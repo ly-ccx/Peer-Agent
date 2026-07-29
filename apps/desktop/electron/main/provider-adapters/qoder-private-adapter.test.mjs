@@ -7,6 +7,9 @@ import {
   buildQoderRemoteChatAsk,
   classifyQoderStreamFailure,
   computeQoderQueueWaitMs,
+  formatQoderDuplicateError,
+  formatQoderQueueError,
+  formatQoderQueueStatusMessage,
   normalizeQoderModel,
   normalizeQoderPreparedEndpoint,
   mergeConsecutiveAssistants,
@@ -52,9 +55,101 @@ describe('qoder private adapter', () => {
     });
     assert.deepEqual(body.messages, [
       { role: 'system', content: 'system prompt' },
-      { role: 'user', content: 'hello' },
+      {
+        role: 'user',
+        content: 'hello',
+        contents: [{ type: 'text', text: 'hello' }],
+      },
     ]);
     assert.equal(body.tools[0].function.name, 'bash');
+  });
+
+  it('aligns remote FREE_INPUT messages with qodercli contents/system shape', () => {
+    const body = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      requestId: 'req-ultimate',
+      requestSetId: 'set-ultimate',
+      sessionId: 'session-ultimate',
+      taskId: 'task-ultimate',
+      maxOutputTokens: 32768,
+      messages: [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: '测试一下' },
+        { role: 'assistant', content: 'ok' },
+      ],
+      metadata: {
+        id: 'ultimate',
+        label: 'Ultimate',
+        source: 'system',
+        format: 'openai',
+        supportsVision: true,
+        supportsReasoning: true,
+        contextWindow: 1_000_000,
+      },
+    });
+
+    assert.equal(body.system, 'system prompt');
+    assert.equal(body.messages[0].role, 'system');
+    assert.equal(body.messages[0].content, 'system prompt');
+    assert.deepEqual(body.messages[1], {
+      role: 'user',
+      content: '测试一下',
+      contents: [{ type: 'text', text: '测试一下' }],
+    });
+    assert.deepEqual(body.messages[2], {
+      role: 'assistant',
+      content: 'ok',
+      contents: [{ type: 'text', text: 'ok' }],
+    });
+    assert.equal(body.model_config.key, 'ultimate');
+    assert.equal(body.parameters.max_tokens, 32768);
+    assert.deepEqual(body.business, {});
+  });
+
+  it('uses empty contents for tool-only assistant and drops empty user messages', () => {
+    const body = buildQoderRemoteChatAsk({
+      model: 'kmodel_latest',
+      requestId: 'req-kimi',
+      requestSetId: 'set-kimi',
+      sessionId: 'session-kimi',
+      taskId: 'task-kimi',
+      messages: [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'run pwd' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"pwd"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: '/tmp' },
+        { role: 'user', content: '' },
+        { role: 'user', content: '测试2' },
+      ],
+      metadata: {
+        id: 'kmodel_latest',
+        label: 'Kimi-K3',
+        source: 'system',
+        format: 'openai',
+        supportsVision: true,
+        supportsReasoning: false,
+        contextWindow: 1_000_000,
+      },
+    });
+
+    const assistant = body.messages.find((message) => message.role === 'assistant');
+    assert.equal(assistant.content, '');
+    assert.deepEqual(assistant.contents, []);
+    assert.equal(assistant.tool_calls[0].id, 'call_1');
+    assert.equal(body.messages.some((message) => message.role === 'user' && message.content === ''), false);
+    assert.deepEqual(body.messages.at(-1), {
+      role: 'user',
+      content: '测试2',
+      contents: [{ type: 'text', text: '测试2' }],
+    });
   });
 
   it('projects a selected context tier into Qoder model_config', () => {
@@ -366,6 +461,46 @@ describe('qoder private adapter', () => {
     }
   });
 
+  it('routes catalog-missing models with modelOptions through agent_chat_generation', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let capturedUrl = null;
+    globalThis.fetch = async (url) => {
+      capturedUrl = String(url);
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://api2-v2.qoder.sh/model/v1',
+        apiKey: 'token',
+        model: 'kmodel_latest',
+        messages: [{ role: 'user', content: '测试2' }],
+        modelOptions: [{
+          id: 'contextTier',
+          kind: 'select',
+          choices: [{ value: '1M', contextWindow: 1_000_000, inputTokenLimit: 980_000 }],
+        }],
+        modelOptionValues: { contextTier: '1M' },
+        webContents: { send: () => {} },
+        streamId: 's-qoder-kmodel-route',
+      });
+
+      assert.equal(result.ok, true);
+      assert.match(capturedUrl, /agent_chat_generation/);
+      assert.doesNotMatch(capturedUrl, /\/model\/v1\/chat\/completions/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
   it('does not stream literal tool_call text from Qoder into the UI', async () => {
     const previousFetch = globalThis.fetch;
     const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
@@ -532,11 +667,13 @@ describe('qoder private adapter', () => {
         webContents: { send: () => {} },
         streamId: 's-qoder-duplicate-request-envelope',
         streamIdleTimeoutMs: 50,
+        // Disable 103 auto-retry so this case only asserts envelope parsing latency.
+        transientRetryDelaysMs: [],
       });
 
       assert.equal(result.ok, false);
       assert.equal(result.providerError, true);
-      assert.match(result.errorText, /provider_stream_error: Duplicate request/);
+      assert.match(result.errorText, /qoder_duplicate_request|provider_stream_error: Duplicate request/);
       assert.doesNotMatch(result.errorText, /provider_stream_idle_timeout/);
       assert.equal(cancelled, true);
     } finally {
@@ -882,17 +1019,51 @@ describe('qoder private adapter', () => {
 
   it('classifies 10605 queue payloads and caps wait time', () => {
     const queued = classifyQoderStreamFailure(
-      'provider_stream_error: {"code":"10605","message":{"isQueued":true,"queueType":"slow","waitTime":15228,"queueCount":12}}',
+      'provider_stream_error: {"code":"10605","message":{"isQueued":true,"queueType":"slow","waitTime":15228,"queueCount":12,"serviceAvailable":false}}',
     );
     assert.equal(queued.kind, 'queued');
     assert.equal(queued.code, '10605');
     assert.equal(queued.queueType, 'slow');
     assert.equal(queued.waitTimeMs, 15228);
+    assert.equal(queued.queueCount, 12);
+    assert.equal(queued.serviceAvailable, false);
     assert.equal(computeQoderQueueWaitMs(queued), 15228);
     assert.equal(computeQoderQueueWaitMs({ waitTimeMs: 999_999 }), 120_000);
 
+    const status = formatQoderQueueStatusMessage(queued, {
+      attempt: 1,
+      maxAttempts: 3,
+      waitTimeMs: 15_228,
+    });
+    assert.match(status, /Qoder slow busy/);
+    assert.match(status, /position ~12/);
+    assert.match(status, /retry 1\/3/);
+    assert.match(status, /service marked unavailable/);
+
+    const timeoutText = formatQoderQueueError('upstream', {
+      attempts: 3,
+      waitTimeMs: 120_000,
+      upstreamWaitTimeMs: 3_814_000,
+      queueType: 'slow',
+      queueCount: 402,
+      serviceAvailable: false,
+    });
+    assert.match(timeoutText, /qoder_queue_timeout/);
+    assert.match(timeoutText, /position ~402/);
+    assert.match(timeoutText, /serviceAvailable=false/);
+    assert.match(timeoutText, /try another model/);
+
     const transient = classifyQoderStreamFailure('provider_stream_error: Rate limit exceeded: tpm (OutputTokens)');
     assert.equal(transient.kind, 'transient');
+
+    const duplicate = classifyQoderStreamFailure('provider_stream_error: Duplicate request', {
+      type: '103',
+      message: 'Duplicate request',
+    });
+    assert.equal(duplicate.kind, 'transient');
+    assert.equal(duplicate.code, '103');
+    assert.equal(duplicate.reason, 'duplicate');
+    assert.match(formatQoderDuplicateError('Duplicate request', { attempts: 2 }), /qoder_duplicate_request/);
 
     const fatal = classifyQoderStreamFailure('provider_stream_error: Failed to convert request');
     assert.equal(fatal.kind, null);
@@ -979,5 +1150,195 @@ describe('qoder private adapter', () => {
       else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
     }
   });
+
+
+  it('marks is_retry when buildQoderRemoteChatAsk isRetry is true', () => {
+    const first = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      requestId: 'req-a',
+      requestSetId: 'req-a',
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    const retry = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      requestId: 'req-b',
+      requestSetId: 'req-b',
+      sessionId: 'session-b',
+      taskId: 'task-b',
+      isRetry: true,
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    assert.equal(first.is_retry, false);
+    assert.equal(retry.is_retry, true);
+    assert.notEqual(first.request_id, retry.request_id);
+  });
+
+  it('regenerates request_id on connection recovery retries', async () => {
+    // Exercise the legacy private path (no catalog metadata) so prepareQoderInferRequest
+    // is not required. Connection recovery must still rebuild a fresh request_id /
+    // session_id rather than replaying the first timed-out attempt.
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const requestIds = [];
+    const sessionIds = [];
+    const headerRequestIds = [];
+    let calls = 0;
+
+    globalThis.fetch = async (_url, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init.body || '{}'));
+      const context = body?.metadata?.context || {};
+      requestIds.push(context.request_id);
+      sessionIds.push(context.session_id);
+      headerRequestIds.push(init.headers?.['X-Request-ID'] || init.headers?.['x-request-id']);
+      if (calls === 1) {
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'ETIMEDOUT' };
+        throw error;
+      }
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n'), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: () => {} },
+        streamId: 's-qoder-retry-ids',
+        maxQueueRetries: 0,
+        transientRetryDelaysMs: [],
+        waitImpl: async () => {},
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(calls, 2);
+      assert.equal(requestIds.length, 2);
+      assert.ok(requestIds[0]);
+      assert.ok(requestIds[1]);
+      assert.notEqual(requestIds[0], requestIds[1]);
+      assert.notEqual(sessionIds[0], sessionIds[1]);
+      assert.notEqual(headerRequestIds[0], headerRequestIds[1]);
+      assert.equal(headerRequestIds[0], requestIds[0]);
+      assert.equal(headerRequestIds[1], requestIds[1]);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('auto-retries 103 Duplicate request with a fresh request id', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let calls = 0;
+    const requestIds = [];
+    const events = [];
+    globalThis.fetch = async (_url, init = {}) => {
+      calls += 1;
+      const body = JSON.parse(String(init.body || '{}'));
+      const headers = init.headers || {};
+      requestIds.push(
+        body?.metadata?.context?.request_id
+        || body?.request_id
+        || headers['X-Request-ID']
+        || headers['x-request-id']
+        || null,
+      );
+      if (calls === 1) {
+        return new Response([
+          'data: {"code":"103","message":"Duplicate request"}',
+          '',
+        ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"ok-after-dup"}}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+        streamId: 's-qoder-duplicate-retry',
+        maxQueueRetries: 0,
+        transientRetryDelaysMs: [5],
+        waitImpl: async () => {},
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(calls, 2);
+      assert.equal(requestIds.length, 2);
+      assert.notEqual(requestIds[0], requestIds[1]);
+      assert.ok(events.some((event) => (
+        event.channel === 'chat:stream:status'
+        && event.payload?.status === 'retrying'
+        && event.payload?.code === '103'
+      )));
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('surfaces qoder_duplicate_request after exhausting 103 retries', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response([
+        'data: {"code":"103","message":"Duplicate request"}',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        webContents: { send: () => {} },
+        streamId: 's-qoder-duplicate-exhausted',
+        maxQueueRetries: 0,
+        transientRetryDelaysMs: [1, 1],
+        waitImpl: async () => {},
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.duplicateExhausted, true);
+      assert.match(result.errorText, /qoder_duplicate_request/);
+      assert.equal(calls, 3); // initial + 2 retries
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
 
 });

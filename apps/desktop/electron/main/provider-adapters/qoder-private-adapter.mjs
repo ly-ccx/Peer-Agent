@@ -13,7 +13,10 @@ import { prepareQoderInferRequest, resolveQoderInferenceEndpoint } from './qoder
 export const QODER_QUEUE_MAX_RETRIES = 3;
 export const QODER_QUEUE_MAX_WAIT_MS = 120_000;
 export const QODER_QUEUE_DEFAULT_WAIT_MS = 15_000;
-export const QODER_TRANSIENT_RETRY_DELAYS_MS = [2_000, 5_000];
+/** When upstream waitTime is huge, still keep each client wait bounded. */
+export const QODER_QUEUE_LONG_WAIT_HINT_MS = 5 * 60_000;
+/** 103 Duplicate + rate-limit style stream failures: short bounded backoff. */
+export const QODER_TRANSIENT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 export const QODER_CONNECTION_RETRY_DELAYS_MS = [1_000, 3_000];
 
 function sleepMs(ms, signal) {
@@ -88,24 +91,47 @@ function normalizeQueuePayload(payload) {
   if (!isQueued && code !== '10605') return null;
   const waitTimeRaw = source.waitTime ?? source.wait_time ?? source.estimatedWaitMs ?? nestedMessage?.waitTime;
   const waitTimeMs = Number(waitTimeRaw);
+  const serviceAvailableRaw = source.serviceAvailable ?? source.service_available
+    ?? nestedMessage?.serviceAvailable ?? payload.serviceAvailable;
+  const serviceAvailable = typeof serviceAvailableRaw === 'boolean' ? serviceAvailableRaw : null;
   return {
     kind: 'queued',
     code: code || '10605',
     queueType: source.queueType || source.queue_type || null,
     waitTimeMs: Number.isFinite(waitTimeMs) && waitTimeMs > 0 ? waitTimeMs : QODER_QUEUE_DEFAULT_WAIT_MS,
     queueCount: Number(source.queueCount ?? source.queue_count) || null,
+    serviceAvailable,
+    reason: 'queue',
     raw: payload,
   };
 }
 
+function formatQueueWaitLabel(waitTimeMs) {
+  const ms = Number(waitTimeMs) || 0;
+  if (ms <= 0) return null;
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
 /**
  * Classify Qoder stream/HTTP failures for retry policy.
- * @returns {{ kind: 'queued'|'transient'|null, waitTimeMs?: number, code?: string, queueType?: string|null, queueCount?: number|null }}
+ * @returns {{
+ *   kind: 'queued'|'transient'|null,
+ *   waitTimeMs?: number,
+ *   code?: string,
+ *   queueType?: string|null,
+ *   queueCount?: number|null,
+ *   serviceAvailable?: boolean|null,
+ *   reason?: string|null,
+ * }}
  */
 export function classifyQoderStreamFailure(errorText, streamError = null) {
   const text = String(errorText || streamError?.message || '');
   const type = String(streamError?.type || '');
   const objects = extractJsonObjectsFromText(text);
+  if (streamError && typeof streamError === 'object') {
+    objects.unshift(streamError);
+  }
   for (const obj of objects) {
     const queue = normalizeQueuePayload(obj);
     if (queue) return queue;
@@ -116,6 +142,16 @@ export function classifyQoderStreamFailure(errorText, streamError = null) {
       const fromBody = normalizeQueuePayload(body);
       if (fromBody) return fromBody;
     }
+
+    const code = String(obj.code ?? obj.error_code ?? obj.errCode ?? obj.type ?? type ?? '').trim();
+    const messageText = typeof obj.message === 'string' ? obj.message : '';
+    const isDuplicate = code === '103'
+      || type === '103'
+      || /duplicate request/i.test(messageText)
+      || /duplicate request/i.test(text);
+    if (isDuplicate) {
+      return { kind: 'transient', code: code || '103', reason: 'duplicate' };
+    }
   }
   if (/10605|isQueued|queueType["']?\s*:\s*["']?slow/i.test(text)) {
     const waitMatch = text.match(/waitTime["']?\s*:\s*(\d+)/i);
@@ -125,14 +161,20 @@ export function classifyQoderStreamFailure(errorText, streamError = null) {
       waitTimeMs: waitMatch ? Number(waitMatch[1]) : QODER_QUEUE_DEFAULT_WAIT_MS,
       queueType: /queueType["']?\s*:\s*["']?(\w+)/i.exec(text)?.[1] || null,
       queueCount: null,
+      serviceAvailable: null,
+      reason: 'queue',
     };
+  }
+  // 103 may arrive as bare text when JSON extraction fails.
+  if (type === '103' || /duplicate request/i.test(text) || /\bcode["']?\s*:\s*["']?103\b/i.test(text)) {
+    return { kind: 'transient', code: '103', reason: 'duplicate' };
   }
   // Do not treat idle_timeout as auto-retryable here: the stream already waited
   // streamIdleTimeoutMs with no data; immediate re-request usually repeats the hang.
   if (
     /\b429\b|rate limit|Rate limit|tpm|All models failed|All backends failed|ECONNRESET|ETIMEDOUT|fetch failed|socket hang up/i.test(text)
   ) {
-    return { kind: 'transient', code: type || 'transient' };
+    return { kind: 'transient', code: type || 'transient', reason: 'rate_or_transport' };
   }
   return { kind: null };
 }
@@ -146,10 +188,63 @@ export function computeQoderQueueWaitMs(queueInfo, { attempt = 0 } = {}) {
   return Math.min(Math.max(50, withBackoff), QODER_QUEUE_MAX_WAIT_MS);
 }
 
-function formatQoderQueueError(errorText, { attempts, waitTimeMs, queueType } = {}) {
-  const waitSec = Math.round((waitTimeMs || 0) / 1000);
-  const typeLabel = queueType ? ` (${queueType})` : '';
-  return `qoder_queue_timeout: still queued after ${attempts} wait(s)${typeLabel}, last estimated wait ~${waitSec}s. ${errorText || ''}`.trim();
+/**
+ * Human-readable queue status for UI + logs.
+ * Keeps machine-stable keywords so tests and recovery can still match.
+ */
+export function formatQoderQueueStatusMessage(classification, {
+  attempt,
+  maxAttempts,
+  waitTimeMs,
+} = {}) {
+  const queueType = classification?.queueType ? String(classification.queueType) : 'queue';
+  const queueCount = Number.isFinite(Number(classification?.queueCount))
+    ? Number(classification.queueCount)
+    : null;
+  const upstreamWait = formatQueueWaitLabel(classification?.waitTimeMs);
+  const clientWait = formatQueueWaitLabel(waitTimeMs);
+  const attemptLabel = Number.isFinite(Number(attempt)) && Number.isFinite(Number(maxAttempts))
+    ? ` (retry ${Number(attempt)}/${Number(maxAttempts)})`
+    : '';
+  const countLabel = queueCount == null ? '' : `, position ~${queueCount}`;
+  const upstreamLabel = upstreamWait ? `, upstream wait ~${upstreamWait}` : '';
+  const clientLabel = clientWait ? `, waiting ${clientWait} then retry` : '';
+  const unavailable = classification?.serviceAvailable === false ? '; service marked unavailable' : '';
+  return `Qoder ${queueType} busy${countLabel}${upstreamLabel}${clientLabel}${unavailable}${attemptLabel}`;
+}
+
+export function formatQoderQueueError(errorText, {
+  attempts,
+  waitTimeMs,
+  queueType,
+  queueCount,
+  serviceAvailable,
+  upstreamWaitTimeMs,
+} = {}) {
+  const typeLabel = queueType ? String(queueType) : 'queue';
+  const countLabel = Number.isFinite(Number(queueCount)) ? `, last position ~${Number(queueCount)}` : '';
+  const clientWait = formatQueueWaitLabel(waitTimeMs);
+  const upstreamWait = formatQueueWaitLabel(upstreamWaitTimeMs ?? waitTimeMs);
+  const waitLabel = clientWait ? `, last client wait ${clientWait}` : '';
+  const upstreamLabel = upstreamWait ? `, upstream wait ~${upstreamWait}` : '';
+  const unavailable = serviceAvailable === false
+    ? '. Upstream reported serviceAvailable=false'
+    : '';
+  const longQueue = Number(upstreamWaitTimeMs ?? waitTimeMs) >= QODER_QUEUE_LONG_WAIT_HINT_MS
+    ? '. Queue is very long — try another model or retry later'
+    : '';
+  return `qoder_queue_timeout: still in Qoder ${typeLabel} after ${attempts} wait(s)`
+    + `${countLabel}${waitLabel}${upstreamLabel}${unavailable}${longQueue}`
+    + `. Upstream: ${String(errorText || '').slice(0, 240)}`;
+}
+
+export function formatQoderDuplicateError(errorText, { attempts } = {}) {
+  const attemptLabel = Number.isFinite(Number(attempts)) && Number(attempts) > 0
+    ? ` after ${Number(attempts)} retry attempt(s)`
+    : '';
+  return `qoder_duplicate_request: Qoder rejected the request as Duplicate (103)${attemptLabel}. `
+    + 'Each retry already used a fresh request id; wait a moment or stop overlapping runs on the same account. '
+    + `Upstream: ${String(errorText || '').slice(0, 240)}`;
 }
 
 async function sendQoderStreamWithResilience(sendOnce, {
@@ -171,10 +266,16 @@ async function sendQoderStreamWithResilience(sendOnce, {
     const classification = classifyQoderStreamFailure(lastResult?.errorText, {
       type: lastResult?.streamErrorType,
       message: lastResult?.errorText,
+      code: lastResult?.streamErrorType,
     });
 
     if (classification.kind === 'queued' && queueAttempts < maxQueueRetries) {
       const waitMs = computeQoderQueueWaitMs(classification, { attempt: queueAttempts });
+      const message = formatQoderQueueStatusMessage(classification, {
+        attempt: queueAttempts + 1,
+        maxAttempts: maxQueueRetries,
+        waitTimeMs: waitMs,
+      });
       try {
         webContents?.send?.('chat:stream:status', {
           streamId,
@@ -182,9 +283,12 @@ async function sendQoderStreamWithResilience(sendOnce, {
           provider: 'qoder',
           code: classification.code || '10605',
           queueType: classification.queueType,
+          queueCount: classification.queueCount,
+          serviceAvailable: classification.serviceAvailable,
           waitMs,
           attempt: queueAttempts + 1,
           maxAttempts: maxQueueRetries,
+          message,
         });
       } catch {
         /* renderer may not listen */
@@ -196,6 +300,23 @@ async function sendQoderStreamWithResilience(sendOnce, {
 
     if (classification.kind === 'transient' && transientAttempts < transientRetryDelaysMs.length) {
       const waitMs = transientRetryDelaysMs[transientAttempts];
+      try {
+        webContents?.send?.('chat:stream:status', {
+          streamId,
+          status: 'retrying',
+          provider: 'qoder',
+          code: classification.code || 'transient',
+          reason: classification.reason || null,
+          waitMs,
+          attempt: transientAttempts + 1,
+          maxAttempts: transientRetryDelaysMs.length,
+          message: classification.reason === 'duplicate'
+            ? `Qoder Duplicate request (103); retrying with a fresh request id in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${transientAttempts + 1}/${transientRetryDelaysMs.length})`
+            : `Qoder transient error; retrying in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${transientAttempts + 1}/${transientRetryDelaysMs.length})`,
+        });
+      } catch {
+        /* renderer may not listen */
+      }
       await waitImpl(waitMs, signal);
       transientAttempts += 1;
       continue;
@@ -206,12 +327,29 @@ async function sendQoderStreamWithResilience(sendOnce, {
         ...lastResult,
         errorText: formatQoderQueueError(lastResult?.errorText, {
           attempts: queueAttempts,
-          waitTimeMs: classification.waitTimeMs,
+          waitTimeMs: Math.min(
+            Number(classification.waitTimeMs) || QODER_QUEUE_DEFAULT_WAIT_MS,
+            QODER_QUEUE_MAX_WAIT_MS,
+          ),
+          upstreamWaitTimeMs: classification.waitTimeMs,
           queueType: classification.queueType,
+          queueCount: classification.queueCount,
+          serviceAvailable: classification.serviceAvailable,
         }),
         queueExhausted: true,
       };
     }
+
+    if (classification.reason === 'duplicate' || classification.code === '103') {
+      return {
+        ...lastResult,
+        errorText: formatQoderDuplicateError(lastResult?.errorText, {
+          attempts: transientAttempts,
+        }),
+        duplicateExhausted: true,
+      };
+    }
+
     return lastResult;
   }
 }
@@ -320,13 +458,43 @@ function qoderToolCall(toolCall, index) {
   };
 }
 
+/**
+ * qodercli 对 user/assistant 会同时发送 content 与 contents。
+ * - 有文本时：contents=[{type:'text', text}]
+ * - 无文本时（如 assistant 仅 tool_calls）：contents=[]
+ * 不要发 contents=[{type:'text', text:''}]，Kimi 等上游会报
+ * "Invalid request: text content is empty"。
+ */
+function qoderMessageContents(content) {
+  if (typeof content === 'string') {
+    return content.trim() ? [{ type: 'text', text: content }] : [];
+  }
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const part of content) {
+      if (typeof part === 'string') {
+        if (part.trim()) parts.push({ type: 'text', text: part });
+        continue;
+      }
+      if (part?.type === 'text' && typeof part.text === 'string') {
+        if (part.text.trim()) parts.push({ type: 'text', text: part.text });
+      }
+    }
+    return parts;
+  }
+  if (content == null) return [];
+  const text = qoderContentText(content);
+  return text.trim() ? [{ type: 'text', text }] : [];
+}
+
 function qoderMessage(message) {
   const role = String(message?.role || '').trim();
   if (!['system', 'user', 'assistant', 'tool'].includes(role)) return null;
   const content = message.content;
   const output = { role };
   if (typeof content === 'string' || content === null) {
-    output.content = content;
+    // Keep null as empty string for assistant/tool-call messages so contents stays [].
+    output.content = content == null ? '' : content;
   } else if (Array.isArray(content)) {
     const parts = content.map(qoderContentPart).filter(Boolean);
     output.content = parts.length ? parts : '';
@@ -336,11 +504,19 @@ function qoderMessage(message) {
   } else {
     output.content = '';
   }
+  // Align with qodercli FREE_INPUT body: user/assistant carry dual content/contents.
+  if (role === 'user' || role === 'assistant') {
+    output.contents = qoderMessageContents(output.content);
+  }
   if (message.name) output.name = message.name;
   if (message.tool_call_id) output.tool_call_id = message.tool_call_id;
   if (Array.isArray(message.tool_calls)) {
     const toolCalls = message.tool_calls.map(qoderToolCall).filter(Boolean);
     if (toolCalls.length) output.tool_calls = toolCalls;
+  }
+  // qodercli drops empty user messages; empty contents also crash some models.
+  if (role === 'user' && !qoderMessageHasText(output.content) && !output.tool_calls?.length) {
+    return null;
   }
   return output;
 }
@@ -586,14 +762,22 @@ export function buildQoderRemoteChatAsk({
   requestSetId,
   sessionId,
   taskId,
+  isRetry = false,
   metadata = null,
   modelOptionValues = {},
 } = {}) {
   const optionProjection = resolveQoderModelOptionProjection(metadata, modelOptionValues);
   const sanitizedInput = mergeConsecutiveAssistants(sanitizeQoderToolPairing(messages));
   const normalizedMessages = sanitizedInput.map(qoderMessage).filter(Boolean);
-  const systemPrompt = normalizedMessages.find((message) => message.role === 'system')?.content || '';
+  // qodercli keeps system both at top-level `system` and as the first messages entry.
+  const systemMessage = normalizedMessages.find((message) => message.role === 'system');
+  const systemPrompt = typeof systemMessage?.content === 'string'
+    ? systemMessage.content
+    : qoderContentText(systemMessage?.content);
   const conversationMessages = normalizedMessages.filter((message) => message.role !== 'system');
+  const requestMessages = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, ...conversationMessages]
+    : conversationMessages;
   const modelKey = metadata?.id || normalizeQoderModel(model);
   const source = metadata?.source || 'system';
   const isReasoning = Boolean(metadata?.supportsReasoning);
@@ -620,7 +804,7 @@ export function buildQoderRemoteChatAsk({
       imageUrls: null,
     },
     is_reply: true,
-    is_retry: false,
+    is_retry: Boolean(isRetry),
     source: 1,
     version: '3',
     agent_id: 'agent_common',
@@ -642,9 +826,12 @@ export function buildQoderRemoteChatAsk({
     },
     custom_model: null,
     system: systemPrompt,
-    messages: conversationMessages,
+    messages: requestMessages,
     tools: qoderCompatibleTools(tools),
     parameters,
+    // qodercli always includes business (via lrI). Ultimate routing to
+    // oa_qwen-plus fails with Execution failed when this field is absent.
+    business: {},
   };
 }
 
@@ -675,34 +862,61 @@ async function sendQoderPreparedStream({
   modelOptions,
   modelOptionValues = {},
 } = {}) {
-  const requestId = crypto.randomUUID();
-  const sessionId = crypto.randomUUID();
+  // Keep non-identity payload (messages/tools/metadata) stable across connection
+  // recovery, but regenerate request_id/session_id/task_id on every attempt so a
+  // timed-out first socket is not rejected by Qoder as Duplicate request (103).
   const catalogMetadata = await getQoderModelMetadataForSend(model);
   const metadata = catalogMetadata && Array.isArray(modelOptions)
     ? { ...catalogMetadata, modelOptions }
     : catalogMetadata;
-  const requestBody = buildQoderRemoteChatAsk({
-    model,
-    messages,
-    tools,
-    maxOutputTokens,
-    requestId,
-    requestSetId: requestId,
-    sessionId,
-    taskId: qoderTurnTaskId(streamId),
-    metadata,
-    modelOptionValues,
-  });
   const resolvedEndpoint = normalizeQoderPreparedEndpoint(endpoint) || await resolveQoderInferenceEndpoint();
-  const prepared = await prepareQoderInferRequest({
-    requestBody,
-    modelKey: requestBody.model_config.key,
-    modelSource: requestBody.model_config.source,
-    endpoint: resolvedEndpoint,
-  });
+  let requestBody = null;
+  let preparedUrl = null;
+
+  const buildConnectionAttemptInit = async ({ isRetry }) => {
+    const requestId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    requestBody = buildQoderRemoteChatAsk({
+      model,
+      messages,
+      tools,
+      maxOutputTokens,
+      requestId,
+      requestSetId: requestId,
+      sessionId,
+      taskId: qoderTurnTaskId(streamId),
+      isRetry,
+      metadata,
+      modelOptionValues,
+    });
+    const prepared = await prepareQoderInferRequest({
+      requestBody,
+      modelKey: requestBody.model_config.key,
+      modelSource: requestBody.model_config.source,
+      endpoint: resolvedEndpoint,
+    });
+    preparedUrl = prepared.url;
+    const headers = {
+      ...prepared.headers,
+      Accept: prepared.headers.Accept || prepared.headers.accept || 'text/event-stream',
+    };
+    if (apiKey && !headers.Authorization && !headers.authorization) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+    return {
+      method: 'POST',
+      headers,
+      body: prepared.body,
+      signal,
+    };
+  };
+
+  // Build the first attempt eagerly so requestBody is available for tracing and
+  // error paths even if recovery never succeeds.
+  const firstInit = await buildConnectionAttemptInit({ isRetry: false });
   const trace = createProviderStreamTrace({
     provider: 'qoder',
-    baseUrl: prepared.url || endpoint,
+    baseUrl: preparedUrl || endpoint,
     model: requestBody.model_config.key,
     effort: 'off',
     supportsReasoning: Boolean(requestBody.model_config.is_reasoning),
@@ -716,25 +930,21 @@ async function sendQoderPreparedStream({
     },
   });
 
-  const headers = {
-    ...prepared.headers,
-    Accept: prepared.headers.Accept || prepared.headers.accept || 'text/event-stream',
-  };
-  if (apiKey && !headers.Authorization && !headers.authorization) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-  const res = await fetchWithConnectionRecovery(prepared.url, {
-    method: 'POST',
-    headers,
-    body: prepared.body,
-    signal,
-  }, {
+  let firstAttemptUsed = false;
+  const res = await fetchWithConnectionRecovery(preparedUrl, firstInit, {
     webContents,
     streamId,
     provider: 'qoder',
     model: requestBody.model_config.key,
     retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
     allowSecondaryFallback: false,
+    buildInit: async ({ attempt, isRetry }) => {
+      if (attempt === 0 && !firstAttemptUsed) {
+        firstAttemptUsed = true;
+        return firstInit;
+      }
+      return buildConnectionAttemptInit({ isRetry });
+    },
   });
   trace.recordResponse(res);
 
@@ -875,9 +1085,24 @@ export async function sendQoderPrivateStream({
 } = {}) {
   return sendQoderStreamWithResilience(async () => {
   const catalogMetadata = await getQoderModelMetadataForSend(model);
-  const metadata = catalogMetadata && Array.isArray(modelOptions)
-    ? { ...catalogMetadata, modelOptions }
-    : catalogMetadata;
+  // Prefer agent_chat_generation whenever we have catalog metadata OR the UI
+  // has persisted modelOptions (e.g. kmodel_latest synced as metadataSource=remote
+  // but not yet present in the local encrypted catalog). Falling back to
+  // /model/v1 for those models returns HTTP 402 quota exceeded.
+  const metadata = catalogMetadata
+    ? (Array.isArray(modelOptions) ? { ...catalogMetadata, modelOptions } : catalogMetadata)
+    : (Array.isArray(modelOptions) && modelOptions.length
+      ? {
+          id: normalizeQoderModel(model),
+          label: String(model || ''),
+          source: 'system',
+          format: 'openai',
+          modelOptions,
+          maxOutputTokens: Number(maxOutputTokens) || 0,
+          supportsVision: true,
+          supportsReasoning: false,
+        }
+      : null);
   if (metadata) {
     return sendQoderPreparedStream({
       apiKey,
@@ -896,22 +1121,36 @@ export async function sendQoderPrivateStream({
       modelOptionValues,
     });
   }
-  const requestId = crypto.randomUUID();
-  const sessionId = crypto.randomUUID();
   const root = String(baseUrl || qoderModelServerBaseUrl()).replace(/\/+$/, '');
   const url = endpoint || `${root}/chat/completions`;
-  const body = buildQoderPrivateRequestBody({
-    model,
-    messages,
-    tools,
-    maxOutputTokens,
-    requestId,
-    requestSetId: requestId,
-    sessionId,
-    taskId: qoderTurnTaskId(streamId),
-    metadata,
-    modelOptionValues,
-  });
+  let body = null;
+
+  const buildPrivateConnectionAttemptInit = ({ isRetry }) => {
+    const requestId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    body = buildQoderPrivateRequestBody({
+      model,
+      messages,
+      tools,
+      maxOutputTokens,
+      requestId,
+      requestSetId: requestId,
+      sessionId,
+      taskId: qoderTurnTaskId(streamId),
+      metadata,
+      modelOptionValues,
+    });
+    // Legacy /model/v1 path has no is_retry field; fresh request_id is enough.
+    void isRetry;
+    return {
+      method: 'POST',
+      headers: buildQoderPrivateHeaders({ token: apiKey, requestId, sessionId }),
+      body: JSON.stringify(body),
+      signal,
+    };
+  };
+
+  const firstInit = buildPrivateConnectionAttemptInit({ isRetry: false });
   const trace = createProviderStreamTrace({
     provider: 'qoder',
     baseUrl: root,
@@ -922,18 +1161,21 @@ export async function sendQoderPrivateStream({
     requestBody: body,
   });
 
-  const res = await fetchWithConnectionRecovery(url, {
-    method: 'POST',
-    headers: buildQoderPrivateHeaders({ token: apiKey, requestId, sessionId }),
-    body: JSON.stringify(body),
-    signal,
-  }, {
+  let firstAttemptUsed = false;
+  const res = await fetchWithConnectionRecovery(url, firstInit, {
     webContents,
     streamId,
     provider: 'qoder',
     model: body.model,
     retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
     allowSecondaryFallback: false,
+    buildInit: ({ attempt, isRetry }) => {
+      if (attempt === 0 && !firstAttemptUsed) {
+        firstAttemptUsed = true;
+        return firstInit;
+      }
+      return buildPrivateConnectionAttemptInit({ isRetry });
+    },
   });
   trace.recordResponse(res);
 

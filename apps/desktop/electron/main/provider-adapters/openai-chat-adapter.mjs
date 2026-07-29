@@ -110,9 +110,15 @@ function extractProviderTopLevelError(parsed) {
     || nestedQueue?.queued === true
     || code === '10605'
     || /isQueued["']?\s*:\s*true/i.test(message);
-  if (!message && !isQueued) return null;
+  // Qoder/gateway business errors may arrive as top-level { code, message }
+  // without an "error" type string (e.g. 103 Duplicate request, 10605 queue).
+  const isNumericBusinessCode = /^\d{3,5}$/.test(code);
+  const isDuplicate = code === '103' || /duplicate request/i.test(message);
+  if (!message && !isQueued && !isDuplicate && !isNumericBusinessCode) return null;
   if (
     !isQueued
+    && !isDuplicate
+    && !isNumericBusinessCode
     && parsed.success !== false
     && !type.toLowerCase().includes('error')
     && !code.toLowerCase().includes('error')
