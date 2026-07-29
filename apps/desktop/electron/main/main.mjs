@@ -27,6 +27,7 @@ import { listChromeBrowserSources } from './session-import/chrome-profiles.mjs';
 import {
   buildSessionImportPreflight,
   openFullDiskAccessSettings,
+  resolveFullDiskAccessDragTarget,
 } from './session-import/import-permission-preflight.mjs';
 import {
   loadCookiesForSites,
@@ -2178,6 +2179,42 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
  * - list-sites: 扫描选定 Profile 的站点聚合（无 value）
  * - import-site-session: 解密选定站点 Cookie 并写入 persist:peer-browser
  */
+
+async function buildSessionImportPreflightPayload() {
+  const preflight = await buildSessionImportPreflightPayload();
+  const dragTarget = resolveFullDiskAccessDragTarget({
+    platform: process.platform,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  });
+  let iconDataUrl = null;
+  if (dragTarget.ok && dragTarget.appPath) {
+    try {
+      const icon = await app.getFileIcon(dragTarget.appPath, { size: 'normal' });
+      if (icon && !icon.isEmpty()) iconDataUrl = icon.toDataURL();
+    } catch {
+      iconDataUrl = null;
+    }
+  }
+  return {
+    ...preflight,
+    dragTarget: dragTarget.ok
+      ? {
+          ok: true,
+          appPath: dragTarget.appPath,
+          displayName: dragTarget.displayName,
+          kind: dragTarget.kind,
+          isPackagedApp: dragTarget.isPackagedApp,
+          iconDataUrl,
+        }
+      : {
+          ok: false,
+          error: dragTarget.error || 'app_path_not_found',
+        },
+  };
+}
+
 ipcMain.handle('browser:list-session-sources', async () => {
   try {
     if (process.platform !== 'darwin') {
@@ -2185,10 +2222,10 @@ ipcMain.handle('browser:list-session-sources', async () => {
         ok: false,
         error: 'unsupported_platform',
         sources: [],
-        preflight: buildSessionImportPreflight({ platform: process.platform }),
+        preflight: await buildSessionImportPreflightPayload(),
       };
     }
-    const preflight = buildSessionImportPreflight({ platform: process.platform });
+    const preflight = await buildSessionImportPreflightPayload();
     const sources = listChromeBrowserSources().map((src) => ({
       adapterId: src.adapterId,
       browserName: src.browserName,
@@ -2214,14 +2251,14 @@ ipcMain.handle('browser:list-session-sources', async () => {
       ok: false,
       error: err?.message || 'list_sources_failed',
       sources: [],
-      preflight: buildSessionImportPreflight({ platform: process.platform }),
+      preflight: await buildSessionImportPreflightPayload(),
     };
   }
 });
 
 ipcMain.handle('browser:session-import-preflight', async () => {
   try {
-    return buildSessionImportPreflight({ platform: process.platform });
+    return await buildSessionImportPreflightPayload();
   } catch (err) {
     return {
       ok: false,
@@ -2243,6 +2280,57 @@ ipcMain.handle('browser:open-full-disk-access-settings', async () => {
     });
   } catch (err) {
     return { ok: false, error: err?.message || 'open_settings_failed' };
+  }
+});
+
+// Codex 同类链路：渲染层拖拽 App 图标时，主进程把真实 .app 路径交给系统设置列表。
+ipcMain.on('browser:start-app-drag', async (event, payload = {}) => {
+  try {
+    if (process.platform !== 'darwin') return;
+    const requestedPath = typeof payload?.appPath === 'string' ? payload.appPath.trim() : '';
+    const resolved = resolveFullDiskAccessDragTarget({
+      platform: process.platform,
+      appGetPath: (name) => app.getPath(name),
+      execPath: process.execPath,
+      resourcesPath: process.resourcesPath,
+    });
+    const filePath = requestedPath || (resolved.ok ? resolved.appPath : '');
+    if (!filePath) return;
+    let icon = nativeImage.createEmpty();
+    try {
+      icon = await app.getFileIcon(filePath, { size: 'normal' });
+    } catch {
+      icon = nativeImage.createEmpty();
+    }
+    // Electron: sender.startDrag({ file, icon })
+    event.sender.startDrag({
+      file: filePath,
+      icon: icon.isEmpty() ? nativeImage.createEmpty() : icon,
+    });
+  } catch (err) {
+    console.warn('[session-import] start-app-drag failed:', err?.message || err);
+  }
+});
+
+ipcMain.handle('browser:get-app-drag-target', async () => {
+  try {
+    const resolved = resolveFullDiskAccessDragTarget({
+      platform: process.platform,
+      appGetPath: (name) => app.getPath(name),
+      execPath: process.execPath,
+      resourcesPath: process.resourcesPath,
+    });
+    if (!resolved.ok) return resolved;
+    let iconDataUrl = null;
+    try {
+      const icon = await app.getFileIcon(resolved.appPath, { size: 'normal' });
+      if (icon && !icon.isEmpty()) iconDataUrl = icon.toDataURL();
+    } catch {
+      iconDataUrl = null;
+    }
+    return { ...resolved, iconDataUrl };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'get_app_drag_target_failed' };
   }
 });
 

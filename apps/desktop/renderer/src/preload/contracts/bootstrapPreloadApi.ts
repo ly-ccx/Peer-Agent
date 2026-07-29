@@ -69,6 +69,15 @@ export type BrowserSessionImportPreflight = {
   readonly openFullDiskAccessSupported?: boolean;
   readonly guidance?: { readonly fullDiskAccess?: string };
   readonly error?: string;
+  readonly dragTarget?: {
+    readonly ok: boolean;
+    readonly appPath?: string;
+    readonly displayName?: string;
+    readonly kind?: string;
+    readonly isPackagedApp?: boolean;
+    readonly iconDataUrl?: string | null;
+    readonly error?: string;
+  };
 };
 
 export interface PendingTask {
@@ -458,6 +467,21 @@ export interface BootstrapPreloadApi {
     readonly url?: string;
     readonly error?: string;
   }>;
+  /** 获取可拖到“完全磁盘访问”列表的 App 路径与图标。 */
+  readonly getAppDragTarget: () => Promise<{
+    readonly ok: boolean;
+    readonly appPath?: string;
+    readonly displayName?: string;
+    readonly kind?: string;
+    readonly isPackagedApp?: boolean;
+    readonly iconDataUrl?: string | null;
+    readonly error?: string;
+  }>;
+  /**
+   * 开始拖拽 App 到系统设置。
+   * 必须在 dragstart 中同步调用（底层 ipc send + startDrag）。
+   */
+  readonly startAppDrag: (payload?: { readonly appPath?: string }) => void;
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   readonly listBrowserSessionSites: (profileId: string) => Promise<{
     readonly ok: boolean;

@@ -1119,6 +1119,72 @@
     background: color-mix(in srgb, #84adff 18%, transparent);
   }
 
+  .session-import-drag-card {
+    margin: 8px 0 10px;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px dashed color-mix(in srgb, var(--chrome-hairline, #ffffff33) 80%, transparent);
+    background: color-mix(in srgb, var(--paper-sheet, #1c1f26) 92%, transparent);
+  }
+  .session-import-drag-handle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: grab;
+    padding: 6px;
+    border-radius: 10px;
+  }
+  .session-import-drag-handle:active { cursor: grabbing; }
+  .session-import-drag-handle:hover {
+    background: color-mix(in srgb, var(--chrome-hairline, #fff2) 35%, transparent);
+  }
+  .session-import-drag-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    flex: 0 0 auto;
+    object-fit: contain;
+    background: color-mix(in srgb, #fff 8%, transparent);
+  }
+  .session-import-drag-icon.fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .session-import-drag-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .session-import-drag-meta strong {
+    font-size: 13px;
+  }
+  .session-import-drag-meta span {
+    font-size: 12px;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--graphite-soft, #c8cdd6) 92%, transparent);
+  }
+  .session-import-drag-steps {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--chrome-hairline, #ffffff22) 70%, transparent);
+  }
+  .session-import-drag-steps ol {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--graphite-soft, #c8cdd6) 92%, transparent);
+  }
+
   .session-import-error {
     margin: 0 16px 8px;
     padding: 8px 10px;

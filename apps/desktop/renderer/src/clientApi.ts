@@ -32,6 +32,8 @@ const unavailableApi: ClientApi = {
   listBrowserSessionSources: unavailableMethod('listBrowserSessionSources'),
   getBrowserSessionImportPreflight: unavailableMethod('getBrowserSessionImportPreflight'),
   openFullDiskAccessSettings: unavailableMethod('openFullDiskAccessSettings'),
+  getAppDragTarget: unavailableMethod('getAppDragTarget'),
+  startAppDrag: unavailableMethod('startAppDrag'),
   listBrowserSessionSites: unavailableMethod('listBrowserSessionSites'),
   importBrowserSiteSession: unavailableMethod('importBrowserSiteSession'),
   listPasswordVaultEntries: unavailableMethod('listPasswordVaultEntries'),

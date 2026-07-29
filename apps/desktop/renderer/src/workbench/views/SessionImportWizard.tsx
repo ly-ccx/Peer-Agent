@@ -2,7 +2,7 @@
  * 站点会话导入向导（Cookie only）。
  * 不导入密码；不展示 Cookie value。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
 export interface SessionImportWizardProps {
@@ -41,6 +41,15 @@ type Preflight = {
   readonly openFullDiskAccessSupported?: boolean;
   readonly guidance?: { readonly fullDiskAccess?: string };
   readonly error?: string;
+  readonly dragTarget?: {
+    readonly ok: boolean;
+    readonly appPath?: string;
+    readonly displayName?: string;
+    readonly kind?: string;
+    readonly isPackagedApp?: boolean;
+    readonly iconDataUrl?: string | null;
+    readonly error?: string;
+  };
 };
 
 type SiteOption = {
@@ -186,6 +195,27 @@ export function SessionImportWizard({
     }
   }, [isZh]);
 
+  // Codex 同类链路：在 dragstart 同步调用主进程 startDrag，把真实 App 路径拖进“完全磁盘访问”列表。
+  const onAppDragStart = useCallback((event: DragEvent<HTMLElement>) => {
+    const target = preflight?.dragTarget;
+    if (!target?.ok || !target.appPath) {
+      event.preventDefault();
+      return;
+    }
+    try {
+      // 给系统一个可见的拖影；真正的 file path 由主进程 startDrag 注入。
+      event.dataTransfer?.setData('text/plain', target.displayName || target.appPath);
+      event.dataTransfer!.effectAllowed = 'copyMove';
+    } catch {
+      // ignore dataTransfer quirks
+    }
+    try {
+      clientApi.startAppDrag?.({ appPath: target.appPath });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [preflight?.dragTarget]);
+
   const statusLabel = useCallback((status: PreflightCheck['status']) => {
     if (isZh) {
       switch (status) {
@@ -326,6 +356,43 @@ export function SessionImportWizard({
                     ? '导入需读取浏览器用户数据目录。若系统拒绝，请授予完全磁盘访问权限并完全退出后重启 Peer Agent。'
                     : 'Import needs browser user-data access. If blocked, grant Full Disk Access and fully relaunch Peer Agent.')}
               </p>
+              {preflight?.dragTarget?.ok ? (
+                <div className="session-import-drag-card">
+                  <button
+                    type="button"
+                    className="session-import-drag-handle"
+                    draggable
+                    onDragStart={onAppDragStart}
+                    title={isZh ? '拖到“完全磁盘访问权限”列表' : 'Drag into Full Disk Access list'}
+                  >
+                    {preflight.dragTarget.iconDataUrl ? (
+                      <img
+                        className="session-import-drag-icon"
+                        src={preflight.dragTarget.iconDataUrl}
+                        alt=""
+                        draggable={false}
+                      />
+                    ) : (
+                      <span className="session-import-drag-icon fallback" aria-hidden>App</span>
+                    )}
+                    <span className="session-import-drag-meta">
+                      <strong>{preflight.dragTarget.displayName || 'Peer Agent'}</strong>
+                      <span>
+                        {isZh
+                          ? '按住图标，拖到系统设置 → 完全磁盘访问权限列表中'
+                          : 'Drag this icon into System Settings → Full Disk Access'}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="session-import-drag-steps">
+                    <ol>
+                      <li>{isZh ? '点击“打开完全磁盘访问权限”' : 'Open Full Disk Access settings'}</li>
+                      <li>{isZh ? '把上方 App 图标拖进列表并打开开关' : 'Drag the app icon into the list and enable it'}</li>
+                      <li>{isZh ? '完全退出并重启 Peer Agent，再点“重新检测”' : 'Fully quit & relaunch Peer Agent, then Re-check'}</li>
+                    </ol>
+                  </div>
+                </div>
+              ) : null}
               <ul className="session-import-preflight-list">
                 {(preflight?.checks || []).map((check) => (
                   <li key={check.id} className={`session-import-preflight-item is-${check.status}`}>

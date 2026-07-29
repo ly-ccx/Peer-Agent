@@ -283,6 +283,73 @@ export function buildSessionImportPreflight(options = {}) {
  * 打开 macOS「完全磁盘访问权限」设置页（尽力而为）。
  * @param {{ shellOpenExternal?: (url: string) => Promise<void> }} [options]
  */
+
+/**
+ * 解析“拖到完全磁盘访问列表”的目标 App/.app 路径。
+ * Codex 同类链路：UI 展示可拖拽 App 图标，主进程用 startDrag 把真实路径交给系统设置。
+ * @param {{ platform?: string, appGetPath?: (name: string) => string, execPath?: string, resourcesPath?: string, existsSync?: (p: string) => boolean }} [options]
+ */
+export function resolveFullDiskAccessDragTarget(options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== 'darwin') {
+    return { ok: false, error: 'unsupported_platform' };
+  }
+  const existsSync = options.existsSync || ((target) => {
+    try { return fs.existsSync(target); } catch { return false; }
+  });
+  const execPath = options.execPath || process.execPath;
+  const resourcesPath = options.resourcesPath || process.resourcesPath || '';
+  let appPath = '';
+  try {
+    appPath = options.appGetPath ? options.appGetPath('exe') : '';
+  } catch {
+    appPath = '';
+  }
+  const candidates = [];
+  const pushCandidate = (raw, kind) => {
+    if (!raw || typeof raw !== 'string') return;
+    const normalized = path.resolve(raw);
+    // Electron 打包：.../Peer Agent.app/Contents/MacOS/Peer Agent
+    // 开发态：.../Electron.app/Contents/MacOS/Electron
+    let bundle = normalized;
+    const marker = `${path.sep}Contents${path.sep}MacOS${path.sep}`;
+    const idx = normalized.lastIndexOf(marker);
+    if (idx > 0) {
+      bundle = normalized.slice(0, idx); // *.app
+    } else if (normalized.endsWith('.app')) {
+      bundle = normalized;
+    }
+    if (!candidates.some((c) => c.path === bundle)) {
+      candidates.push({ path: bundle, kind });
+    }
+  };
+  pushCandidate(appPath, 'app_get_path_exe');
+  pushCandidate(execPath, 'process_exec_path');
+  // resourcesPath 通常是 .../Peer Agent.app/Contents/Resources
+  if (resourcesPath) {
+    const maybeApp = path.resolve(resourcesPath, '..', '..');
+    if (maybeApp.endsWith('.app')) pushCandidate(maybeApp, 'resources_path_app');
+  }
+
+  for (const item of candidates) {
+    if (existsSync(item.path)) {
+      const name = path.basename(item.path).replace(/\.app$/i, '') || 'Peer Agent';
+      return {
+        ok: true,
+        appPath: item.path,
+        displayName: name,
+        kind: item.kind,
+        isPackagedApp: item.path.endsWith('.app'),
+      };
+    }
+  }
+  return {
+    ok: false,
+    error: 'app_path_not_found',
+    candidates: candidates.map((c) => c.path),
+  };
+}
+
 export async function openFullDiskAccessSettings(options = {}) {
   const openExternal = options.shellOpenExternal;
   if (typeof openExternal !== 'function') {

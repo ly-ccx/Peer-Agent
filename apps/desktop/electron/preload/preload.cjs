@@ -67,6 +67,13 @@ contextBridge.exposeInMainWorld('peerAgent', {
   getBrowserSessionImportPreflight: () => ipcRenderer.invoke('browser:session-import-preflight'),
   /** 打开 macOS 完全磁盘访问权限设置。 */
   openFullDiskAccessSettings: () => ipcRenderer.invoke('browser:open-full-disk-access-settings'),
+  /** 获取可拖到“完全磁盘访问”列表的 App 路径与图标。 */
+  getAppDragTarget: () => ipcRenderer.invoke('browser:get-app-drag-target'),
+  /**
+   * 开始把 App 拖到系统设置（完全磁盘访问列表）。
+   * 必须在 renderer 的 dragstart 事件中同步调用。
+   */
+  startAppDrag: (payload) => ipcRenderer.send('browser:start-app-drag', payload || {}),
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   listBrowserSessionSites: (profileId) =>
     ipcRenderer.invoke('browser:list-session-sites', { profileId }),

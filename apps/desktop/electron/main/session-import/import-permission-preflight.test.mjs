@@ -5,6 +5,7 @@ import {
   openFullDiskAccessSettings,
   probeDirectoryAccess,
   probeFileCopyAccess,
+  resolveFullDiskAccessDragTarget,
 } from './import-permission-preflight.mjs';
 
 function makeFs({ exists = true, readdirError = null } = {}) {
@@ -142,4 +143,32 @@ test('preflight flags cookies blocked even when browser dir is readable', () => 
   assert.equal(res.ready, false);
   assert.ok(res.checks.some((c) => c.id === 'cookies:chrome-mac' && c.status === 'blocked'));
   assert.ok(res.checks.some((c) => c.id === 'full-disk-access' && c.status === 'blocked'));
+});
+
+
+test('resolveFullDiskAccessDragTarget maps Electron exec path to .app bundle', () => {
+  const execPath = '/Applications/Peer Agent.app/Contents/MacOS/Peer Agent';
+  const res = resolveFullDiskAccessDragTarget({
+    platform: 'darwin',
+    execPath,
+    appGetPath: () => execPath,
+    existsSync: (p) => p === '/Applications/Peer Agent.app',
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.appPath, '/Applications/Peer Agent.app');
+  assert.equal(res.displayName, 'Peer Agent');
+  assert.equal(res.isPackagedApp, true);
+});
+
+test('resolveFullDiskAccessDragTarget supports Electron.dev app bundle', () => {
+  const execPath = '/Users/me/app/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron';
+  const res = resolveFullDiskAccessDragTarget({
+    platform: 'darwin',
+    execPath,
+    appGetPath: () => execPath,
+    existsSync: (p) => p.endsWith('Electron.app'),
+  });
+  assert.equal(res.ok, true);
+  assert.ok(String(res.appPath).endsWith('Electron.app'));
+  assert.equal(res.displayName, 'Electron');
 });
