@@ -270,9 +270,9 @@ describe('chat compaction coordinator', () => {
     assert.equal('nextRequestInputTokens' in done, false);
   });
 
-  it('rethrows when a compacted persist fails and settles the banner to idle', async () => {
+  it('rethrows when a compacted persist fails and preserves a failed terminal state', async () => {
     // 大量消息 + force 触发结构化压缩 (compacted:true);persistCompaction 抛错。
-    // 回归点:错误必须向上抛出(交由 sendMessage 终态兜底),且失败路径必须补发 idle。
+    // 回归点:错误必须向上抛出，主进程必须发布可解释 failed，而不是 finally 清成 idle。
     const events = [];
     const messages = Array.from({ length: 14 }, (_, i) => ({
       role: i % 2 === 0 ? 'user' : 'assistant',
@@ -307,7 +307,13 @@ describe('chat compaction coordinator', () => {
       .filter((e) => e.channel === 'chat:compaction')
       .map((e) => e.payload.stage);
     assert.equal(stages.includes('done'), false);
-    assert.equal(stages.at(-1), 'idle');
+    assert.equal(stages.at(-1), 'failed');
+    const failed = events.findLast(
+      (event) => event.channel === 'chat:compaction' && event.payload.stage === 'failed',
+    )?.payload;
+    assert.equal(failed.conversationId, 'c1');
+    assert.equal(failed.errorCode, 'CONTEXT_COMPACTION_PERSIST_FAILED');
+    assert.match(failed.message, /persist boom/);
   });
 });
 

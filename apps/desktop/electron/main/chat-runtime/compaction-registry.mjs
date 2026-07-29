@@ -11,7 +11,7 @@
 //
 // 这是一个进程内的小接口深模块：Map + 4 个方法，无外部依赖，便于单测。
 
-/** @type {Map<string, { streamId: string, percent: number | null, manual: boolean, startedAt: number }>} */
+/** @type {Map<string, { phase: 'running' | 'failed', streamId: string, percent: number | null, manual: boolean, startedAt: number, failedAt?: number, errorCode?: string, message?: string, budget?: object | null }>} */
 const registry = new Map();
 
 /**
@@ -21,6 +21,7 @@ const registry = new Map();
 export function beginCompaction({ conversationId, streamId, manual = false } = {}) {
   if (!conversationId || !streamId) return;
   registry.set(conversationId, {
+    phase: 'running',
     streamId,
     percent: null,
     manual: Boolean(manual),
@@ -40,8 +41,29 @@ export function updateCompactionProgress({ conversationId, streamId, percent } =
   entry.percent = typeof percent === 'number' ? percent : entry.percent;
 }
 
+/** Preserve an explainable terminal failure until retry, success, or explicit dismissal. */
+export function failCompaction({
+  conversationId,
+  streamId,
+  errorCode = 'CONTEXT_COMPACTION_FAILED',
+  message = 'Context compaction failed.',
+  budget = null,
+} = {}) {
+  if (!conversationId || !streamId) return;
+  const entry = registry.get(conversationId);
+  if (!entry || entry.streamId !== streamId) return;
+  registry.set(conversationId, {
+    ...entry,
+    phase: 'failed',
+    failedAt: Date.now(),
+    errorCode,
+    message,
+    budget,
+  });
+}
+
 /**
- * 结束某会话的压缩（done / idle / 失败均调用）。仅当 streamId 与登记一致时清除，
+ * 结束某会话的压缩（done / idle / explicit dismiss）。仅当 streamId 与登记一致时清除，
  * 避免旧流的收尾误清掉新一轮压缩的进行态。
  * @param {{ conversationId?: string | null, streamId?: string | null }} params
  */
@@ -63,6 +85,18 @@ export function getCompaction(conversationId) {
   if (!conversationId) return null;
   const entry = registry.get(conversationId);
   if (!entry) return null;
+  if (entry.phase === 'failed') {
+    return {
+      compacting: false,
+      phase: 'failed',
+      streamId: entry.streamId,
+      manual: entry.manual,
+      errorCode: entry.errorCode,
+      message: entry.message,
+      failedAt: entry.failedAt,
+      budget: entry.budget ?? null,
+    };
+  }
   return {
     compacting: true,
     streamId: entry.streamId,

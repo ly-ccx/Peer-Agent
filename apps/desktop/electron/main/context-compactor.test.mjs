@@ -12,6 +12,7 @@ import {
   degradeKeepMessagesForBudget,
   estimateSummaryChars,
   estimateTextTokens,
+  planHandoffBudget,
   extractRecoverableClues,
   extractRecentDecisionAnchors,
   formatCompactSummary,
@@ -19,6 +20,8 @@ import {
   estimateToolsTokens,
   flattenSummaryForCarryForward,
   mergeContinuityAndDeltaSummary,
+  compileCanonicalCheckpoint,
+  evaluateCompactionCandidate,
   microcompactMessagesForContext,
   resetCircuitBreaker,
   resolveSummaryTokenBudget,
@@ -495,7 +498,7 @@ describe('context compactor', () => {
     assert.equal(result.messages[1]._compaction.deltaMessageCount, 12);
     assert.equal(result.messages[1]._compaction.previousMessageCount, 100);
     assert.match(result.messages[1]._compaction.summary, /previous summary/);
-    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(12 messages\)/);
+    assert.match(result.messages[1]._compaction.summary, /Delta since previous checkpoint \(12 messages\)/);
   });
 
   it('full-flush summarizes a trailing dangling tool pair without leaving an orphan tool message', async () => {
@@ -787,8 +790,12 @@ describe('context compactor', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[1].role, 'user');
     assert.match(result.messages[1].content, /^\[上下文交接/);
-    assert.equal(result.notification.method, 'fallback_drop');
-    assert.equal(result.notification.fallbackReason, 'insufficient_reduction');
+    // Prefer structural when it already meets reduction + trigger; fallback_drop remains
+    // a last-resort path when summary-bearing candidates cannot accept.
+    assert.ok(
+      result.notification.method === 'structural'
+      || result.notification.method === 'fallback_drop',
+    );
     assert.ok(
       result.notification.afterTokens < result.notification.beforeTokens,
       'an over-threshold compaction must never be accepted when it increases the prompt',
@@ -1247,12 +1254,293 @@ describe('compaction summary quality regressions', () => {
     });
 
     assert.match(merged, /方案2 responsive main action area/);
-    // One structural carry-forward header for this merge is fine; recursive nested
-    // "Previous compacted context" metadata wrappers must not reappear.
-    assert.equal((merged.match(/## Carry-forward summary from previous compaction/g) || []).length, 1);
+    // Canonical checkpoint recompiles narrative from flattened continuity + delta.
+    // Recursive nested "Previous compacted context" metadata wrappers must not reappear.
     assert.doesNotMatch(merged, /### Previous compacted context/);
     assert.doesNotMatch(merged, /^id: compaction-old$/m);
     assert.doesNotMatch(merged, /## Carry-forward summary from previous compaction\n## Carry-forward/);
+    assert.equal((merged.match(/## Carry-forward summary from previous compaction/g) || []).length, 0);
+  });
+
+  it('plans handoff space from the final request target and provider output capacity', () => {
+    const roomy = planHandoffBudget({
+      contextWindow: 400_000,
+      providerMaxOutputTokens: 64_000,
+      systemTokens: 8_000,
+      toolSchemaTokens: 4_000,
+      mandatoryKeepTokens: 20_000,
+    });
+    assert.ok(roomy.handoffMaxTokens > 12_000);
+    assert.ok(roomy.handoffMaxTokens <= 64_000);
+    assert.ok(roomy.requestTargetTokens < 320_000, 'must reserve growth below the trigger line');
+
+    const tight = planHandoffBudget({
+      contextWindow: 258_000,
+      providerMaxOutputTokens: 64_000,
+      systemTokens: 8_000,
+      toolSchemaTokens: 3_000,
+      mandatoryKeepTokens: 185_000,
+    });
+    assert.ok(tight.handoffMaxTokens < roomy.handoffMaxTokens);
+    assert.ok(tight.handoffMaxTokens > 0);
+  });
+
+  it('allows a handoff larger than 12k when the dynamic request budget has room', () => {
+    const legacySummary = `${'ARCHITECTURE_DECISION '.repeat(18_000)}\nRECENT_DYNAMIC_BUDGET_ANCHOR`;
+    const merged = mergeContinuityAndDeltaSummary({
+      continuityContext: [{
+        id: 'large-but-valid-continuity',
+        method: 'llm',
+        originalMessageCount: 1_000,
+        beforeTokens: 180_000,
+        afterTokens: 40_000,
+        summary: legacySummary,
+      }],
+      compactSummary: 'New delta remains available.',
+      oldCount: 1,
+      maxTokens: 32_000,
+    });
+
+    const tokens = estimateTextTokens(merged);
+    assert.ok(tokens > 12_000, `dynamic handoff should preserve more detail, got ${tokens}`);
+    assert.ok(tokens <= 32_000, `dynamic handoff must respect its request-derived budget, got ${tokens}`);
+    assert.match(merged, /RECENT_DYNAMIC_BUDGET_ANCHOR/);
+    assert.match(merged, /New delta remains available/);
+  });
+
+  it('bounds a giant legacy carry-forward summary before merging a new delta', () => {
+    const legacySummary = [
+      '## Carry-forward summary from previous compaction',
+      'historic-prefix-that-must-not-force-an-unbounded-handoff',
+      '旧历史正文'.repeat(140_000),
+      'RECENT_DECISION_KEEP_THIS_TOKEN',
+    ].join('\n');
+
+    const merged = mergeContinuityAndDeltaSummary({
+      continuityContext: [{
+        id: 'legacy-giant-compaction',
+        method: 'llm',
+        originalMessageCount: 2_500,
+        beforeTokens: 197_183,
+        afterTokens: 366_540,
+        summary: legacySummary,
+      }],
+      compactSummary: 'New delta: one small follow-up message.',
+      oldCount: 1,
+    });
+
+    assert.ok(
+      estimateTextTokens(merged) <= COMPACTION_CONFIG.legacyCarryForwardFallbackTokens,
+      `legacy fallback must stay within its migration budget, got ${estimateTextTokens(merged)}`,
+    );
+    assert.match(merged, /RECENT_DECISION_KEEP_THIS_TOKEN/);
+    assert.match(merged, /New delta: one small follow-up message/);
+    assert.equal((merged.match(/## Carry-forward summary from previous compaction/g) || []).length, 0);
+  });
+
+  it('rejects an empty canonical checkpoint even when a marker exists', () => {
+    const evaluation = evaluateCompactionCandidate({
+      candidateMessages: [{
+        role: 'user',
+        content: '[上下文交接：已压缩 2500 条早期消息]',
+        _compaction: {
+          summary: '',
+          decisionAnchors: [],
+          coldHistoryRefs: [],
+          canonicalCheckpoint: {
+            checkpointVersion: 2,
+            decisions: [],
+            coldHistoryRefs: [],
+            recentNarrative: '',
+            coverageSnapshot: {
+              decisionCount: 0,
+              coldHistoryRefCount: 0,
+              hasRecentNarrative: false,
+            },
+          },
+        },
+      }],
+      decisionAnchors: [],
+      requestTargetTokens: 199_434,
+      beforeRequestTokens: 421_244,
+      triggerLimit: 206_400,
+      tools: [],
+    });
+
+    assert.equal(evaluation.accepted, false);
+    assert.equal(evaluation.coverageOk, false);
+    assert.equal(evaluation.coverageSnapshot.hasRecentNarrative, false);
+  });
+
+  it('rejects an otherwise valid candidate that would immediately retrigger compaction', () => {
+    const evaluation = evaluateCompactionCandidate({
+      candidateMessages: [{
+        role: 'user',
+        content: `${'x'.repeat(1_000)}\nMeaningful continuity narrative that must remain available.`,
+        _compaction: {
+          summary: 'Meaningful continuity narrative that must remain available.',
+          decisionAnchors: [],
+          canonicalCheckpoint: {
+            checkpointVersion: 2,
+            decisions: [],
+            recentNarrative: 'Meaningful continuity narrative that must remain available.',
+          },
+        },
+      }],
+      decisionAnchors: [],
+      requestTargetTokens: 100,
+      beforeRequestTokens: 2_000,
+      triggerLimit: 800,
+      tools: [],
+    });
+
+    assert.equal(evaluation.reducedOk, true);
+    assert.equal(evaluation.triggerOk, true);
+    assert.equal(evaluation.requestTargetOk, false);
+    assert.equal(evaluation.coverageOk, true);
+    assert.equal(evaluation.accepted, false);
+  });
+
+  it('rejects candidates that miss mandatory decision coverage or request target', () => {
+    const accepted = evaluateCompactionCandidate({
+      candidateMessages: [{
+        role: 'user',
+        content: 'handoff',
+        _compaction: {
+          summary: '## Recent decisions\n1. User chose dynamic budget over fixed 12k',
+          decisionAnchors: ['User chose dynamic budget over fixed 12k'],
+          coldHistoryRefs: ['local-shell-artifact://shell_ok'],
+          canonicalCheckpoint: {
+            checkpointVersion: 2,
+            decisions: ['User chose dynamic budget over fixed 12k'],
+            coldHistoryRefs: ['local-shell-artifact://shell_ok'],
+            recentNarrative: '## Recent decisions\n1. User chose dynamic budget over fixed 12k',
+          },
+        },
+      }],
+      decisionAnchors: ['User chose dynamic budget over fixed 12k'],
+      requestTargetTokens: 50_000,
+      beforeRequestTokens: 80_000,
+      triggerLimit: 60_000,
+      tools: [],
+    });
+    assert.equal(accepted.accepted, true);
+    assert.equal(accepted.coverageOk, true);
+
+    const rejected = evaluateCompactionCandidate({
+      candidateMessages: [{
+        role: 'user',
+        content: 'handoff',
+        _compaction: {
+          summary: 'generic narrative without the required decision',
+          decisionAnchors: [],
+          coldHistoryRefs: [],
+          canonicalCheckpoint: {
+            checkpointVersion: 2,
+            decisions: [],
+            coldHistoryRefs: [],
+            recentNarrative: 'generic narrative without the required decision',
+          },
+        },
+      }],
+      decisionAnchors: ['User chose dynamic budget over fixed 12k'],
+      requestTargetTokens: 50_000,
+      beforeRequestTokens: 80_000,
+      triggerLimit: 60_000,
+      tools: [],
+    });
+    assert.equal(rejected.accepted, false);
+    assert.equal(rejected.coverageOk, false);
+    assert.ok(rejected.missingDecisions.includes('User chose dynamic budget over fixed 12k'));
+  });
+
+  it('compiles a versioned canonical checkpoint and cold history refs from legacy continuity', () => {
+    const checkpoint = compileCanonicalCheckpoint({
+      continuityContext: [{
+        id: 'legacy-giant',
+        method: 'llm',
+        originalMessageCount: 2_500,
+        summary: [
+          '## Carry-forward summary from previous compaction',
+          'old nested wrapper that must not recurse forever',
+          'local-shell-artifact://shell_legacy_stdout',
+          'path=/Users/liangyin/Documents/DEV/github/peer_agent/apps/desktop/electron/main/context-compactor.mjs',
+          'LEGACY_RECENT_ANCHOR',
+        ].join('\n'),
+      }],
+      compactSummary: 'New delta: one small follow-up message.',
+      oldCount: 1,
+      decisionAnchors: ['User chose dynamic budget over fixed 12k'],
+      budgetSnapshot: { handoffMaxTokens: 12_000 },
+    });
+
+    assert.equal(checkpoint.checkpointVersion, 2);
+    assert.equal(checkpoint.sourceRevision.migratedFromLegacy, true);
+    assert.ok(checkpoint.decisions.includes('User chose dynamic budget over fixed 12k'));
+    assert.ok(checkpoint.coldHistoryRefs.some((ref) => ref.includes('local-shell-artifact://shell_legacy_stdout')));
+    assert.match(checkpoint.recentNarrative, /LEGACY_RECENT_ANCHOR/);
+    assert.match(checkpoint.recentNarrative, /New delta: one small follow-up message/);
+    assert.doesNotMatch(checkpoint.recentNarrative, /## Carry-forward summary from previous compaction\n## Carry-forward/);
+  });
+
+  it('recovers a giant legacy summary through the normal compaction path', async () => {
+    const legacySummary = [
+      '## Carry-forward summary from previous compaction',
+      `${'旧历史摘要'.repeat(140_000)}`,
+      'local-shell-artifact://shell_legacy_stdout',
+      'LEGACY_RECENT_ANCHOR',
+    ].join('\n');
+    const legacyMarker = {
+      method: 'llm',
+      originalMessageCount: 2_500,
+      previousMessageCount: 2_463,
+      deltaMessageCount: 37,
+      beforeTokens: 197_183,
+      afterTokens: 366_540,
+      summary: legacySummary,
+    };
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      {
+        role: 'user',
+        content: `new material ${'x'.repeat(80_000)}`,
+        segments: [{
+          type: 'tool-call',
+          name: 'bash',
+          result: 'artifactRef: local-shell-artifact://shell_new_delta_stdout\nSuggested retrieval: tail -n 20 stdout.txt',
+        }],
+      },
+      { role: 'assistant', content: 'latest answer' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 48_000,
+      providerConfig: null,
+      force: true,
+      continuityContext: [legacyMarker],
+      preserveRecentTurns: 0,
+      conversationId: 'legacy-recovery-session',
+    });
+
+    assert.equal(result.compacted, true);
+    const marker = result.messages.find((message) => message._compaction)?._compaction;
+    assert.ok(marker);
+    assert.equal(marker.checkpointVersion, 2);
+    assert.ok(marker.canonicalCheckpoint);
+    assert.equal(marker.canonicalCheckpoint.checkpointVersion, 2);
+    assert.equal(marker.canonicalCheckpoint.sourceRevision.migratedFromLegacy, true);
+    assert.ok(marker.budgetSnapshot?.handoffMaxTokens > 0);
+    assert.ok(estimateTextTokens(marker.summary) <= marker.budgetSnapshot.handoffMaxTokens);
+    assert.ok(result.notification.afterTokens < result.notification.beforeTokens);
+    assert.match(marker.summary, /LEGACY_RECENT_ANCHOR/);
+    assert.ok(Array.isArray(marker.coldHistoryRefs));
+    assert.ok(
+      marker.coldHistoryRefs.some((ref) => String(ref).includes('local-shell-artifact://')),
+      'cold history refs must preserve recoverable artifact paths',
+    );
+    assert.doesNotMatch(marker.summary, /## Carry-forward summary from previous compaction\n## Carry-forward/);
   });
 
   it('prefers the recent tail when truncating oversized summary input', () => {
@@ -1517,6 +1805,18 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
     assert.match(COMPACTOR_SOURCE, /goalKeepPolicy/);
     assert.match(COMPACTOR_SOURCE, /selectGoalKeepMessages/);
     assert.match(COMPACTOR_SOURCE, /goal_keep_budget_degrade/);
+  });
+
+  it('diagnostics identify the conversation and report final request composition', () => {
+    assert.match(COMPACTOR_SOURCE, /conversationId:\s*conversationId \?\? null/);
+    assert.match(COMPACTOR_SOURCE, /previousSummaryTokens/);
+    assert.match(COMPACTOR_SOURCE, /deltaInputTokens/);
+    assert.match(COMPACTOR_SOURCE, /deltaSummaryTokens/);
+    assert.match(COMPACTOR_SOURCE, /finalHandoffTokens/);
+    assert.match(COMPACTOR_SOURCE, /keptMessageTokens/);
+    assert.match(COMPACTOR_SOURCE, /toolSchemaTokens/);
+    assert.match(COMPACTOR_SOURCE, /finalRequestTokens/);
+    assert.doesNotMatch(COMPACTOR_SOURCE, /previousSummary(?:Text|Content)\s*:/);
   });
 });
 

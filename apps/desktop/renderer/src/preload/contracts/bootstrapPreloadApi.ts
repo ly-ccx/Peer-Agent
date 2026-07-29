@@ -692,7 +692,26 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly clearPendingTask: () => Promise<boolean>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
   // 按会话查询当前压缩态（切会话恢复横幅用）。压缩态真值在主进程登记表，渲染层只表达。
-  readonly chatCompactionGet: (params: { conversationId: string }) => Promise<{ compacting: true; streamId: string; percent: number | null; manual: boolean } | null>;
+  // running: compacting=true; failed: compacting=false + phase='failed' with explainable detail.
+  readonly chatCompactionGet: (params: { conversationId: string }) => Promise<
+    | {
+        compacting: true;
+        streamId: string;
+        percent: number | null;
+        manual: boolean;
+      }
+    | {
+        compacting: false;
+        phase: 'failed';
+        streamId: string;
+        manual?: boolean;
+        errorCode?: string;
+        message?: string;
+        failedAt?: number;
+        budget?: Record<string, unknown> | null;
+      }
+    | null
+  >;
   // restored 重投影(21 号文档 13.3):快照缺失/跨宿主时由 Runtime 按完整成分重算占用并回写共享快照。
   readonly chatContextRestored?: (params: {
     conversationId: string;

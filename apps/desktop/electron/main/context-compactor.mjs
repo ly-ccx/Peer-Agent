@@ -50,6 +50,17 @@ const COMPACTION_CONFIG = {
   summaryOutputReserveTokens: 4_000,
   // 额外安全区：provider framing / 工具 schema 抖动 / 估算误差。
   safetyReserveTokens: 1_000,
+  // Legacy fallback only. Normal compaction uses planHandoffBudget() so semantic detail can grow
+  // beyond 12k when the final request and provider output capacity have room.
+  legacyCarryForwardFallbackTokens: 12_000,
+  // Reserve enough room for several ordinary turns so compaction does not immediately retrigger.
+  futureTurnReserveRatio: 0.08,
+  minFutureTurnReserveTokens: 8_000,
+  maxFutureTurnReserveTokens: 32_000,
+  providerEnvelopeReserveTokens: 1_000,
+  // Canonical checkpoint must carry actual continuity, not merely a marker envelope.
+  // This is a semantic floor (roughly one short paragraph), not a normal-path ceiling.
+  minCanonicalNarrativeChars: 32,
   // 现场证据：本地投影 461k，而 Grok provider 实际计为 928k（约 2.01x）。
   // 在没有 provider 原生 tokenizer 的前提下，只允许摘要输入使用可用窗口的 45%，
   // 即使 token 密度接近该现场样本，仍保留约 10% 的请求 framing 余量。
@@ -101,6 +112,119 @@ function recordCompactionFailure(scope) {
 const estimateTextTokens = estimateContextTextTokens;
 const estimateTokensFromMessages = estimateContextMessagesTokens;
 const estimateToolsTokens = estimateContextToolsTokens;
+
+function estimateFinalRequestBudget(messages, tools) {
+  const messageTokens = estimateTokensFromMessages(messages);
+  const toolTokens = estimateToolsTokens(tools);
+  return {
+    messageTokens,
+    toolTokens,
+    finalRequestTokens: messageTokens + toolTokens,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function planHandoffBudget({
+  contextWindow,
+  providerMaxOutputTokens,
+  systemTokens = 0,
+  toolSchemaTokens = 0,
+  mandatoryKeepTokens = 0,
+}) {
+  const windowTokens = Number.isFinite(contextWindow) && contextWindow > 0
+    ? Math.floor(contextWindow)
+    : null;
+  const providerOutputLimit = Number.isFinite(providerMaxOutputTokens) && providerMaxOutputTokens > 0
+    ? Math.floor(providerMaxOutputTokens)
+    : COMPACTION_CONFIG.defaultSummaryMaxTokens;
+  if (!windowTokens) {
+    return {
+      requestTargetTokens: null,
+      handoffMaxTokens: providerOutputLimit,
+      futureTurnReserveTokens: 0,
+      providerOutputLimit,
+      accountingSource: 'provider_output_only',
+    };
+  }
+
+  const triggerLimit = Math.floor(windowTokens * COMPACTION_CONFIG.triggerRatio);
+  // Every reserve scales down for small windows; absolute production defaults must never
+  // collapse the usable request target or handoff budget to one token.
+  const safetyReserveTokens = Math.min(
+    COMPACTION_CONFIG.safetyReserveTokens,
+    Math.max(0, Math.floor(triggerLimit * 0.1)),
+  );
+  const providerEnvelopeReserveTokens = Math.min(
+    COMPACTION_CONFIG.providerEnvelopeReserveTokens,
+    Math.max(0, Math.floor(triggerLimit * 0.05)),
+  );
+  const proportionalReserve = Math.floor(windowTokens * COMPACTION_CONFIG.futureTurnReserveRatio);
+  const maxReserveForWindow = Math.max(
+    0,
+    Math.floor(triggerLimit * 0.25) - safetyReserveTokens,
+  );
+  const futureTurnReserveTokens = clamp(
+    proportionalReserve,
+    Math.min(COMPACTION_CONFIG.minFutureTurnReserveTokens, maxReserveForWindow),
+    Math.min(COMPACTION_CONFIG.maxFutureTurnReserveTokens, maxReserveForWindow),
+  );
+  const requestTargetTokens = Math.max(
+    1,
+    triggerLimit - futureTurnReserveTokens - safetyReserveTokens,
+  );
+  const availableForHandoff = Math.max(
+    1,
+    requestTargetTokens
+      - Math.max(0, systemTokens)
+      - Math.max(0, toolSchemaTokens)
+      - Math.max(0, mandatoryKeepTokens)
+      - providerEnvelopeReserveTokens,
+  );
+  return {
+    requestTargetTokens,
+    handoffMaxTokens: Math.max(1, Math.min(providerOutputLimit, availableForHandoff)),
+    futureTurnReserveTokens,
+    safetyReserveTokens,
+    providerEnvelopeReserveTokens,
+    providerOutputLimit,
+    availableForHandoff,
+    accountingSource: 'dynamic_final_request_budget',
+  };
+}
+
+function getLatestContinuitySummary(continuityContext) {
+  const items = normalizeContinuityContext(continuityContext);
+  return items.length > 0 ? items[items.length - 1].summary : '';
+}
+
+function buildCompactionDiagnosticContext({
+  conversationId,
+  continuityContext,
+  deltaInputMessages,
+  deltaSummary,
+  resultMessages,
+  tools,
+}) {
+  const previousSummary = getLatestContinuitySummary(continuityContext);
+  const marker = resultMessages?.find((message) => message?._compaction)?._compaction ?? null;
+  const finalBudget = estimateFinalRequestBudget(resultMessages ?? [], tools);
+  return {
+    conversationId: conversationId ?? null,
+    accountingSource: 'runtime_estimate',
+    previousSummaryTokens: estimateTextTokens(previousSummary),
+    deltaInputTokens: estimateTokensFromMessages(deltaInputMessages ?? []),
+    deltaSummaryTokens: estimateTextTokens(deltaSummary ?? ''),
+    finalHandoffTokens: estimateTextTokens(marker?.summary ?? ''),
+    keptMessageTokens: estimateTokensFromMessages(
+      (resultMessages ?? []).filter((message) => message?.role !== 'system' && !message?._compaction),
+    ),
+    toolSchemaTokens: finalBudget.toolTokens,
+    finalRequestTokens: finalBudget.finalRequestTokens,
+  };
+}
 
 // ── Message Grouping（对标 CC groupMessagesByApiRound）──
 
@@ -414,6 +538,7 @@ async function summarizeWithLLM({
   contextWindow = null,
   summaryInputTokenBudget = null,
   onProviderUsage = null,
+  conversationId = null,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
@@ -422,6 +547,7 @@ async function summarizeWithLLM({
   const summaryMaxTokens = summaryBudget.summaryMaxTokens;
 
   logCompactionDiagnostic('summarize:enter', {
+    conversationId,
     providerConfig,
     summaryMaxTokens,
     oldMessageCount: Array.isArray(oldMessages) ? oldMessages.length : null,
@@ -936,48 +1062,280 @@ function normalizeContinuityContext(continuityContext = []) {
       beforeTokens: Number.isFinite(item.beforeTokens) ? item.beforeTokens : 0,
       afterTokens: Number.isFinite(item.afterTokens) ? item.afterTokens : 0,
       summary: typeof item.summary === 'string' ? item.summary : '',
+      checkpointVersion: Number.isFinite(item.checkpointVersion) ? Math.floor(item.checkpointVersion) : null,
+      budgetSnapshot: item.budgetSnapshot && typeof item.budgetSnapshot === 'object'
+        ? item.budgetSnapshot
+        : null,
+      canonicalCheckpoint: item.canonicalCheckpoint && typeof item.canonicalCheckpoint === 'object'
+        ? item.canonicalCheckpoint
+        : null,
+      coldHistoryRefs: Array.isArray(item.coldHistoryRefs)
+        ? item.coldHistoryRefs.filter((ref) => typeof ref === 'string' && ref.trim())
+        : [],
     }))
-    .filter((item) => item.summary.trim() || item.originalMessageCount > 0);
+    .filter((item) => item.summary.trim() || item.originalMessageCount > 0 || item.canonicalCheckpoint);
 }
 
-function buildContinuityCarryForwardSummary(continuityContext) {
+function buildContinuityCarryForwardSummary(
+  continuityContext,
+  maxTokens = COMPACTION_CONFIG.legacyCarryForwardFallbackTokens,
+) {
   const items = normalizeContinuityContext(continuityContext);
-  if (!items.length) return '';
-  // Only carry the latest continuity item, and flatten any prior merge wrappers so
-  // repeated compaction cannot nest "## Carry-forward ..." blobs forever.
+  if (!items.length || maxTokens <= 0) return '';
+  // Only carry the latest continuity item, flatten prior wrappers, then bound the body itself.
+  // Legacy sessions may contain hundreds of thousands of tokens in one _compaction.summary;
+  // treating that body as immutable makes every later compaction mathematically impossible.
   const latest = items[items.length - 1];
   const flattened = flattenSummaryForCarryForward(latest.summary)
     || latest.summary.trim()
     || '[previous compacted context summary unavailable]';
-  return flattened;
+  return truncateSummaryInputToTokenBudget(flattened, maxTokens);
 }
 
-function mergeContinuityAndDeltaSummary({ continuityContext, compactSummary, oldCount, decisionAnchors = [] }) {
-  const previousSummary = buildContinuityCarryForwardSummary(continuityContext);
-  const deltaSummary = flattenSummaryForCarryForward(compactSummary)
-    || compactSummary?.trim()
+function uniqueNonEmptyStrings(values, limit = 24) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function collectTextFromMessages(messages, limit = 12) {
+  const texts = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (typeof message?.content === 'string' && message.content.trim()) {
+      texts.push(message.content);
+    } else if (Array.isArray(message?.content)) {
+      for (const block of message.content) {
+        if (typeof block?.content === 'string' && block.content.trim()) {
+          texts.push(block.content);
+        } else if (typeof block?.text === 'string' && block.text.trim()) {
+          texts.push(block.text);
+        }
+      }
+    }
+    if (Array.isArray(message?.segments)) {
+      for (const segment of message.segments) {
+        if (typeof segment?.content === 'string' && segment.content.trim()) {
+          texts.push(segment.content);
+        }
+        if (typeof segment?.result === 'string' && segment.result.trim()) {
+          texts.push(segment.result);
+        } else if (segment?.result != null) {
+          try {
+            texts.push(JSON.stringify(segment.result));
+          } catch {
+            // ignore non-serializable segment results
+          }
+        }
+      }
+    }
+    if (texts.length >= limit) break;
+  }
+  return texts.slice(0, limit);
+}
+
+/**
+ * Candidate acceptance is not "summary generated".
+ * It must prove final-request budget and mandatory semantic coverage.
+ */
+function evaluateCompactionCandidate({
+  candidateMessages,
+  decisionAnchors = [],
+  requestTargetTokens = null,
+  beforeRequestTokens = null,
+  triggerLimit = null,
+  tools = [],
+}) {
+  const marker = Array.isArray(candidateMessages)
+    ? candidateMessages.find((message) => message?._compaction)?._compaction
+    : null;
+  const checkpoint = marker?.canonicalCheckpoint && typeof marker.canonicalCheckpoint === 'object'
+    ? marker.canonicalCheckpoint
+    : null;
+  const coldHistoryRefs = Array.isArray(marker?.coldHistoryRefs)
+    ? marker.coldHistoryRefs
+    : Array.isArray(checkpoint?.coldHistoryRefs)
+      ? checkpoint.coldHistoryRefs
+      : [];
+  const preservedDecisions = Array.isArray(checkpoint?.decisions)
+    ? checkpoint.decisions
+    : Array.isArray(marker?.decisionAnchors)
+      ? marker.decisionAnchors
+      : [];
+  const requiredDecisions = uniqueNonEmptyStrings(decisionAnchors, 16);
+  const missingDecisions = requiredDecisions.filter(
+    (decision) => !preservedDecisions.some((item) => String(item).includes(decision) || decision.includes(String(item))),
+  );
+  const budget = estimateFinalRequestBudget(candidateMessages, tools);
+  const requestTargetOk = !Number.isFinite(requestTargetTokens)
+    || budget.finalRequestTokens <= requestTargetTokens;
+  const reducedOk = !Number.isFinite(beforeRequestTokens)
+    || budget.finalRequestTokens < beforeRequestTokens;
+  const triggerOk = !Number.isFinite(triggerLimit)
+    || budget.finalRequestTokens <= triggerLimit;
+  const narrative = typeof checkpoint?.recentNarrative === 'string'
+    ? checkpoint.recentNarrative.trim()
+    : typeof marker?.summary === 'string'
+      ? marker.summary.trim()
+      : '';
+  const narrativeOk = narrative.length >= COMPACTION_CONFIG.minCanonicalNarrativeChars;
+  const coverageOk = Boolean(marker) && narrativeOk && missingDecisions.length === 0;
+  // Commit gate: reduced + under trigger + growth-aware request target + semantic coverage.
+  // A candidate below trigger but above requestTarget would immediately retrigger after one turn.
+  return {
+    accepted: reducedOk && triggerOk && requestTargetOk && coverageOk,
+    preferred: reducedOk && triggerOk && requestTargetOk && coverageOk,
+    budget,
+    requestTargetOk,
+    reducedOk,
+    triggerOk,
+    coverageOk,
+    missingDecisions,
+    coldHistoryRefs,
+    coverageSnapshot: {
+      decisionCount: preservedDecisions.length,
+      requiredDecisionCount: requiredDecisions.length,
+      coldHistoryRefCount: coldHistoryRefs.length,
+      hasRecentNarrative: narrativeOk,
+      missingDecisions,
+    },
+  };
+}
+
+function collectColdHistoryFromSources(sources) {
+  const artifactRefs = [];
+  const paths = [];
+  const suggestedRetrieval = [];
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const clues = extractRecoverableClues(source, { limit: 16 });
+    artifactRefs.push(...(clues.artifactRefs || []));
+    paths.push(...(clues.paths || []));
+    suggestedRetrieval.push(...(clues.suggestedRetrieval || []));
+  }
+  return {
+    artifactRefs: uniqueNonEmptyStrings(artifactRefs, 24),
+    paths: uniqueNonEmptyStrings(paths, 24),
+    suggestedRetrieval: uniqueNonEmptyStrings(suggestedRetrieval, 24),
+  };
+}
+
+/**
+ * Compile a versioned canonical checkpoint.
+ * Narrative is a rendering of this structure; recursive legacy wrappers are only migration inputs.
+ */
+function compileCanonicalCheckpoint({
+  continuityContext = [],
+  compactSummary = '',
+  oldCount = 0,
+  decisionAnchors = [],
+  deltaInputMessages = [],
+  keepMessages = [],
+  budgetSnapshot = null,
+  checkpointVersion = 2,
+} = {}) {
+  const continuityItems = normalizeContinuityContext(continuityContext);
+  const previous = continuityItems.length ? continuityItems[continuityItems.length - 1] : null;
+  const previousCheckpoint = previous?.canonicalCheckpoint && typeof previous.canonicalCheckpoint === 'object'
+    ? previous.canonicalCheckpoint
+    : null;
+  const previousNarrative = previous
+    ? flattenSummaryForCarryForward(previous.summary) || previous.summary.trim()
+    : '';
+  const deltaNarrative = flattenSummaryForCarryForward(compactSummary)
+    || (typeof compactSummary === 'string' ? compactSummary.trim() : '')
     || `No semantic delta summary was available for the ${oldCount} newly compacted messages.`;
-  const decisionSection = formatDecisionAnchorsSection(decisionAnchors);
-  let merged;
-  if (!previousSummary) {
-    merged = deltaSummary;
-  } else {
-    // One-level merge only: previous body (already flattened) + this delta.
-    // Do not store another full nested carry-forward of a prior merge result.
-    merged = [
-      '## Carry-forward summary from previous compaction',
-      previousSummary,
-      '',
-      `## Delta summary since previous compaction (${oldCount} messages)`,
-      deltaSummary,
-    ].join('\n');
-  }
-  // Persist decision anchors inside the stored summary so later continuity carry-forward
-  // still retains them even after the original messages leave the active window.
-  if (decisionSection) {
-    return `${decisionSection}\n\n${merged}`;
-  }
-  return merged;
+  const decisions = uniqueNonEmptyStrings([
+    ...(Array.isArray(previousCheckpoint?.decisions) ? previousCheckpoint.decisions : []),
+    ...(Array.isArray(decisionAnchors) ? decisionAnchors : []),
+  ], 16);
+  const coldHistory = collectColdHistoryFromSources([
+    previousNarrative,
+    deltaNarrative,
+    ...collectTextFromMessages(deltaInputMessages, 8),
+    ...collectTextFromMessages(keepMessages, 4),
+    ...(Array.isArray(previousCheckpoint?.coldHistoryRefs) ? previousCheckpoint.coldHistoryRefs : []),
+    ...(Array.isArray(previous?.coldHistoryRefs) ? previous.coldHistoryRefs : []),
+  ]);
+  const coldHistoryRefs = uniqueNonEmptyStrings([
+    ...coldHistory.artifactRefs,
+    ...coldHistory.paths,
+    ...coldHistory.suggestedRetrieval,
+  ], 36);
+  const recentNarrative = truncateSummaryInputToTokenBudget(
+    [
+      previousNarrative ? `## Previous continuity\n${previousNarrative}` : '',
+      `## Delta since previous checkpoint (${oldCount} messages)\n${deltaNarrative}`,
+      decisions.length
+        ? `## Recent decisions\n${decisions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`
+        : '',
+      coldHistoryRefs.length
+        ? `## Cold history refs\n${coldHistoryRefs.map((item) => `- ${item}`).join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n\n'),
+    Math.max(
+      1,
+      budgetSnapshot?.handoffMaxTokens
+        || COMPACTION_CONFIG.legacyCarryForwardFallbackTokens,
+    ),
+  ).trim();
+
+  return {
+    checkpointVersion,
+    sourceRevision: {
+      previousMessageCount: countContinuityMessages(continuityContext),
+      deltaMessageCount: Math.max(0, oldCount || 0),
+      previousCheckpointVersion: previousCheckpoint?.checkpointVersion
+        || previous?.checkpointVersion
+        || null,
+      migratedFromLegacy: !previousCheckpoint && Boolean(previousNarrative),
+    },
+    decisions,
+    openWork: uniqueNonEmptyStrings(previousCheckpoint?.openWork, 12),
+    completedWork: uniqueNonEmptyStrings(previousCheckpoint?.completedWork, 12),
+    coldHistoryRefs,
+    coldHistory,
+    recentNarrative,
+    budgetSnapshot: budgetSnapshot && typeof budgetSnapshot === 'object'
+      ? { ...budgetSnapshot }
+      : null,
+    coverageSnapshot: {
+      decisionCount: decisions.length,
+      coldHistoryRefCount: coldHistoryRefs.length,
+      hasRecentNarrative: Boolean(recentNarrative),
+    },
+  };
+}
+
+function mergeContinuityAndDeltaSummary({
+  continuityContext,
+  compactSummary,
+  oldCount,
+  decisionAnchors = [],
+  maxTokens = COMPACTION_CONFIG.legacyCarryForwardFallbackTokens,
+  deltaInputMessages = [],
+  keepMessages = [],
+  budgetSnapshot = null,
+}) {
+  // Prefer the versioned checkpoint narrative so recursive wrappers never become continuity truth.
+  const checkpoint = compileCanonicalCheckpoint({
+    continuityContext,
+    compactSummary,
+    oldCount,
+    decisionAnchors,
+    deltaInputMessages,
+    keepMessages,
+    budgetSnapshot: {
+      ...(budgetSnapshot && typeof budgetSnapshot === 'object' ? budgetSnapshot : {}),
+      handoffMaxTokens: maxTokens,
+    },
+  });
+  return truncateSummaryInputToTokenBudget(checkpoint.recentNarrative, maxTokens).trim();
 }
 
 function countContinuityMessages(continuityContext) {
@@ -1026,17 +1384,31 @@ function buildCompactedMessages({
   fallbackReason = null,
   fallbackDetail = null,
   decisionAnchors = [],
+  handoffMaxTokens = COMPACTION_CONFIG.legacyCarryForwardFallbackTokens,
+  budgetSnapshot = null,
+  deltaInputMessages = [],
 }) {
   const result = [{ role: 'system', content: systemPrompt }];
   const previousMessageCount = countContinuityMessages(continuityContext);
   const representedMessageCount = previousMessageCount + oldCount;
   const anchors = Array.isArray(decisionAnchors) ? decisionAnchors : [];
-  const mergedSummary = mergeContinuityAndDeltaSummary({
+  const effectiveBudgetSnapshot = {
+    ...(budgetSnapshot && typeof budgetSnapshot === 'object' ? budgetSnapshot : {}),
+    handoffMaxTokens,
+  };
+  const canonicalCheckpoint = compileCanonicalCheckpoint({
     continuityContext,
     compactSummary,
     oldCount,
     decisionAnchors: anchors,
+    deltaInputMessages,
+    keepMessages,
+    budgetSnapshot: effectiveBudgetSnapshot,
   });
+  const mergedSummary = truncateSummaryInputToTokenBudget(
+    canonicalCheckpoint.recentNarrative || '',
+    handoffMaxTokens,
+  ).trim();
 
   result.push({
     role: 'user',
@@ -1056,9 +1428,13 @@ function buildCompactedMessages({
       previousMessageCount,
       beforeTokens,
       afterTokens,
-      // Store merged summary (with decision anchors) for subsequent continuity carry-forward.
+      // Narrative is a rendering of the versioned checkpoint, not recursive legacy wrappers.
       summary: mergedSummary || '',
       decisionAnchors: anchors,
+      checkpointVersion: 2,
+      budgetSnapshot: effectiveBudgetSnapshot,
+      canonicalCheckpoint,
+      coldHistoryRefs: canonicalCheckpoint.coldHistoryRefs,
     }),
   });
 
@@ -1153,6 +1529,7 @@ export async function compactIfNeeded({
       fallbackReason: 'circuit_breaker',
       fallbackDetail: 'LLM summary circuit breaker tripped after repeated failures',
       decisionAnchors,
+      deltaInputMessages: old,
     });
 
     console.warn(
@@ -1179,7 +1556,8 @@ export async function compactIfNeeded({
   // Estimate current tokens（含工具 schema：tools 每次请求都全量发送，必须计入触发口径，
   // 否则会出现「进度条/触发器都没算工具，但 provider 已超窗」）。
   // ADR 52：触发只看下一请求投影估算；usageTokens 参数保留兼容，不抬高触发水位。
-  const estimatedLocal = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
+  const beforeBudget = estimateFinalRequestBudget(messages, tools);
+  const estimatedLocal = beforeBudget.finalRequestTokens;
   const usageNum = Number.isFinite(usageTokens) && usageTokens > 0 ? usageTokens : null;
   void usageNum; // 诊断兼容字段，不参与 shouldRunCompaction
   const estimated = estimatedLocal;
@@ -1249,6 +1627,7 @@ export async function compactIfNeeded({
               usageReported = true;
               onProviderUsage?.(usage);
             },
+            conversationId,
           });
 
           if (rawSummary) {
@@ -1271,6 +1650,7 @@ export async function compactIfNeeded({
             errMsg.includes('token');
 
           logCompactionDiagnostic('compact:attempt_error', {
+            conversationId,
             attempt,
             maxPtlRetries: COMPACTION_CONFIG.maxPtlRetries,
             oldMessageCount: llmOld.length,
@@ -1325,6 +1705,7 @@ export async function compactIfNeeded({
         maxAttempts: COMPACTION_CONFIG.maxPtlRetries,
       });
       logCompactionDiagnostic('compact:fallback', {
+        conversationId,
         fallbackReason,
         errorName: err?.name ?? null,
         errorMessage: detail,
@@ -1351,7 +1732,20 @@ export async function compactIfNeeded({
     fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
   }
 
-  // Build result
+  // Build result. The handoff budget is derived from the final request target, not a semantic
+  // constant. Recompute it whenever the mandatory keep set changes.
+  const providerMaxOutputTokens = resolveSummaryTokenBudget({
+    providerConfig,
+    contextWindow,
+  }).summaryMaxTokens;
+  const buildBudgetPlan = (keepMessages) => planHandoffBudget({
+    contextWindow,
+    providerMaxOutputTokens,
+    systemTokens: estimateTextTokens(systemPrompt),
+    toolSchemaTokens: beforeBudget.toolTokens,
+    mandatoryKeepTokens: estimateTokensFromMessages(keepMessages),
+  });
+  let handoffBudgetPlan = buildBudgetPlan(keep);
   const decisionAnchors = extractRecentDecisionAnchors(old);
   let result = buildCompactedMessages({
     systemPrompt,
@@ -1365,9 +1759,13 @@ export async function compactIfNeeded({
     fallbackReason,
     fallbackDetail,
     decisionAnchors,
+    handoffMaxTokens: handoffBudgetPlan.handoffMaxTokens,
+    budgetSnapshot: handoffBudgetPlan,
+    deltaInputMessages: old,
   });
 
-  let afterTokens = estimateTokensFromMessages(result);
+  let afterBudget = estimateFinalRequestBudget(result, tools);
+  let afterTokens = afterBudget.messageTokens;
   setCompactionAfterTokens(result, afterTokens);
 
   // 压缩不是“生成了摘要”就算成功：自动压缩必须同时满足两条验收条件：
@@ -1375,16 +1773,29 @@ export async function compactIfNeeded({
   // 结构摘要在大量短消息场景可能比原文还大，LLM 也可能返回异常冗长摘要；此时降级为
   // 最小 handoff。若连最小 handoff + 必须保留的 user/tool 尾都无法过线，则明确失败，
   // 避免把“压后仍超窗”伪装成 compacted:true 后继续撞 provider。
-  const toolTokens = estimateToolsTokens(tools);
+  const toolTokens = beforeBudget.toolTokens;
   const triggerLimit = contextWindow
     ? Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio)
     : null;
-  let afterBudgetTokens = afterTokens + toolTokens;
-  const requiresBudgetAcceptance = shouldCompact(beforeTokens, contextWindow);
-  const meetsBudgetAcceptance = () => (
-    afterBudgetTokens < beforeTokens
-    && (triggerLimit === null || afterBudgetTokens <= triggerLimit)
-  );
+  const requestTargetTokens = Number.isFinite(handoffBudgetPlan?.requestTargetTokens)
+    ? handoffBudgetPlan.requestTargetTokens
+    : (triggerLimit == null ? null : Math.max(1, triggerLimit - COMPACTION_CONFIG.safetyReserveTokens));
+  let afterBudgetTokens = afterBudget.finalRequestTokens;
+  const requiresBudgetAcceptance = shouldCompact(beforeBudget.finalRequestTokens, contextWindow);
+  const evaluateCandidate = (candidateMessages) => evaluateCompactionCandidate({
+    candidateMessages,
+    decisionAnchors,
+    requestTargetTokens,
+    beforeRequestTokens: beforeBudget.finalRequestTokens,
+    triggerLimit,
+    tools,
+  });
+  const meetsBudgetAcceptance = () => {
+    const evaluation = evaluateCandidate(result);
+    afterBudget = evaluation.budget;
+    afterBudgetTokens = evaluation.budget.finalRequestTokens;
+    return evaluation.accepted;
+  };
 
   if (requiresBudgetAcceptance && !meetsBudgetAcceptance()) {
     const rejectedMethod = method;
@@ -1402,6 +1813,8 @@ export async function compactIfNeeded({
     let keepBudgetDegraded = false;
 
     const tryCandidatesWithKeep = (keepMessages, reason, detail) => {
+      const candidateBudgetPlan = buildBudgetPlan(keepMessages);
+      let bestAccepted = null;
       for (const alternative of alternatives) {
         const candidate = buildCompactedMessages({
           systemPrompt,
@@ -1415,27 +1828,52 @@ export async function compactIfNeeded({
           fallbackReason: reason,
           fallbackDetail: detail,
           decisionAnchors,
+          handoffMaxTokens: candidateBudgetPlan.handoffMaxTokens,
+          budgetSnapshot: candidateBudgetPlan,
+          deltaInputMessages: old,
         });
-        const candidateAfterTokens = estimateTokensFromMessages(candidate);
+        const evaluation = evaluateCompactionCandidate({
+          candidateMessages: candidate,
+          decisionAnchors,
+          requestTargetTokens: candidateBudgetPlan.requestTargetTokens ?? requestTargetTokens,
+          beforeRequestTokens: beforeBudget.finalRequestTokens,
+          triggerLimit,
+          tools,
+        });
+        const candidateBudget = evaluation.budget;
+        const candidateAfterTokens = candidateBudget.messageTokens;
         setCompactionAfterTokens(candidate, candidateAfterTokens);
-        const candidateBudgetTokens = candidateAfterTokens + toolTokens;
+        const candidateBudgetTokens = candidateBudget.finalRequestTokens;
         minimalCandidateBudgetTokens = Math.min(minimalCandidateBudgetTokens, candidateBudgetTokens);
-        if (
-          candidateBudgetTokens < beforeTokens
-          && (triggerLimit === null || candidateBudgetTokens <= triggerLimit)
-        ) {
-          result = candidate;
-          compactSummary = alternative.summary;
-          method = alternative.method;
-          fallbackReason = reason;
-          fallbackDetail = detail;
-          afterTokens = candidateAfterTokens;
-          afterBudgetTokens = candidateBudgetTokens;
-          activeKeep = keepMessages;
-          return true;
+        if (!evaluation.accepted) continue;
+        const acceptedCandidate = {
+          candidate,
+          alternative,
+          candidateBudgetPlan,
+          candidateBudget,
+          candidateAfterTokens,
+          candidateBudgetTokens,
+          preferred: evaluation.preferred,
+        };
+        // Prefer candidates that also meet the growth-aware request target.
+        if (evaluation.preferred) {
+          bestAccepted = acceptedCandidate;
+          break;
         }
+        if (!bestAccepted) bestAccepted = acceptedCandidate;
       }
-      return false;
+      if (!bestAccepted) return false;
+      result = bestAccepted.candidate;
+      handoffBudgetPlan = bestAccepted.candidateBudgetPlan;
+      compactSummary = bestAccepted.alternative.summary;
+      method = bestAccepted.alternative.method;
+      fallbackReason = reason;
+      fallbackDetail = detail;
+      afterBudget = bestAccepted.candidateBudget;
+      afterTokens = bestAccepted.candidateAfterTokens;
+      afterBudgetTokens = bestAccepted.candidateBudgetTokens;
+      activeKeep = keepMessages;
+      return true;
     };
 
     const summaryFailDetail = `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`;
@@ -1505,11 +1943,20 @@ export async function compactIfNeeded({
 
     if (!accepted) {
       const error = new Error(
-        `Context compaction could not reduce the prompt below ${triggerLimit} tokens; minimal candidate=${minimalCandidateBudgetTokens}, before=${beforeTokens}`,
+        `Context compaction could not reduce the prompt below ${triggerLimit} tokens; minimal candidate=${minimalCandidateBudgetTokens}, before=${beforeBudget.finalRequestTokens}`,
       );
       error.code = 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION';
       logCompactionDiagnostic('compact:insufficient_reduction', {
+        ...buildCompactionDiagnosticContext({
+          conversationId,
+          continuityContext,
+          deltaInputMessages: old,
+          deltaSummary: compactSummary,
+          resultMessages: result,
+          tools,
+        }),
         beforeTokens,
+        beforeRequestTokens: beforeBudget.finalRequestTokens,
         afterBudgetTokens: minimalCandidateBudgetTokens,
         triggerLimit,
         oldMessageCount: old.length,
@@ -1522,13 +1969,22 @@ export async function compactIfNeeded({
   }
 
   console.log(
-    `[context-compactor] Compaction complete: ${beforeTokens} → ${afterBudgetTokens} tokens (method: ${method})`,
+    `[context-compactor] Compaction complete: ${beforeBudget.finalRequestTokens} → ${afterBudgetTokens} tokens (method: ${method})`,
   );
 
   logCompactionDiagnostic('compact:complete', {
+    ...buildCompactionDiagnosticContext({
+      conversationId,
+      continuityContext,
+      deltaInputMessages: old,
+      deltaSummary: compactSummary,
+      resultMessages: result,
+      tools,
+    }),
     method,
     fallbackReason,
     beforeTokens,
+    beforeRequestTokens: beforeBudget.finalRequestTokens,
     afterTokens,
     afterBudgetTokens,
     triggerLimit,
@@ -1570,7 +2026,10 @@ export {
   flattenSummaryForCarryForward,
   extractRecentDecisionAnchors,
   mergeContinuityAndDeltaSummary,
+  compileCanonicalCheckpoint,
+  evaluateCompactionCandidate,
   buildHandoffContent,
   degradeKeepMessagesForBudget,
   summarizeOldMessages,
+  planHandoffBudget,
 };

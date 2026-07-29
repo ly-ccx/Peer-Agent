@@ -7,7 +7,12 @@ import {
   microcompactMessagesForContext,
   resolveSummaryTokenBudget,
 } from '../context-compactor.mjs';
-import { beginCompaction, endCompaction, updateCompactionProgress } from './compaction-registry.mjs';
+import {
+  beginCompaction,
+  endCompaction,
+  failCompaction,
+  updateCompactionProgress,
+} from './compaction-registry.mjs';
 
 export function buildCompactionProviderConfig({
   provider,
@@ -619,8 +624,35 @@ export async function runCompactionCheck({
     settleBannerIdle();
     return { compacted: false, messages: effectiveMessages, compactResult };
   } catch (err) {
-    // 压缩失败不应静默吞掉:收尾横幅后继续抛出,交由上游统一的终态兜底处理。
-    settleBannerIdle();
+    // Failure is a queryable terminal state owned by the main process. Do not immediately erase it
+    // with idle; retry, success, or explicit dismissal will replace/clear the registry entry.
+    if (webContents?.send && conversationId) {
+      settledBanner = true;
+      const errorCode = err?.code === 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION'
+        ? err.code
+        : err?.code || 'CONTEXT_COMPACTION_PERSIST_FAILED';
+      const budget = {
+        beforeRequestTokens: err?.beforeRequestTokens ?? null,
+        minimalCandidateTokens: err?.minimalCandidateTokens ?? null,
+        requestTarget: err?.requestTarget ?? null,
+      };
+      failCompaction({
+        conversationId,
+        streamId,
+        errorCode,
+        message: err?.message || 'Context compaction failed.',
+        budget,
+      });
+      webContents.send('chat:compaction', {
+        conversationId,
+        streamId,
+        stage: 'failed',
+        errorCode,
+        message: err?.message || 'Context compaction failed.',
+        budget,
+        emergency,
+      });
+    }
     throw err;
   }
 }

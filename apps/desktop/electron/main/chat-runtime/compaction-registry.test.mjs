@@ -4,6 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   beginCompaction,
   endCompaction,
+  failCompaction,
   getCompaction,
   updateCompactionProgress,
   __resetCompactionRegistry,
@@ -62,6 +63,25 @@ describe('compaction registry', () => {
     // Matching end clears it.
     endCompaction({ conversationId: 'c1', streamId: 's-new' });
     assert.equal(getCompaction('c1'), null);
+  });
+
+  it('preserves a failed terminal state until retry or explicit clear', () => {
+    beginCompaction({ conversationId: 'c1', streamId: 's1', manual: false });
+    failCompaction({
+      conversationId: 'c1',
+      streamId: 's1',
+      errorCode: 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION',
+      message: 'minimal candidate is above target',
+      budget: { minimalCandidateTokens: 207_428, requestTarget: 206_400 },
+    });
+    const failed = getCompaction('c1');
+    assert.equal(failed.compacting, false);
+    assert.equal(failed.phase, 'failed');
+    assert.equal(failed.errorCode, 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION');
+    assert.equal(failed.budget.minimalCandidateTokens, 207_428);
+
+    beginCompaction({ conversationId: 'c1', streamId: 's2', manual: false });
+    assert.equal(getCompaction('c1').compacting, true);
   });
 
   it('end without streamId clears unconditionally (fallback)', () => {

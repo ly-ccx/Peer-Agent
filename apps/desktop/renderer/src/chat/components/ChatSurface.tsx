@@ -620,6 +620,10 @@ export function ChatSurface({
     scrollRef: threadRef,
     enabled: virtualizeChatTurns,
   });
+  // 保持 resetVirtualMeasurements 的最新引用，供会话切换 effect 调用而不必把它
+  // 放入依赖（它的 identity 随 count/enabled 变化，会导致会话切换 effect 在每条新消息时重跑）。
+  const resetVirtualMeasurementsRef = useRef(resetVirtualMeasurements);
+  resetVirtualMeasurementsRef.current = resetVirtualMeasurements;
   const shouldAutoScrollRef = useRef(true);
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
   const pendingThreadScrollRestoreRef = useRef<{
@@ -633,7 +637,8 @@ export function ChatSurface({
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const atBottom = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
     shouldAutoScrollRef.current = atBottom;
-    setIsThreadAtBottom(atBottom);
+    // Equality gate: avoid re-rendering ChatSurface when stick-to-bottom flag is unchanged.
+    setIsThreadAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     return atBottom;
   }, []);
 
@@ -653,7 +658,9 @@ export function ChatSurface({
   }, []);
 
   const updateCurrentTurnContext = useCallback((container: HTMLDivElement | null) => {
-    setCurrentTurnId(container ? findCurrentTurnIdForScroll(container) : null);
+    const nextTurnId = container ? findCurrentTurnIdForScroll(container) : null;
+    // Equality gate: rail highlight only needs a state update when the active turn actually changes.
+    setCurrentTurnId((previous) => (previous === nextTurnId ? previous : nextTurnId));
   }, []);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -661,7 +668,7 @@ export function ChatSurface({
     if (!container) return;
     container.scrollTo({ top: container.scrollHeight, behavior });
     shouldAutoScrollRef.current = true;
-    setIsThreadAtBottom(true);
+    setIsThreadAtBottom((previous) => (previous ? previous : true));
     saveThreadScrollSnapshot(conversationIdRef.current, container);
     updateCurrentTurnContext(container);
   }, [saveThreadScrollSnapshot, updateCurrentTurnContext]);
@@ -674,6 +681,8 @@ export function ChatSurface({
     const container = event.currentTarget;
     // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
     // container state and coalesce virtual range updates and geometry probes to one pass per frame.
+    // Virtual viewport only setStates when the window indices/padding change; bottom/turn/scrolled
+    // flags also apply equality gates so mid-range scrolling does not re-render the whole surface.
     threadScrollCoalescerRef.current.request(() => {
       updateVirtualViewport();
       updateThreadBottomState(container);
@@ -681,7 +690,8 @@ export function ChatSurface({
       if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
         saveThreadScrollSnapshot(conversationId, container);
       }
-      setThreadScrolled(container.scrollTop > 4);
+      const nextScrolled = container.scrollTop > 4;
+      setThreadScrolled((previous) => (previous === nextScrolled ? previous : nextScrolled));
     });
   }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
 
@@ -700,7 +710,7 @@ export function ChatSurface({
     messageNavigationRequestRef.current = requestId;
     const requestConversationId = conversationIdRef.current;
     shouldAutoScrollRef.current = false;
-    setIsThreadAtBottom(false);
+    setIsThreadAtBottom((previous) => (previous ? false : previous));
     scrollToTurn(turnIndex, { align: 'center' });
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -907,8 +917,9 @@ export function ChatSurface({
     pendingThreadScrollRestoreRef.current = conversationId
       ? { conversationId, snapshot: threadScrollSnapshot }
       : null;
-    shouldAutoScrollRef.current = threadScrollSnapshot?.atBottom ?? true;
-    setIsThreadAtBottom(threadScrollSnapshot?.atBottom ?? true);
+    const nextAtBottom = threadScrollSnapshot?.atBottom ?? true;
+    shouldAutoScrollRef.current = nextAtBottom;
+    setIsThreadAtBottom((previous) => (previous === nextAtBottom ? previous : nextAtBottom));
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId/toolProgress 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
@@ -919,6 +930,10 @@ export function ChatSurface({
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setCompactionState(IDLE_COMPACTION_STATE);
+    // 切换会话时清空虚拟列表的测量缓存和 ResizeObserver：旧会话的按 index 缓存高度
+    // 与新会话时间线错位会导致布局抖动；遗留的 ResizeObserver 回调会在新会话滚动时
+    // 重复触发 syncRange，造成每帧多次 setState → 整页卡顿。
+    resetVirtualMeasurementsRef.current();
     // contextAccounting 已按 conversationId 分桶。切换订阅时必须保留目标会话自己的
     // triggerTokens 快照；主动清空会让同一会话退回本地历史估算，造成百分比口径跳变。
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
@@ -996,7 +1011,17 @@ export function ChatSurface({
       try {
         const comp = await clientApi.chatCompactionGet({ conversationId });
         if (cancelled) return;
-        if (comp && comp.compacting && comp.streamId) {
+        if (comp && 'phase' in comp && comp.phase === 'failed' && comp.streamId) {
+          streamIdRef.current = comp.streamId;
+          setCompactionState({
+            phase: 'failed',
+            percent: null,
+            streamId: comp.streamId,
+            failedAt: typeof comp.failedAt === 'number' ? comp.failedAt : Date.now(),
+            errorCode: typeof comp.errorCode === 'string' ? comp.errorCode : undefined,
+            error: typeof comp.message === 'string' ? comp.message : undefined,
+          });
+        } else if (comp && comp.compacting && comp.streamId) {
           streamIdRef.current = comp.streamId;
           conversationStore.routeStream(comp.streamId, conversationId);
           conversationStore.setState(conversationId, { streamId: comp.streamId });
@@ -1214,7 +1239,8 @@ export function ChatSurface({
       updateVirtualViewport();
       updateThreadBottomState(container);
       updateCurrentTurnContext(container);
-      setThreadScrolled(container.scrollTop > 4);
+      const nextScrolled = container.scrollTop > 4;
+      setThreadScrolled((previous) => (previous === nextScrolled ? previous : nextScrolled));
       saveThreadScrollSnapshot(conversationId, container);
       pendingThreadScrollRestoreRef.current = null;
     };
@@ -1268,7 +1294,7 @@ export function ChatSurface({
 
     container.scrollTop = container.scrollHeight;
     shouldAutoScrollRef.current = true;
-    setIsThreadAtBottom(true);
+    setIsThreadAtBottom((previous) => (previous ? previous : true));
     finishRestore();
   }, [
     conversationId,

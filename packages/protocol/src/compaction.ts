@@ -25,6 +25,17 @@ export interface ConversationCompactionMarker {
   readonly summary: string;
   /** 近期关键决策锚点(可为空数组)。 */
   readonly decisionAnchors: readonly string[];
+  /** Canonical checkpoint schema version. Legacy markers omit this field. */
+  readonly checkpointVersion?: number;
+  /** Final-request-derived budget used to compile this marker. */
+  readonly budgetSnapshot?: Readonly<Record<string, unknown>> | null;
+  /**
+   * Versioned structured checkpoint compiled by the Context Compiler.
+   * Narrative summary is a rendering of this object, not the sole continuity truth.
+   */
+  readonly canonicalCheckpoint?: Readonly<Record<string, unknown>> | null;
+  /** Recoverable cold-history refs extracted from compacted content. */
+  readonly coldHistoryRefs?: readonly string[] | null;
 }
 
 function nonNegativeInt(value: unknown): number {
@@ -53,6 +64,10 @@ export function buildCompactionMarker(input: {
   readonly afterTokens?: number | null;
   readonly summary?: string | null;
   readonly decisionAnchors?: readonly string[] | null;
+  readonly checkpointVersion?: number | null;
+  readonly budgetSnapshot?: Readonly<Record<string, unknown>> | null;
+  readonly canonicalCheckpoint?: Readonly<Record<string, unknown>> | null;
+  readonly coldHistoryRefs?: readonly string[] | null;
 }): ConversationCompactionMarker {
   const fallbackReason = typeof input.fallbackReason === 'string' && input.fallbackReason.trim()
     ? input.fallbackReason
@@ -73,5 +88,21 @@ export function buildCompactionMarker(input: {
     decisionAnchors: Array.isArray(input.decisionAnchors)
       ? input.decisionAnchors.filter((anchor): anchor is string => typeof anchor === 'string' && anchor.length > 0)
       : [],
+    ...(Number.isFinite(input.checkpointVersion) && Number(input.checkpointVersion) > 0
+      ? { checkpointVersion: Math.floor(Number(input.checkpointVersion)) }
+      : {}),
+    ...(input.budgetSnapshot && typeof input.budgetSnapshot === 'object'
+      ? { budgetSnapshot: { ...input.budgetSnapshot } }
+      : {}),
+    ...(input.canonicalCheckpoint && typeof input.canonicalCheckpoint === 'object'
+      ? { canonicalCheckpoint: { ...input.canonicalCheckpoint } }
+      : {}),
+    ...(Array.isArray(input.coldHistoryRefs)
+      ? {
+          coldHistoryRefs: input.coldHistoryRefs.filter(
+            (ref): ref is string => typeof ref === 'string' && ref.trim().length > 0,
+          ),
+        }
+      : {}),
   };
 }

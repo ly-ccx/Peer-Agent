@@ -141,7 +141,10 @@ export type CompactionState =
       phase: 'failed';
       percent: number | null;
       streamId?: string;
+      /** Human-readable failure detail shown by the banner. */
       error?: string;
+      /** Stable machine-readable code from main-process compaction registry. */
+      errorCode?: string;
       failedAt: number;
     };
 
