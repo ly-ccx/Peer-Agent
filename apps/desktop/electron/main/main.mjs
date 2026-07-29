@@ -2246,6 +2246,17 @@ ipcMain.handle('browser:open-full-disk-access-settings', async () => {
   }
 });
 
+
+function humanizeSessionImportError(err, isZh = true) {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  if (/cookie_db_permission_denied|EPERM|EACCES|operation not permitted|copyfile/i.test(msg)) {
+    return isZh
+      ? '无法复制浏览器 Cookies 文件（系统拒绝访问）。请到「系统设置 → 隐私与安全性 → 完全磁盘访问权限」允许 Peer Agent（开发态可能是 Electron），然后完全退出并重启应用后再试。'
+      : 'Cannot copy browser Cookies (permission denied). Grant Full Disk Access to Peer Agent under System Settings → Privacy & Security, fully quit and relaunch, then retry.';
+  }
+  return msg || (isZh ? '导入失败' : 'import_failed');
+}
+
 ipcMain.handle('browser:list-session-sites', async (_event, { profileId } = {}) => {
   try {
     if (!profileId || typeof profileId !== 'string') {
@@ -2253,7 +2264,11 @@ ipcMain.handle('browser:list-session-sites', async (_event, { profileId } = {}) 
     }
     return await scanProfileSites(profileId);
   } catch (err) {
-    return { ok: false, error: err?.message || 'list_sites_failed' };
+    return {
+      ok: false,
+      error: humanizeSessionImportError(err, true),
+      code: err?.code || (/cookie_db_permission_denied|EPERM|EACCES/i.test(String(err?.message || '')) ? 'permission_denied' : undefined),
+    };
   }
 });
 
@@ -2277,7 +2292,8 @@ ipcMain.handle(
       if (!loaded.ok) {
         return {
           ok: false,
-          error: loaded.error || 'load_cookies_failed',
+          error: humanizeSessionImportError(loaded.error || 'load_cookies_failed', true),
+          code: /cookie_db_permission_denied|EPERM|EACCES/i.test(String(loaded.error || '')) ? 'permission_denied' : undefined,
           stats: loaded.stats,
         };
       }
@@ -2300,7 +2316,11 @@ ipcMain.handle(
         applyErrors: applied.errors,
       };
     } catch (err) {
-      return { ok: false, error: err?.message || 'import_failed' };
+      return {
+        ok: false,
+        error: humanizeSessionImportError(err, true),
+        code: /cookie_db_permission_denied|EPERM|EACCES/i.test(String(err?.message || '')) ? 'permission_denied' : undefined,
+      };
     }
   },
 );

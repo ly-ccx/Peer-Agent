@@ -26,7 +26,21 @@ export function snapshotCookieDatabase(cookieDbPath, options = {}) {
   const base = options.tmpDir || path.join(os.tmpdir(), `peer-session-import-${randomUUID()}`);
   fsp.mkdirSync(base, { recursive: true, mode: 0o700 });
   const dest = path.join(base, 'Cookies');
-  fsp.copyFileSync(cookieDbPath, dest);
+  try {
+    fsp.copyFileSync(cookieDbPath, dest);
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+    if (code === 'EPERM' || code === 'EACCES') {
+      // 目录可能可读，但 Cookies 本体仍被 TCC 拦截（用户截图的 copyfile EPERM）。
+      throw new Error(
+        `cookie_db_permission_denied:${cookieDbPath}. ` +
+          'Grant Full Disk Access to Peer Agent (System Settings → Privacy & Security), ' +
+          'fully quit and relaunch, then retry. ' +
+          `raw=${err?.message || String(err)}`,
+      );
+    }
+    throw err;
+  }
   for (const suffix of ['-wal', '-shm', '-journal']) {
     const side = `${cookieDbPath}${suffix}`;
     if (fsp.existsSync(side)) {

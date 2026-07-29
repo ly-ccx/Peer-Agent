@@ -4,6 +4,7 @@ import {
   buildSessionImportPreflight,
   openFullDiskAccessSettings,
   probeDirectoryAccess,
+  probeFileCopyAccess,
 } from './import-permission-preflight.mjs';
 
 function makeFs({ exists = true, readdirError = null } = {}) {
@@ -53,7 +54,7 @@ test('preflight marks full disk access blocked when all browser dirs deny read',
   assert.ok(res.guidance?.fullDiskAccess?.includes('完全磁盘访问权限'));
 });
 
-test('preflight is ready when at least one browser dir is readable', () => {
+test('preflight is ready when browser dir is readable and Cookies can be copied', () => {
   const adapters = [
     {
       id: 'chrome-mac',
@@ -63,15 +64,23 @@ test('preflight is ready when at least one browser dir is readable', () => {
       keychainBrowserId: 'Chrome',
     },
   ];
+  const fsImpl = {
+    existsSync: (p) => String(p).includes('Google/Chrome'),
+    readdirSync: () => ['Default'],
+    mkdirSync: () => {},
+    copyFileSync: () => {},
+    rmSync: () => {},
+  };
   const res = buildSessionImportPreflight({
     platform: 'darwin',
     adapters,
-    fsImpl: makeFs({ exists: true }),
+    fsImpl,
     isZh: false,
   });
   assert.equal(res.ready, true);
   assert.equal(res.blocked, false);
   assert.ok(res.checks.some((c) => c.id === 'browser:chrome-mac' && c.status === 'ok'));
+  assert.ok(res.checks.some((c) => c.id === 'cookies:chrome-mac' && c.status === 'ok'));
 });
 
 test('non-darwin preflight is unsupported', () => {
@@ -90,4 +99,47 @@ test('openFullDiskAccessSettings tries preference URLs', async () => {
   });
   assert.equal(res.ok, true);
   assert.ok(opened[0]?.includes('Privacy_AllFiles') || opened[0]?.includes('preference.security'));
+});
+
+
+test('probeFileCopyAccess maps EPERM on copyFileSync to blocked', () => {
+  const err = Object.assign(new Error('EPERM copyfile'), { code: 'EPERM' });
+  const fsImpl = {
+    existsSync: () => true,
+    mkdirSync: () => {},
+    copyFileSync: () => { throw err; },
+    rmSync: () => {},
+  };
+  const res = probeFileCopyAccess('/x/Cookies', { fsImpl, tmpDir: '/tmp/peer-probe-test' });
+  assert.equal(res.status, 'blocked');
+  assert.equal(res.code, 'EPERM');
+});
+
+test('preflight flags cookies blocked even when browser dir is readable', () => {
+  const err = Object.assign(new Error('EPERM copyfile'), { code: 'EPERM' });
+  const adapters = [
+    {
+      id: 'chrome-mac',
+      browserName: 'Google Chrome',
+      bundleId: 'com.google.Chrome',
+      userDataRoot: '/Users/me/Library/Application Support/Google/Chrome',
+      keychainBrowserId: 'Chrome',
+    },
+  ];
+  const fsImpl = {
+    existsSync: (p) => String(p).includes('Google/Chrome'),
+    readdirSync: () => ['Default'],
+    mkdirSync: () => {},
+    copyFileSync: () => { throw err; },
+    rmSync: () => {},
+  };
+  const res = buildSessionImportPreflight({
+    platform: 'darwin',
+    adapters,
+    fsImpl,
+    isZh: true,
+  });
+  assert.equal(res.ready, false);
+  assert.ok(res.checks.some((c) => c.id === 'cookies:chrome-mac' && c.status === 'blocked'));
+  assert.ok(res.checks.some((c) => c.id === 'full-disk-access' && c.status === 'blocked'));
 });

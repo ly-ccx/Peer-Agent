@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { MACOS_CHROMIUM_ADAPTERS } from './chrome-profiles.mjs';
 
@@ -40,6 +41,38 @@ export function probeDirectoryAccess(dir, options = {}) {
     return { status: 'blocked', code, message: err?.message || String(err) };
   }
 }
+
+/**
+ * 探测文件是否可复制到临时目录（导入真实路径是 copyFile Cookies）。
+ * 目录可读 != Cookies 可 copy：macOS 常在这一步才 EPERM。
+ * @param {string} filePath
+ * @param {{ fsImpl?: typeof fs, tmpDir?: string }} [options]
+ */
+export function probeFileCopyAccess(filePath, options = {}) {
+  const fsp = options.fsImpl || fs;
+  try {
+    if (!filePath || !fsp.existsSync(filePath)) {
+      return { status: 'missing', code: null, message: 'file_missing' };
+    }
+    // 轻量读 1 字节：有些环境 read 过但 copy 不过；仍以 copy 为准。
+    const tmpRoot = options.tmpDir || path.join(os.tmpdir(), `peer-import-probe-${Date.now()}`);
+    fsp.mkdirSync(tmpRoot, { recursive: true, mode: 0o700 });
+    const dest = path.join(tmpRoot, 'Cookies.probe');
+    try {
+      fsp.copyFileSync(filePath, dest);
+      return { status: 'ok', code: null, message: null };
+    } finally {
+      try { fsp.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : null;
+    if (code === 'EPERM' || code === 'EACCES') {
+      return { status: 'blocked', code, message: err?.message || String(err) };
+    }
+    return { status: 'blocked', code, message: err?.message || String(err) };
+  }
+}
+
 
 /**
  * 汇总导入所需检查项。
@@ -83,6 +116,9 @@ export function buildSessionImportPreflight(options = {}) {
   let anyBrowserReadable = false;
   let anyBrowserBlocked = false;
 
+  let anyCookieCopyOk = false;
+  let anyCookieCopyBlocked = false;
+
   for (const adapter of adapters) {
     const root = adapter.userDataRoot;
     const probe = probeDirectoryAccess(root, options);
@@ -110,6 +146,49 @@ export function buildSessionImportPreflight(options = {}) {
         action: 'none',
         path: root,
       });
+
+      // 进一步探测 Cookies 是否可 copy（真实导入路径）。
+      const cookieCandidates = [
+        path.join(root, 'Default', 'Network', 'Cookies'),
+        path.join(root, 'Default', 'Cookies'),
+      ];
+      let cookiePath = null;
+      for (const candidate of cookieCandidates) {
+        try {
+          if ((options.fsImpl || fs).existsSync(candidate)) {
+            cookiePath = candidate;
+            break;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (cookiePath) {
+        const cookieProbe = probeFileCopyAccess(cookiePath, options);
+        if (cookieProbe.status === 'ok') {
+          anyCookieCopyOk = true;
+          checks.push({
+            id: `cookies:${adapter.id}`,
+            status: 'ok',
+            title: isZh ? `${adapter.browserName} Cookies 文件` : `${adapter.browserName} Cookies file`,
+            detail: isZh ? `可复制：${cookiePath}` : `Copyable: ${cookiePath}`,
+            action: 'none',
+            path: cookiePath,
+          });
+        } else if (cookieProbe.status === 'blocked') {
+          anyCookieCopyBlocked = true;
+          checks.push({
+            id: `cookies:${adapter.id}`,
+            status: 'blocked',
+            title: isZh ? `${adapter.browserName} Cookies 文件` : `${adapter.browserName} Cookies file`,
+            detail: isZh
+              ? `目录可读，但无法复制 Cookies（${cookieProbe.code || 'EPERM'}）：${cookiePath}。这通常仍是「完全磁盘访问权限」不足：请在系统设置中允许 Peer Agent（或开发态 Electron），然后完全退出并重启后再试。`
+              : `Directory is readable, but Cookies copy failed (${cookieProbe.code || 'EPERM'}): ${cookiePath}. This still usually means Full Disk Access is missing for Peer Agent (or Electron in dev). Grant it, fully quit, relaunch, then retry.`,
+            action: 'open_full_disk_access',
+            path: cookiePath,
+          });
+        }
+      }
     } else {
       anyBrowserBlocked = true;
       checks.push({
@@ -135,32 +214,34 @@ export function buildSessionImportPreflight(options = {}) {
         : 'No local user-data directory found for Chrome / Edge / Brave / Chromium.',
       action: 'install_browser',
     });
-  } else if (anyBrowserBlocked && !anyBrowserReadable) {
+  } else if ((anyBrowserBlocked && !anyBrowserReadable) || (anyCookieCopyBlocked && !anyCookieCopyOk)) {
     checks.push({
       id: 'full-disk-access',
       status: 'blocked',
       title: isZh ? '完全磁盘访问权限' : 'Full Disk Access',
       detail: isZh
-        ? '系统拦截了对浏览器 Cookie 目录的扫描。请开启完全磁盘访问权限后重启 Peer Agent。'
-        : 'macOS blocked scanning browser cookie directories. Enable Full Disk Access and restart Peer Agent.',
+        ? '系统拦截了浏览器目录或 Cookies 文件复制（常见 EPERM copyfile）。请开启完全磁盘访问权限后，完全退出并重启 Peer Agent。'
+        : 'macOS blocked browser directory access or Cookies copy (often EPERM copyfile). Enable Full Disk Access, fully quit, and relaunch Peer Agent.',
       action: 'open_full_disk_access',
     });
-  } else if (anyBrowserBlocked && anyBrowserReadable) {
+  } else if ((anyBrowserBlocked && anyBrowserReadable) || (anyCookieCopyBlocked && anyCookieCopyOk)) {
     checks.push({
       id: 'full-disk-access',
       status: 'warn',
-      title: isZh ? '部分浏览器目录不可读' : 'Some browser directories are unreadable',
+      title: isZh ? '部分浏览器仍受权限限制' : 'Some browsers still restricted',
       detail: isZh
-        ? '至少有一个浏览器可读，但仍有目录被拒绝。若要导入被拦截的浏览器，请开启完全磁盘访问权限。'
-        : 'At least one browser is readable, but some directories were denied. Enable Full Disk Access to import from blocked browsers.',
+        ? '至少有一个浏览器可用，但仍有目录/Cookies 被拒绝。导入被拦截的浏览器前，请开启完全磁盘访问权限。'
+        : 'At least one browser works, but some directories/Cookies are still denied. Enable Full Disk Access before importing those browsers.',
       action: 'open_full_disk_access',
     });
   } else {
     checks.push({
       id: 'full-disk-access',
       status: 'ok',
-      title: isZh ? '浏览器目录读取' : 'Browser directory access',
-      detail: isZh ? '已能读取至少一个浏览器的用户数据目录。' : 'At least one browser user-data directory is readable.',
+      title: isZh ? '浏览器目录与 Cookies 访问' : 'Browser directory & Cookies access',
+      detail: isZh
+        ? '已能读取浏览器目录，并成功探测 Cookies 复制。'
+        : 'Browser directories are readable and Cookies copy probe succeeded.',
       action: 'none',
     });
   }
@@ -176,7 +257,11 @@ export function buildSessionImportPreflight(options = {}) {
   });
 
   const blocked = checks.some((c) => c.status === 'blocked' || c.status === 'unsupported');
-  const ready = anyBrowserReadable && !checks.some((c) => c.status === 'unsupported');
+  // 若探测到 Cookies 复制结果，则以“至少有一个 Cookies 可 copy”为准；否则退回目录可读。
+  const ready = (
+    (anyCookieCopyOk || (!anyCookieCopyBlocked && anyBrowserReadable))
+    && !checks.some((c) => c.status === 'unsupported')
+  );
 
   return {
     ok: true,
