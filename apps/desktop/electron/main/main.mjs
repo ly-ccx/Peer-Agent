@@ -3097,7 +3097,17 @@ ipcMain.handle('chat:context:restored', async (
         });
   }
   try {
-    conversationStore.updateContextSnapshot(conversationId, snapshot);
+    // 守卫:unknown 快照不得覆盖 sidecar 里已有的 provider_usage 观测快照。
+    // 否则「重启 → restore 无 observation → unknown 落盘」会永久抹掉圆环基线。
+    const existing = conv.contextSnapshot;
+    const wouldClobberObserved =
+      snapshot?.pressureSource === 'unknown'
+      && existing?.version === 1
+      && existing.pressureSource === 'provider_usage'
+      && existing.modelKey === snapshot.modelKey;
+    if (!wouldClobberObserved) {
+      conversationStore.updateContextSnapshot(conversationId, snapshot);
+    }
   } catch (error) {
     console.warn('[main] failed to persist restored projection:', error?.message || error);
   }

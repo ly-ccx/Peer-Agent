@@ -1165,6 +1165,72 @@ describe('llm chat service tool materialization', () => {
     assert.equal(contextWrites[0].snapshot.lastObserved.inputTokens, 30);
   });
 
+  it('persists provider_usage context snapshots at observe time, before any terminal event', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const contextWrites = [];
+    globalThis.fetch = async () => new Response(sse([
+      {
+        choices: [{ delta: {} }],
+        usage: {
+          prompt_tokens: 30,
+          completion_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 10 },
+        },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          updateContextSnapshot: (id, snapshot) => {
+            // 记录落盘时刻是否已有终态事件:观测即持久化要求写入先于 done/error/aborted。
+            contextWrites.push({
+              id,
+              snapshot,
+              terminalEventsSeen: events.filter((event) =>
+                event.channel === 'chat:stream:done'
+                || event.channel === 'chat:stream:error'
+                || event.channel === 'chat:stream:aborted').length,
+            });
+          },
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-observe-persist',
+        conversationId: 'c-observe-persist',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    // 观测即持久化:恰好一次落盘(终态按 persistKey 去重,不双写),
+    // 且发生在任何终态事件之前 —— aborted turn 因此不会丢失 lastObserved。
+    assert.equal(contextWrites.length, 1);
+    assert.equal(contextWrites[0].id, 'c-observe-persist');
+    assert.equal(contextWrites[0].snapshot.pressureSource, 'provider_usage');
+    assert.equal(contextWrites[0].snapshot.lastObserved.inputTokens, 30);
+    assert.equal(contextWrites[0].terminalEventsSeen, 0);
+  });
+
   it('parses an OpenAI stream frame that ends without a trailing newline', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

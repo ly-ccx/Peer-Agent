@@ -548,7 +548,11 @@ function wrapWebContentsForRuntimeEvents(
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
         if (payload?.contextAccounting?.version === 1
           && typeof conversationStore?.updateContextSnapshot === 'function'
-          && streamRecord.conversationId) {
+          && streamRecord.conversationId
+          // 观测即持久化后,同一快照可能已在 context.accounting 事件时落盘;
+          // 终态重复写会造成双写,据 persistKey 去重。
+          && contextSnapshotPersistKey(payload.contextAccounting)
+            !== streamRecord.persistedContextSnapshotKey) {
           conversationStore.updateContextSnapshot(
             streamRecord.conversationId,
             payload.contextAccounting,
@@ -577,6 +581,15 @@ function wrapWebContentsForRuntimeEvents(
       return realWebContents.send(channel, routedPayload);
     },
   };
+}
+
+/**
+ * 观测快照的落盘去重键:同一 (modelKey, revision, lastObserved.at) 视为同一次观测,
+ * 终态(done/error)不再重复写 sidecar。
+ */
+function contextSnapshotPersistKey(snapshot) {
+  if (!snapshot || snapshot.version !== 1) return null;
+  return `${snapshot.modelKey}::${snapshot.revision ?? 0}::${snapshot.lastObserved?.at ?? ''}`;
 }
 
 function getActiveContextEpochId(store, conversationId = null) {
@@ -821,6 +834,29 @@ export function createLlmChatService({
           mode,
         });
       }
+      // 观测即持久化(ADR 56 补丁):provider_usage 级 context.accounting 快照在观测
+      // 发生时立即写入 conversation sidecar,不再只依赖 chat:stream:done。这样被
+      // 中断(aborted)或崩溃的 turn 不丢 lastObserved,restore 后圆环能恢复百分比。
+      // 只拦截 provider_usage:estimated/unknown 快照不落盘,避免噪声覆盖观测事实。
+      const emitRuntimeEventPersistingAccounting = (event) => {
+        if (
+          event?.type === 'context.accounting'
+          && event.snapshot?.version === 1
+          && event.snapshot.pressureSource === 'provider_usage'
+          && streamRecord.conversationId
+          && !streamRecord.ephemeral
+          && typeof conversationStore?.updateContextSnapshot === 'function'
+        ) {
+          try {
+            conversationStore.updateContextSnapshot(streamRecord.conversationId, event.snapshot);
+            streamRecord.persistedContextSnapshotKey = contextSnapshotPersistKey(event.snapshot);
+          } catch (error) {
+            console.warn('[llm-chat] failed to persist observed context snapshot:', error?.message || error);
+          }
+        }
+        if (typeof emitRuntimeEvent === 'function') return emitRuntimeEvent(event);
+        return null;
+      };
       // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
       accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
         conversationStore,
@@ -1046,7 +1082,7 @@ export function createLlmChatService({
               persistCompaction,
               continuityContext,
               rebuildSystemPrompt,
-              emitRuntimeEvent,
+              emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
@@ -1083,7 +1119,7 @@ export function createLlmChatService({
               goalPlanStore,
               onNativeReasoningFallback,
               resolvedChannel,
-              emitRuntimeEvent,
+              emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
@@ -1119,7 +1155,7 @@ export function createLlmChatService({
               goalPlanStore,
               resolvedChannel,
               authMethod: credential.authMethod,
-              emitRuntimeEvent,
+              emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
@@ -1158,7 +1194,7 @@ export function createLlmChatService({
               authMethod: credential.authMethod,
               accountId: credential.accountId,
               resolvedChannel,
-              emitRuntimeEvent,
+              emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
