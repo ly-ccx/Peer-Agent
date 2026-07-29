@@ -51,19 +51,15 @@ function idlePrompt() {
   };
 }
 
-/**
- * Fetch the account catalog through Qoder's public SDK control contract.
- * The caller may inject the resolver/query factory for deterministic tests.
- */
-export async function fetchOfficialQoderModelCatalog(options = {}) {
+async function withQoderControlSession(options = {}, run) {
   const resolveCli = options.resolveQoderCliBinary ?? resolveQoderCliBinary;
   const cliPath = options.qoderCliPath || await resolveCli(options);
   if (!cliPath) throw createCatalogError('qoder_cli_not_found');
 
-  const timeoutMs = catalogTimeoutMs(options.qoderCatalogTimeoutMs);
+  const timeoutMs = catalogTimeoutMs(options.qoderCatalogTimeoutMs ?? options.qoderUsageTimeoutMs);
   const abortController = new AbortController();
   const prompt = idlePrompt();
-  const queryFactory = options.qoderCatalogQueryFactory ?? query;
+  const queryFactory = options.qoderCatalogQueryFactory ?? options.qoderUsageQueryFactory ?? query;
   let timedOut = false;
   let session = null;
   const timeout = setTimeout(() => {
@@ -88,17 +84,15 @@ export async function fetchOfficialQoderModelCatalog(options = {}) {
       },
     });
     await session.initializationResult();
-    const models = await session.getAvailableModels({ fetchStrategy: 'live' });
-    if (!Array.isArray(models) || models.length === 0) {
-      throw createCatalogError('qoder_official_models_empty');
-    }
-    return models;
+    return await run(session);
   } catch (error) {
-    if (error?.code === 'qoder_cli_not_found' || error?.code === 'qoder_official_models_empty') {
+    if (error?.code === 'qoder_cli_not_found' || error?.code === 'qoder_official_models_empty' || error?.code === 'qoder_usage_empty') {
       throw error;
     }
     throw createCatalogError(
-      timedOut ? 'qoder_official_models_timeout' : 'qoder_official_models_unavailable',
+      timedOut
+        ? (options.usageMode ? 'qoder_usage_timeout' : 'qoder_official_models_timeout')
+        : (options.usageMode ? 'qoder_usage_unavailable' : 'qoder_official_models_unavailable'),
       error,
     );
   } finally {
@@ -108,4 +102,35 @@ export async function fetchOfficialQoderModelCatalog(options = {}) {
       await session?.close?.();
     } catch {}
   }
+}
+
+/**
+ * Fetch the account catalog through Qoder's public SDK control contract.
+ * The caller may inject the resolver/query factory for deterministic tests.
+ */
+export async function fetchOfficialQoderModelCatalog(options = {}) {
+  return withQoderControlSession(options, async (session) => {
+    const models = await session.getAvailableModels({ fetchStrategy: 'live' });
+    if (!Array.isArray(models) || models.length === 0) {
+      throw createCatalogError('qoder_official_models_empty');
+    }
+    return models;
+  });
+}
+
+/**
+ * Fetch plan / credit / resource-package usage through Qoder SDK control.
+ * Mirrors /status Usage and /model Available Credits in Qoder CLI.
+ */
+export async function fetchQoderUsageInfo(options = {}) {
+  return withQoderControlSession({ ...options, usageMode: true }, async (session) => {
+    if (typeof session.getUsageInfo !== 'function') {
+      throw createCatalogError('qoder_usage_unavailable');
+    }
+    const usage = await session.getUsageInfo();
+    if (!usage || typeof usage !== 'object') {
+      throw createCatalogError('qoder_usage_empty');
+    }
+    return usage;
+  });
 }

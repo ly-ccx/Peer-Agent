@@ -34,6 +34,7 @@ import {
 import {
   formatQuotaLine,
   isOAuthMethod,
+  supportsSubscriptionQuotaMethod,
 } from './llmSubscriptionQuota';
 
 interface PendingProviderDraft extends Record<string, unknown> {
@@ -871,7 +872,8 @@ export function LlmSettingsPanel({
     const headIds: string[] = [];
     const seenGroup = new Set<string>();
     for (const provider of providers) {
-      if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected') continue;
+      if (!supportsSubscriptionQuotaMethod(provider.authMethod)) continue;
+      if (isOAuthMethod(provider.authMethod) && provider.oauthStatus?.status !== 'connected') continue;
       const groupId = provider.groupId || provider.id;
       if (seenGroup.has(groupId)) continue;
       seenGroup.add(groupId);
@@ -1073,7 +1075,7 @@ export function LlmSettingsPanel({
               </div>
             
               </div>
-              {isOAuthMethod(head.authMethod) ? (
+              {supportsSubscriptionQuotaMethod(head.authMethod) ? (
                 <div className="llm-group-header-quota">
                   <div className="llm-subscription-quota llm-group-quota">
                     <span

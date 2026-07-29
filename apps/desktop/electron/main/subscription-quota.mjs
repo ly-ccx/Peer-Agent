@@ -1,11 +1,13 @@
-// 订阅额度查询（GPT / Gemini / Grok）。
+// 订阅额度查询（GPT / Gemini / Grok / Qoder）。
 // 数据源对齐 CodexBar：
 // - GPT: ChatGPT backend wham/usage
 // - Gemini: cloudcode-pa retrieveUserQuota
 // - Grok: grok.com GrokBuildBilling GetGrokCreditsConfig
-// 只在 main 进程运行；复用已有 OAuth 会话（resolveProviderCredential），不引入第三方依赖。
+// - Qoder: qoder-agent-sdk session.getUsageInfo()
+// 只在 main 进程运行；复用已有 OAuth / 本机登录态，不引入第三方依赖。
 
 import { resolveProviderCredential, getProviderCredentialErrorCode } from './provider-credential-resolver.mjs';
+import { fetchQoderUsageInfo } from './provider-adapters/qoder-official-model-catalog.mjs';
 
 const QUOTA_TTL_MS = 60_000;
 /** 新鲜缓存：TTL 内直接返回，避免重复打供应商接口。 */
@@ -17,6 +19,7 @@ const quotaCache = new Map(); // cacheKey -> { expiresAt, result }
 const lastSuccessByKey = new Map(); // cacheKey -> result
 
 const OAUTH_METHODS = new Set(['oauth_chatgpt', 'oauth_google', 'oauth_grok']);
+const LOCAL_CLI_METHODS = new Set(['qoder_local_auth', 'local_cli']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -588,7 +591,138 @@ export async function fetchGrokQuota({ accessToken, fetchImpl = fetch } = {}) {
 // ── Facade ──────────────────────────────────────────────────────────────
 
 export function supportsSubscriptionQuota(authMethod) {
-  return OAUTH_METHODS.has(authMethod);
+  return OAUTH_METHODS.has(authMethod) || LOCAL_CLI_METHODS.has(authMethod);
+}
+
+function finiteNumber(value) {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function bucketRemainingPercent(bucket) {
+  if (!bucket || typeof bucket !== 'object') return null;
+  const percentage = finiteNumber(bucket.percentage);
+  if (percentage != null) return clampPercent(100 - percentage);
+  const remaining = finiteNumber(bucket.remaining);
+  const total = finiteNumber(bucket.total ?? bucket.cap);
+  if (remaining != null && total != null && total > 0) {
+    return clampPercent((remaining / total) * 100);
+  }
+  const used = finiteNumber(bucket.used);
+  if (used != null && total != null && total > 0) {
+    return clampPercent(((total - used) / total) * 100);
+  }
+  return null;
+}
+
+/**
+ * 将 Qoder SDK UsageInfo 映射为统一订阅额度快照。
+ * 对齐 CLI /status：Plan Credits、Add-on Credits、Org Resource Package、Available Credits。
+ */
+export function mapQoderUsageToQuota(usage) {
+  if (!usage || typeof usage !== 'object') {
+    throw Object.assign(new Error('usage_parse_failed'), { code: 'quota_parse_failed' });
+  }
+
+  const userQuota = usage.userQuota && typeof usage.userQuota === 'object' ? usage.userQuota : null;
+  const addOnQuota = usage.addOnQuota && typeof usage.addOnQuota === 'object' ? usage.addOnQuota : null;
+  const orgPackage = usage.orgResourcePackage && typeof usage.orgResourcePackage === 'object'
+    ? usage.orgResourcePackage
+    : null;
+
+  const planUsed = finiteNumber(userQuota?.used);
+  const planTotal = finiteNumber(userQuota?.total);
+  const planRemaining = finiteNumber(userQuota?.remaining)
+    ?? (planUsed != null && planTotal != null ? Math.max(0, planTotal - planUsed) : null);
+
+  const addOnUsed = finiteNumber(addOnQuota?.used);
+  const addOnTotal = finiteNumber(addOnQuota?.total);
+  const addOnRemaining = finiteNumber(addOnQuota?.remaining)
+    ?? (addOnUsed != null && addOnTotal != null ? Math.max(0, addOnTotal - addOnUsed) : null);
+
+  const orgUsed = finiteNumber(orgPackage?.used);
+  const orgCap = finiteNumber(orgPackage?.cap ?? orgPackage?.total);
+  const orgRemaining = finiteNumber(orgPackage?.remaining)
+    ?? (orgUsed != null && orgCap != null ? Math.max(0, orgCap - orgUsed) : null);
+
+  const availableCredits = [planRemaining, addOnRemaining, orgRemaining]
+    .filter((value) => value != null)
+    .reduce((sum, value) => sum + value, 0);
+
+  const windows = [];
+  if (userQuota) {
+    windows.push({
+      id: 'plan_credits',
+      label: 'Plan Credits',
+      remainingPercent: bucketRemainingPercent(userQuota) ?? undefined,
+      usedPercent: clampPercent(finiteNumber(userQuota.percentage) ?? (
+        planUsed != null && planTotal != null && planTotal > 0 ? (planUsed / planTotal) * 100 : null
+      )) ?? undefined,
+      resetsAt: typeof usage.expiresAt === 'string' ? usage.expiresAt : undefined,
+    });
+  }
+  if (addOnQuota) {
+    windows.push({
+      id: 'addon_credits',
+      label: 'Add-on Credits',
+      remainingPercent: bucketRemainingPercent(addOnQuota) ?? undefined,
+      usedPercent: clampPercent(finiteNumber(addOnQuota.percentage) ?? (
+        addOnUsed != null && addOnTotal != null && addOnTotal > 0 ? (addOnUsed / addOnTotal) * 100 : null
+      )) ?? undefined,
+    });
+  }
+  if (orgPackage) {
+    windows.push({
+      id: 'org_resource_package',
+      label: 'Org Resource Package',
+      remainingPercent: bucketRemainingPercent({
+        ...orgPackage,
+        total: orgCap ?? orgPackage.total,
+      }) ?? undefined,
+      usedPercent: clampPercent(finiteNumber(orgPackage.percentage) ?? (
+        orgUsed != null && orgCap != null && orgCap > 0 ? (orgUsed / orgCap) * 100 : null
+      )) ?? undefined,
+    });
+  }
+
+  const totalCap = [planTotal, addOnTotal, orgCap]
+    .filter((value) => value != null)
+    .reduce((sum, value) => sum + value, 0);
+  const remainingPercent = totalCap > 0
+    ? clampPercent((availableCredits / totalCap) * 100)
+    : (bucketRemainingPercent(userQuota) ?? bucketRemainingPercent(orgPackage));
+  const usedPercent = remainingPercent == null ? null : clampPercent(100 - remainingPercent);
+
+  if (windows.length === 0 && availableCredits <= 0 && remainingPercent == null) {
+    throw Object.assign(new Error('usage_parse_failed'), { code: 'quota_parse_failed' });
+  }
+
+  return {
+    success: true,
+    status: 'ok',
+    provider: 'qoder',
+    planLabel: typeof usage.userType === 'string' && usage.userType.trim()
+      ? usage.userType.trim()
+      : undefined,
+    remainingPercent: remainingPercent ?? undefined,
+    usedPercent: usedPercent ?? undefined,
+    resetsAt: typeof usage.expiresAt === 'string' ? usage.expiresAt : undefined,
+    windows: windows.length ? windows : undefined,
+    fetchedAt: nowIso(),
+    availableCredits: availableCredits > 0 || planRemaining != null || orgRemaining != null
+      ? availableCredits
+      : undefined,
+    planCreditsUsed: planUsed ?? undefined,
+    planCreditsTotal: planTotal ?? undefined,
+    orgPackageUsed: orgUsed ?? undefined,
+    orgPackageCap: orgCap ?? undefined,
+    accountId: typeof usage.userId === 'string' ? usage.userId : undefined,
+  };
+}
+
+export async function fetchQoderQuota({ usageLoader = fetchQoderUsageInfo, ...options } = {}) {
+  const usage = await usageLoader(options);
+  return mapQoderUsageToQuota(usage);
 }
 
 export async function fetchProviderSubscriptionQuota({
@@ -605,10 +739,11 @@ export async function fetchProviderSubscriptionQuota({
 
   const authMethod = provider.authMethod || 'api_key';
   if (!supportsSubscriptionQuota(authMethod)) {
-    return failure('unsupported', 'Subscription quota is only available for ChatGPT / Gemini / Grok OAuth');
+    return failure('unsupported', 'Subscription quota is only available for ChatGPT / Gemini / Grok OAuth or Qoder CLI login');
   }
 
-  if (provider.oauthStatus?.status === 'disconnected') {
+  const isLocalCli = LOCAL_CLI_METHODS.has(authMethod);
+  if (!isLocalCli && provider.oauthStatus?.status === 'disconnected') {
     return failure('not_logged_in', 'Not logged in');
   }
 
@@ -627,21 +762,28 @@ export async function fetchProviderSubscriptionQuota({
   }
 
   try {
-    const credential = await resolveCredential({ provider, llmConfigStore });
-    const accessToken = credential.apiKey;
-    const accountId = credential.accountId || provider.oauthStatus?.accountId || null;
-    const stored = llmConfigStore.getCredential?.(credentialId) || null;
-    const projectId = stored?.oauthProjectId || null;
-
     let result;
-    if (authMethod === 'oauth_chatgpt') {
-      result = await fetchChatGptUsage({ accessToken, accountId, fetchImpl });
-    } else if (authMethod === 'oauth_google') {
-      result = await fetchGeminiQuota({ accessToken, projectId, fetchImpl });
-    } else if (authMethod === 'oauth_grok') {
-      result = await fetchGrokQuota({ accessToken, fetchImpl });
+    let accountId = provider.oauthStatus?.accountId || null;
+
+    if (isLocalCli) {
+      result = await fetchQoderQuota();
+      accountId = result.accountId || accountId;
     } else {
-      return failure('unsupported', 'Unsupported auth method');
+      const credential = await resolveCredential({ provider, llmConfigStore });
+      const accessToken = credential.apiKey;
+      accountId = credential.accountId || accountId;
+      const stored = llmConfigStore.getCredential?.(credentialId) || null;
+      const projectId = stored?.oauthProjectId || null;
+
+      if (authMethod === 'oauth_chatgpt') {
+        result = await fetchChatGptUsage({ accessToken, accountId, fetchImpl });
+      } else if (authMethod === 'oauth_google') {
+        result = await fetchGeminiQuota({ accessToken, projectId, fetchImpl });
+      } else if (authMethod === 'oauth_grok') {
+        result = await fetchGrokQuota({ accessToken, fetchImpl });
+      } else {
+        return failure('unsupported', 'Unsupported auth method');
+      }
     }
 
     result = {
@@ -657,7 +799,9 @@ export async function fetchProviderSubscriptionQuota({
     return result;
   } catch (error) {
     const code = error?.code || getProviderCredentialErrorCode(error) || 'quota_fetch_failed';
-    if (code === 'oauth_not_logged_in') return failure('not_logged_in', error.message);
+    if (code === 'oauth_not_logged_in' || code === 'qoder_cli_not_found') {
+      return failure('not_logged_in', error.message || 'Not logged in');
+    }
     if (code === 'oauth_session_expired' || code === 'oauth_token_refresh_failed') {
       return failure('session_expired', error.message || 'Session expired');
     }

@@ -64,10 +64,14 @@ describe('qoder model catalog', () => {
     assert.equal(result.models[0].supportsVision, true);
     assert.equal(result.models[0].supportsReasoning, true);
     assert.equal(result.models[0].modelOptions[0].defaultValue, '200K');
+    assert.equal(result.models[0].priceFactor, 0.25);
+    assert.equal(result.models[0].originalPriceFactor, 0.5);
 
     const cached = getQoderModelMetadata('CMODEL', options);
     assert.equal(cached?.label, 'Cantus');
     assert.equal(cached?.modelOptions?.[0]?.choices?.[1]?.contextWindow, 1000000);
+    assert.equal(cached?.priceFactor, 0.25);
+    assert.equal(cached?.originalPriceFactor, 0.5);
   }, {
     officialCatalogLoader: async () => [{
       value: 'cmodel',
@@ -79,6 +83,8 @@ describe('qoder model catalog', () => {
       isDefault: false,
       isVl: true,
       isReasoning: true,
+      priceFactor: 0.25,
+      originalPriceFactor: 0.5,
       maxInputTokens: 180000,
       maxOutputTokens: 32768,
       context_config: {
@@ -88,6 +94,8 @@ describe('qoder model catalog', () => {
       serverModel: {
         key: 'cmodel',
         display_name: 'Cantus',
+        price_factor: 0.25,
+        original_price_factor: 0.5,
       },
     }],
   }));

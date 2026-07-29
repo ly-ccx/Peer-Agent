@@ -3,13 +3,14 @@ import type {
   LlmProviderConfigView,
   LlmSubscriptionQuota,
 } from '@peer-agent/protocol';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import {
   formatQuotaTooltipLine,
   isOAuthMethod,
+  supportsSubscriptionQuotaMethod,
 } from '../../../app/components/llmSubscriptionQuota';
 import { Tooltip } from '../../../app/components/Tooltip';
 import { clientApi } from '../../../clientApi';
@@ -235,15 +236,17 @@ export function TokenUsageDisplay({
     || providers.find((p) => p.isDefault && p.apiKeyConfigured)
     || providers.find((p) => p.apiKeyConfigured);
 
-  // 订阅额度：与设置页一致，按 group head 拉取；仅 OAuth 且已连接时查询。
+  // 订阅额度：与设置页一致，按 group head 拉取。
+  // 支持 OAuth 订阅（ChatGPT/Gemini/Grok）与 Qoder CLI 本机登录。
   // 每 5 分钟自动刷新剩余额度（force=true），模型切换时立即重拉。
   const [subscriptionQuota, setSubscriptionQuota] = useState<LlmSubscriptionQuota | null>(null);
   const quotaProviderId = (() => {
-    if (!defaultProvider || !isOAuthMethod(defaultProvider.authMethod)) return null;
+    if (!defaultProvider || !supportsSubscriptionQuotaMethod(defaultProvider.authMethod)) return null;
     const groupId = defaultProvider.groupId || defaultProvider.id;
     const head = providers.find((p) => p.id === groupId) ?? defaultProvider;
-    if (!isOAuthMethod(head.authMethod)) return null;
-    if (head.oauthStatus?.status !== 'connected') return null;
+    if (!supportsSubscriptionQuotaMethod(head.authMethod)) return null;
+    // OAuth 需要已连接；Qoder 本地登录不依赖 oauthStatus。
+    if (isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected') return null;
     return head.id;
   })();
 
@@ -344,7 +347,7 @@ export function TokenUsageDisplay({
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
   const showCacheHit = defaultProvider?.supportsPromptCaching === true && cacheRead > 0;
 
-  const isSubscriptionProvider = isOAuthMethod(defaultProvider?.authMethod);
+  const isSubscriptionProvider = supportsSubscriptionQuotaMethod(defaultProvider?.authMethod);
   let costStr: string | null = null;
   if (!isSubscriptionProvider && defaultProvider?.inputPrice != null && defaultProvider?.outputPrice != null) {
     const p = defaultProvider;
@@ -397,7 +400,7 @@ export function TokenUsageDisplay({
   // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
   // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
-  const modelGroups: readonly CascadingMenuGroup[] = (() => {
+  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => {
     const order: string[] = [];
     const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
     for (const prov of providers) {
@@ -414,7 +417,10 @@ export function TokenUsageDisplay({
       const bucket = byGroup.get(key)!;
       return { id: key, label: bucket.label, items: bucket.items, disabled: bucket.items.every((it) => it.disabled) };
     });
-  })();
+  }, [providers, isZh]);
+  const handleModelMenuChange = useCallback((next: string) => {
+    onModelChange?.(next);
+  }, [onModelChange]);
 
   const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
   const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
@@ -430,7 +436,7 @@ export function TokenUsageDisplay({
               className="composer-cascading-menu composer-model-dropdown"
               value={defaultProvider.id}
               groups={modelGroups}
-              onChange={(next) => onModelChange?.(next)}
+              onChange={handleModelMenuChange}
               ariaLabel={isZh ? '切换模型' : 'Switch model'}
               title={modelLoading ? (isZh ? '正在加载模型列表' : 'Loading models') : modelTitle}
               menuPlacement="up"

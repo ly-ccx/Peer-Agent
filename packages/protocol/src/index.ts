@@ -413,7 +413,7 @@ export interface LlmSubscriptionQuotaWindow {
 }
 
 /**
- * GPT / Gemini / Grok 订阅额度快照。
+ * GPT / Gemini / Grok / Qoder 订阅额度快照。
  * success=false 时用 status/error 表达未登录、过期或拉取失败，UI 应降级展示。
  */
 export interface LlmSubscriptionQuota {
@@ -421,7 +421,7 @@ export interface LlmSubscriptionQuota {
   readonly status?: string;
   readonly providerId?: string;
   readonly authMethod?: LlmAuthMethod;
-  readonly provider?: 'chatgpt' | 'gemini' | 'grok' | string;
+  readonly provider?: 'chatgpt' | 'gemini' | 'grok' | 'qoder' | string;
   readonly planLabel?: string;
   readonly remainingPercent?: number;
   readonly usedPercent?: number;
@@ -432,6 +432,12 @@ export interface LlmSubscriptionQuota {
   readonly fetchedAt?: string;
   readonly cached?: boolean;
   readonly error?: string;
+  // Qoder 信用点数 / 资源包绝对值（可选；百分比字段仍保留供通用 UI）。
+  readonly availableCredits?: number;
+  readonly planCreditsUsed?: number;
+  readonly planCreditsTotal?: number;
+  readonly orgPackageUsed?: number;
+  readonly orgPackageCap?: number;
 }
 
 export interface LlmProviderConfig {
@@ -626,6 +632,9 @@ export interface LlmModelInfo {
   readonly longContextInputPrice?: number;
   readonly longContextCacheReadPrice?: number;
   readonly longContextOutputPrice?: number;
+  // Qoder CLI 积分倍率：当前结算倍率 / 原价倍率（如 0.25x ← 0.50x 表示折扣中）。
+  readonly priceFactor?: number;
+  readonly originalPriceFactor?: number;
 }
 
 // 列模型结果。source 标明数据来源:
