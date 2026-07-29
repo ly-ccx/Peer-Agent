@@ -141,6 +141,19 @@ test('isOpenAIResponsesTransientFailure classifies ChatGPT server_error as retry
   assert.equal(
     isOpenAIResponsesTransientFailure({
       ok: false,
+      providerError: true,
+      errorText: 'provider_stream_error: Our servers are currently overloaded. Please try again later.',
+      streamError: {
+        type: 'server_is_overloaded',
+        message: 'Our servers are currently overloaded. Please try again later.',
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    isOpenAIResponsesTransientFailure({
+      ok: false,
       status: 503,
       errorText: 'service unavailable',
     }),
@@ -201,6 +214,39 @@ test('sendOpenAIResponsesStreamWithResilience retries server_error then succeeds
   assert.equal(result.content, 'recovered');
   assert.equal(calls, 3); // initial + 2 retries
   assert.deepEqual(waits, [1, 1]);
+});
+
+test('sendOpenAIResponsesStreamWithResilience retries server_is_overloaded then succeeds', async () => {
+  let calls = 0;
+  const waits = [];
+  const result = await sendOpenAIResponsesStreamWithResilience(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          providerError: true,
+          errorText: 'provider_stream_error: Our servers are currently overloaded. Please try again later.',
+          streamError: {
+            type: 'server_is_overloaded',
+            message: 'Our servers are currently overloaded. Please try again later.',
+          },
+        };
+      }
+      return { ok: true, content: 'recovered after overload', toolCalls: [] };
+    },
+    {
+      transientRetryDelaysMs: [1, 1, 1],
+      waitImpl: async (ms) => {
+        waits.push(ms);
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.content, 'recovered after overload');
+  assert.equal(calls, 2); // initial + 1 retry
+  assert.deepEqual(waits, [1]);
 });
 
 test('sendOpenAIResponsesStreamWithResilience surfaces error after 3 failed retries', async () => {

@@ -70,7 +70,7 @@ export function isOpenAIResponsesTransientFailure(result) {
   }
 
   const type = String(result.streamError?.type || '');
-  if (type === 'server_error') return true;
+  if (type === 'server_error' || type === 'server_is_overloaded') return true;
 
   const errorText = String(result.errorText || result.streamError?.message || '');
   if (!errorText) return false;
