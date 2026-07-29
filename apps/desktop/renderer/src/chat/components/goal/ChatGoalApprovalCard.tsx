@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import type { ReactElement } from 'react';
 import type { GoalPlan } from '@peer-agent/protocol';
-import { InteractionContext } from '../thread/interactionContext';
+import { InteractionActionsContext } from '../thread/interactionContext';
 import { goalPlanNextStepCopy } from './goalPlanNextActions';
 import { useGoalPlanApproval } from './useGoalPlanApproval';
 import { useAwaitingGoalPlans } from './useAwaitingGoalPlans';
@@ -31,7 +31,7 @@ export function ChatGoalApprovalCard({
 }): ReactElement | null {
   const awaitingPlans = useAwaitingGoalPlans(conversationId, enabled);
   const { busyPlanId, error, decide } = useGoalPlanApproval({ isZh });
-  const interaction = useContext(InteractionContext);
+  const interactionActions = useContext(InteractionActionsContext);
   const copy = goalPlanNextStepCopy(isZh);
 
   if (!enabled || awaitingPlans.length === 0) return null;
@@ -75,8 +75,8 @@ export function ChatGoalApprovalCard({
               <button
                 type="button"
                 className="chat-goal-approval-btn chat-goal-approval-btn--adjust"
-                disabled={disabled || !interaction}
-                onClick={() => interaction?.onSelectOption(copy.adjustmentMessage)}
+                disabled={disabled || !interactionActions}
+                onClick={() => interactionActions?.onSelectOption(copy.adjustmentMessage)}
               >
                 {copy.adjust}
               </button>

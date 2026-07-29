@@ -97,7 +97,7 @@ import {
   type SessionReferenceHit,
 } from '../state/sessionReference';
 import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
-import { InteractionContext } from './thread/interactionContext';
+import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
 import { ChatTurn } from './thread/ChatTurn';
@@ -1889,10 +1889,20 @@ export function ChatSurface({
 
   // 选择 request_user_input 的选项 = 把该选项作为用户消息，复用既有 submitMessage 发送路径。
   // 见 Goal 模式运行时闸门设计。
-  const selectInteractionOption = useCallback((text: string) => {
+  // 稳定 action：引用不随 isStreaming / effort / conversationId 变化；
+  // 调用时读最新闭包，避免流式帧让 GoalPlanPanel 的 onNextAction 失效。
+  const selectInteractionOption = useStableCallback((text: string) => {
     if (!text || isStreaming || !hasProvider || !conversationId) return;
     void submitMessage(text, [], effort);
-  }, [isStreaming, hasProvider, conversationId, submitMessage, effort]);
+  });
+  const interactionActions = useMemo(
+    () => ({ onSelectOption: selectInteractionOption }),
+    [selectInteractionOption],
+  );
+  const interactionStreaming = useMemo(
+    () => ({ isStreaming }),
+    [isStreaming],
+  );
 
   // GoalPlanPanel 的批准动作只记录治理事实；真正执行由 main process Goal Runner
   // 监听 goalPlans:approve 后托管推进，renderer 不再伪造一条用户消息来启动执行。
@@ -2001,7 +2011,8 @@ export function ChatSurface({
   // 草稿态（conversationId === null）也渲染完整聊天面：可输入，首条发送时再落库。
   return (
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
-    <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
+    <InteractionActionsContext.Provider value={interactionActions}>
+    <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
     <div
       className="chat-surface"
@@ -2381,7 +2392,8 @@ export function ChatSurface({
       ) : null}
     </div>
     </div>
-    </InteractionContext.Provider>
+    </InteractionStreamingContext.Provider>
+    </InteractionActionsContext.Provider>
     </WorkspacePathContext.Provider>
   );
 }

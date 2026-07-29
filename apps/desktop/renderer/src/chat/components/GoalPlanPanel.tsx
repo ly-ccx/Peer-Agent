@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, ReactElement } from 'react';
 import type {
@@ -17,7 +17,7 @@ import type {
 import { projectGoalTiming } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
-import { InteractionContext } from './thread/interactionContext';
+import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
@@ -1395,7 +1395,13 @@ interface PlanCardProps {
   ) => void | Promise<void>;
 }
 
-function PlanCard({
+const EMPTY_PLAN_RELATION: Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'> = {
+  parentPlan: null,
+  sourceTask: null,
+  childPlans: [],
+};
+
+const PlanCard = memo(function PlanCard({
   plan,
   defaultExpanded,
   isZh,
@@ -1409,7 +1415,7 @@ function PlanCard({
   onNextAction,
   onRunnerControl,
   onManualConfirm,
-}: PlanCardProps): ReactElement {
+});: PlanCardProps): ReactElement {
   // 所有等待用户决定的计划（含 Goal 模式的 accepted）都要强制展开，
   // 使聊天底部的浮条本身成为可直接操作的审批入口。
   const awaitingLock = hasPendingGoalApproval([plan]);
@@ -1539,7 +1545,7 @@ function PlanCard({
       ) : null}
     </section>
   );
-}
+});
 
 // 重档过渡的卸载延迟（毫秒），必须与 CSS token --za-motion-medium 对齐（见
 // chat-surface.css 的 .chat-side-panel 过渡时长）。收起时 body 先随收缩动画播完
@@ -1569,9 +1575,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const [closing, setClosing] = useState(false);
   // 本轮助手输出（streaming）期间，禁用「批准并执行 / 驳回」这两个治理事实写操作：
   // 计划一落库面板就出现，但本轮 AI 会话尚未结束，此时点批准会被运行时丢弃（见 0004 提案）。
-  // 复用既有 InteractionContext（GoalPlanPanel 渲染在该 Provider 内），不新增 prop 透传。
-  const interaction = useContext(InteractionContext);
-  const isStreaming = interaction?.isStreaming ?? false;
+  // action / streaming 拆开：GoalPlanPanel 消费 action 时不因 token 流式帧重渲染。
+  const interactionActions = useContext(InteractionActionsContext);
+  const interactionStreaming = useContext(InteractionStreamingContext);
+  const isStreaming = interactionStreaming?.isStreaming ?? false;
 
   const normalizedConversationId = useMemo(
     () => normalizeConversationId(conversationId),
@@ -1794,6 +1801,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 批准 / 驳回收敛到共享 hook（单一事实源）：右侧面板与聊天侧批准卡共用同一条
   // goalPlansApprove（带 confirmationId 的二元治理事实）链路，状态经 goalPlans:changed
   // 广播互相消解。见 Goal 模式运行时闸门设计。
+  const handleApprovalSettled = useCallback(async () => {
+    await reload({ mode: 'silent' });
+  }, [reload]);
   const {
     busyPlanId: approvalBusyPlanId,
     error: approvalError,
@@ -1801,15 +1811,13 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   } = useGoalPlanApproval({
     isZh,
     onApproved,
-    onSettled: async () => {
-      await reload({ mode: 'silent' });
-    },
+    onSettled: handleApprovalSettled,
   });
 
   const handleNextAction = useCallback(
     async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
       if (action === 'adjust') {
-        interaction?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
+        interactionActions?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
         onRequestHostFocus?.();
         return;
       }
@@ -1833,7 +1841,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         setBusyPlanId(null);
       }
     },
-    [decide, interaction, isZh, onRequestHostFocus, reload],
+    [decide, interactionActions, isZh, onRequestHostFocus, reload],
   );
 
   // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）

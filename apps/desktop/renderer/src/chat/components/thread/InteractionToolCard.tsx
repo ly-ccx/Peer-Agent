@@ -1,7 +1,7 @@
 import { useContext, useState } from 'react';
 import type { InteractionToolView } from '../../state/interactionToolView';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
-import { InteractionAnsweredContext, InteractionContext } from './interactionContext';
+import { InteractionActionsContext, InteractionAnsweredContext, InteractionStreamingContext } from './interactionContext';
 
 export function InteractionToolCard({
   view,
@@ -13,20 +13,21 @@ export function InteractionToolCard({
   // 点击选项后的即时乐观反馈：消息级 answeredText 要等回复消息进入列表才会出现，
   // 中间有一拍延迟，用本地 state 先锁住，避免重复点击。
   const [optimisticAnswer, setOptimisticAnswer] = useState<string | null>(null);
-  const interaction = useContext(InteractionContext);
+  const interactionActions = useContext(InteractionActionsContext);
+  const interactionStreaming = useContext(InteractionStreamingContext);
   // 消息级事实：这张卡之后是否已有 user 回复（点选项或输入框自由输入都算）。
   const repliedText = useContext(InteractionAnsweredContext);
 
   const selectedText = repliedText ?? optimisticAnswer;
   const answered = selectedText !== null;
-  const isStreaming = interaction?.isStreaming ?? false;
+  const isStreaming = interactionStreaming?.isStreaming ?? false;
   // 等待回复：有回调、未在生成中、且尚未被回复。已回复后一律不可再点。
-  const waiting = Boolean(interaction) && !isStreaming && !answered;
+  const waiting = Boolean(interactionActions) && !isStreaming && !answered;
 
   const select = (text: string) => {
-    if (!waiting || !interaction) return;
+    if (!waiting || !interactionActions) return;
     setOptimisticAnswer(text);
-    interaction.onSelectOption(text);
+    interactionActions.onSelectOption(text);
   };
 
   const normalize = (s: string) => s.trim();
