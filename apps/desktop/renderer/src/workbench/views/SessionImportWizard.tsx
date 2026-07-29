@@ -24,6 +24,25 @@ type ProfileOption = {
   readonly browserName: string;
 };
 
+type PreflightCheck = {
+  readonly id: string;
+  readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
+  readonly title: string;
+  readonly detail: string;
+  readonly action?: 'open_full_disk_access' | 'install_browser' | 'none';
+  readonly path?: string;
+};
+
+type Preflight = {
+  readonly ok: boolean;
+  readonly ready?: boolean;
+  readonly blocked?: boolean;
+  readonly checks?: readonly PreflightCheck[];
+  readonly openFullDiskAccessSupported?: boolean;
+  readonly guidance?: { readonly fullDiskAccess?: string };
+  readonly error?: string;
+};
+
 type SiteOption = {
   readonly registrableDomain: string;
   readonly cookieCount: number;
@@ -41,6 +60,8 @@ export function SessionImportWizard({
   const [step, setStep] = useState<Step>('sources');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const [openingSettings, setOpeningSettings] = useState(false);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -84,6 +105,8 @@ export function SessionImportWizard({
     setStep('sources');
     setLoading(false);
     setError(null);
+    setPreflight(null);
+    setOpeningSettings(false);
     setProfiles([]);
     setProfileId(null);
     setSites([]);
@@ -91,49 +114,98 @@ export function SessionImportWizard({
     setResultSummary(null);
   }, []);
 
+  const loadSources = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await clientApi.listBrowserSessionSources();
+      if (res?.preflight) {
+        setPreflight(res.preflight as Preflight);
+      } else {
+        try {
+          const pf = await clientApi.getBrowserSessionImportPreflight?.();
+          if (pf) setPreflight(pf as Preflight);
+        } catch {
+          // optional
+        }
+      }
+      if (!res?.ok) {
+        setError(res?.error || t.noSources);
+        setProfiles([]);
+        return;
+      }
+      const flat: ProfileOption[] = [];
+      for (const src of res.sources || []) {
+        for (const p of src.profiles || []) {
+          flat.push({
+            profileId: p.profileId,
+            displayName: p.displayName,
+            directory: p.directory,
+            hasCookieDb: p.hasCookieDb,
+            browserName: src.browserName,
+          });
+        }
+      }
+      setProfiles(flat);
+      if (flat.length === 0) {
+        setError(res.error || t.noSources);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [t.noSources]);
+
   useEffect(() => {
     if (!open) {
       reset();
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     void (async () => {
-      try {
-        const res = await clientApi.listBrowserSessionSources();
-        if (cancelled) return;
-        if (!res?.ok) {
-          setError(res?.error || t.noSources);
-          setProfiles([]);
-          return;
-        }
-        const flat: ProfileOption[] = [];
-        for (const src of res.sources || []) {
-          for (const p of src.profiles || []) {
-            flat.push({
-              profileId: p.profileId,
-              displayName: p.displayName,
-              directory: p.directory,
-              hasCookieDb: p.hasCookieDb,
-              browserName: src.browserName,
-            });
-          }
-        }
-        setProfiles(flat);
-        if (flat.length === 0) setError(t.noSources);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await loadSources();
+      if (cancelled) return;
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, reset, t.noSources]);
+  }, [open, reset, loadSources]);
+
+  const openFullDiskAccess = useCallback(async () => {
+    setOpeningSettings(true);
+    try {
+      const res = await clientApi.openFullDiskAccessSettings?.();
+      if (res && res.ok === false) {
+        setError(res.error || (isZh ? '无法打开系统设置' : 'Failed to open System Settings'));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOpeningSettings(false);
+    }
+  }, [isZh]);
+
+  const statusLabel = useCallback((status: PreflightCheck['status']) => {
+    if (isZh) {
+      switch (status) {
+        case 'ok': return '通过';
+        case 'missing': return '缺失';
+        case 'blocked': return '需授权';
+        case 'warn': return '警告';
+        case 'unsupported': return '不支持';
+        default: return '说明';
+      }
+    }
+    switch (status) {
+      case 'ok': return 'OK';
+      case 'missing': return 'Missing';
+      case 'blocked': return 'Blocked';
+      case 'warn': return 'Warn';
+      case 'unsupported': return 'N/A';
+      default: return 'Info';
+    }
+  }, [isZh]);
 
   const loadSites = useCallback(
     async (id: string) => {
@@ -227,6 +299,50 @@ export function SessionImportWizard({
 
         {step === 'sources' || (step === 'sites' && !profileId) ? (
           <section className="session-import-body">
+            <section className="session-import-preflight" aria-label={isZh ? '权限自检' : 'Permission checks'}>
+              <div className="session-import-preflight-head">
+                <h3 className="session-import-section-title">{isZh ? '权限自检' : 'Permission checks'}</h3>
+                <div className="session-import-preflight-actions">
+                  <button type="button" className="session-import-close" disabled={loading} onClick={() => void loadSources()}>
+                    {isZh ? '重新检测' : 'Re-check'}
+                  </button>
+                  {preflight?.checks?.some((c) => c.action === 'open_full_disk_access') ? (
+                    <button
+                      type="button"
+                      className="session-import-close"
+                      disabled={openingSettings}
+                      onClick={() => void openFullDiskAccess()}
+                    >
+                      {openingSettings
+                        ? (isZh ? '打开中…' : 'Opening…')
+                        : (isZh ? '打开完全磁盘访问权限' : 'Open Full Disk Access')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <p className="session-import-hint">
+                {preflight?.guidance?.fullDiskAccess
+                  || (isZh
+                    ? '导入需读取浏览器用户数据目录。若系统拒绝，请授予完全磁盘访问权限并完全退出后重启 Peer Agent。'
+                    : 'Import needs browser user-data access. If blocked, grant Full Disk Access and fully relaunch Peer Agent.')}
+              </p>
+              <ul className="session-import-preflight-list">
+                {(preflight?.checks || []).map((check) => (
+                  <li key={check.id} className={`session-import-preflight-item is-${check.status}`}>
+                    <div className="session-import-preflight-item-top">
+                      <span className="session-import-preflight-status">{statusLabel(check.status)}</span>
+                      <strong>{check.title}</strong>
+                    </div>
+                    <p>{check.detail}</p>
+                  </li>
+                ))}
+                {!preflight?.checks?.length && !loading ? (
+                  <li className="session-import-preflight-item is-info">
+                    <p>{isZh ? '正在准备自检项…' : 'Preparing checks…'}</p>
+                  </li>
+                ) : null}
+              </ul>
+            </section>
             <h3 className="session-import-section-title">{t.pickProfile}</h3>
             {loading ? <p className="session-import-hint">{t.loadingSources}</p> : null}
             <ul className="session-import-list">

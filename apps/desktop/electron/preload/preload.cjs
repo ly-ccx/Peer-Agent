@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.invoke('browser:capture-page', { webContentsId, savePath }),
   /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
   listBrowserSessionSources: () => ipcRenderer.invoke('browser:list-session-sources'),
+  /** 导入前权限/环境自检。 */
+  getBrowserSessionImportPreflight: () => ipcRenderer.invoke('browser:session-import-preflight'),
+  /** 打开 macOS 完全磁盘访问权限设置。 */
+  openFullDiskAccessSettings: () => ipcRenderer.invoke('browser:open-full-disk-access-settings'),
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   listBrowserSessionSites: (profileId) =>
     ipcRenderer.invoke('browser:list-session-sites', { profileId }),

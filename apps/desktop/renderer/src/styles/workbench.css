@@ -1049,6 +1049,76 @@
     color: var(--graphite-muted, #667);
     line-height: 1.4;
   }
+
+  .session-import-preflight {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--chrome-hairline, #ffffff22) 80%, transparent);
+    background: color-mix(in srgb, var(--paper-sheet, #1c1f26) 88%, transparent);
+  }
+  .session-import-preflight-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .session-import-preflight-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .session-import-preflight-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .session-import-preflight-item {
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--chrome-hairline, #ffffff22) 70%, transparent);
+  }
+  .session-import-preflight-item p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--graphite-soft, #c8cdd6) 92%, transparent);
+  }
+  .session-import-preflight-item-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .session-import-preflight-status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--chrome-hairline, #fff2) 50%, transparent);
+  }
+  .session-import-preflight-item.is-ok .session-import-preflight-status {
+    color: #1f7a3f;
+    background: color-mix(in srgb, #3dcf7a 18%, transparent);
+  }
+  .session-import-preflight-item.is-blocked .session-import-preflight-status,
+  .session-import-preflight-item.is-unsupported .session-import-preflight-status {
+    color: #b42318;
+    background: color-mix(in srgb, #f97066 18%, transparent);
+  }
+  .session-import-preflight-item.is-missing .session-import-preflight-status,
+  .session-import-preflight-item.is-warn .session-import-preflight-status {
+    color: #9a6700;
+    background: color-mix(in srgb, #f5c451 20%, transparent);
+  }
+  .session-import-preflight-item.is-info .session-import-preflight-status {
+    color: #175cd3;
+    background: color-mix(in srgb, #84adff 18%, transparent);
+  }
+
   .session-import-error {
     margin: 0 16px 8px;
     padding: 8px 10px;

@@ -30,6 +30,8 @@ const unavailableApi: ClientApi = {
   clearBrowserSiteData: unavailableMethod('clearBrowserSiteData'),
   captureBrowserPage: unavailableMethod('captureBrowserPage'),
   listBrowserSessionSources: unavailableMethod('listBrowserSessionSources'),
+  getBrowserSessionImportPreflight: unavailableMethod('getBrowserSessionImportPreflight'),
+  openFullDiskAccessSettings: unavailableMethod('openFullDiskAccessSettings'),
   listBrowserSessionSites: unavailableMethod('listBrowserSessionSites'),
   importBrowserSiteSession: unavailableMethod('importBrowserSiteSession'),
   listPasswordVaultEntries: unavailableMethod('listPasswordVaultEntries'),

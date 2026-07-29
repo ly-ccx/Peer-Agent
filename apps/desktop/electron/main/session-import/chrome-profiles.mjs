@@ -96,7 +96,26 @@ export function listProfilesForAdapter(adapter, options = {}) {
     infoCache = {};
   }
 
-  const dirents = fsp.readdirSync(root, { withFileTypes: true });
+  let dirents;
+  try {
+    dirents = fsp.readdirSync(root, { withFileTypes: true });
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : null;
+    return {
+      adapterId: adapter.id,
+      browserName: adapter.browserName,
+      bundleId: adapter.bundleId,
+      available: false,
+      userDataRoot: root,
+      keychainBrowserId: adapter.keychainBrowserId,
+      profiles: [],
+      accessError: {
+        code,
+        message: err?.message || String(err),
+        kind: code === 'EPERM' || code === 'EACCES' ? 'permission_denied' : 'readdir_failed',
+      },
+    };
+  }
   for (const ent of dirents) {
     if (!ent.isDirectory()) continue;
     const name = ent.name;

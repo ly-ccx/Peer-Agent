@@ -25,6 +25,10 @@ import {
 } from './runtime-gateway/browser-control-registry.mjs';
 import { listChromeBrowserSources } from './session-import/chrome-profiles.mjs';
 import {
+  buildSessionImportPreflight,
+  openFullDiskAccessSettings,
+} from './session-import/import-permission-preflight.mjs';
+import {
   loadCookiesForSites,
   redactLoadedCookies,
   scanProfileSites,
@@ -2159,8 +2163,14 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
 ipcMain.handle('browser:list-session-sources', async () => {
   try {
     if (process.platform !== 'darwin') {
-      return { ok: false, error: 'unsupported_platform', sources: [] };
+      return {
+        ok: false,
+        error: 'unsupported_platform',
+        sources: [],
+        preflight: buildSessionImportPreflight({ platform: process.platform }),
+      };
     }
+    const preflight = buildSessionImportPreflight({ platform: process.platform });
     const sources = listChromeBrowserSources().map((src) => ({
       adapterId: src.adapterId,
       browserName: src.browserName,
@@ -2172,9 +2182,49 @@ ipcMain.handle('browser:list-session-sources', async () => {
         hasCookieDb: Boolean(p.cookieDbPath),
       })),
     }));
-    return { ok: true, sources };
+    // 权限被拦截时 sources 可能为空；仍返回 ok=true + preflight，让 UI 先展示自检引导。
+    return {
+      ok: true,
+      sources,
+      preflight,
+      error: sources.length === 0 && preflight.blocked
+        ? (preflight.checks.find((c) => c.status === 'blocked')?.detail || 'permission_denied')
+        : undefined,
+    };
   } catch (err) {
-    return { ok: false, error: err?.message || 'list_sources_failed', sources: [] };
+    return {
+      ok: false,
+      error: err?.message || 'list_sources_failed',
+      sources: [],
+      preflight: buildSessionImportPreflight({ platform: process.platform }),
+    };
+  }
+});
+
+ipcMain.handle('browser:session-import-preflight', async () => {
+  try {
+    return buildSessionImportPreflight({ platform: process.platform });
+  } catch (err) {
+    return {
+      ok: false,
+      ready: false,
+      blocked: true,
+      checks: [],
+      error: err?.message || 'preflight_failed',
+    };
+  }
+});
+
+ipcMain.handle('browser:open-full-disk-access-settings', async () => {
+  try {
+    if (process.platform !== 'darwin') {
+      return { ok: false, error: 'unsupported_platform' };
+    }
+    return await openFullDiskAccessSettings({
+      shellOpenExternal: (url) => shell.openExternal(url),
+    });
+  } catch (err) {
+    return { ok: false, error: err?.message || 'open_settings_failed' };
   }
 });
 

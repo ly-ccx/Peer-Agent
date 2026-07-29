@@ -51,6 +51,26 @@ import type {
  *
  * 旧的 v1 形状(顶层 `prompt`、无 sessionId)已废弃;store 通过版本号丢弃旧记录。
  */
+
+export type BrowserSessionImportPreflightCheck = {
+  readonly id: string;
+  readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
+  readonly title: string;
+  readonly detail: string;
+  readonly action?: 'open_full_disk_access' | 'install_browser' | 'none';
+  readonly path?: string;
+};
+
+export type BrowserSessionImportPreflight = {
+  readonly ok: boolean;
+  readonly ready?: boolean;
+  readonly blocked?: boolean;
+  readonly checks: readonly BrowserSessionImportPreflightCheck[];
+  readonly openFullDiskAccessSupported?: boolean;
+  readonly guidance?: { readonly fullDiskAccess?: string };
+  readonly error?: string;
+};
+
 export interface PendingTask {
   readonly sessionId: string;
   readonly task: string;
@@ -427,6 +447,15 @@ export interface BootstrapPreloadApi {
         readonly hasCookieDb: boolean;
       }[];
     }[];
+    readonly error?: string;
+    readonly preflight?: BrowserSessionImportPreflight;
+  }>;
+  /** 导入前权限/环境自检清单。 */
+  readonly getBrowserSessionImportPreflight: () => Promise<BrowserSessionImportPreflight>;
+  /** 打开 macOS 完全磁盘访问权限设置页。 */
+  readonly openFullDiskAccessSettings: () => Promise<{
+    readonly ok: boolean;
+    readonly url?: string;
     readonly error?: string;
   }>;
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
