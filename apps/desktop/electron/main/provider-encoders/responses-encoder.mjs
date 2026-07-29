@@ -153,8 +153,14 @@ export function encodeOpenAIResponsesRequest({
   const outputLimit = positiveTokenLimit(maxOutputTokens);
   if (!omitMaxOutputTokens && outputLimit) body.max_output_tokens = outputLimit;
 
+  // Keep effort only. Do NOT request reasoning.summary by default:
+  // OpenAI docs say summary is optional and off unless explicitly set.
+  // Forcing summary:'auto' produced sticky GPT status phrases and
+  // mislabeled long Grok/OpenAI summary streams as "thinking".
   if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
-    body.reasoning = { effort: mappedEffortValue(effort, reasoningEffortMap) ?? REASONING_EFFORT[effort] ?? 'medium', summary: 'auto' };
+    body.reasoning = {
+      effort: mappedEffortValue(effort, reasoningEffortMap) ?? REASONING_EFFORT[effort] ?? 'medium',
+    };
   }
   return body;
 }

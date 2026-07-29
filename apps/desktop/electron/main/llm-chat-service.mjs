@@ -17,6 +17,7 @@ import { agentLoopAnthropic } from './chat-runtime/anthropic-agent-loop.mjs';
 import { agentLoopGemini } from './chat-runtime/gemini-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
 import { agentLoopQoder } from './chat-runtime/qoder-agent-loop.mjs';
+import { joinSummaryThinkingContent } from './thinking-summary-join.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
 import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
@@ -346,7 +347,12 @@ function wrapWebContentsForRuntimeEvents(
       && (last.kind || undefined) === (kind || undefined);
     const samePlainText = type !== 'thinking' && last?.type === type;
     if (sameThinkingKind || samePlainText) {
-      last.content = `${last.content || ''}${content}`;
+      // Only GPT-style summary phrases get safe breaks; reasoning/legacy stay plain +.
+      const mergedKind = type === 'thinking' ? (kind || last.kind) : undefined;
+      last.content =
+        type === 'thinking' && mergedKind === 'summary'
+          ? joinSummaryThinkingContent(last.content || '', content)
+          : `${last.content || ''}${content}`;
       if (type === 'thinking' && kind && !last.kind) last.kind = kind;
     } else if (type === 'thinking' && kind) {
       segments.push({ type, content, kind });
@@ -470,7 +476,11 @@ function wrapWebContentsForRuntimeEvents(
           content: payload.content,
           ...(thinkingKind ? { kind: thinkingKind } : {}),
         });
-        streamRecord.accumulatedThinking = `${streamRecord.accumulatedThinking || ''}${payload.content}`;
+        // Keep accumulatedThinking consistent with segment join rules (summary-only breaks).
+        streamRecord.accumulatedThinking =
+          thinkingKind === 'summary'
+            ? joinSummaryThinkingContent(streamRecord.accumulatedThinking || '', payload.content)
+            : `${streamRecord.accumulatedThinking || ''}${payload.content}`;
         appendTextSegment('thinking', payload.content, thinkingKind);
         persistStreamRecord();
       } else if (channel === 'chat:stream:tool-call') {

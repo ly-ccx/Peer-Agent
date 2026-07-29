@@ -7,6 +7,7 @@
 // 这是对既有 user/assistant 文本的事实解析，不是把文本提升为工具执行或系统指令。
 
 import type { ContentSegment, ChatMsg, ToolCallLegacy, SegmentGroup } from './types';
+import { joinSummaryThinkingContent } from './thinkingSummaryJoin.ts';
 
 type ToolCallSegment = Extract<ContentSegment, { type: 'tool-call' }>;
 
@@ -251,7 +252,11 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
         && last.type === 'thinking'
         && (last.kind || undefined) === (seg.kind || undefined);
       if (sameKind && last.type === 'thinking') {
-        last.content += seg.content || '';
+        // Summary tracks re-join with the same safe phrase helper; other kinds stay plain +.
+        last.content =
+          last.kind === 'summary'
+            ? joinSummaryThinkingContent(last.content || '', seg.content || '')
+            : last.content + (seg.content || '');
       } else {
         groups.push(
           seg.kind

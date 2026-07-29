@@ -104,6 +104,23 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
       effort: 'high',
     });
     assert.equal(on.reasoning.effort, 'high');
+    // Default: request effort only. Do not subscribe to reasoning.summary
+    // (OpenAI docs: summary is optional and off unless explicitly set).
+    assert.equal(on.reasoning.summary, undefined);
+    assert.deepEqual(Object.keys(on.reasoning).sort(), ['effort']);
+  });
+
+  it('does not request reasoning.summary for GPT subscription Responses by default', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-5.4',
+      messages: [{ role: 'user', content: 'plan' }],
+      supportsReasoning: true,
+      effort: 'medium',
+      reasoningParamStyle: 'openai-effort',
+    });
+    assert.ok(body.reasoning);
+    assert.equal(body.reasoning.effort, 'medium');
+    assert.equal('summary' in body.reasoning, false);
   });
 
   it('passes OpenAI extra-high reasoning through as xhigh', () => {

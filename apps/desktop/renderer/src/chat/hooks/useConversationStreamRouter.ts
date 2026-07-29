@@ -33,6 +33,7 @@ import {
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg, ThinkingKind } from '../state/types';
+import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
 
@@ -83,9 +84,14 @@ function appendThinking(
     && (lastSeg.kind || undefined) === (kind || undefined);
   if (sameKind && lastSeg.type === 'thinking') {
     const nextKind = kind || lastSeg.kind;
+    // Only summary status phrases get safe phrase breaks; reasoning / legacy stay plain +.
+    const joined =
+      nextKind === 'summary'
+        ? joinSummaryThinkingContent(lastSeg.content || '', chunk)
+        : (lastSeg.content || '') + chunk;
     segments[segments.length - 1] = nextKind
-      ? { type: 'thinking', content: (lastSeg.content || '') + chunk, kind: nextKind }
-      : { type: 'thinking', content: (lastSeg.content || '') + chunk };
+      ? { type: 'thinking', content: joined, kind: nextKind }
+      : { type: 'thinking', content: joined };
   } else {
     segments.push(
       kind
