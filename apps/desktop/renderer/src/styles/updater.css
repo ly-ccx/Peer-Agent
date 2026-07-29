@@ -150,9 +150,7 @@
   .updater-modal {
     width: min(460px, calc(100vw - 48px));
     border-radius: 16px;
-    background: var(--pa-surface-card);
-    border: 1px solid var(--za-line);
-    box-shadow: var(--za-shadow-popover);
+    /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
     padding: 0;
     color: var(--pa-text-primary);
     overflow: hidden;

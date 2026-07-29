@@ -1636,8 +1636,11 @@
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-xl);
-  background: var(--chrome-raised);
-  box-shadow: var(--shadow-popover);
+  /* 图片预览卡片：glass-popover 毛玻璃 */
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover));
+  -webkit-backdrop-filter: blur(var(--blur-popover));
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
 }
 .image-preview-img {
   display: block;
@@ -3063,11 +3066,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
-  backdrop-filter: blur(18px);
+  /* 级联菜单对齐 glass-popover token，去掉散写 blur(18px) */
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover));
+  -webkit-backdrop-filter: blur(var(--blur-popover));
   border: none;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   isolation: isolate;
 }
 
@@ -3084,11 +3089,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
-  backdrop-filter: blur(18px);
+  /* 二级子菜单同样走 glass-popover token */
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover));
+  -webkit-backdrop-filter: blur(var(--blur-popover));
   border: none;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   isolation: isolate;
 }
 
@@ -3101,6 +3108,23 @@
 .pa-cascading-submenu-panel.can-scroll-up {
   mask-image: linear-gradient(to bottom, transparent 0%, #000 28px, #000 100%);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px, #000 100%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pa-cascading-menu-panel,
+  .pa-cascading-submenu-panel {
+    background: var(--chrome-raised, var(--paper-sheet));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-popover);
+  }
+
+  .image-preview-card {
+    background: var(--chrome-raised, var(--paper-sheet));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-popover);
+  }
 }
 
 .pa-cascading-submenu-panel.can-scroll-up.can-scroll-down {

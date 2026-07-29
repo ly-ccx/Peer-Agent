@@ -1,5 +1,5 @@
 /* 自绘 Tooltip：受控样式浮层，替换浏览器原生 title 气泡。
-   暗色底 + 圆角 + 轻阴影，随主题 token 走；通过 portal 定位到视口坐标。 */
+   毛玻璃 + 圆角 + 轻阴影，随主题 glass-popover token 走；通过 portal 定位到视口坐标。 */
 .app-tooltip {
   position: fixed;
   z-index: 2147483000;
@@ -9,10 +9,12 @@
   max-width: 280px;
   padding: 6px 9px;
   border-radius: var(--ui-radius-control, var(--radius-sm, 6px));
-  background: var(--ui-tooltip-bg, rgba(28, 30, 36, 0.96));
-  color: var(--ui-tooltip-fg, #f2f4f8);
-  border: 1px solid var(--ui-tooltip-border, rgba(255, 255, 255, 0.08));
-  box-shadow: var(--shadow-pop, 0 6px 20px rgba(0, 0, 0, 0.28));
+  background: var(--glass-popover, var(--ui-tooltip-bg, rgba(28, 30, 36, 0.88)));
+  backdrop-filter: blur(var(--blur-popover, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  color: var(--ui-tooltip-fg, var(--graphite-base, #f2f4f8));
+  border: 1px solid var(--chrome-hairline, var(--ui-tooltip-border, rgba(255, 255, 255, 0.08)));
+  box-shadow: var(--shadow-popover, var(--shadow-pop, 0 6px 20px rgba(0, 0, 0, 0.28))), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
   font-size: 0.68rem;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
@@ -22,6 +24,15 @@
   /* Reuse centralized motion primitives instead of a local @keyframes. */
   --motion-enter-from: 2px;
   animation: motion-enter-rise var(--za-motion-fast, 120ms) var(--za-ease-out, ease) both;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-tooltip {
+    background: var(--ui-tooltip-bg, rgba(28, 30, 36, 0.96));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-pop, 0 6px 20px rgba(0, 0, 0, 0.28));
+  }
 }
 
 .app-tooltip__line {

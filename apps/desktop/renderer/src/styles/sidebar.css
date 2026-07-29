@@ -628,6 +628,7 @@
   padding: var(--space-8) var(--space-2);
 }
 .sidebar-conversation-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-1);
@@ -645,6 +646,7 @@
   transition:
     background var(--za-motion-fast),
     border-color var(--za-motion-fast),
+    box-shadow var(--za-motion-fast),
     color var(--za-motion-fast);
 }
 .sidebar-conversation-item:hover {
@@ -653,12 +655,26 @@
   box-shadow: none;
   color: var(--graphite-base);
 }
+/* 云端式选中浮层：毛玻璃底 + 轻边 + 左侧 azure 印记，避免实心浅蓝灰底。 */
 .sidebar-conversation-item.active {
-  background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
-  border-color: transparent;
-  box-shadow: none;
+  background: var(--glass-control, var(--ui-surface-selected, var(--za-sidebar-thread-active-bg)));
+  -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
+  backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
+  border-color: color-mix(in srgb, var(--chrome-hairline, var(--za-line)) 72%, transparent);
+  box-shadow:
+    inset 2px 0 0 var(--azure-trace),
+    var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   color: var(--graphite-base);
   font-weight: 500;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar-conversation-item.active {
+    background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: inset 2px 0 0 var(--azure-trace);
+  }
 }
 .sidebar-conv-title {
   flex: 1 1 auto;

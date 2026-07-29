@@ -50,10 +50,13 @@ body:has(.quick-chat-shell) {
   flex: 0 0 auto;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--quick-border);
+  border: 1px solid var(--chrome-hairline, var(--quick-border));
   border-radius: 14px;
-  background: var(--quick-surface);
-  box-shadow: var(--quick-shadow);
+  /* 独立窗已 transparent；bar 走 glass-popover 透出桌面/vibrancy */
+  background: var(--glass-popover, var(--quick-surface));
+  backdrop-filter: blur(var(--blur-popover, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  box-shadow: var(--shadow-popover, var(--quick-shadow)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
   -webkit-app-region: drag;
   transition: border-color 120ms ease;
 }
@@ -350,14 +353,27 @@ body:has(.quick-chat-shell) {
   z-index: 10;
   overflow: hidden;
   /* Compact floating card under the bar — single outline, no nested double border. */
-  border: 1px solid var(--quick-border);
+  border: 1px solid var(--chrome-hairline, var(--quick-border));
   border-radius: 12px;
   color: var(--graphite-base);
-  background: var(--quick-surface);
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--quick-text) 12%, transparent);
+  /* popover 与 bar 同档 glass-popover */
+  background: var(--glass-popover, var(--quick-surface));
+  backdrop-filter: blur(var(--blur-popover, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  box-shadow: var(--shadow-popover, 0 8px 20px color-mix(in srgb, var(--quick-text) 12%, transparent)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   outline: 0;
   -webkit-app-region: no-drag;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .quick-chat-bar,
+  .quick-chat-popover-shell {
+    background: var(--quick-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--quick-shadow);
+  }
 }
 
 .quick-chat-popover-panel {

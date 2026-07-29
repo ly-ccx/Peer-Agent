@@ -764,16 +764,28 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--space-2);
-  background: var(--paper-sheet);
+  /* 选择器菜单统一 glass-popover 毛玻璃 */
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover));
+  -webkit-backdrop-filter: blur(var(--blur-popover));
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   isolation: isolate;
   z-index: var(--z-dropdown-portal, 10000);
   max-height: 280px;
   overflow-y: auto;
   --motion-enter-from: calc(-1 * var(--za-motion-shift-sm));
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pa-dropdown-menu {
+    background: var(--paper-sheet, var(--chrome-raised));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-popover);
+  }
 }
 .pa-dropdown-menu.is-up {
   --motion-enter-from: var(--za-motion-shift-sm);
@@ -1370,10 +1382,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--paper-sheet);
-  border: 1px solid var(--chrome-hairline-strong, var(--chrome-hairline));
+  /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-drag);
 }
 
 .llm-model-settings-dialog {

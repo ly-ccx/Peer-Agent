@@ -841,16 +841,37 @@
   /* Upload dialog */
   .skill-upload-overlay {
     @apply fixed inset-0 z-50 grid place-items-center;
-    background: rgba(255, 255, 255, 0.35);
-    backdrop-filter: blur(1.5px);
-    -webkit-backdrop-filter: blur(1.5px);
+    background: rgba(8, 12, 18, 0.40);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
 
   .skill-upload-dialog {
     @apply grid w-[480px] gap-5 p-7;
     border-radius: var(--ui-radius-modal);
-    background: #fff;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    /* 对齐 glass-popover 毛玻璃配方（本轮只 CSS，不迁 Overlay） */
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover));
+    -webkit-backdrop-filter: blur(var(--blur-popover));
+    border: 1px solid var(--chrome-hairline, var(--za-line));
+    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .skill-detail-overlay,
+    .skill-upload-overlay {
+      background: rgba(8, 12, 18, 0.55);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .skill-detail-dialog,
+    .skill-upload-dialog {
+      background: var(--chrome-raised, var(--paper-sheet, #fff));
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: var(--shadow-popover);
+    }
   }
 
   .skill-upload-dialog header {
@@ -1087,8 +1108,9 @@
     @apply fixed inset-0 flex items-center justify-center;
     z-index: 1000;
     padding: 40px;
-    background: rgba(5, 8, 14, 0.62);
+    background: rgba(8, 12, 18, 0.40);
     backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
 
   .skill-detail-dialog {
@@ -1096,9 +1118,12 @@
     width: min(900px, 90vw);
     max-height: min(820px, 88vh);
     color: var(--za-text);
-    background: color-mix(in srgb, var(--za-thread-bg) 92%, #fff 8%);
-    border: 1px solid color-mix(in srgb, var(--za-line) 76%, #fff 24%);
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+    /* 对齐 glass-popover 毛玻璃配方（本轮只 CSS，不迁 Overlay） */
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover));
+    -webkit-backdrop-filter: blur(var(--blur-popover));
+    border: 1px solid var(--chrome-hairline, var(--za-line));
+    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   }
 
   .skill-detail-header {

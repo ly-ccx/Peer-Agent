@@ -16,16 +16,40 @@
     display: grid;
     place-items: center;
     padding: var(--space-8);
-    /* 统一冷调遮罩，而非纯黑硬编码 */
-    background: rgba(8, 12, 18, 0.46);
-    backdrop-filter: blur(2px);
+    /* 统一冷调遮罩：半透 + 中等模糊，给面板毛玻璃留出景深 */
+    background: rgba(8, 12, 18, 0.40);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     /* 动效基元（motion.css）：backdrop 只淡入，位移交给面板。 */
     animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .pa-overlay-panel {
+    /* 统一毛玻璃面板配方（frost glass-popover token）。
+       业务面板若再写实色 background，会盖掉本层——应删除覆盖而非另起 blur。 */
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover));
+    -webkit-backdrop-filter: blur(var(--blur-popover));
+    border: 1px solid var(--chrome-hairline, var(--za-line));
+    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
     /* 动效基元：淡入 + 上移（enter-rise）。 */
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+  }
+
+  /* 系统偏好关闭半透明时：回退不透明表面，去掉 blur（对齐 sidebar 降级模式）。 */
+  @media (prefers-reduced-transparency: reduce) {
+    .pa-overlay-backdrop {
+      background: rgba(8, 12, 18, 0.55);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .pa-overlay-panel {
+      background: var(--chrome-raised, var(--pa-surface-card, var(--paper-sheet)));
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: var(--shadow-popover);
+    }
   }
 
   /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
@@ -48,8 +72,9 @@
   }
 
   .pa-overlay-backdrop--drawer-soft {
-    background: rgba(8, 12, 18, 0.18);
-    backdrop-filter: blur(1px);
+    background: rgba(8, 12, 18, 0.22);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .pa-overlay-backdrop--drawer .pa-overlay-panel {
@@ -57,10 +82,12 @@
     height: 100vh;
     max-height: 100vh;
     border-radius: 0;
-    /* 抽屉需自带不透明背景：基座 .pa-overlay-panel 本身不带背景色。 */
-    background: var(--chrome-raised);
+    /* 抽屉同样走 glass-popover；边与阴影用 drawer 档位微调。 */
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover));
+    -webkit-backdrop-filter: blur(var(--blur-popover));
     border-left: 1px solid var(--chrome-hairline);
-    box-shadow: var(--shadow-drag);
+    box-shadow: var(--shadow-drag), var(--glass-edge-highlight);
     display: flex;
     flex-direction: column;
     overflow: hidden;
