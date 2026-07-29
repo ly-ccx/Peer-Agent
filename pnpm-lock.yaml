@@ -256,7 +256,11 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/system-context: {}
+  packages/system-context:
+    dependencies:
+      '@peer-agent/runtime-core':
+        specifier: workspace:*
+        version: link:../runtime-core
 
   packages/task-thread:
     dependencies:
