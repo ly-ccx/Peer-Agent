@@ -1287,6 +1287,9 @@ function createWindow() {
     minWidth: 1040,
     minHeight: 720,
     title: 'Peer Agent',
+    // 冷启动首帧前不要把空窗露出来：show:false + ready-to-show 再显示。
+    // 否则 macOS 透明底会在 HTML/CSS 注入前短暂露黑（「首次打开黑一下，第二次正常」）。
+    show: false,
     backgroundColor: isMac ? '#00000000' : '#1e1e2e',
     ...(isMac
       ? {
@@ -1321,6 +1324,20 @@ function createWindow() {
   // 渲染层挂载完成后补发一次初始状态，避免错过加载期间的全屏切换。
   mainWindow.webContents.on('did-finish-load', sendFullscreenState);
 
+  let shown = false;
+  const revealMainWindow = () => {
+    if (shown || mainWindow.isDestroyed()) return;
+    shown = true;
+    if (!mainWindow.isVisible()) mainWindow.show();
+  };
+  // 首屏内容可画时再 show，避免冷启动透明窗体闪黑。
+  mainWindow.once('ready-to-show', revealMainWindow);
+  // 兜底：个别环境 ready-to-show 可能不触发，did-finish-load 后再尝试一次。
+  mainWindow.webContents.once('did-finish-load', () => {
+    // 给渲染层一帧机会提交样式，再 reveal。
+    setTimeout(revealMainWindow, 0);
+  });
+
   if (isDev) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
@@ -1329,6 +1346,7 @@ function createWindow() {
       : path.join(workspaceRoot, 'apps/desktop/dist/index.html');
     void mainWindow.loadFile(indexPath);
   }
+  return mainWindow;
 }
 
 // ── Bootstrap & Session ──
