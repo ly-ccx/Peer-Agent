@@ -1478,7 +1478,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   // 同时把磁盘写入合并到 300ms 窗口，降低高频 tick 的 IO 与广播放大。
   const runnerProgressOverlay = new Map();
   const runnerProgressTimers = new Map();
+  // soft progress IPC 合并：写盘 300ms、广播 100ms，硬状态仍即时。
+  const runnerProgressNotifyTimers = new Map();
   const RUNNER_PROGRESS_PERSIST_MS = 300;
+  const RUNNER_PROGRESS_NOTIFY_MS = 100;
 
   function clearRunnerProgressState(planId) {
     if (planId) {
@@ -1488,10 +1491,17 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         clearTimeout(timer);
         runnerProgressTimers.delete(planId);
       }
+      const notifyTimer = runnerProgressNotifyTimers.get(planId);
+      if (notifyTimer) {
+        clearTimeout(notifyTimer);
+        runnerProgressNotifyTimers.delete(planId);
+      }
       return;
     }
     for (const timer of runnerProgressTimers.values()) clearTimeout(timer);
     runnerProgressTimers.clear();
+    for (const timer of runnerProgressNotifyTimers.values()) clearTimeout(timer);
+    runnerProgressNotifyTimers.clear();
     runnerProgressOverlay.clear();
   }
 
@@ -1529,6 +1539,22 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       flushRunnerProgressPersist(planId, { notify: false });
     }, RUNNER_PROGRESS_PERSIST_MS);
     runnerProgressTimers.set(planId, timer);
+  }
+
+  /** soft progress 广播合并：同一 plan 100ms 窗口只推最新 runner 快照。 */
+  function scheduleRunnerProgressNotify(planId, conversationId) {
+    if (runnerProgressNotifyTimers.has(planId)) return;
+    const timer = setTimeout(() => {
+      runnerProgressNotifyTimers.delete(planId);
+      const plan = runnerProgressOverlay.get(planId) || plans.get(planId);
+      if (!plan) return;
+      notifyChanged('persist', planId, {
+        conversationId: conversationId ?? plan.conversationId ?? null,
+        changeKind: 'runner-progress',
+        runner: plan.runner ?? null,
+      });
+    }, RUNNER_PROGRESS_NOTIFY_MS);
+    runnerProgressNotifyTimers.set(planId, timer);
   }
 
   function planFile(id) {
@@ -2283,11 +2309,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       };
       runnerProgressOverlay.set(planId, next);
       scheduleRunnerProgressPersist(planId);
-      notifyChanged('persist', next.planId, {
-        conversationId: next.conversationId ?? null,
-        changeKind: 'runner-progress',
-        runner: next.runner ?? null,
-      });
+      // soft progress：IPC 合并；硬状态跃迁仍走下面即时 persist 路径。
+      scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);
       return next;
     }
 

@@ -56,6 +56,23 @@ function shouldRefreshForConversation(
   return true;
 }
 
+/** Runner 展示指纹：双通道可能投递等价快照，避免重复 setState。 */
+function runnerFingerprint(runner: GoalPlan['runner'] | Partial<GoalRunnerState> | null | undefined): string {
+  if (!runner) return '';
+  const r = runner as Record<string, unknown>;
+  return [
+    r.status ?? '',
+    r.phase ?? '',
+    r.enabled === true ? '1' : r.enabled === false ? '0' : '',
+    r.roundCount ?? '',
+    r.toolCallCount ?? '',
+    r.intent ?? '',
+    r.currentTaskId ?? '',
+    r.lastTickAt ?? '',
+    r.lastError ?? '',
+  ].join('|');
+}
+
 function patchPlanRunner(
   plans: readonly GoalPlan[],
   planId: string | null | undefined,
@@ -65,11 +82,14 @@ function patchPlanRunner(
   let changed = false;
   const next = plans.map((plan) => {
     if (plan.planId !== planId) return plan;
-    changed = true;
     const mergedRunner = {
       ...(plan.runner ?? {}),
       ...runner,
     } as GoalRunnerState;
+    // 引用相同或关键展示字段未变：吞掉 goalPlans/goalRunner 双通道重复投递。
+    if (plan.runner === mergedRunner) return plan;
+    if (runnerFingerprint(plan.runner) === runnerFingerprint(mergedRunner)) return plan;
+    changed = true;
     return {
       ...plan,
       runner: mergedRunner,

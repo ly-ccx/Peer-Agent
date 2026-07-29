@@ -10,9 +10,40 @@ const FALLBACK_QODER_MODELS = [
 ];
 
 const latestCatalogByConfigDir = new Map();
+/** 本地读盘短缓存：避免 goal tick / metadata 热路径反复 readFileSync。 */
+const localCatalogReadCache = new Map();
+const LOCAL_CATALOG_TTL_MS = 5_000;
 
 function catalogCacheKey(options = {}) {
   return resolveQoderConfigDir(options);
+}
+
+function readLocalCatalogCached(options = {}) {
+  const key = catalogCacheKey(options);
+  const hit = localCatalogReadCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < LOCAL_CATALOG_TTL_MS) return hit.models;
+  let models;
+  try {
+    const encrypted = readEncryptedCatalogSync(options);
+    if (encrypted.length) {
+      models = mergeModelCatalog(encrypted, readLegacyModelCatalog(options));
+    } else {
+      models = null;
+    }
+  } catch {
+    models = null;
+  }
+  if (!models) {
+    try {
+      const parsed = parseQoderModelCatalogText(fs.readFileSync(modelPath(options), 'utf8'));
+      models = parsed.length ? parsed : [...FALLBACK_QODER_MODELS];
+    } catch {
+      models = [...FALLBACK_QODER_MODELS];
+    }
+  }
+  localCatalogReadCache.set(key, { at: now, models });
+  return models;
 }
 
 function modelPath(options = {}) {
@@ -279,16 +310,8 @@ function readEncryptedCatalogSync(options = {}) {
 export function getQoderModelCatalog(options = {}) {
   const cached = latestCatalogByConfigDir.get(catalogCacheKey(options));
   if (cached?.length) return cached;
-  try {
-    const models = readEncryptedCatalogSync(options);
-    if (models.length) return mergeModelCatalog(models, readLegacyModelCatalog(options));
-  } catch {}
-  try {
-    const models = parseQoderModelCatalogText(fs.readFileSync(modelPath(options), 'utf8'));
-    return models.length ? models : [...FALLBACK_QODER_MODELS];
-  } catch {
-    return [...FALLBACK_QODER_MODELS];
-  }
+  // 本地 catalog 读盘短缓存（5s），热路径复用；远程 list 仍写入 latestCatalogByConfigDir。
+  return readLocalCatalogCached(options);
 }
 
 export function getQoderModelMetadata(modelId, options = {}) {

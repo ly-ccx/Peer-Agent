@@ -1561,19 +1561,22 @@ test('onChange: setRunnerState 进度字段广播 conversationId + changeKind=ru
   watched.setRunnerState(plan.planId, { roundCount: 1, toolCallCount: 2, phase: 'act' });
   watched.setRunnerState(plan.planId, { roundCount: 2, toolCallCount: 3, phase: 'act' });
 
-  assert.ok(events.length >= 2, '进度更新应立即广播');
+  // soft progress：IPC 合并到 100ms 窗口，连续 tick 只推最新快照
+  assert.equal(events.length, 0, '进度广播应合并，不应每个 tick 立即 notify');
+  // 内存即时可见
+  assert.equal(watched.getPlan(plan.planId)?.runner?.roundCount, 2);
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.ok(events.length >= 1, '合并窗口后应广播 runner-progress');
   assert.equal(events[0].changeKind, 'runner-progress');
   assert.equal(events[0].conversationId, 'conv-progress');
   assert.equal(events[0].planId, plan.planId);
   assert.ok(events[0].runner, 'runner-progress 应附带 runner 便于 UI 本地 patch');
-  assert.equal(events[0].runner.roundCount, 1);
-  assert.equal(events[1].runner.roundCount, 2);
+  assert.equal(events[0].runner.roundCount, 2, '合并后应是最新 roundCount');
+  assert.equal(events[0].runner.toolCallCount, 3);
 
-  // 内存即时可见
-  assert.equal(watched.getPlan(plan.planId)?.runner?.roundCount, 2);
-
-  // 节流写盘：短时间内磁盘可能仍是旧值，等待 flush 后应落盘
-  await new Promise((resolve) => setTimeout(resolve, 350));
+  // 节流写盘：等待 flush 后应落盘
+  await new Promise((resolve) => setTimeout(resolve, 250));
   const disk = JSON.parse(
     readFileSync(path.join(storeDir, `${plan.planId}.json`), 'utf8'),
   );
