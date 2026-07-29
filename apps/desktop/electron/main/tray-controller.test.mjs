@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  TRAY_RECENT_EXPANDED_LIMIT,
   TRAY_RECENT_LIMIT,
   buildTrayMenuTemplate,
   truncateTrayTitle,
@@ -36,7 +37,6 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       recent: [],
       handlers: {
-        onMore: () => calls.push('more'),
         onNewChat: () => calls.push('new'),
         onOpenApp: () => calls.push('open'),
         onQuit: () => calls.push('quit'),
@@ -46,16 +46,16 @@ describe('buildTrayMenuTemplate', () => {
     const labels = template.map((item) => item.label).filter(Boolean);
     assert.ok(labels.includes('最近会话'));
     assert.ok(labels.includes('暂无会话'));
-    assert.ok(labels.includes('更多'));
+    // 无溢出时不展示「更多」
+    assert.equal(labels.includes('更多'), false);
     assert.ok(labels.includes('新会话'));
     assert.ok(labels.includes('打开 Peer Agent'));
     assert.ok(labels.includes('退出 Peer Agent'));
 
     template.find((item) => item.id === 'tray-new-chat').click();
-    template.find((item) => item.id === 'tray-more').click();
     template.find((item) => item.id === 'tray-open').click();
     template.find((item) => item.id === 'tray-quit').click();
-    assert.deepEqual(calls, ['new', 'more', 'open', 'quit']);
+    assert.deepEqual(calls, ['new', 'open', 'quit']);
   });
 
   it('includes recent conversations with title and workspace subtitle', () => {
@@ -104,5 +104,54 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({ recent });
     const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
     assert.equal(recentItems.length, TRAY_RECENT_LIMIT);
+  });
+
+  it('shows more when overflow exists and expands via onExpandRecent', () => {
+    const recent = Array.from({ length: 8 }, (_, i) => ({
+      id: `c${i + 1}`,
+      title: `会话 ${i + 1}`,
+      workspacePath: '/tmp/ws',
+    }));
+    const expanded = [];
+    const template = buildTrayMenuTemplate({
+      recent,
+      expanded: false,
+      handlers: { onExpandRecent: () => expanded.push('expand') },
+    });
+    const more = template.find((item) => item.id === 'tray-more');
+    assert.ok(more, 'should show 更多 when more than collapsed limit');
+    more.click();
+    assert.deepEqual(expanded, ['expand']);
+  });
+
+  it('expanded menu lists more conversations and offers collapse', () => {
+    const recent = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i + 1}`,
+      title: `会话 ${i + 1}`,
+      workspacePath: '/tmp/ws',
+    }));
+    const collapsed = [];
+    const template = buildTrayMenuTemplate({
+      recent,
+      expanded: true,
+      handlers: { onCollapseRecent: () => collapsed.push('collapse') },
+    });
+    const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
+    assert.equal(recentItems.length, 12);
+    assert.ok(recentItems.length <= TRAY_RECENT_EXPANDED_LIMIT);
+    const less = template.find((item) => item.id === 'tray-less');
+    assert.ok(less, 'should show 收起 when expanded');
+    assert.equal(template.some((item) => item.id === 'tray-more'), false);
+    less.click();
+    assert.deepEqual(collapsed, ['collapse']);
+  });
+
+  it('hides more when total recent fits collapsed limit', () => {
+    const recent = Array.from({ length: 3 }, (_, i) => ({
+      id: `c${i + 1}`,
+      title: `会话 ${i + 1}`,
+    }));
+    const template = buildTrayMenuTemplate({ recent, expanded: false });
+    assert.equal(template.some((item) => item.id === 'tray-more'), false);
   });
 });

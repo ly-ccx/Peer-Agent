@@ -61,7 +61,7 @@ import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
-import { createTrayController, TRAY_RECENT_LIMIT } from './tray-controller.mjs';
+import { createTrayController, TRAY_RECENT_EXPANDED_LIMIT, TRAY_RECENT_LIMIT } from './tray-controller.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
@@ -510,9 +510,11 @@ function openTrayMore() {
 }
 
 async function listTrayRecentConversations({ limit = TRAY_RECENT_LIMIT } = {}) {
+  const requested = Math.max(1, Number(limit) || TRAY_RECENT_LIMIT);
+  // 允许「更多」展开到 TRAY_RECENT_EXPANDED_LIMIT，不再硬钳在 5。
   const listed = conversationStore.listConversations({
     status: 'active',
-    limit: Math.max(1, Math.min(Number(limit) || TRAY_RECENT_LIMIT, TRAY_RECENT_LIMIT)),
+    limit: Math.min(requested, TRAY_RECENT_EXPANDED_LIMIT),
   });
   return (Array.isArray(listed) ? listed : []).map((item) => ({
     id: item.id,
