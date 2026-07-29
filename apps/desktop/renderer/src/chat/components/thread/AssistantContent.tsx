@@ -21,7 +21,6 @@ import type {
   CompactionMeta,
   ToolProgress,
   SegmentGroup,
-  ThinkingKind,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
@@ -257,27 +256,18 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   );
 }
 
-function thinkingKindLabel(kind: ThinkingKind | undefined, isZh: boolean): string | null {
-  if (kind === 'summary') return isZh ? '推理摘要' : 'Reasoning summary';
-  if (kind === 'reasoning') return isZh ? '思考过程' : 'Reasoning';
-  return null;
-}
-
-function ThinkingTextGroup({ content, isZh, kind }: {
+function ThinkingTextGroup({ content, isZh }: {
   readonly content: string;
   readonly isZh: boolean;
-  readonly kind?: ThinkingKind;
 }) {
   const [expandedContentAnchor, setExpandedContentAnchor] = useState<string | null>(null);
   const textWindow = useMemo(() => windowProcessingText(content), [content]);
   const contentAnchor = content.slice(0, 128);
   const showFullText = expandedContentAnchor === contentAnchor;
   const visibleContent = showFullText ? content : textWindow.content;
-  const label = thinkingKindLabel(kind, isZh);
 
   return (
-    <div className={`thinking-text${kind ? ` thinking-text--${kind}` : ''}`}>
-      {label ? <div className="thinking-kind-label">{label}</div> : null}
+    <div className="thinking-text">
       {textWindow.omittedCharacterCount > 0 ? (
         <button
           type="button"
@@ -307,7 +297,6 @@ function TimelineGroups({ groups, isZh }: {
           key={`thinking-${groupIndex}-${group.kind || 'legacy'}`}
           content={group.content}
           isZh={isZh}
-          kind={group.kind}
         />
       );
     }

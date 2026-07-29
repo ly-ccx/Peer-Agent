@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   isMessageStructureRewritten,
   planThreadScrollAfterMessagesChange,
+  resolveThreadFollowAfterScroll,
   shouldStickMessageRailToLatest,
 } from './threadScrollPolicy.ts';
 
@@ -57,5 +58,51 @@ describe('thread scroll policy after compaction', () => {
     assert.equal(shouldStickMessageRailToLatest(15, 16), false);
     assert.equal(shouldStickMessageRailToLatest(0, 10), true);
     assert.equal(shouldStickMessageRailToLatest(5, 0), false);
+  });
+});
+
+describe('thread follow after scroll', () => {
+  it('enters follow when the viewport is already at bottom', () => {
+    assert.deepEqual(
+      resolveThreadFollowAfterScroll({
+        currentlyFollowing: false,
+        atBottom: true,
+        userInitiated: false,
+      }),
+      { nextFollowing: true, shouldReaffirmBottom: false },
+    );
+  });
+
+  it('keeps follow and reaffirms bottom when stream/layout drifts without user gesture', () => {
+    assert.deepEqual(
+      resolveThreadFollowAfterScroll({
+        currentlyFollowing: true,
+        atBottom: false,
+        userInitiated: false,
+      }),
+      { nextFollowing: true, shouldReaffirmBottom: true },
+    );
+  });
+
+  it('exits follow only when the user intentionally leaves the bottom', () => {
+    assert.deepEqual(
+      resolveThreadFollowAfterScroll({
+        currentlyFollowing: true,
+        atBottom: false,
+        userInitiated: true,
+      }),
+      { nextFollowing: false, shouldReaffirmBottom: false },
+    );
+  });
+
+  it('does not force bottom while the user is reading older turns', () => {
+    assert.deepEqual(
+      resolveThreadFollowAfterScroll({
+        currentlyFollowing: false,
+        atBottom: false,
+        userInitiated: true,
+      }),
+      { nextFollowing: false, shouldReaffirmBottom: false },
+    );
   });
 });

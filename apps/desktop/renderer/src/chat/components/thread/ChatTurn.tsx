@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { intakeAttachments } from '../../state/attachmentIntake';
 import { formatDuration, formatTime } from '../../state/format';
 import type { ChatAttachment } from '../../state/types';
@@ -22,7 +22,11 @@ interface ChatTurnProps {
   readonly onRegenerate: (messageIndex: number) => void;
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
   readonly turnIndex: number;
-  readonly onMeasure: (index: number, element: HTMLElement | null) => void;
+  readonly onMeasure: (
+    index: number,
+    element: HTMLElement | null,
+    previousElement?: HTMLElement | null,
+  ) => void;
 }
 
 function StreamingElapsedTime({ startedAt, isZh }: { readonly startedAt: number | null; readonly isZh: boolean }) {
@@ -64,10 +68,18 @@ function ChatTurnImpl({
   onMeasure,
 }: ChatTurnProps) {
   const lastMessage = turn.messages.at(-1)?.msg;
-  const measureRef = useCallback(
-    (element: HTMLElement | null) => onMeasure(turnIndex, element),
-    [onMeasure, turnIndex],
-  );
+  const measureRef = useMemo(() => {
+    let ownedElement: HTMLElement | null = null;
+    return (element: HTMLElement | null) => {
+      if (element) {
+        ownedElement = element;
+        onMeasure(turnIndex, element);
+        return;
+      }
+      if (ownedElement) onMeasure(turnIndex, null, ownedElement);
+      ownedElement = null;
+    };
+  }, [onMeasure, turnIndex]);
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');

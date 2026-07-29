@@ -54,3 +54,52 @@ export function shouldStickMessageRailToLatest(
   if (previousItemCount <= 0) return true;
   return nextItemCount < previousItemCount;
 }
+
+/**
+ * 滚动事件后如何维护 stick-to-bottom / follow。
+ *
+ * 关键：
+ * - 点「向下箭头」会进入 follow；
+ * - 流式/虚拟列表重测会触发 scroll 且短暂离底；
+ * - 若仅凭瞬时 distanceToBottom 清掉 follow，后续流式就不会再贴底，视口像瞬间回顶。
+ *
+ * 规则：
+ * - 已在底部 → 进入/保持 follow；
+ * - follow 中且用户手势导致离底 → 退出 follow；
+ * - follow 中但非用户手势离底（内容增高、虚拟测量、程序滚动）→ 保持 follow 并 reaffirm；
+ * - 非 follow 且未到底 → 保持离开。
+ */
+export function resolveThreadFollowAfterScroll(input: {
+  readonly currentlyFollowing: boolean;
+  readonly atBottom: boolean;
+  readonly userInitiated: boolean;
+}): {
+  readonly nextFollowing: boolean;
+  readonly shouldReaffirmBottom: boolean;
+} {
+  if (input.atBottom) {
+    return {
+      nextFollowing: true,
+      shouldReaffirmBottom: false,
+    };
+  }
+
+  if (!input.currentlyFollowing) {
+    return {
+      nextFollowing: false,
+      shouldReaffirmBottom: false,
+    };
+  }
+
+  if (input.userInitiated) {
+    return {
+      nextFollowing: false,
+      shouldReaffirmBottom: false,
+    };
+  }
+
+  return {
+    nextFollowing: true,
+    shouldReaffirmBottom: true,
+  };
+}

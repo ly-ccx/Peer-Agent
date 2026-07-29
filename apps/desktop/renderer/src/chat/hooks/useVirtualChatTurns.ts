@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createFrameCoalescer } from '../state/frameCoalescer';
+import { IndexedResourceRegistry } from '../state/indexedResourceRegistry';
 import {
   calculateVirtualTurnRange,
   DEFAULT_TURN_ESTIMATE_PX,
   DEFAULT_TURN_OVERSCAN_PX,
   estimateVirtualTurnOffset,
+  type VirtualTurnRange,
 } from '../state/virtualTurns';
 
 interface UseVirtualChatTurnsOptions {
+  readonly ownerKey: string | null;
   readonly count: number;
   readonly scrollRef: React.RefObject<HTMLDivElement | null>;
   readonly enabled: boolean;
@@ -16,69 +20,182 @@ interface ScrollToTurnOptions {
   readonly align?: 'start' | 'center';
 }
 
+interface ViewportGeometry {
+  scrollTop: number;
+  clientHeight: number;
+}
+
+const EMPTY_RANGE: VirtualTurnRange = {
+  items: [],
+  totalSize: 0,
+  paddingStart: 0,
+  paddingEnd: 0,
+  startIndex: 0,
+  endIndex: -1,
+};
+
+function rangesEqual(left: VirtualTurnRange, right: VirtualTurnRange): boolean {
+  if (
+    left.startIndex !== right.startIndex
+    || left.endIndex !== right.endIndex
+    || left.paddingStart !== right.paddingStart
+    || left.paddingEnd !== right.paddingEnd
+    || left.totalSize !== right.totalSize
+    || left.items.length !== right.items.length
+  ) {
+    return false;
+  }
+  for (let index = 0; index < left.items.length; index += 1) {
+    const leftItem = left.items[index]!;
+    const rightItem = right.items[index]!;
+    if (
+      leftItem.index !== rightItem.index
+      || leftItem.start !== rightItem.start
+      || leftItem.size !== rightItem.size
+      || leftItem.end !== rightItem.end
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
- * 无外部依赖的动态高度轮次虚拟化。测量结果按 index 缓存；轮次数变化时保留已有高度，
- * 新轮次先用估算值。ResizeObserver 只观察当前窗口中的少量节点。
+ * 无外部依赖的动态高度轮次虚拟化。
+ *
+ * 关键性能约束：
+ * - 滚动几何（scrollTop / clientHeight）只放 ref，避免每帧 setState 唤醒整棵 ChatSurface。
+ * - 仅当虚拟窗口索引 / padding / totalSize 真正变化时才 setState（rangeChanged）。
+ * - 测量结果按 index 缓存；ResizeObserver 只观察当前窗口中的少量节点。
  */
-export function useVirtualChatTurns({ count, scrollRef, enabled }: UseVirtualChatTurnsOptions) {
+export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: UseVirtualChatTurnsOptions) {
   const measuredSizesRef = useRef(new Map<number, number>());
-  const observersRef = useRef(new Map<Element, ResizeObserver>());
-  const [revision, setRevision] = useState(0);
-  const [viewport, setViewport] = useState({ scrollTop: 0, clientHeight: 0 });
-  const [forcedIndex, setForcedIndex] = useState<number | null>(null);
+  const observersRef = useRef(new IndexedResourceRegistry<HTMLElement, { dispose(): void }>());
+  const forcedIndexReleaseRef = useRef(createFrameCoalescer({
+    request: (callback) => window.requestAnimationFrame(callback),
+    cancel: (frameId) => window.cancelAnimationFrame(frameId),
+  }));
+  const viewportRef = useRef<ViewportGeometry>({ scrollTop: 0, clientHeight: 0 });
+  const forcedIndexRef = useRef<number | null>(null);
+  const rangeRef = useRef<VirtualTurnRange>(EMPTY_RANGE);
+  const [range, setRange] = useState<VirtualTurnRange>(EMPTY_RANGE);
+
+  const computeRange = useCallback((forceIndex: number | null = forcedIndexRef.current): VirtualTurnRange => {
+    if (count <= 0) {
+      return EMPTY_RANGE;
+    }
+    return calculateVirtualTurnRange({
+      count,
+      scrollTop: viewportRef.current.scrollTop,
+      viewportSize: viewportRef.current.clientHeight,
+      measuredSizes: measuredSizesRef.current,
+      estimateSize: DEFAULT_TURN_ESTIMATE_PX,
+      // When virtualization is disabled, force the full range so all turns stay mounted.
+      overscanPx: enabled ? DEFAULT_TURN_OVERSCAN_PX : Number.MAX_SAFE_INTEGER,
+      forceIndex: enabled ? forceIndex : null,
+    });
+  }, [count, enabled]);
+
+  const commitRangeIfChanged = useCallback((next: VirtualTurnRange): boolean => {
+    // rangeChanged: only publish React state when the virtual window truly changes.
+    const rangeChanged = !rangesEqual(rangeRef.current, next);
+    if (!rangeChanged) return false;
+    rangeRef.current = next;
+    setRange(next);
+    return true;
+  }, []);
+
+  const syncRange = useCallback((forceIndex: number | null = forcedIndexRef.current) => {
+    commitRangeIfChanged(computeRange(forceIndex));
+  }, [commitRangeIfChanged, computeRange]);
+  const countRef = useRef(count);
+  countRef.current = count;
+  const syncRangeRef = useRef(syncRange);
+  syncRangeRef.current = syncRange;
+  const ownerKeyRef = useRef(ownerKey);
+
+  const refreshMountedMeasurements = useCallback(() => {
+    measuredSizesRef.current.clear();
+    observersRef.current.forEach((element, index) => {
+      if (index < 0 || index >= countRef.current) return;
+      measuredSizesRef.current.set(
+        index,
+        Math.max(1, element.getBoundingClientRect().height),
+      );
+    });
+  }, []);
 
   const updateViewport = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
-    setViewport((previous) => {
-      const next = { scrollTop: element.scrollTop, clientHeight: element.clientHeight };
-      return previous.scrollTop === next.scrollTop && previous.clientHeight === next.clientHeight
-        ? previous
-        : next;
-    });
+    const next: ViewportGeometry = {
+      scrollTop: element.scrollTop,
+      clientHeight: element.clientHeight,
+    };
+    const previous = viewportRef.current;
+    if (previous.scrollTop === next.scrollTop && previous.clientHeight === next.clientHeight) {
+      return;
+    }
+    viewportRef.current = next;
+    // Geometry lives in a ref; React only re-renders when the derived virtual range changes.
+    syncRangeRef.current();
   }, [scrollRef]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    updateViewport();
-    const observer = new ResizeObserver(updateViewport);
+
+    // Callback refs have already committed at this point. On an owner switch,
+    // discard the previous conversation's index heights, but keep the observers
+    // attached to the nodes that now belong to the new conversation. A destructive
+    // reset here would leave those mounted nodes permanently unobserved until a
+    // later message happened to remount the virtual window.
+    if (ownerKeyRef.current !== ownerKey) {
+      ownerKeyRef.current = ownerKey;
+      forcedIndexReleaseRef.current.cancel();
+      forcedIndexRef.current = null;
+      refreshMountedMeasurements();
+    }
+
+    viewportRef.current = {
+      scrollTop: element.scrollTop,
+      clientHeight: element.clientHeight,
+    };
+    syncRangeRef.current();
+    const observer = new ResizeObserver(() => {
+      const target = scrollRef.current;
+      if (!target) return;
+      viewportRef.current = {
+        scrollTop: target.scrollTop,
+        clientHeight: target.clientHeight,
+      };
+      syncRangeRef.current();
+    });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [scrollRef, updateViewport]);
+  }, [ownerKey, refreshMountedMeasurements, scrollRef]);
 
   useEffect(() => {
     for (const index of measuredSizesRef.current.keys()) {
       if (index >= count) measuredSizesRef.current.delete(index);
     }
-  }, [count]);
+    syncRange();
+  }, [count, syncRange]);
 
   useEffect(() => () => {
-    observersRef.current.forEach((observer) => observer.disconnect());
     observersRef.current.clear();
+    forcedIndexReleaseRef.current.cancel();
   }, []);
 
-  const range = useMemo(
-    () => calculateVirtualTurnRange({
-      count,
-      scrollTop: viewport.scrollTop,
-      viewportSize: viewport.clientHeight,
-      measuredSizes: measuredSizesRef.current,
-      estimateSize: DEFAULT_TURN_ESTIMATE_PX,
-      overscanPx: enabled ? DEFAULT_TURN_OVERSCAN_PX : Number.MAX_SAFE_INTEGER,
-      forceIndex: forcedIndex,
-    }),
-    [count, enabled, forcedIndex, revision, viewport.clientHeight, viewport.scrollTop],
-  );
-
-  const measureElement = useCallback((index: number, element: HTMLElement | null) => {
-    for (const [observedElement, observer] of observersRef.current) {
-      if (observedElement instanceof HTMLElement && observedElement.dataset.virtualTurnIndex === String(index)) {
-        observer.disconnect();
-        observersRef.current.delete(observedElement);
-      }
+  const measureElement = useCallback((
+    index: number,
+    element: HTMLElement | null,
+    previousElement?: HTMLElement | null,
+  ) => {
+    if (!element) {
+      if (previousElement) observersRef.current.release(index, previousElement);
+      return;
     }
-    if (!element) return;
 
     const applyMeasurement = () => {
       const nextSize = Math.max(1, element.getBoundingClientRect().height);
@@ -88,7 +205,7 @@ export function useVirtualChatTurns({ count, scrollRef, enabled }: UseVirtualCha
       const scrollElement = scrollRef.current;
       const oldOffset = estimateVirtualTurnOffset(
         index,
-        count,
+        countRef.current,
         measuredSizesRef.current,
         DEFAULT_TURN_ESTIMATE_PX,
       );
@@ -96,26 +213,34 @@ export function useVirtualChatTurns({ count, scrollRef, enabled }: UseVirtualCha
       if (scrollElement && oldOffset < scrollElement.scrollTop) {
         const oldSize = previousSize ?? DEFAULT_TURN_ESTIMATE_PX;
         scrollElement.scrollTop += nextSize - oldSize;
+        viewportRef.current = {
+          scrollTop: scrollElement.scrollTop,
+          clientHeight: scrollElement.clientHeight,
+        };
       }
-      setRevision((value) => value + 1);
+      // Measurement changes may alter offsets/padding even when start/end stay put.
+      syncRangeRef.current();
     };
 
     element.dataset.virtualTurnIndex = String(index);
     applyMeasurement();
-    const observer = new ResizeObserver(applyMeasurement);
-    observer.observe(element);
-    observersRef.current.set(element, observer);
-  }, [count, scrollRef]);
+    observersRef.current.replace(index, element, () => {
+      const observer = new ResizeObserver(applyMeasurement);
+      observer.observe(element);
+      return { dispose: () => observer.disconnect() };
+    });
+  }, [scrollRef]);
 
   const scrollToTurn = useCallback((index: number, options: ScrollToTurnOptions = {}) => {
-    if (index < 0 || index >= count) return;
+    const currentCount = countRef.current;
+    if (index < 0 || index >= currentCount) return;
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
 
-    setForcedIndex(index);
+    forcedIndexRef.current = index;
     const offset = estimateVirtualTurnOffset(
       index,
-      count,
+      currentCount,
       measuredSizesRef.current,
       DEFAULT_TURN_ESTIMATE_PX,
     );
@@ -124,22 +249,40 @@ export function useVirtualChatTurns({ count, scrollRef, enabled }: UseVirtualCha
       ? offset - Math.max(0, (scrollElement.clientHeight - measuredSize) / 2)
       : offset;
     scrollElement.scrollTop = Math.max(0, top);
-    updateViewport();
+    viewportRef.current = {
+      scrollTop: scrollElement.scrollTop,
+      clientHeight: scrollElement.clientHeight,
+    };
+    syncRange(index);
 
-    window.requestAnimationFrame(() => setForcedIndex(null));
-  }, [count, scrollRef, updateViewport]);
+    // A later navigation replaces this release frame. Reset/unmount cancels it,
+    // so a stale conversation can never publish a range into the new owner.
+    forcedIndexReleaseRef.current.request(() => {
+      forcedIndexRef.current = null;
+      syncRangeRef.current(null);
+    });
+  }, [scrollRef]);
 
+  /**
+   * Rebuild the height model without detaching observers from mounted turns.
+   * Used after a structural message rewrite (for example compaction). Observer
+   * ownership only ends when a turn ref releases its exact element or the hook
+   * unmounts; otherwise mounted nodes could remain permanently unobserved.
+   */
   const resetMeasurements = useCallback(() => {
-    measuredSizesRef.current.clear();
-    for (const element of observersRef.current.keys()) {
-      if (!(element instanceof HTMLElement)) continue;
-      const index = Number(element.dataset.virtualTurnIndex);
-      if (!Number.isInteger(index) || index < 0 || index >= count) continue;
-      measuredSizesRef.current.set(index, Math.max(1, element.offsetHeight));
+    forcedIndexReleaseRef.current.cancel();
+    forcedIndexRef.current = null;
+    refreshMountedMeasurements();
+
+    const element = scrollRef.current;
+    if (element) {
+      viewportRef.current = {
+        scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
+      };
     }
-    setRevision((value) => value + 1);
-    updateViewport();
-  }, [count, updateViewport]);
+    syncRangeRef.current();
+  }, [refreshMountedMeasurements, scrollRef]);
 
   return {
     range,

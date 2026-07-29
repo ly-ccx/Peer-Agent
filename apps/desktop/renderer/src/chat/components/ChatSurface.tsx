@@ -123,7 +123,10 @@ import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
 import { useVirtualChatTurns } from '../hooks/useVirtualChatTurns';
-import { planThreadScrollAfterMessagesChange } from '../state/threadScrollPolicy';
+import {
+  planThreadScrollAfterMessagesChange,
+  resolveThreadFollowAfterScroll,
+} from '../state/threadScrollPolicy';
 import {
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
@@ -616,15 +619,16 @@ export function ChatSurface({
     updateViewport: updateVirtualViewport,
     resetMeasurements: resetVirtualMeasurements,
   } = useVirtualChatTurns({
+    ownerKey: conversationId,
     count: chatTurns.length,
     scrollRef: threadRef,
     enabled: virtualizeChatTurns,
   });
-  // 保持 resetVirtualMeasurements 的最新引用，供会话切换 effect 调用而不必把它
-  // 放入依赖（它的 identity 随 count/enabled 变化，会导致会话切换 effect 在每条新消息时重跑）。
-  const resetVirtualMeasurementsRef = useRef(resetVirtualMeasurements);
-  resetVirtualMeasurementsRef.current = resetVirtualMeasurements;
   const shouldAutoScrollRef = useRef(true);
+  // 用户主动滚动意图：只有 wheel/touch/pointer 等手势可退出 follow。
+  // 流式增高、虚拟列表重测、程序贴底触发的 scroll 不得清掉 follow。
+  const userScrollIntentRef = useRef(false);
+  const userScrollIntentClearTimerRef = useRef<number | null>(null);
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
   const pendingThreadScrollRestoreRef = useRef<{
     conversationId: string;
@@ -632,14 +636,39 @@ export function ChatSurface({
   } | null>(null);
   const messageNavigationRequestRef = useRef(0);
 
-  const updateThreadBottomState = useCallback((container: HTMLDivElement | null) => {
+  const markUserScrollIntent = useCallback(() => {
+    userScrollIntentRef.current = true;
+    if (userScrollIntentClearTimerRef.current != null) {
+      window.clearTimeout(userScrollIntentClearTimerRef.current);
+    }
+    // 手势后的惯性滚动仍可能继续触发 scroll；短暂保持 intent，避免误 reaffirm。
+    userScrollIntentClearTimerRef.current = window.setTimeout(() => {
+      userScrollIntentRef.current = false;
+      userScrollIntentClearTimerRef.current = null;
+    }, 120);
+  }, []);
+
+  const updateThreadBottomState = useCallback((
+    container: HTMLDivElement | null,
+    options?: { readonly userInitiated?: boolean },
+  ) => {
     if (!container) return true;
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const atBottom = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
-    shouldAutoScrollRef.current = atBottom;
+    const decision = resolveThreadFollowAfterScroll({
+      currentlyFollowing: shouldAutoScrollRef.current,
+      atBottom,
+      userInitiated: options?.userInitiated === true,
+    });
+    shouldAutoScrollRef.current = decision.nextFollowing;
     // Equality gate: avoid re-rendering ChatSurface when stick-to-bottom flag is unchanged.
-    setIsThreadAtBottom((previous) => (previous === atBottom ? previous : atBottom));
-    return atBottom;
+    setIsThreadAtBottom((previous) => (
+      previous === decision.nextFollowing ? previous : decision.nextFollowing
+    ));
+    if (decision.shouldReaffirmBottom) {
+      container.scrollTop = container.scrollHeight;
+    }
+    return decision.nextFollowing;
   }, []);
 
   const saveThreadScrollSnapshot = useCallback((id: string | null, container: HTMLDivElement | null) => {
@@ -666,6 +695,12 @@ export function ChatSurface({
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = threadRef.current;
     if (!container) return;
+    // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
+    userScrollIntentRef.current = false;
+    if (userScrollIntentClearTimerRef.current != null) {
+      window.clearTimeout(userScrollIntentClearTimerRef.current);
+      userScrollIntentClearTimerRef.current = null;
+    }
     container.scrollTo({ top: container.scrollHeight, behavior });
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom((previous) => (previous ? previous : true));
@@ -679,13 +714,14 @@ export function ChatSurface({
   }));
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
+    const userInitiated = userScrollIntentRef.current;
     // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
     // container state and coalesce virtual range updates and geometry probes to one pass per frame.
     // Virtual viewport only setStates when the window indices/padding change; bottom/turn/scrolled
     // flags also apply equality gates so mid-range scrolling does not re-render the whole surface.
     threadScrollCoalescerRef.current.request(() => {
       updateVirtualViewport();
-      updateThreadBottomState(container);
+      updateThreadBottomState(container, { userInitiated });
       updateCurrentTurnContext(container);
       if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
         saveThreadScrollSnapshot(conversationId, container);
@@ -697,6 +733,10 @@ export function ChatSurface({
 
   useEffect(() => () => {
     threadScrollCoalescerRef.current.cancel();
+    if (userScrollIntentClearTimerRef.current != null) {
+      window.clearTimeout(userScrollIntentClearTimerRef.current);
+      userScrollIntentClearTimerRef.current = null;
+    }
   }, []);
 
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
@@ -930,10 +970,6 @@ export function ChatSurface({
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setCompactionState(IDLE_COMPACTION_STATE);
-    // 切换会话时清空虚拟列表的测量缓存和 ResizeObserver：旧会话的按 index 缓存高度
-    // 与新会话时间线错位会导致布局抖动；遗留的 ResizeObserver 回调会在新会话滚动时
-    // 重复触发 syncRange，造成每帧多次 setState → 整页卡顿。
-    resetVirtualMeasurementsRef.current();
     // contextAccounting 已按 conversationId 分桶。切换订阅时必须保留目标会话自己的
     // triggerTokens 快照；主动清空会让同一会话退回本地历史估算，造成百分比口径跳变。
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
@@ -1226,7 +1262,6 @@ export function ChatSurface({
   useLayoutEffect(() => {
     const pending = pendingThreadScrollRestoreRef.current;
     if (!pending || pending.conversationId !== conversationId) return;
-    resetVirtualMeasurements();
     const container = threadRef.current;
     if (!container) return;
     if (messages.length === 0 && pending.snapshot && pending.snapshot.top > 0) return;
@@ -1300,7 +1335,6 @@ export function ChatSurface({
     conversationId,
     messageTurnIndex,
     messages,
-    resetVirtualMeasurements,
     saveThreadScrollSnapshot,
     scrollToTurn,
     updateCurrentTurnContext,
@@ -2017,7 +2051,13 @@ export function ChatSurface({
           <span className="current-turn-context-text">{currentTurnContext}</span>
         </div>
       ) : null}
-      <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
+      <div
+        className="chat-thread"
+        ref={threadRef}
+        onScroll={handleThreadScroll}
+        onWheel={markUserScrollIntent}
+        onTouchMove={markUserScrollIntent}
+      >
         {/* 切会话 beginLoad 会先清空 messages；空首页仅 loadStatus === 'ready' 且无消息时显示。 */}
         {shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length }) ? (
           <div className="chat-thread-loading" role="status" aria-live="polite">
