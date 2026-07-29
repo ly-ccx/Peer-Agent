@@ -95,63 +95,50 @@ describe('buildTrayMenuTemplate', () => {
     assert.equal(recentItems[0].sublabel, undefined);
   });
 
-  it('caps recent items to TRAY_RECENT_LIMIT', () => {
+  it('keeps primary recent items to TRAY_RECENT_LIMIT and puts overflow in more submenu', () => {
+    const opened = [];
     const recent = Array.from({ length: TRAY_RECENT_LIMIT + 3 }, (_, i) => ({
       id: `c${i}`,
       title: `会话 ${i}`,
       workspacePath: `/ws/${i}`,
     }));
-    const template = buildTrayMenuTemplate({ recent });
-    const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
-    assert.equal(recentItems.length, TRAY_RECENT_LIMIT);
-  });
-
-  it('shows more when overflow exists and expands via onExpandRecent', () => {
-    const recent = Array.from({ length: 8 }, (_, i) => ({
-      id: `c${i + 1}`,
-      title: `会话 ${i + 1}`,
-      workspacePath: '/tmp/ws',
-    }));
-    const expanded = [];
     const template = buildTrayMenuTemplate({
       recent,
-      expanded: false,
-      handlers: { onExpandRecent: () => expanded.push('expand') },
+      handlers: {
+        onOpenConversation: (payload) => opened.push(payload.conversationId),
+      },
     });
+    const primary = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
+    assert.equal(primary.length, TRAY_RECENT_LIMIT);
     const more = template.find((item) => item.id === 'tray-more');
-    assert.ok(more, 'should show 更多 when more than collapsed limit');
-    more.click();
-    assert.deepEqual(expanded, ['expand']);
+    assert.ok(more, 'should show 更多 submenu when overflow exists');
+    assert.ok(Array.isArray(more.submenu));
+    assert.equal(more.submenu.length, 3);
+    assert.equal(more.submenu[0].id, `tray-recent:c${TRAY_RECENT_LIMIT}`);
+    more.submenu[0].click();
+    assert.deepEqual(opened, [`c${TRAY_RECENT_LIMIT}`]);
   });
 
-  it('expanded menu lists more conversations and offers collapse', () => {
-    const recent = Array.from({ length: 12 }, (_, i) => ({
+  it('caps submenu overflow by TRAY_RECENT_EXPANDED_LIMIT', () => {
+    const recent = Array.from({ length: TRAY_RECENT_EXPANDED_LIMIT + 5 }, (_, i) => ({
       id: `c${i + 1}`,
       title: `会话 ${i + 1}`,
       workspacePath: '/tmp/ws',
     }));
-    const collapsed = [];
-    const template = buildTrayMenuTemplate({
-      recent,
-      expanded: true,
-      handlers: { onCollapseRecent: () => collapsed.push('collapse') },
-    });
-    const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
-    assert.equal(recentItems.length, 12);
-    assert.ok(recentItems.length <= TRAY_RECENT_EXPANDED_LIMIT);
-    const less = template.find((item) => item.id === 'tray-less');
-    assert.ok(less, 'should show 收起 when expanded');
-    assert.equal(template.some((item) => item.id === 'tray-more'), false);
-    less.click();
-    assert.deepEqual(collapsed, ['collapse']);
+    const template = buildTrayMenuTemplate({ recent });
+    const primary = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
+    const more = template.find((item) => item.id === 'tray-more');
+    assert.equal(primary.length, TRAY_RECENT_LIMIT);
+    assert.ok(more?.submenu);
+    assert.equal(more.submenu.length, TRAY_RECENT_EXPANDED_LIMIT - TRAY_RECENT_LIMIT);
   });
 
-  it('hides more when total recent fits collapsed limit', () => {
+  it('hides more submenu when total recent fits collapsed limit', () => {
     const recent = Array.from({ length: 3 }, (_, i) => ({
       id: `c${i + 1}`,
       title: `会话 ${i + 1}`,
     }));
-    const template = buildTrayMenuTemplate({ recent, expanded: false });
+    const template = buildTrayMenuTemplate({ recent });
     assert.equal(template.some((item) => item.id === 'tray-more'), false);
   });
 });

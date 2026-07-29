@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pickExistingTrayIconPath, resolveTrayIconPaths } from './tray-icon-paths.mjs';
 
 export const TRAY_RECENT_LIMIT = 5;
-/** 点击「更多」后托盘菜单最多展示的最近会话数。 */
+/** 托盘「更多」二级菜单最多展示到第 N 条（含一级已展示的前 TRAY_RECENT_LIMIT 条）。 */
 export const TRAY_RECENT_EXPANDED_LIMIT = 20;
 export const TRAY_TITLE_MAX_CHARS = 36;
 
@@ -29,7 +29,6 @@ export function buildTrayMenuTemplate({
   recent = [],
   labels = {},
   handlers = {},
-  expanded = false,
   collapsedLimit = TRAY_RECENT_LIMIT,
   expandedLimit = TRAY_RECENT_EXPANDED_LIMIT,
 } = {}) {
@@ -37,7 +36,6 @@ export function buildTrayMenuTemplate({
     recent: labels.recent ?? '最近会话',
     empty: labels.empty ?? '暂无会话',
     more: labels.more ?? '更多',
-    less: labels.less ?? '收起',
     newChat: labels.newChat ?? '新会话',
     open: labels.open ?? '打开 Peer Agent',
     quit: labels.quit ?? '退出 Peer Agent',
@@ -46,50 +44,55 @@ export function buildTrayMenuTemplate({
   const items = [];
   items.push({ label: L.recent, enabled: false });
 
-  const all = Array.isArray(recent) ? recent.filter((c) => typeof c?.id === 'string' && c.id) : [];
-  const limit = expanded
-    ? Math.max(1, Number(expandedLimit) || TRAY_RECENT_EXPANDED_LIMIT)
-    : Math.max(1, Number(collapsedLimit) || TRAY_RECENT_LIMIT);
-  const list = all.slice(0, limit);
-  if (list.length === 0) {
+  const all = Array.isArray(recent)
+    ? recent.filter((c) => typeof c?.id === 'string' && c.id)
+    : [];
+  const primaryLimit = Math.max(1, Number(collapsedLimit) || TRAY_RECENT_LIMIT);
+  const totalLimit = Math.max(primaryLimit, Number(expandedLimit) || TRAY_RECENT_EXPANDED_LIMIT);
+  const capped = all.slice(0, totalLimit);
+  const primary = capped.slice(0, primaryLimit);
+  const overflow = capped.slice(primaryLimit);
+
+  const toRecentItem = (conversation) => {
+    const id = conversation.id;
+    const title = truncateTrayTitle(conversation.title);
+    // macOS native menus ignore "\n" in label; use Electron MenuItem.sublabel
+    // (darwin >= 14.4) so workspace appears as a second line like Codex.
+    const subtitle = workspaceShortName(conversation.workspacePath);
+    return {
+      label: title,
+      ...(subtitle ? { sublabel: subtitle } : {}),
+      id: `tray-recent:${id}`,
+      click: () => {
+        handlers.onOpenConversation?.({
+          conversationId: id,
+          workspacePath: typeof conversation.workspacePath === 'string'
+            ? conversation.workspacePath
+            : '',
+          source: 'tray-recent',
+        });
+      },
+    };
+  };
+
+  if (primary.length === 0) {
     items.push({ label: L.empty, enabled: false });
   } else {
-    for (const conversation of list) {
-      const id = conversation.id;
-      const title = truncateTrayTitle(conversation.title);
-      // macOS native menus ignore "\n" in label; use Electron MenuItem.sublabel
-      // (darwin >= 14.4) so workspace appears as a second line like Codex.
-      const subtitle = workspaceShortName(conversation.workspacePath);
-      items.push({
-        label: title,
-        ...(subtitle ? { sublabel: subtitle } : {}),
-        id: `tray-recent:${id}`,
-        click: () => {
-          handlers.onOpenConversation?.({
-            conversationId: id,
-            workspacePath: typeof conversation.workspacePath === 'string'
-              ? conversation.workspacePath
-              : '',
-            source: 'tray-recent',
-          });
-        },
-      });
+    for (const conversation of primary) {
+      items.push(toRecentItem(conversation));
     }
   }
 
-  // 「更多」只在还有未展示会话时出现；展开后显示「收起」。
-  const canExpand = all.length > Math.max(1, Number(collapsedLimit) || TRAY_RECENT_LIMIT);
-  if (canExpand) {
+  // 溢出会话放进「更多」二级菜单，避免一级菜单被拉长。
+  if (overflow.length > 0) {
     items.push({ type: 'separator' });
     items.push({
-      label: expanded ? L.less : L.more,
-      id: expanded ? 'tray-less' : 'tray-more',
-      click: () => {
-        if (expanded) handlers.onCollapseRecent?.();
-        else handlers.onExpandRecent?.();
-      },
+      label: L.more,
+      id: 'tray-more',
+      submenu: overflow.map((conversation) => toRecentItem(conversation)),
     });
   }
+
   items.push({ type: 'separator' });
   items.push({
     label: L.newChat,
@@ -195,24 +198,9 @@ export function createTrayController({
   let tray = null;
   let destroyed = false;
   let refreshTimer = null;
-  // 托盘菜单内「更多/收起」：展开态仅在当前菜单会话内有效，下次右键默认收起。
-  let recentExpanded = false;
 
   const boundHandlers = {
     onOpenConversation: (payload) => handlers.onOpenConversation?.(payload),
-    onExpandRecent: () => {
-      recentExpanded = true;
-      // 展开后立刻重建菜单；macOS 需再次右键才能看到新菜单，这是系统菜单行为。
-      void refresh({ reopen: true });
-      handlers.onExpandRecent?.();
-    },
-    onCollapseRecent: () => {
-      recentExpanded = false;
-      void refresh({ reopen: true });
-      handlers.onCollapseRecent?.();
-    },
-    // 兼容旧 onMore：仍可用于打开主窗口，但默认「更多」改为菜单内展开。
-    onMore: () => handlers.onMore?.(),
     onNewChat: () => handlers.onNewChat?.(),
     onOpenApp: () => handlers.onOpenApp?.(),
     onQuit: () => handlers.onQuit?.(),
@@ -220,11 +208,9 @@ export function createTrayController({
 
   async function buildMenu() {
     let recent = [];
-    const limit = recentExpanded ? TRAY_RECENT_EXPANDED_LIMIT : TRAY_RECENT_LIMIT;
     try {
-      // 展开时多取 1 条用于判断是否还能继续展开；模板内部再 slice。
-      const fetchLimit = recentExpanded ? TRAY_RECENT_EXPANDED_LIMIT : (TRAY_RECENT_LIMIT + 1);
-      const listed = await listRecentConversations?.({ limit: fetchLimit });
+      // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
+      const listed = await listRecentConversations?.({ limit: TRAY_RECENT_EXPANDED_LIMIT });
       recent = Array.isArray(listed) ? listed : [];
     } catch (err) {
       console.warn('[tray] listRecentConversations failed:', err);
@@ -233,26 +219,17 @@ export function createTrayController({
     const template = buildTrayMenuTemplate({
       recent,
       handlers: boundHandlers,
-      expanded: recentExpanded,
       collapsedLimit: TRAY_RECENT_LIMIT,
       expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
     });
     return Menu.buildFromTemplate(template);
   }
 
-  async function refresh({ reopen = false } = {}) {
+  async function refresh() {
     if (destroyed || !tray) return;
     try {
       const menu = await buildMenu();
       tray.setContextMenu(menu);
-      // 展开/收起后尝试重新弹出菜单（非 darwin 左键菜单路径更可靠；darwin 仍可能需再次右键）。
-      if (reopen) {
-        try {
-          tray.popUpContextMenu?.(menu);
-        } catch {
-          // ignore native popup failures
-        }
-      }
     } catch (err) {
       console.warn('[tray] refresh failed:', err);
     }
@@ -275,7 +252,6 @@ export function createTrayController({
 
   // Rebuild on open-ish interactions so Recent stays fresh without polling.
   tray.on?.('click', () => {
-    recentExpanded = false;
     void refresh().then(() => {
       // On some platforms left-click does not auto-open context menu.
       if (platform !== 'darwin' && tray && !destroyed) {
@@ -288,7 +264,6 @@ export function createTrayController({
     });
   });
   tray.on?.('right-click', () => {
-    recentExpanded = false;
     void refresh();
   });
 
