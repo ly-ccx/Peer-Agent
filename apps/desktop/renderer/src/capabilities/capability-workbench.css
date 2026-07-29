@@ -838,40 +838,11 @@
     transform: translateX(16px);
   }
 
-  /* Upload dialog */
-  .skill-upload-overlay {
-    @apply fixed inset-0 z-50 grid place-items-center;
-    background: rgba(8, 12, 18, 0.40);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-  }
-
+  /* Upload dialog —— 遮罩/动效由 Overlay 基座提供；本类只负责面板布局 */
   .skill-upload-dialog {
     @apply grid w-[480px] gap-5 p-7;
     border-radius: var(--ui-radius-modal);
-    /* 对齐 glass-popover 毛玻璃配方（本轮只 CSS，不迁 Overlay） */
-    background: var(--glass-popover);
-    backdrop-filter: blur(var(--blur-popover));
-    -webkit-backdrop-filter: blur(var(--blur-popover));
-    border: 1px solid var(--chrome-hairline, var(--za-line));
-    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
-  }
-
-  @media (prefers-reduced-transparency: reduce) {
-    .skill-detail-overlay,
-    .skill-upload-overlay {
-      background: rgba(8, 12, 18, 0.55);
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-    }
-
-    .skill-detail-dialog,
-    .skill-upload-dialog {
-      background: var(--chrome-raised, var(--paper-sheet, #fff));
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      box-shadow: var(--shadow-popover);
-    }
+    /* 背景/边/阴影/blur 由 .pa-overlay-panel glass-popover 统一提供 */
   }
 
   .skill-upload-dialog header {
@@ -1103,27 +1074,13 @@
     cursor: not-allowed;
   }
 
-  /* ── Skill detail dialog ── */
-  .skill-detail-overlay {
-    @apply fixed inset-0 flex items-center justify-center;
-    z-index: 1000;
-    padding: 40px;
-    background: rgba(8, 12, 18, 0.40);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-  }
-
+  /* ── Skill detail dialog —— 遮罩/动效由 Overlay 基座提供；本类只负责面板布局 ── */
   .skill-detail-dialog {
     @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[28px];
     width: min(900px, 90vw);
     max-height: min(820px, 88vh);
     color: var(--za-text);
-    /* 对齐 glass-popover 毛玻璃配方（本轮只 CSS，不迁 Overlay） */
-    background: var(--glass-popover);
-    backdrop-filter: blur(var(--blur-popover));
-    -webkit-backdrop-filter: blur(var(--blur-popover));
-    border: 1px solid var(--chrome-hairline, var(--za-line));
-    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+    /* 背景/边/阴影/blur 由 .pa-overlay-panel glass-popover 统一提供 */
   }
 
   .skill-detail-header {
@@ -1199,7 +1156,6 @@
   .skill-detail-when p { @apply text-[13px] leading-6; color: var(--za-text-muted); }
 
   @media (max-width: 720px) {
-    .skill-detail-overlay { padding: 16px; }
     .skill-detail-header { padding: 22px 20px 16px; }
     .skill-detail-content { margin: 0 10px 10px; padding: 20px; }
     .skill-detail-meta { padding-inline: 20px; }

@@ -1152,6 +1152,8 @@ function loadRendererWindow(targetWindow, query = {}) {
 }
 
 function createQuickChatWindow() {
+  // macOS：透明 + vibrancy，让 renderer glass-popover 透出桌面材质；非 darwin 仅 transparent。
+  const isMac = process.platform === 'darwin';
   const quickWindow = new BrowserWindow({
     ...QUICK_CHAT_SIZE,
     minWidth: QUICK_CHAT_SIZE.width,
@@ -1160,6 +1162,12 @@ function createQuickChatWindow() {
     useContentSize: true,
     backgroundColor: '#00000000',
     transparent: true,
+    ...(isMac
+      ? {
+          vibrancy: 'popover',
+          visualEffectState: 'active',
+        }
+      : {}),
     show: false,
     frame: false,
     roundedCorners: true,

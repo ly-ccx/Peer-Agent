@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 
 export function SkillUploadDialog({
@@ -39,56 +40,61 @@ export function SkillUploadDialog({
     }, [file, onDone]);
 
     return (
-        <div className="skill-upload-overlay" onClick={onClose}>
-            <div className="skill-upload-dialog" onClick={(e) => e.stopPropagation()}>
-                <header>
-                    <h3>上传技能</h3>
-                    <button type="button" className="skill-upload-close" onClick={onClose}>×</button>
-                </header>
+        <Overlay
+            onClose={onClose}
+            ariaLabel="上传技能"
+            panelClassName="skill-upload-dialog"
+        >
+            {({ requestClose }) => (
+                <>
+                    <header>
+                        <h3>上传技能</h3>
+                        <button type="button" className="skill-upload-close" onClick={requestClose}>×</button>
+                    </header>
 
-                {showBanner && (
-                    <div className="skill-upload-banner">
-                        <span className="skill-upload-banner-icon">i</span>
-                        <span>个人技能为仅供个人在本地安装使用的技能</span>
-                        {/* <button type="button" className="skill-upload-banner-close" onClick={() => setShowBanner(false)}>×</button> */}
+                    {showBanner && (
+                        <div className="skill-upload-banner">
+                            <span className="skill-upload-banner-icon">i</span>
+                            <span>个人技能为仅供个人在本地安装使用的技能</span>
+                        </div>
+                    )}
+
+                    <div className="skill-upload-field">
+                        <label className="skill-upload-label">技能文件 <span className="required">*</span></label>
+                        <div className="skill-upload-file-row">
+                            <input
+                                ref={inputRef}
+                                type="file"
+                                accept=".zip"
+                                onChange={handleFileChange}
+                                style={{ display: 'none' }}
+                            />
+                            <button
+                                type="button"
+                                className="skill-upload-file-btn"
+                                onClick={() => inputRef.current?.click()}
+                            >
+                                {file ? file.name : '＋ 上传技能'}
+                            </button>
+                            <span className="skill-upload-tip">.zip格式，且解压后必须包含 SKILL.md</span>
+                        </div>
                     </div>
-                )}
 
-                <div className="skill-upload-field">
-                    <label className="skill-upload-label">技能文件 <span className="required">*</span></label>
-                    <div className="skill-upload-file-row">
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            accept=".zip"
-                            onChange={handleFileChange}
-                            style={{ display: 'none' }}
-                        />
+                    {error && <p className="skill-upload-error">{error}</p>}
+
+                    <footer>
+                        <button type="button" className="skill-btn-cancel" onClick={requestClose}>取消</button>
                         <button
                             type="button"
-                            className="skill-upload-file-btn"
-                            onClick={() => inputRef.current?.click()}
+                            className="skill-btn-confirm"
+                            disabled={!file || uploading}
+                            onClick={handleUpload}
                         >
-                            {file ? file.name : '＋ 上传技能'}
+                            {uploading ? '上传中…' : '确定'}
                         </button>
-                        <span className="skill-upload-tip">.zip格式，且解压后必须包含 SKILL.md</span>
-                    </div>
-                </div>
-
-                {error && <p className="skill-upload-error">{error}</p>}
-
-                <footer>
-                    <button type="button" className="skill-btn-cancel" onClick={onClose}>取消</button>
-                    <button
-                        type="button"
-                        className="skill-btn-confirm"
-                        disabled={!file || uploading}
-                        onClick={handleUpload}
-                    >
-                        {uploading ? '上传中…' : '确定'}
-                    </button>
-                </footer>
-            </div>
-        </div>
+                    </footer>
+                </>
+            )}
+        </Overlay>
     );
 }

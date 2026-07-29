@@ -17,11 +17,12 @@
   margin: 0 auto 8px;
   border: 1px solid var(--chrome-hairline, var(--ui-border-subtle, var(--za-line)));
   border-radius: var(--ui-radius-panel, var(--za-radius));
-  /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃 */
+  /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃。
+     不叠 glass-edge-highlight：暗色下顶部 inset 高光会变成一条刺眼亮线。 */
   background: var(--glass-popover);
   backdrop-filter: blur(var(--blur-popover));
   -webkit-backdrop-filter: blur(var(--blur-popover));
-  box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
+  box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12));
   overflow: hidden;
 }
 
