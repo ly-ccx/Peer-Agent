@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
 import { BrandWordmark } from '../../app/components/BrandWordmark';
@@ -40,6 +41,22 @@ interface WorkspaceInfo {
   name: string;
   absolutePath: string;
   git?: { branch?: string; isDirty?: boolean };
+}
+
+/** 按视口边界夹紧右键菜单坐标，避免贴边时被裁切。 */
+function clampContextMenuPosition(
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+  padding = 8,
+): { x: number; y: number } {
+  const maxX = Math.max(padding, window.innerWidth - menuWidth - padding);
+  const maxY = Math.max(padding, window.innerHeight - menuHeight - padding);
+  return {
+    x: Math.min(Math.max(padding, x), maxX),
+    y: Math.min(Math.max(padding, y), maxY),
+  };
 }
 
 // 将 ISO 时间戳格式化为简洁的相对时间（跟随设计稿风格：纯「X 单位」，不带「前」字）。
@@ -326,6 +343,18 @@ export function Sidebar({
   }, [onReorderPinnedConversations, pinnedIds]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // 菜单 portal 到 body 后，按真实尺寸把 left/top 夹进视口，避免顶部/底部被裁切。
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const el = contextMenuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const next = clampContextMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
+    if (next.x !== contextMenu.x || next.y !== contextMenu.y) {
+      setContextMenu((prev) => (prev ? { ...prev, x: next.x, y: next.y } : prev));
+    }
+  }, [contextMenu]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -744,76 +773,79 @@ export function Sidebar({
         ) : null}
       </div>
 
-      {contextMenu && contextConv ? (
-        <div
-          ref={contextMenuRef}
-          className="sidebar-context-menu"
-          role="menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          {!isArchivedView ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!contextCanTogglePin}
-              onClick={() => {
-                closeContextMenu();
-                if (!contextCanTogglePin) return;
-                void (contextIsPinned ? onUnpinConversation(contextConv.id) : onPinConversation(contextConv.id));
-              }}
+      {contextMenu && contextConv
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="sidebar-context-menu"
+              role="menu"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
             >
-              <PinIcon filled={contextIsPinned} />
-              <span>{contextIsPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}</span>
-            </button>
-          ) : null}
-          {!isArchivedView ? (
-            <button type="button" role="menuitem" onClick={() => { closeContextMenu(); beginRenameConversation(contextConv); }}>
-              <span>{isZh ? '编辑标题' : 'Edit title'}</span>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              closeContextMenu();
-              void navigator.clipboard.writeText(contextConv.id).catch((error: unknown) => {
-                console.error('Failed to copy Session ID', error);
-              });
-            }}
-          >
-            <span>{isZh ? '复制会话 ID' : 'Copy Session ID'}</span>
-          </button>
-          {isArchivedView ? (
-            <>
+              {!isArchivedView ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!contextCanTogglePin}
+                  onClick={() => {
+                    closeContextMenu();
+                    if (!contextCanTogglePin) return;
+                    void (contextIsPinned ? onUnpinConversation(contextConv.id) : onPinConversation(contextConv.id));
+                  }}
+                >
+                  <PinIcon filled={contextIsPinned} />
+                  <span>{contextIsPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}</span>
+                </button>
+              ) : null}
+              {!isArchivedView ? (
+                <button type="button" role="menuitem" onClick={() => { closeContextMenu(); beginRenameConversation(contextConv); }}>
+                  <span>{isZh ? '编辑标题' : 'Edit title'}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   closeContextMenu();
-                  void onDeleteConversation(contextConv.id);
+                  void navigator.clipboard.writeText(contextConv.id).catch((error: unknown) => {
+                    console.error('Failed to copy Session ID', error);
+                  });
                 }}
               >
-                <span>{isZh ? '永久删除' : 'Delete permanently'}</span>
+                <span>{isZh ? '复制会话 ID' : 'Copy Session ID'}</span>
               </button>
-              <button type="button" role="menuitem" onClick={() => { closeContextMenu(); void onRestoreConversation(contextConv.id); }}>
-                <span>{isZh ? '恢复会话' : 'Restore chat'}</span>
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={contextIsRunning || contextIsCompacting}
-              onClick={() => {
-                closeContextMenu();
-                if (!contextIsRunning && !contextIsCompacting) void onArchiveConversation(contextConv.id);
-              }}
-            >
-              <span>{isZh ? '归档会话' : 'Archive chat'}</span>
-            </button>
-          )}
-        </div>
-      ) : null}
+              {isArchivedView ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeContextMenu();
+                      void onDeleteConversation(contextConv.id);
+                    }}
+                  >
+                    <span>{isZh ? '永久删除' : 'Delete permanently'}</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => { closeContextMenu(); void onRestoreConversation(contextConv.id); }}>
+                    <span>{isZh ? '恢复会话' : 'Restore chat'}</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={contextIsRunning || contextIsCompacting}
+                  onClick={() => {
+                    closeContextMenu();
+                    if (!contextIsRunning && !contextIsCompacting) void onArchiveConversation(contextConv.id);
+                  }}
+                >
+                  <span>{isZh ? '归档会话' : 'Archive chat'}</span>
+                </button>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div className="sidebar-bottom">
         <button type="button" className={`sidebar-nav-btn ${activePage === 'settings' ? 'active' : ''}`} onClick={onOpenSettings}>

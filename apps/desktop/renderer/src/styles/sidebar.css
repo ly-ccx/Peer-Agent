@@ -575,7 +575,8 @@
 
 .sidebar-context-menu {
   position: fixed;
-  z-index: 60;
+  /* portal 到 body 后与其它浮层对齐，避免仍被侧栏/会话标题叠层盖住 */
+  z-index: var(--z-dropdown-portal, 10000);
   min-width: 150px;
   padding: 6px;
   border: 1px solid var(--chrome-hairline);
