@@ -3,6 +3,7 @@ import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
+import { FullDiskAccessStartupGate } from './app/components/FullDiskAccessStartupGate';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
 import { useConfirm } from './app/components/ConfirmProvider';
@@ -927,6 +928,8 @@ function MainApp() {
           </section>
         </section>
       )}
+
+      <FullDiskAccessStartupGate enabled={showMainShell} isZh={isZh} />
     </main>
   );
 }

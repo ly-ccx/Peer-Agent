@@ -106,3 +106,53 @@
     padding: var(--space-6, 20px);
   }
 }
+
+
+  /* 启动时完全磁盘访问权限门 */
+  .pa-overlay-panel.fda-startup-gate {
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(86vh, 720px);
+    overflow: auto;
+    padding: 20px 20px 16px;
+    border-radius: 16px;
+  }
+  .fda-startup-gate-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .fda-startup-gate-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .fda-startup-gate-lead {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--graphite-soft, #c8cdd6) 94%, transparent);
+  }
+  .fda-startup-steps {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .fda-startup-checks {
+    max-height: 220px;
+    overflow: auto;
+  }
+  .fda-startup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .fda-startup-actions .updater-btn.ghost {
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--chrome-hairline, #fff3) 80%, transparent);
+  }
+  .fda-startup-drag {
+    margin: 0;
+  }
