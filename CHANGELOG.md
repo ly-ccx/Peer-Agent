@@ -4,9 +4,38 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-### Removed
+## 0.0.1-beta.45 - 2026-07-29
 
+### Added
+
+- Goal active runtime timing display during plan execution.
+- Goal durable checkpoint/idempotency and compaction follow-ups.
+- Virtual chat turn list isolation and background stream buffer for inactive conversations.
+- Browser overflow menu P0, password manager Phase 1, Chrome site-cookie import; Files tree refresh/light watch.
+- Qoder credits/discounts/quota in settings and context ring.
+- GPT reasoning summary split from reasoning text; GPT-5.6 reasoning tiers.
+- TUI prompt cache hit rate.
+
+### Changed
+
+- Stop stream frames from invalidating PlanCard memo via split InteractionContext + stable selectInteractionOption.
+- Coalesce soft runner-progress IPC (100ms), dedupe dual-channel runner snapshots, and cache local Qoder catalog reads (5s TTL).
+- Memoize GoalPlanPanel view model and relation props.
+- Composer CSS field-sizing autosize; defer historical attachment image loading/decoding.
+- Frost glass polish for overlays, selected sidebar rows, Goal/Quick Chat/Skills surfaces.
+- Semantic, budget-safe context compaction; persist provider_usage at observe time.
 - Remove the unused `cu-proxy-core` Rust health stub and `local.health` scaffold (capability, provider, IPC, packaging, and tests). Keep `peer-credential-helper`.
+
+### Fixed
+
+- Tray More: native submenu for conversations 6–20; stop hard-clamping tray recent list to 5 or only opening the app.
+- Sidebar context menu portal + viewport clamp.
+- Stick-to-bottom during streaming after jump-to-latest.
+- ChatGPT overload/server_error retries; Qoder queue/duplicate stream retries; recovering-fetch rebuilds RequestInit on connection retries.
+- Attachment unsupported copy reflects that agents can still read local files.
+- GPT subscription context window restored to 258k; stop requesting reasoning summary by default.
+- Browser visible readiness wait; assorted sidebar/status-dot/workspace hover/docs dark theme fixes.
+
 
 ## 0.0.1-beta.44 - 2026-07-28
 
