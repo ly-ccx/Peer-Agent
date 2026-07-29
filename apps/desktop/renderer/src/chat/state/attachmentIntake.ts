@@ -110,8 +110,8 @@ export async function intakeAttachments(
           kind: 'unsupported',
         });
         error = isZh
-          ? `${file.name || '文件'} 暂不支持读取内容，仅附带文件信息`
-          : `${file.name || 'File'} content is not supported yet; only file metadata was attached`;
+          ? `${file.name || '文件'} 的内容不会随消息内联发送，已附带文件信息（名称/类型/大小），Agent 可在需要时自行读取本地文件`
+          : `${file.name || 'File'} content is not inlined into the message; file info (name/type/size) was attached, and the agent can read the local file when needed`;
       }
     } catch (cause) {
       error = cause instanceof Error

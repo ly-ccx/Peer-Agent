@@ -57,7 +57,7 @@ export function buildAttachmentText(attachments: readonly ChatAttachment[]): str
         `Attached file: ${attachment.name}`,
         `MIME: ${attachment.mimeType || 'application/octet-stream'}`,
         `Size: ${formatBytes(attachment.size)}`,
-        'Content is not included because this file type is not supported yet.',
+        'Content is not inlined; if a local path is available, read the file with local tools when needed.',
       ].join('\n'));
     }
   }

@@ -41,7 +41,7 @@ describe('buildAttachmentText', () => {
   });
   it('notes unsupported attachments without content', () => {
     const out = buildAttachmentText([textAtt({ kind: 'unsupported', name: 'x.bin', text: undefined })]);
-    assert.match(out, /not supported yet/);
+    assert.match(out, /not inlined/);
   });
   it('ignores image attachments (handled as parts)', () => {
     assert.equal(buildAttachmentText([imgAtt()]), '');
