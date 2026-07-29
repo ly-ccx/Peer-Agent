@@ -20,7 +20,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 import { clientApi } from '../../clientApi';
+import {
+  applyBackgroundStreamOperations,
+  BackgroundStreamBuffer,
+} from '../state/backgroundStreamBuffer';
 import { conversationStore } from '../state/conversationStore';
+import { createFrameCoalescer } from '../state/frameCoalescer';
 import { shouldRevealBrowserPanel } from '../state/browserToolReveal';
 import { reduceCompactionLifecycle } from '../state/compactionLifecycle';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
@@ -183,6 +188,23 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   const thinkingTypewriter = useTypewriterStream(appendActiveThinking);
   const flushTextTypewriter = textTypewriter.flush;
   const flushThinkingTypewriter = thinkingTypewriter.flush;
+  const backgroundStreamBufferRef = useRef(new BackgroundStreamBuffer());
+  const backgroundFlushRef = useRef(createFrameCoalescer({
+    request: (callback) => window.requestAnimationFrame(callback),
+    cancel: (frameId) => window.cancelAnimationFrame(frameId),
+  }));
+  const flushBackgroundStream = useCallback((conversationId?: string) => {
+    const patches = backgroundStreamBufferRef.current.drain(conversationId);
+    if (patches.length === 0) return;
+    for (const patch of patches) {
+      conversationStore.setState(patch.conversationId, (prev) => ({
+        messages: applyBackgroundStreamOperations(prev.messages, patch.operations),
+      }));
+    }
+  }, []);
+  const scheduleBackgroundFlush = useCallback(() => {
+    backgroundFlushRef.current.request(() => flushBackgroundStream());
+  }, [flushBackgroundStream]);
 
   useLayoutEffect(() => {
     if (activeRef.current === activeConversationId) return;
@@ -190,8 +212,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     // 不能 reset 丢弃，否则后台 done 可能用缺字的 renderer 快照回写主进程。
     flushThinkingTypewriter();
     flushTextTypewriter();
+    if (activeConversationId) flushBackgroundStream(activeConversationId);
     activeRef.current = activeConversationId;
-  }, [activeConversationId, flushTextTypewriter, flushThinkingTypewriter]);
+  }, [activeConversationId, flushBackgroundStream, flushTextTypewriter, flushThinkingTypewriter]);
 
   useEffect(() => {
     // 按会话保存「完成后短暂停顿再隐藏」的 timer，并绑定触发它的 streamId。
@@ -246,7 +269,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         thinkingTypewriter.flush();
         textTypewriter.push(content);
       } else {
-        conversationStore.setState(cid, (prev) => ({ messages: appendText(prev.messages, content) }));
+        backgroundStreamBufferRef.current.pushText(cid, content);
+        scheduleBackgroundFlush();
       }
     });
 
@@ -264,9 +288,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         }
         thinkingTypewriter.push(content);
       } else {
-        conversationStore.setState(cid, (prev) => ({
-          messages: appendThinking(prev.messages, content, kind),
-        }));
+        backgroundStreamBufferRef.current.pushThinking(cid, content, kind);
+        scheduleBackgroundFlush();
       }
     });
 
@@ -276,6 +299,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
         clearRecoveryNotice(cid);
+        flushBackgroundStream(cid);
         if (cid === activeRef.current) {
           textTypewriter.flush();
           thinkingTypewriter.flush();
@@ -373,6 +397,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
+      flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         // 中断时丢弃打字机积压缓冲（而非 flush 吐完），否则用户点停止后
         // 已入队的 delta 仍会继续「涌出」。正文以主进程落盘的快照为准。
@@ -432,6 +457,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       if (!cid) return;
       // 内置浏览器工具：通知上层自动展开 Workbench。仅前台触发，避免后台会话抢占视图。
       if (shouldRevealBrowserPanel(tool, cid, activeRef.current)) onBrowserRef.current?.(tool);
+      flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         textTypewriter.flush();
         thinkingTypewriter.flush();
@@ -450,6 +476,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offToolResult = clientApi.onChatStreamToolResult(({ streamId, toolCallId, result, startedAtMs, endedAtMs, durationMs }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         textTypewriter.flush();
         thinkingTypewriter.flush();
@@ -482,6 +509,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
+      flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         // 异常终止（含复读兜底自动 error）同样丢弃积压缓冲，避免残留 delta 继续涌出。
         textTypewriter.reset();
@@ -697,6 +725,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     return () => {
       for (const { timer } of compactionDoneTimers.values()) clearTimeout(timer);
       compactionDoneTimers.clear();
+      backgroundFlushRef.current.cancel();
+      backgroundStreamBufferRef.current.clear();
       offRuntimeEvent();
       offDelta();
       offThinking();

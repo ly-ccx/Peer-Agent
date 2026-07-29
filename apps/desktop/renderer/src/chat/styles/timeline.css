@@ -20,12 +20,8 @@
     padding-bottom: var(--space-6);
   }
 
-  /* 非虚拟化（搜索开启/短会话）时，Chromium 仍可跳过离屏历史轮次的布局与绘制。
-   * 虚拟列表中的窗口项必须参与真实测量，不能让 contain-intrinsic-size 冒充高度。 */
-  .chat-turn-virtual-list:not([data-virtualized='true']) .chat-turn[data-settled='true'] {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 360px;
-  }
+  /* 非虚拟化路径不使用 content-visibility / contain-intrinsic-size。
+   * 显式虚拟列表窗口内的项必须参与真实测量；非虚拟化时也不把布局推迟到滚动帧。 */
 
   .chat-turn>.chat-msg.chat-msg-user+.chat-msg-assistant {
     margin-top: calc(-1 * var(--space-2));

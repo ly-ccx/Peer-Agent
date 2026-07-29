@@ -5,13 +5,14 @@ import test from 'node:test';
 const readSource = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('conversation switch remeasures mounted turns without detaching their observers', async () => {
-  const [surface, virtualHook] = await Promise.all([
+  const [surface, virtualList, virtualHook] = await Promise.all([
     readSource('../components/ChatSurface.tsx'),
+    readSource('../components/thread/VirtualChatTurnList.tsx'),
     readSource('../hooks/useVirtualChatTurns.ts'),
   ]);
 
   assert.match(
-    surface,
+    virtualList,
     /useVirtualChatTurns\(\{[\s\S]*?ownerKey:\s*conversationId/,
   );
 

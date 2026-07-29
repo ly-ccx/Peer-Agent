@@ -12,6 +12,76 @@ export interface ChatTurn {
   readonly messages: ChatTurnMessage[];
 }
 
+export interface ChatTurnVirtualizationWeight {
+  readonly turnCount: number;
+  readonly segmentCount: number;
+  readonly maxTurnSegmentCount: number;
+  readonly toolCallCount: number;
+  readonly attachmentBytes: number;
+  readonly maxTurnAttachmentBytes: number;
+}
+
+const VIRTUAL_TURN_COUNT_THRESHOLD = 20;
+const VIRTUAL_SEGMENT_COUNT_THRESHOLD = 120;
+const VIRTUAL_MAX_TURN_SEGMENT_THRESHOLD = 60;
+const VIRTUAL_TOOL_CALL_COUNT_THRESHOLD = 80;
+const VIRTUAL_ATTACHMENT_BYTES_THRESHOLD = 768 * 1024;
+const VIRTUAL_ATTACHMENT_MIN_TURN_COUNT = 3;
+
+export function getChatTurnVirtualizationWeight(
+  turns: readonly ChatTurn[],
+): ChatTurnVirtualizationWeight {
+  let segmentCount = 0;
+  let maxTurnSegmentCount = 0;
+  let toolCallCount = 0;
+  let attachmentBytes = 0;
+  let maxTurnAttachmentBytes = 0;
+
+  for (const turn of turns) {
+    let turnSegmentCount = 0;
+    let turnAttachmentBytes = 0;
+    for (const { msg } of turn.messages) {
+      const segments = msg.segments ?? [];
+      turnSegmentCount += segments.length;
+      for (const segment of segments) {
+        if (segment.type === 'tool-call') toolCallCount += 1;
+      }
+      for (const attachment of msg.attachments ?? []) {
+        turnAttachmentBytes += Math.max(0, attachment.size || 0);
+      }
+    }
+    segmentCount += turnSegmentCount;
+    maxTurnSegmentCount = Math.max(maxTurnSegmentCount, turnSegmentCount);
+    attachmentBytes += turnAttachmentBytes;
+    maxTurnAttachmentBytes = Math.max(maxTurnAttachmentBytes, turnAttachmentBytes);
+  }
+
+  return {
+    turnCount: turns.length,
+    segmentCount,
+    maxTurnSegmentCount,
+    toolCallCount,
+    attachmentBytes,
+    maxTurnAttachmentBytes,
+  };
+}
+
+export function shouldVirtualizeChatTurns(
+  turns: readonly ChatTurn[],
+  findOpen: boolean,
+): boolean {
+  if (findOpen) return false;
+  const weight = getChatTurnVirtualizationWeight(turns);
+  return weight.turnCount > VIRTUAL_TURN_COUNT_THRESHOLD
+    || weight.segmentCount > VIRTUAL_SEGMENT_COUNT_THRESHOLD
+    || weight.maxTurnSegmentCount > VIRTUAL_MAX_TURN_SEGMENT_THRESHOLD
+    || weight.toolCallCount > VIRTUAL_TOOL_CALL_COUNT_THRESHOLD
+    || (
+      weight.turnCount >= VIRTUAL_ATTACHMENT_MIN_TURN_COUNT
+      && weight.attachmentBytes >= VIRTUAL_ATTACHMENT_BYTES_THRESHOLD
+    );
+}
+
 /**
  * 把连续消息分组为以 user 消息开头的渲染轮次。
  *

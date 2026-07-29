@@ -3,15 +3,126 @@ import { describe, it } from 'node:test';
 import type { ChatMsg } from './types.ts';
 import {
   buildMessageTurnIndex,
+  getChatTurnVirtualizationWeight,
   getTurnUserMessage,
   groupMessagesIntoTurns,
   groupMessagesIntoTurnsIncremental,
   isLiveChatTurn,
+  shouldVirtualizeChatTurns,
 } from './chatTurns.ts';
 
 function message(id: string, role: ChatMsg['role']): ChatMsg {
   return { id, role, content: id };
 }
+
+function messageWithSegments(
+  id: string,
+  role: ChatMsg['role'],
+  segmentCount: number,
+  toolCallCount = 0,
+): ChatMsg {
+  return {
+    ...message(id, role),
+    segments: Array.from({ length: segmentCount }, (_, index) => (
+      index < toolCallCount
+        ? { type: 'tool-call' as const, tool: 'bash', args: {}, result: 'ok' }
+        : { type: 'thinking' as const, content: 'thinking' }
+    )),
+  };
+}
+
+function messageWithImage(id: string, size: number): ChatMsg {
+  return {
+    ...message(id, 'user'),
+    attachments: [{
+      id: `attachment-${id}`,
+      name: 'image.png',
+      mimeType: 'image/png',
+      size,
+      kind: 'image',
+      dataUrl: 'data:image/png;base64,stub',
+    }],
+  };
+}
+
+describe('chat turn virtualization weight', () => {
+  it('virtualizes short conversations that contain very heavy tool timelines', () => {
+    const turns = groupMessagesIntoTurns([
+      message('u1', 'user'),
+      messageWithSegments('a1', 'assistant', 31, 21),
+      message('u2', 'user'),
+      messageWithSegments('a2', 'assistant', 113, 74),
+      message('u3', 'user'),
+      messageWithSegments('a3', 'assistant', 19, 9),
+    ]);
+
+    assert.deepEqual(getChatTurnVirtualizationWeight(turns), {
+      turnCount: 3,
+      segmentCount: 163,
+      maxTurnSegmentCount: 113,
+      toolCallCount: 104,
+      attachmentBytes: 0,
+      maxTurnAttachmentBytes: 0,
+    });
+    assert.equal(shouldVirtualizeChatTurns(turns, false), true);
+  });
+
+  it('virtualizes short conversations whose historical attachments are collectively heavy', () => {
+    const turns = groupMessagesIntoTurns([
+      messageWithImage('u1', 169_052),
+      message('a1', 'assistant'),
+      message('u2', 'user'),
+      message('a2', 'assistant'),
+      message('u3', 'user'),
+      message('a3', 'assistant'),
+      messageWithImage('u4', 778_462),
+      message('a4', 'assistant'),
+      message('u5', 'user'),
+      message('a5', 'assistant'),
+      message('u6', 'user'),
+      message('a6', 'assistant'),
+      message('u7', 'user'),
+      message('a7', 'assistant'),
+    ]);
+
+    assert.deepEqual(getChatTurnVirtualizationWeight(turns), {
+      turnCount: 7,
+      segmentCount: 0,
+      maxTurnSegmentCount: 0,
+      toolCallCount: 0,
+      attachmentBytes: 947_514,
+      maxTurnAttachmentBytes: 778_462,
+    });
+    assert.equal(shouldVirtualizeChatTurns(turns, false), true);
+  });
+
+  it('does not virtualize one or two turn image exchanges solely because one image is large', () => {
+    const turns = groupMessagesIntoTurns([
+      messageWithImage('u1', 2 * 1024 * 1024),
+      message('a1', 'assistant'),
+      message('u2', 'user'),
+      message('a2', 'assistant'),
+    ]);
+
+    assert.equal(shouldVirtualizeChatTurns(turns, false), false);
+  });
+
+  it('keeps small conversations unvirtualized and disables virtualization while find is open', () => {
+    const small = groupMessagesIntoTurns([
+      message('u1', 'user'),
+      messageWithSegments('a1', 'assistant', 4, 1),
+      message('u2', 'user'),
+      messageWithSegments('a2', 'assistant', 5, 2),
+    ]);
+    const long = groupMessagesIntoTurns(
+      Array.from({ length: 22 }, (_, index) => message(`u${index}`, 'user')),
+    );
+
+    assert.equal(shouldVirtualizeChatTurns(small, false), false);
+    assert.equal(shouldVirtualizeChatTurns(long, false), true);
+    assert.equal(shouldVirtualizeChatTurns(long, true), false);
+  });
+});
 
 describe('chat turn grouping', () => {
   it('groups assistant and system messages under the preceding user message', () => {

@@ -16,7 +16,7 @@ interface UseVirtualChatTurnsOptions {
   readonly enabled: boolean;
 }
 
-interface ScrollToTurnOptions {
+export interface ScrollToTurnOptions {
   readonly align?: 'start' | 'center';
 }
 

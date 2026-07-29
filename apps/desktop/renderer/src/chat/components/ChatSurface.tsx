@@ -12,6 +12,7 @@ import { contextAccountingModelKey } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
+import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
@@ -100,7 +101,10 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
-import { ChatTurn } from './thread/ChatTurn';
+import {
+  VirtualChatTurnList,
+  type VirtualChatTurnListHandle,
+} from './thread/VirtualChatTurnList';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { MessageQueue } from './MessageQueue';
@@ -122,7 +126,6 @@ import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
-import { useVirtualChatTurns } from '../hooks/useVirtualChatTurns';
 import {
   planThreadScrollAfterMessagesChange,
   resolveThreadFollowAfterScroll,
@@ -135,13 +138,14 @@ import { shouldHardBeginConversationLoad } from '../state/conversationLoadGate';
 import {
   getTurnUserMessage,
   groupMessagesIntoTurnsIncremental,
-  isLiveChatTurn,
+  shouldVirtualizeChatTurns,
   type ChatTurnGroupCache,
 } from '../state/chatTurns';
 import { useWorkbench } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
+const EMPTY_EFFORT_LEVELS: readonly EffortLevel[] = [];
 
 function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
   const callbackRef = useRef(callback);
@@ -610,20 +614,18 @@ export function ChatSurface({
   // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
   const threadRef = useRef<HTMLDivElement>(null);
+  const virtualTurnListRef = useRef<VirtualChatTurnListHandle>(null);
   const messageTurnIndex = turnGroupCache.messageTurnIndex;
-  const virtualizeChatTurns = !findOpen && chatTurns.length > 20;
-  const {
-    range: virtualTurnRange,
-    measureElement: measureVirtualTurn,
-    scrollToTurn,
-    updateViewport: updateVirtualViewport,
-    resetMeasurements: resetVirtualMeasurements,
-  } = useVirtualChatTurns({
-    ownerKey: conversationId,
-    count: chatTurns.length,
-    scrollRef: threadRef,
-    enabled: virtualizeChatTurns,
-  });
+  const virtualizeChatTurns = shouldVirtualizeChatTurns(chatTurns, findOpen);
+  const scrollToTurn = useCallback<VirtualChatTurnListHandle['scrollToTurn']>((index, options) => {
+    virtualTurnListRef.current?.scrollToTurn(index, options);
+  }, []);
+  const updateVirtualViewport = useCallback(() => {
+    virtualTurnListRef.current?.updateViewport();
+  }, []);
+  const resetVirtualMeasurements = useCallback(() => {
+    virtualTurnListRef.current?.resetMeasurements();
+  }, []);
   const shouldAutoScrollRef = useRef(true);
   // 用户主动滚动意图：只有 wheel/touch/pointer 等手势可退出 follow。
   // 流式增高、虚拟列表重测、程序贴底触发的 scroll 不得清掉 follow。
@@ -789,7 +791,14 @@ export function ChatSurface({
   const activeProviderSupportsReasoning = Boolean(activeProvider?.supportsReasoning);
   // 档位列表以后端透传的 provider 原生能力（reasoningEffortLevels）为准，经归一化后渲染；
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
-  const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
+  const effortLevels = useMemo(
+    () => normalizeEffortLevels(activeProvider?.reasoningEffortLevels),
+    [activeProvider?.reasoningEffortLevels],
+  );
+  const composerEffortLevels = useMemo(
+    () => (activeProviderSupportsReasoning && hasTunableEffortLevels(effortLevels) ? effortLevels : EMPTY_EFFORT_LEVELS),
+    [activeProviderSupportsReasoning, effortLevels],
+  );
   // 渠道能力变化后（如切到 Grok 仅 low/medium/high），把会话旧档位投影到合法默认值。
   useEffect(() => {
     if (!activeProviderSupportsReasoning) return;
@@ -848,6 +857,24 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
+  const modeOptions = useMemo<readonly DropdownOption[]>(
+    () => CHAT_MODES.map((m) => ({ value: m, label: modeLabel(m, isZh) })),
+    [isZh],
+  );
+  const accessLevelOptions = useMemo<readonly DropdownOption[]>(
+    () => ACCESS_LEVELS.map((level) => ({
+      value: level,
+      label: accessLevelLabel(level, isZh),
+      tone: level === 'full_local' ? 'danger' : undefined,
+    })),
+    [isZh],
+  );
+  const handleModeDropdownChange = useCallback((next: string) => {
+    if (isChatMode(next)) changeMode(next);
+  }, [changeMode]);
+  const handleAccessLevelDropdownChange = useCallback((next: string) => {
+    if (isLocalAccessLevel(next)) changeLocalAccessLevel(next);
+  }, [changeLocalAccessLevel]);
   const compactionNoticeLabel = compactionStateLabel(compactionState, isZh);
   const currentTurnContext = useMemo(() => {
     if (!currentTurnId) return null;
@@ -2148,42 +2175,23 @@ export function ChatSurface({
             ) : null}
           </div>
         ) : (
-          <div
-            className="chat-turn-virtual-list"
-            role="list"
-            data-virtualized={virtualizeChatTurns ? 'true' : 'false'}
-          >
-            {virtualTurnRange.paddingStart > 0 ? (
-              <div aria-hidden="true" style={{ height: virtualTurnRange.paddingStart }} />
-            ) : null}
-            {virtualTurnRange.items.map(({ index: turnIndex }) => {
-              const turn = turnIndex === chatTurns.length - 1 && liveChatTurn
-                ? liveChatTurn
-                : chatTurns[turnIndex];
-              if (!turn) return null;
-              const live = isLiveChatTurn(turn, messages.at(-1), isStreaming);
-              return (
-                <ChatTurn
-                  key={turn.id}
-                  conversationId={conversationId}
-                  turn={turn}
-                  isLive={live}
-                  streamStartedAt={live ? convState.turnStartedAt : null}
-                  isZh={isZh}
-                  i18n={i18n}
-                  onMessageAction={stableHandleMessageAction}
-                  onEditMessage={stableHandleEditMessage}
-                  onRegenerate={stableHandleRegenerate}
-                  onPreviewImage={setImagePreview}
-                  turnIndex={turnIndex}
-                  onMeasure={measureVirtualTurn}
-                />
-              );
-            })}
-            {virtualTurnRange.paddingEnd > 0 ? (
-              <div aria-hidden="true" style={{ height: virtualTurnRange.paddingEnd }} />
-            ) : null}
-          </div>
+          <VirtualChatTurnList
+            ref={virtualTurnListRef}
+            conversationId={conversationId}
+            turns={chatTurns}
+            liveTurn={liveChatTurn}
+            lastMessage={messages.at(-1)}
+            isStreaming={isStreaming}
+            streamStartedAt={convState.turnStartedAt}
+            isZh={isZh}
+            i18n={i18n}
+            enabled={virtualizeChatTurns}
+            scrollRef={threadRef}
+            onMessageAction={stableHandleMessageAction}
+            onEditMessage={stableHandleEditMessage}
+            onRegenerate={stableHandleRegenerate}
+            onPreviewImage={setImagePreview}
+          />
         )}
         {providerRecoveryNotice ? (
           <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
@@ -2342,13 +2350,8 @@ export function ChatSurface({
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
-              options={CHAT_MODES.map((m) => ({
-                value: m,
-                label: modeLabel(m, isZh),
-              }))}
-              onChange={(next) => {
-                if (isChatMode(next)) changeMode(next);
-              }}
+              options={modeOptions}
+              onChange={handleModeDropdownChange}
               ariaLabel={isZh ? '对话模式' : 'Chat mode'}
               title={modeTitle(mode, isZh)}
               menuPlacement="up"
@@ -2356,14 +2359,8 @@ export function ChatSurface({
             <Dropdown
               className="composer-dropdown composer-access-dropdown"
               value={localAccessLevel}
-              options={ACCESS_LEVELS.map((level) => ({
-                value: level,
-                label: accessLevelLabel(level, isZh),
-                tone: level === 'full_local' ? 'danger' : undefined,
-              }))}
-              onChange={(next) => {
-                if (isLocalAccessLevel(next)) changeLocalAccessLevel(next);
-              }}
+              options={accessLevelOptions}
+              onChange={handleAccessLevelDropdownChange}
               ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
@@ -2378,7 +2375,7 @@ export function ChatSurface({
             isStreaming={isStreaming}
             isZh={isZh}
             effort={effort}
-            effortLevels={activeProviderSupportsReasoning && hasTunableEffortLevels(effortLevels) ? effortLevels : []}
+            effortLevels={composerEffortLevels}
             onEffortChange={changeEffort}
             modelOptions={modelOptions}
             canSwitchModel={canSwitchModel}
