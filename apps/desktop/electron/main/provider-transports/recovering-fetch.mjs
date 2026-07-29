@@ -174,13 +174,34 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
   scheduleTimeout = defaultScheduleTimeout,
   allowSecondaryFallback = true,
+  // Optional per-attempt request factory. Providers that stamp request_id into
+  // the body/headers can rebuild a fresh payload on connection retries so the
+  // server does not reject the recovery attempt as a duplicate request.
+  buildInit = null,
 } = {}) {
   const maxRetries = retryDelaysMs.length;
   let lastError = null;
+  const baseInit = init || {};
+
+  const resolveAttemptInit = async (attempt) => {
+    if (typeof buildInit !== 'function') return baseInit;
+    const rebuilt = await buildInit({
+      attempt,
+      isRetry: attempt > 0,
+      baseInit,
+    });
+    if (!rebuilt || typeof rebuilt !== 'object') return baseInit;
+    return {
+      ...baseInit,
+      ...rebuilt,
+      // Keep the caller-owned abort signal authoritative across rebuilds.
+      signal: rebuilt.signal ?? baseInit.signal,
+    };
+  };
 
   let proxyDetected = false;
   try {
-    proxyDetected = Boolean(await detectProxy({ url, signal: init?.signal }));
+    proxyDetected = Boolean(await detectProxy({ url, signal: baseInit?.signal }));
   } catch {
     proxyDetected = false;
   }
@@ -201,9 +222,9 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   // arrive, so racing this await bounds time-to-headers (connect + TLS + proxy),
   // not the streamed body. A hung socket is aborted and surfaced as a recoverable
   // ConnectTimeoutError so it enters the backoff loop instead of blocking forever.
-  const callWithConnectTimeout = async (impl) => {
+  const callWithConnectTimeout = async (impl, attemptInit) => {
     if (!connectTimeoutMs || connectTimeoutMs <= 0) {
-      return impl(url, init);
+      return impl(url, attemptInit);
     }
     const controller = new AbortController();
     let timedOut = false;
@@ -211,14 +232,14 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       timedOut = true;
       controller.abort();
     }, connectTimeoutMs);
-    const upstreamSignal = init?.signal;
+    const upstreamSignal = attemptInit?.signal;
     const onUpstreamAbort = () => controller.abort();
     if (upstreamSignal) {
       if (upstreamSignal.aborted) controller.abort();
       else upstreamSignal.addEventListener('abort', onUpstreamAbort, { once: true });
     }
     try {
-      return await impl(url, { ...init, signal: controller.signal });
+      return await impl(url, { ...attemptInit, signal: controller.signal });
     } catch (error) {
       if (timedOut) throw makeConnectTimeoutError(connectTimeoutMs);
       throw error;
@@ -229,13 +250,14 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   };
 
   for (let round = 0; round <= maxRetries; round += 1) {
-    if (init?.signal?.aborted) throw createAbortError();
+    if (baseInit?.signal?.aborted) throw createAbortError();
+    const attemptInit = await resolveAttemptInit(round);
 
     let primaryError = null;
     const primaryImpl = await primaryChannel.resolve();
     if (primaryImpl) {
       try {
-        const response = await callWithConnectTimeout(primaryImpl);
+        const response = await callWithConnectTimeout(primaryImpl, attemptInit);
         if (round > 0) {
           emitConnectionRecovery(webContents, {
             streamId,
@@ -260,7 +282,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     const secondaryImpl = allowSecondaryFallback ? await secondaryChannel.resolve() : null;
     if (secondaryImpl) {
       try {
-        const response = await callWithConnectTimeout(secondaryImpl);
+        const response = await callWithConnectTimeout(secondaryImpl, attemptInit);
         emitConnectionRecovery(webContents, {
           streamId,
           provider,
@@ -301,7 +323,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       delayMs,
       reason: describeConnectionFailure(lastError),
     });
-    await waitImpl(delayMs, init?.signal);
+    await waitImpl(delayMs, baseInit?.signal);
   }
 
   throw lastError;

@@ -286,4 +286,49 @@ describe('recovering provider fetch', () => {
     assert.equal(recovered.length, 1);
     assert.equal(recovered[0].payload.connection, 'node-fetch');
   });
+
+  it('rebuilds request init on each connection retry via buildInit', async () => {
+    const bodies = [];
+    const attempts = [];
+    let fetchCalls = 0;
+
+    const result = await fetchWithConnectionRecovery('https://api.example.com/v1/chat', {
+      method: 'POST',
+      body: 'stale-should-not-be-used',
+    }, {
+      detectProxy: async () => false,
+      retryDelaysMs: [1],
+      waitImpl: async () => {},
+      connectTimeoutMs: 0,
+      allowSecondaryFallback: false,
+      buildInit: ({ attempt, isRetry }) => {
+        attempts.push({ attempt, isRetry });
+        return {
+          method: 'POST',
+          headers: { 'x-attempt': String(attempt) },
+          body: JSON.stringify({ request_id: `req-${attempt}`, is_retry: isRetry }),
+        };
+      },
+      fetchImpl: async (_url, init) => {
+        fetchCalls += 1;
+        bodies.push(init.body);
+        if (fetchCalls === 1) {
+          const error = new TypeError('fetch failed');
+          error.cause = { code: 'ETIMEDOUT' };
+          throw error;
+        }
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    assert.equal(result.status, 200);
+    assert.deepEqual(attempts, [
+      { attempt: 0, isRetry: false },
+      { attempt: 1, isRetry: true },
+    ]);
+    assert.deepEqual(bodies, [
+      JSON.stringify({ request_id: 'req-0', is_retry: false }),
+      JSON.stringify({ request_id: 'req-1', is_retry: true }),
+    ]);
+  });
 });
