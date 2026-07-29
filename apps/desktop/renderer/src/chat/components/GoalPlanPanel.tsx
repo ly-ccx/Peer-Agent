@@ -14,7 +14,9 @@ import type {
   GoalTask,
   GoalVerifierRun,
 } from '@peer-agent/protocol';
+import { projectGoalTiming } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { formatDuration } from '../state/format';
 import { InteractionContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
@@ -215,6 +217,32 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
 
 function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
+}
+
+/** Live 时钟：仅在有 open segment / 进行中 timing 时 1s 刷新。 */
+function useLiveNowMs(enabled: boolean): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [enabled]);
+  return nowMs;
+}
+
+function formatGoalTimingLabel(
+  plan: GoalPlan,
+  isZh: boolean,
+  nowMs: number,
+): string | null {
+  const projected = projectGoalTiming(plan.timing, nowMs);
+  if (!projected || typeof projected.activeMs !== 'number') return null;
+  const duration = formatDuration(projected.activeMs);
+  if (projected.isLive) {
+    return isZh ? `运行中 · ${duration}` : `Running · ${duration}`;
+  }
+  return isZh ? `用时 ${duration}` : `${duration}`;
 }
 
 function explorerStatusLabel(status: GoalExplorerRun['status'], isZh: boolean): string {
@@ -1397,6 +1425,13 @@ function PlanCard({
   const progress = safeProgress(plan);
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
   const title = derivePlanTitle(plan, isZh);
+  const timingLive = Boolean(
+    plan.timing?.startedAt
+    && !plan.timing?.completedAt
+    && (plan.status === 'executing' || plan.status === 'paused' || Boolean(plan.timing?.activeSegmentStartedAt)),
+  );
+  const nowMs = useLiveNowMs(timingLive);
+  const timingLabel = formatGoalTimingLabel(plan, isZh, nowMs);
 
   return (
     <section
@@ -1420,6 +1455,16 @@ function PlanCard({
             {planStatusLabel(plan.status, isZh)}
           </span>
           <span className="goal-plan-title">{title}</span>
+          {timingLabel ? (
+            <span
+              className={`goal-plan-head-timing${timingLive ? ' goal-plan-head-timing--live' : ''}`}
+              title={timingLive
+                ? (isZh ? '有效运行时间（暂停/等人时停表）' : 'Active runtime (pauses while waiting)')
+                : (isZh ? '有效运行用时' : 'Active runtime')}
+            >
+              {timingLabel}
+            </span>
+          ) : null}
           <span className="goal-plan-head-progress">
             {`${progress.completed}/${progress.total}`}
           </span>

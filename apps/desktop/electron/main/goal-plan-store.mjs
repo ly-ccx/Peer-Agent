@@ -94,6 +94,175 @@ const TERMINAL_OK = 'completed';
 const TERMINAL_FAIL = 'failed';
 const BLOCKED = 'waiting_user';
 
+/** Plan 终态：关闭 active segment 并落盘 duration。 */
+const PLAN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+/** 停表状态：人在回路 / 暂停。 */
+const PLAN_PAUSE_STATUSES = new Set(['paused']);
+/** 开表状态：真正在跑。 */
+const PLAN_ACTIVE_STATUSES = new Set(['executing']);
+/**
+ * Runner 人在回路 / 暂停态：即使 plan 仍为 executing 也停表。
+ * exploring / compacting_context 等系统侧工作不停表。
+ */
+const RUNNER_PAUSE_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted']);
+const RUNNER_ACTIVE_STATUSES = new Set([
+  'running',
+  'compacting_context',
+  'resuming_after_compaction',
+  'exploring',
+]);
+
+function toIsoOrNull(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number.isFinite(Date.parse(trimmed)) ? trimmed : null;
+}
+
+function nonNegInt(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.floor(n));
+}
+
+/**
+ * 规范化 GoalTiming 账本。历史 plan 无 timing 时返回 undefined。
+ * @param {object|null|undefined} timing
+ * @returns {object|undefined}
+ */
+export function normalizeGoalTiming(timing) {
+  if (!timing || typeof timing !== 'object') return undefined;
+  const startedAt = toIsoOrNull(timing.startedAt) || undefined;
+  const completedAt = toIsoOrNull(timing.completedAt) || undefined;
+  const activeSegmentStartedAt = toIsoOrNull(timing.activeSegmentStartedAt) || undefined;
+  const activeAccumulatedMs = nonNegInt(timing.activeAccumulatedMs, 0);
+  const next = {
+    activeAccumulatedMs,
+  };
+  if (startedAt) next.startedAt = startedAt;
+  if (completedAt) next.completedAt = completedAt;
+  if (activeSegmentStartedAt) next.activeSegmentStartedAt = activeSegmentStartedAt;
+  if (typeof timing.wallClockMs === 'number' && Number.isFinite(timing.wallClockMs)) {
+    next.wallClockMs = nonNegInt(timing.wallClockMs, 0);
+  }
+  if (typeof timing.activeMs === 'number' && Number.isFinite(timing.activeMs)) {
+    next.activeMs = nonNegInt(timing.activeMs, 0);
+  }
+  // 没有任何时间标记且累计为 0 → 视为缺省
+  if (!startedAt && !completedAt && !activeSegmentStartedAt
+    && activeAccumulatedMs === 0
+    && next.wallClockMs === undefined
+    && next.activeMs === undefined) {
+    return undefined;
+  }
+  return next;
+}
+
+function closeActiveSegment(timing, nowIso) {
+  const base = {
+    activeAccumulatedMs: nonNegInt(timing?.activeAccumulatedMs, 0),
+  };
+  if (timing?.startedAt) base.startedAt = timing.startedAt;
+  if (timing?.completedAt) base.completedAt = timing.completedAt;
+  if (typeof timing?.wallClockMs === 'number') base.wallClockMs = nonNegInt(timing.wallClockMs, 0);
+  if (typeof timing?.activeMs === 'number') base.activeMs = nonNegInt(timing.activeMs, 0);
+
+  const segmentStart = toIsoOrNull(timing?.activeSegmentStartedAt);
+  if (!segmentStart) {
+    // 无 open segment，仅去掉字段
+    return base;
+  }
+  const startMs = Date.parse(segmentStart);
+  const endMs = Date.parse(nowIso);
+  if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+    base.activeAccumulatedMs += Math.max(0, endMs - startMs);
+  }
+  return base;
+}
+
+function openActiveSegment(timing, nowIso) {
+  const base = {
+    activeAccumulatedMs: nonNegInt(timing?.activeAccumulatedMs, 0),
+    activeSegmentStartedAt: nowIso,
+  };
+  if (timing?.startedAt) base.startedAt = timing.startedAt;
+  // 重新开跑时清掉终态字段
+  return base;
+}
+
+/**
+ * 按 plan 新状态推进时间账本。
+ * - 首次进入 executing：写 startedAt + open segment
+ * - pause / 终态：close segment；终态再落盘 wallClockMs/activeMs
+ * - resume → executing：open segment（startedAt 不重置）
+ *
+ * @param {object|null|undefined} prevTiming
+ * @param {string|undefined} prevStatus
+ * @param {string} nextStatus
+ * @param {string} [nowIso]
+ * @returns {object|undefined}
+ */
+export function applyGoalTimingTransition(prevTiming, prevStatus, nextStatus, nowIso = new Date().toISOString()) {
+  if (!nextStatus || prevStatus === nextStatus) {
+    return normalizeGoalTiming(prevTiming);
+  }
+
+  let timing = normalizeGoalTiming(prevTiming) || { activeAccumulatedMs: 0 };
+  const now = toIsoOrNull(nowIso) || new Date().toISOString();
+
+  // 进入有效运行
+  if (PLAN_ACTIVE_STATUSES.has(nextStatus)) {
+    if (!timing.startedAt) timing.startedAt = now;
+    // 从停表/草稿进入执行：开 segment；若已在跑且有 open segment 则保持
+    if (!timing.activeSegmentStartedAt) {
+      timing = openActiveSegment(timing, now);
+    } else {
+      // 清除终态字段（若从 failed 等恢复）
+      const { completedAt: _c, wallClockMs: _w, activeMs: _a, ...rest } = timing;
+      timing = rest;
+    }
+    return normalizeGoalTiming(timing);
+  }
+
+  // 停表（paused）
+  if (PLAN_PAUSE_STATUSES.has(nextStatus)) {
+    timing = closeActiveSegment(timing, now);
+    return normalizeGoalTiming(timing);
+  }
+
+  // 终态
+  if (PLAN_TERMINAL_STATUSES.has(nextStatus)) {
+    timing = closeActiveSegment(timing, now);
+    if (!timing.startedAt) {
+      // 从未真正开跑就终态：不伪造 startedAt
+      return normalizeGoalTiming({
+        ...timing,
+        completedAt: now,
+        activeMs: nonNegInt(timing.activeAccumulatedMs, 0),
+        wallClockMs: 0,
+      });
+    }
+    const startedMs = Date.parse(timing.startedAt);
+    const completedMs = Date.parse(now);
+    const wallClockMs = Number.isFinite(startedMs) && Number.isFinite(completedMs)
+      ? Math.max(0, completedMs - startedMs)
+      : 0;
+    return normalizeGoalTiming({
+      ...timing,
+      completedAt: now,
+      activeMs: nonNegInt(timing.activeAccumulatedMs, 0),
+      wallClockMs,
+    });
+  }
+
+  // 其他状态（drafting / awaiting_approval / approved / accepted）：若有 open segment 则关掉
+  // （例如从 executing 回退到 approved 的异常路径）
+  if (timing.activeSegmentStartedAt) {
+    timing = closeActiveSegment(timing, now);
+  }
+  return normalizeGoalTiming(timing);
+}
+
 /**
  * 自底向上聚合进度。约束（提案 §4）：
  * - 只统计叶子任务（无 subtasks 的任务）；父任务状态由叶子派生，不单独计数。
@@ -1144,11 +1313,13 @@ function normalizePlan(plan) {
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
+  const timing = normalizeGoalTiming(plan.timing);
+  const withTiming = timing ? { ...normalized, timing } : normalized;
   const withRunTrace = runTrace.events.length > 0
     || runTrace.activeNodeId
     || runTrace.lastCheckpointNodeId
-    ? { ...normalized, runTrace }
-    : normalized;
+    ? { ...withTiming, runTrace }
+    : withTiming;
   return runner ? { ...withRunTrace, runner } : withRunTrace;
 }
 
@@ -1466,16 +1637,43 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
 
   function persist(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
+    // timing 在 status 实际迁移时推进；同状态写入仅规范化，不重复开关 segment。
+    // 调用方通常传入 { ...plan, status: next }，所以 prevStatus 必须取磁盘旧值
+    // （或 options 显式覆盖），不能用入参上的新 status。
+    const existing = plan?.planId ? (() => {
+      try {
+        const file = planFile(plan.planId);
+        if (!existsSync(file)) return null;
+        return normalizePlan(JSON.parse(readFileSync(file, 'utf8')));
+      } catch {
+        return null;
+      }
+    })() : null;
+    const prevStatus = options.prevStatus ?? existing?.status;
+    const prevTiming = options.prevTiming ?? existing?.timing;
     const normalized = normalizePlan(plan);
+    const nextStatus = options.preserveStatus
+      ? normalized.status
+      : derivePlanStatus(normalized.status, normalized.tasks);
+    const nowIso = normalized.updatedAt || new Date().toISOString();
+    const timing = applyGoalTimingTransition(
+      prevTiming,
+      prevStatus,
+      nextStatus,
+      nowIso,
+    );
     const next = {
       ...normalized,
       // 默认按叶子事实派生；preserveStatus 用于显式 setPlanStatus（如 stream_error → failed），
       // 避免瞬时失败态在同一次写入中被立刻恢复。后续 recordTaskEvidence 会重新派生。
-      status: options.preserveStatus
-        ? normalized.status
-        : derivePlanStatus(normalized.status, normalized.tasks),
+      status: nextStatus,
       progress: aggregateProgress(normalized.tasks),
+      ...(timing ? { timing } : {}),
     };
+    // 终态 / 非执行态时若 timing 已清空 open segment 且历史无 timing，不强制写空对象
+    if (!timing && Object.prototype.hasOwnProperty.call(next, 'timing')) {
+      delete next.timing;
+    }
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
@@ -2059,7 +2257,19 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     };
     const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
     const changeKind = classifyRunnerChangeKind(patch);
-    const nextPlan = { ...plan, runner: nextRunner, updatedAt: now };
+    // Runner 人在回路停表：plan 可能仍为 executing，需按 runner status 开关 segment。
+    let timing = plan.timing;
+    const prevRunnerStatus = current.status;
+    const nextRunnerStatus = nextRunner?.status;
+    if (prevRunnerStatus !== nextRunnerStatus && plan.status === 'executing') {
+      if (RUNNER_PAUSE_STATUSES.has(nextRunnerStatus)) {
+        timing = applyGoalTimingTransition(plan.timing, 'executing', 'paused', now);
+      } else if (RUNNER_ACTIVE_STATUSES.has(nextRunnerStatus)
+        && (RUNNER_PAUSE_STATUSES.has(prevRunnerStatus) || !plan.timing?.activeSegmentStartedAt)) {
+        timing = applyGoalTimingTransition(plan.timing, 'paused', 'executing', now);
+      }
+    }
+    const nextPlan = { ...plan, runner: nextRunner, updatedAt: now, ...(timing ? { timing } : {}) };
 
     // 高频 runner 进度：内存即时可见 + 广播 runner-progress（带 runner 本地 patch），
     // 写盘节流到 300ms，避免每个 tick 全量 list 与磁盘抖动。
@@ -2069,6 +2279,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         ...normalized,
         status: derivePlanStatus(normalized.status, normalized.tasks),
         progress: aggregateProgress(normalized.tasks),
+        ...(normalized.timing ? { timing: normalized.timing } : {}),
       };
       runnerProgressOverlay.set(planId, next);
       scheduleRunnerProgressPersist(planId);
@@ -2081,9 +2292,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     }
 
     // 状态跃迁/终态等：立即 flush + 完整 persist（会清 overlay）。
+    // 已在上面按 runner 调整 timing 时，把 prev 标成与 next 相同，避免 persist 因 plan 仍为
+    // executing 而再次 open/close segment。
     return persist(nextPlan, {
       changeKind: 'runner-state',
       runner: nextRunner,
+      prevStatus: plan.status,
+      prevTiming: timing ?? plan.timing,
     });
   }
 

@@ -407,6 +407,19 @@
   border-radius: var(--ui-radius-chip, 4px);
 }
 
+.goal-plan-head-timing {
+  flex: none;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-soft);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--ui-surface-hover, var(--za-hover));
+  white-space: nowrap;
+}
+.goal-plan-head-timing--live {
+  color: var(--za-text);
+}
 .goal-plan-head-progress {
   flex: none;
   font-size: var(--ui-font-caption, 11px);

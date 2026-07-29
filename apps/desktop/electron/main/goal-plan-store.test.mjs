@@ -5,7 +5,13 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createGoalPlanStore, aggregateProgress, derivePlanStatus } from './goal-plan-store.mjs';
+import {
+  createGoalPlanStore,
+  aggregateProgress,
+  derivePlanStatus,
+  applyGoalTimingTransition,
+  normalizeGoalTiming,
+} from './goal-plan-store.mjs';
 
 let tmpRoot;
 let store;
@@ -1700,5 +1706,109 @@ test('context checkpoint: prepare CAS rejects stale plan version', () => {
     }),
     (error) => error?.code === 'GOAL_CHECKPOINT_CONFLICT',
   );
+});
+
+test('applyGoalTimingTransition: first executing opens segment; pause closes; resume reopens without resetting startedAt', () => {
+  const t0 = '2026-01-01T00:00:00.000Z';
+  const t1 = '2026-01-01T00:00:10.000Z';
+  const t2 = '2026-01-01T00:00:40.000Z';
+  const t3 = '2026-01-01T00:01:00.000Z';
+
+  const started = applyGoalTimingTransition(undefined, 'approved', 'executing', t0);
+  assert.equal(started.startedAt, t0);
+  assert.equal(started.activeSegmentStartedAt, t0);
+  assert.equal(started.activeAccumulatedMs, 0);
+
+  const paused = applyGoalTimingTransition(started, 'executing', 'paused', t1);
+  assert.equal(paused.startedAt, t0);
+  assert.equal(paused.activeSegmentStartedAt, undefined);
+  assert.equal(paused.activeAccumulatedMs, 10_000);
+
+  const resumed = applyGoalTimingTransition(paused, 'paused', 'executing', t2);
+  assert.equal(resumed.startedAt, t0);
+  assert.equal(resumed.activeSegmentStartedAt, t2);
+  assert.equal(resumed.activeAccumulatedMs, 10_000);
+
+  const completed = applyGoalTimingTransition(resumed, 'executing', 'completed', t3);
+  assert.equal(completed.startedAt, t0);
+  assert.equal(completed.completedAt, t3);
+  assert.equal(completed.activeSegmentStartedAt, undefined);
+  assert.equal(completed.activeAccumulatedMs, 30_000);
+  assert.equal(completed.activeMs, 30_000);
+  assert.equal(completed.wallClockMs, 60_000);
+});
+
+test('normalizeGoalTiming: empty / invalid timing becomes undefined', () => {
+  assert.equal(normalizeGoalTiming(undefined), undefined);
+  assert.equal(normalizeGoalTiming({ activeAccumulatedMs: 0 }), undefined);
+  assert.equal(normalizeGoalTiming({ startedAt: 'not-a-date', activeAccumulatedMs: 0 }), undefined);
+  const ok = normalizeGoalTiming({
+    startedAt: '2026-01-01T00:00:00.000Z',
+    activeAccumulatedMs: -5,
+    wallClockMs: 12.7,
+  });
+  assert.equal(ok.startedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(ok.activeAccumulatedMs, 0);
+  assert.equal(ok.wallClockMs, 12);
+});
+
+test('setPlanStatus timing ledger: executing → paused → resume → completed excludes pause from activeMs', async () => {
+  const plan = approvedPlanWithTasks();
+  const executing = store.setPlanStatus(plan.planId, 'executing');
+  assert.ok(executing.timing?.startedAt);
+  assert.ok(executing.timing?.activeSegmentStartedAt);
+  assert.equal(executing.timing.activeAccumulatedMs, 0);
+
+  await new Promise((r) => setTimeout(r, 30));
+  const paused = store.setPlanStatus(plan.planId, 'paused');
+  assert.ok(paused.timing?.activeAccumulatedMs >= 20);
+  assert.equal(paused.timing?.activeSegmentStartedAt, undefined);
+  const accumulatedAfterPause = paused.timing.activeAccumulatedMs;
+
+  await new Promise((r) => setTimeout(r, 40));
+  const resumed = store.resumeRunner(plan.planId, { enabled: true, status: 'running' });
+  assert.equal(resumed.status, 'executing');
+  assert.equal(resumed.timing?.startedAt, executing.timing.startedAt);
+  assert.ok(resumed.timing?.activeSegmentStartedAt);
+  // pause 段不计入：resume 时累计应仍是 pause 结算值
+  assert.equal(resumed.timing.activeAccumulatedMs, accumulatedAfterPause);
+
+  await new Promise((r) => setTimeout(r, 30));
+  const completed = store.setPlanStatus(plan.planId, 'completed');
+  assert.equal(completed.status, 'completed');
+  assert.ok(completed.timing?.completedAt);
+  assert.equal(completed.timing?.activeSegmentStartedAt, undefined);
+  assert.ok(completed.timing.activeMs >= accumulatedAfterPause + 20);
+  // wallClock 应明显大于 active（含 pause 的 ~40ms）
+  assert.ok(completed.timing.wallClockMs >= completed.timing.activeMs);
+  // 重载后 timing 落盘保留
+  const reloaded = store.getPlan(plan.planId);
+  assert.equal(reloaded.timing.activeMs, completed.timing.activeMs);
+  assert.equal(reloaded.timing.wallClockMs, completed.timing.wallClockMs);
+});
+
+test('setRunnerState blocked pauses active segment while plan stays executing', async () => {
+  const plan = approvedPlanWithTasks();
+  store.setPlanStatus(plan.planId, 'executing');
+  store.setRunnerState(plan.planId, { enabled: true, status: 'running' });
+  await new Promise((r) => setTimeout(r, 25));
+
+  const blocked = store.setRunnerState(plan.planId, {
+    status: 'blocked',
+    blockedReason: 'waiting for user',
+  });
+  assert.equal(blocked.status, 'executing');
+  assert.equal(blocked.runner.status, 'blocked');
+  assert.ok(blocked.timing?.activeAccumulatedMs >= 15);
+  assert.equal(blocked.timing?.activeSegmentStartedAt, undefined);
+  const pausedAccum = blocked.timing.activeAccumulatedMs;
+
+  await new Promise((r) => setTimeout(r, 40));
+  const resumed = store.setRunnerState(plan.planId, {
+    status: 'running',
+    blockedReason: undefined,
+  });
+  assert.equal(resumed.timing.activeAccumulatedMs, pausedAccum);
+  assert.ok(resumed.timing.activeSegmentStartedAt);
 });
 

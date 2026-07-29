@@ -156,6 +156,115 @@ export interface GoalProgress {
   readonly percent: number;
 }
 
+/**
+ * Goal 运行时间账本。
+ *
+ * 由 store 在 plan 状态迁移时维护（不可手填）：
+ * - active：runner 真正在跑的时间累计（pause / waiting_user / 人在回路 blocked 停表）
+ * - wallClock：首次开始执行到终态的日历跨度（含等待）
+ * 终态落盘 activeMs / wallClockMs，reload 不依赖重算。
+ */
+export interface GoalTiming {
+  /** 首次进入 executing / runner 真正开跑；resume 不重置。 */
+  readonly startedAt?: string;
+  /** 进入终态 completed | failed | cancelled。 */
+  readonly completedAt?: string;
+  /**
+   * 已累计的有效运行毫秒（不含当前未闭合 segment）。
+   * pause / blocked(等人) / waiting_user / 终态时结算进账。
+   */
+  readonly activeAccumulatedMs: number;
+  /** 当前有效 segment 起点；runner 在跑时有值，暂停/终态时清空。 */
+  readonly activeSegmentStartedAt?: string;
+  /** 终态墙钟毫秒：completedAt - startedAt。 */
+  readonly wallClockMs?: number;
+  /** 终态有效运行毫秒（含终态时未闭合 segment 的结算）。 */
+  readonly activeMs?: number;
+}
+
+/** 投影后的 live / 终态口径，UI 只消费此结构。 */
+export interface ProjectedGoalTiming {
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly wallClockMs?: number;
+  readonly activeMs?: number;
+  readonly isLive: boolean;
+}
+
+/**
+ * 统一 live 与终态用时口径。
+ * - 终态优先使用落盘 activeMs / wallClockMs
+ * - 进行中：active = accumulated + open segment；wall = now - startedAt
+ */
+export function projectGoalTiming(
+  timing: GoalTiming | null | undefined,
+  nowMs: number = Date.now(),
+): ProjectedGoalTiming | null {
+  if (!timing || typeof timing !== 'object') return null;
+  const startedAt = typeof timing.startedAt === 'string' && timing.startedAt.trim()
+    ? timing.startedAt.trim()
+    : undefined;
+  if (!startedAt) return null;
+
+  const completedAt = typeof timing.completedAt === 'string' && timing.completedAt.trim()
+    ? timing.completedAt.trim()
+    : undefined;
+  const accumulated = Number.isFinite(timing.activeAccumulatedMs)
+    ? Math.max(0, Math.floor(timing.activeAccumulatedMs))
+    : 0;
+  const segmentStart = typeof timing.activeSegmentStartedAt === 'string'
+    && timing.activeSegmentStartedAt.trim()
+    ? timing.activeSegmentStartedAt.trim()
+    : undefined;
+
+  if (completedAt) {
+    const startedMs = Date.parse(startedAt);
+    const completedMs = Date.parse(completedAt);
+    const wallFromMarks = Number.isFinite(startedMs) && Number.isFinite(completedMs)
+      ? Math.max(0, completedMs - startedMs)
+      : undefined;
+    const activeFromMarks = (() => {
+      if (typeof timing.activeMs === 'number' && Number.isFinite(timing.activeMs)) {
+        return Math.max(0, Math.floor(timing.activeMs));
+      }
+      let active = accumulated;
+      if (segmentStart) {
+        const seg = Date.parse(segmentStart);
+        if (Number.isFinite(seg) && Number.isFinite(completedMs)) {
+          active += Math.max(0, completedMs - seg);
+        }
+      }
+      return active;
+    })();
+    return {
+      startedAt,
+      completedAt,
+      wallClockMs: typeof timing.wallClockMs === 'number' && Number.isFinite(timing.wallClockMs)
+        ? Math.max(0, Math.floor(timing.wallClockMs))
+        : wallFromMarks,
+      activeMs: activeFromMarks,
+      isLive: false,
+    };
+  }
+
+  const startedMs = Date.parse(startedAt);
+  let activeMs = accumulated;
+  if (segmentStart) {
+    const seg = Date.parse(segmentStart);
+    if (Number.isFinite(seg)) activeMs += Math.max(0, nowMs - seg);
+  }
+  const wallClockMs = Number.isFinite(startedMs)
+    ? Math.max(0, nowMs - startedMs)
+    : undefined;
+
+  return {
+    startedAt,
+    wallClockMs,
+    activeMs,
+    isLive: true,
+  };
+}
+
 /** 修订记录（来自 reject/revise 的 feedback）。 */
 export interface GoalRevision {
   readonly version: number;
@@ -619,6 +728,11 @@ export interface GoalPlan {
   readonly approval?: GoalApproval;
   /** 由子任务聚合，派生，不可手填 */
   readonly progress: GoalProgress;
+  /**
+   * 运行时间账本；由 store 在状态迁移时维护，旧计划可缺省。
+   * UI 请用 projectGoalTiming 统一 live / 终态口径。
+   */
+  readonly timing?: GoalTiming;
   /** Goal Runner 托管推进状态；旧计划可缺省。 */
   readonly runner?: GoalRunnerState;
   /** Execution/event ledger used by the Goal / Plan / Run right-panel projection. */
