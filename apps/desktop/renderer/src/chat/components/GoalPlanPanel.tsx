@@ -1395,10 +1395,9 @@ interface PlanCardProps {
   ) => void | Promise<void>;
 }
 
+const EMPTY_CHILD_PLANS: readonly GoalPlan[] = [];
 const EMPTY_PLAN_RELATION: Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'> = {
-  parentPlan: null,
-  sourceTask: null,
-  childPlans: [],
+  childPlans: EMPTY_CHILD_PLANS,
 };
 
 const PlanCard = memo(function PlanCard({
@@ -1410,12 +1409,12 @@ const PlanCard = memo(function PlanCard({
   isMain,
   parentPlan,
   sourceTask,
-  childPlans = [],
+  childPlans = EMPTY_CHILD_PLANS,
   onNavigateToPlan,
   onNextAction,
   onRunnerControl,
   onManualConfirm,
-});: PlanCardProps): ReactElement {
+}: PlanCardProps): ReactElement {
   // 所有等待用户决定的计划（含 Goal 模式的 accepted）都要强制展开，
   // 使聊天底部的浮条本身成为可直接操作的审批入口。
   const awaitingLock = hasPendingGoalApproval([plan]);
@@ -1804,6 +1803,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const handleApprovalSettled = useCallback(async () => {
     await reload({ mode: 'silent' });
   }, [reload]);
+
   const {
     busyPlanId: approvalBusyPlanId,
     error: approvalError,
@@ -1896,48 +1896,65 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     return undefined;
   }, [closing, sidePanelContainer]);
 
-  // 面板位于输入框上方：没有计划时不占位，直接隐藏。
-  if (plans.length === 0) {
-    return null;
-  }
-  // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
-  const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
-  // A：折叠态也要有信息密度——挑一个「活跃计划」（优先待批准，其次执行中，再次第一个），
-  // 在 header 上直接显示它的标题与 X/Y 迷你进度，避免「很长却什么都没有」。
-  const activePlan =
-    plans.find((plan) => plan.status === 'awaiting_approval') ??
-    plans.find((plan) => plan.status === 'executing') ??
-    plans[0] ??
-    null;
-  const activeProgress = activePlan ? safeProgress(activePlan) : null;
-  // 主卡优先展示待批准和执行中计划；其他仍需用户处理的活跃计划也置顶展开。
-  // 只有已完成、已取消的历史计划留在下方并默认折叠。
-  const mainPlan = selectPrimaryGoalPlan(plans);
-  // 清单计划按持久化父子关系组织；主卡仍置顶，但其余节点保留相对层级。
-  const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
-  const plansById = new Map(plans.map((plan) => [plan.planId, plan]));
-  const listPlanRows = mainPlan
-    ? buildGoalPlanTreeRows(listPlans).map(({ plan }) => ({
-        plan,
-        depth: goalPlanTreeDepth(plan, plansById),
-      }))
-    : buildGoalPlanTreeRows(listPlans);
-  const relationFor = (plan: GoalPlan) => {
-    const parentPlan = plan.parentPlanId ? plansById.get(plan.parentPlanId) : undefined;
-    const sourceTask = parentPlan && plan.sourceTaskId
-      ? parentPlan.tasks.find((task) => task.taskId === plan.sourceTaskId)
-      : undefined;
-    const childPlans = plans.filter((candidate) => candidate.parentPlanId === plan.planId);
-    return { parentPlan, sourceTask, childPlans };
-  };
-  const navigateToPlan = (planId: string, taskId?: string) => {
+  const planViewModel = useMemo(() => {
+    const activePlan =
+      plans.find((plan) => plan.status === 'awaiting_approval') ??
+      plans.find((plan) => plan.status === 'executing') ??
+      plans[0] ??
+      null;
+    const mainPlan = selectPrimaryGoalPlan(plans);
+    const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
+    const plansById = new Map(plans.map((plan) => [plan.planId, plan]));
+    const childrenByParentId = new Map<string, GoalPlan[]>();
+    for (const plan of plans) {
+      if (!plan.parentPlanId) continue;
+      const children = childrenByParentId.get(plan.parentPlanId);
+      if (children) children.push(plan);
+      else childrenByParentId.set(plan.parentPlanId, [plan]);
+    }
+    const relations = new Map<string, Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'>>();
+    for (const plan of plans) {
+      const parentPlan = plan.parentPlanId ? plansById.get(plan.parentPlanId) : undefined;
+      const sourceTask = parentPlan && plan.sourceTaskId
+        ? parentPlan.tasks.find((task) => task.taskId === plan.sourceTaskId)
+        : undefined;
+      relations.set(plan.planId, {
+        parentPlan,
+        sourceTask,
+        childPlans: childrenByParentId.get(plan.planId) ?? EMPTY_CHILD_PLANS,
+      });
+    }
+    const listPlanRows = mainPlan
+      ? buildGoalPlanTreeRows(listPlans).map(({ plan }) => ({
+          plan,
+          depth: goalPlanTreeDepth(plan, plansById),
+        }))
+      : buildGoalPlanTreeRows(listPlans);
+    return { activePlan, mainPlan, listPlans, listPlanRows, relations };
+  }, [plans]);
+
+  const navigateToPlan = useCallback((planId: string, taskId?: string) => {
     const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);
     element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     element?.focus({ preventScroll: true });
     if (taskId) {
       document.querySelector<HTMLElement>(`[data-goal-task-id="${CSS.escape(taskId)}"]`)?.focus({ preventScroll: true });
     }
-  };
+  }, []);
+
+  const relationFor = useCallback(
+    (plan: GoalPlan) => planViewModel.relations.get(plan.planId) ?? EMPTY_PLAN_RELATION,
+    [planViewModel.relations],
+  );
+
+  // 面板位于输入框上方：没有计划时不占位，直接隐藏。
+  if (plans.length === 0) {
+    return null;
+  }
+  // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
+  const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
+  const { activePlan, mainPlan, listPlans, listPlanRows } = planViewModel;
+  const activeProgress = activePlan ? safeProgress(activePlan) : null;
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
