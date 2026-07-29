@@ -184,8 +184,13 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
     case 'response.reasoning_text.delta': {
       const delta = parsed.delta || '';
       if (delta) {
+        // Keep kind on the wire so UI can label summary vs reasoning without
+        // reintroducing join heuristics. Both still use the thinking channel.
+        const kind = type === 'response.reasoning_summary_text.delta'
+          ? 'summary'
+          : 'reasoning';
         state.thinkingContent += delta;
-        webContents.send('chat:stream:thinking', { streamId, content: delta });
+        webContents.send('chat:stream:thinking', { streamId, content: delta, kind });
       }
       break;
     }

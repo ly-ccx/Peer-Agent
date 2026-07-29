@@ -32,8 +32,7 @@ import {
   isEmptyUserMessage,
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
-import type { ChatMsg } from '../state/types';
-import { joinThinkingContent } from '@peer-agent/chat-kernel';
+import type { ChatMsg, ThinkingKind } from '../state/types';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
 
@@ -66,24 +65,39 @@ function appendText(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
   return [...prev.slice(0, -1), { ...last, content: getTextContent(segments), segments }];
 }
 
-/** 追加思考 delta：仅与活跃的尾部 thinking 段合并，工具调用后新起一段。
- *  GPT 多条 status phrase 无分隔符时，用 joinThinkingContent 插入换行，避免粘成一句。 */
-function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
+/** 追加思考 delta：仅与同 kind 的尾部 thinking 段合并；kind 变化或工具调用后新起一段。 */
+function appendThinking(
+  messages: readonly ChatMsg[],
+  chunk: string,
+  kind?: ThinkingKind,
+): ChatMsg[] {
   const prev = messages as ChatMsg[];
   if (!chunk) return prev;
   const last = prev[prev.length - 1];
   if (!last || last.role !== 'assistant') return prev;
   const segments = [...(last.segments || [])];
   const lastSeg = segments[segments.length - 1];
-  if (lastSeg && lastSeg.type === 'thinking') {
-    segments[segments.length - 1] = {
-      type: 'thinking',
-      content: joinThinkingContent(lastSeg.content || '', chunk),
-    };
+  const sameKind =
+    lastSeg
+    && lastSeg.type === 'thinking'
+    && (lastSeg.kind || undefined) === (kind || undefined);
+  if (sameKind && lastSeg.type === 'thinking') {
+    const nextKind = kind || lastSeg.kind;
+    segments[segments.length - 1] = nextKind
+      ? { type: 'thinking', content: (lastSeg.content || '') + chunk, kind: nextKind }
+      : { type: 'thinking', content: (lastSeg.content || '') + chunk };
   } else {
-    segments.push({ type: 'thinking', content: chunk });
+    segments.push(
+      kind
+        ? { type: 'thinking', content: chunk, kind }
+        : { type: 'thinking', content: chunk },
+    );
   }
   return [...prev.slice(0, -1), { ...last, segments }];
+}
+
+function normalizeThinkingKind(value: unknown): ThinkingKind | undefined {
+  return value === 'summary' || value === 'reasoning' ? value : undefined;
 }
 
 /** 把内存消息映射回主进程持久化（与原 hook persistMessages 逐字一致，按会话 id）。 */
@@ -148,10 +162,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     if (!cid || !chunk) return;
     conversationStore.setState(cid, (prev) => ({ messages: appendText(prev.messages, chunk) }));
   }, []);
+  // Typewriter only carries text; keep the active thinking kind in a ref so
+  // summary/reasoning deltas flush into separate segments when the kind flips.
+  const activeThinkingKindRef = useRef<ThinkingKind | undefined>(undefined);
   const appendActiveThinking = useCallback((chunk: string) => {
     const cid = activeRef.current;
     if (!cid || !chunk) return;
-    conversationStore.setState(cid, (prev) => ({ messages: appendThinking(prev.messages, chunk) }));
+    const kind = activeThinkingKindRef.current;
+    conversationStore.setState(cid, (prev) => ({
+      messages: appendThinking(prev.messages, chunk, kind),
+    }));
   }, []);
   const textTypewriter = useTypewriterStream(appendActiveText);
   const thinkingTypewriter = useTypewriterStream(appendActiveThinking);
@@ -224,16 +244,23 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       }
     });
 
-    const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
+    const offThinking = clientApi.onChatStreamThinking(({ streamId, content, kind: rawKind }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       // 推理模型常先输出 thinking 再出正文，此处同样兜底清除重试横幅。
       clearRecoveryNotice(cid);
+      const kind = normalizeThinkingKind(rawKind);
       if (cid === activeRef.current) {
         textTypewriter.flush();
+        if (activeThinkingKindRef.current !== kind) {
+          thinkingTypewriter.flush();
+          activeThinkingKindRef.current = kind;
+        }
         thinkingTypewriter.push(content);
       } else {
-        conversationStore.setState(cid, (prev) => ({ messages: appendThinking(prev.messages, content) }));
+        conversationStore.setState(cid, (prev) => ({
+          messages: appendThinking(prev.messages, content, kind),
+        }));
       }
     });
 

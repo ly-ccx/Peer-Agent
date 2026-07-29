@@ -26,6 +26,11 @@ export function normalizeStreamSegment(segment: ContentSegment): ContentSegment 
       durationMs: segment.durationMs,
     };
   }
+  if (segment.type === 'thinking') {
+    return segment.kind
+      ? { type: 'thinking', content: segment.content || '', kind: segment.kind }
+      : { type: 'thinking', content: segment.content || '' };
+  }
   return { type: segment.type, content: segment.content || '' };
 }
 
@@ -34,6 +39,9 @@ export function segmentsSignature(segments: readonly ContentSegment[]): string {
   return JSON.stringify(segments.map((segment) => {
     if (segment.type === 'tool-call') {
       return [segment.type, segment.toolCallId || '', segment.tool || '', JSON.stringify(segment.args || {}), segment.result || '', segment.synthetic ? '1' : '0', segment.startedAtMs ?? '', segment.endedAtMs ?? '', segment.durationMs ?? ''];
+    }
+    if (segment.type === 'thinking') {
+      return [segment.type, segment.kind || '', segment.content || ''];
     }
     return [segment.type, segment.content || ''];
   }));
@@ -113,10 +121,21 @@ function mergeTextLikeReattachSegment(
     if (persistedContent.startsWith(liveContent)) return { type: 'text', content: persistedContent };
   }
   if (persisted.type === 'thinking' && live.type === 'thinking') {
+    // Do not reattach-merge across different reasoning kinds.
+    if ((persisted.kind || undefined) !== (live.kind || undefined)) return null;
     const persistedContent = persisted.content || '';
     const liveContent = live.content || '';
-    if (liveContent.startsWith(persistedContent)) return { type: 'thinking', content: liveContent };
-    if (persistedContent.startsWith(liveContent)) return { type: 'thinking', content: persistedContent };
+    const kind = live.kind || persisted.kind;
+    if (liveContent.startsWith(persistedContent)) {
+      return kind
+        ? { type: 'thinking', content: liveContent, kind }
+        : { type: 'thinking', content: liveContent };
+    }
+    if (persistedContent.startsWith(liveContent)) {
+      return kind
+        ? { type: 'thinking', content: persistedContent, kind }
+        : { type: 'thinking', content: persistedContent };
+    }
   }
   return null;
 }
@@ -224,10 +243,21 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
       groups.push({ type: 'text', content: seg.content || '' });
     } else if (seg.type === 'thinking') {
       const last = groups[groups.length - 1];
-      if (last && last.type === 'thinking') {
+      // Only merge consecutive thinking segments with the same kind (including both
+      // missing kind for legacy history). Different kinds stay separate groups so
+      // the UI can label summary vs reasoning distinctly.
+      const sameKind =
+        last
+        && last.type === 'thinking'
+        && (last.kind || undefined) === (seg.kind || undefined);
+      if (sameKind && last.type === 'thinking') {
         last.content += seg.content || '';
       } else {
-        groups.push({ type: 'thinking', content: seg.content || '' });
+        groups.push(
+          seg.kind
+            ? { type: 'thinking', content: seg.content || '', kind: seg.kind }
+            : { type: 'thinking', content: seg.content || '' },
+        );
       }
     } else {
       const last = groups[groups.length - 1];

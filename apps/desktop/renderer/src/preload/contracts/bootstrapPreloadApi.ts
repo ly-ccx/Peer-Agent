@@ -77,7 +77,7 @@ export type StreamReattachResult =
       readonly accumulatedThinking: string;
       readonly segments?: readonly (
         | { readonly type: 'text'; readonly content?: string }
-        | { readonly type: 'thinking'; readonly content?: string }
+        | { readonly type: 'thinking'; readonly content?: string; readonly kind?: 'summary' | 'reasoning' }
         | {
             readonly type: 'tool-call';
             readonly tool?: string;
@@ -712,7 +712,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     contextEpochId?: string;
   }) => Promise<readonly PromptContextEpochRecord[]>;
   readonly onChatStreamDelta: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
-  readonly onChatStreamThinking: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
+  readonly onChatStreamThinking: (listener: (payload: {
+    streamId: string;
+    content: string;
+    /** OpenAI Responses: summary vs reasoning_text; omit for legacy/unknown. */
+    kind?: 'summary' | 'reasoning';
+  }) => void) => () => void;
   readonly onChatStreamDone: (listener: (payload: {
     streamId: string;
     conversationId?: string;

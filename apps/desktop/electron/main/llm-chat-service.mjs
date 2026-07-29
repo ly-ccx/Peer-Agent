@@ -13,7 +13,6 @@ import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
 } from './provider-encoders/index.mjs';
-import { joinThinkingContent } from './thinking-content-join.mjs';
 import { agentLoopAnthropic } from './chat-runtime/anthropic-agent-loop.mjs';
 import { agentLoopGemini } from './chat-runtime/gemini-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
@@ -335,16 +334,22 @@ function wrapWebContentsForRuntimeEvents(
     failRuntimeTurn = null,
   } = {},
 ) {
-  const appendTextSegment = (type, content) => {
+  const appendTextSegment = (type, content, kind) => {
     if (!content) return;
     const segments = streamRecord.segments;
     const last = segments[segments.length - 1];
-    if (last?.type === type) {
-      // GPT reasoning status phrases often arrive without separators; only
-      // thinking joins need the shared glue-break helper.
-      last.content = type === 'thinking'
-        ? joinThinkingContent(last.content || '', content)
-        : `${last.content || ''}${content}`;
+    // Thinking segments only merge when kind matches (including both missing
+    // kind for legacy/unknown sources). Different kinds stay separate tracks.
+    const sameThinkingKind =
+      type === 'thinking'
+      && last?.type === 'thinking'
+      && (last.kind || undefined) === (kind || undefined);
+    const samePlainText = type !== 'thinking' && last?.type === type;
+    if (sameThinkingKind || samePlainText) {
+      last.content = `${last.content || ''}${content}`;
+      if (type === 'thinking' && kind && !last.kind) last.kind = kind;
+    } else if (type === 'thinking' && kind) {
+      segments.push({ type, content, kind });
     } else {
       segments.push({ type, content });
     }
@@ -456,12 +461,17 @@ function wrapWebContentsForRuntimeEvents(
           return realWebContents.send('chat:stream:error', errorPayload);
         }
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
-        emitStreamRuntimeEvent({ type: 'reasoning.delta', content: payload.content });
-        streamRecord.accumulatedThinking = joinThinkingContent(
-          streamRecord.accumulatedThinking || '',
-          payload.content,
-        );
-        appendTextSegment('thinking', payload.content);
+        const thinkingKind =
+          payload.kind === 'summary' || payload.kind === 'reasoning'
+            ? payload.kind
+            : undefined;
+        emitStreamRuntimeEvent({
+          type: 'reasoning.delta',
+          content: payload.content,
+          ...(thinkingKind ? { kind: thinkingKind } : {}),
+        });
+        streamRecord.accumulatedThinking = `${streamRecord.accumulatedThinking || ''}${payload.content}`;
+        appendTextSegment('thinking', payload.content, thinkingKind);
         persistStreamRecord();
       } else if (channel === 'chat:stream:tool-call') {
         const toolName = typeof payload?.tool === 'string' ? payload.tool : undefined;

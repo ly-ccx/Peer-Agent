@@ -55,10 +55,18 @@ export interface ChatApiMessage {
   name?: string;
 }
 
+/**
+ * OpenAI Responses 等上游对 reasoning 的细分来源。
+ * - summary: reasoning_summary_text（状态摘要）
+ * - reasoning: reasoning_text（更接近完整推理文本）
+ * 缺省表示历史/未知来源，展示回退旧「思考」样式。
+ */
+export type ThinkingKind = 'summary' | 'reasoning';
+
 /** 流式内容分段：正文 / 思考 / 工具调用。 */
 export type ContentSegment =
   | { type: 'text'; content?: string }
-  | { type: 'thinking'; content?: string }
+  | { type: 'thinking'; content?: string; kind?: ThinkingKind }
   | {
       type: 'tool-call';
       tool?: string;
@@ -162,7 +170,7 @@ export interface ChatMsg {
 
 /** 渲染分组：连续正文 / 思考 / 工具调用组。 */
 export interface TextGroup { type: 'text'; content: string }
-export interface ThinkingGroup { type: 'thinking'; content: string }
+export interface ThinkingGroup { type: 'thinking'; content: string; kind?: ThinkingKind }
 export interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
 export type SegmentGroup = TextGroup | ThinkingGroup | ToolCallGroup;
 

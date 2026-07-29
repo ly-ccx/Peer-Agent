@@ -1,37 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyThinkingEvent, createThinkingProcess, joinThinkingContent } from './thinking-reducer.ts';
+import { applyThinkingEvent, createThinkingProcess } from './thinking-reducer.ts';
 
-test('joinThinkingContent keeps provider whitespace and mid-token streams intact', () => {
-  assert.equal(joinThinkingContent('', 'Hello'), 'Hello');
-  assert.equal(joinThinkingContent('Hello', ''), 'Hello');
-  assert.equal(joinThinkingContent('Plan', 'ning'), 'Planning');
-  assert.equal(joinThinkingContent('hello ', 'world'), 'hello world');
-  assert.equal(joinThinkingContent('hello', ' world'), 'hello world');
-  assert.equal(joinThinkingContent('先确认', '登录态'), '先确认登录态');
-});
-
-test('joinThinkingContent inserts newline between glued English status phrases', () => {
-  assert.equal(
-    joinThinkingContent('Planning codebase inspection', 'Investigating file path'),
-    'Planning codebase inspection\nInvestigating file path',
-  );
-  assert.equal(
-    joinThinkingContent('logic', 'Fixing earliest human turn tracking'),
-    'logic\nFixing earliest human turn tracking',
-  );
-  assert.equal(
-    joinThinkingContent('exploration', 'Investigating file path support issue'),
-    'exploration\nInvestigating file path support issue',
-  );
-  // sentence punctuation then capitalized phrase
-  assert.equal(
-    joinThinkingContent('Done.', 'Next step'),
-    'Done.\nNext step',
-  );
-});
-
-test('applyThinkingEvent content_delta joins glued reasoning status phrases with newlines', () => {
+test('applyThinkingEvent content_delta concatenates thinking deltas with plain string join', () => {
   let process = createThinkingProcess({ maxIterations: 3 });
   process = applyThinkingEvent(process, 'react_start', { maxIterations: 3 })!;
   process = applyThinkingEvent(process, 'iteration_start', {
@@ -48,17 +19,14 @@ test('applyThinkingEvent content_delta joins glued reasoning status phrases with
     content: 'Inspecting code split',
   })!;
 
+  // Plain concat: if provider glues status phrases, they stay glued.
   assert.equal(
     process.iterations[0]?.thinkingContent,
-    [
-      'Planning codebase inspection',
-      'Investigating file path support issue',
-      'Inspecting code split',
-    ].join('\n'),
+    'Planning codebase inspectionInvestigating file path support issueInspecting code split',
   );
 });
 
-test('applyThinkingEvent content_delta still concatenates mid-token deltas without spaces', () => {
+test('applyThinkingEvent content_delta concatenates mid-token deltas without spaces', () => {
   let process = createThinkingProcess({ maxIterations: 3 });
   process = applyThinkingEvent(process, 'react_start', { maxIterations: 3 })!;
   process = applyThinkingEvent(process, 'content_delta', { content: 'Plan' })!;
@@ -66,4 +34,14 @@ test('applyThinkingEvent content_delta still concatenates mid-token deltas witho
   process = applyThinkingEvent(process, 'content_delta', { content: ' inspection' })!;
 
   assert.equal(process.iterations[0]?.thinkingContent, 'Planning inspection');
+});
+
+test('applyThinkingEvent content_delta keeps camelCase identifier fragments intact', () => {
+  let process = createThinkingProcess({ maxIterations: 3 });
+  process = applyThinkingEvent(process, 'react_start', { maxIterations: 3 })!;
+  for (const content of ['set', 'State', ' is', 'Thread', 'At', 'Bottom']) {
+    process = applyThinkingEvent(process, 'content_delta', { content })!;
+  }
+
+  assert.equal(process.iterations[0]?.thinkingContent, 'setState isThreadAtBottom');
 });

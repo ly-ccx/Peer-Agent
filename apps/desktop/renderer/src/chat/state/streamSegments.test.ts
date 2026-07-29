@@ -17,7 +17,10 @@ import {
 import type { ContentSegment } from './types.ts';
 
 const txt = (content: string): ContentSegment => ({ type: 'text', content });
-const think = (content: string): ContentSegment => ({ type: 'thinking', content });
+const think = (
+  content: string,
+  kind?: Extract<ContentSegment, { type: 'thinking' }>['kind'],
+): ContentSegment => (kind ? { type: 'thinking', content, kind } : { type: 'thinking', content });
 const tool = (tool: string, over: Partial<Extract<ContentSegment, { type: 'tool-call' }>> = {}): ContentSegment => ({ type: 'tool-call', tool, args: {}, ...over });
 
 describe('normalizeStreamSegment', () => {
@@ -33,6 +36,17 @@ describe('normalizeStreamSegment', () => {
   });
   it('defaults content to empty string for text/thinking', () => {
     assert.deepEqual(normalizeStreamSegment({ type: 'text' } as ContentSegment), { type: 'text', content: '' });
+    assert.deepEqual(normalizeStreamSegment({ type: 'thinking' } as ContentSegment), { type: 'thinking', content: '' });
+  });
+  it('preserves thinking kind when present', () => {
+    assert.deepEqual(
+      normalizeStreamSegment({ type: 'thinking', content: 'plan', kind: 'summary' }),
+      { type: 'thinking', content: 'plan', kind: 'summary' },
+    );
+    assert.deepEqual(
+      normalizeStreamSegment({ type: 'thinking', content: 'detail', kind: 'reasoning' }),
+      { type: 'thinking', content: 'detail', kind: 'reasoning' },
+    );
   });
 });
 
@@ -42,6 +56,12 @@ describe('segmentsSignature', () => {
   });
   it('differs when content differs', () => {
     assert.notEqual(segmentsSignature([txt('a')]), segmentsSignature([txt('b')]));
+  });
+  it('differs when thinking kind differs', () => {
+    assert.notEqual(
+      segmentsSignature([think('same', 'summary')]),
+      segmentsSignature([think('same', 'reasoning')]),
+    );
   });
 });
 
@@ -153,6 +173,28 @@ describe('groupSegments', () => {
     assert.equal(groups[1].type, 'tool-call-group');
     assert.equal((groups[1] as { calls: unknown[] }).calls.length, 2);
     assert.deepEqual(groups[2], { type: 'text', content: 'done' });
+  });
+  it('keeps summary and reasoning thinking as separate groups', () => {
+    const groups = groupSegments([
+      think('Planning inspection', 'summary'),
+      think('Detailed chain…', 'reasoning'),
+      think(' more summary', 'summary'),
+    ]);
+    assert.equal(groups.length, 3);
+    assert.deepEqual(groups[0], { type: 'thinking', content: 'Planning inspection', kind: 'summary' });
+    assert.deepEqual(groups[1], { type: 'thinking', content: 'Detailed chain…', kind: 'reasoning' });
+    assert.deepEqual(groups[2], { type: 'thinking', content: ' more summary', kind: 'summary' });
+  });
+  it('merges consecutive same-kind thinking and leaves legacy kindless thinking merged', () => {
+    const groups = groupSegments([
+      think('a', 'summary'),
+      think('b', 'summary'),
+      think('legacy-1'),
+      think('legacy-2'),
+    ]);
+    assert.equal(groups.length, 2);
+    assert.deepEqual(groups[0], { type: 'thinking', content: 'ab', kind: 'summary' });
+    assert.deepEqual(groups[1], { type: 'thinking', content: 'legacy-1legacy-2' });
   });
   it('keeps thinking and visible text in their original timeline order', () => {
     const groups = groupSegments([txt('请选择方案 A/B/C'), think('内部分析')]);

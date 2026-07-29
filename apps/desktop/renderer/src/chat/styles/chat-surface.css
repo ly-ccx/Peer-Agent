@@ -615,6 +615,29 @@
   overflow-wrap: anywhere;
 }
 
+/* OpenAI Responses: label summary vs reasoning when kind is present. */
+.thinking-kind-label {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0.35em;
+  padding: 0.1em 0.45em;
+  border-radius: var(--ui-radius-control, var(--radius-sm));
+  background: var(--chrome-sunken);
+  color: var(--graphite-mute);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+.thinking-text--summary .thinking-kind-label {
+  color: var(--graphite-mute);
+}
+
+.thinking-text--reasoning .thinking-kind-label {
+  color: var(--graphite-soft);
+}
+
 
 /* ── Tool call cards ── */
 .tool-calls-list {
