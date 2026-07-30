@@ -256,8 +256,10 @@ export function buildSessionImportPreflight(options = {}) {
     action: 'none',
   });
 
+  // blocked：任一浏览器/环境需授权或不可用（用于启动门；Chrome EPERM 时即使 Chromium 可读也要 blocked）。
   const blocked = checks.some((c) => c.status === 'blocked' || c.status === 'unsupported');
-  // 若探测到 Cookies 复制结果，则以“至少有一个 Cookies 可 copy”为准；否则退回目录可读。
+  // ready：至少有一个浏览器可继续导入（导入向导可继续）；与 blocked 独立，不能互相吞掉。
+  // 若探测到 Cookies 复制结果，则以“至少一个 Cookies 可 copy”为准；否则退回目录可读。
   const ready = (
     (anyCookieCopyOk || (!anyCookieCopyBlocked && anyBrowserReadable))
     && !checks.some((c) => c.status === 'unsupported')
@@ -266,7 +268,7 @@ export function buildSessionImportPreflight(options = {}) {
   return {
     ok: true,
     ready,
-    blocked: blocked && !ready,
+    blocked,
     checks,
     openFullDiskAccessSupported: true,
     guidance: isZh

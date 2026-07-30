@@ -172,3 +172,51 @@ test('resolveFullDiskAccessDragTarget supports Electron.dev app bundle', () => {
   assert.ok(String(res.appPath).endsWith('Electron.app'));
   assert.equal(res.displayName, 'Electron');
 });
+
+
+test('mixed browsers: Chrome blocked but Chromium readable still reports blocked', () => {
+  const err = Object.assign(new Error('EPERM copyfile'), { code: 'EPERM' });
+  const adapters = [
+    {
+      id: 'chrome-mac',
+      browserName: 'Google Chrome',
+      bundleId: 'com.google.Chrome',
+      userDataRoot: '/Users/me/Library/Application Support/Google/Chrome',
+      keychainBrowserId: 'Chrome',
+    },
+    {
+      id: 'chromium-mac',
+      browserName: 'Chromium',
+      bundleId: 'org.chromium.Chromium',
+      userDataRoot: '/Users/me/Library/Application Support/Chromium',
+      keychainBrowserId: 'Chromium',
+    },
+  ];
+  const fsImpl = {
+    existsSync: (p) => {
+      const s = String(p);
+      return s.includes('Google/Chrome') || s.includes('/Chromium');
+    },
+    readdirSync: (p) => {
+      // Chrome 目录 EPERM；Chromium 可读。
+      if (String(p).includes('Google/Chrome')) throw err;
+      return ['Default'];
+    },
+    mkdirSync: () => {},
+    copyFileSync: (src) => {
+      if (String(src).includes('Google/Chrome')) throw err;
+    },
+    rmSync: () => {},
+  };
+  const res = buildSessionImportPreflight({
+    platform: 'darwin',
+    adapters,
+    fsImpl,
+    isZh: false,
+  });
+  // Chromium 可读 => ready 可为 true；但 Chrome 被拦 => blocked 必须仍为 true（启动门依赖此项）。
+  assert.equal(res.ready, true);
+  assert.equal(res.blocked, true);
+  assert.ok(res.checks.some((c) => c.id === 'browser:chrome-mac' && c.status === 'blocked'));
+  assert.ok(res.checks.some((c) => c.action === 'open_full_disk_access'));
+});

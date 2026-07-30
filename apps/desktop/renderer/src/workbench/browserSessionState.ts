@@ -45,6 +45,16 @@ export function createBrowserSessionState(tab = createBrowserTabSession()): Brow
   return { tabs: [tab], activeTabId: tab.id };
 }
 
+/** 仅 about:blank、无标题的会话视为“空浏览器”，不应用作启动时恢复 browser tab 的理由。 */
+export function isBlankBrowserSession(session: BrowserSessionState | null | undefined): boolean {
+  if (!session || session.tabs.length === 0) return true;
+  return session.tabs.every((tab) => {
+    const url = (tab.url || '').trim() || BROWSER_HOME_URL;
+    const title = (tab.title || '').trim();
+    return (url === BROWSER_HOME_URL || url === '') && !title;
+  });
+}
+
 function normalizeBrowserTab(raw: unknown): BrowserTabSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const tab = raw as Record<string, unknown>;

@@ -11,6 +11,7 @@ import {
 import { clientApi } from '../clientApi';
 import {
   createBrowserSessionState,
+  isBlankBrowserSession,
   normalizeBrowserSessionMap,
   normalizeBrowserSessionState,
   workbenchSessionKey,
@@ -450,10 +451,16 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
   const activeTab: WorkbenchTabId = useMemo(() => {
     const key = workbenchSessionKey(conversationId);
     const stored = normalizeWorkbenchTab(activeTabMap[key]);
+    if (stored === 'browser') {
+      const session = browserSessionMap[key] ?? defaultBrowserSessionsRef.current[key];
+      // 仅空白 about:blank 时不要在冷启动恢复 browser tab（避免一打开就露出空浏览器）。
+      if (!session || isBlankBrowserSession(session)) return 'plan';
+      return 'browser';
+    }
     if (stored) return stored;
     // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图。
     return 'plan';
-  }, [conversationId, activeTabMap]);
+  }, [conversationId, activeTabMap, browserSessionMap]);
 
   const browserSession = useMemo(() => {
     const stored = browserSessionMap[currentSessionKey];

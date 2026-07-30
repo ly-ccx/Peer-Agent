@@ -35,6 +35,9 @@ test('startup gate uses session-import preflight + app drag APIs', () => {
   // 不依赖 Overlay render props，降低 hooks 复杂度。
   assert.doesNotMatch(src, /from '\.\/Overlay'/);
   assert.match(src, /createPortal/);
+  // ready 不能吞掉 blocked：Chrome EPERM 时仍应弹门。
+  assert.doesNotMatch(src, /if \(res\.ready\) return false/);
+  assert.doesNotMatch(src, /!isBlockedPreflight\(res\) \|\| res\?\.ready/);
 });
 
 test('root renderer wraps App with AppErrorBoundary', () => {

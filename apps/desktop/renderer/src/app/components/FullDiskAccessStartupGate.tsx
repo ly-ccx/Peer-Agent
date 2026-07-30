@@ -51,7 +51,8 @@ function isMacPlatform(): boolean {
 
 function isBlockedPreflight(res: Preflight | null | undefined): boolean {
   if (!res) return false;
-  if (res.ready) return false;
+  // ready 只表示「至少有一个浏览器可导入」，不能吞掉 Chrome 等被 EPERM 拦住的项。
+  // 启动门：只要存在需 FDA 的 blocked / open_full_disk_access 检查就应弹出。
   return Boolean(
     res.blocked
     || res.checks?.some((c) => c.status === 'blocked' || c.action === 'open_full_disk_access'),
@@ -107,10 +108,10 @@ export function FullDiskAccessStartupGate({
       }
       const res = await api() as Preflight;
       setPreflight(res);
-      if (!isBlockedPreflight(res) || res?.ready) {
-        setOpen(false);
-      } else {
+      if (isBlockedPreflight(res)) {
         setOpen(true);
+      } else {
+        setOpen(false);
       }
       return res;
     } catch (err) {
