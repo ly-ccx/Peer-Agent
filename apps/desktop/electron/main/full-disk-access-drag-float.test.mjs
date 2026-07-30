@@ -42,6 +42,7 @@ test('drag float controller builds always-on-top window and html drag payload', 
     preloadPath: '/tmp/preload.cjs',
     resolveDragTarget: () => ({ ok: true, appPath: '/Applications/Peer Agent.app', displayName: 'Peer Agent' }),
     resolveLogoFilePath: () => '/tmp/logo.png',
+    resolveLogoDataUrl: () => 'data:image/png;base64,aaa',
     isZh: () => true,
   });
   const res = controller.show({ isZh: true, ttlMs: 0 });

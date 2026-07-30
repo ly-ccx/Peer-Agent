@@ -2186,18 +2186,34 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
 function resolveAppIconNativeImage(appPath) {
   // 固定优先使用 Peer Agent 品牌资源（logo/icon），不要回落到系统通用占位图。
   // 这样权限卡展示的是“我们的 LOGO”，不是蓝色 App 方块。
+  // 注意：打包态 workspaceRoot 为 null，禁止 path.join(null, ...)，否则拖拽会炸：
+  // "The \"path\" argument must be of type string. Received null"
   const candidates = [];
   // monorepo / pack / installed resources
+  if (workspaceRoot) {
+    candidates.push(
+      path.join(workspaceRoot, 'apps/desktop/public/logo.png'),
+      path.join(workspaceRoot, 'apps/desktop/build/icon.png'),
+      path.join(workspaceRoot, 'apps/desktop/build/icon.icns'),
+    );
+  }
   candidates.push(
-    path.join(workspaceRoot, 'apps/desktop/public/logo.png'),
-    path.join(workspaceRoot, 'apps/desktop/build/icon.png'),
-    path.join(workspaceRoot, 'apps/desktop/build/icon.icns'),
     path.join(__dirname, '../../public/logo.png'),
     path.join(__dirname, '../../dist/logo.png'),
     path.join(__dirname, '../../build/icon.png'),
     path.join(__dirname, '../../build/icon.icns'),
     path.join(__dirname, '../../dist/favicon.png'),
   );
+  // packaged app.asar.unpacked / Resources
+  try {
+    if (process.resourcesPath) {
+      candidates.push(
+        path.join(process.resourcesPath, 'logo.png'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'logo.png'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'logo.png'),
+      );
+    }
+  } catch { /* ignore */ }
   if (appPath && typeof appPath === 'string') {
     candidates.push(
       path.join(appPath, 'Contents', 'Resources', 'icon.icns'),
@@ -2244,12 +2260,43 @@ function resolveFdaFloatLogoPath() {
     path.join(__dirname, '../../public/logo.png'),
     path.join(__dirname, '../../dist/logo.png'),
     path.join(__dirname, '../../build/icon.png'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'logo.png') : null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'logo.png') : null,
   ].filter(Boolean);
   for (const file of candidates) {
     try {
-      if (existsSync(file)) return file;
+      if (file && existsSync(file)) return file;
     } catch { /* continue */ }
   }
+  return null;
+}
+
+/** 浮窗在 sandbox data: HTML 里，file:// 往往裂图；改为 data URL。 */
+function resolveFdaFloatLogoDataUrl() {
+  try {
+    const file = resolveFdaFloatLogoPath();
+    if (file) {
+      const img = nativeImage.createFromPath(file);
+      if (img && !img.isEmpty()) {
+        const dataUrl = img.toDataURL();
+        if (dataUrl) return dataUrl;
+      }
+    }
+  } catch { /* fall through */ }
+  try {
+    // 再走统一图标解析（已对 workspaceRoot null 安全）
+    const drag = resolveFullDiskAccessDragTarget({
+      platform: process.platform,
+      appGetPath: (name) => app.getPath(name),
+      execPath: process.execPath,
+      resourcesPath: process.resourcesPath,
+    });
+    const icon = resolveAppIconNativeImage(drag?.ok ? drag.appPath : '');
+    if (icon && !icon.isEmpty()) {
+      const dataUrl = icon.toDataURL();
+      if (dataUrl) return dataUrl;
+    }
+  } catch { /* fall through */ }
   return null;
 }
 
@@ -2266,6 +2313,7 @@ const fullDiskAccessDragFloatController = createFullDiskAccessDragFloatControlle
     resourcesPath: process.resourcesPath,
   }),
   resolveLogoFilePath: resolveFdaFloatLogoPath,
+  resolveLogoDataUrl: resolveFdaFloatLogoDataUrl,
   isZh: () => {
     try {
       // best-effort locale; renderer also passes isZh when available
@@ -2493,10 +2541,11 @@ ipcMain.on('browser:start-app-drag', (event, payload = {}) => {
     if (icon.isEmpty()) {
       // 最后兜底：1x1 透明也不理想，尽量再找 logo.png
       const logoFallbacks = [
-        path.join(workspaceRoot, 'apps/desktop/public/logo.png'),
+        workspaceRoot ? path.join(workspaceRoot, 'apps/desktop/public/logo.png') : null,
         path.join(__dirname, '../../public/logo.png'),
         path.join(__dirname, '../../dist/logo.png'),
-      ];
+        process.resourcesPath ? path.join(process.resourcesPath, 'logo.png') : null,
+      ].filter(Boolean);
       for (const f of logoFallbacks) {
         try {
           if (!existsSync(f)) continue;

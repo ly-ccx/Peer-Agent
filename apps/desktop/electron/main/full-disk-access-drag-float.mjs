@@ -28,6 +28,7 @@ export function createFullDiskAccessDragFloatController(deps) {
     preloadPath,
     resolveDragTarget,
     resolveLogoFilePath,
+    resolveLogoDataUrl,
     isZh = () => true,
   } = deps;
 
@@ -104,6 +105,10 @@ export function createFullDiskAccessDragFloatController(deps) {
     box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     pointer-events: none;
   }
+  .logo-fallback {
+    display: flex; align-items: center; justify-content: center;
+    background: #111; color: #fff; font-size: 13px; font-weight: 700;
+  }
   .meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .meta strong {
     font-size: 13px; font-weight: 650; line-height: 1.3;
@@ -131,7 +136,9 @@ export function createFullDiskAccessDragFloatController(deps) {
 </head>
 <body>
   <div class="card" id="drag" draggable="true" title="${escapeHtml(title)}">
-    ${logoSrc ? `<img class="logo" src="${escapeHtml(logoSrc)}" alt="" />` : `<div class="logo" style="background:#111;border-radius:12px"></div>`}
+    ${logoSrc
+      ? `<img class="logo" src="${escapeHtml(logoSrc)}" alt="" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'flex\';" /><div class="logo logo-fallback" style="display:none">PA</div>`
+      : `<div class="logo logo-fallback">PA</div>`}
     <div class="meta">
       <strong>${escapeHtml(title)}</strong>
       <span>${escapeHtml(subtitle)}</span>
@@ -207,15 +214,25 @@ export function createFullDiskAccessDragFloatController(deps) {
     if (!target?.ok || !target.appPath) {
       return { ok: false, error: target?.error || 'app_path_not_found' };
     }
-    const logoPath = resolveLogoFilePath();
-    let logoFileUrl = '';
-    if (logoPath && existsSync(logoPath)) {
-      try { logoFileUrl = pathToFileURL(logoPath).href; } catch { logoFileUrl = ''; }
+    // sandbox data: HTML 无法稳定加载 file://；优先 data URL
+    let logoSrc = '';
+    try {
+      if (typeof resolveLogoDataUrl === 'function') {
+        logoSrc = resolveLogoDataUrl() || '';
+      }
+    } catch { logoSrc = ''; }
+    if (!logoSrc) {
+      try {
+        const logoPath = typeof resolveLogoFilePath === 'function' ? resolveLogoFilePath() : null;
+        if (logoPath && existsSync(logoPath)) {
+          logoSrc = pathToFileURL(logoPath).href;
+        }
+      } catch { logoSrc = ''; }
     }
     const payload = {
       appPath: target.appPath,
       displayName: target.displayName || 'Peer Agent',
-      logoFileUrl,
+      logoFileUrl: logoSrc,
       isZh: options.isZh !== undefined ? options.isZh : isZh(),
     };
     const html = buildHtml(payload);
