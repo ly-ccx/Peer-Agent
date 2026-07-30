@@ -46,11 +46,14 @@
   --glass-chrome: hsla(215, 16%, 98%, 0.52);
   --glass-chrome-hover: hsla(215, 16%, 96%, 0.62);
   --glass-control: hsla(218, 18%, 96%, 0.56);
-  --glass-popover: hsla(212, 12%, 99%, 0.72);
+  /* 磨砂毛玻璃：提高不透明度，避免「透明玻璃」可读背景字 */
+  --glass-popover: hsla(212, 12%, 99%, 0.88);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.55);
   --blur-chrome: 24px;
   --blur-control: 16px;
-  --blur-popover: 20px;
+  --blur-popover: 24px;
+  /* 与 blur 搭配：saturate 让磨砂更厚、更糊，而不是单 blur 的薄透明感 */
+  --blur-saturate: 1.6;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -342,7 +345,8 @@
   --glass-chrome: hsla(220, 22%, 12%, 0.48);
   --glass-chrome-hover: hsla(220, 20%, 16%, 0.58);
   --glass-control: hsla(220, 18%, 18%, 0.52);
-  --glass-popover: hsla(220, 20%, 12%, 0.70);
+  /* 暗色磨砂：同样抬不透明度，背景字不可清晰辨认 */
+  --glass-popover: hsla(220, 20%, 12%, 0.86);
   --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.14);
 
   /* ─── Frost 正名 token ─── */

@@ -20,8 +20,8 @@
   /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃。
      不叠 glass-edge-highlight：暗色下顶部 inset 高光会变成一条刺眼亮线。 */
   background: var(--glass-popover);
-  backdrop-filter: blur(var(--blur-popover));
-  -webkit-backdrop-filter: blur(var(--blur-popover));
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12));
   overflow: hidden;
 }

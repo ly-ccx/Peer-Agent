@@ -766,8 +766,8 @@
   padding: var(--space-2);
   /* 选择器菜单统一 glass-popover 毛玻璃 */
   background: var(--glass-popover);
-  backdrop-filter: blur(var(--blur-popover));
-  -webkit-backdrop-filter: blur(var(--blur-popover));
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-popover), var(--glass-edge-highlight);

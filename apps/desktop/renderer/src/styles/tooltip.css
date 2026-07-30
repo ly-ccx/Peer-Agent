@@ -10,8 +10,8 @@
   padding: 6px 9px;
   border-radius: var(--ui-radius-control, var(--radius-sm, 6px));
   background: var(--glass-popover, var(--ui-tooltip-bg, rgba(28, 30, 36, 0.88)));
-  backdrop-filter: blur(var(--blur-popover, 20px));
-  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
   color: var(--ui-tooltip-fg, var(--graphite-base, #f2f4f8));
   border: 1px solid var(--chrome-hairline, var(--ui-tooltip-border, rgba(255, 255, 255, 0.08)));
   box-shadow: var(--shadow-popover, var(--shadow-pop, 0 6px 20px rgba(0, 0, 0, 0.28))), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));

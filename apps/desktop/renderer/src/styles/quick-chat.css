@@ -54,8 +54,8 @@ body:has(.quick-chat-shell) {
   border-radius: 14px;
   /* 独立窗已 transparent；bar 走 glass-popover 透出桌面/vibrancy */
   background: var(--glass-popover, var(--quick-surface));
-  backdrop-filter: blur(var(--blur-popover, 20px));
-  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
   box-shadow: var(--shadow-popover, var(--quick-shadow)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
   -webkit-app-region: drag;
   transition: border-color 120ms ease;
@@ -358,8 +358,8 @@ body:has(.quick-chat-shell) {
   color: var(--graphite-base);
   /* popover 与 bar 同档 glass-popover */
   background: var(--glass-popover, var(--quick-surface));
-  backdrop-filter: blur(var(--blur-popover, 20px));
-  -webkit-backdrop-filter: blur(var(--blur-popover, 20px));
+  backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
   box-shadow: var(--shadow-popover, 0 8px 20px color-mix(in srgb, var(--quick-text) 12%, transparent)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   outline: 0;
