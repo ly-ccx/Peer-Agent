@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Overlay } from '../../../app/components/Overlay';
 import { formatBytes } from '../../state/format';
 import type { ChatAttachment } from '../../state/types';
 
 export const PEER_ATTACHMENT_DND_TYPE = 'application/x-peer-attachment-id';
 
-export function AttachmentStrip({
+/**
+ * 附件条含 image dataUrl 缩略图，渲染成本高。
+ * 必须 memo：输入区逐字更新时父级可能重渲染，但 attachments/回调未变时禁止重绘缩略图，
+ * 否则大图 dataUrl 会让输入框内部每敲一字闪一下。
+ */
+export const AttachmentStrip = memo(function AttachmentStrip({
   attachments,
   onRemove,
   onReorder,
@@ -122,7 +127,7 @@ export function AttachmentStrip({
       })}
     </div>
   );
-}
+});
 
 export function ImagePreviewOverlay({
   attachment,

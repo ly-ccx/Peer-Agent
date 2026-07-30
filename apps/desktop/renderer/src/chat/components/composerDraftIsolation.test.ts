@@ -5,17 +5,28 @@ import test from 'node:test';
 const readSource = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('draft input stays in the composer leaf and never becomes context token authority', async () => {
-  const [surface, controls, tokenUsage] = await Promise.all([
+  const [surface, controls, tokenUsage, attachmentStrip] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./ComposerDraftControls.tsx'),
     readSource('./ComposerTokenUsageDisplay.tsx'),
+    readSource('./thread/AttachmentStrip.tsx'),
   ]);
 
   assert.match(surface, /<ComposerDraftControls[\s\S]*?conversationId=\{conversationId\}/);
   assert.match(surface, /onPrimaryAction=\{stableHandlePrimaryAction\}/);
   assert.doesNotMatch(surface, /estimateDraftTokens|estimateStreamDeltaTokens/);
+  // 壳层不订阅 draft；唯一订阅点在 ComposerDraftField 叶子，避免附件条随逐字重渲。
+  assert.match(controls, /const ComposerDraftField = memo\(function ComposerDraftField/);
   assert.match(controls, /const draft = useConversationDraft\(conversationId\)/);
   assert.match(controls, /conversationStore\.setDraft\(conversationId, value\)/);
+  assert.match(controls, /attachmentSlot/);
+  assert.equal(
+    (controls.match(/useConversationDraft/g) ?? []).length,
+    2,
+    'useConversationDraft should appear only as import + one leaf subscription',
+  );
+  // 附件条必须 memo，dataUrl 缩略图不能因父级 draft 重渲而整块重绘。
+  assert.match(attachmentStrip, /export const AttachmentStrip = memo\(function AttachmentStrip/);
   assert.match(tokenUsage, /useConversationContextAccounting\(conversationId\)/);
   assert.match(tokenUsage, /contextAccounting=\{contextAccounting\}/);
   assert.match(tokenUsage, /emptyContext=\{conversationId == null\}/);

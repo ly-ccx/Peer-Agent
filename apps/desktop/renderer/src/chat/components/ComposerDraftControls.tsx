@@ -32,6 +32,10 @@ const SLASH_COMMANDS: readonly SlashCommand[] = [
   },
 ];
 
+/**
+ * 输入壳：不订阅 draft。
+ * 附件条/文件按钮停在壳层；逐字 draft 只唤醒下方叶子，避免 dataUrl 缩略图随每个字符重绘。
+ */
 export const ComposerDraftControls = memo(function ComposerDraftControls({
   conversationId,
   hasProvider,
@@ -65,6 +69,85 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 壳层稳定构造附件节点；draft 叶子重渲染时 props 引用不变 + AttachmentStrip memo → 不重绘缩略图。
+  const attachmentSlot = useMemo(
+    () => (
+      <>
+        <AttachmentStrip
+          attachments={attachments}
+          onRemove={onRemoveAttachment}
+          onReorder={onReorderAttachment}
+          onPreviewImage={onPreviewImage}
+          isZh={isZh}
+        />
+        {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
+      </>
+    ),
+    [attachmentError, attachments, isZh, onPreviewImage, onRemoveAttachment, onReorderAttachment],
+  );
+
+  return (
+    <form
+      className="chat-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onPrimaryAction();
+      }}
+    >
+      <ComposerDraftField
+        conversationId={conversationId}
+        hasProvider={hasProvider}
+        isBusy={isBusy}
+        isStreaming={isStreaming}
+        isZh={isZh}
+        hasAttachments={attachments.length > 0}
+        messageQueue={messageQueue}
+        attachmentSlot={attachmentSlot}
+        fileInputRef={fileInputRef}
+        onPaste={onPaste}
+        onAddFiles={onAddFiles}
+        onAttachSessionReference={onAttachSessionReference}
+        onPrimaryAction={onPrimaryAction}
+      />
+    </form>
+  );
+});
+
+/**
+ * 草稿叶子：唯一订阅会话草稿的输入区。
+ * 菜单 / textarea / 发送按钮随 draft 更新；附件 slot 由壳层注入且 memo，不随逐字刷新重建。
+ */
+const ComposerDraftField = memo(function ComposerDraftField({
+  conversationId,
+  hasProvider,
+  isBusy,
+  isStreaming,
+  isZh,
+  hasAttachments,
+  messageQueue,
+  attachmentSlot,
+  fileInputRef,
+  onPaste,
+  onAddFiles,
+  onAttachSessionReference,
+  onPrimaryAction,
+}: {
+  readonly conversationId: string | null;
+  readonly hasProvider: boolean;
+  readonly isBusy: boolean;
+  readonly isStreaming: boolean;
+  readonly isZh: boolean;
+  readonly hasAttachments: boolean;
+  readonly messageQueue: readonly QueuedMessage[];
+  readonly attachmentSlot: React.ReactNode;
+  readonly fileInputRef: React.RefObject<HTMLInputElement | null>;
+  readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
+  readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
+  readonly onPrimaryAction: () => void;
+}) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [activeSessionIndex, setActiveSessionIndex] = useState(0);
@@ -72,7 +155,6 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   const [sessionLoading, setSessionLoading] = useState(false);
   const sessionQueryRef = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
   const hydrationReadyConversationRef = useRef<string | null>(null);
 
@@ -88,11 +170,12 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
     return detectAtQuery(draft);
   }, [draft, showSlashCommands]);
   const showSessionMentions = Boolean(atQuery) && !isBusy;
-  const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
+  const hasComposerContent = draft.trim().length > 0 || hasAttachments;
 
+  // 只在 slash 候选列表变化时重置高亮，避免每个字符 setState 二次渲染。
   useEffect(() => {
     setActiveSlashIndex(0);
-  }, [draft]);
+  }, [slashCommands]);
 
   useEffect(() => {
     setActiveSessionIndex(0);
@@ -215,8 +298,10 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   }, [conversationId, draft, messageQueue]);
 
   const setDraft = (value: string) => conversationStore.setDraft(conversationId, value);
+
   const applySlashCommand = (command: SlashCommand) => {
     setDraft(command.value);
+    setActiveSlashIndex(0);
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(command.value.length, command.value.length);
@@ -239,13 +324,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   };
 
   return (
-    <form
-      className="chat-composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onPrimaryAction();
-      }}
-    >
+    <>
       {showSlashCommands ? (
         <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
           {slashCommands.map((command, index) => (
@@ -254,63 +333,45 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
               type="button"
               role="option"
               aria-selected={index === activeSlashIndex}
-              className={`slash-command-item ${index === activeSlashIndex ? 'active' : ''}`}
+              className={`slash-command-item${index === activeSlashIndex ? ' active' : ''}`}
               onMouseDown={(event) => {
                 event.preventDefault();
                 applySlashCommand(command);
               }}
             >
-              <span className="slash-command-badge">/</span>
-              <span className="slash-command-main">
-                <span className="slash-command-label">{isZh ? command.labelZh : command.labelEn}</span>
-                <span className="slash-command-desc">{isZh ? command.descriptionZh : command.descriptionEn}</span>
-              </span>
+              <span className="slash-command-label">{isZh ? command.labelZh : command.labelEn}</span>
+              <span className="slash-command-description">{isZh ? command.descriptionZh : command.descriptionEn}</span>
             </button>
           ))}
         </div>
       ) : null}
       {showSessionMentions ? (
-        <div className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '选择会话' : 'Select session'}>
-          {sessionLoading && sessionHits.length === 0 ? (
-            <div className="session-mention-empty">{isZh ? '加载会话…' : 'Loading sessions…'}</div>
-          ) : null}
-          {!sessionLoading && sessionHits.length === 0 ? (
-            <div className="session-mention-empty">{isZh ? '没有可引用的会话' : 'No sessions found'}</div>
-          ) : null}
-          {sessionHits.map((hit, index) => {
-            const title = hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session');
-            return (
+        <div className="slash-command-menu" role="listbox" aria-label={isZh ? '引用会话' : 'Mention session'}>
+          {sessionLoading ? (
+            <div className="slash-command-empty">{isZh ? '搜索会话…' : 'Searching sessions…'}</div>
+          ) : sessionHits.length === 0 ? (
+            <div className="slash-command-empty">{isZh ? '没有匹配的会话' : 'No matching sessions'}</div>
+          ) : (
+            sessionHits.map((hit, index) => (
               <button
                 key={hit.id}
                 type="button"
                 role="option"
                 aria-selected={index === activeSessionIndex}
-                className={`slash-command-item ${index === activeSessionIndex ? 'active' : ''}`}
+                className={`slash-command-item${index === activeSessionIndex ? ' active' : ''}`}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   applySessionMention(hit);
                 }}
               >
-                <span className="slash-command-badge">@</span>
-                <span className="slash-command-main">
-                  <span className="slash-command-label">{title}</span>
-                  <span className="slash-command-desc">{hit.id.slice(0, 8)}</span>
-                </span>
+                <span className="slash-command-label">{hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session')}</span>
+                <span className="slash-command-description">{hit.id}</span>
               </button>
-            );
-          })}
+            ))
+          )}
         </div>
       ) : null}
-      {attachments.length ? (
-        <AttachmentStrip
-          attachments={attachments}
-          onRemove={onRemoveAttachment}
-          onReorder={onReorderAttachment}
-          onPreviewImage={onPreviewImage}
-          isZh={isZh}
-        />
-      ) : null}
-      {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
+      {attachmentSlot}
       <textarea
         ref={textareaRef}
         value={draft}
@@ -319,7 +380,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
           ? isBusy
             ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
             : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
-          : (isZh ? '请先配置模型' : 'Configure a model first')}
+          : (isZh ? '请先在设置中配置模型提供商' : 'Configure a model provider in Settings first')}
         rows={1}
         onPaste={onPaste}
         onChange={(event) => setDraft(event.target.value)}
@@ -338,7 +399,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
             if ((event.key === 'Tab' || event.key === 'Enter')
               && draft !== slashCommands[activeSlashIndex]?.value) {
               event.preventDefault();
-              const command = slashCommands[activeSlashIndex];
+              const command = slashCommands[activeSlashIndex] ?? slashCommands[0];
               if (command) applySlashCommand(command);
               return;
             }
@@ -348,32 +409,32 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
               return;
             }
           }
-          if (showSessionMentions && sessionHits.length > 0) {
+          if (showSessionMentions && atQuery) {
             if (event.key === 'ArrowDown') {
               event.preventDefault();
+              if (sessionHits.length === 0) return;
               setActiveSessionIndex((index) => (index + 1) % sessionHits.length);
               return;
             }
             if (event.key === 'ArrowUp') {
               event.preventDefault();
+              if (sessionHits.length === 0) return;
               setActiveSessionIndex((index) => (index - 1 + sessionHits.length) % sessionHits.length);
               return;
             }
-            if (event.key === 'Tab' || event.key === 'Enter') {
+            if ((event.key === 'Tab' || event.key === 'Enter') && sessionHits.length > 0) {
               event.preventDefault();
-              const hit = sessionHits[activeSessionIndex];
+              const hit = sessionHits[activeSessionIndex] ?? sessionHits[0];
               if (hit) applySessionMention(hit);
               return;
             }
             if (event.key === 'Escape') {
               event.preventDefault();
-              if (atQuery) {
-                setDraft(`${draft.slice(0, atQuery.start)}${draft.slice(atQuery.start + 1 + atQuery.query.length)}`);
-              }
+              setDraft(`${draft.slice(0, atQuery.start)}${draft.slice(atQuery.start + 1 + atQuery.query.length)}`);
               return;
             }
           }
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+          if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             onPrimaryAction();
           }
@@ -393,37 +454,31 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         type="button"
         className="composer-attach-btn"
         disabled={!hasProvider || isStreaming}
-        title={isZh ? '添加附件' : 'Attach files'}
-        aria-label={isZh ? '添加附件' : 'Attach files'}
+        title={isZh ? '添加附件' : 'Attach file'}
+        aria-label={isZh ? '添加附件' : 'Attach file'}
         onClick={() => fileInputRef.current?.click()}
       >
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
         </svg>
       </button>
       <button
         type="submit"
-        className={isBusy && !hasComposerContent ? 'streaming' : undefined}
-        disabled={!hasProvider || (!isBusy && !hasComposerContent)}
-        title={isBusy && !hasComposerContent
-          ? (isZh ? '停止' : 'Stop')
-          : isBusy
-            ? (isZh ? '加入队列' : 'Add to queue')
-            : (isZh ? '发送' : 'Send')}
-        aria-label={isBusy && !hasComposerContent
-          ? (isZh ? '停止' : 'Stop')
-          : isBusy
-            ? (isZh ? '加入队列' : 'Add to queue')
-            : (isZh ? '发送' : 'Send')}
+        disabled={!hasProvider || (!isStreaming && !hasComposerContent)}
+        className={isStreaming ? 'streaming' : undefined}
+        title={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
+        aria-label={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
       >
-        {isBusy && !hasComposerContent ? (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+        {isStreaming ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
         ) : (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
           </svg>
         )}
       </button>
-    </form>
+    </>
   );
 });
