@@ -2181,7 +2181,9 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
  */
 
 async function buildSessionImportPreflightPayload() {
-  const preflight = await buildSessionImportPreflightPayload();
+  // 注意：这里必须调用纯探测函数 buildSessionImportPreflight，
+  // 不能 await 自己，否则会无限递归，导致 dragTarget 永远生成失败、UI 不显示可拖 App。
+  const preflight = buildSessionImportPreflight({ platform: process.platform });
   const dragTarget = resolveFullDiskAccessDragTarget({
     platform: process.platform,
     appGetPath: (name) => app.getPath(name),

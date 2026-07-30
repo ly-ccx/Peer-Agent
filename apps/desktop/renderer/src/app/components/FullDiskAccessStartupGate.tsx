@@ -154,6 +154,27 @@ export function FullDiskAccessStartupGate({
     }
   }, [isZh]);
 
+  const revealAppInFinder = useCallback(async () => {
+    try {
+      // 兜底：若拖拽链路不可用，至少打开安装位置让用户手动拖。
+      const target = preflight?.dragTarget;
+      if (target?.ok && target.appPath) {
+        await clientApi.openPath?.(target.appPath);
+        return;
+      }
+      // 再尝试拉一次 drag target
+      const fresh = await clientApi.getAppDragTarget?.();
+      if (fresh?.ok && fresh.appPath) {
+        await clientApi.openPath?.(fresh.appPath);
+        return;
+      }
+      // 最后打开 /Applications
+      await clientApi.openPath?.('/Applications');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [preflight?.dragTarget]);
+
   const onAppDragStart = useCallback((event: DragEvent<HTMLElement>) => {
     const target = preflight?.dragTarget;
     if (!target?.ok || !target.appPath) {
@@ -217,8 +238,8 @@ export function FullDiskAccessStartupGate({
               : 'Peer Agent needs to read local browser cookie directories (e.g. Chrome) to import site sessions. macOS blocks this by default—grant access before continuing.'}
           </p>
 
-          {preflight?.dragTarget?.ok ? (
-            <div className="session-import-drag-card fda-startup-drag">
+          <div className="session-import-drag-card fda-startup-drag">
+            {preflight?.dragTarget?.ok ? (
               <button
                 type="button"
                 className="session-import-drag-handle"
@@ -245,8 +266,22 @@ export function FullDiskAccessStartupGate({
                   </span>
                 </span>
               </button>
+            ) : (
+              <div className="session-import-drag-meta" style={{ padding: '6px' }}>
+                <strong>{isZh ? '未识别到可拖拽的 App' : 'No draggable app detected'}</strong>
+                <span>
+                  {isZh
+                    ? '请点“在 Finder 中显示”，把 Peer Agent.app（或 Electron）拖进右侧列表。'
+                    : 'Click “Reveal in Finder” and drag Peer Agent.app (or Electron) into the list.'}
+                </span>
+              </div>
+            )}
+            <div className="fda-startup-actions" style={{ marginTop: 8 }}>
+              <button type="button" className="updater-btn ghost" onClick={() => void revealAppInFinder()}>
+                {isZh ? '在 Finder 中显示 App' : 'Reveal app in Finder'}
+              </button>
             </div>
-          ) : null}
+          </div>
 
           <ol className="fda-startup-steps">
             <li>{isZh ? '点击下方「打开完全磁盘访问权限」' : 'Click “Open Full Disk Access” below'}</li>
