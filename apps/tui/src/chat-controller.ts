@@ -5,6 +5,7 @@ import type {
 } from '@peer-agent/protocol';
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import type { RuntimeUsageAccounting } from '@peer-agent/runtime-core';
+import type { SystemContextInput } from '@peer-agent/system-context';
 import {
   COMPACTION_PROGRESS_CONFIG,
   compactMessagesWithSummaryStrategy,
@@ -150,6 +151,11 @@ export interface ChatSystemContextBlock {
   readonly trust?: string;
 }
 
+export type ChatSupplementalSystemContextInput = Pick<
+  SystemContextInput,
+  'continuityContext' | 'explorerContext' | 'verifierContext'
+>;
+
 export interface ChatModelInput {
   readonly content: string;
   readonly images?: readonly ChatMessageImage[];
@@ -159,6 +165,7 @@ export interface ChatModelInput {
   readonly usage?: ChatUsage;
   readonly contextAccounting?: ContextAccountingSnapshot;
   readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
+  readonly systemContextInput?: ChatSupplementalSystemContextInput;
   readonly turnId: string;
   readonly turnIndex: number;
 }
@@ -208,6 +215,7 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
     readonly mode: TuiMode;
     readonly conversationId?: string;
     readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
+    readonly systemContextInput?: ChatSupplementalSystemContextInput;
   }): readonly ModelMessage[];
   summarizeCompaction?(input: {
     readonly messages: readonly ModelMessage[];

@@ -209,28 +209,6 @@ export function createTuiSkillMcpBridge(options: SkillMcpBridgeOptions) {
     return execution;
   };
 
-  const discoveryHint = (): string => {
-    const skills = skillStore.listSkills().filter((skill) => skill.enabled !== false);
-    const mcpTools = listMcpTools();
-    const lines = [
-      '## Local Skill and MCP discovery',
-      `Skill root: ${path.join(options.userDataPath, 'skills')}`,
-      `MCP registry: ${path.join(options.userDataPath, 'mcp-registry.json')}`,
-    ];
-    if (skills.length > 0) {
-      lines.push('Available local skills:');
-      for (const skill of skills) {
-        const hint = skill.whenToUse || skill.description || '';
-        lines.push(`- ${skill.skillId}${hint ? `: ${hint}` : ''}`);
-      }
-    }
-    if (mcpTools.length > 0) {
-      lines.push(`Available MCP tools: ${mcpTools.map((tool) => tool.name).join(', ')}`);
-    }
-    lines.push('Use the projected Skill/MCP tools directly when they match the user request.');
-    return lines.join('\n');
-  };
-
   return {
     skillStore,
     mcpRegistry,
@@ -247,6 +225,5 @@ export function createTuiSkillMcpBridge(options: SkillMcpBridgeOptions) {
     isSkillCapability,
     isMcpCapability,
     execute,
-    discoveryHint,
   };
 }

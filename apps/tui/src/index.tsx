@@ -240,9 +240,9 @@ const systemPrompt = (context: ProviderSystemPromptContext) => {
     (item) => item.credentialId === selection.providerId,
   );
   return buildTuiSystemPrompt(
-    languageStore.getReplyLanguage(),
-    [host.skillMcpBridge?.discoveryHint() ?? ''],
+    languageStore.getPromptSettings(),
     {
+      ...(context.systemContextInput ?? {}),
       workspacePath: workspaceRoot,
       provider: providerMetadata?.channelId ?? selection.providerId,
       model: selection.modelId,
@@ -251,11 +251,16 @@ const systemPrompt = (context: ProviderSystemPromptContext) => {
       conversationId: context.conversationId ?? null,
       goalPlanStore: host.goalBridge?.store,
       mcpRegistry: host.skillMcpBridge?.mcpRegistry,
-      continuityContext: context.systemContextBlocks?.map((block) => ({
-        id: block.id,
-        method: 'tui',
-        content: block.content,
-      })) ?? [],
+      continuityContext: [
+        ...(Array.isArray(context.systemContextInput?.continuityContext)
+          ? context.systemContextInput.continuityContext
+          : []),
+        ...(context.systemContextBlocks?.map((block) => ({
+          id: block.id,
+          method: 'tui',
+          content: block.content,
+        })) ?? []),
+      ],
     },
   );
 };

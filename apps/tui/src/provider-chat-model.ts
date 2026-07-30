@@ -78,6 +78,7 @@ export interface ProviderSystemPromptContext {
   readonly mode: TuiRuntimeMode;
   readonly conversationId?: string;
   readonly systemContextBlocks?: ChatModelInput['systemContextBlocks'];
+  readonly systemContextInput?: ChatModelInput['systemContextInput'];
 }
 
 function parameters(tool: RuntimeToolDefinition): Readonly<Record<string, unknown>> {
@@ -331,6 +332,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         mode: normalizeTuiRuntimeMode(context.mode),
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
         systemContextBlocks: context.systemContextBlocks,
+        systemContextInput: context.systemContextInput,
       });
     },
     summarizeCompaction,
@@ -340,6 +342,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         mode,
         ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
         systemContextBlocks: input.input.systemContextBlocks,
+        systemContextInput: input.input.systemContextInput,
       });
       const userContent = toUserModelContent(input.input.content, input.input.images);
       // System Context is rebuilt from current host facts every turn. Never retain

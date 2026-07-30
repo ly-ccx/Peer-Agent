@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   assembleSystemContext,
+  buildHostConfigInstructions,
+  buildReplyLanguageContext,
   type AssembledSystemContext,
+  type HostPromptSettings,
   type SystemContextInput,
 } from '@peer-agent/system-context';
 
@@ -24,8 +27,15 @@ export interface TuiLanguageStore {
   getState(): TuiLanguageState;
   getLocale(): TuiLocale;
   getReplyLanguage(): TuiLocale;
+  getPromptSettings(): TuiPromptSettings;
   setLocale(value: unknown): TuiLanguageState;
   setLanguage(locale: TuiLocale): TuiLanguageState;
+}
+
+export interface TuiPromptSettings extends HostPromptSettings {
+  readonly replyLanguage?: string | null;
+  readonly systemInstructions?: string | null;
+  readonly gitBranchPrefix?: string | null;
 }
 
 export const TUI_LANGUAGE_OPTIONS: readonly TuiLanguageOption[] = Object.freeze([
@@ -42,11 +52,6 @@ export const TUI_LANGUAGE_OPTIONS: readonly TuiLanguageOption[] = Object.freeze(
     shortcut: '2',
   },
 ]);
-
-const REPLY_LANGUAGE_INSTRUCTIONS: Readonly<Record<TuiLocale, string>> = Object.freeze({
-  'zh-CN': '请始终使用简体中文回复用户。',
-  'en-US': 'Always reply to the user in English.',
-});
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -74,58 +79,28 @@ export function languageIndex(locale: TuiLocale): number {
 }
 
 export function buildReplyLanguageInstruction(replyLanguage: string | null | undefined): string | null {
-  const locale = normalizeTuiLocale(replyLanguage, 'zh-CN');
-  if (!replyLanguage || String(replyLanguage).trim() === '' || String(replyLanguage).trim().toLowerCase() === 'auto') {
-    return null;
-  }
-  // Only emit when the value normalizes to a supported explicit locale.
-  const raw = String(replyLanguage).trim().toLowerCase();
-  if (raw === 'auto') return null;
-  if (!(locale in REPLY_LANGUAGE_INSTRUCTIONS)) return null;
-  // Unknown free-form values that don't look like zh/en stay out.
-  if (!raw.startsWith('zh') && !raw.startsWith('en')) return null;
-  return REPLY_LANGUAGE_INSTRUCTIONS[locale];
+  return buildReplyLanguageContext(replyLanguage)[0]?.content ?? null;
 }
 
 export function buildTuiSystemPrompt(
-  replyLanguage: string | null | undefined,
-  contextExtensions: readonly string[] = [],
+  promptSettings: TuiPromptSettings | string | null | undefined,
   input: SystemContextInput = {},
 ): string {
-  return buildTuiSystemContext(replyLanguage, contextExtensions, input).rendered;
+  return buildTuiSystemContext(promptSettings, input).rendered;
 }
 
 export function buildTuiSystemContext(
-  replyLanguage: string | null | undefined,
-  contextExtensions: readonly string[] = [],
+  promptSettings: TuiPromptSettings | string | null | undefined,
   input: SystemContextInput = {},
 ): AssembledSystemContext {
-  const instruction = buildReplyLanguageInstruction(replyLanguage);
+  const settings = typeof promptSettings === 'string' || promptSettings == null
+    ? { replyLanguage: promptSettings }
+    : promptSettings;
   return assembleSystemContext({
     ...input,
     configInstructions: [
       ...(Array.isArray(input.configInstructions) ? input.configInstructions : []),
-      ...(instruction
-        ? [{
-            id: 'tui.reply-language',
-            title: 'Reply language',
-            source: 'tui-language',
-            priority: -100,
-            content: instruction,
-          }]
-        : []),
-    ],
-    contextExtensions: [
-      ...(Array.isArray(input.contextExtensions) ? input.contextExtensions : []),
-      ...contextExtensions
-        .filter((content) => typeof content === 'string' && content.trim().length > 0)
-        .map((content, index) => ({
-          id: `tui.host-extension-${index + 1}`,
-          title: 'TUI host capability discovery',
-          sourceKind: 'host',
-          layer: 'L4_CAPABILITIES',
-          content,
-        })),
+      ...buildHostConfigInstructions(settings),
     ],
   });
 }
@@ -165,10 +140,27 @@ export function createTuiLanguageStore({
     return { locale, replyLanguage };
   };
 
+  const readPromptSettings = (): TuiPromptSettings => {
+    const settings = readSettings();
+    const state = readState();
+    return {
+      replyLanguage: typeof settings.replyLanguage === 'string'
+        ? settings.replyLanguage
+        : state.replyLanguage,
+      systemInstructions: typeof settings.systemInstructions === 'string'
+        ? settings.systemInstructions
+        : null,
+      gitBranchPrefix: typeof settings.gitBranchPrefix === 'string'
+        ? settings.gitBranchPrefix
+        : null,
+    };
+  };
+
   return {
     getState: readState,
     getLocale: () => readState().locale,
     getReplyLanguage: () => readState().replyLanguage,
+    getPromptSettings: readPromptSettings,
     setLocale(value) {
       const locale = normalizeTuiLocale(value, readState().locale);
       return this.setLanguage(locale);

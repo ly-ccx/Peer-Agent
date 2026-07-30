@@ -13,6 +13,10 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.mjs"
+    },
+    "./host-config-instructions": {
+      "types": "./src/host-config-instructions.d.ts",
+      "default": "./src/host-config-instructions.mjs"
     }
   },
   "files": [

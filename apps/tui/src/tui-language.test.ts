@@ -2,6 +2,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
+import {
+  assembleSystemContext,
+  buildHostConfigInstructions,
+} from '@peer-agent/system-context';
 
 import {
   buildReplyLanguageInstruction,
@@ -61,12 +65,40 @@ describe('createTuiLanguageStore', () => {
     const userDataPath = tempDir();
     writeFileSync(
       path.join(userDataPath, 'settings.json'),
-      JSON.stringify({ locale: 'en-US', replyLanguage: 'zh-CN' }, null, 2),
+      JSON.stringify({
+        locale: 'en-US',
+        replyLanguage: 'zh-CN',
+        systemInstructions: 'Keep answers concise.',
+        gitBranchPrefix: 'team/',
+      }, null, 2),
       'utf8',
     );
     const store = createTuiLanguageStore({ userDataPath });
     expect(store.getLocale()).toBe('en-US');
     expect(store.getReplyLanguage()).toBe('zh-CN');
+    expect(store.getPromptSettings()).toEqual({
+      replyLanguage: 'zh-CN',
+      systemInstructions: 'Keep answers concise.',
+      gitBranchPrefix: 'team/',
+    });
+  });
+
+  test('preserves Desktop auto reply-language semantics in prompt settings', () => {
+    const userDataPath = tempDir();
+    writeFileSync(
+      path.join(userDataPath, 'settings.json'),
+      JSON.stringify({ locale: 'en-US', replyLanguage: 'auto' }, null, 2),
+      'utf8',
+    );
+
+    const store = createTuiLanguageStore({ userDataPath });
+    expect(store.getPromptSettings().replyLanguage).toBe('auto');
+    const context = buildTuiSystemContext(store.getPromptSettings(), {
+      workspacePath: userDataPath,
+    });
+    expect(context.sections.map((section) => section.id)).not.toContain(
+      'project.instructions.config.settings.replylanguage',
+    );
   });
 });
 
@@ -92,14 +124,86 @@ describe('reply language prompt', () => {
       model: 'gpt-test',
       mode: 'goal',
     };
-    const first = buildTuiSystemContext('en-US', ['Skill discovery'], input);
-    const second = buildTuiSystemContext('en-US', ['Skill discovery'], input);
+    const first = buildTuiSystemContext('en-US', input);
+    const second = buildTuiSystemContext('en-US', input);
 
     expect(first.sections.map((section) => section.id)).toContain('core.identity');
     expect(first.sections.map((section) => section.id)).toContain('runtime.mode');
-    expect(first.sections.map((section) => section.id)).toContain('runtime.contextExtensions.tui.host-extension-1');
+    expect(first.sections.map((section) => section.id)).not.toContain('runtime.contextExtensions.tui.host-extension-1');
     expect(first.snapshot.renderedHash).toBe(second.snapshot.renderedHash);
     expect(first.rendered).toBe(second.rendered);
+  });
+
+  test('uses the same configured host instructions as Desktop without a TUI-only capability catalog', () => {
+    const settings = {
+      replyLanguage: 'ja-JP',
+      systemInstructions: '  Keep answers concise.  ',
+      gitBranchPrefix: '  team/  ',
+    };
+    const input = {
+      workspacePath: tempDir(),
+      provider: 'openai',
+      model: 'gpt-test',
+      mode: 'chat',
+    };
+    const context = buildTuiSystemContext(settings, input);
+    const canonical = assembleSystemContext({
+      ...input,
+      configInstructions: buildHostConfigInstructions(settings),
+    });
+
+    const sectionIds = context.sections.map((section) => section.id);
+    expect(sectionIds).toContain('project.instructions.config.settings.systeminstructions');
+    expect(sectionIds).toContain('project.instructions.config.settings.replylanguage');
+    expect(sectionIds).toContain('project.instructions.config.settings.gitbranchprefix');
+    expect(sectionIds).not.toContain('project.instructions.config.tui.reply-language');
+    expect(sectionIds.some((id) => id.startsWith(
+      'runtime.contextExtensions.tui.host-extension-',
+    ))).toBe(false);
+    expect(context.rendered).toContain('Keep answers concise.');
+    expect(context.rendered).toContain('Japanese (日本語)');
+    expect(context.rendered).toContain('prefix "team/"');
+    expect(context.rendered).toBe(canonical.rendered);
+  });
+
+  test('keeps Explorer sections in their canonical layers and provenance', () => {
+    const context = buildTuiSystemContext('en-US', {
+      workspacePath: tempDir(),
+      mode: 'explorer',
+      explorerContext: {
+        explorerId: 'explorer-1',
+        planId: 'plan-1',
+        question: 'Find the projection.',
+      },
+    });
+
+    const contract = context.sections.find((section) => section.id === 'runtime.explorer.contract');
+    const brief = context.sections.find((section) => section.id === 'runtime.explorer.brief');
+    expect(contract?.layer).toBe('L6_MODE_REMINDER');
+    expect(contract?.source.kind).toBe('explorer-contract');
+    expect(brief?.layer).toBe('L7_CONTINUITY');
+    expect(brief?.source.kind).toBe('explorer-brief');
+    expect(context.sections.map((section) => section.id)).not.toContain('runtime.continuity');
+  });
+
+  test('keeps Verifier sections in their canonical layers and provenance', () => {
+    const context = buildTuiSystemContext('en-US', {
+      workspacePath: tempDir(),
+      mode: 'explorer',
+      verifierContext: {
+        verifierRunId: 'verifier-1',
+        planId: 'plan-1',
+        plan: { planId: 'plan-1', title: 'Verify parity' },
+      },
+    });
+
+    const contract = context.sections.find((section) => section.id === 'runtime.verifier.contract');
+    const brief = context.sections.find((section) => section.id === 'runtime.verifier.brief');
+    expect(contract?.layer).toBe('L6_MODE_REMINDER');
+    expect(contract?.source.kind).toBe('verifier-contract');
+    expect(brief?.layer).toBe('L7_CONTINUITY');
+    expect(brief?.source.kind).toBe('verifier-brief');
+    expect(context.sections.map((section) => section.id)).not.toContain('runtime.continuity');
   });
 });
 

@@ -603,7 +603,7 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(controller.getSnapshot().messages.at(-1)?.content).toContain('PEER_MODEL_API_KEY');
   });
 
-  test('injects a Goal-mode system prompt that requires creating a draft plan first', async () => {
+  test('injects the shared Agent self-driven prompt for the legacy Goal wire mode', async () => {
     const requests: ModelProviderRequest[] = [];
     const provider: ModelProvider = {
       async stream(request) {
@@ -618,7 +618,7 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
-        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', {
           mode: context.mode,
           conversationId: context.conversationId,
         }),
@@ -631,8 +631,8 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const content = typeof system?.content === 'string'
       ? system.content
       : JSON.stringify(system?.content ?? '');
-    expect(content).toContain('Mode: goal');
-    expect(content).toContain('Self-driven goal mode');
+    expect(content).toContain('Mode: agent');
+    expect(content).toContain('Self-driven agent mode');
     expect(content).toContain('goal_create_plan');
     expect(content).toContain('side-effect');
   });
@@ -690,7 +690,7 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
-        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', {
           mode: context.mode,
           conversationId: context.conversationId,
         }),
@@ -998,4 +998,3 @@ describe('TUI summary input budget', () => {
     expect(maxChars).toBeGreaterThan(2_000 * 4);
   });
 });
-

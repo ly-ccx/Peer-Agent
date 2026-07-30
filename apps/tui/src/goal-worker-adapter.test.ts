@@ -52,10 +52,10 @@ function fakeHost(observed: TuiExecutionContext[]): TuiHost {
   };
 }
 
-function explorerModel(observedBlocks: string[]): ChatModelPort {
+function explorerModel(observedInputs: Record<string, unknown>[]): ChatModelPort {
   return {
     initialize(input) {
-      observedBlocks.push(...(input.input.systemContextBlocks ?? []).map((block) => block.title));
+      observedInputs.push(input.input.systemContextInput ?? {});
       return stateFromInput(input);
     },
     runTurn(state, context) {
@@ -94,9 +94,9 @@ function explorerModel(observedBlocks: string[]): ChatModelPort {
 describe('TUI Goal worker adapter', () => {
   test('runs Explorer in an isolated explorer-mode pipeline with shared context sources and real Evidence', async () => {
     const observedContexts: TuiExecutionContext[] = [];
-    const observedBlocks: string[] = [];
+    const observedInputs: Record<string, unknown>[] = [];
     const worker = createTuiGoalWorkerAdapter({
-      model: explorerModel(observedBlocks),
+      model: explorerModel(observedInputs),
       host: fakeHost(observedContexts),
       idFactory: () => 'worker-id',
     });
@@ -117,8 +117,12 @@ describe('TUI Goal worker adapter', () => {
     expect(observedContexts).toHaveLength(1);
     expect(observedContexts[0]?.mode).toBe('explorer');
     expect(observedContexts[0]?.sessionId).toBe('tui-worker:explorer-1');
-    expect(observedBlocks).toContain('Explorer mission context');
-    expect(observedBlocks).toContain('Explorer readonly contract');
+    expect(observedInputs).toHaveLength(1);
+    expect(observedInputs[0]?.explorerContext).toMatchObject({
+      explorerId: 'explorer-1',
+      planId: 'plan-1',
+    });
+    expect(observedInputs[0]?.continuityContext).toBeUndefined();
     expect(report).toMatchObject({
       status: 'completed',
       summary: 'Found the projection.',
@@ -206,7 +210,8 @@ describe('TUI Goal worker adapter', () => {
   });
 
   test('requires real Evidence before a Verifier can pass', async () => {
-    const model = explorerModel([]);
+    const observedInputs: Record<string, unknown>[] = [];
+    const model = explorerModel(observedInputs);
     const worker = createTuiGoalWorkerAdapter({ model, host: fakeHost([]) });
     const report = await worker.runVerifier({
       planId: 'plan-4',
@@ -221,5 +226,10 @@ describe('TUI Goal worker adapter', () => {
     expect(report.evidenceRefs).toContain('tool-result://verifier-4');
     expect(report.passed).toBe(false);
     expect(report.toolCallCount).toBe(1);
+    expect(observedInputs[0]?.verifierContext).toMatchObject({
+      verifierRunId: 'verifier-4',
+      planId: 'plan-4',
+    });
+    expect(observedInputs[0]?.continuityContext).toBeUndefined();
   });
 });

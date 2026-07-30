@@ -3,10 +3,6 @@ import {
   type RuntimePipelineToolExecution,
 } from '@peer-agent/runtime-sdk';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
-import {
-  createExplorerPromptSource,
-  createVerifierPromptSource,
-} from '@peer-agent/system-context';
 
 import type {
   ChatMessage,
@@ -14,7 +10,7 @@ import type {
   ChatModelPort,
   ChatModelState,
   ChatModelToolCall,
-  ChatSystemContextBlock,
+  ChatSupplementalSystemContextInput,
 } from './chat-controller.ts';
 import type { TuiHost } from './tui-host.ts';
 
@@ -100,21 +96,6 @@ function collectExecutionEvidence(executions: readonly RuntimeSdkProviderExecuti
     addEvidenceRefs(refs, (result.outputPreview as { artifactRefs?: unknown } | undefined)?.artifactRefs);
   }
   return [...refs];
-}
-
-function renderContextBlocks(source: any, input: Record<string, unknown>): ChatSystemContextBlock[] {
-  const observation = source.observe(input);
-  const rendered = source.render(observation);
-  if (!Array.isArray(rendered)) return [];
-  return rendered
-    .filter((block) => block && typeof block.content === 'string' && block.content.trim())
-    .map((block, index) => ({
-      id: asString(block.id) || asString(block.source?.id) || `${source.id}:${index}`,
-      title: asString(block.title) || source.id,
-      content: block.content,
-      layer: asString(block.layer) || asString(source.layer) || undefined,
-      trust: asString(block.trust) || asString(source.trust) || undefined,
-    }));
 }
 
 function collectLeafTasks(plan: any): any[] {
@@ -255,13 +236,10 @@ export function createTuiGoalWorkerAdapter(
   options: CreateTuiGoalWorkerAdapterOptions,
 ): TuiGoalWorkerAdapter {
   const idFactory = options.idFactory ?? (() => crypto.randomUUID());
-  const explorerSource = createExplorerPromptSource();
-  const verifierSource = createVerifierPromptSource();
-
   async function runWorker(input: {
     readonly workerId: string;
     readonly mission: string;
-    readonly systemContextBlocks: readonly ChatSystemContextBlock[];
+    readonly systemContextInput: ChatSupplementalSystemContextInput;
     readonly signal?: AbortSignal;
   }): Promise<{ output: unknown; executions: readonly RuntimeSdkProviderExecution[]; toolCalls: number }> {
     const pipeline = createRuntimePipeline<
@@ -297,7 +275,7 @@ export function createTuiGoalWorkerAdapter(
         content: input.mission,
         history: [] as ChatMessage[],
         modelMessages: [],
-        systemContextBlocks: input.systemContextBlocks,
+        systemContextInput: input.systemContextInput,
         turnId: input.workerId,
         turnIndex: 0,
       },
@@ -316,14 +294,10 @@ export function createTuiGoalWorkerAdapter(
     async runExplorer(input) {
       const workerId = asString(input.explorer?.explorerId) || `explorer:${idFactory()}`;
       const context = explorerContext(input.plan, input.explorer);
-      const systemContextBlocks = renderContextBlocks(explorerSource, {
-        mode: 'explorer',
-        explorerContext: context,
-      });
       const result = await runWorker({
         workerId,
         mission: explorerMission(input.plan, input.explorer),
-        systemContextBlocks,
+        systemContextInput: { explorerContext: context },
         signal: input.signal,
       });
       const toolEvidenceRefs = collectExecutionEvidence(result.executions);
@@ -332,14 +306,10 @@ export function createTuiGoalWorkerAdapter(
     async runVerifier(input) {
       const workerId = input.verifierRunId || `verifier:${idFactory()}`;
       const context = verifierContext(input.plan, workerId);
-      const systemContextBlocks = renderContextBlocks(verifierSource, {
-        mode: 'explorer',
-        verifierContext: context,
-      });
       const result = await runWorker({
         workerId,
         mission: verifierMission(input.plan, workerId),
-        systemContextBlocks,
+        systemContextInput: { verifierContext: context },
         signal: input.signal,
       });
       const toolEvidenceRefs = collectExecutionEvidence(result.executions);
@@ -352,5 +322,4 @@ export const __testables = {
   collectExecutionEvidence,
   normalizeExplorerReport,
   normalizeVerifierReport,
-  renderContextBlocks,
 };

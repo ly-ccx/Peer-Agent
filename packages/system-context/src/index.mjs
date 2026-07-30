@@ -3,6 +3,15 @@ export {
   createDefaultPromptSourceRegistry,
   renderSystemContext,
 } from './prompt-assembler.mjs';
+export {
+  buildConfigInstructionContext,
+  buildGitBranchPrefixContext,
+  buildHostConfigInstructions,
+  buildReplyLanguageContext,
+  DEFAULT_GIT_BRANCH_PREFIX,
+  REPLY_LANGUAGE_OPTIONS,
+  resolveGitBranchPrefix,
+} from './host-config-instructions.mjs';
 export { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 export { createAttachmentPromptSource } from './sources/attachment-source.mjs';
 export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';
