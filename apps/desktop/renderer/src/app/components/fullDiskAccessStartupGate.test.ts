@@ -14,30 +14,22 @@ test('startup shell mounts FullDiskAccessStartupGate after main shell is ready',
   assert.match(src, /enabled=\{showMainShell\}/);
 });
 
-test('startup gate uses session-import preflight + app drag APIs', () => {
+test('startup gate checks Agent-required OS permissions, not Chrome import', () => {
   const src = readFileSync(gateTsx, 'utf8');
-  assert.match(src, /getBrowserSessionImportPreflight/);
+  assert.match(src, /getStartupOsPermissions/);
   assert.match(src, /openFullDiskAccessSettings/);
   assert.match(src, /startAppDrag/);
-  // 启动门文案应强调“打开时检测”，不是 Browser 导入向导专属。
-  assert.match(src, /需要完全磁盘访问权限|Full Disk Access required/);
-  // 固定使用品牌 LOGO，而不是蓝色 App 占位。
+  // 启动门文案：Agent 必需权限，不绑死 Chrome
+  assert.match(src, /Agent 必需|required for Agent|需要授予 Agent 必需权限/);
+  assert.doesNotMatch(src, /Cookie 目录（例如 Chrome）/);
   assert.match(src, /BRAND_LOGO_SRC = '\.\/logo\.png'/);
   assert.match(src, /fda-permission-logo/);
-  assert.match(src, /fda-permission-card/);
-  assert.match(src, /在 Finder 中显示 App|Reveal app in Finder/);
-  // 对齐 AskForPermission：列表不会自动出现，需拖入 + 在系统设置完成。
   assert.match(src, /Complete in System Settings|在系统设置中完成/);
   assert.match(src, /apps never auto-appear|列表不会自动出现/);
-  // 回前台自动重检。
   assert.match(src, /visibilitychange/);
   assert.match(src, /addEventListener\('focus'/);
-  // 不依赖 Overlay render props，降低 hooks 复杂度。
   assert.doesNotMatch(src, /from '\.\/Overlay'/);
   assert.match(src, /createPortal/);
-  // ready 不能吞掉 blocked：Chrome EPERM 时仍应弹门。
-  assert.doesNotMatch(src, /if \(res\.ready\) return false/);
-  assert.doesNotMatch(src, /!isBlockedPreflight\(res\) \|\| res\?\.ready/);
 });
 
 test('root renderer wraps App with AppErrorBoundary', () => {

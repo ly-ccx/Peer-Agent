@@ -1,10 +1,12 @@
 /**
- * 应用启动时的 macOS 完全磁盘访问权限门（表达层）。
+ * 应用启动时的 macOS 必需权限门（表达层）。
  *
- * 对齐 AskForPermission 的关键交互：
- * - 打开 App 即检测（不依赖导入向导）
+ * 当前必需：完全磁盘访问（Full Disk Access）。
+ * 与「导入 Chrome / 站点会话」解耦：打开 App 即检测，不通过就弹窗。
+ *
+ * 对齐 AskForPermission 交互：
  * - 打开系统设置对应隐私页
- * - 列表不会自动出现 App，需拖入品牌 LOGO / App
+ * - 列表不会自动出现 App，需拖入品牌 LOGO
  * - 回前台 / 页面可见时自动重检
  *
  * hooks 数量必须恒定：所有 hooks 在任何 early return 之前。
@@ -15,20 +17,21 @@ import { clientApi } from '../../clientApi';
 
 const BRAND_LOGO_SRC = './logo.png';
 
-type PreflightCheck = {
+type PermissionCheck = {
   readonly id: string;
   readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
   readonly title: string;
   readonly detail: string;
-  readonly action?: 'open_full_disk_access' | 'install_browser' | 'none';
+  readonly action?: 'open_full_disk_access' | 'none' | string;
   readonly path?: string;
 };
 
-type Preflight = {
+type StartupPermissions = {
   readonly ok: boolean;
-  readonly ready?: boolean;
   readonly blocked?: boolean;
-  readonly checks?: readonly PreflightCheck[];
+  readonly platform?: string;
+  readonly checks?: readonly PermissionCheck[];
+  readonly required?: readonly PermissionCheck[];
   readonly openFullDiskAccessSupported?: boolean;
   readonly guidance?: { readonly fullDiskAccess?: string };
   readonly error?: string;
@@ -49,17 +52,16 @@ function isMacPlatform(): boolean {
   return /Mac|macOS/i.test(ua);
 }
 
-function isBlockedPreflight(res: Preflight | null | undefined): boolean {
+/** 启动门：任一必需权限 blocked / 需打开 FDA 即弹出。不看 Chrome ready。 */
+function needsStartupGate(res: StartupPermissions | null | undefined): boolean {
   if (!res) return false;
-  // ready 只表示「至少有一个浏览器可导入」，不能吞掉 Chrome 等被 EPERM 拦住的项。
-  // 启动门：只要存在需 FDA 的 blocked / open_full_disk_access 检查就应弹出。
+  if (res.blocked) return true;
   return Boolean(
-    res.blocked
-    || res.checks?.some((c) => c.status === 'blocked' || c.action === 'open_full_disk_access'),
+    res.checks?.some((c) => c.status === 'blocked' || c.action === 'open_full_disk_access'),
   );
 }
 
-function statusLabel(status: PreflightCheck['status'], isZh: boolean): string {
+function statusLabel(status: PermissionCheck['status'], isZh: boolean): string {
   if (isZh) {
     switch (status) {
       case 'ok': return '通过';
@@ -91,32 +93,29 @@ export function FullDiskAccessStartupGate({
   const [loading, setLoading] = useState(false);
   const [openingSettings, setOpeningSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const [snapshot, setSnapshot] = useState<StartupPermissions | null>(null);
   const [settingsOpened, setSettingsOpened] = useState(false);
 
-  const needsAttention = useMemo(() => isBlockedPreflight(preflight), [preflight]);
+  const needsAttention = useMemo(() => needsStartupGate(snapshot), [snapshot]);
 
-  const runPreflight = useCallback(async (opts?: { silent?: boolean }) => {
+  const runCheck = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     setError(null);
     try {
-      const api = clientApi.getBrowserSessionImportPreflight;
+      const api = clientApi.getStartupOsPermissions || clientApi.getBrowserSessionImportPreflight;
       if (typeof api !== 'function') {
-        setPreflight(null);
+        setSnapshot(null);
         setOpen(false);
         return null;
       }
-      const res = await api() as Preflight;
-      setPreflight(res);
-      if (isBlockedPreflight(res)) {
-        setOpen(true);
-      } else {
-        setOpen(false);
-      }
+      const res = await api() as StartupPermissions;
+      setSnapshot(res);
+      if (needsStartupGate(res)) setOpen(true);
+      else setOpen(false);
       return res;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      // 检测失败不永久挡主壳；关闭门，错误写在下次打开时仍可看到。
+      // 检测失败不永久挡主壳
       setOpen(false);
       return null;
     } finally {
@@ -124,23 +123,23 @@ export function FullDiskAccessStartupGate({
     }
   }, []);
 
-  // 冷启动 / 主壳就绪：主动 preflight（macOS only）
+  // 冷启动 / 主壳就绪：主动检测（macOS only）
   useEffect(() => {
     if (!enabled) return;
     if (!isMacPlatform()) return;
     let cancelled = false;
     void (async () => {
-      const res = await runPreflight();
+      const res = await runCheck();
       if (cancelled || !res) return;
-      if (isBlockedPreflight(res)) setOpen(true);
+      if (needsStartupGate(res)) setOpen(true);
       else setOpen(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [enabled, runPreflight]);
+  }, [enabled, runCheck]);
 
-  // 回前台 / 页面重新可见时自动重检（对齐 AskForPermission 授权后回到 App 即刷新状态）
+  // 回前台 / 页面重新可见时自动重检
   useEffect(() => {
     if (!enabled) return;
     if (!isMacPlatform()) return;
@@ -148,10 +147,9 @@ export function FullDiskAccessStartupGate({
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     const recheck = () => {
-      // 门已关且上次已通过时仍轻量 recheck：用户可能刚授权完
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        void runPreflight({ silent: true });
+        void runCheck({ silent: true });
       }, 250);
     };
 
@@ -167,7 +165,7 @@ export function FullDiskAccessStartupGate({
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onFocus);
     };
-  }, [enabled, runPreflight]);
+  }, [enabled, runCheck]);
 
   const openSettings = useCallback(async () => {
     setOpeningSettings(true);
@@ -187,7 +185,7 @@ export function FullDiskAccessStartupGate({
 
   const revealAppInFinder = useCallback(async () => {
     try {
-      const target = preflight?.dragTarget;
+      const target = snapshot?.dragTarget;
       if (target?.ok && target.appPath) {
         await clientApi.openPath?.(target.appPath);
         return;
@@ -201,10 +199,10 @@ export function FullDiskAccessStartupGate({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [preflight?.dragTarget]);
+  }, [snapshot?.dragTarget]);
 
   const onAppDragStart = useCallback((event: DragEvent<HTMLElement>) => {
-    const target = preflight?.dragTarget;
+    const target = snapshot?.dragTarget;
     if (!target?.ok || !target.appPath) {
       event.preventDefault();
       return;
@@ -220,20 +218,19 @@ export function FullDiskAccessStartupGate({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [preflight?.dragTarget]);
+  }, [snapshot?.dragTarget]);
 
-  // hooks 全部结束后再决定是否渲染，保证 hooks 数量恒定。
+  // hooks 全部结束后再决定是否渲染
   if (!enabled || !open || !needsAttention) return null;
 
-  const checks = (preflight?.checks || []).filter((c) => (
+  const checks = (snapshot?.checks || []).filter((c) => (
     c.status === 'blocked'
     || c.status === 'warn'
-    || c.status === 'missing'
     || c.id === 'full-disk-access'
-    || c.id.startsWith('cookies:')
+    || c.action === 'open_full_disk_access'
   ));
-  const displayName = preflight?.dragTarget?.displayName || 'Peer Agent';
-  const canDrag = Boolean(preflight?.dragTarget?.ok && preflight?.dragTarget?.appPath);
+  const displayName = snapshot?.dragTarget?.displayName || 'Peer Agent';
+  const canDrag = Boolean(snapshot?.dragTarget?.ok && snapshot?.dragTarget?.appPath);
 
   const node = (
     <div className="pa-overlay-backdrop" role="presentation">
@@ -241,17 +238,17 @@ export function FullDiskAccessStartupGate({
         className="pa-overlay-panel fda-startup-gate"
         role="dialog"
         aria-modal="true"
-        aria-label={isZh ? '完全磁盘访问权限' : 'Full Disk Access'}
+        aria-label={isZh ? 'Agent 必需权限' : 'Required permissions for Agent'}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="fda-startup-gate-body">
           <h2 className="fda-startup-gate-title">
-            {isZh ? '需要完全磁盘访问权限' : 'Full Disk Access required'}
+            {isZh ? '需要授予 Agent 必需权限' : 'Required permissions for Agent'}
           </h2>
           <p className="fda-startup-gate-lead">
             {isZh
-              ? 'Peer Agent 需要读取本机浏览器 Cookie 目录（例如 Chrome）才能导入站点会话。这些权限仅在你使用本功能时用到。'
-              : 'Peer Agent needs to read local browser cookie directories (e.g. Chrome) to import site sessions. These permissions are only used while you use this feature.'}
+              ? 'Peer Agent 需要若干 macOS 系统权限才能可靠读写本机工作区与用户数据。以下权限仅在你使用相关能力时用到。'
+              : 'Peer Agent needs a few macOS system permissions to work reliably with local workspaces and user data. These are only used while you use related features.'}
           </p>
 
           <div className="fda-permission-row">
@@ -259,7 +256,7 @@ export function FullDiskAccessStartupGate({
               <span className="fda-permission-row-icon" aria-hidden>
                 <img
                   className="fda-permission-logo"
-                  src={preflight?.dragTarget?.iconDataUrl || BRAND_LOGO_SRC}
+                  src={snapshot?.dragTarget?.iconDataUrl || BRAND_LOGO_SRC}
                   alt=""
                   draggable={false}
                   onError={(e) => {
@@ -270,11 +267,11 @@ export function FullDiskAccessStartupGate({
                 />
               </span>
               <span className="fda-permission-row-text">
-                <strong>{isZh ? '完全磁盘访问' : 'Full Disk Access'}</strong>
+                <strong>{isZh ? '完全磁盘访问（Agent 必需）' : 'Full Disk Access (required for Agent)'}</strong>
                 <span>
                   {isZh
-                    ? '用于读取 Chrome 等浏览器本地 Cookie 目录'
-                    : 'Needed to read Chrome (and similar) cookie directories'}
+                    ? '用于读写受保护的本机目录与工作区数据'
+                    : 'Needed to read/write protected local directories and workspace data'}
                 </span>
               </span>
             </div>
@@ -300,7 +297,7 @@ export function FullDiskAccessStartupGate({
             >
               <img
                 className="fda-permission-logo"
-                src={preflight?.dragTarget?.iconDataUrl || BRAND_LOGO_SRC}
+                src={snapshot?.dragTarget?.iconDataUrl || BRAND_LOGO_SRC}
                 alt="Peer Agent"
                 draggable={false}
                 onError={(e) => {
@@ -355,8 +352,8 @@ export function FullDiskAccessStartupGate({
             </p>
           ) : null}
 
-          {preflight?.guidance?.fullDiskAccess ? (
-            <p className="session-import-hint">{preflight.guidance.fullDiskAccess}</p>
+          {snapshot?.guidance?.fullDiskAccess ? (
+            <p className="session-import-hint">{snapshot.guidance.fullDiskAccess}</p>
           ) : null}
 
           <ul className="session-import-preflight-list fda-startup-checks">
@@ -374,7 +371,7 @@ export function FullDiskAccessStartupGate({
           {error ? <div className="session-import-error">{error}</div> : null}
 
           <div className="fda-startup-actions">
-            <button type="button" className="updater-btn" disabled={loading} onClick={() => void runPreflight()}>
+            <button type="button" className="updater-btn" disabled={loading} onClick={() => void runCheck()}>
               {loading
                 ? (isZh ? '检测中…' : 'Checking…')
                 : (isZh ? '我已授权，重新检测' : 'I’ve granted access — re-check')}

@@ -29,6 +29,7 @@ import {
   openFullDiskAccessSettings,
   resolveFullDiskAccessDragTarget,
 } from './session-import/import-permission-preflight.mjs';
+import { buildStartupOsPermissions } from './startup-os-permissions.mjs';
 import {
   loadCookiesForSites,
   redactLoadedCookies,
@@ -2234,6 +2235,41 @@ async function resolveDragIconDataUrl(appPath) {
   return null;
 }
 
+async function buildStartupOsPermissionsPayload() {
+  const snapshot = buildStartupOsPermissions({
+    platform: process.platform,
+    includeDragTarget: true,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  });
+  const dragTarget = snapshot.dragTarget || resolveFullDiskAccessDragTarget({
+    platform: process.platform,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  });
+  const iconDataUrl = dragTarget?.ok && dragTarget.appPath
+    ? await resolveDragIconDataUrl(dragTarget.appPath)
+    : null;
+  return {
+    ...snapshot,
+    dragTarget: dragTarget?.ok
+      ? {
+          ok: true,
+          appPath: dragTarget.appPath,
+          displayName: dragTarget.displayName,
+          kind: dragTarget.kind,
+          isPackagedApp: dragTarget.isPackagedApp,
+          iconDataUrl,
+        }
+      : {
+          ok: false,
+          error: dragTarget?.error || 'app_path_not_found',
+        },
+  };
+}
+
 async function buildSessionImportPreflightPayload() {
   // 注意：这里必须调用纯探测函数 buildSessionImportPreflight，
   // 不能 await 自己，否则会无限递归，导致 dragTarget 永远生成失败、UI 不显示可拖 App。
@@ -2302,6 +2338,20 @@ ipcMain.handle('browser:list-session-sources', async () => {
       error: err?.message || 'list_sources_failed',
       sources: [],
       preflight: await buildSessionImportPreflightPayload(),
+    };
+  }
+});
+
+ipcMain.handle('os:startup-permissions', async () => {
+  try {
+    return await buildStartupOsPermissionsPayload();
+  } catch (err) {
+    return {
+      ok: false,
+      blocked: true,
+      checks: [],
+      required: [],
+      error: err?.message || 'startup_permissions_failed',
     };
   }
 });

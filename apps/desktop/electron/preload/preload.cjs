@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.invoke('browser:capture-page', { webContentsId, savePath }),
   /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
   listBrowserSessionSources: () => ipcRenderer.invoke('browser:list-session-sources'),
+  /** Agent 启动必需的 macOS 系统权限自检（不绑 Chrome 导入）。 */
+  getStartupOsPermissions: () => ipcRenderer.invoke('os:startup-permissions'),
   /** 导入前权限/环境自检。 */
   getBrowserSessionImportPreflight: () => ipcRenderer.invoke('browser:session-import-preflight'),
   /** 打开 macOS 完全磁盘访问权限设置。 */

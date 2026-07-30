@@ -460,6 +460,44 @@ export interface BootstrapPreloadApi {
     readonly preflight?: BrowserSessionImportPreflight;
   }>;
   /** 导入前权限/环境自检清单。 */
+  
+  /**
+   * Agent 启动必需权限快照（macOS Full Disk Access 等）。
+   * 与站点会话导入 preflight 解耦，不绑死 Chrome。
+   */
+  readonly getStartupOsPermissions: () => Promise<{
+    readonly ok: boolean;
+    readonly blocked?: boolean;
+    readonly platform?: string;
+    readonly checks?: readonly {
+      readonly id: string;
+      readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
+      readonly title: string;
+      readonly detail: string;
+      readonly action?: 'open_full_disk_access' | 'none';
+      readonly path?: string;
+    }[];
+    readonly required?: readonly {
+      readonly id: string;
+      readonly status: string;
+      readonly title: string;
+      readonly detail: string;
+      readonly action?: string;
+      readonly path?: string;
+    }[];
+    readonly openFullDiskAccessSupported?: boolean;
+    readonly guidance?: { readonly fullDiskAccess?: string };
+    readonly error?: string;
+    readonly dragTarget?: {
+      readonly ok: boolean;
+      readonly appPath?: string;
+      readonly displayName?: string;
+      readonly kind?: string;
+      readonly isPackagedApp?: boolean;
+      readonly iconDataUrl?: string | null;
+      readonly error?: string;
+    };
+  }>;
   readonly getBrowserSessionImportPreflight: () => Promise<BrowserSessionImportPreflight>;
   /** 打开 macOS 完全磁盘访问权限设置页。 */
   readonly openFullDiskAccessSettings: () => Promise<{

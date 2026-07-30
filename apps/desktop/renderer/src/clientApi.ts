@@ -30,6 +30,7 @@ const unavailableApi: ClientApi = {
   clearBrowserSiteData: unavailableMethod('clearBrowserSiteData'),
   captureBrowserPage: unavailableMethod('captureBrowserPage'),
   listBrowserSessionSources: unavailableMethod('listBrowserSessionSources'),
+  getStartupOsPermissions: unavailableMethod('getStartupOsPermissions'),
   getBrowserSessionImportPreflight: unavailableMethod('getBrowserSessionImportPreflight'),
   openFullDiskAccessSettings: unavailableMethod('openFullDiskAccessSettings'),
   getAppDragTarget: unavailableMethod('getAppDragTarget'),
