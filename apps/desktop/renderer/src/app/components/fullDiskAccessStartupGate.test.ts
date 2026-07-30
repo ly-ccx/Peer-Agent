@@ -30,6 +30,8 @@ test('startup gate checks Agent-required OS permissions, not Chrome import', () 
   assert.match(src, /addEventListener\('focus'/);
   assert.doesNotMatch(src, /from '\.\/Overlay'/);
   assert.match(src, /createPortal/);
+  assert.doesNotMatch(src, /在 Finder 中显示 App|Reveal app in Finder|revealAppInFinder/);
+  assert.match(src, /getStartupOsPermissions/);
 });
 
 test('root renderer wraps App with AppErrorBoundary', () => {

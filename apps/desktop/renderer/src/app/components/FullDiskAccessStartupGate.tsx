@@ -102,7 +102,7 @@ export function FullDiskAccessStartupGate({
     if (!opts?.silent) setLoading(true);
     setError(null);
     try {
-      const api = clientApi.getStartupOsPermissions || clientApi.getBrowserSessionImportPreflight;
+      const api = clientApi.getStartupOsPermissions;
       if (typeof api !== 'function') {
         setSnapshot(null);
         setOpen(false);
@@ -183,27 +183,27 @@ export function FullDiskAccessStartupGate({
     }
   }, [isZh]);
 
-  const revealAppInFinder = useCallback(async () => {
-    try {
-      const target = snapshot?.dragTarget;
-      if (target?.ok && target.appPath) {
-        await clientApi.openPath?.(target.appPath);
-        return;
-      }
-      const fresh = await clientApi.getAppDragTarget?.();
-      if (fresh?.ok && fresh.appPath) {
-        await clientApi.openPath?.(fresh.appPath);
-        return;
-      }
-      await clientApi.openPath?.('/Applications');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [snapshot?.dragTarget]);
 
   const onAppDragStart = useCallback((event: DragEvent<HTMLElement>) => {
     const target = snapshot?.dragTarget;
     if (!target?.ok || !target.appPath) {
+      event.preventDefault();
+      setError(isZh ? '无法定位 Peer Agent.app，拖拽授权暂不可用。' : 'Could not locate Peer Agent.app for drag-to-grant.');
+      return;
+    }
+    // 必须在 dragstart 同步调用主进程 startDrag（preload sendSync）。
+    // 不要依赖 HTML5 dataTransfer 作为进系统设置列表的载荷。
+    try {
+      const result = clientApi.startAppDrag?.({ appPath: target.appPath }) as
+        | { ok?: boolean; error?: string; filePath?: string }
+        | void;
+      if (result && result.ok === false) {
+        setError(result.error || (isZh ? '拖拽启动失败' : 'Failed to start app drag'));
+        event.preventDefault();
+        return;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
       event.preventDefault();
       return;
     }
@@ -213,12 +213,7 @@ export function FullDiskAccessStartupGate({
     } catch {
       // ignore
     }
-    try {
-      clientApi.startAppDrag?.({ appPath: target.appPath });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [snapshot?.dragTarget]);
+  }, [snapshot?.dragTarget, isZh]);
 
   // hooks 全部结束后再决定是否渲染
   if (!enabled || !open || !needsAttention) return null;
@@ -314,8 +309,8 @@ export function FullDiskAccessStartupGate({
                       ? '按住品牌 LOGO 拖进系统设置列表，然后打开开关'
                       : 'Hold the brand logo, drag into System Settings, then enable it')
                     : (isZh
-                      ? '正在准备可拖拽的 App… 也可点下方在 Finder 中显示'
-                      : 'Preparing draggable app… or reveal it in Finder below')}
+                      ? '正在准备可拖拽的 App…'
+                      : 'Preparing draggable app…')}
                 </span>
               </span>
             </button>
@@ -331,11 +326,6 @@ export function FullDiskAccessStartupGate({
                 : (isZh ? '在系统设置中完成' : 'Complete in System Settings')}
             </button>
 
-            <div className="fda-permission-actions">
-              <button type="button" className="updater-btn ghost" onClick={() => void revealAppInFinder()}>
-                {isZh ? '在 Finder 中显示 App' : 'Reveal app in Finder'}
-              </button>
-            </div>
           </div>
 
           <ol className="fda-startup-steps">

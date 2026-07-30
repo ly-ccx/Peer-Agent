@@ -2384,9 +2384,17 @@ ipcMain.handle('browser:open-full-disk-access-settings', async () => {
 });
 
 // Codex 同类链路：渲染层拖拽 App 图标时，主进程把真实 .app 路径交给系统设置列表。
-ipcMain.on('browser:start-app-drag', async (event, payload = {}) => {
+// 关键：必须在 dragstart 同步路径里调用 startDrag。
+// 因此 preload 用 sendSync，这里禁止 async/await（否则系统设置接不住，表现为“拖了没反应”）。
+ipcMain.on('browser:start-app-drag', (event, payload = {}) => {
+  const fail = (error) => {
+    try { event.returnValue = { ok: false, error: error || 'start_drag_failed' }; } catch { /* ignore */ }
+  };
   try {
-    if (process.platform !== 'darwin') return;
+    if (process.platform !== 'darwin') {
+      fail('unsupported_platform');
+      return;
+    }
     const requestedPath = typeof payload?.appPath === 'string' ? payload.appPath.trim() : '';
     const resolved = resolveFullDiskAccessDragTarget({
       platform: process.platform,
@@ -2394,24 +2402,51 @@ ipcMain.on('browser:start-app-drag', async (event, payload = {}) => {
       execPath: process.execPath,
       resourcesPath: process.resourcesPath,
     });
-    const filePath = requestedPath || (resolved.ok ? resolved.appPath : '');
-    if (!filePath) return;
+    let filePath = requestedPath || (resolved.ok ? resolved.appPath : '');
+    if (!filePath) {
+      fail('app_path_missing');
+      return;
+    }
+    // 规范化到 .app bundle
+    const marker = `${path.sep}Contents${path.sep}MacOS${path.sep}`;
+    const idx = filePath.lastIndexOf(marker);
+    if (idx > 0) filePath = filePath.slice(0, idx);
+    if (!existsSync(filePath)) {
+      fail('app_path_not_found');
+      return;
+    }
     let icon = resolveAppIconNativeImage(filePath);
+    // startDrag 要求有效 icon；空 icon 在部分 Electron/macOS 上会导致拖拽静默失败。
     if (icon.isEmpty()) {
-      try {
-        icon = await app.getFileIcon(filePath, { size: 'normal' });
-      } catch {
-        icon = nativeImage.createEmpty();
+      // 最后兜底：1x1 透明也不理想，尽量再找 logo.png
+      const logoFallbacks = [
+        path.join(workspaceRoot, 'apps/desktop/public/logo.png'),
+        path.join(__dirname, '../../public/logo.png'),
+        path.join(__dirname, '../../dist/logo.png'),
+      ];
+      for (const f of logoFallbacks) {
+        try {
+          if (!existsSync(f)) continue;
+          const img = nativeImage.createFromPath(f);
+          if (img && !img.isEmpty()) { icon = img; break; }
+        } catch { /* continue */ }
       }
     }
-    // Electron: sender.startDrag({ file, icon })
-    // 注意：file 必须是真实 .app 路径，系统设置列表才能接住并显示该 app。
+    if (icon.isEmpty()) {
+      // 仍为空则造一个最小非空图标，避免 startDrag 直接 no-op
+      icon = nativeImage.createFromDataURL(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W7tUAAAAASUVORK5CYII=',
+      );
+    }
+    // Electron: sender.startDrag({ file, icon }) — 必须同步调用
     event.sender.startDrag({
       file: filePath,
-      icon: icon.isEmpty() ? nativeImage.createEmpty() : icon,
+      icon,
     });
+    try { event.returnValue = { ok: true, filePath }; } catch { /* ignore */ }
   } catch (err) {
     console.warn('[session-import] start-app-drag failed:', err?.message || err);
+    fail(err?.message || 'start_drag_failed');
   }
 });
 

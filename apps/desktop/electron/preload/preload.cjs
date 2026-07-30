@@ -75,7 +75,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
    * 开始把 App 拖到系统设置（完全磁盘访问列表）。
    * 必须在 renderer 的 dragstart 事件中同步调用。
    */
-  startAppDrag: (payload) => ipcRenderer.send('browser:start-app-drag', payload || {}),
+  startAppDrag: (payload) => ipcRenderer.sendSync('browser:start-app-drag', payload || {}),
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   listBrowserSessionSites: (profileId) =>
     ipcRenderer.invoke('browser:list-session-sites', { profileId }),
