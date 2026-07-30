@@ -68,7 +68,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   /** 导入前权限/环境自检。 */
   getBrowserSessionImportPreflight: () => ipcRenderer.invoke('browser:session-import-preflight'),
   /** 打开 macOS 完全磁盘访问权限设置。 */
-  openFullDiskAccessSettings: () => ipcRenderer.invoke('browser:open-full-disk-access-settings'),
+  openFullDiskAccessSettings: (payload) => ipcRenderer.invoke('browser:open-full-disk-access-settings', payload || {}),
   /** 获取可拖到“完全磁盘访问”列表的 App 路径与图标。 */
   getAppDragTarget: () => ipcRenderer.invoke('browser:get-app-drag-target'),
   /**
@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
    * 必须在 renderer 的 dragstart 事件中同步调用。
    */
   startAppDrag: (payload) => ipcRenderer.sendSync('browser:start-app-drag', payload || {}),
+  /** 关闭 FDA 拖拽浮窗（设置下方的 always-on-top LOGO 条）。 */
+  hideFdaDragFloat: () => ipcRenderer.sendSync('browser:hide-fda-drag-float-sync'),
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   listBrowserSessionSites: (profileId) =>
     ipcRenderer.invoke('browser:list-session-sites', { profileId }),

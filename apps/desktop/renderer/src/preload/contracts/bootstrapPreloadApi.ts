@@ -499,11 +499,19 @@ export interface BootstrapPreloadApi {
     };
   }>;
   readonly getBrowserSessionImportPreflight: () => Promise<BrowserSessionImportPreflight>;
-  /** 打开 macOS 完全磁盘访问权限设置页。 */
-  readonly openFullDiskAccessSettings: () => Promise<{
+  /** 打开 macOS 完全磁盘访问权限设置页，并弹出设置下方的拖拽浮窗。 */
+  readonly openFullDiskAccessSettings: (payload?: {
+    readonly isZh?: boolean;
+  }) => Promise<{
     readonly ok: boolean;
     readonly url?: string;
     readonly error?: string;
+    readonly dragFloat?: {
+      readonly ok?: boolean;
+      readonly appPath?: string;
+      readonly displayName?: string;
+      readonly error?: string;
+    };
   }>;
   /** 获取可拖到“完全磁盘访问”列表的 App 路径与图标。 */
   readonly getAppDragTarget: () => Promise<{
@@ -519,6 +527,7 @@ export interface BootstrapPreloadApi {
    * 开始拖拽 App 到系统设置。
    * 必须在 dragstart 中同步调用（底层 ipc send + startDrag）。
    */
+  readonly hideFdaDragFloat?: () => { readonly ok?: boolean; readonly error?: string };
   readonly startAppDrag: (payload?: { readonly appPath?: string }) => void;
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   readonly listBrowserSessionSites: (profileId: string) => Promise<{

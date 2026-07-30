@@ -30,6 +30,7 @@ import {
   resolveFullDiskAccessDragTarget,
 } from './session-import/import-permission-preflight.mjs';
 import { buildStartupOsPermissions } from './startup-os-permissions.mjs';
+import { createFullDiskAccessDragFloatController } from './full-disk-access-drag-float.mjs';
 import {
   loadCookiesForSites,
   redactLoadedCookies,
@@ -2235,6 +2236,46 @@ async function resolveDragIconDataUrl(appPath) {
   return null;
 }
 
+
+function resolveFdaFloatLogoPath() {
+  const candidates = [
+    workspaceRoot ? path.join(workspaceRoot, 'apps/desktop/public/logo.png') : null,
+    workspaceRoot ? path.join(workspaceRoot, 'apps/desktop/dist/logo.png') : null,
+    path.join(__dirname, '../../public/logo.png'),
+    path.join(__dirname, '../../dist/logo.png'),
+    path.join(__dirname, '../../build/icon.png'),
+  ].filter(Boolean);
+  for (const file of candidates) {
+    try {
+      if (existsSync(file)) return file;
+    } catch { /* continue */ }
+  }
+  return null;
+}
+
+const fullDiskAccessDragFloatController = createFullDiskAccessDragFloatController({
+  BrowserWindow,
+  screen,
+  path,
+  existsSync,
+  preloadPath: path.join(__dirname, '../preload/preload.cjs'),
+  resolveDragTarget: () => resolveFullDiskAccessDragTarget({
+    platform: process.platform,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  }),
+  resolveLogoFilePath: resolveFdaFloatLogoPath,
+  isZh: () => {
+    try {
+      // best-effort locale; renderer also passes isZh when available
+      return app.getLocale().toLowerCase().startsWith('zh');
+    } catch {
+      return true;
+    }
+  },
+});
+
 async function buildStartupOsPermissionsPayload() {
   const snapshot = buildStartupOsPermissions({
     platform: process.platform,
@@ -2370,16 +2411,48 @@ ipcMain.handle('browser:session-import-preflight', async () => {
   }
 });
 
-ipcMain.handle('browser:open-full-disk-access-settings', async () => {
+ipcMain.handle('browser:open-full-disk-access-settings', async (_event, payload = {}) => {
   try {
     if (process.platform !== 'darwin') {
       return { ok: false, error: 'unsupported_platform' };
     }
-    return await openFullDiskAccessSettings({
+    const opened = await openFullDiskAccessSettings({
       shellOpenExternal: (url) => shell.openExternal(url),
     });
+    // AskForPermission 风格：系统设置下方（屏幕底部）弹出可拖拽 LOGO 浮窗
+    let floatResult = null;
+    try {
+      floatResult = fullDiskAccessDragFloatController.show({
+        isZh: payload?.isZh,
+      });
+    } catch (err) {
+      console.warn('[fda-drag-float] show failed:', err?.message || err);
+      floatResult = { ok: false, error: err?.message || 'float_show_failed' };
+    }
+    return {
+      ...opened,
+      dragFloat: floatResult,
+    };
   } catch (err) {
     return { ok: false, error: err?.message || 'open_settings_failed' };
+  }
+});
+
+ipcMain.handle('browser:hide-fda-drag-float', async () => {
+  try {
+    fullDiskAccessDragFloatController.hide();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'hide_float_failed' };
+  }
+});
+
+ipcMain.on('browser:hide-fda-drag-float-sync', (event) => {
+  try {
+    fullDiskAccessDragFloatController.hide();
+    event.returnValue = { ok: true };
+  } catch (err) {
+    event.returnValue = { ok: false, error: err?.message || 'hide_float_failed' };
   }
 });
 
@@ -4205,3 +4278,5 @@ app.on('before-quit', () => {
     console.error('[updater] stop failed:', err);
   }
 });
+
+app.once('will-quit', () => { try { fullDiskAccessDragFloatController.destroy(); } catch { /* ignore */ } });

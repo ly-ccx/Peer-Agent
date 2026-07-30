@@ -170,7 +170,7 @@ export function FullDiskAccessStartupGate({
   const openSettings = useCallback(async () => {
     setOpeningSettings(true);
     try {
-      const res = await clientApi.openFullDiskAccessSettings?.();
+      const res = await clientApi.openFullDiskAccessSettings?.({ isZh });
       if (res && res.ok === false) {
         setError(res.error || (isZh ? '无法打开系统设置' : 'Failed to open System Settings'));
       } else {
