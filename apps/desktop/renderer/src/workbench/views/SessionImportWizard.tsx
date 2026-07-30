@@ -196,6 +196,24 @@ export function SessionImportWizard({
   }, [isZh]);
 
   // Codex 同类链路：在 dragstart 同步调用主进程 startDrag，把真实 App 路径拖进“完全磁盘访问”列表。
+  const revealAppInFinder = useCallback(async () => {
+    try {
+      const target = preflight?.dragTarget;
+      if (target?.ok && target.appPath) {
+        await clientApi.openPath?.(target.appPath);
+        return;
+      }
+      const fresh = await clientApi.getAppDragTarget?.();
+      if (fresh?.ok && fresh.appPath) {
+        await clientApi.openPath?.(fresh.appPath);
+        return;
+      }
+      await clientApi.openPath?.('/Applications');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [preflight?.dragTarget]);
+
   const onAppDragStart = useCallback((event: DragEvent<HTMLElement>) => {
     const target = preflight?.dragTarget;
     if (!target?.ok || !target.appPath) {
@@ -356,8 +374,8 @@ export function SessionImportWizard({
                     ? '导入需读取浏览器用户数据目录。若系统拒绝，请授予完全磁盘访问权限并完全退出后重启 Peer Agent。'
                     : 'Import needs browser user-data access. If blocked, grant Full Disk Access and fully relaunch Peer Agent.')}
               </p>
-              {preflight?.dragTarget?.ok ? (
-                <div className="session-import-drag-card">
+              <div className="session-import-drag-card">
+                {preflight?.dragTarget?.ok ? (
                   <button
                     type="button"
                     className="session-import-drag-handle"
@@ -379,20 +397,34 @@ export function SessionImportWizard({
                       <strong>{preflight.dragTarget.displayName || 'Peer Agent'}</strong>
                       <span>
                         {isZh
-                          ? '按住图标，拖到系统设置 → 完全磁盘访问权限列表中'
-                          : 'Drag this icon into System Settings → Full Disk Access'}
+                          ? '按住图标，拖到系统设置 → 完全磁盘访问权限列表中（列表不会自动出现 App，必须拖进去）'
+                          : 'Drag this icon into System Settings → Full Disk Access (apps never auto-appear; drag is required)'}
                       </span>
                     </span>
                   </button>
-                  <div className="session-import-drag-steps">
-                    <ol>
-                      <li>{isZh ? '点击“打开完全磁盘访问权限”' : 'Open Full Disk Access settings'}</li>
-                      <li>{isZh ? '把上方 App 图标拖进列表并打开开关' : 'Drag the app icon into the list and enable it'}</li>
-                      <li>{isZh ? '完全退出并重启 Peer Agent，再点“重新检测”' : 'Fully quit & relaunch Peer Agent, then Re-check'}</li>
-                    </ol>
+                ) : (
+                  <div className="session-import-drag-meta" style={{ padding: 6 }}>
+                    <strong>{isZh ? '未识别到可拖拽的 App' : 'No draggable app detected'}</strong>
+                    <span>
+                      {isZh
+                        ? '请点“在 Finder 中显示 App”，手动把 Peer Agent.app 拖进列表。'
+                        : 'Use “Reveal app in Finder” and drag Peer Agent.app into the list manually.'}
+                    </span>
                   </div>
+                )}
+                <div className="session-import-drag-steps">
+                  <ol>
+                    <li>{isZh ? '点击“打开完全磁盘访问权限”' : 'Open Full Disk Access settings'}</li>
+                    <li>{isZh ? '把上方 App 图标拖进列表并打开开关' : 'Drag the app icon into the list and enable it'}</li>
+                    <li>{isZh ? '完全退出并重启 Peer Agent，再点“重新检测”' : 'Fully quit & relaunch Peer Agent, then Re-check'}</li>
+                  </ol>
                 </div>
-              ) : null}
+                <div style={{ marginTop: 8 }}>
+                  <button type="button" className="session-import-close" onClick={() => void revealAppInFinder()}>
+                    {isZh ? '在 Finder 中显示 App' : 'Reveal app in Finder'}
+                  </button>
+                </div>
+              </div>
               <ul className="session-import-preflight-list">
                 {(preflight?.checks || []).map((check) => (
                   <li key={check.id} className={`session-import-preflight-item is-${check.status}`}>

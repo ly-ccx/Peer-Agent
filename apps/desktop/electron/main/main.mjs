@@ -2180,6 +2180,55 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
  * - import-site-session: 解密选定站点 Cookie 并写入 persist:peer-browser
  */
 
+
+function resolveAppIconNativeImage(appPath) {
+  // 优先用打包资源里的真实 icns/png，避免 app.getFileIcon 在某些路径返回空图，
+  // 导致权限卡只剩空白占位、用户以为“没有图标可拖”。
+  const candidates = [];
+  if (appPath && typeof appPath === 'string') {
+    candidates.push(
+      path.join(appPath, 'Contents', 'Resources', 'icon.icns'),
+      path.join(appPath, 'Contents', 'Resources', 'electron.icns'),
+      path.join(appPath, 'Contents', 'Resources', 'app-icons', 'icon.icns'),
+    );
+  }
+  // monorepo / unpackaged desktop build icons
+  candidates.push(
+    path.join(workspaceRoot, 'apps/desktop/build/icon.icns'),
+    path.join(workspaceRoot, 'apps/desktop/build/icon.png'),
+    path.join(__dirname, '../../build/icon.icns'),
+    path.join(__dirname, '../../build/icon.png'),
+    path.join(__dirname, '../../dist/favicon.png'),
+  );
+  for (const file of candidates) {
+    try {
+      if (!file || !existsSync(file)) continue;
+      const img = nativeImage.createFromPath(file);
+      if (img && !img.isEmpty()) return img;
+    } catch {
+      // continue
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
+async function resolveDragIconDataUrl(appPath) {
+  try {
+    let icon = resolveAppIconNativeImage(appPath);
+    if (icon.isEmpty() && appPath) {
+      try {
+        icon = await app.getFileIcon(appPath, { size: 'normal' });
+      } catch {
+        // ignore
+      }
+    }
+    if (icon && !icon.isEmpty()) return icon.toDataURL();
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 async function buildSessionImportPreflightPayload() {
   // 注意：这里必须调用纯探测函数 buildSessionImportPreflight，
   // 不能 await 自己，否则会无限递归，导致 dragTarget 永远生成失败、UI 不显示可拖 App。
@@ -2190,15 +2239,9 @@ async function buildSessionImportPreflightPayload() {
     execPath: process.execPath,
     resourcesPath: process.resourcesPath,
   });
-  let iconDataUrl = null;
-  if (dragTarget.ok && dragTarget.appPath) {
-    try {
-      const icon = await app.getFileIcon(dragTarget.appPath, { size: 'normal' });
-      if (icon && !icon.isEmpty()) iconDataUrl = icon.toDataURL();
-    } catch {
-      iconDataUrl = null;
-    }
-  }
+  const iconDataUrl = dragTarget.ok && dragTarget.appPath
+    ? await resolveDragIconDataUrl(dragTarget.appPath)
+    : null;
   return {
     ...preflight,
     dragTarget: dragTarget.ok
@@ -2298,13 +2341,16 @@ ipcMain.on('browser:start-app-drag', async (event, payload = {}) => {
     });
     const filePath = requestedPath || (resolved.ok ? resolved.appPath : '');
     if (!filePath) return;
-    let icon = nativeImage.createEmpty();
-    try {
-      icon = await app.getFileIcon(filePath, { size: 'normal' });
-    } catch {
-      icon = nativeImage.createEmpty();
+    let icon = resolveAppIconNativeImage(filePath);
+    if (icon.isEmpty()) {
+      try {
+        icon = await app.getFileIcon(filePath, { size: 'normal' });
+      } catch {
+        icon = nativeImage.createEmpty();
+      }
     }
     // Electron: sender.startDrag({ file, icon })
+    // 注意：file 必须是真实 .app 路径，系统设置列表才能接住并显示该 app。
     event.sender.startDrag({
       file: filePath,
       icon: icon.isEmpty() ? nativeImage.createEmpty() : icon,
@@ -2323,13 +2369,7 @@ ipcMain.handle('browser:get-app-drag-target', async () => {
       resourcesPath: process.resourcesPath,
     });
     if (!resolved.ok) return resolved;
-    let iconDataUrl = null;
-    try {
-      const icon = await app.getFileIcon(resolved.appPath, { size: 'normal' });
-      if (icon && !icon.isEmpty()) iconDataUrl = icon.toDataURL();
-    } catch {
-      iconDataUrl = null;
-    }
+    const iconDataUrl = await resolveDragIconDataUrl(resolved.appPath);
     return { ...resolved, iconDataUrl };
   } catch (err) {
     return { ok: false, error: err?.message || 'get_app_drag_target_failed' };

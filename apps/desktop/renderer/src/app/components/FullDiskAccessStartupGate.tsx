@@ -294,7 +294,7 @@ export function FullDiskAccessStartupGate({
 
           <ol className="fda-startup-steps">
             <li>{isZh ? '点击下方「打开完全磁盘访问权限」' : 'Click “Open Full Disk Access” below'}</li>
-            <li>{isZh ? '把上方 App 图标拖进列表，并打开开关' : 'Drag the app icon into the list and enable it'}</li>
+            <li>{isZh ? '把上方 App 图标拖进列表并打开开关（列表不会自动出现 App）' : 'Drag the app icon into the list and enable it (apps never auto-appear)'}</li>
             <li>{isZh ? '完全退出并重启 Peer Agent' : 'Fully quit and relaunch Peer Agent'}</li>
             <li>{isZh ? '回来后点「我已授权，重新检测」' : 'Then click “I’ve granted access — re-check”'}</li>
           </ol>
