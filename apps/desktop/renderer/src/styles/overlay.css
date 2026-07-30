@@ -231,3 +231,83 @@
     flex-wrap: wrap;
     gap: 8px;
   }
+
+
+/* AskForPermission-aligned Full Disk Access startup gate */
+.fda-permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--chrome-hairline, #0002) 85%, transparent);
+  background: color-mix(in srgb, var(--paper-sheet, #fff) 94%, transparent);
+}
+.fda-permission-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.fda-permission-row-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.fda-permission-row-icon .fda-permission-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+.fda-permission-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fda-permission-row-text strong {
+  font-size: 13px;
+}
+.fda-permission-row-text span {
+  font-size: 12px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--graphite-soft, #5b6472) 95%, transparent);
+}
+.fda-permission-row-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: color-mix(in srgb, #b45309 90%, #000);
+}
+.fda-permission-row-status.is-pending {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+.fda-drag-banner {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--graphite-soft, #5b6472) 96%, transparent);
+}
+.fda-complete-in-settings {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--chrome-hairline, #0003) 90%, transparent);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+.fda-complete-in-settings:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper-sheet, #fff) 80%, transparent);
+}
+.fda-complete-in-settings:disabled {
+  opacity: 0.65;
+  cursor: default;
+}

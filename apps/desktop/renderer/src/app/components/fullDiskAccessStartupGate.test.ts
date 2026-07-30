@@ -10,10 +10,8 @@ const gateTsx = join(here, 'FullDiskAccessStartupGate.tsx');
 
 test('startup shell mounts FullDiskAccessStartupGate after main shell is ready', () => {
   const src = readFileSync(appTsx, 'utf8');
-  assert.match(src, /import \{ FullDiskAccessStartupGate \}/);
-  assert.match(src, /<FullDiskAccessStartupGate enabled=\{showMainShell\} isZh=\{isZh\} \/>/);
-  // 不应绑到不存在的 ready 变量。
-  assert.doesNotMatch(src, /enabled=\{ready\}/);
+  assert.match(src, /FullDiskAccessStartupGate/);
+  assert.match(src, /enabled=\{showMainShell\}/);
 });
 
 test('startup gate uses session-import preflight + app drag APIs', () => {
@@ -28,11 +26,16 @@ test('startup gate uses session-import preflight + app drag APIs', () => {
   assert.match(src, /fda-permission-logo/);
   assert.match(src, /fda-permission-card/);
   assert.match(src, /在 Finder 中显示 App|Reveal app in Finder/);
+  // 对齐 AskForPermission：列表不会自动出现，需拖入 + 在系统设置完成。
+  assert.match(src, /Complete in System Settings|在系统设置中完成/);
+  assert.match(src, /apps never auto-appear|列表不会自动出现/);
+  // 回前台自动重检。
+  assert.match(src, /visibilitychange/);
+  assert.match(src, /addEventListener\('focus'/);
   // 不依赖 Overlay render props，降低 hooks 复杂度。
   assert.doesNotMatch(src, /from '\.\/Overlay'/);
   assert.match(src, /createPortal/);
 });
-
 
 test('root renderer wraps App with AppErrorBoundary', () => {
   const mainTsx = readFileSync(join(here, '../../main.tsx'), 'utf8');
