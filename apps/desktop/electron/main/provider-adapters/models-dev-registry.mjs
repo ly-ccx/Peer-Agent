@@ -1,3 +1,5 @@
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -88,7 +90,7 @@ function lookupModelsDevMetadata(registry, modelId) {
 }
 
 async function fetchModelsDevRegistry({
-  fetchImpl = globalThis.fetch,
+  fetchImpl = fetchWithConnectionRecovery,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   cacheTtlMs = DEFAULT_CACHE_TTL_MS,
   now = Date.now,

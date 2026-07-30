@@ -9,16 +9,55 @@ import {
 } from './provider-transports/recovering-fetch.mjs';
 
 describe('recovering provider fetch', () => {
-  it('classifies corporate TLS and Node fetch failures as connection recoverable', () => {
+  it('classifies corporate TLS and transient transport failures as recoverable', () => {
     assert.equal(isRecoverableConnectionFailure(new TypeError('fetch failed', {
       cause: { code: 'SELF_SIGNED_CERT_IN_CHAIN' },
     })), true);
     assert.equal(isRecoverableConnectionFailure(new Error('empty_model_response')), false);
   });
 
-  it('falls back from Node fetch to Electron net.fetch without changing provider or model', async () => {
+  it('keeps Desktop provider retries on Electron net.fetch without falling back to Node', async () => {
+    const events = [];
+    let electronCalls = 0;
+    let nodeCalls = 0;
+
+    const result = await fetchWithConnectionRecovery('https://chatgpt.com/backend-api/codex/responses', {
+      method: 'POST',
+      body: '{}',
+    }, {
+      retryDelaysMs: [1],
+      waitImpl: async () => {},
+      electronFetchImpl: async () => {
+        electronCalls += 1;
+        if (electronCalls === 1) {
+          const error = new TypeError('electron proxy connection reset');
+          error.cause = { code: 'ERR_CONNECTION_RESET' };
+          throw error;
+        }
+        return new Response('ok', { status: 200 });
+      },
+      fetchImpl: async () => {
+        nodeCalls += 1;
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'SELF_SIGNED_CERT_IN_CHAIN' };
+        throw error;
+      },
+      webContents: {
+        send: (channel, payload) => events.push({ channel, payload }),
+      },
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(electronCalls, 2);
+    assert.equal(nodeCalls, 0);
+    assert.equal(events.filter((event) => event.payload?.status === 'retrying').length, 1);
+    assert.match(events[0].payload.reason, /electron proxy connection reset/);
+  });
+
+  it('uses Electron net.fetch immediately without probing Node fetch', async () => {
     const events = [];
     const calls = [];
+    let nodeCalls = 0;
     const result = await fetchWithConnectionRecovery('https://chatgpt.com/backend-api/codex/responses', {
       method: 'POST',
       body: '{}',
@@ -27,9 +66,8 @@ describe('recovering provider fetch', () => {
       provider: 'openai-responses',
       model: 'gpt-5.5',
       fetchImpl: async () => {
-        const error = new TypeError('fetch failed');
-        error.cause = { code: 'SELF_SIGNED_CERT_IN_CHAIN' };
-        throw error;
+        nodeCalls += 1;
+        throw new Error('Node fetch must not run in Desktop');
       },
       electronFetchImpl: async (url, init) => {
         calls.push({ url, init });
@@ -41,64 +79,37 @@ describe('recovering provider fetch', () => {
     });
 
     assert.equal(result.status, 200);
+    assert.equal(nodeCalls, 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'https://chatgpt.com/backend-api/codex/responses');
     assert.equal(calls[0].init.method, 'POST');
-    assert.deepEqual(events, [{
-      channel: 'chat:stream:connection-recovery',
-      payload: {
-        streamId: 's1',
-        provider: 'openai-responses',
-        model: 'gpt-5.5',
-        status: 'recovered',
-        fromConnection: 'node-fetch',
-        toConnection: 'electron-net-fetch',
-        connection: 'electron-net-fetch',
-        attempt: 0,
-        maxRetries: 1,
-        reason: 'fetch failed (SELF_SIGNED_CERT_IN_CHAIN)',
-      },
-    }]);
+    assert.deepEqual(events, []);
   });
 
-  it('can disable same-body secondary fallback for non-idempotent provider requests', async () => {
-    const events = [];
+  it('fails closed when Electron transport is unavailable in a Desktop runtime', async () => {
     let nodeCalls = 0;
-    let electronCalls = 0;
-    const error = new TypeError('fetch failed');
-    error.cause = { code: 'ECONNRESET' };
 
     await assert.rejects(
       fetchWithConnectionRecovery('https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation', {
         method: 'POST',
         body: '{"request_id":"req-1"}',
       }, {
-        streamId: 's-qoder-non-idempotent',
+        streamId: 's-electron-required',
         provider: 'qoder',
         model: 'qmodel_latest',
-        retryDelaysMs: [],
-        allowSecondaryFallback: false,
+        requireElectronTransport: true,
         fetchImpl: async () => {
           nodeCalls += 1;
-          throw error;
-        },
-        electronFetchImpl: async () => {
-          electronCalls += 1;
-          return new Response('duplicate', { status: 200 });
-        },
-        webContents: {
-          send: (channel, payload) => events.push({ channel, payload }),
+          return new Response('wrong transport', { status: 200 });
         },
       }),
-      /fetch failed/,
+      (error) => error?.code === 'electron_net_fetch_unavailable',
     );
 
-    assert.equal(nodeCalls, 1);
-    assert.equal(electronCalls, 0);
-    assert.deepEqual(events, []);
+    assert.equal(nodeCalls, 0);
   });
 
-  it('emits scheduled retry progress before retrying Node fetch', async () => {
+  it('emits scheduled retry progress before retrying Electron net.fetch', async () => {
     const events = [];
     const waits = [];
     let attempts = 0;
@@ -112,7 +123,7 @@ describe('recovering provider fetch', () => {
       model: 'gpt-5.5',
       retryDelaysMs: [10_000, 30_000],
       waitImpl: async (ms) => waits.push(ms),
-      fetchImpl: async () => {
+      electronFetchImpl: async () => {
         attempts += 1;
         if (attempts < 3) {
           const error = new TypeError('fetch failed');
@@ -136,6 +147,7 @@ describe('recovering provider fetch', () => {
           provider: 'openai',
           model: 'gpt-5.5',
           status: 'retrying',
+          connection: 'electron-net-fetch',
           attempt: 1,
           maxRetries: 2,
           delayMs: 10_000,
@@ -149,6 +161,7 @@ describe('recovering provider fetch', () => {
           provider: 'openai',
           model: 'gpt-5.5',
           status: 'retrying',
+          connection: 'electron-net-fetch',
           attempt: 2,
           maxRetries: 2,
           delayMs: 30_000,
@@ -162,7 +175,7 @@ describe('recovering provider fetch', () => {
           provider: 'openai',
           model: 'gpt-5.5',
           status: 'recovered',
-          connection: 'node-fetch',
+          connection: 'electron-net-fetch',
           attempt: 2,
           maxRetries: 2,
           reason: 'fetch failed (ETIMEDOUT)',
@@ -176,13 +189,12 @@ describe('recovering provider fetch', () => {
     let attempts = 0;
     await assert.rejects(
       fetchWithConnectionRecovery('https://example.com', {}, {
-        fetchImpl: async () => {
+        electronFetchImpl: async () => {
           attempts += 1;
           const error = new TypeError('fetch failed');
           error.cause = { code: 'ETIMEDOUT' };
           throw error;
         },
-        electronFetchImpl: null,
         randomImpl: () => 0.5,
         waitImpl: async (ms) => { waits.push(ms); },
       }),
@@ -201,13 +213,12 @@ describe('recovering provider fetch', () => {
 
     await assert.rejects(
       fetchWithConnectionRecovery('https://example.com', { signal: controller.signal }, {
-        fetchImpl: async () => {
+        electronFetchImpl: async () => {
           attempts += 1;
           const error = new TypeError('fetch failed');
           error.cause = { code: 'ETIMEDOUT' };
           throw error;
         },
-        electronFetchImpl: null,
         retryDelaysMs: [1_000],
         waitImpl: async (_ms, signal) => {
           controller.abort();
@@ -222,11 +233,10 @@ describe('recovering provider fetch', () => {
   });
 
   it('aborts a hung first-call socket via connect-timeout and surfaces a recoverable error into backoff', async () => {
-    // Cold start: in round 0 both channels hang (socket settles only on abort).
-    // The injected scheduleTimeout fires the connect deadline for those first
-    // two attempts, converting each hang into a recoverable ConnectTimeoutError.
-    // The loop then backs off once and round 1 recovers — proving a hung first
-    // call no longer blocks the turn forever.
+    // Cold start: the first Electron request hangs (socket settles only on
+    // abort). The injected scheduleTimeout converts it into a recoverable
+    // ConnectTimeoutError. The loop then backs off once and the same Electron
+    // transport recovers on round 1.
     const events = [];
     const waits = [];
     let totalCalls = 0;
@@ -243,6 +253,7 @@ describe('recovering provider fetch', () => {
       sig?.addEventListener('abort', onAbort, { once: true });
     });
 
+    let timeoutSchedules = 0;
     const result = await fetchWithConnectionRecovery('https://api.example.com/v1/messages', {
       method: 'POST',
       body: '{}',
@@ -250,24 +261,19 @@ describe('recovering provider fetch', () => {
       streamId: 's3',
       provider: 'anthropic',
       model: 'claude',
-      // Force "no proxy" so node-fetch (fetchImpl) is the primary channel.
-      detectProxy: async () => false,
       retryDelaysMs: [777],
       connectTimeoutMs: 5_000,
-      // Fire the connect deadline immediately for the two round-0 attempts only.
+      // Fire the connect deadline immediately for the first attempt only.
       scheduleTimeout: (cb) => {
-        if (totalCalls <= 2) cb();
+        timeoutSchedules += 1;
+        if (timeoutSchedules === 1) cb();
         return () => {};
       },
       waitImpl: async (ms) => { waits.push(ms); },
-      fetchImpl: async (_url, init) => {
+      electronFetchImpl: async (_url, init) => {
         totalCalls += 1;
         if (totalCalls === 1) return hangUntilAbort(init); // round 0 primary: hang
         return new Response('ok', { status: 200 }); // round 1 primary: recover
-      },
-      electronFetchImpl: async (_url, init) => {
-        totalCalls += 1;
-        return hangUntilAbort(init); // round 0 secondary: hang -> connect-timeout
       },
       webContents: {
         send: (channel, payload) => events.push({ channel, payload }),
@@ -284,7 +290,7 @@ describe('recovering provider fetch', () => {
     // Round 1 recovered on the primary channel.
     const recovered = events.filter((e) => e.payload?.status === 'recovered');
     assert.equal(recovered.length, 1);
-    assert.equal(recovered[0].payload.connection, 'node-fetch');
+    assert.equal(recovered[0].payload.connection, 'electron-net-fetch');
   });
 
   it('rebuilds request init on each connection retry via buildInit', async () => {
@@ -296,11 +302,9 @@ describe('recovering provider fetch', () => {
       method: 'POST',
       body: 'stale-should-not-be-used',
     }, {
-      detectProxy: async () => false,
       retryDelaysMs: [1],
       waitImpl: async () => {},
       connectTimeoutMs: 0,
-      allowSecondaryFallback: false,
       buildInit: ({ attempt, isRetry }) => {
         attempts.push({ attempt, isRetry });
         return {
@@ -309,7 +313,7 @@ describe('recovering provider fetch', () => {
           body: JSON.stringify({ request_id: `req-${attempt}`, is_retry: isRetry }),
         };
       },
-      fetchImpl: async (_url, init) => {
+      electronFetchImpl: async (_url, init) => {
         fetchCalls += 1;
         bodies.push(init.body);
         if (fetchCalls === 1) {

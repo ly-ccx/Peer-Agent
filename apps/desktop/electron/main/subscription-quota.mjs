@@ -8,6 +8,7 @@
 
 import { resolveProviderCredential, getProviderCredentialErrorCode } from './provider-credential-resolver.mjs';
 import { fetchQoderUsageInfo } from './provider-adapters/qoder-official-model-catalog.mjs';
+import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 
 const QUOTA_TTL_MS = 60_000;
 /** 新鲜缓存：TTL 内直接返回，避免重复打供应商接口。 */
@@ -86,7 +87,7 @@ async function readJsonResponse(response) {
 
 // ── GPT / ChatGPT subscription (wham/usage) ─────────────────────────────
 
-export async function fetchChatGptUsage({ accessToken, accountId, fetchImpl = fetch } = {}) {
+export async function fetchChatGptUsage({ accessToken, accountId, fetchImpl = fetchWithConnectionRecovery } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
 
   const headers = {
@@ -203,7 +204,7 @@ function pickDefaultOnboardTier(loadRes) {
 export async function resolveGeminiCodeAssistProjectId({
   accessToken,
   projectId,
-  fetchImpl = fetch,
+  fetchImpl = fetchWithConnectionRecovery,
   pollIntervalMs = 1000,
   maxPolls = 30,
 } = {}) {
@@ -339,7 +340,7 @@ export async function resolveGeminiCodeAssistProjectId({
 
 // ── Gemini Code Assist (retrieveUserQuota) ──────────────────────────────
 
-export async function fetchGeminiQuota({ accessToken, projectId, fetchImpl = fetch } = {}) {
+export async function fetchGeminiQuota({ accessToken, projectId, fetchImpl = fetchWithConnectionRecovery } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
 
   // CodexBar：先 loadCodeAssist 拿 cloudaicompanionProject，再 retrieveUserQuota。
@@ -554,7 +555,7 @@ function parseGrokGrpcWeb(body) {
   };
 }
 
-export async function fetchGrokQuota({ accessToken, fetchImpl = fetch } = {}) {
+export async function fetchGrokQuota({ accessToken, fetchImpl = fetchWithConnectionRecovery } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
 
   // 空 gRPC-web 消息帧：1 byte flags + 4 byte length(0)
@@ -729,7 +730,7 @@ export async function fetchProviderSubscriptionQuota({
   providerId,
   llmConfigStore,
   force = false,
-  fetchImpl = fetch,
+  fetchImpl = fetchWithConnectionRecovery,
   resolveCredential = resolveProviderCredential,
 } = {}) {
   if (!providerId) return failure('invalid_request', 'provider id required');

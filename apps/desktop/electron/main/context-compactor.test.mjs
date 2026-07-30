@@ -1011,7 +1011,7 @@ describe('context compactor · streaming progress (0007)', () => {
     assert.equal(progressEvents.at(-1).receivedChars, 'summary text'.length);
   });
 
-  it('recovers compaction transport through Electron fetch when Node fetch hits corporate TLS', async () => {
+  it('retries compaction on Electron fetch without probing Node fetch', async () => {
     const sseChunks = [
       `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'recovered summary' })}\n\n`,
       'data: [DONE]\n\n',
@@ -1049,29 +1049,33 @@ describe('context compactor · streaming progress (0007)', () => {
       connectionRecoveryOptions: {
         fetchImpl: async () => {
           nodeFetchCalls += 1;
-          const error = new Error('self signed certificate in certificate chain');
-          error.code = 'SELF_SIGNED_CERT_IN_CHAIN';
-          throw error;
+          throw new Error('Node fetch must not run in Desktop');
         },
         electronFetchImpl: async () => {
           electronFetchCalls += 1;
+          if (electronFetchCalls === 1) {
+            const error = new Error('net::ERR_NETWORK_CHANGED');
+            error.code = 'ERR_NETWORK_CHANGED';
+            throw error;
+          }
           return makeSseResponse(sseChunks);
         },
+        retryDelaysMs: [0],
         waitImpl: async () => {},
       },
     });
 
-    assert.equal(nodeFetchCalls, 1);
-    assert.equal(electronFetchCalls, 1);
+    assert.equal(nodeFetchCalls, 0);
+    assert.equal(electronFetchCalls, 2);
     assert.equal(result.compacted, true);
     assert.equal(result.messages[1]._compaction.method, 'llm');
     assert.equal(result.messages[1].content.includes('recovered summary'), true);
-    assert.deepEqual(events.map((event) => event.payload.status), ['recovered']);
+    assert.deepEqual(events.map((event) => event.payload.status), ['retrying', 'recovered']);
     assert.equal(events[0].payload.streamId, 'compact-1');
     assert.equal(events[0].payload.provider, 'openai');
     assert.equal(events[0].payload.model, 'gpt-5.1-codex');
-    assert.equal(events[0].payload.fromConnection, 'node-fetch');
-    assert.equal(events[0].payload.toConnection, 'electron-net-fetch');
+    assert.equal(events[0].payload.connection, 'electron-net-fetch');
+    assert.equal(events[1].payload.connection, 'electron-net-fetch');
   });
 
   it('falls back to structural when the stream errors', async () => {
@@ -1819,4 +1823,3 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
     assert.doesNotMatch(COMPACTOR_SOURCE, /previousSummary(?:Text|Content)\s*:/);
   });
 });
-

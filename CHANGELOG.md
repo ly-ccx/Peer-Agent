@@ -14,6 +14,10 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+### Fixed
+
+- Desktop provider, OAuth, quota, model-catalog, context-count, pricing, and connection-test traffic now stays on Electron `net.fetch`, preserving the system proxy and macOS trust store instead of falling through to raw Node fetch.
+
 ## 0.0.1-beta.45 - 2026-07-29
 
 ### Added

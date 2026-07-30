@@ -43,6 +43,7 @@ import {
   fillMissingPricingFromRegistry,
 } from './provider-adapters/models-dev-registry.mjs';
 import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
+import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 
 const { safeStorage } = electron;
 
@@ -250,6 +251,7 @@ export function createLlmConfigStore({
   credentialClient: providedCredentialClient,
   credentialDataHome,
   legacySecretDecryptor = decryptLegacySecret,
+  providerFetch = fetchWithConnectionRecovery,
 } = {}) {
   let productionCredentialClient;
   function credentials() {
@@ -1378,15 +1380,15 @@ export function createLlmConfigStore({
     try {
       const resolved = resolveChannel({ ...item, apiKey });
       if (resolved.wire === 'anthropic-messages') {
-        return await testAnthropic(resolved, item.model, start);
+        return await testAnthropic(resolved, item.model, start, providerFetch);
       }
       if (resolved.wire === 'openai-responses') {
-        return await testOpenAIResponses(resolved, item.model, start);
+        return await testOpenAIResponses(resolved, item.model, start, providerFetch);
       }
       if (resolved.wire === 'gemini') {
-        return await testGemini(resolved, item.model, start);
+        return await testGemini(resolved, item.model, start, providerFetch);
       }
-      return await testOpenAI(resolved, item.model, start);
+      return await testOpenAI(resolved, item.model, start, providerFetch);
     } catch (err) {
       return { success: false, error: err?.message || 'Connection failed', latencyMs: Date.now() - start };
     }
@@ -1398,7 +1400,7 @@ export function createLlmConfigStore({
    * Only fills undefined price fields; never overwrites existing values.
    */
   async function backfillMissingPricingFromModelsDev({
-    fetchImpl,
+    fetchImpl = providerFetch,
     timeoutMs,
     cacheTtlMs,
   } = {}) {
@@ -1422,9 +1424,9 @@ export function createLlmConfigStore({
   return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, backfillMissingPricingFromModelsDev };
 }
 
-async function testOpenAI(resolved, model, start) {
+async function testOpenAI(resolved, model, start, fetchImpl) {
   const url = resolved.endpoint;
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     method: 'POST',
     headers: resolved.headers,
     body: JSON.stringify({
@@ -1443,8 +1445,8 @@ async function testOpenAI(resolved, model, start) {
   return { success: true, model: data.model || model, latencyMs };
 }
 
-async function testOpenAIResponses(resolved, model, start) {
-  const res = await fetch(resolved.endpoint, {
+async function testOpenAIResponses(resolved, model, start, fetchImpl) {
+  const res = await fetchImpl(resolved.endpoint, {
     method: 'POST',
     headers: resolved.headers,
     body: JSON.stringify({
@@ -1464,9 +1466,9 @@ async function testOpenAIResponses(resolved, model, start) {
   return { success: true, model: data.model || model, latencyMs };
 }
 
-async function testAnthropic(resolved, model, start) {
+async function testAnthropic(resolved, model, start, fetchImpl) {
   const url = resolved.endpoint;
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     method: 'POST',
     headers: resolved.headers,
     body: JSON.stringify({
@@ -1485,8 +1487,8 @@ async function testAnthropic(resolved, model, start) {
   return { success: true, model: data.model || model, latencyMs };
 }
 
-async function testGemini(resolved, model, start) {
-  const res = await fetch(resolved.testEndpoint || resolved.endpoint, {
+async function testGemini(resolved, model, start, fetchImpl) {
+  const res = await fetchImpl(resolved.testEndpoint || resolved.endpoint, {
     method: 'POST',
     headers: resolved.headers,
     body: JSON.stringify({

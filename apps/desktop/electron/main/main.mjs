@@ -3783,12 +3783,10 @@ ipcMain.handle('llm:quota', async (_, { id, force } = {}) => fetchProviderSubscr
   providerId: id,
   llmConfigStore,
   force: Boolean(force),
-  // 与 OAuth / 模型调用一致：走 Node↔Electron 双通道 + 代理回退。
-  // 裸 fetch 在系统代理/跨境网络下会直接 TypeError: fetch failed。
+  // 与 OAuth / 模型调用一致：统一走 Electron 网络栈，继承系统代理与信任库。
   fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
     provider: 'subscription-quota',
     model: 'quota',
-    maxRetries: 1,
   }),
 }));
 

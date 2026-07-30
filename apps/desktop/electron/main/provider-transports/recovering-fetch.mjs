@@ -1,10 +1,10 @@
 // Provider transport recovery: keep the same provider/model request, but retry
 // transient connection failures before surfacing a terminal stream error.
 //
-// Channel selection: when a proxy is detected (corporate / system proxy), the
-// Electron net.fetch transport is preferred first because it honors the OS proxy
-// configuration, with Node fetch kept as fallback. Without a proxy we keep the
-// original order (Node fetch first, Electron net.fetch as fallback).
+// Desktop has one authoritative network stack: Electron net.fetch. It honors
+// Chromium's system proxy and macOS trust store, so retries must stay on that
+// same stack instead of falling through to raw Node fetch. Non-Electron hosts
+// (the TUI compatibility path and focused unit tests) keep their injected fetch.
 
 const CONNECTION_FAILURE_PATTERNS = [
   /fetch failed/i,
@@ -14,6 +14,7 @@ const CONNECTION_FAILURE_PATTERNS = [
   /SELF_SIGNED_CERT_IN_CHAIN/i,
   /CERT_HAS_EXPIRED/i,
   /ERR_CERT_/i,
+  /net::ERR_(?:FAILED|CONNECTION_|NETWORK_|INTERNET_|TIMED_OUT|TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|SOCKS_CONNECTION_FAILED|NAME_NOT_RESOLVED|ADDRESS_UNREACHABLE|HTTP2_|QUIC_)/i,
   /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i,
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
   // Bun/Node stream body drops during proxy/VPN jitter.
@@ -102,55 +103,42 @@ async function resolveElectronNetFetch() {
   }
 }
 
-function readEnvProxy(url, env) {
-  let protocol = 'https:';
-  try {
-    protocol = new URL(url).protocol;
-  } catch {
-    protocol = 'https:';
-  }
-  const names = protocol === 'http:'
-    ? ['HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']
-    : ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'];
-  for (const name of names) {
-    const value = env?.[name];
-    if (value && String(value).trim()) return true;
-  }
-  return false;
+function isElectronRuntime() {
+  return Boolean(
+    typeof process !== 'undefined'
+    && process?.versions
+    && process.versions.electron
+  );
 }
 
-async function resolveSystemProxy(url) {
-  try {
-    const electron = await import('electron');
-    const session = electron?.session || electron?.default?.session;
-    const resolver = session?.defaultSession?.resolveProxy;
-    if (typeof resolver !== 'function') return false;
-    const result = await session.defaultSession.resolveProxy(url);
-    if (!result || typeof result !== 'string') return false;
-    return !/^DIRECT/i.test(result.trim());
-  } catch {
-    return false;
-  }
+function electronTransportUnavailableError() {
+  const error = new Error('electron net.fetch is unavailable in the Desktop main process');
+  error.code = 'electron_net_fetch_unavailable';
+  return error;
 }
 
-// Proxy detection seam: environment variables first, system proxy (Electron
-// session.resolveProxy) as fallback. Returns false on any error so we safely
-// fall back to the original Node-fetch-first behavior.
-export async function defaultDetectProxy({
-  url,
-  env = (typeof process !== 'undefined' ? process.env : {}),
-  resolveSystemProxyImpl = resolveSystemProxy,
-} = {}) {
-  if (readEnvProxy(url, env)) return true;
-  try {
-    return Boolean(await resolveSystemProxyImpl(url));
-  } catch {
-    return false;
+async function resolveProviderTransport({
+  fetchImpl,
+  electronFetchImpl,
+  requireElectronTransport,
+}) {
+  const electronFetch = electronFetchImpl || await resolveElectronNetFetch();
+  if (typeof electronFetch === 'function') {
+    return {
+      label: 'electron-net-fetch',
+      fetch: electronFetch,
+    };
   }
-}
-
-function channelFailLabel(label) {
-  return label === 'electron-net-fetch' ? 'electron_net_fetch_failed' : 'node_fetch_failed';
+  if (requireElectronTransport) {
+    throw electronTransportUnavailableError();
+  }
+  if (typeof fetchImpl === 'function') {
+    return {
+      label: 'non-electron-fetch',
+      fetch: fetchImpl,
+    };
+  }
+  throw new TypeError('provider fetch implementation is unavailable');
 }
 
 function emitConnectionRecovery(webContents, payload) {
@@ -164,16 +152,15 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   model = null,
   fetchImpl = globalThis.fetch,
   electronFetchImpl = null,
+  requireElectronTransport = isElectronRuntime(),
   retryDelaysMs = DEFAULT_CONNECTION_RETRY_DELAYS_MS,
   retryJitterRatio = retryDelaysMs === DEFAULT_CONNECTION_RETRY_DELAYS_MS
     ? DEFAULT_CONNECTION_RETRY_JITTER_RATIO
     : 0,
   randomImpl = Math.random,
   waitImpl = sleep,
-  detectProxy = defaultDetectProxy,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
   scheduleTimeout = defaultScheduleTimeout,
-  allowSecondaryFallback = true,
   // Optional per-attempt request factory. Providers that stamp request_id into
   // the body/headers can rebuild a fresh payload on connection retries so the
   // server does not reject the recovery attempt as a duplicate request.
@@ -182,6 +169,11 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   const maxRetries = retryDelaysMs.length;
   let lastError = null;
   const baseInit = init || {};
+  const transport = await resolveProviderTransport({
+    fetchImpl,
+    electronFetchImpl,
+    requireElectronTransport,
+  });
 
   const resolveAttemptInit = async (attempt) => {
     if (typeof buildInit !== 'function') return baseInit;
@@ -198,25 +190,6 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       signal: rebuilt.signal ?? baseInit.signal,
     };
   };
-
-  let proxyDetected = false;
-  try {
-    proxyDetected = Boolean(await detectProxy({ url, signal: baseInit?.signal }));
-  } catch {
-    proxyDetected = false;
-  }
-
-  const nodeChannel = {
-    label: 'node-fetch',
-    resolve: async () => fetchImpl,
-  };
-  const electronChannel = {
-    label: 'electron-net-fetch',
-    resolve: async () => electronFetchImpl || await resolveElectronNetFetch(),
-  };
-  const [primaryChannel, secondaryChannel] = proxyDetected
-    ? [electronChannel, nodeChannel]
-    : [nodeChannel, electronChannel];
 
   // Guard the connect/first-response phase. fetch resolves once response headers
   // arrive, so racing this await bounds time-to-headers (connect + TLS + proxy),
@@ -253,60 +226,25 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     if (baseInit?.signal?.aborted) throw createAbortError();
     const attemptInit = await resolveAttemptInit(round);
 
-    let primaryError = null;
-    const primaryImpl = await primaryChannel.resolve();
-    if (primaryImpl) {
-      try {
-        const response = await callWithConnectTimeout(primaryImpl, attemptInit);
-        if (round > 0) {
-          emitConnectionRecovery(webContents, {
-            streamId,
-            provider,
-            model,
-            status: 'recovered',
-            connection: primaryChannel.label,
-            attempt: round,
-            maxRetries,
-            reason: lastError ? describeConnectionFailure(lastError) : null,
-          });
-        }
-        return response;
-      } catch (error) {
-        if (error?.name === 'AbortError') throw error;
-        if (!isRecoverableConnectionFailure(error)) throw error;
-        primaryError = error;
-        lastError = error;
-      }
-    }
-
-    const secondaryImpl = allowSecondaryFallback ? await secondaryChannel.resolve() : null;
-    if (secondaryImpl) {
-      try {
-        const response = await callWithConnectTimeout(secondaryImpl, attemptInit);
+    try {
+      const response = await callWithConnectTimeout(transport.fetch, attemptInit);
+      if (round > 0) {
         emitConnectionRecovery(webContents, {
           streamId,
           provider,
           model,
           status: 'recovered',
-          fromConnection: primaryChannel.label,
-          toConnection: secondaryChannel.label,
-          connection: secondaryChannel.label,
+          connection: transport.label,
           attempt: round,
           maxRetries,
-          reason: describeConnectionFailure(primaryError || lastError),
+          reason: lastError ? describeConnectionFailure(lastError) : null,
         });
-        return response;
-      } catch (fallbackError) {
-        if (fallbackError?.name === 'AbortError') throw fallbackError;
-        if (!isRecoverableConnectionFailure(fallbackError)) {
-          const wrapped = new Error(
-            `${describeConnectionFailure(primaryError || fallbackError)}; ${channelFailLabel(secondaryChannel.label)}: ${describeConnectionFailure(fallbackError)}`
-          );
-          wrapped.cause = primaryError || fallbackError;
-          throw wrapped;
-        }
-        lastError = fallbackError;
       }
+      return response;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (!isRecoverableConnectionFailure(error)) throw error;
+      lastError = error;
     }
 
     if (round >= maxRetries) break;
@@ -318,6 +256,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       provider,
       model,
       status: 'retrying',
+      connection: transport.label,
       attempt: round + 1,
       maxRetries,
       delayMs,

@@ -1,4 +1,5 @@
 import { enrichModelsWithRegistry, fetchModelsDevRegistry } from './models-dev-registry.mjs';
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 
 // OpenAI 订阅(ChatGPT OAuth)模型目录(ADR 28)。
 //
@@ -272,7 +273,7 @@ export async function listOpenAICompatibleModels({
   fetchImpl,
   registryFetchImpl,
 } = {}) {
-  const doFetch = fetchImpl || fetch;
+  const doFetch = fetchImpl || fetchWithConnectionRecovery;
   const root = String(baseUrl || '').replace(/\/+$/, '');
   if (!root) throw new Error('base_url_not_configured');
 

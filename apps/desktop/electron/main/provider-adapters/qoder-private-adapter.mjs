@@ -937,7 +937,6 @@ async function sendQoderPreparedStream({
     provider: 'qoder',
     model: requestBody.model_config.key,
     retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
-    allowSecondaryFallback: false,
     buildInit: async ({ attempt, isRetry }) => {
       if (attempt === 0 && !firstAttemptUsed) {
         firstAttemptUsed = true;
@@ -1168,7 +1167,6 @@ export async function sendQoderPrivateStream({
     provider: 'qoder',
     model: body.model,
     retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
-    allowSecondaryFallback: false,
     buildInit: ({ attempt, isRetry }) => {
       if (attempt === 0 && !firstAttemptUsed) {
         firstAttemptUsed = true;

@@ -605,6 +605,35 @@ test('Qoder connection test probes the selected private chat model', async () =>
   }
 }));
 
+test('API key connection test uses the shared Desktop provider transport', async () => withStore(async ({ configFile }) => {
+  const calls = [];
+  const store = createLlmConfigStore({
+    configFile,
+    providerFetch: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ model: 'gpt-test' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'secret-key',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-test',
+  });
+
+  const result = await store.testConnection(provider.id);
+
+  assert.equal(result.success, true);
+  assert.equal(result.model, 'gpt-test');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.openai.com/v1/chat/completions');
+  assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-test');
+}));
+
 test('legacy provider updates also update channel identity when channelId is omitted', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({

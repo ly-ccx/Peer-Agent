@@ -2,6 +2,7 @@ import {
   encodeAnthropicMessagesRequest,
   encodeGeminiGenerateContentRequest,
 } from '../provider-encoders/index.mjs';
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 
 function cleanBaseUrl(value, fallback) {
   return String(value || fallback).replace(/\/+$/, '');
@@ -25,7 +26,7 @@ export async function countAnthropicCanonicalRequest({
   baseUrl,
   apiKey,
   headers,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = fetchWithConnectionRecovery,
   signal,
   ...request
 } = {}) {
@@ -69,7 +70,7 @@ export async function countGeminiCanonicalRequest({
   baseUrl,
   apiKey,
   headers,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = fetchWithConnectionRecovery,
   signal,
   model,
   ...request
