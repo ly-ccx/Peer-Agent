@@ -89,3 +89,31 @@ export function resolveContextUserMessageId(
   }
   return chosen ?? latest;
 }
+
+/**
+ * Sticky context bar should only appear when its target user bubble has left
+ * the viewport. Otherwise the transcript already shows that YOU row and the bar
+ * looks like a duplicated first message.
+ */
+export function shouldShowUserContextBar(options: {
+  readonly contextUserId: string | null;
+  readonly rowScreenTops?: Readonly<Record<string, number>>;
+  readonly viewportScreenTop?: number;
+  readonly viewportHeight?: number;
+}): boolean {
+  if (!options.contextUserId) return false;
+
+  const tops = options.rowScreenTops;
+  const viewportTop = options.viewportScreenTop;
+  const viewportHeight = options.viewportHeight ?? 0;
+  // Before geometry is measured (common on the first paint of a turn), keep the
+  // sticky bar hidden so the live user bubble is the only YOU row.
+  if (!tops || viewportTop == null || viewportHeight <= 0) return false;
+
+  const top = tops[options.contextUserId];
+  if (top == null) return false;
+
+  // Row top still inside the viewport ⇒ bubble is visible ⇒ hide sticky bar.
+  // Row top above the viewport ⇒ bubble scrolled away ⇒ show sticky bar.
+  return top < viewportTop;
+}

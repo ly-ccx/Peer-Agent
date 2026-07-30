@@ -22,6 +22,7 @@ import {
   conversationMessageRenderId,
   latestUserMessage,
   resolveContextUserMessageId,
+  shouldShowUserContextBar,
   summarizeUserContext,
 } from './conversation-scroll.ts';
 
@@ -426,7 +427,13 @@ function ChatHistory({
     () => userMessages.find((message) => message.id === contextUserId) ?? latestUser,
     [userMessages, contextUserId, latestUser],
   );
-  const contextBody = contextUser
+  const showContextBar = shouldShowUserContextBar({
+    contextUserId,
+    rowScreenTops,
+    viewportScreenTop,
+    viewportHeight,
+  });
+  const contextBody = contextUser && showContextBar
     ? formatUserMessageBody(contextUser.content, contextUser.images)
     : null;
 

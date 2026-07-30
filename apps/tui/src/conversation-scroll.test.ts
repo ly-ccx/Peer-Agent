@@ -5,6 +5,7 @@ import {
   latestUserMessage,
   latestUserMessageIndex,
   resolveContextUserMessageId,
+  shouldShowUserContextBar,
   summarizeUserContext,
 } from './conversation-scroll.ts';
 
@@ -57,5 +58,29 @@ describe('conversation context bar policy', () => {
 
   test('builds a stable renderable id for message rows', () => {
     expect(conversationMessageRenderId('abc')).toBe('chat-msg-abc');
+  });
+
+  test('hides sticky context bar while the target user row is still in view', () => {
+    expect(shouldShowUserContextBar({
+      contextUserId: 'u2',
+      rowScreenTops: { u1: -20, u2: 8 },
+      viewportScreenTop: 0,
+      viewportHeight: 40,
+    })).toBe(false);
+  });
+
+  test('shows sticky context bar only after the target user row scrolls away', () => {
+    expect(shouldShowUserContextBar({
+      contextUserId: 'u2',
+      rowScreenTops: { u1: -40, u2: -12 },
+      viewportScreenTop: 0,
+      viewportHeight: 40,
+    })).toBe(true);
+  });
+
+  test('hides sticky context bar before geometry is measured', () => {
+    expect(shouldShowUserContextBar({
+      contextUserId: 'u1',
+    })).toBe(false);
   });
 });
