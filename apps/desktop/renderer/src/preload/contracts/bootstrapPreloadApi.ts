@@ -962,22 +962,39 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly getShortcutStatus: () => Promise<{
     quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
     newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    appshot: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
   }>;
   readonly updateShortcut: (
-    action: 'quickChat' | 'newTask',
+    action: 'quickChat' | 'newTask' | 'appshot',
     accelerator: string,
   ) => Promise<{
     success?: boolean;
     error?: string | null;
     quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
     newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    appshot: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
   }>;
-  readonly resetShortcut: (action?: 'quickChat' | 'newTask') => Promise<{
+  readonly resetShortcut: (action?: 'quickChat' | 'newTask' | 'appshot') => Promise<{
     success?: boolean;
     error?: string | null;
     quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
     newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    appshot: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
   }>;
+  // ── Appshots（P0a：ADR 59，用户手势捕获前台窗口）──
+  readonly appshotCapture: () => Promise<{
+    ok: boolean;
+    code?: string;
+    detail?: string;
+    delivery?: { conversationId: string; created: boolean; messageId: string };
+  }>;
+  readonly appshotPermissionStatus: () => Promise<{
+    ok: boolean;
+    status: string;
+    canCapture: boolean;
+    hintKey: string;
+  }>;
+  readonly appshotOpenScreenSettings: () => Promise<{ ok: boolean; url?: string; error?: string }>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
   // ── Updater ──（主进程负责能力，渲染层只表达）

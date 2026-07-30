@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   getShortcutStatus: () => ipcRenderer.invoke('shortcuts:status'),
   updateShortcut: (action, accelerator) => ipcRenderer.invoke('shortcuts:update', action, accelerator),
   resetShortcut: (action) => ipcRenderer.invoke('shortcuts:reset', action),
+  // Appshots（P0a：用户手势捕获前台窗口，ADR 59）
+  appshotCapture: () => ipcRenderer.invoke('appshot:capture'),
+  appshotPermissionStatus: () => ipcRenderer.invoke('appshot:permission-status'),
+  appshotOpenScreenSettings: () => ipcRenderer.invoke('appshot:open-screen-settings'),
   getDeveloperSettings: () => ipcRenderer.invoke('developer-settings:get'),
   updateDeveloperSettings: (partial) => ipcRenderer.invoke('developer-settings:update', partial),
   resetDeveloperSettings: () => ipcRenderer.invoke('developer-settings:reset'),

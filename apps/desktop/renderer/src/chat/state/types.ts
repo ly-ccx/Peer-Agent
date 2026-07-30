@@ -18,6 +18,21 @@ export interface ChatAttachment {
   kind: 'image' | 'text' | 'unsupported';
   dataUrl?: string;
   text?: string;
+  /**
+   * Appshot（前台窗口快照）附件：本地 artifact 引用。
+   * ADR 59 决策 3：整图只经 artifactRef 落盘引用，dataUrl 仅承载小缩略图。
+   */
+  artifactRef?: string;
+  /** Appshot 元数据；存在即按 Appshot 卡片渲染（来源 App / 捕获时间 / 尺寸）。 */
+  appshot?: {
+    appshotId: string;
+    capturedAt: string;
+    appName: string;
+    bundleId?: string;
+    width?: number;
+    height?: number;
+    textMode?: string;
+  };
 }
 
 /**

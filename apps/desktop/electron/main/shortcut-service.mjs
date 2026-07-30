@@ -1,10 +1,13 @@
 export const DEFAULT_SHORTCUTS = Object.freeze({
   quickChat: process.platform === 'darwin' ? 'CommandOrControl+Shift+N' : 'Control+Shift+N',
   newTask: 'CommandOrControl+N',
+  // Appshots P0a (ADR 59 / spike S3): double-Command is not expressible as an
+  // Electron accelerator, so the default is a standard chord.
+  appshot: 'CommandOrControl+Shift+A',
 });
 
 /** Actions registered via Electron globalShortcut (OS-level). Others are app-local. */
-const GLOBAL_ACTIONS = new Set(['quickChat']);
+const GLOBAL_ACTIONS = new Set(['quickChat', 'appshot']);
 
 const RESERVED_SHORTCUTS = new Set(
   process.platform === 'darwin'
@@ -42,9 +45,19 @@ function isKnownAction(action) {
  * previous working binding on failure. App-local actions (newTask) only persist
  * configuration for the renderer to bind.
  */
-export function createShortcutService({ globalShortcut, settingsStore, onQuickChat }) {
-  let activeAccelerator = null;
-  let registrationError = null;
+export function createShortcutService({ globalShortcut, settingsStore, onQuickChat, onAppshot }) {
+  // Per-action callback table (T4). Legacy param onQuickChat maps to quickChat.
+  const actionHandlers = {
+    quickChat: onQuickChat,
+    appshot: onAppshot,
+  };
+  // Per-action registration state: action -> { active, error }.
+  const registration = new Map();
+
+  function regState(action) {
+    if (!registration.has(action)) registration.set(action, { active: null, error: null });
+    return registration.get(action);
+  }
 
   function readShortcuts() {
     const shortcuts = settingsStore.getAll().shortcuts;
@@ -65,20 +78,51 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     });
   }
 
-  function register(accelerator = configuredAccelerator('quickChat')) {
+  function register(actionOrAccelerator, maybeAccelerator) {
+    // Overloads: register() → all global actions with configured accelerators;
+    // register(accelerator) → legacy quickChat; register(action, accelerator?) → one action.
+    if (actionOrAccelerator === undefined) {
+      const results = {};
+      for (const action of GLOBAL_ACTIONS) {
+        if (typeof actionHandlers[action] !== 'function') continue;
+        results[action] = registerAction(action, configuredAccelerator(action));
+      }
+      // Legacy single-result shape for the primary action, plus per-action map.
+      return { ...(results.quickChat ?? { success: true }), actions: results };
+    }
+    if (typeof actionOrAccelerator === 'string' && isKnownAction(actionOrAccelerator)) {
+      const action = actionOrAccelerator;
+      return registerAction(action, maybeAccelerator ?? configuredAccelerator(action));
+    }
+    // Legacy: register('Cmd+X') targets quickChat.
+    return registerAction('quickChat', actionOrAccelerator);
+  }
+
+  function registerAction(action, accelerator) {
+    if (!GLOBAL_ACTIONS.has(action)) return { success: false, accelerator, error: 'not-a-global-action' };
+    if (typeof actionHandlers[action] !== 'function') {
+      return { success: false, accelerator, error: 'no-handler' };
+    }
+    const state = regState(action);
     const validation = validateShortcut(accelerator);
     if (!validation.valid) return { success: false, accelerator, error: validation.reason };
     const next = validation.accelerator;
-    if (next === activeAccelerator && globalShortcut.isRegistered(next)) {
+    if (next === state.active && globalShortcut.isRegistered(next)) {
       return { success: true, accelerator: next };
     }
-    if (!globalShortcut.register(next, onQuickChat)) {
-      registrationError = 'registration-failed';
-      return { success: false, accelerator: next, error: registrationError };
+    // Cross-action conflict: refuse to steal another global action's binding.
+    for (const [otherAction, otherState] of registration) {
+      if (otherAction !== action && otherState.active === next) {
+        return { success: false, accelerator: next, error: 'conflict-with-other-action' };
+      }
     }
-    const previous = activeAccelerator;
-    activeAccelerator = next;
-    registrationError = null;
+    if (!globalShortcut.register(next, actionHandlers[action])) {
+      state.error = 'registration-failed';
+      return { success: false, accelerator: next, error: state.error };
+    }
+    const previous = state.active;
+    state.active = next;
+    state.error = null;
     if (previous && previous !== next) globalShortcut.unregister(previous);
     return { success: true, accelerator: next };
   }
@@ -96,7 +140,7 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     }
 
     if (GLOBAL_ACTIONS.has(resolvedAction)) {
-      const result = register(validation.accelerator);
+      const result = registerAction(resolvedAction, validation.accelerator);
       if (!result.success) return { success: false, error: result.error, ...status() };
       persist(resolvedAction, result.accelerator);
       return { success: true, error: null, ...status() };
@@ -114,11 +158,12 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
   function actionStatus(action) {
     const configured = configuredAccelerator(action);
     if (GLOBAL_ACTIONS.has(action)) {
+      const state = regState(action);
       return {
         configured,
-        active: activeAccelerator,
-        registered: Boolean(activeAccelerator && globalShortcut.isRegistered(activeAccelerator)),
-        error: registrationError,
+        active: state.active,
+        registered: Boolean(state.active && globalShortcut.isRegistered(state.active)),
+        error: state.error,
         isDefault: configured === DEFAULT_SHORTCUTS[action],
       };
     }
@@ -135,12 +180,15 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     return {
       quickChat: actionStatus('quickChat'),
       newTask: actionStatus('newTask'),
+      appshot: actionStatus('appshot'),
     };
   }
 
   function dispose() {
-    if (activeAccelerator) globalShortcut.unregister(activeAccelerator);
-    activeAccelerator = null;
+    for (const [, state] of registration) {
+      if (state.active) globalShortcut.unregister(state.active);
+      state.active = null;
+    }
   }
 
   return { register, update, reset, status, dispose, configuredAccelerator };

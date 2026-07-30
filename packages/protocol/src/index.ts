@@ -858,3 +858,4 @@ export * from './memory.ts';
 export * from './system-context.ts';
 export * from './goal.ts';
 export * from './updater.ts';
+export * from './appshot.ts';
