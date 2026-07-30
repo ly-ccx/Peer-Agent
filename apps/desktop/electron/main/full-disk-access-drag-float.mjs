@@ -96,15 +96,67 @@ export function createFullDiskAccessDragFloatController(deps) {
     if (!force && settingsBoundsCache && (now - settingsBoundsCache.at) < BOUNDS_CACHE_MS) {
       return settingsBoundsCache.bounds;
     }
-    const bounds = readSettingsBoundsViaCGWindowList() || readSettingsBoundsViaSystemEvents();
+    // 顺序：System Events（系统自带）→ /usr/bin/swift CGWindowList → 缓存空
+    // 打包后 GUI 进程 PATH 常常没有 swift，旧逻辑会直接失败并贴屏幕底。
+    const bounds =
+      readSettingsBoundsViaSystemEvents()
+      || readSettingsBoundsViaSwiftCG()
+      || null;
     settingsBoundsCache = { at: now, bounds };
     return bounds;
   }
 
-  /** CGWindowList → 已转换为与 Electron setBounds 一致的顶左原点坐标。 */
-  function readSettingsBoundsViaCGWindowList() {
-    // Quartz bounds 原点在主屏左下；Swift 内转成 Electron 顶左后再输出。
-    // 用 String(format:) 避免 JS template 与 Swift \( ) 插值转义互相踩踏。
+  function parseBoundsCsv(out) {
+    if (!out) return null;
+    const parts = String(out).trim().split(',').map((x) => Number(String(x).trim()));
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+    const [x, y, width, height] = parts;
+    if (width < 200 || height < 120) return null;
+    return { x, y, width, height };
+  }
+
+  function readSettingsBoundsViaSystemEvents() {
+    // 顶左原点，与 Electron setBounds 一致。需要辅助功能权限；失败返回 null。
+    const script = [
+      'tell application "System Events"',
+      '  set procNames to {"System Settings", "System Preferences"}',
+      '  repeat with procName in procNames',
+      '    try',
+      '      if exists process procName then',
+      '        tell process procName',
+      '          if (count of windows) > 0 then',
+      '            set w to window 1',
+      '            set p to position of w',
+      '            set s to size of w',
+      '            return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 of s) as text) & "," & ((item 2 of s) as text)',
+      '          end if',
+      '        end tell',
+      '      end if',
+      '    end try',
+      '  end repeat',
+      'end tell',
+      'return ""',
+    ].join('\n');
+    try {
+      const out = execFileSync('/usr/bin/osascript', ['-e', script], {
+        encoding: 'utf8',
+        timeout: 1200,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      return parseBoundsCsv(out);
+    } catch {
+      return null;
+    }
+  }
+
+  function readSettingsBoundsViaSwiftCG() {
+    // 不依赖辅助功能；但需要本机有 /usr/bin/swift（开发机有，部分打包环境可能无）
+    const swiftPath = '/usr/bin/swift';
+    try {
+      if (!existsSync(swiftPath)) return null;
+    } catch {
+      return null;
+    }
     const script = [
       'import Cocoa',
       'let opts = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)',
@@ -135,59 +187,15 @@ export function createFullDiskAccessDragFloatController(deps) {
       'print(NSString(format: "%.1f,%.1f,%.1f,%.1f", electronX, electronY, w, h))',
     ].join('\n');
     try {
-      const out = execFileSync('swift', ['-e', script], {
+      const out = execFileSync(swiftPath, ['-e', script], {
         encoding: 'utf8',
         timeout: 2500,
         stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
+      });
       return parseBoundsCsv(out);
     } catch {
       return null;
     }
-  }
-
-  function readSettingsBoundsViaSystemEvents() {
-    const script = `
-tell application "System Events"
-  set procNames to {"System Settings", "System Preferences"}
-  repeat with procName in procNames
-    try
-      if exists process procName then
-        tell process procName
-          set winCount to count of windows
-          if winCount > 0 then
-            set w to window 1
-            set p to position of w
-            set s to size of w
-            return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 of s) as text) & "," & ((item 2 of s) as text)
-          end if
-        end tell
-      end if
-    end try
-  end repeat
-end tell
-return ""
-`
-    try {
-      const out = execFileSync('osascript', ['-e', script], {
-        encoding: 'utf8',
-        timeout: 1500,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      // System Events position 已是顶左原点（屏幕坐标）
-      return parseBoundsCsv(out);
-    } catch {
-      return null;
-    }
-  }
-
-  function parseBoundsCsv(out) {
-    if (!out) return null;
-    const parts = out.split(',').map((x) => Number(String(x).trim()));
-    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
-    const [x, y, width, height] = parts;
-    if (width < 200 || height < 120) return null;
-    return { x, y, width, height };
   }
 
   function clampToDisplay(bounds, display) {
@@ -205,8 +213,9 @@ return ""
    * 贴在系统设置窗口底部（列表附近），而不是屏幕底边。
    * 原因：设置窗很高时，“窗口下方”会超出 workArea，旧 clamp 会把浮窗挤到屏幕最底部，看起来离设置很远。
    */
-  function computeFloatBounds() {
-    const settings = readSystemSettingsWindowBounds();
+  function computeFloatBounds(anchorBounds) {
+    // anchorBounds: 优先系统设置窗；否则主窗口；绝不无脑贴屏幕底。
+    const settings = anchorBounds || readSystemSettingsWindowBounds();
     if (settings) {
       const display = screen.getDisplayMatching({
         x: Math.round(settings.x),
@@ -215,41 +224,52 @@ return ""
         height: Math.round(settings.height),
       });
       const area = display.workArea;
-      const width = Math.min(FLOAT_SIZE.width, Math.max(300, Math.round(settings.width * 0.72)));
+      const width = Math.min(FLOAT_SIZE.width, Math.max(300, Math.round(settings.width * 0.78)));
       const height = FLOAT_SIZE.height;
-      // 水平：相对设置窗口居中
       let x = Math.round(settings.x + (settings.width - width) / 2);
-      // 垂直：紧贴设置窗口下沿外侧（AskForPermission：贴着窗底，不是屏幕底）
-      // 先尝试窗外 6px；若超出 workArea，再改为窗内底部 6px。
-      let y = Math.round(settings.y + settings.height + POSITION_GAP_PX);
+
+      // 关键策略：默认贴在设置窗「底边外侧 4px」。
+      // 若越出 workArea，则改为设置窗「底边内侧 8px」（盖在列表 + / - 附近），
+      // 绝不再 clamp 到屏幕最底部（那会看起来「越来越远」）。
+      const outsideY = Math.round(settings.y + settings.height + 4);
+      const insideY = Math.round(settings.y + settings.height - height - 8);
       const maxY = area.y + area.height - height - 8;
       const minY = area.y + 8;
-      if (y > maxY) {
-        // 窗外放不下：贴到设置窗底部内侧，紧挨列表 + / - 区域
-        y = Math.round(settings.y + settings.height - height - POSITION_GAP_PX);
-      }
-      if (y < minY) y = minY;
+      let y = outsideY;
+      if (y > maxY) y = insideY;
+      // 仍越界时，夹在 [minY, maxY]，但尽量靠近 settings.bottom
       if (y > maxY) y = maxY;
+      if (y < minY) y = minY;
+      // 若 clamp 后离设置窗底边超过 48px，强制拉回 insideY（只要 insideY 在屏内）
+      const settingsBottom = settings.y + settings.height;
+      if (Math.abs((y + height) - settingsBottom) > 48 && insideY >= minY && insideY <= maxY) {
+        y = insideY;
+      }
 
-      // 水平限制在 workArea，但尽量仍相对设置窗居中
       const minX = area.x + 8;
       const maxX = area.x + area.width - width - 8;
       if (x < minX) x = minX;
       if (x > maxX) x = maxX;
-
       return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
     }
 
-    // fallback：读不到设置窗时，贴光标屏中下部（不要贴死屏幕底）
+    // fallback：贴 Peer Agent 主窗口下方（比贴屏幕底更接近用户视线）
+    try {
+      const all = BrowserWindow.getAllWindows?.() || [];
+      const main = all.find((w) => w && !w.isDestroyed?.() && w.isVisible?.() && !w.__peerAgentFdaDragFloat);
+      if (main) {
+        const b = main.getBounds();
+        return computeFloatBounds(b); // reuse settings logic with main as anchor
+      }
+    } catch { /* ignore */ }
+
     const point = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(point);
     const area = display.workArea;
     const x = Math.round(area.x + (area.width - FLOAT_SIZE.width) / 2);
-    const y = Math.round(area.y + Math.min(area.height * 0.58, area.height - FLOAT_SIZE.height - 120));
-    return clampToDisplay(
-      { x, y, width: FLOAT_SIZE.width, height: FLOAT_SIZE.height },
-      display,
-    );
+    // 屏幕中下部，而不是最底
+    const y = Math.round(area.y + area.height * 0.55);
+    return clampToDisplay({ x, y, width: FLOAT_SIZE.width, height: FLOAT_SIZE.height }, display);
   }
 
   function positionWindow(win) {
