@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   startAppDrag: (payload) => ipcRenderer.sendSync('browser:start-app-drag', payload || {}),
   /** 关闭 FDA 拖拽浮窗（设置下方的 always-on-top LOGO 条）。 */
   hideFdaDragFloat: () => ipcRenderer.sendSync('browser:hide-fda-drag-float-sync'),
+  setFdaDragFloatDragging: (dragging) => ipcRenderer.send('browser:fda-drag-float-dragging', { dragging: Boolean(dragging) }),
   /** 扫描 Profile 站点聚合（无 Cookie value）。 */
   listBrowserSessionSites: (profileId) =>
     ipcRenderer.invoke('browser:list-session-sites', { profileId }),

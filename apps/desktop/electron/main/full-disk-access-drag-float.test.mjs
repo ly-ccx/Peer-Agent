@@ -54,22 +54,25 @@ test('drag float html uses native startAppDrag + preventDefault', () => {
   assert.equal(controller.isOpen(), true);
   controller.hide();
   assert.equal(controller.isOpen(), false);
+  assert.equal(typeof controller.setDragging, 'function');
+  controller.setDragging(true);
+  controller.setDragging(false);
 });
 
-test('float should sit on bottom band of settings window, not screen bottom', () => {
-  // settings roughly like a centered tall preferences window
+test('float should hug settings bottom (outside if possible)', () => {
   const settings = { x: 260, y: 80, width: 920, height: 720 };
-  const floatH = 96;
-  // new policy: overlay bottom inside settings
-  const y = Math.round(settings.y + settings.height - floatH - 18);
-  assert.equal(y, 80 + 720 - 96 - 18); // 686
-  // must NOT be near screen bottom (e.g. 900-96-28 = 776) when settings bottom is higher
-  assert.ok(y < 750);
-  assert.ok(y > settings.y + settings.height * 0.5);
-  // horizontal center
-  const floatW = 400;
+  const floatH = 88;
+  const gap = 6;
+  // prefer outside just below window
+  const yOutside = Math.round(settings.y + settings.height + gap);
+  assert.equal(yOutside, 80 + 720 + 6); // 806
+  // if workArea maxY is smaller, fall inside:
+  const yInside = Math.round(settings.y + settings.height - floatH - gap);
+  assert.equal(yInside, 80 + 720 - 88 - 6); // 706
+  assert.ok(yInside < 750);
+  const floatW = 380;
   const x = Math.round(settings.x + (settings.width - floatW) / 2);
-  assert.equal(x, 260 + (920 - 400) / 2);
+  assert.equal(x, Math.round(260 + (920 - 380) / 2));
 });
 
 test('main wires delayed float show after opening settings', () => {

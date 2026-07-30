@@ -6,8 +6,10 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-const FLOAT_SIZE = { width: 400, height: 96 };
-const POSITION_GAP_PX = 10;
+const FLOAT_SIZE = { width: 380, height: 88 };
+const POSITION_GAP_PX = 6;
+const BOUNDS_CACHE_MS = 2000;
+const FOLLOW_INTERVAL_MS = 1600;
 
 /**
  * @param {{
@@ -39,6 +41,9 @@ export function createFullDiskAccessDragFloatController(deps) {
   let floatWindow = null;
   let hideTimer = null;
   let followTimer = null;
+  /** @type {{ at: number, bounds: { x:number,y:number,width:number,height:number } | null } | null} */
+  let settingsBoundsCache = null;
+  let dragging = false;
 
   function clearHideTimer() {
     if (hideTimer) {
@@ -84,9 +89,16 @@ export function createFullDiskAccessDragFloatController(deps) {
    * 读取 System Settings / System Preferences 窗口 bounds（Electron 顶左原点坐标）。
    * 优先 CGWindowList（Swift，不需要辅助功能权限）；失败再退回 System Events。
    */
-  function readSystemSettingsWindowBounds() {
+  function readSystemSettingsWindowBounds(options = {}) {
     if (process.platform !== 'darwin') return null;
-    return readSettingsBoundsViaCGWindowList() || readSettingsBoundsViaSystemEvents();
+    const force = Boolean(options.force);
+    const now = Date.now();
+    if (!force && settingsBoundsCache && (now - settingsBoundsCache.at) < BOUNDS_CACHE_MS) {
+      return settingsBoundsCache.bounds;
+    }
+    const bounds = readSettingsBoundsViaCGWindowList() || readSettingsBoundsViaSystemEvents();
+    settingsBoundsCache = { at: now, bounds };
+    return bounds;
   }
 
   /** CGWindowList → 已转换为与 Electron setBounds 一致的顶左原点坐标。 */
@@ -203,41 +215,37 @@ return ""
         height: Math.round(settings.height),
       });
       const area = display.workArea;
-      const width = Math.min(FLOAT_SIZE.width, Math.max(280, settings.width - 48));
+      const width = Math.min(FLOAT_SIZE.width, Math.max(300, Math.round(settings.width * 0.72)));
       const height = FLOAT_SIZE.height;
       // 水平：相对设置窗口居中
       let x = Math.round(settings.x + (settings.width - width) / 2);
-      // 垂直：叠在设置窗口底部内侧（AskForPermission 同款“贴着列表下方”）
-      // 略伸到窗口外一点点也没关系，但绝不能被 clamp 甩到屏幕底。
-      let y = Math.round(settings.y + settings.height - height - 18);
-
-      // 若底部内侧会跑出 workArea，则贴 workArea 底但仍然水平对齐设置窗
-      const minY = area.y + 8;
+      // 垂直：紧贴设置窗口下沿外侧（AskForPermission：贴着窗底，不是屏幕底）
+      // 先尝试窗外 6px；若超出 workArea，再改为窗内底部 6px。
+      let y = Math.round(settings.y + settings.height + POSITION_GAP_PX);
       const maxY = area.y + area.height - height - 8;
-      if (y > maxY) y = maxY;
+      const minY = area.y + 8;
+      if (y > maxY) {
+        // 窗外放不下：贴到设置窗底部内侧，紧挨列表 + / - 区域
+        y = Math.round(settings.y + settings.height - height - POSITION_GAP_PX);
+      }
       if (y < minY) y = minY;
-      // 水平限制在 workArea
+      if (y > maxY) y = maxY;
+
+      // 水平限制在 workArea，但尽量仍相对设置窗居中
       const minX = area.x + 8;
       const maxX = area.x + area.width - width - 8;
       if (x < minX) x = minX;
       if (x > maxX) x = maxX;
 
-      // 额外：保证浮窗至少与设置窗垂直重叠/紧邻（不要落到另一个屏幕底）
-      const settingsBottom = settings.y + settings.height;
-      if (y > settingsBottom + 24) {
-        y = Math.round(settingsBottom - height - 12);
-        if (y < minY) y = minY;
-      }
       return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
     }
 
-    // fallback：没有读到设置窗时，仍避免“无脑贴屏幕底”——贴主窗口附近/光标屏中下部
+    // fallback：读不到设置窗时，贴光标屏中下部（不要贴死屏幕底）
     const point = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(point);
     const area = display.workArea;
     const x = Math.round(area.x + (area.width - FLOAT_SIZE.width) / 2);
-    // 中下部而不是最底：更接近通常 System Settings 弹窗位置
-    const y = Math.round(area.y + area.height * 0.62);
+    const y = Math.round(area.y + Math.min(area.height * 0.58, area.height - FLOAT_SIZE.height - 120));
     return clampToDisplay(
       { x, y, width: FLOAT_SIZE.width, height: FLOAT_SIZE.height },
       display,
@@ -357,22 +365,32 @@ return ""
         return;
       }
       try {
-        // 先同步启动原生拖拽，再 preventDefault 接管 HTML5 拖拽
+        // 拖拽期间暂停窗口跟随，避免 swift/osascript 抢主线程导致图标不跟手
+        try { window.peerAgent.setFdaDragFloatDragging?.(true); } catch (_) {}
         const result = window.peerAgent.startAppDrag({ appPath });
         if (result && result.ok === false) {
+          try { window.peerAgent.setFdaDragFloatDragging?.(false); } catch (_) {}
           e.preventDefault();
           err.hidden = false;
           err.textContent = result.error || 'start_drag_failed';
           return;
         }
-        // 关键：阻止默认 HTML5 drag，让 Electron startDrag 接管视觉与 payload
+        // 阻止 HTML5 默认拖影，交给 Electron 原生 startDrag（跟手）
         e.preventDefault();
       } catch (ex) {
+        try { window.peerAgent.setFdaDragFloatDragging?.(false); } catch (_) {}
         e.preventDefault();
         err.hidden = false;
         err.textContent = String(ex && ex.message ? ex.message : ex);
       }
     });
+    // startDrag 结束后浏览器不一定有 dragend；多点兜底恢复跟随
+    const clearDragging = () => {
+      try { window.peerAgent.setFdaDragFloatDragging?.(false); } catch (_) {}
+    };
+    drag.addEventListener('dragend', clearDragging);
+    window.addEventListener('mouseup', clearDragging);
+    window.addEventListener('blur', clearDragging);
   </script>
 </body>
 </html>`;
@@ -418,11 +436,17 @@ return ""
 
   function startFollowSettings() {
     clearFollowTimer();
-    // 用户拖动系统设置窗口时，浮窗跟随贴在其下方
+    // 注意：读窗口 bounds 会起 swift/osascript，绝不能在拖拽时高频跑，否则 startDrag 卡、图标不跟手。
+    // 仅低频跟随设置窗移动；拖拽中完全跳过。
     followTimer = setInterval(() => {
+      if (dragging) return;
       if (!floatWindow || floatWindow.isDestroyed() || !floatWindow.isVisible()) return;
-      try { positionWindow(floatWindow); } catch { /* ignore */ }
-    }, 300);
+      try {
+        // force refresh occasionally so move 能跟上
+        readSystemSettingsWindowBounds({ force: true });
+        positionWindow(floatWindow);
+      } catch { /* ignore */ }
+    }, FOLLOW_INTERVAL_MS);
   }
 
   function show(options = {}) {
@@ -458,6 +482,8 @@ return ""
     const html = buildHtml(payload);
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     const win = ensureWindow();
+    // 首次显示强制读设置窗，避免用过期 cache / fallback 贴底
+    try { readSystemSettingsWindowBounds({ force: true }); } catch { /* ignore */ }
     const bounds = positionWindow(win);
     void win.loadURL(url);
     if (!win.isVisible()) win.showInactive();
@@ -483,6 +509,7 @@ return ""
     hide,
     destroy,
     isOpen: () => Boolean(floatWindow && !floatWindow.isDestroyed() && floatWindow.isVisible()),
+    setDragging: (value) => { dragging = Boolean(value); },
     // test helpers
     _computeFloatBounds: computeFloatBounds,
     _readSystemSettingsWindowBounds: readSystemSettingsWindowBounds,

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, Tray, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
@@ -46,6 +46,9 @@ import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs
 import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './data-store.mjs';
 import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
+import { createAppshotService } from './appshot-service.mjs';
+import { buildAppshotPermissionPreflight, openScreenRecordingSettings } from './appshot-permission-preflight.mjs';
+import { deliverAppshot } from './appshot-delivery.mjs';
 import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
@@ -1199,11 +1202,56 @@ const quickChatWindowController = createQuickChatWindowController({
   screen,
   createWindow: createQuickChatWindow,
 });
+
+// Appshots P0a (ADR 59): user-gesture-only capture; never exposed as a model tool.
+const appshotService = createAppshotService({
+  getScreenPermissionStatus: (type = 'screen') => systemPreferences.getMediaAccessStatus(type),
+  artifactsDir: path.join(app.getPath('userData'), 'appshot-artifacts'),
+  log: (line) => console.log('[appshot]', line),
+});
+
+async function handleAppshotHotkey() {
+  try {
+    const preflight = buildAppshotPermissionPreflight({
+      getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
+    });
+    if (!preflight.canCapture) {
+      console.warn('[appshot] preflight blocked:', preflight.status);
+      void openScreenRecordingSettings({ shellOpenExternal: (url) => shell.openExternal(url) });
+      return { ok: false, code: 'permission_denied', detail: preflight.status };
+    }
+    const result = await appshotService.capture();
+    if (!result.ok) {
+      console.warn('[appshot] capture failed:', result.code);
+      return result;
+    }
+    const delivery = deliverAppshot({
+      payload: result.payload,
+      listConversations: () => conversationStore.listConversations({ includeMessageCount: false }),
+      createConversation: (input) => conversationStore.createConversation(input),
+      appendMessage: (id, message) => conversationStore.appendMessage(id, message),
+    });
+    console.log('[appshot] delivered to conversation', delivery.conversationId, delivery.created ? '(new)' : '');
+    return { ...result, delivery };
+  } catch (err) {
+    console.error('[appshot] hotkey handling failed:', err?.message ?? err);
+    return { ok: false, code: 'window_not_capturable', detail: 'unexpected failure' };
+  }
+}
+
 const shortcutService = createShortcutService({
   globalShortcut,
   settingsStore,
   onQuickChat: () => quickChatWindowController.toggle(),
+  onAppshot: () => { void handleAppshotHotkey(); },
 });
+
+ipcMain.handle('appshot:capture', () => handleAppshotHotkey());
+ipcMain.handle('appshot:permission-status', () => buildAppshotPermissionPreflight({
+  getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
+}));
+ipcMain.handle('appshot:open-screen-settings', () =>
+  openScreenRecordingSettings({ shellOpenExternal: (url) => shell.openExternal(url) }));
 
 ipcMain.handle('shortcuts:status', () => shortcutService.status());
 ipcMain.handle('shortcuts:update', (_event, actionOrAccelerator, accelerator) =>
@@ -2300,7 +2348,50 @@ function resolveFdaFloatLogoDataUrl() {
   return null;
 }
 
+let cachedFdaDragIcon = null; // NativeImage, resized for smooth startDrag
+let cachedFdaDragIconKey = '';
+
+function getCachedFdaDragIcon(filePath) {
+  const key = String(filePath || '');
+  if (cachedFdaDragIcon && !cachedFdaDragIcon.isEmpty() && cachedFdaDragIconKey === key) {
+    return cachedFdaDragIcon;
+  }
+  let icon = resolveAppIconNativeImage(filePath);
+  if (icon.isEmpty()) {
+    const logoFallbacks = [
+      workspaceRoot ? path.join(workspaceRoot, 'apps/desktop/public/logo.png') : null,
+      path.join(__dirname, '../../public/logo.png'),
+      path.join(__dirname, '../../dist/logo.png'),
+      process.resourcesPath ? path.join(process.resourcesPath, 'logo.png') : null,
+    ].filter(Boolean);
+    for (const f of logoFallbacks) {
+      try {
+        if (!existsSync(f)) continue;
+        const img = nativeImage.createFromPath(f);
+        if (img && !img.isEmpty()) { icon = img; break; }
+      } catch { /* continue */ }
+    }
+  }
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W7tUAAAAASUVORK5CYII=',
+    );
+  } else {
+    // 关键：startDrag 用大图会非常卡、不跟手；缩到 48px
+    try {
+      const size = icon.getSize();
+      if (size.width > 48 || size.height > 48) {
+        icon = icon.resize({ width: 48, height: 48, quality: 'better' });
+      }
+    } catch { /* keep original */ }
+  }
+  cachedFdaDragIcon = icon;
+  cachedFdaDragIconKey = key;
+  return icon;
+}
+
 const fullDiskAccessDragFloatController = createFullDiskAccessDragFloatController({
+
   BrowserWindow,
   screen,
   path,
@@ -2472,9 +2563,14 @@ ipcMain.handle('browser:open-full-disk-access-settings', async (_event, payload 
     let floatResult = null;
     const showFloat = () => {
       try {
-        return fullDiskAccessDragFloatController.show({
+        const shown = fullDiskAccessDragFloatController.show({
           isZh: payload?.isZh,
         });
+        // 预热拖拽图标，避免第一次 dragstart 卡顿
+        try {
+          if (shown?.ok && shown.appPath) getCachedFdaDragIcon(shown.appPath);
+        } catch { /* ignore */ }
+        return shown;
       } catch (err) {
         console.warn('[fda-drag-float] show failed:', err?.message || err);
         return { ok: false, error: err?.message || 'float_show_failed' };
@@ -2507,7 +2603,14 @@ ipcMain.handle('browser:hide-fda-drag-float', async () => {
   }
 });
 
+ipcMain.on('browser:fda-drag-float-dragging', (_event, payload = {}) => {
+  try {
+    fullDiskAccessDragFloatController.setDragging?.(Boolean(payload?.dragging));
+  } catch { /* ignore */ }
+});
+
 ipcMain.on('browser:hide-fda-drag-float-sync', (event) => {
+
   try {
     fullDiskAccessDragFloatController.hide();
     event.returnValue = { ok: true };
@@ -2548,31 +2651,8 @@ ipcMain.on('browser:start-app-drag', (event, payload = {}) => {
       fail('app_path_not_found');
       return;
     }
-    let icon = resolveAppIconNativeImage(filePath);
-    // startDrag 要求有效 icon；空 icon 在部分 Electron/macOS 上会导致拖拽静默失败。
-    if (icon.isEmpty()) {
-      // 最后兜底：1x1 透明也不理想，尽量再找 logo.png
-      const logoFallbacks = [
-        workspaceRoot ? path.join(workspaceRoot, 'apps/desktop/public/logo.png') : null,
-        path.join(__dirname, '../../public/logo.png'),
-        path.join(__dirname, '../../dist/logo.png'),
-        process.resourcesPath ? path.join(process.resourcesPath, 'logo.png') : null,
-      ].filter(Boolean);
-      for (const f of logoFallbacks) {
-        try {
-          if (!existsSync(f)) continue;
-          const img = nativeImage.createFromPath(f);
-          if (img && !img.isEmpty()) { icon = img; break; }
-        } catch { /* continue */ }
-      }
-    }
-    if (icon.isEmpty()) {
-      // 仍为空则造一个最小非空图标，避免 startDrag 直接 no-op
-      icon = nativeImage.createFromDataURL(
-        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W7tUAAAAASUVORK5CYII=',
-      );
-    }
-    // Electron: sender.startDrag({ file, icon }) — 必须同步调用
+    // 使用缓存的小图标，避免每次 dragstart 解码大 PNG/icns 导致卡顿、不跟手
+    const icon = getCachedFdaDragIcon(filePath);
     event.sender.startDrag({
       file: filePath,
       icon,
@@ -4292,6 +4372,13 @@ app.whenReady().then(async () => {
   if (!shortcutRegistration.success) {
     console.warn('[shortcuts] Quick Chat global shortcut unavailable:', shortcutRegistration.error);
   }
+  if (shortcutRegistration.actions?.appshot && !shortcutRegistration.actions.appshot.success) {
+    console.warn('[shortcuts] Appshot global shortcut unavailable:', shortcutRegistration.actions.appshot.error);
+  }
+
+  // Appshots T3.1: absorb the one-time window-list binary compile + first-exec
+  // security scan at startup instead of on the user's first hotkey press.
+  void appshotService.warmup();
 
   // 自定义应用菜单替换 Electron 默认菜单：移除生产环境整窗 Reload/Force Reload，
   // ⌘R 收归为「刷新内嵌浏览器页」（初始无活动浏览器页时置灰）。
