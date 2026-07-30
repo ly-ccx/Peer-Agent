@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.1-beta.46
+
+### Added
+- Startup Full Disk Access gate: preflight on main-shell ready with brand logo drag grant UI.
+
+### Fixed
+- React #310 white screen from TokenUsageDisplay conditional hooks after early return.
+- Startup gate portal rewrite; remove 24h dismiss silence.
+
+
 All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
