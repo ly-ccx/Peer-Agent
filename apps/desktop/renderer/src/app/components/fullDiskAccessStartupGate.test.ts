@@ -8,10 +8,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appTsx = join(here, '../../App.tsx');
 const gateTsx = join(here, 'FullDiskAccessStartupGate.tsx');
 
-test('startup shell mounts FullDiskAccessStartupGate after main shell is ready', () => {
+test('startup shell keeps FullDiskAccessStartupGate code but disables launch gate for now', () => {
   const src = readFileSync(appTsx, 'utf8');
+  // 组件 import / 挂载点仍保留，便于开发者账号就绪后一键打开
   assert.match(src, /FullDiskAccessStartupGate/);
   assert.match(src, /enabled=\{showMainShell\}/);
+  // 当前产品决策：开屏检测先关掉
+  assert.match(src, /false && <FullDiskAccessStartupGate/);
+  assert.match(src, /开屏完全磁盘访问检测：暂存档关闭/);
 });
 
 test('startup gate checks Agent-required OS permissions, not Chrome import', () => {

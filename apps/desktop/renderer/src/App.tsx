@@ -929,7 +929,11 @@ function MainApp() {
         </section>
       )}
 
-      <FullDiskAccessStartupGate enabled={showMainShell} isZh={isZh} />
+      {/* 开屏完全磁盘访问检测：暂存档关闭。
+          等 Apple 开发者账号就绪、正式签名/公证链路可用后再打开。
+          相关实现仍保留：FullDiskAccessStartupGate / startup-os-permissions / full-disk-access-drag-float
+          知识库：peer-knowledge/knowledge/experience/full-disk-access-startup-gate-archive.md */}
+      {false && <FullDiskAccessStartupGate enabled={showMainShell} isZh={isZh} />}
     </main>
   );
 }
