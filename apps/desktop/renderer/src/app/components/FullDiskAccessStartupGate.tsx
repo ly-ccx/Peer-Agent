@@ -1,20 +1,14 @@
 /**
  * 应用启动时的 macOS 完全磁盘访问权限门（表达层）。
  *
- * 产品要求：不是进 Browser 导入向导才查，而是一打开 App 就自检；
- * 缺失时引导用户把当前 App 拖进「系统设置 → 完全磁盘访问权限」。
- *
- * 能力真相仍在主进程 preflight / startDrag；本组件只负责启动时展示与交互。
+ * 注意：本组件必须保持 hooks 数量恒定；不要在 hooks 之后/之前插入条件 hooks。
+ * Overlay 使用简单 children，避免 render-prop 路径引入额外复杂度。
  */
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
-import { Overlay } from './Overlay';
 
-const DISMISS_STORAGE_KEY = 'peer.fullDiskAccess.startupGate.dismissedAt';
-/** 权限卡固定展示我们的品牌 LOGO（renderer public/dist 资源）。 */
 const BRAND_LOGO_SRC = './logo.png';
-/** 点「稍后」后 24 小时内不再强弹（仍可在导入向导里看）。 */
-const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
 
 type PreflightCheck = {
   readonly id: string;
@@ -44,29 +38,24 @@ type Preflight = {
   };
 };
 
-function readDismissedAt(): number {
-  try {
-    const raw = window.localStorage.getItem(DISMISS_STORAGE_KEY);
-    const n = raw ? Number(raw) : 0;
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
+function statusLabel(status: PreflightCheck['status'], isZh: boolean): string {
+  if (isZh) {
+    switch (status) {
+      case 'ok': return '通过';
+      case 'missing': return '缺失';
+      case 'blocked': return '需授权';
+      case 'warn': return '警告';
+      case 'unsupported': return '不支持';
+      default: return '说明';
+    }
   }
-}
-
-function writeDismissedAt(ts: number): void {
-  try {
-    window.localStorage.setItem(DISMISS_STORAGE_KEY, String(ts));
-  } catch {
-    // ignore quota / privacy mode
-  }
-}
-
-function clearDismissedAt(): void {
-  try {
-    window.localStorage.removeItem(DISMISS_STORAGE_KEY);
-  } catch {
-    // ignore
+  switch (status) {
+    case 'ok': return 'OK';
+    case 'missing': return 'Missing';
+    case 'blocked': return 'Blocked';
+    case 'warn': return 'Warn';
+    case 'unsupported': return 'N/A';
+    default: return 'Info';
   }
 }
 
@@ -74,7 +63,6 @@ export function FullDiskAccessStartupGate({
   enabled,
   isZh,
 }: {
-  /** bootstrap 完成后才启用，避免抢 BrandStartupLoader。 */
   readonly enabled: boolean;
   readonly isZh: boolean;
 }) {
@@ -87,7 +75,6 @@ export function FullDiskAccessStartupGate({
   const needsAttention = useMemo(() => {
     if (!preflight) return false;
     if (preflight.ready) return false;
-    // 仅在 macOS 且确实被权限/环境挡住时弹。
     return Boolean(
       preflight.blocked
       || preflight.checks?.some((c) => c.status === 'blocked' || c.action === 'open_full_disk_access'),
@@ -100,21 +87,16 @@ export function FullDiskAccessStartupGate({
     try {
       const api = clientApi.getBrowserSessionImportPreflight;
       if (typeof api !== 'function') {
-        // 旧包 / preload 未暴露时不能抛死整棵树。
         setPreflight(null);
         setOpen(false);
         return null;
       }
-      const res = await api();
-      setPreflight(res as Preflight);
-      if ((res as Preflight)?.ready) {
-        clearDismissedAt();
-        setOpen(false);
-      }
-      return res as Preflight;
+      const res = await api() as Preflight;
+      setPreflight(res);
+      if (res?.ready) setOpen(false);
+      return res;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      // 权限探测失败不应白屏；仅关闭启动门。
       setOpen(false);
       return null;
     } finally {
@@ -124,9 +106,9 @@ export function FullDiskAccessStartupGate({
 
   useEffect(() => {
     if (!enabled) return;
-    // 非 macOS 不弹。
-    if (typeof navigator !== 'undefined' && !/Mac|macOS/i.test(navigator.platform || navigator.userAgent || '')) {
-      return;
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.platform || navigator.userAgent || '';
+      if (!/Mac|macOS/i.test(ua)) return;
     }
     let cancelled = false;
     void (async () => {
@@ -139,8 +121,6 @@ export function FullDiskAccessStartupGate({
         setOpen(false);
         return;
       }
-      // 权限仍缺失时，每次打开 App 都提示（不再 24h 静默）。
-      // 「稍后」只关闭当前会话弹窗，不抑制下次冷启动检测。
       setOpen(true);
     })();
     return () => {
@@ -164,19 +144,16 @@ export function FullDiskAccessStartupGate({
 
   const revealAppInFinder = useCallback(async () => {
     try {
-      // 兜底：若拖拽链路不可用，至少打开安装位置让用户手动拖。
       const target = preflight?.dragTarget;
       if (target?.ok && target.appPath) {
         await clientApi.openPath?.(target.appPath);
         return;
       }
-      // 再尝试拉一次 drag target
       const fresh = await clientApi.getAppDragTarget?.();
       if (fresh?.ok && fresh.appPath) {
         await clientApi.openPath?.(fresh.appPath);
         return;
       }
-      // 最后打开 /Applications
       await clientApi.openPath?.('/Applications');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -202,40 +179,26 @@ export function FullDiskAccessStartupGate({
     }
   }, [preflight?.dragTarget]);
 
-  const statusLabel = useCallback((status: PreflightCheck['status']) => {
-    if (isZh) {
-      switch (status) {
-        case 'ok': return '通过';
-        case 'missing': return '缺失';
-        case 'blocked': return '需授权';
-        case 'warn': return '警告';
-        case 'unsupported': return '不支持';
-        default: return '说明';
-      }
-    }
-    switch (status) {
-      case 'ok': return 'OK';
-      case 'missing': return 'Missing';
-      case 'blocked': return 'Blocked';
-      case 'warn': return 'Warn';
-      case 'unsupported': return 'N/A';
-      default: return 'Info';
-    }
-  }, [isZh]);
-
+  // hooks 全部结束后再决定是否渲染，保证 hooks 数量恒定。
   if (!enabled || !open || !needsAttention) return null;
 
-  return (
-    <Overlay
-      onClose={() => {
-        writeDismissedAt(Date.now());
-        setOpen(false);
-      }}
-      closeOnBackdrop={false}
-      ariaLabel={isZh ? '完全磁盘访问权限' : 'Full Disk Access'}
-      panelClassName="fda-startup-gate"
-    >
-      {({ requestClose }) => (
+  const checks = (preflight?.checks || []).filter((c) => (
+    c.status === 'blocked'
+    || c.status === 'warn'
+    || c.status === 'missing'
+    || c.id === 'full-disk-access'
+    || c.id.startsWith('cookies:')
+  ));
+
+  const node = (
+    <div className="pa-overlay-backdrop" role="presentation">
+      <div
+        className="pa-overlay-panel fda-startup-gate"
+        role="dialog"
+        aria-modal="true"
+        aria-label={isZh ? '完全磁盘访问权限' : 'Full Disk Access'}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="fda-startup-gate-body">
           <h2 className="fda-startup-gate-title">
             {isZh ? '需要完全磁盘访问权限' : 'Full Disk Access required'}
@@ -260,7 +223,6 @@ export function FullDiskAccessStartupGate({
                 alt="Peer Agent"
                 draggable={false}
                 onError={(e) => {
-                  // 兜底品牌资源
                   const img = e.currentTarget;
                   if (img.src.endsWith('/logo.png') || img.src.endsWith('./logo.png')) return;
                   img.src = BRAND_LOGO_SRC;
@@ -286,8 +248,8 @@ export function FullDiskAccessStartupGate({
           </div>
 
           <ol className="fda-startup-steps">
-            <li>{isZh ? '点击下方「打开完全磁盘访问权限」' : 'Click “Open Full Disk Access” below'}</li>
-            <li>{isZh ? '把上方 App 图标拖进列表并打开开关（列表不会自动出现 App）' : 'Drag the app icon into the list and enable it (apps never auto-appear)'}</li>
+            <li>{isZh ? '点击「打开完全磁盘访问权限」' : 'Click “Open Full Disk Access”'}</li>
+            <li>{isZh ? '把上方 LOGO 拖进列表并打开开关（列表不会自动出现 App）' : 'Drag the logo into the list and enable it (apps never auto-appear)'}</li>
             <li>{isZh ? '完全退出并重启 Peer Agent' : 'Fully quit and relaunch Peer Agent'}</li>
             <li>{isZh ? '回来后点「我已授权，重新检测」' : 'Then click “I’ve granted access — re-check”'}</li>
           </ol>
@@ -297,45 +259,34 @@ export function FullDiskAccessStartupGate({
           ) : null}
 
           <ul className="session-import-preflight-list fda-startup-checks">
-            {(preflight?.checks || [])
-              .filter((c) => c.status === 'blocked' || c.status === 'warn' || c.status === 'missing' || c.id === 'full-disk-access' || c.id.startsWith('cookies:'))
-              .map((check) => (
-                <li key={check.id} className={`session-import-preflight-item is-${check.status}`}>
-                  <div className="session-import-preflight-item-top">
-                    <span className="session-import-preflight-status">{statusLabel(check.status)}</span>
-                    <strong>{check.title}</strong>
-                  </div>
-                  <p>{check.detail}</p>
-                </li>
-              ))}
+            {checks.map((check) => (
+              <li key={check.id} className={`session-import-preflight-item is-${check.status}`}>
+                <div className="session-import-preflight-item-top">
+                  <span className="session-import-preflight-status">{statusLabel(check.status, isZh)}</span>
+                  <strong>{check.title}</strong>
+                </div>
+                <p>{check.detail}</p>
+              </li>
+            ))}
           </ul>
 
           {error ? <div className="session-import-error">{error}</div> : null}
 
           <div className="fda-startup-actions">
-            <button
-              type="button"
-              className="updater-btn"
-              disabled={loading}
-              onClick={() => void runPreflight()}
-            >
+            <button type="button" className="updater-btn" disabled={loading} onClick={() => void runPreflight()}>
               {loading
                 ? (isZh ? '检测中…' : 'Checking…')
                 : (isZh ? '我已授权，重新检测' : 'I’ve granted access — re-check')}
             </button>
-            <button
-              type="button"
-              className="updater-btn ghost"
-              onClick={() => {
-                // 仅关闭本次弹窗；下次启动若仍无权限会再出现。
-                requestClose();
-              }}
-            >
+            <button type="button" className="updater-btn ghost" onClick={() => setOpen(false)}>
               {isZh ? '稍后' : 'Later'}
             </button>
           </div>
         </div>
-      )}
-    </Overlay>
+      </div>
+    </div>
   );
+
+  if (typeof document === 'undefined') return node;
+  return createPortal(node, document.body);
 }
