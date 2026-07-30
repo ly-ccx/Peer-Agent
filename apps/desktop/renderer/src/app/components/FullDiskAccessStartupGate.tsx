@@ -192,7 +192,7 @@ export function FullDiskAccessStartupGate({
       return;
     }
     // 必须在 dragstart 同步调用主进程 startDrag（preload sendSync）。
-    // 不要依赖 HTML5 dataTransfer 作为进系统设置列表的载荷。
+    // preventDefault 让 Electron 原生拖拽接管，否则只有 HTML5 拖影、进不了系统设置列表。
     try {
       const result = clientApi.startAppDrag?.({ appPath: target.appPath }) as
         | { ok?: boolean; error?: string; filePath?: string }
@@ -202,16 +202,10 @@ export function FullDiskAccessStartupGate({
         event.preventDefault();
         return;
       }
+      event.preventDefault();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       event.preventDefault();
-      return;
-    }
-    try {
-      event.dataTransfer?.setData('text/plain', target.displayName || target.appPath);
-      event.dataTransfer!.effectAllowed = 'copyMove';
-    } catch {
-      // ignore
     }
   }, [snapshot?.dragTarget, isZh]);
 

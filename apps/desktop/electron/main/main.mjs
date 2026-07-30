@@ -2467,16 +2467,28 @@ ipcMain.handle('browser:open-full-disk-access-settings', async (_event, payload 
     const opened = await openFullDiskAccessSettings({
       shellOpenExternal: (url) => shell.openExternal(url),
     });
-    // AskForPermission 风格：系统设置下方（屏幕底部）弹出可拖拽 LOGO 浮窗
+    // AskForPermission 风格：贴在系统设置窗口正下方的拖拽浮窗。
+    // 先打开设置，稍等窗口出现后再 show，才能用 AX/System Events 读到 bounds。
     let floatResult = null;
-    try {
-      floatResult = fullDiskAccessDragFloatController.show({
-        isZh: payload?.isZh,
-      });
-    } catch (err) {
-      console.warn('[fda-drag-float] show failed:', err?.message || err);
-      floatResult = { ok: false, error: err?.message || 'float_show_failed' };
-    }
+    const showFloat = () => {
+      try {
+        return fullDiskAccessDragFloatController.show({
+          isZh: payload?.isZh,
+        });
+      } catch (err) {
+        console.warn('[fda-drag-float] show failed:', err?.message || err);
+        return { ok: false, error: err?.message || 'float_show_failed' };
+      }
+    };
+    // 立即尝试一次（设置已在前台时）
+    floatResult = showFloat();
+    // 再延迟重定位/重显，覆盖“设置窗口刚创建”的时序
+    setTimeout(() => {
+      try { showFloat(); } catch { /* ignore */ }
+    }, 450);
+    setTimeout(() => {
+      try { showFloat(); } catch { /* ignore */ }
+    }, 1200);
     return {
       ...opened,
       dragFloat: floatResult,
