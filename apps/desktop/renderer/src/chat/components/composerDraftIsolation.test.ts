@@ -20,13 +20,21 @@ test('draft input stays in the composer leaf and never becomes context token aut
   assert.match(controls, /const draft = useConversationDraft\(conversationId\)/);
   assert.match(controls, /conversationStore\.setDraft\(conversationId, value\)/);
   assert.match(controls, /attachmentSlot/);
+  // 附件条必须是壳层兄弟节点，不能再作为 ComposerDraftField 的子树。
+  assert.match(controls, /\{attachmentSlot\}\s*<ComposerDraftField/);
+  assert.doesNotMatch(
+    controls.split('const ComposerDraftField')[1] ?? '',
+    /attachmentSlot/,
+    'ComposerDraftField leaf must not receive or render attachmentSlot',
+  );
   assert.equal(
     (controls.match(/useConversationDraft/g) ?? []).length,
     2,
     'useConversationDraft should appear only as import + one leaf subscription',
   );
-  // 附件条必须 memo，dataUrl 缩略图不能因父级 draft 重渲而整块重绘。
+  // 附件条必须 memo，并使用小缩略图缓存，避免 2MB 原图 dataUrl 随输入闪刷。
   assert.match(attachmentStrip, /export const AttachmentStrip = memo\(function AttachmentStrip/);
+  assert.match(attachmentStrip, /attachmentThumbCache|AttachmentThumb|downscaleDataUrl/);
   assert.match(tokenUsage, /useConversationContextAccounting\(conversationId\)/);
   assert.match(tokenUsage, /contextAccounting=\{contextAccounting\}/);
   assert.match(tokenUsage, /emptyContext=\{conversationId == null\}/);

@@ -71,7 +71,9 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 壳层稳定构造附件节点；draft 叶子重渲染时 props 引用不变 + AttachmentStrip memo → 不重绘缩略图。
+  // 附件条挂在壳层 form 的兄弟节点，绝不进入 ComposerDraftField 子树。
+  // 即使 React 协调时 field 重渲，attachment-strip 也不在 draft 叶子 DOM 子树内，
+  // 可避免 field-sizing / 文本重排把大图缩略图一起刷掉。
   const attachmentSlot = useMemo(
     () => (
       <>
@@ -96,6 +98,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onPrimaryAction();
       }}
     >
+      {/* 顺序靠 CSS order：菜单(0) → 附件(1) → textarea/按钮(2/3) */}
+      {attachmentSlot}
       <ComposerDraftField
         conversationId={conversationId}
         hasProvider={hasProvider}
@@ -104,7 +108,6 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         isZh={isZh}
         hasAttachments={attachments.length > 0}
         messageQueue={messageQueue}
-        attachmentSlot={attachmentSlot}
         fileInputRef={fileInputRef}
         onPaste={onPaste}
         onAddFiles={onAddFiles}
@@ -117,7 +120,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
 
 /**
  * 草稿叶子：唯一订阅会话草稿的输入区。
- * 菜单 / textarea / 发送按钮随 draft 更新；附件 slot 由壳层注入且 memo，不随逐字刷新重建。
+ * 菜单 / textarea / 发送按钮随 draft 更新；附件条已在壳层兄弟节点，不在本叶子子树。
  */
 const ComposerDraftField = memo(function ComposerDraftField({
   conversationId,
@@ -127,7 +130,6 @@ const ComposerDraftField = memo(function ComposerDraftField({
   isZh,
   hasAttachments,
   messageQueue,
-  attachmentSlot,
   fileInputRef,
   onPaste,
   onAddFiles,
@@ -141,7 +143,6 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly isZh: boolean;
   readonly hasAttachments: boolean;
   readonly messageQueue: readonly QueuedMessage[];
-  readonly attachmentSlot: React.ReactNode;
   readonly fileInputRef: React.RefObject<HTMLInputElement | null>;
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
@@ -371,7 +372,6 @@ const ComposerDraftField = memo(function ComposerDraftField({
           )}
         </div>
       ) : null}
-      {attachmentSlot}
       <textarea
         ref={textareaRef}
         value={draft}
