@@ -41,6 +41,7 @@ import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
 import { buildTuiSystemPrompt, createTuiLanguageStore } from './tui-language.ts';
 import { createTuiThemeStore } from './tui-theme.ts';
+import { formatTerminalTitle } from './terminal-title.ts';
 
 // Fast path: `peer --version` / `peer -v` → single line, no TUI boot.
 if (handleCliVersionArgs(process.argv.slice(2))) {
@@ -282,6 +283,7 @@ const model = provider
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
+renderer.setTerminalTitle(formatTerminalTitle(workspaceRoot));
 const root = createRoot(renderer);
 const shutdown = createTuiShutdown({
   unmount: () => root.unmount(),
