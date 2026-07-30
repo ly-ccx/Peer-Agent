@@ -28,3 +28,10 @@ test('startup gate uses session-import preflight + app drag APIs', () => {
   assert.match(src, /session-import-drag-card/);
   assert.match(src, /在 Finder 中显示 App|Reveal app in Finder/);
 });
+
+
+test('root renderer wraps App with AppErrorBoundary', () => {
+  const mainTsx = readFileSync(join(here, '../../main.tsx'), 'utf8');
+  assert.match(mainTsx, /AppErrorBoundary/);
+  assert.match(mainTsx, /<AppErrorBoundary>/);
+});

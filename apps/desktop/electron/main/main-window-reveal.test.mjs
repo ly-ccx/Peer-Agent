@@ -25,4 +25,6 @@ test('index.html provides first-paint background fallback before CSS bundle', ()
   assert.match(html, /background:\s*#F4F6F9/i);
   assert.match(html, /prefers-color-scheme:\s*dark/);
   assert.match(html, /background:\s*#16191D/i);
+  assert.match(html, /html, body, #root/);
+  assert.match(html, /data-boot-shell|Starting Peer Agent/);
 });

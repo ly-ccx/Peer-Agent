@@ -8,12 +8,13 @@
     <style>
       /* 首帧兜底：在 CSS bundle 注入前避免透明 body 透出系统黑底。
          Electron vibrancy 仍由窗口层处理；这里只给 document 一个浅/深纸色。 */
-      html, body {
+      html, body, #root {
         margin: 0;
+        height: 100%;
         background: #F4F6F9;
       }
       @media (prefers-color-scheme: dark) {
-        html, body { background: #16191D; }
+        html, body, #root { background: #16191D; }
       }
     </style>
     <link rel="icon" type="image/png" href="./favicon-light.png" media="(prefers-color-scheme: light)" />
@@ -25,7 +26,12 @@
     <title>Peer Agent</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- React 挂载前的首帧壳：避免透明窗口 + 空 #root 呈现整窗白屏 -->
+      <div data-boot-shell style="min-height:100vh;display:grid;place-items:center;font:14px/1.4 system-ui,-apple-system,sans-serif;color:#5b6472;">
+        Starting Peer Agent…
+      </div>
+    </div>
     <script type="module" src="/renderer/src/main.tsx"></script>
   </body>
 </html>

@@ -11,14 +11,19 @@
 
   body {
     @apply m-0 min-h-[720px] min-w-[1024px] overflow-hidden antialiased;
-    /* 透明底留给 Electron vibrancy / 系统毛玻璃透出；内容区各自用实色或 --glass-*。 */
-    background: transparent;
+    /*
+     * 文档层必须有实色兜底。
+     * Electron macOS 窗口本身可透明 + vibrancy，但 html/body/#root 若也透明，
+     * 在 React 首帧/bootstrap 失败时会呈现“整窗白屏/空屏”。
+     * 内容区半透明玻璃仍由各组件 --glass-* 负责。
+     */
+    background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
     font-weight: 400;
   }
 
   html,
   #root {
-    background: transparent;
+    background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
   }
 
   button,

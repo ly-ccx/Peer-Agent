@@ -96,7 +96,14 @@ export function FullDiskAccessStartupGate({
     setLoading(true);
     setError(null);
     try {
-      const res = await clientApi.getBrowserSessionImportPreflight();
+      const api = clientApi.getBrowserSessionImportPreflight;
+      if (typeof api !== 'function') {
+        // 旧包 / preload 未暴露时不能抛死整棵树。
+        setPreflight(null);
+        setOpen(false);
+        return null;
+      }
+      const res = await api();
       setPreflight(res as Preflight);
       if ((res as Preflight)?.ready) {
         clearDismissedAt();
@@ -105,6 +112,8 @@ export function FullDiskAccessStartupGate({
       return res as Preflight;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // 权限探测失败不应白屏；仅关闭启动门。
+      setOpen(false);
       return null;
     } finally {
       setLoading(false);
