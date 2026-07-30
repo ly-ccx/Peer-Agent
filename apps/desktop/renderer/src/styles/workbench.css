@@ -1149,7 +1149,8 @@
     border-radius: 10px;
     flex: 0 0 auto;
     object-fit: contain;
-    background: color-mix(in srgb, #fff 8%, transparent);
+    background: #fff;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
   }
   .session-import-drag-icon.fallback {
     display: inline-flex;

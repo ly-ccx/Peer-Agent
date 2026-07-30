@@ -24,9 +24,12 @@ test('startup gate uses session-import preflight + app drag APIs', () => {
   assert.match(src, /peer\.fullDiskAccess\.startupGate\.dismissedAt/);
   // 启动门文案应强调“打开时检测”，不是 Browser 导入向导专属。
   assert.match(src, /需要完全磁盘访问权限|Full Disk Access required/);
-  // 可拖 App 区域应始终渲染，不能只在 dragTarget.ok 时才出现。
-  assert.match(src, /session-import-drag-card/);
+  // 固定使用品牌 LOGO，而不是蓝色 App 占位。
+  assert.match(src, /BRAND_LOGO_SRC = '\.\/logo\.png'/);
+  assert.match(src, /fda-permission-logo/);
   assert.match(src, /在 Finder 中显示 App|Reveal app in Finder/);
+  // 权限缺失时不应被 24h dismiss 静默掉。
+  assert.doesNotMatch(src, /Date\.now\(\) - dismissedAt < DISMISS_TTL_MS/);
 });
 
 

@@ -2182,24 +2182,29 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
 
 
 function resolveAppIconNativeImage(appPath) {
-  // 优先用打包资源里的真实 icns/png，避免 app.getFileIcon 在某些路径返回空图，
-  // 导致权限卡只剩空白占位、用户以为“没有图标可拖”。
+  // 固定优先使用 Peer Agent 品牌资源（logo/icon），不要回落到系统通用占位图。
+  // 这样权限卡展示的是“我们的 LOGO”，不是蓝色 App 方块。
   const candidates = [];
+  // monorepo / pack / installed resources
+  candidates.push(
+    path.join(workspaceRoot, 'apps/desktop/public/logo.png'),
+    path.join(workspaceRoot, 'apps/desktop/build/icon.png'),
+    path.join(workspaceRoot, 'apps/desktop/build/icon.icns'),
+    path.join(__dirname, '../../public/logo.png'),
+    path.join(__dirname, '../../dist/logo.png'),
+    path.join(__dirname, '../../build/icon.png'),
+    path.join(__dirname, '../../build/icon.icns'),
+    path.join(__dirname, '../../dist/favicon.png'),
+  );
   if (appPath && typeof appPath === 'string') {
     candidates.push(
       path.join(appPath, 'Contents', 'Resources', 'icon.icns'),
-      path.join(appPath, 'Contents', 'Resources', 'electron.icns'),
       path.join(appPath, 'Contents', 'Resources', 'app-icons', 'icon.icns'),
+      path.join(appPath, 'Contents', 'Resources', 'logo.png'),
+      // electron.icns 放到最后，避免开发态误显示 Electron 默认图标语义
+      path.join(appPath, 'Contents', 'Resources', 'electron.icns'),
     );
   }
-  // monorepo / unpackaged desktop build icons
-  candidates.push(
-    path.join(workspaceRoot, 'apps/desktop/build/icon.icns'),
-    path.join(workspaceRoot, 'apps/desktop/build/icon.png'),
-    path.join(__dirname, '../../build/icon.icns'),
-    path.join(__dirname, '../../build/icon.png'),
-    path.join(__dirname, '../../dist/favicon.png'),
-  );
   for (const file of candidates) {
     try {
       if (!file || !existsSync(file)) continue;

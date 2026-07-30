@@ -5,6 +5,8 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
+const BRAND_LOGO_SRC = './logo.png';
+
 export interface SessionImportWizardProps {
   readonly open: boolean;
   readonly isZh: boolean;
@@ -383,16 +385,17 @@ export function SessionImportWizard({
                     onDragStart={onAppDragStart}
                     title={isZh ? '拖到“完全磁盘访问权限”列表' : 'Drag into Full Disk Access list'}
                   >
-                    {preflight.dragTarget.iconDataUrl ? (
-                      <img
-                        className="session-import-drag-icon"
-                        src={preflight.dragTarget.iconDataUrl}
-                        alt=""
-                        draggable={false}
-                      />
-                    ) : (
-                      <span className="session-import-drag-icon fallback" aria-hidden>App</span>
-                    )}
+                    <img
+                      className="session-import-drag-icon"
+                      src={preflight.dragTarget.iconDataUrl || BRAND_LOGO_SRC}
+                      alt="Peer Agent"
+                      draggable={false}
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (img.src.endsWith('/logo.png') || img.src.endsWith('./logo.png')) return;
+                        img.src = BRAND_LOGO_SRC;
+                      }}
+                    />
                     <span className="session-import-drag-meta">
                       <strong>{preflight.dragTarget.displayName || 'Peer Agent'}</strong>
                       <span>

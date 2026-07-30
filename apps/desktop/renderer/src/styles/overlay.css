@@ -16,24 +16,41 @@
     display: grid;
     place-items: center;
     padding: var(--space-8);
-    /* 统一冷调遮罩：半透 + 中等模糊，给面板毛玻璃留出景深 */
-    background: rgba(8, 12, 18, 0.40);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    /* 统一冷调遮罩：半透 + 中等磨砂，给面板毛玻璃留出景深 */
+    background: rgba(8, 12, 18, 0.42);
+    backdrop-filter: blur(14px) saturate(var(--blur-saturate, 1.6));
+    -webkit-backdrop-filter: blur(14px) saturate(var(--blur-saturate, 1.6));
     /* 动效基元（motion.css）：backdrop 只淡入，位移交给面板。 */
     animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .pa-overlay-panel {
-    /* 统一毛玻璃面板配方（frost glass-popover token）。
-       业务面板若再写实色 background，会盖掉本层——应删除覆盖而非另起 blur。 */
-    background: var(--glass-popover);
-    backdrop-filter: blur(var(--blur-popover));
-    -webkit-backdrop-filter: blur(var(--blur-popover));
+    /* 磨砂层放在 ::before：Chromium 上同一元素写 overflow:hidden/auto
+       会让 backdrop-filter 失效，看起来像实心白卡。内容层保持可 overflow。 */
+    position: relative;
+    isolation: isolate;
+    background: transparent;
     border: 1px solid var(--chrome-hairline, var(--za-line));
     box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
     /* 动效基元：淡入 + 上移（enter-rise）。 */
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+  }
+
+  .pa-overlay-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+    -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  }
+
+  .pa-overlay-panel > * {
+    position: relative;
+    z-index: 1;
   }
 
   /* 系统偏好关闭半透明时：回退不透明表面，去掉 blur（对齐 sidebar 降级模式）。 */
@@ -46,9 +63,11 @@
 
     .pa-overlay-panel {
       background: var(--chrome-raised, var(--pa-surface-card, var(--paper-sheet)));
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
       box-shadow: var(--shadow-popover);
+    }
+
+    .pa-overlay-panel::before {
+      display: none;
     }
   }
 
@@ -72,9 +91,9 @@
   }
 
   .pa-overlay-backdrop--drawer-soft {
-    background: rgba(8, 12, 18, 0.22);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(8, 12, 18, 0.28);
+    backdrop-filter: blur(12px) saturate(var(--blur-saturate, 1.6));
+    -webkit-backdrop-filter: blur(12px) saturate(var(--blur-saturate, 1.6));
   }
 
   .pa-overlay-backdrop--drawer .pa-overlay-panel {
@@ -82,10 +101,7 @@
     height: 100vh;
     max-height: 100vh;
     border-radius: 0;
-    /* 抽屉同样走 glass-popover；边与阴影用 drawer 档位微调。 */
-    background: var(--glass-popover);
-    backdrop-filter: blur(var(--blur-popover));
-    -webkit-backdrop-filter: blur(var(--blur-popover));
+    /* 抽屉布局；磨砂仍由 ::before 提供，避免面板自身 overflow 废掉 blur。 */
     border-left: 1px solid var(--chrome-hairline);
     box-shadow: var(--shadow-drag), var(--glass-edge-highlight);
     display: flex;
@@ -105,10 +121,8 @@
     overflow-y: auto;
     padding: var(--space-6, 20px);
   }
-}
 
-
-  /* 启动时完全磁盘访问权限门 */
+  /* 启动时完全磁盘访问权限门：内容可滚动，磨砂在 ::before */
   .pa-overlay-panel.fda-startup-gate {
     width: min(520px, calc(100vw - 32px));
     max-height: min(86vh, 720px);
@@ -116,43 +130,104 @@
     padding: 20px 20px 16px;
     border-radius: 16px;
   }
+
   .fda-startup-gate-body {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
+
   .fda-startup-gate-title {
     margin: 0;
     font-size: 18px;
     font-weight: 650;
     letter-spacing: -0.01em;
   }
+
   .fda-startup-gate-lead {
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
     color: color-mix(in srgb, var(--graphite-soft, #c8cdd6) 94%, transparent);
   }
+
   .fda-startup-steps {
     margin: 0;
     padding-left: 18px;
     font-size: 13px;
     line-height: 1.5;
   }
+
   .fda-startup-checks {
     max-height: 220px;
     overflow: auto;
   }
+
   .fda-startup-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 4px;
   }
+
   .fda-startup-actions .updater-btn.ghost {
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--chrome-hairline, #fff3) 80%, transparent);
   }
+
   .fda-startup-drag {
     margin: 0;
+  }
+}
+
+
+  .fda-permission-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px dashed color-mix(in srgb, var(--chrome-hairline, #0002) 80%, transparent);
+    background: color-mix(in srgb, var(--paper-sheet, #fff) 92%, transparent);
+  }
+  .fda-permission-drag {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: grab;
+    padding: 4px;
+    border-radius: 12px;
+  }
+  .fda-permission-drag:active { cursor: grabbing; }
+  .fda-permission-logo {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    object-fit: contain;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(0,0,0,0.04);
+    flex: 0 0 auto;
+  }
+  .fda-permission-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .fda-permission-meta strong {
+    font-size: 14px;
+  }
+  .fda-permission-meta span {
+    font-size: 12px;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--graphite-soft, #5b6472) 95%, transparent);
+  }
+  .fda-permission-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }

@@ -11,6 +11,8 @@ import { clientApi } from '../../clientApi';
 import { Overlay } from './Overlay';
 
 const DISMISS_STORAGE_KEY = 'peer.fullDiskAccess.startupGate.dismissedAt';
+/** 权限卡固定展示我们的品牌 LOGO（renderer public/dist 资源）。 */
+const BRAND_LOGO_SRC = './logo.png';
 /** 点「稍后」后 24 小时内不再强弹（仍可在导入向导里看）。 */
 const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -137,11 +139,8 @@ export function FullDiskAccessStartupGate({
         setOpen(false);
         return;
       }
-      const dismissedAt = readDismissedAt();
-      if (dismissedAt && Date.now() - dismissedAt < DISMISS_TTL_MS) {
-        setOpen(false);
-        return;
-      }
+      // 权限仍缺失时，每次打开 App 都提示（不再 24h 静默）。
+      // 「稍后」只关闭当前会话弹窗，不抑制下次冷启动检测。
       setOpen(true);
     })();
     return () => {
@@ -247,45 +246,39 @@ export function FullDiskAccessStartupGate({
               : 'Peer Agent needs to read local browser cookie directories (e.g. Chrome) to import site sessions. macOS blocks this by default—grant access before continuing.'}
           </p>
 
-          <div className="session-import-drag-card fda-startup-drag">
-            {preflight?.dragTarget?.ok ? (
-              <button
-                type="button"
-                className="session-import-drag-handle"
-                draggable
-                onDragStart={onAppDragStart}
-                title={isZh ? '拖到“完全磁盘访问权限”列表' : 'Drag into Full Disk Access list'}
-              >
-                {preflight.dragTarget.iconDataUrl ? (
-                  <img
-                    className="session-import-drag-icon"
-                    src={preflight.dragTarget.iconDataUrl}
-                    alt=""
-                    draggable={false}
-                  />
-                ) : (
-                  <span className="session-import-drag-icon fallback" aria-hidden>App</span>
-                )}
-                <span className="session-import-drag-meta">
-                  <strong>{preflight.dragTarget.displayName || 'Peer Agent'}</strong>
-                  <span>
-                    {isZh
-                      ? '按住此图标，拖到系统设置 → 完全磁盘访问权限列表'
-                      : 'Drag this icon into System Settings → Full Disk Access'}
-                  </span>
-                </span>
-              </button>
-            ) : (
-              <div className="session-import-drag-meta" style={{ padding: '6px' }}>
-                <strong>{isZh ? '未识别到可拖拽的 App' : 'No draggable app detected'}</strong>
+          <div className="fda-permission-card">
+            <button
+              type="button"
+              className="fda-permission-drag"
+              draggable={Boolean(preflight?.dragTarget?.ok && preflight?.dragTarget?.appPath)}
+              onDragStart={onAppDragStart}
+              title={isZh ? '拖到“完全磁盘访问权限”列表' : 'Drag into Full Disk Access list'}
+            >
+              <img
+                className="fda-permission-logo"
+                src={preflight?.dragTarget?.iconDataUrl || BRAND_LOGO_SRC}
+                alt="Peer Agent"
+                draggable={false}
+                onError={(e) => {
+                  // 兜底品牌资源
+                  const img = e.currentTarget;
+                  if (img.src.endsWith('/logo.png') || img.src.endsWith('./logo.png')) return;
+                  img.src = BRAND_LOGO_SRC;
+                }}
+              />
+              <span className="fda-permission-meta">
+                <strong>{preflight?.dragTarget?.displayName || 'Peer Agent'}</strong>
                 <span>
                   {isZh
-                    ? '请点“在 Finder 中显示”，把 Peer Agent.app（或 Electron）拖进右侧列表。'
-                    : 'Click “Reveal in Finder” and drag Peer Agent.app (or Electron) into the list.'}
+                    ? '按住我们的 LOGO，拖到系统设置 → 完全磁盘访问权限列表（列表不会自动出现 App）'
+                    : 'Drag our logo into System Settings → Full Disk Access (apps never auto-appear)'}
                 </span>
-              </div>
-            )}
-            <div className="fda-startup-actions" style={{ marginTop: 8 }}>
+              </span>
+            </button>
+            <div className="fda-permission-actions">
+              <button type="button" className="updater-btn" disabled={openingSettings} onClick={() => void openSettings()}>
+                {openingSettings ? (isZh ? '打开中…' : 'Opening…') : (isZh ? '打开完全磁盘访问权限' : 'Open Full Disk Access')}
+              </button>
               <button type="button" className="updater-btn ghost" onClick={() => void revealAppInFinder()}>
                 {isZh ? '在 Finder 中显示 App' : 'Reveal app in Finder'}
               </button>
@@ -323,16 +316,6 @@ export function FullDiskAccessStartupGate({
             <button
               type="button"
               className="updater-btn"
-              disabled={openingSettings}
-              onClick={() => void openSettings()}
-            >
-              {openingSettings
-                ? (isZh ? '打开中…' : 'Opening…')
-                : (isZh ? '打开完全磁盘访问权限' : 'Open Full Disk Access')}
-            </button>
-            <button
-              type="button"
-              className="updater-btn"
               disabled={loading}
               onClick={() => void runPreflight()}
             >
@@ -344,7 +327,7 @@ export function FullDiskAccessStartupGate({
               type="button"
               className="updater-btn ghost"
               onClick={() => {
-                writeDismissedAt(Date.now());
+                // 仅关闭本次弹窗；下次启动若仍无权限会再出现。
                 requestClose();
               }}
             >
