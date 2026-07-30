@@ -98,9 +98,11 @@ export function createFullDiskAccessDragFloatController(deps) {
     }
     // 顺序：System Events（系统自带）→ /usr/bin/swift CGWindowList → 缓存空
     // 打包后 GUI 进程 PATH 常常没有 swift，旧逻辑会直接失败并贴屏幕底。
+    // Swift CG 不需要辅助功能；osascript 在未授权时会 -1719 失败。
+    // 打包环境用绝对路径 /usr/bin/swift，避免 PATH 丢失。
     const bounds =
-      readSettingsBoundsViaSystemEvents()
-      || readSettingsBoundsViaSwiftCG()
+      readSettingsBoundsViaSwiftCG()
+      || readSettingsBoundsViaSystemEvents()
       || null;
     settingsBoundsCache = { at: now, bounds };
     return bounds;
@@ -214,7 +216,6 @@ export function createFullDiskAccessDragFloatController(deps) {
    * 原因：设置窗很高时，“窗口下方”会超出 workArea，旧 clamp 会把浮窗挤到屏幕最底部，看起来离设置很远。
    */
   function computeFloatBounds(anchorBounds) {
-    // anchorBounds: 优先系统设置窗；否则主窗口；绝不无脑贴屏幕底。
     const settings = anchorBounds || readSystemSettingsWindowBounds();
     if (settings) {
       const display = screen.getDisplayMatching({
@@ -224,42 +225,50 @@ export function createFullDiskAccessDragFloatController(deps) {
         height: Math.round(settings.height),
       });
       const area = display.workArea;
-      const width = Math.min(FLOAT_SIZE.width, Math.max(300, Math.round(settings.width * 0.78)));
+      const width = Math.min(FLOAT_SIZE.width, Math.max(300, Math.round(settings.width * 0.82)));
       const height = FLOAT_SIZE.height;
+      // 水平：相对设置窗居中
       let x = Math.round(settings.x + (settings.width - width) / 2);
+      // 垂直：始终贴设置窗底内侧 4px（盖住列表底部 + / - 一带）
+      // 这是 AskForPermission 观感：贴着窗，而不是漂在屏幕底。
+      let y = Math.round(settings.y + settings.height - height - 4);
 
-      // 关键策略：默认贴在设置窗「底边外侧 4px」。
-      // 若越出 workArea，则改为设置窗「底边内侧 8px」（盖在列表 + / - 附近），
-      // 绝不再 clamp 到屏幕最底部（那会看起来「越来越远」）。
-      const outsideY = Math.round(settings.y + settings.height + 4);
-      const insideY = Math.round(settings.y + settings.height - height - 8);
-      const maxY = area.y + area.height - height - 8;
-      const minY = area.y + 8;
-      let y = outsideY;
-      if (y > maxY) y = insideY;
-      // 仍越界时，夹在 [minY, maxY]，但尽量靠近 settings.bottom
-      if (y > maxY) y = maxY;
+      // 仅当浮窗完全跑出 workArea 时才微调，且保持与 settings.bottom 的距离 ≤ 12px
+      const minY = area.y + 4;
+      const maxY = area.y + area.height - height - 4;
       if (y < minY) y = minY;
-      // 若 clamp 后离设置窗底边超过 48px，强制拉回 insideY（只要 insideY 在屏内）
+      if (y > maxY) {
+        // 屏底放不下完整浮窗：仍尽量靠近设置窗底
+        y = Math.min(maxY, Math.round(settings.y + settings.height - height - 4));
+      }
+      // 最终硬约束：浮窗顶边不得低于设置窗顶；底边尽量贴 settings.bottom
       const settingsBottom = settings.y + settings.height;
-      if (Math.abs((y + height) - settingsBottom) > 48 && insideY >= minY && insideY <= maxY) {
-        y = insideY;
+      // 若浮窗顶边离窗底太远（说明被 clamp 甩飞了），拉回窗底内侧
+      if (y + height < settingsBottom - 12 || y > settingsBottom - 20) {
+        y = Math.round(settingsBottom - height - 4);
+        if (y < minY) y = minY;
+        if (y > maxY) y = maxY;
       }
 
-      const minX = area.x + 8;
-      const maxX = area.x + area.width - width - 8;
+      const minX = area.x + 4;
+      const maxX = area.x + area.width - width - 4;
       if (x < minX) x = minX;
       if (x > maxX) x = maxX;
       return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
     }
 
-    // fallback：贴 Peer Agent 主窗口下方（比贴屏幕底更接近用户视线）
+    // 读不到设置窗：贴主窗口底内侧，而不是屏幕底
     try {
-      const all = BrowserWindow.getAllWindows?.() || [];
-      const main = all.find((w) => w && !w.isDestroyed?.() && w.isVisible?.() && !w.__peerAgentFdaDragFloat);
+      const all = typeof BrowserWindow.getAllWindows === 'function' ? BrowserWindow.getAllWindows() : [];
+      const main = all.find((w) => w && !w.isDestroyed() && w.isVisible() && !w.__peerAgentFdaDragFloat);
       if (main) {
         const b = main.getBounds();
-        return computeFloatBounds(b); // reuse settings logic with main as anchor
+        return computeFloatBounds({
+          x: b.x,
+          y: b.y,
+          width: b.width,
+          height: b.height,
+        });
       }
     } catch { /* ignore */ }
 
@@ -267,8 +276,8 @@ export function createFullDiskAccessDragFloatController(deps) {
     const display = screen.getDisplayNearestPoint(point);
     const area = display.workArea;
     const x = Math.round(area.x + (area.width - FLOAT_SIZE.width) / 2);
-    // 屏幕中下部，而不是最底
-    const y = Math.round(area.y + area.height * 0.55);
+    // 中部偏下，避免贴死底边
+    const y = Math.round(area.y + area.height * 0.52);
     return clampToDisplay({ x, y, width: FLOAT_SIZE.width, height: FLOAT_SIZE.height }, display);
   }
 

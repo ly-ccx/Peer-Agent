@@ -1210,32 +1210,92 @@ const appshotService = createAppshotService({
   log: (line) => console.log('[appshot]', line),
 });
 
-async function handleAppshotHotkey() {
+async function handleAppshotHotkey(source = 'hotkey') {
   try {
+    // Settings gate (T8): the panel toggle is the single source of truth.
+    const appshotSettings = settingsStore.getAll().appshots;
+    if (appshotSettings && appshotSettings.enabled === false) {
+      console.warn('[appshot] skipped: disabled in settings');
+      return { ok: false, code: 'disabled', detail: 'appshots disabled in settings' };
+    }
     const preflight = buildAppshotPermissionPreflight({
       getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
     });
     if (!preflight.canCapture) {
       console.warn('[appshot] preflight blocked:', preflight.status);
       void openScreenRecordingSettings({ shellOpenExternal: (url) => shell.openExternal(url) });
+      notifyAppshotOutcome(source, { ok: false, code: 'permission_denied' });
       return { ok: false, code: 'permission_denied', detail: preflight.status };
     }
     const result = await appshotService.capture();
     if (!result.ok) {
       console.warn('[appshot] capture failed:', result.code);
+      notifyAppshotOutcome(source, result);
       return result;
+    }
+    // T7: small inline thumbnail for instant card rendering (ADR 59: full image
+    // stays on disk; only a bounded-width thumbnail may inline as dataUrl).
+    let thumbnailDataUrl;
+    try {
+      const image = nativeImage.createFromPath(result.payload.visual.filePath);
+      if (!image.isEmpty()) {
+        const size = image.getSize();
+        const width = Math.min(480, size.width);
+        thumbnailDataUrl = image.resize({ width }).toDataURL();
+      }
+    } catch {
+      thumbnailDataUrl = undefined; // card falls back to the broken/placeholder state
     }
     const delivery = deliverAppshot({
       payload: result.payload,
       listConversations: () => conversationStore.listConversations({ includeMessageCount: false }),
       createConversation: (input) => conversationStore.createConversation(input),
       appendMessage: (id, message) => conversationStore.appendMessage(id, message),
+      options: { thumbnailDataUrl },
     });
     console.log('[appshot] delivered to conversation', delivery.conversationId, delivery.created ? '(new)' : '');
+    notifyAppshotOutcome(source, { ok: true, appName: result.payload.source.appName, delivery });
     return { ...result, delivery };
   } catch (err) {
     console.error('[appshot] hotkey handling failed:', err?.message ?? err);
+    notifyAppshotOutcome(source, { ok: false, code: 'window_not_capturable' });
     return { ok: false, code: 'window_not_capturable', detail: 'unexpected failure' };
+  }
+}
+
+/**
+ * T9: lightweight capture feedback (product §9).
+ * - Never force-reveals the Peer main window (the user stays in their app).
+ * - Hotkey path only; settings "test capture" already renders inline feedback.
+ * - System notification, silent-failure tolerant; click routes to the conversation
+ *   via the existing task-notification reveal path.
+ * - Log lines carry outcome codes only — no window titles, no image data (ADR 59).
+ */
+function notifyAppshotOutcome(source, outcome) {
+  if (source !== 'hotkey') return;
+  try {
+    if (outcome.ok) {
+      const notified = showTaskSystemNotification({
+        title: 'Appshot',
+        body: `已捕获「${outcome.appName}」窗口，已添加到会话。`,
+        onClick: () => openConversationFromTaskNotification({
+          conversationId: outcome.delivery?.conversationId,
+          messageId: outcome.delivery?.messageId,
+          source: 'appshot-notification',
+        }),
+      });
+      if (!notified) console.log('[appshot] delivered (notification unavailable)');
+      return;
+    }
+    const bodies = {
+      permission_denied: '缺少屏幕录制权限，请在系统设置中授权。',
+      peer_frontmost: 'Peer 自身在前台，请切换到要捕获的应用后重试。',
+      no_window: '未找到可捕获的前台窗口。',
+      window_not_capturable: '该窗口不支持捕获。',
+    };
+    showTaskSystemNotification({ title: 'Appshot', body: bodies[outcome.code] ?? '捕获失败。' });
+  } catch (err) {
+    console.warn('[appshot] feedback failed:', err?.message ?? err);
   }
 }
 
@@ -1246,7 +1306,7 @@ const shortcutService = createShortcutService({
   onAppshot: () => { void handleAppshotHotkey(); },
 });
 
-ipcMain.handle('appshot:capture', () => handleAppshotHotkey());
+ipcMain.handle('appshot:capture', () => handleAppshotHotkey('settings-test'));
 ipcMain.handle('appshot:permission-status', () => buildAppshotPermissionPreflight({
   getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
 }));
@@ -2576,15 +2636,14 @@ ipcMain.handle('browser:open-full-disk-access-settings', async (_event, payload 
         return { ok: false, error: err?.message || 'float_show_failed' };
       }
     };
-    // 立即尝试一次（设置已在前台时）
+    // 立即 + 多次延迟：等 System Settings 真正出现后再贴边
+    //（osascript 无辅助功能权限时依赖 swift CG；窗口创建也有时序）
     floatResult = showFloat();
-    // 再延迟重定位/重显，覆盖“设置窗口刚创建”的时序
-    setTimeout(() => {
-      try { showFloat(); } catch { /* ignore */ }
-    }, 450);
-    setTimeout(() => {
-      try { showFloat(); } catch { /* ignore */ }
-    }, 1200);
+    for (const ms of [250, 500, 900, 1500, 2400]) {
+      setTimeout(() => {
+        try { showFloat(); } catch { /* ignore */ }
+      }, ms);
+    }
     return {
       ...opened,
       dragFloat: floatResult,

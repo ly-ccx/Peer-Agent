@@ -59,17 +59,14 @@ test('drag float html uses native startAppDrag + preventDefault', () => {
   controller.setDragging(false);
 });
 
-test('float should hug settings bottom (outside if possible)', () => {
+test('float should glue to settings bottom inside with 4px padding', () => {
   const settings = { x: 260, y: 80, width: 920, height: 720 };
   const floatH = 88;
-  const gap = 6;
-  // prefer outside just below window
-  const yOutside = Math.round(settings.y + settings.height + gap);
-  assert.equal(yOutside, 80 + 720 + 6); // 806
-  // if workArea maxY is smaller, fall inside:
-  const yInside = Math.round(settings.y + settings.height - floatH - gap);
-  assert.equal(yInside, 80 + 720 - 88 - 6); // 706
-  assert.ok(yInside < 750);
+  const y = Math.round(settings.y + settings.height - floatH - 4);
+  assert.equal(y, 80 + 720 - 88 - 4); // 708
+  // top of float should be near bottom of settings, not screen bottom
+  assert.ok(y > settings.y + settings.height * 0.5);
+  assert.equal(y + floatH + 4, settings.y + settings.height);
   const floatW = 380;
   const x = Math.round(settings.x + (settings.width - floatW) / 2);
   assert.equal(x, Math.round(260 + (920 - 380) / 2));
@@ -79,6 +76,7 @@ test('main wires delayed float show after opening settings', () => {
   const main = readFileSync(join(here, 'main.mjs'), 'utf8');
   assert.match(main, /createFullDiskAccessDragFloatController/);
   assert.match(main, /fullDiskAccessDragFloatController\.show/);
-  assert.match(main, /setTimeout\(\(\) => \{\s*try \{ showFloat\(\); \}/);
+  assert.match(main, /showFloat\(/);
+  assert.match(main, /for \(const ms of \[250, 500, 900, 1500, 2400\]\)/);
   assert.match(main, /hide-fda-drag-float|hideFdaDragFloat/);
 });
