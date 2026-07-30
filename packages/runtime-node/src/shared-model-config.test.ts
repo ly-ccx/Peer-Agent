@@ -356,6 +356,11 @@ test('loadSharedModelMetadataList expands Desktop v2 channels/models config', ()
 
     const list = loadSharedModelMetadataList({ userDataPath });
     assert.equal(list.length, 3);
+    // Conversations may bind by the model entry id; the list must expose it.
+    assert.deepEqual(
+      list.map((item) => item.entryId),
+      ['model-api-1', 'model-oauth-1', 'model-grok-1'],
+    );
     assert.deepEqual(
       list.map((item) => ({
         credentialId: item.credentialId,

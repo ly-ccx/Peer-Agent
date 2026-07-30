@@ -66,6 +66,12 @@ export interface SharedModelMetadata {
   /** Desktop channel id when present (openai / anthropic / anthropic-compatible / qoder / ...). */
   readonly channelId?: string;
   readonly credentialId: string;
+  /**
+   * Desktop model entry id (v2 models[].id). Desktop conversation meta binds
+   * modelProviderId by this id; readers need it to resolve uuid-shaped
+   * bindings back to credentialId.
+   */
+  readonly entryId?: string;
   readonly displayName: string;
   readonly model: string;
   /** Optional human-readable model label from Desktop (e.g. GLM-5.2). */
@@ -409,11 +415,13 @@ function metadataFromSelected(
     selected.reasoningDefaultEffort,
   );
   const channelId = selected.channelId?.trim() || undefined;
+  const entryId = selected.id?.trim() || undefined;
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
     ...(channelId ? { channelId } : {}),
     credentialId: credentialIdOf(selected),
+    ...(entryId ? { entryId } : {}),
     displayName: selected.name?.trim() || selected.model?.trim() || 'Desktop default',
     model: selected.model?.trim() || '',
     ...(modelLabel ? { modelLabel } : {}),

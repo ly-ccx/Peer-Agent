@@ -6,6 +6,7 @@ import {
   cycleModelPickerGroup,
   modelPickerItems,
   modelSelectionLabel,
+  resolvePersistedModelSelection,
   sessionTopbarModelLabel,
 } from './tui-model-selection.ts';
 
@@ -224,6 +225,76 @@ describe('TUI model selection', () => {
       'OPENAI / GPT-5.6-SOL',
     );
     expect(sessionTopbarModelLabel(null, null, 'gpt-5.6-sol')).toBe('GPT-5.6-SOL');
+  });
+
+  test('resolves persisted bindings across Desktop id shapes', () => {
+    // Mirrors real Desktop data: the primary model row has entryId === groupId,
+    // additional models in the same channel carry their own entry uuid.
+    const control = createTuiModelSelectionControl({
+      providerId: 'group-qoder',
+      modelId: 'gm51model',
+      displayName: 'GLM-5.2 · Qoder CLI',
+      catalog: [
+        {
+          providerId: 'group-qoder',
+          modelId: 'gm51model',
+          entryId: 'group-qoder',
+          displayName: 'GLM-5.2 · Qoder CLI',
+          supportsTools: true,
+          supportedReasoningEfforts: ['off', 'default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+        {
+          providerId: 'group-qoder',
+          modelId: 'ultimate',
+          entryId: 'entry-ultimate',
+          displayName: 'Ultimate · Qoder CLI',
+          supportsTools: true,
+          supportedReasoningEfforts: ['off', 'default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+        {
+          providerId: 'group-offline',
+          modelId: 'model-offline',
+          entryId: 'entry-offline',
+          displayName: 'Offline · Provider X',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default'],
+          defaultReasoningEffort: 'default',
+          available: false,
+        },
+      ],
+    });
+
+    // groupId binding (CLI-written form) resolves exactly.
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off',
+    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off' });
+
+    // Desktop model entry uuid binding maps back to the groupId-keyed entry.
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'entry-ultimate', modelId: 'ultimate', reasoningEffort: 'off',
+    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off' });
+
+    // Unsupported persisted effort clamps to the entry default.
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'entry-ultimate', modelId: 'ultimate', reasoningEffort: 'xhigh',
+    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'default' });
+
+    // Group binding with a drifted model snapshot keeps the provider.
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'group-qoder', modelId: 'unknown-model', reasoningEffort: 'default',
+    })).toEqual({ providerId: 'group-qoder', modelId: 'gm51model', reasoningEffort: 'default' });
+
+    // Unavailable entries and unknown bindings resolve to null, never throw.
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'entry-offline', modelId: 'model-offline', reasoningEffort: 'default',
+    })).toBeNull();
+    expect(resolvePersistedModelSelection(control, {
+      providerId: 'entry-missing', modelId: 'ultimate', reasoningEffort: 'off',
+    })).toBeNull();
   });
 
 });

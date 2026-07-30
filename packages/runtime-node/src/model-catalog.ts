@@ -5,6 +5,12 @@ export type RuntimePermissionPolicy = 'read-only' | 'ask' | 'workspace-write' | 
 export interface RuntimeModelCatalogEntry {
   readonly providerId: string;
   readonly modelId: string;
+  /**
+   * Desktop model entry id (llm-providers.json v2 models[].id). Desktop binds
+   * conversations by this id, so cross-end binding resolution needs it to map
+   * back to the groupId-keyed providerId.
+   */
+  readonly entryId?: string;
   readonly displayName: string;
   readonly contextWindow?: number;
   readonly supportsTools: boolean;

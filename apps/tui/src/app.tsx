@@ -97,6 +97,7 @@ import {
   indexOfCurrentSelectableRow,
   modelPickerGroupCounts,
   modelSelectionLabel,
+  resolvePersistedModelSelection,
   sessionTopbarModelLabel,
   type ModelPickerStage,
   type ModelPickerViewRow,
@@ -1717,8 +1718,14 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     setExternalConversationRevision(0);
     if (!conversation || !resumeTuiConversation(controller, persistence, conversation)) return;
     if (conversation.modelSelection && modelSelection) {
-      modelSelection.setSelection(conversation.modelSelection);
-      setSelectedModel(conversation.modelSelection);
+      // Desktop may bind conversations by the model entry uuid; resolve before
+      // the strict setSelection so an unknown binding keeps the current model
+      // instead of throwing inside this effect.
+      const restored = resolvePersistedModelSelection(modelSelection, conversation.modelSelection);
+      if (restored) {
+        modelSelection.setSelection(restored);
+        setSelectedModel(restored);
+      }
     }
   }, [controller, externalConversationRevision, modelSelection, persistence, snapshot.status]);
   useEffect(() => {
@@ -1781,8 +1788,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       return;
     }
     if (conversation.modelSelection) {
-      modelSelection?.setSelection(conversation.modelSelection);
-      setSelectedModel(conversation.modelSelection);
+      // Same binding resolution as the external-change path: never let a stale
+      // or uuid-shaped Desktop binding crash /resume.
+      const restored = modelSelection
+        ? resolvePersistedModelSelection(modelSelection, conversation.modelSelection)
+        : null;
+      if (restored) {
+        modelSelection?.setSelection(restored);
+        setSelectedModel(restored);
+      } else if (modelSelection) {
+        setCommandNotice('Conversation model is unavailable here; keeping the current model');
+      } else {
+        setSelectedModel(conversation.modelSelection);
+      }
     }
     setExperience((current) => escapeFooter({
       ...current,

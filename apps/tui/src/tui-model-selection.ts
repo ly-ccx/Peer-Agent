@@ -101,6 +101,41 @@ export function createTuiModelSelectionControl(input: {
   };
 }
 
+/**
+ * Resolve a conversation-persisted model binding into a valid catalog selection.
+ *
+ * Desktop conversation meta stores modelProviderId in three shapes (see Desktop
+ * usage-stats resolveProviderRecord): the model entry uuid, the channel groupId,
+ * or the legacy `groupId::model` composite (already stripped by the persistence
+ * reader). The CLI catalog keys entries by groupId only, so uuid-shaped bindings
+ * must map through entryId before the strict setSelection validation. Returns
+ * null when nothing in the catalog can host the binding; callers keep the
+ * current selection instead of throwing.
+ */
+export function resolvePersistedModelSelection(
+  control: TuiModelSelectionControl,
+  persisted: RuntimeModelSelection,
+): RuntimeModelSelection | null {
+  const available = control.catalog.filter((entry) => entry.available);
+  const match =
+    available.find((entry) =>
+      entry.providerId === persisted.providerId && entry.modelId === persisted.modelId)
+    // Desktop binds by the model entry uuid; the matched entry pins both the
+    // groupId-keyed provider and the concrete model.
+    ?? available.find((entry) => entry.entryId === persisted.providerId)
+    // Binding/model drift (group binding with a foreign model snapshot): keep
+    // the provider and fall back to one of its models, Desktop-aligned.
+    ?? available.find((entry) => entry.providerId === persisted.providerId);
+  if (!match) return null;
+  return {
+    providerId: match.providerId,
+    modelId: match.modelId,
+    reasoningEffort: match.supportedReasoningEfforts.includes(persisted.reasoningEffort)
+      ? persisted.reasoningEffort
+      : match.defaultReasoningEffort,
+  };
+}
+
 /** Split "model · provider" labels back into provider/model parts for grouping. */
 export function splitModelDisplayName(displayName: string, fallbackModelId: string): {
   readonly providerName: string;

@@ -101,6 +101,9 @@ export function resolveTuiModelConfig(
     return {
       providerId: provider.credentialId,
       modelId: provider.model,
+      // Desktop conversation meta may bind by the model entry uuid; keep it so
+      // resume paths can map that binding back to this groupId-keyed entry.
+      ...(provider.entryId ? { entryId: provider.entryId } : {}),
       displayName: `${modelDisplay} · ${provider.displayName}`,
       // Prefer Desktop llm-providers.json contextWindow so status bar can
       // render `ctx N%` instead of falling back to `ctx N / ?`.
