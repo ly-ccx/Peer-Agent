@@ -21,8 +21,17 @@ export interface ComposerStatusInput {
   readonly modelLabel: string;
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
+  /**
+   * Desktop TokenUsageDisplay.tokenUsage analogue: conversation lifetime totals.
+   * Prefer this when available so multi-turn cache read accumulates like Desktop.
+   */
+  readonly lifetimeUsage?: ComposerUsageSnapshot;
+  /**
+   * Desktop activeUsage analogue: in-flight turn totals not yet folded into lifetime.
+   * Also used as the sole cumulative source when lifetime is unavailable.
+   */
   readonly usage?: ComposerUsageSnapshot;
-  /** Most recent provider request usage; used only for request-local cache rate. */
+  /** @deprecated Kept for callers; cache hit no longer uses last-request-only usage. */
   readonly lastRequestUsage?: ComposerUsageSnapshot;
   /** ADR 56: provider-backed accounting is the only capacity source. */
   readonly contextAccounting?: ContextAccountingSnapshot;
@@ -88,10 +97,38 @@ export function contextTokensFromUsage(usage: ComposerUsageSnapshot | undefined)
   return safeTokenCount(usage?.inputTokens) + safeTokenCount(usage?.cacheReadTokens);
 }
 
+/** Desktop-aligned: lifetime tokenUsage + in-flight activeUsage. */
+export function combineComposerUsage(
+  lifetime?: ComposerUsageSnapshot,
+  active?: ComposerUsageSnapshot,
+): ComposerUsageSnapshot | undefined {
+  if (!lifetime && !active) return undefined;
+  const inputTokens = safeTokenCount(lifetime?.inputTokens) + safeTokenCount(active?.inputTokens);
+  const cacheReadTokens = safeTokenCount(lifetime?.cacheReadTokens) + safeTokenCount(active?.cacheReadTokens);
+  if (inputTokens <= 0 && cacheReadTokens <= 0) return undefined;
+  return {
+    ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+  };
+}
+
+export function resolveComposerCacheUsage(input: Pick<
+  ComposerStatusInput,
+  'lifetimeUsage' | 'usage' | 'lastRequestUsage'
+>): ComposerUsageSnapshot | undefined {
+  const combined = combineComposerUsage(input.lifetimeUsage, input.usage);
+  if (combined) return combined;
+  // Legacy fallback only when no lifetime/active aggregate exists.
+  return input.lastRequestUsage;
+}
+
 export function cacheHitPercent(usage?: ComposerUsageSnapshot): number | undefined {
-  if (!usage || usage.cacheReadTokens === undefined) return undefined;
+  // Align Desktop TokenUsageDisplay: only show when cacheRead > 0.
+  // Missing / zero cacheRead means "no positive hit to report", not a hard 0% badge.
+  if (!usage) return undefined;
   const inputTokens = safeTokenCount(usage.inputTokens);
   const cacheReadTokens = safeTokenCount(usage.cacheReadTokens);
+  if (cacheReadTokens <= 0) return undefined;
   const totalInputTokens = inputTokens + cacheReadTokens;
   if (totalInputTokens <= 0) return undefined;
   return Math.min(100, Math.max(0, Math.round((cacheReadTokens / totalInputTokens) * 100)));
@@ -157,7 +194,8 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     input.emptyContext,
   );
   const language = languageOption(input.locale ?? 'zh-CN');
-  const cachePercent = cacheHitPercent(input.lastRequestUsage);
+  // Desktop TokenUsageDisplay: (tokenUsage + activeUsage), hide when cacheRead == 0.
+  const cachePercent = cacheHitPercent(resolveComposerCacheUsage(input));
   return {
     workspace: compactWorkspacePath(input.workspaceRoot),
     workspaceShort: workspaceBasename(input.workspaceRoot),

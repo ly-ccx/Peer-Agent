@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   cacheHitPercent,
+  combineComposerUsage,
   compactWorkspacePath,
   contextStatus,
   contextTokensFromUsage,
   contextWindowForModel,
   createComposerStatus,
+  resolveComposerCacheUsage,
   modelIdFromLabel,
   workspaceBasename,
 } from './composer-status.ts';
@@ -54,12 +56,30 @@ describe('composer status', () => {
     expect(modelIdFromLabel('')).toBe('model not configured');
   });
 
-  test('calculates cache hit rate from the most recent request input', () => {
+  test('calculates cache hit rate from cumulative usage and hides zero/unknown', () => {
     expect(cacheHitPercent({ inputTokens: 1_200, cacheReadTokens: 300 })).toBe(20);
     expect(cacheHitPercent({ inputTokens: 0, cacheReadTokens: 1_000 })).toBe(100);
-    expect(cacheHitPercent({ inputTokens: 1_000, cacheReadTokens: 0 })).toBe(0);
+    // Desktop hides cache when cacheRead is 0; CLI must not hard-render 0%.
+    expect(cacheHitPercent({ inputTokens: 1_000, cacheReadTokens: 0 })).toBeUndefined();
     expect(cacheHitPercent({ inputTokens: 1_000 })).toBeUndefined();
     expect(cacheHitPercent({ inputTokens: 0, cacheReadTokens: 0 })).toBeUndefined();
+  });
+
+  test('combines lifetime and in-flight usage like Desktop tokenUsage + activeUsage', () => {
+    expect(combineComposerUsage(
+      { inputTokens: 1_000, cacheReadTokens: 4_000 },
+      { inputTokens: 200, cacheReadTokens: 800 },
+    )).toEqual({ inputTokens: 1_200, cacheReadTokens: 4_800 });
+    expect(cacheHitPercent(combineComposerUsage(
+      { inputTokens: 1_000, cacheReadTokens: 4_000 },
+      { inputTokens: 200, cacheReadTokens: 800 },
+    ))).toBe(80);
+    // Prefer lifetime+active over a last-request miss.
+    expect(resolveComposerCacheUsage({
+      lifetimeUsage: { inputTokens: 1_000, cacheReadTokens: 4_000 },
+      usage: { inputTokens: 200, cacheReadTokens: 800 },
+      lastRequestUsage: { inputTokens: 500, cacheReadTokens: 0 },
+    })).toEqual({ inputTokens: 1_200, cacheReadTokens: 4_800 });
   });
 
   test('uses the repository model-catalog window for supported GPT models', () => {
@@ -145,8 +165,11 @@ describe('composer status', () => {
       workspaceRoot: '/Users/alice/Projects/peer_agent',
       mode: 'chat',
       modelLabel: 'gpt-5.6-sol · ChatGPT',
-      usage: { inputTokens: 0 },
-      lastRequestUsage: { inputTokens: 1_200, cacheReadTokens: 300 },
+      // Desktop-aligned: lifetime + in-flight active usage.
+      lifetimeUsage: { inputTokens: 1_000, cacheReadTokens: 4_000 },
+      usage: { inputTokens: 200, cacheReadTokens: 800 },
+      // last-request-only miss must not override cumulative hit.
+      lastRequestUsage: { inputTokens: 500, cacheReadTokens: 0 },
     })).toMatchObject({
       workspace: '~/Projects/peer_agent',
       workspaceShort: 'peer_agent',
@@ -159,10 +182,19 @@ describe('composer status', () => {
       model: 'gpt-5.6-sol',
       effort: 'auto',
       reasoning: 'reasoning auto',
-      cache: 'cache 20%',
-      cachePercent: 20,
+      cache: 'cache 80%',
+      cachePercent: 80,
       context: 'context ?',
     });
+
+    // Zero cumulative cacheRead hides the badge (no hard cache 0%).
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'grok-4.5',
+      usage: { inputTokens: 2_000, cacheReadTokens: 0 },
+      lastRequestUsage: { inputTokens: 2_000, cacheReadTokens: 0 },
+    }).cache).toBeUndefined();
 
     expect(createComposerStatus({
       workspaceRoot: '/tmp/project',

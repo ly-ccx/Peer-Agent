@@ -76,6 +76,14 @@ interface ConversationStore {
 export interface TuiConversationPersistence {
   getConversationId(): string | undefined;
   ensureConversation(): string;
+  /**
+   * Desktop tokenUsage analogue: durable conversation lifetime totals.
+   * Does not include the in-flight turn until that turn is recorded.
+   */
+  getLifetimeUsage(): {
+    readonly inputTokens?: number;
+    readonly cacheReadTokens?: number;
+  } | undefined;
   listResumable(): readonly TuiConversationSummary[];
   loadConversation(id: string): TuiConversationRestore | null;
   resumeConversation(conversation: TuiConversationRestore): void;
@@ -580,6 +588,22 @@ export function createTuiConversationPersistence(options: {
 
   return {
     getConversationId: () => conversationId,
+    getLifetimeUsage() {
+      if (!conversationId) return undefined;
+      const meta = store.getConversation(conversationId);
+      const lifetime = (meta as { lifetimeUsage?: {
+        inputTokens?: number;
+        cacheReadTokens?: number;
+      } } | null)?.lifetimeUsage;
+      if (!lifetime) return undefined;
+      const inputTokens = Number(lifetime.inputTokens) || 0;
+      const cacheReadTokens = Number(lifetime.cacheReadTokens) || 0;
+      if (inputTokens <= 0 && cacheReadTokens <= 0) return undefined;
+      return {
+        ...(inputTokens > 0 ? { inputTokens } : {}),
+        ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+      };
+    },
     ensureConversation,
     listResumable() {
       try {

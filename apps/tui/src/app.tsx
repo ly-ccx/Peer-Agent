@@ -1596,6 +1596,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     (entry) => entry.providerId === selectedModel?.providerId
       && entry.modelId === selectedModel?.modelId,
   )?.contextWindow;
+  // Desktop TokenUsageDisplay: lifetime tokenUsage + in-flight activeUsage.
+  // After a turn completes, TUI records that turn into lifetime and clears the
+  // controller's active usage on the next send; while idle, only lifetime is used
+  // so we do not double-count the just-recorded turn.
+  const activeUsage = snapshot.status === 'idle' ? undefined : snapshot.usage;
   const composerStatus = createComposerStatus({
     workspaceRoot: host.workspaceRoot,
     mode: snapshot.mode,
@@ -1603,7 +1608,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     locale,
     modelLabel: selectedModelLabel,
     reasoningEffort: selectedModel?.reasoningEffort,
-    usage: snapshot.usage,
+    lifetimeUsage: persistence.getLifetimeUsage(),
+    usage: activeUsage,
     lastRequestUsage: snapshot.lastRequestUsage,
     contextWindow,
     contextAccounting: snapshot.contextAccounting,
