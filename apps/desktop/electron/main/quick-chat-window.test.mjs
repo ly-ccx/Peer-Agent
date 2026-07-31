@@ -8,7 +8,7 @@ import {
   resolveQuickChatPopoverWindowBounds,
 } from './quick-chat-window.mjs';
 
-function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 104 }) {
+function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 64 }) {
   const handlers = new Map();
   const calls = [];
   let destroyed = false;
@@ -42,6 +42,29 @@ function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 
   };
 }
 
+
+function createFakeMenu() {
+  const calls = [];
+  let lastTemplate = null;
+  let lastPopup = null;
+  return {
+    calls,
+    get lastTemplate() { return lastTemplate; },
+    get lastPopup() { return lastPopup; },
+    buildFromTemplate: (template) => {
+      lastTemplate = template;
+      calls.push(['buildFromTemplate', template]);
+      return {
+        popup: (opts) => {
+          lastPopup = opts;
+          calls.push(['popup', opts]);
+          // Tests can invoke selection via template click.
+        },
+      };
+    },
+  };
+}
+
 const screen = {
   getCursorScreenPoint: () => ({ x: 1200, y: 200 }),
   getAllDisplays: () => [
@@ -58,7 +81,7 @@ test('positions the floating window on the display containing the cursor', () =>
     displays: screen.getAllDisplays(),
   }), {
     width: 720,
-    height: 104,
+    height: 64,
     x: 1000 + Math.round((1200 - 720) / 2),
     y: Math.round(20 + Math.max(24, 840 * 0.16)),
   });
@@ -82,9 +105,9 @@ test('legacy expanded bounds only grow downward without moving top edge', () => 
     kind: 'model',
     items: [{ value: 'a', label: 'Model A' }],
   });
-  const expectedHeight = Math.max(104, 72 + 24 + size.height);
+  const expectedHeight = Math.max(80, 72 + 24 + size.height);
   assert.deepEqual(resolveQuickChatExpandedBounds(
-    { x: 100, y: 100, width: 720, height: 104 },
+    { x: 100, y: 100, width: 720, height: 64 },
     { x: 200, y: 72, width: 100, height: 24 },
     { x: 0, y: 0, width: 1000, height: 760 },
     size,
@@ -94,18 +117,18 @@ test('legacy expanded bounds only grow downward without moving top edge', () => 
 test('independent popover window bounds sit under the bar and can flip above', () => {
   const size = { width: 240, height: 120 };
   const below = resolveQuickChatPopoverWindowBounds(
-    { x: 100, y: 100, width: 720, height: 104 },
+    { x: 100, y: 100, width: 720, height: 64 },
     { x: 20, y: 70, width: 80, height: 24 },
     { x: 0, y: 0, width: 1440, height: 900 },
     size,
     'workspace',
   );
-  assert.equal(below.y, 204);
+  assert.equal(below.y, 164);
   assert.equal(below.width, 240);
   assert.equal(below.height, 120);
 
   const above = resolveQuickChatPopoverWindowBounds(
-    { x: 100, y: 780, width: 720, height: 104 },
+    { x: 100, y: 780, width: 720, height: 64 },
     { x: 20, y: 70, width: 80, height: 24 },
     { x: 0, y: 0, width: 1440, height: 900 },
     size,
@@ -143,10 +166,11 @@ test('configures always-on-top once at create, not on every show', () => {
   assert.equal(window.calls.filter(([name]) => name === 'show').length, 1);
 });
 
-test('shows an independent popover window without expanding the bar', () => {
+test('shows native Menu for simple enums without creating a popover window', () => {
   const parent = createFakeWindow();
   const popover = createFakeWindow({ x: 0, y: 0, width: 200, height: 100 });
   let popoverCreations = 0;
+  const menu = createFakeMenu();
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
@@ -154,6 +178,7 @@ test('shows an independent popover window without expanding the bar', () => {
       popoverCreations += 1;
       return popover;
     },
+    Menu: menu,
   });
 
   controller.show();
@@ -161,27 +186,61 @@ test('shows an independent popover window without expanding the bar', () => {
     kind: 'model',
     selectedValue: 'model-a',
     anchorRect: { x: 180, y: 72, width: 100, height: 24 },
-    items: [{ value: 'model-a', label: 'Model A' }],
+    items: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }],
   }), true);
 
-  assert.equal(popoverCreations, 1);
-  assert.equal(parent.getBounds().height, 104);
-  assert.equal(parent.getBounds().width, 720);
-  assert.equal(popover.isVisible(), true);
-  assert.equal(popover.getBounds().height > 0, true);
-  assert.equal(
-    popover.calls.some(([name, channel]) => name === 'send' && channel === 'quick-chat-popover:state'),
-    true,
+  assert.equal(popoverCreations, 0);
+  assert.equal(parent.getBounds().height, 64);
+  assert.equal(popover.isVisible(), false);
+  assert.equal(menu.calls.some(([name]) => name === 'buildFromTemplate'), true);
+  assert.equal(menu.calls.some(([name]) => name === 'popup'), true);
+  assert.equal(menu.lastTemplate?.length, 2);
+  assert.equal(menu.lastTemplate?.[0]?.checked, true);
+  // Menu.popup coords are window-local (not screen absolute).
+  assert.deepEqual(
+    { x: menu.lastPopup?.x, y: menu.lastPopup?.y },
+    { x: 180, y: 96 },
   );
 });
 
-test('shows one independent popover and sends a validated selection to the main window', () => {
+test('shows native Menu for effort options without creating a popover window', () => {
   const parent = createFakeWindow();
   const popover = createFakeWindow({ x: 0, y: 0, width: 200, height: 100 });
+  let popoverCreations = 0;
+  const menu = createFakeMenu();
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
-    createPopoverWindow: () => popover,
+    createPopoverWindow: () => {
+      popoverCreations += 1;
+      return popover;
+    },
+    Menu: menu,
+  });
+
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'effort',
+    selectedValue: 'high',
+    anchorRect: { x: 180, y: 72, width: 100, height: 24 },
+    items: [{ value: 'high', label: 'High' }, { value: 'low', label: 'Low' }],
+  }), true);
+
+  assert.equal(popoverCreations, 0);
+  assert.equal(parent.getBounds().height, 64);
+  assert.equal(popover.isVisible(), false);
+  assert.equal(menu.lastTemplate?.length, 2);
+  assert.equal(menu.lastTemplate?.[0]?.label, 'High');
+  assert.equal(menu.lastTemplate?.[0]?.checked, true);
+});
+
+test('native Menu selection validates and sends to the main window', () => {
+  const parent = createFakeWindow();
+  const menu = createFakeMenu();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+    Menu: menu,
   });
   controller.show();
   assert.equal(controller.showPopover({
@@ -195,92 +254,150 @@ test('shows one independent popover and sends a validated selection to the main 
   }), true);
   assert.equal(controller.selectPopoverValue('/missing'), false);
   assert.equal(controller.selectPopoverValue('/two'), true);
-  assert.equal(popover.isVisible(), false);
-  assert.equal(parent.getBounds().height, 104);
+  assert.equal(parent.getBounds().height, 64);
   assert.deepEqual(
     parent.calls.filter(([name, channel]) => name === 'send' && channel === 'quick-chat:popover-selected').at(-1)?.slice(1),
     ['quick-chat:popover-selected', { kind: 'workspace', value: '/two' }],
   );
 });
 
-test('keeps bar content height while independent popover is open', () => {
+test('effort menu selection validates and sends to the main window', () => {
   const parent = createFakeWindow();
-  const popover = createFakeWindow({ x: 0, y: 0, width: 200, height: 100 });
+  const menu = createFakeMenu();
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
-    createPopoverWindow: () => popover,
+    Menu: menu,
+  });
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'effort',
+    selectedValue: 'high',
+    anchorRect: { x: 12, y: 72, width: 120, height: 24 },
+    items: [
+      { value: 'high', label: 'High' },
+      { value: 'low', label: 'Low' },
+    ],
+  }), true);
+  assert.equal(controller.selectPopoverValue('missing'), false);
+  assert.equal(controller.selectPopoverValue('low'), true);
+  assert.equal(parent.getBounds().height, 64);
+  assert.deepEqual(
+    parent.calls.filter(([name, channel]) => name === 'send' && channel === 'quick-chat:popover-selected').at(-1)?.slice(1),
+    ['quick-chat:popover-selected', { kind: 'effort', value: 'low' }],
+  );
+});
+
+test('groups model items into provider submenus', () => {
+  const parent = createFakeWindow();
+  const menu = createFakeMenu();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+    Menu: menu,
+  });
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'model',
+    selectedValue: 'm2',
+    anchorRect: { x: 10, y: 10, width: 40, height: 20 },
+    items: [
+      { value: 'm1', label: 'gpt-a', group: 'OpenAI' },
+      { value: 'm2', label: 'gpt-b', group: 'OpenAI' },
+      { value: 'm3', label: 'claude-a', group: 'Anthropic' },
+      { value: 'flat', label: 'standalone' },
+    ],
+  }), true);
+
+  assert.equal(menu.lastTemplate?.length, 3);
+  assert.equal(menu.lastTemplate?.[0]?.label, 'OpenAI');
+  assert.equal(Array.isArray(menu.lastTemplate?.[0]?.submenu), true);
+  assert.equal(menu.lastTemplate?.[0]?.submenu?.length, 2);
+  assert.equal(menu.lastTemplate?.[0]?.submenu?.[1]?.label, 'gpt-b');
+  assert.equal(menu.lastTemplate?.[0]?.submenu?.[1]?.checked, true);
+  assert.equal(menu.lastTemplate?.[1]?.label, 'Anthropic');
+  assert.equal(menu.lastTemplate?.[1]?.submenu?.length, 1);
+  assert.equal(menu.lastTemplate?.[2]?.label, 'standalone');
+  assert.equal(menu.lastTemplate?.[2]?.type, 'checkbox');
+});
+
+test('keeps bar content height while native menu is open', () => {
+  const parent = createFakeWindow();
+  const menu = createFakeMenu();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+    Menu: menu,
   });
   controller.show();
   controller.setContentHeight(160);
   assert.equal(parent.getBounds().height, 160);
   controller.showPopover({
-    kind: 'model',
-    selectedValue: 'model-a',
+    kind: 'effort',
+    selectedValue: 'high',
     anchorRect: { x: 180, y: 72, width: 100, height: 24 },
-    items: [{ value: 'model-a', label: 'Model A' }],
+    items: [{ value: 'high', label: 'High' }],
   });
   assert.equal(parent.getBounds().height, 160);
   controller.hidePopover({ restoreFocus: true });
   assert.equal(parent.isVisible(), true);
   assert.equal(parent.getBounds().height, 160);
-  assert.equal(popover.isVisible(), false);
 });
 
-test('keeps the main window visible while closing the independent popover', () => {
+test('keeps the main window visible while closing the native menu state', () => {
   const parent = createFakeWindow();
-  const popover = createFakeWindow({ x: 0, y: 0, width: 200, height: 100 });
+  const menu = createFakeMenu();
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
-    createPopoverWindow: () => popover,
+    Menu: menu,
   });
   controller.show();
-  controller.showPopover({ kind: 'workspace', selectedValue: '/one', anchorRect: {}, items: [{ value: '/one', label: 'one' }] });
+  controller.showPopover({ kind: 'effort', selectedValue: 'high', anchorRect: {}, items: [{ value: 'high', label: 'High' }] });
   controller.hidePopover({ restoreFocus: true });
   assert.equal(parent.isVisible(), true);
-  assert.equal(parent.getBounds().height, 104);
+  assert.equal(parent.getBounds().height, 64);
 });
 
 test('restores the design width from a compressed native window across every state change', () => {
-  const parent = createFakeWindow({ x: 100, y: 100, width: 208, height: 104 });
-  const popover = createFakeWindow({ x: 0, y: 0, width: 200, height: 100 });
+  const parent = createFakeWindow({ x: 100, y: 100, width: 208, height: 64 });
+  const menu = createFakeMenu();
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
-    createPopoverWindow: () => popover,
+    Menu: menu,
   });
 
   controller.show();
   const shownBounds = parent.getBounds();
   assert.equal(shownBounds.width, 720);
-  assert.equal(shownBounds.height, 104);
+  assert.equal(shownBounds.height, 64);
 
   controller.showPopover({
-    kind: 'model',
-    selectedValue: 'model-a',
+    kind: 'effort',
+    selectedValue: 'high',
     anchorRect: { x: 180, y: 72, width: 100, height: 24 },
-    items: [{ value: 'model-a', label: 'Model A' }],
+    items: [{ value: 'high', label: 'High' }],
   });
   assert.equal(parent.getBounds().width, 720);
-  assert.equal(parent.getBounds().height, 104);
+  assert.equal(parent.getBounds().height, 64);
 
   controller.hidePopover();
   assert.deepEqual(parent.getBounds(), {
     x: shownBounds.x,
     y: shownBounds.y,
     width: 720,
-    height: 104,
+    height: 64,
   });
 
   controller.setTaskCardVisible(true);
   assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 334 });
   controller.setTaskCardVisible(false);
-  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 64 });
 });
 
 test('content height drives window growth while keeping the top edge fixed', () => {
-  const parent = createFakeWindow({ x: 100, y: 100, width: 720, height: 104 });
+  const parent = createFakeWindow({ x: 100, y: 100, width: 720, height: 64 });
   const controller = createQuickChatWindowController({ screen, createWindow: () => parent });
   controller.show();
   const shownBounds = parent.getBounds();
@@ -318,3 +435,66 @@ test('recreates the singleton after it is closed', () => {
   assert.equal(controller.show(), windows[1]);
   assert.equal(index, 2);
 });
+
+test('keeps bar visible while native Menu is open even if bar blurs', () => {
+  const parent = createFakeWindow();
+  const menu = createFakeMenu();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+    Menu: menu,
+  });
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'mode',
+    selectedValue: 'agent',
+    anchorRect: { x: 20, y: 70, width: 80, height: 24 },
+    items: [{ value: 'agent', label: 'Agent' }, { value: 'chat', label: 'Chat' }],
+  }), true);
+  parent.emit('blur');
+  assert.equal(parent.isVisible(), true);
+});
+
+test('menuSelection survives popup callback after click', () => {
+  const parent = createFakeWindow();
+  const calls = [];
+  let lastTemplate = null;
+  const menu = {
+    calls,
+    buildFromTemplate: (template) => {
+      lastTemplate = template;
+      calls.push(['buildFromTemplate', template]);
+      return {
+        popup: (opts) => {
+          calls.push(['popup', opts]);
+          // Click second item, then close callback (common macOS order variants).
+          template[1]?.click?.();
+          opts?.callback?.();
+        },
+      };
+    },
+  };
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+    Menu: menu,
+  });
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'mode',
+    selectedValue: 'agent',
+    anchorRect: { x: 10, y: 10, width: 40, height: 20 },
+    items: [
+      { value: 'agent', label: 'Agent' },
+      { value: 'chat', label: 'Chat' },
+    ],
+  }), true);
+  assert.equal(lastTemplate?.length, 2);
+  const selected = parent.calls.filter(([name, channel]) => name === 'send' && channel === 'quick-chat:popover-selected');
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected[0].slice(1), ['quick-chat:popover-selected', { kind: 'mode', value: 'chat' }]);
+  // Dismiss closed event should not fire after a successful selection.
+  const closed = parent.calls.filter(([name, channel]) => name === 'send' && channel === 'quick-chat:popover-closed');
+  assert.equal(closed.length, 0);
+});
+

@@ -267,13 +267,13 @@ export function modePickerValue(mode: ChatMode): 'chat' | 'plan' {
 export function modeTitle(mode: ChatMode, isZh: boolean): string {
   if (mode === 'plan') {
     return isZh
-      ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
-      : 'Plan before execute: co-author a structured plan, then execute after approval';
+      ? '先规划，批准后再执行'
+      : 'Plan first, then execute after approval';
   }
   // Agent（chat / legacy goal）：自适应规划 + 自驱执行
   return isZh
-    ? '默认 Agent：按任务深度自动规划并执行（L0–L3），高风险或需决策时再打断你；旧 goal 会话兼容为同一自驱内核'
-    : 'Default Agent: adaptively plan and execute (L0–L3); interrupt only for high-risk or decisions; legacy goal uses the same self-driven kernel';
+    ? '自动规划并执行，高风险时再打断'
+    : 'Plan and execute automatically; interrupt only for high-risk decisions';
 }
 
 export function effortLabel(level: EffortLevel, isZh: boolean): string {

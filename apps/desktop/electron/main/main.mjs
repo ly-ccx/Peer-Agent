@@ -161,9 +161,19 @@ function getDesktopIconPath() {
   return desktopIconPath && existsSync(desktopIconPath) ? desktopIconPath : undefined;
 }
 
+function applyNativeThemeSource(appearance = settingsStore.getAll().appearance) {
+  // Keep Electron/nativeTheme (and thus vibrancy materials) aligned with app appearance.
+  // Without this, Quick Chat vibrancy can stay system-light while renderer is dark (or vice versa).
+  const mode = appearance?.mode;
+  if (mode === 'dark') nativeTheme.themeSource = 'dark';
+  else if (mode === 'light') nativeTheme.themeSource = 'light';
+  else nativeTheme.themeSource = 'system';
+}
+
 function setDockIcon(appearance = settingsStore.getAll().appearance) {
   // app.dock.setIcon renders a PNG as-is in both development and packaged apps,
   // so the shipped theme variants already include their macOS alpha mask.
+  applyNativeThemeSource(appearance);
   const followsSystem = appearance?.mode === 'system' || appearance?.mode == null;
   const useDarkIcon = appearance?.mode === 'dark'
     || (followsSystem && nativeTheme.shouldUseDarkColors);
@@ -1176,7 +1186,8 @@ function createQuickChatWindow() {
     transparent: true,
     ...(isMac
       ? {
-          vibrancy: 'popover',
+          // HUD/popover material reads closer to native floating capsules.
+          vibrancy: 'hud',
           visualEffectState: 'active',
         }
       : {}),
@@ -1240,6 +1251,7 @@ const quickChatWindowController = createQuickChatWindowController({
   screen,
   createWindow: createQuickChatWindow,
   createPopoverWindow: createQuickChatPopoverWindow,
+  Menu,
 });
 
 // Appshots P0a (ADR 59): user-gesture-only capture; never exposed as a model tool.

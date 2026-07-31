@@ -81,6 +81,17 @@ function saveSettings(settings: AppearanceSettings) {
   void window.peerAgent?.updateSettings({ appearance: settings });
 }
 
+function appearanceEqual(a: AppearanceSettings, b: AppearanceSettings): boolean {
+  return (
+    a.mode === b.mode
+    && a.palette === b.palette
+    && a.density === b.density
+    && a.fontScale === b.fontScale
+    && a.codeFontSize === b.codeFontSize
+    && a.diffMarkerMode === b.diffMarkerMode
+  );
+}
+
 export function AppearanceProvider({
   children,
 }: {
@@ -90,22 +101,44 @@ export function AppearanceProvider({
   const [systemScheme, setSystemScheme] = useState<AppearanceScheme>(() => readSystemScheme());
   const activeScheme: AppearanceScheme = settings.mode === 'system' ? systemScheme : settings.mode;
 
+  // Apply tokens only. Never save here — updateSettings broadcasts appearance:changed,
+  // which would re-enter setSettings and thrash light/dark (especially mode=system).
   useEffect(() => {
     applyAppearance(settings, activeScheme);
-    saveSettings(settings);
   }, [activeScheme, settings]);
+
+  // Main window / settings may change appearance while Quick Chat is open.
+  // Main process broadcasts `appearance:changed` to all windows.
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.peerAgent : undefined;
+    if (!api?.onAppearanceChanged) return undefined;
+    return api.onAppearanceChanged((next) => {
+      if (!next || typeof next !== 'object') return;
+      const sanitized = sanitizeSettings(next);
+      setSettings((current) => (appearanceEqual(current, sanitized) ? current : sanitized));
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => setSystemScheme(media.matches ? 'dark' : 'light');
+    const onChange = () => {
+      const next = media.matches ? 'dark' : 'light';
+      setSystemScheme((current) => (current === next ? current : next));
+    };
     onChange();
     media.addEventListener('change', onChange);
     return () => media.removeEventListener('change', onChange);
   }, []);
 
   const update = useCallback((patch: Partial<AppearanceSettings>) => {
-    setSettings((current) => sanitizeSettings({ ...current, ...patch }));
+    setSettings((current) => {
+      const next = sanitizeSettings({ ...current, ...patch });
+      if (appearanceEqual(current, next)) return current;
+      // User-initiated only: persist + broadcast via main process.
+      saveSettings(next);
+      return next;
+    });
   }, []);
 
   const setMode = useCallback((mode: AppearanceMode) => update({ mode }), [update]);
@@ -114,7 +147,13 @@ export function AppearanceProvider({
   const setFontScale = useCallback((fontScale: AppearanceFontScale) => update({ fontScale }), [update]);
   const setCodeFontSize = useCallback((size: number) => update({ codeFontSize: size }), [update]);
   const setDiffMarkerMode = useCallback((mode: DiffMarkerMode) => update({ diffMarkerMode: mode }), [update]);
-  const reset = useCallback(() => setSettings(DEFAULT_APPEARANCE_SETTINGS), []);
+  const reset = useCallback(() => {
+    setSettings((current) => {
+      if (appearanceEqual(current, DEFAULT_APPEARANCE_SETTINGS)) return current;
+      saveSettings(DEFAULT_APPEARANCE_SETTINGS);
+      return DEFAULT_APPEARANCE_SETTINGS;
+    });
+  }, []);
 
   const value = useMemo<AppearanceContextValue>(
     () => ({

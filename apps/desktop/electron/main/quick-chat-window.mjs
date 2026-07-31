@@ -1,4 +1,5 @@
-const DEFAULT_SIZE = Object.freeze({ width: 720, height: 104 });
+/** Default = true single-line capsule (input + meta, no nested card). Grows with content. */
+const DEFAULT_SIZE = Object.freeze({ width: 720, height: 64 });
 const TASK_SIZE = Object.freeze({ width: 720, height: 334 });
 const MAX_CONTENT_HEIGHT = 480;
 const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 360 });
@@ -9,6 +10,14 @@ const POPOVER_VIEWPORT_INSET = 8;
 const POPOVER_CHROME_HEIGHT = 14;
 const RIGHT_ALIGNED_KINDS = new Set(['model', 'effort']);
 const POPOVER_KINDS = new Set(['workspace', 'model', 'effort', 'mode', 'access']);
+/**
+ * Enums / option lists → Electron native Menu.popup (no BrowserWindow chrome).
+ * effort is a discrete option list (not a slider) and belongs here too.
+ * model uses optional item.group for provider submenus.
+ */
+const MENU_KINDS = new Set(['workspace', 'model', 'mode', 'access', 'effort']);
+/** Reserved for future rich window popovers; currently empty. */
+const WINDOW_POPOVER_KINDS = new Set();
 
 export function clampQuickChatContentHeight(height, { hasTaskCard = false } = {}) {
   const fallback = hasTaskCard ? TASK_SIZE.height : DEFAULT_SIZE.height;
@@ -141,10 +150,20 @@ export function createQuickChatWindowController({
   screen,
   createWindow,
   createPopoverWindow = null,
+  /** Electron Menu module (or test fake). Required for MENU_KINDS. */
+  Menu = null,
 }) {
   let quickChatWindow = null;
   let popoverWindow = null;
   let popoverState = null;
+  /** True while a native Menu.popup is open (bar blur must not hide the bar). */
+  let nativeMenuOpen = false;
+  /**
+   * Menu.popup callback vs item click ordering is platform-dependent.
+   * Capture a successful selection here so finish() does not wipe it as "dismiss".
+   * Shape: { kind, value } | null
+   */
+  let menuSelection = null;
   let taskCardVisible = false;
   let contentHeight = DEFAULT_SIZE.height;
 
@@ -219,6 +238,8 @@ export function createQuickChatWindowController({
     quickChatWindow.on('blur', () => {
       if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
       if (quickChatWindow.webContents?.isDevToolsOpened?.()) return;
+      // Native Menu.popup steals focus on some platforms; keep the bar up.
+      if (nativeMenuOpen) return;
       // Keep bar open when focus moved into the independent popover.
       if (popoverWindow && !popoverWindow.isDestroyed()) {
         const popFocused = typeof popoverWindow.isFocused === 'function' && popoverWindow.isFocused();
@@ -273,17 +294,131 @@ export function createQuickChatWindowController({
     return quickChatWindow;
   }
 
-  function showPopover(nextState) {
-    if (!nextState || !POPOVER_KINDS.has(nextState.kind) || !Array.isArray(nextState.items)) {
+  function menuPopupPosition(_win, anchorRect) {
+    // Renderer sends viewport-local getBoundingClientRect() values.
+    // Electron Menu.popup({ window }) uses WINDOW-local coords — do NOT add screen origin.
+    // Adding barBounds.x/y previously pushed menus far away on multi-monitor / centered bars.
+    const anchor = anchorRect && typeof anchorRect === 'object'
+      ? {
+          x: Number(anchorRect.x) || 0,
+          y: Number(anchorRect.y) || 0,
+          width: Number(anchorRect.width) || 0,
+          height: Number(anchorRect.height) || 0,
+        }
+      : { x: 0, y: 0, width: 0, height: 0 };
+    return {
+      x: Math.max(0, Math.round(anchor.x)),
+      y: Math.max(0, Math.round(anchor.y + Math.max(anchor.height, 0))),
+    };
+  }
+
+  function showNativeMenu(nextState, win) {
+    if (!Menu || typeof Menu.buildFromTemplate !== 'function') {
       return false;
     }
-    const win = ensureWindow();
-    if (!win || win.isDestroyed()) return false;
+    // Close any Electron window popover first.
+    if (popoverWindow && !popoverWindow.isDestroyed()
+      && (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible())) {
+      popoverWindow.hide();
+    }
 
+    popoverState = {
+      kind: nextState.kind,
+      items: nextState.items,
+      selectedValue: typeof nextState.selectedValue === 'string' ? nextState.selectedValue : '',
+      anchorRect: nextState.anchorRect ?? null,
+      presentation: 'menu',
+    };
+
+    const selectedValue = popoverState.selectedValue;
+    const leafItem = (item) => {
+      const value = String(item?.value ?? '');
+      const label = String(item?.label ?? value);
+      // For grouped model menus, label is already the model name; skip detail in leaf.
+      const detail = !item?.group && typeof item?.detail === 'string' && item.detail.trim()
+        ? item.detail.trim()
+        : '';
+      return {
+        label: detail ? `${label}  —  ${detail}` : label,
+        type: 'checkbox',
+        checked: value === selectedValue,
+        click: () => {
+          selectPopoverValue(value);
+        },
+      };
+    };
+
+    // Group items that share `group` into submenus (provider → models).
+    // Ungrouped items stay as top-level entries, preserving input order.
+    const template = [];
+    const groupIndex = new Map();
+    for (const item of nextState.items) {
+      const group = typeof item?.group === 'string' ? item.group.trim() : '';
+      if (!group) {
+        template.push(leafItem(item));
+        continue;
+      }
+      let entry = groupIndex.get(group);
+      if (!entry) {
+        entry = { label: group, submenu: [] };
+        groupIndex.set(group, entry);
+        template.push(entry);
+      }
+      entry.submenu.push(leafItem(item));
+    }
+
+    if (!template.length) {
+      popoverState = null;
+      return false;
+    }
+
+    const menu = Menu.buildFromTemplate(template);
+    const point = menuPopupPosition(win, nextState.anchorRect);
+    nativeMenuOpen = true;
+    menuSelection = null;
+    resizeBarForContent();
+
+    const finish = () => {
+      nativeMenuOpen = false;
+      const pending = menuSelection;
+      menuSelection = null;
+      // Selection path already notified bar; only clear residual menu state.
+      if (pending) {
+        popoverState = null;
+        if (win && !win.isDestroyed() && typeof win.focus === 'function') win.focus();
+        return;
+      }
+      // Dismissed without selecting: clear menu state and notify bar.
+      if (popoverState?.presentation === 'menu') {
+        popoverState = null;
+        if (win && !win.isDestroyed()) {
+          win.webContents?.send?.('quick-chat:popover-closed');
+          if (typeof win.focus === 'function') win.focus();
+        }
+      }
+    };
+
+    try {
+      // Electron Menu.popup: callback fires when menu is closed.
+      menu.popup({
+        window: win,
+        x: point.x,
+        y: point.y,
+        callback: finish,
+      });
+    } catch {
+      finish();
+      return false;
+    }
+    return true;
+  }
+
+  function showWindowPopover(nextState, win) {
     // Toggle same kind closed (bar trigger clicked again).
     if (
       popoverState
       && popoverState.kind === nextState.kind
+      && popoverState.presentation !== 'menu'
       && popoverWindow
       && !popoverWindow.isDestroyed()
       && (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible())
@@ -297,6 +432,7 @@ export function createQuickChatWindowController({
       items: nextState.items,
       selectedValue: typeof nextState.selectedValue === 'string' ? nextState.selectedValue : '',
       anchorRect: nextState.anchorRect ?? null,
+      presentation: 'window',
     };
 
     // Without an independent popover factory, refuse rather than expand the bar.
@@ -339,9 +475,43 @@ export function createQuickChatWindowController({
     return true;
   }
 
+  function showPopover(nextState) {
+    if (!nextState || !POPOVER_KINDS.has(nextState.kind) || !Array.isArray(nextState.items)) {
+      return false;
+    }
+    const win = ensureWindow();
+    if (!win || win.isDestroyed()) return false;
+
+    // Simple enums → native Menu (zero clip, platform chrome).
+    if (MENU_KINDS.has(nextState.kind)) {
+      return showNativeMenu(nextState, win);
+    }
+    // Rich content (effort slider, etc.) → independent Electron window.
+    if (WINDOW_POPOVER_KINDS.has(nextState.kind) || !MENU_KINDS.has(nextState.kind)) {
+      return showWindowPopover(nextState, win);
+    }
+    return false;
+  }
+
   function selectPopoverValue(value) {
     if (!popoverState || !popoverState.items.some((item) => item?.value === value)) return false;
     const kind = popoverState.kind;
+    const presentation = popoverState.presentation;
+    // Menu click already closes the OS menu; mark selection so finish() won't treat as dismiss.
+    if (presentation === 'menu') {
+      menuSelection = { kind, value };
+      popoverState = null;
+      nativeMenuOpen = false;
+      const bar = quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
+      if (bar) {
+        bar.webContents?.send?.('quick-chat:popover-selected', { kind, value });
+        // Focus after a tick so Menu teardown doesn't steal it back empty-handed.
+        setTimeout(() => {
+          if (bar && !bar.isDestroyed() && typeof bar.focus === 'function') bar.focus();
+        }, 0);
+      }
+      return true;
+    }
     hidePopover({ restoreFocus: true });
     quickChatWindow?.webContents?.send?.('quick-chat:popover-selected', { kind, value });
     return true;
@@ -350,6 +520,8 @@ export function createQuickChatWindowController({
   function show() {
     const win = ensureWindow();
     popoverState = null;
+    nativeMenuOpen = false;
+    menuSelection = null;
     if (popoverWindow && !popoverWindow.isDestroyed()) popoverWindow.hide();
     const bounds = resolveQuickChatBounds({
       cursorPoint: screen.getCursorScreenPoint(),
@@ -378,6 +550,8 @@ export function createQuickChatWindowController({
   }
 
   function hide() {
+    nativeMenuOpen = false;
+    menuSelection = null;
     hidePopover();
     if (quickChatWindow && !quickChatWindow.isDestroyed()) quickChatWindow.hide();
   }
@@ -429,4 +603,11 @@ export function createQuickChatWindowController({
   };
 }
 
-export { DEFAULT_SIZE, MAX_CONTENT_HEIGHT, POPOVER_MAX_SIZE, TASK_SIZE };
+export {
+  DEFAULT_SIZE,
+  MAX_CONTENT_HEIGHT,
+  MENU_KINDS,
+  POPOVER_MAX_SIZE,
+  TASK_SIZE,
+  WINDOW_POPOVER_KINDS,
+};

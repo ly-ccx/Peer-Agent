@@ -140,20 +140,18 @@ export function QuickChatWindow() {
 
   const openPopover = popoverState?.kind ?? null;
 
-  useEffect(() => clientApi.onQuickChatPopoverClosed(() => {
-    setPopoverState(null);
-    inputRef.current?.focus();
-  }), []);
-
   const selectPopoverValue = useCallback((kind: QuickChatPopoverKind, value: string) => {
     if (kind === 'workspace' && workspaces.some((workspace) => workspace.path === value)) {
       setWorkspacePath(value);
+      // Keep main app workspace in sync when possible.
+      void clientApi.workspaceSetActive?.({ path: value }).catch(() => {});
     }
     if (kind === 'model') {
       const provider = providers.find((item) => item.id === value);
       if (provider) {
         const levels = normalizeEffortLevels(provider.reasoningEffortLevels);
         setModelProviderId(provider.id);
+        writeLastModelProviderId(provider.id);
         setEffort((current) => (
           levels.includes(current)
             ? current
@@ -170,6 +168,20 @@ export function QuickChatWindow() {
       void clientApi.updateSettings({ localAccessLevel: value });
     }
   }, [effortLevels, providers, workspaces]);
+
+  // Main process (native Menu / window popover) reports selection here.
+  // Without this subscription the bar never updates after Menu.popup.
+  useEffect(() => clientApi.onQuickChatPopoverSelected?.((payload) => {
+    if (!payload || typeof payload.kind !== 'string' || typeof payload.value !== 'string') return;
+    selectPopoverValue(payload.kind as QuickChatPopoverKind, payload.value);
+    setPopoverState(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }), [selectPopoverValue]);
+
+  useEffect(() => clientApi.onQuickChatPopoverClosed(() => {
+    setPopoverState(null);
+    inputRef.current?.focus();
+  }), []);
 
   const dismissPopover = useCallback(() => {
     setPopoverState(null);
@@ -198,11 +210,20 @@ export function QuickChatWindow() {
     const items = kind === 'workspace'
       ? workspaces.map((workspace) => ({ value: workspace.path, label: workspace.name || workspace.path.split('/').filter(Boolean).pop() || workspace.path, detail: workspace.path }))
       : kind === 'model'
-        ? providers.map((provider) => ({ value: provider.id, label: getProviderModelDisplayLabel(provider, true), detail: provider.name }))
+        // group = provider name → native Menu submenu; leaf label = model only.
+        ? providers.map((provider) => ({
+            value: provider.id,
+            label: getProviderModelDisplayLabel(provider, true),
+            group: (provider.name || provider.id || 'Provider').trim(),
+          }))
         : kind === 'effort'
           ? effortLevels.map((level) => ({ value: level, label: effortLabel(level, true) }))
           : kind === 'mode'
-            ? CHAT_MODES.map((value) => ({ value, label: modeLabel(value, true), detail: modeTitle(value, true) }))
+            // Menu shows "Agent：说明 / Plan：说明" as one line (user-requested density).
+            ? CHAT_MODES.map((value) => ({
+                value,
+                label: `${modeLabel(value, true)}：${modeTitle(value, true)}`,
+              }))
             : ACCESS_LEVELS.map((value) => ({ value, label: accessLevelLabel(value, true), detail: accessLevelTitle(value, true) }));
     const selectedValue = kind === 'workspace'
       ? workspacePath
@@ -264,7 +285,7 @@ export function QuickChatWindow() {
     const element = inputRef.current;
     if (!element) return;
     element.style.height = 'auto';
-    element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, 240)}px`;
   }, [draft, attachments.length]);
 
   useEffect(() => {
@@ -368,7 +389,7 @@ export function QuickChatWindow() {
             />
           ) : null}
           <div className="quick-chat-input-row">
-            <textarea ref={inputRef} value={draft} placeholder="向 Peer Agent 发起任务…" aria-label="快速会话内容" onChange={(event) => { setDraft(event.target.value); setError(''); }} onPaste={(event) => {
+            <textarea ref={inputRef} rows={1} value={draft} placeholder="向 Peer Agent 发起任务…" aria-label="快速会话内容" onChange={(event) => { setDraft(event.target.value); setError(''); }} onPaste={(event) => {
               const files = getClipboardFiles(event.clipboardData.items);
               if (files.length) { event.preventDefault(); void addFiles(files); }
             }} onKeyDown={(event) => {
@@ -449,7 +470,7 @@ export function QuickChatWindow() {
           {error ? <span className="quick-chat-error" role="alert">{error}</span> : null}
         </div>
       </section>
-      {/* Menus render in the independent quick-chat-popover window (ADR 60). */}
+      {/* Enums (incl. effort) + model provider submenus → native Menu (ADR 60). */}
     </main>
   );
 }

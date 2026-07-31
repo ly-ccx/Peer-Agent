@@ -247,6 +247,8 @@ export interface QuickChatPopoverItem {
   readonly value: string;
   readonly label: string;
   readonly detail?: string;
+  /** Optional menu group title (e.g. model provider name → submenu). */
+  readonly group?: string;
 }
 
 export interface QuickChatPopoverState {
