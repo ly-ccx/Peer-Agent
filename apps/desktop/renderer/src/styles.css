@@ -13,6 +13,7 @@
 @import "./chat/styles/message.css";
 @import "./chat/styles/timeline.css";
 @import "./chat/styles/markdown.css";
+@import "./chat/styles/code-highlight.css";
 @import "./chat/styles/chat-composer.css";
 @import "./chat/styles/permission-gate-strip.css";
 @import "./chat/styles/goal-panel.css";

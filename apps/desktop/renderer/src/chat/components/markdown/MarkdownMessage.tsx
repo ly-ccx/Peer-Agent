@@ -1,4 +1,5 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { highlightCode } from './codeHighlighter';
 import { renderInlineLines } from './InlineMarkdown';
 import { parseMarkdownBlocks } from './markdownParser';
 import { stripHistoricalLocalRecordForDisplay } from '../../state/historicalLocalRecord';
@@ -88,10 +89,37 @@ function CopyableCodeBlock({ content, language, blockKey }: {
         )}
       </button>
       <pre>
-        <code data-language={language}>{content}</code>
+        <CodeBlockContent content={content} language={language} />
       </pre>
     </div>
   );
+}
+
+/**
+ * 代码内容渲染：命中语法高亮时输出 hljs token HTML，否则回退纯文本。
+ *
+ * useMemo + 模块级 LRU 双层缓存：流式打字机每帧都会重渲当前代码块，
+ * 这里保证同一 (language, content) 只计算一次高亮。
+ */
+function CodeBlockContent({ content, language }: {
+  readonly content: string;
+  readonly language?: string;
+}) {
+  const highlighted = useMemo(() => highlightCode(content, language), [content, language]);
+
+  // dangerouslySetInnerHTML 的输入来自 highlight.js，已对源码做 HTML 转义，
+  // 只包含 <span class="hljs-*"> 结构；未高亮时走纯文本分支，绝不注入原始内容。
+  if (highlighted.html !== null) {
+    return (
+      <code
+        className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ''}`}
+        data-language={highlighted.language ?? language}
+        dangerouslySetInnerHTML={{ __html: highlighted.html }}
+      />
+    );
+  }
+
+  return <code data-language={language}>{content}</code>;
 }
 
 function MarkdownMessageImpl({ content }: { readonly content: string }) {

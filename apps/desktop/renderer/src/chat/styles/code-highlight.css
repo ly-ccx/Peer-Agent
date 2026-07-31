@@ -1,0 +1,171 @@
+/*
+ * 代码块语法高亮配色。
+ *
+ * 设计约束：
+ * - 颜色只通过 --za-code-* 变量表达，深浅色由 [data-theme] 切换，
+ *   与 tokens.css 的主题机制保持一致，组件层不需要感知当前主题。
+ * - 选择器统一收敛在 .hljs 下，避免和已有 pre/code 样式互相覆盖。
+ * - diff 使用行级背景 + 前景双通道着色，保证在两种主题下都能看清增删。
+ */
+
+/* 浅色（默认）：Peer Frost 基调，低饱和但可辨识。 */
+:root {
+  --za-code-keyword: #8250df;
+  --za-code-string: #0a7c42;
+  --za-code-number: #b3261e;
+  --za-code-comment: #6b7785;
+  --za-code-function: #1a63c4;
+  --za-code-type: #b45309;
+  --za-code-variable: #953800;
+  --za-code-attr: #0550ae;
+  --za-code-meta: #57606a;
+  --za-code-punct: #4b5563;
+  --za-code-addition-fg: #0a6b34;
+  --za-code-addition-bg: rgba(31, 136, 61, 0.14);
+  --za-code-deletion-fg: #b3261e;
+  --za-code-deletion-bg: rgba(207, 34, 46, 0.13);
+  --za-code-diff-meta-fg: #0550ae;
+  --za-code-diff-meta-bg: rgba(84, 121, 224, 0.13);
+}
+
+/* 深色：提高明度与饱和，保证在深底上的对比度。 */
+[data-theme="dark"] {
+  --za-code-keyword: #d2a8ff;
+  --za-code-string: #7ee787;
+  --za-code-number: #ffa657;
+  --za-code-comment: #8b949e;
+  --za-code-function: #79c0ff;
+  --za-code-type: #ffa657;
+  --za-code-variable: #ffa198;
+  --za-code-attr: #79c0ff;
+  --za-code-meta: #8b949e;
+  --za-code-punct: #c9d1d9;
+  --za-code-addition-fg: #7ee787;
+  --za-code-addition-bg: rgba(46, 160, 67, 0.18);
+  --za-code-deletion-fg: #ffa198;
+  --za-code-deletion-bg: rgba(248, 81, 73, 0.16);
+  --za-code-diff-meta-fg: #79c0ff;
+  --za-code-diff-meta-bg: rgba(56, 139, 253, 0.16);
+}
+
+@layer components {
+  /* 高亮容器：继承既有 pre 排版，仅接管前景色语义。 */
+  .markdown-content code.hljs,
+  .cloud-chat-message code.hljs {
+    color: inherit;
+    background: transparent;
+  }
+
+  /* --- 通用 token --- */
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-section,
+  .hljs-doctag,
+  .hljs-name,
+  .hljs-strong {
+    color: var(--za-code-keyword);
+  }
+
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-attribute,
+  .hljs-meta .hljs-string,
+  .hljs-quote {
+    color: var(--za-code-string);
+  }
+
+  .hljs-number,
+  .hljs-symbol,
+  .hljs-bullet,
+  .hljs-link,
+  .hljs-selector-attr,
+  .hljs-selector-pseudo,
+  .hljs-template-variable {
+    color: var(--za-code-number);
+  }
+
+  .hljs-comment,
+  .hljs-code,
+  .hljs-formula {
+    color: var(--za-code-comment);
+    font-style: italic;
+  }
+
+  .hljs-title,
+  .hljs-title.class_,
+  .hljs-title.function_,
+  .hljs-built_in,
+  .hljs-selector-id {
+    color: var(--za-code-function);
+  }
+
+  .hljs-type,
+  .hljs-class .hljs-title,
+  .hljs-params,
+  .hljs-selector-class {
+    color: var(--za-code-type);
+  }
+
+  .hljs-variable,
+  .hljs-variable.language_,
+  .hljs-variable.constant_,
+  .hljs-property,
+  .hljs-operator {
+    color: var(--za-code-variable);
+  }
+
+  .hljs-attr,
+  .hljs-tag .hljs-attr {
+    color: var(--za-code-attr);
+  }
+
+  .hljs-meta,
+  .hljs-meta .hljs-keyword,
+  .hljs-comment.hljs-meta {
+    color: var(--za-code-meta);
+  }
+
+  .hljs-punctuation,
+  .hljs-tag {
+    color: var(--za-code-punct);
+  }
+
+  .hljs-emphasis {
+    font-style: italic;
+  }
+
+  /* --- diff：行级红绿着色 --- */
+  /* highlight.js 的 diff 语言把整行包进 addition/deletion，
+     用 display:block + 负 padding 让底色铺满代码块宽度。 */
+  .markdown-content code.hljs .hljs-addition,
+  .cloud-chat-message code.hljs .hljs-addition {
+    display: block;
+    color: var(--za-code-addition-fg);
+    background: var(--za-code-addition-bg);
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+  }
+
+  .markdown-content code.hljs .hljs-deletion,
+  .cloud-chat-message code.hljs .hljs-deletion {
+    display: block;
+    color: var(--za-code-deletion-fg);
+    background: var(--za-code-deletion-bg);
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+  }
+
+  /* diff 的 @@ hunk 头与文件头：蓝色定位信息。 */
+  .markdown-content code.language-diff .hljs-meta,
+  .markdown-content code.language-diff .hljs-comment,
+  .cloud-chat-message code.language-diff .hljs-meta,
+  .cloud-chat-message code.language-diff .hljs-comment {
+    display: block;
+    color: var(--za-code-diff-meta-fg);
+    background: var(--za-code-diff-meta-bg);
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+    font-style: normal;
+  }
+}
