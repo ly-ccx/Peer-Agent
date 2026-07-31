@@ -36,10 +36,20 @@
     @apply grid h-screen min-h-0 min-w-0 overflow-hidden;
     position: relative;
     grid-template-rows: minmax(0, 1fr) auto;
-    /* 内容主区保持实色纸面，保证正文对比度；毛玻璃只落在侧栏/Workbench 等 Chrome 层。 */
-    background: var(--chrome-canvas, var(--za-app-bg));
-    /* 四角圆角与输入框 (.chat-composer) 同 token，overflow:hidden 使子元素一并裁圆。 */
-    border-radius: var(--radius-lg);
+    /* 中间列是基础 Chrome 容器：直角铺满列并承载玻璃材质；
+       往下的内容区块各自决定圆角与实色背景，避免容器圆角在列交界处挖出缺口。 */
+    background: var(--glass-chrome, var(--chrome-canvas, var(--za-app-bg)));
+    -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+    backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+    border-radius: 0;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .main-panel {
+      background: var(--chrome-canvas, var(--za-app-bg));
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
   }
 
   .profile-chip {
@@ -62,6 +72,10 @@
 
   .thread {
     @apply flex min-h-0 flex-col gap-4 overflow-y-auto px-10 pb-6 pt-[52px];
+    /* thread 才是真正的内容纸面：在直角玻璃底 .main-panel 之上负责实色与圆角，
+       并利用自身 overflow 裁切内部 header、消息区和 composer。 */
+    background: var(--chrome-canvas, var(--za-app-bg));
+    border-radius: var(--radius-lg);
     contain: layout;
   }
 

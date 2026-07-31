@@ -117,6 +117,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
 
   const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
+    const resizer = ev.currentTarget;
+    resizer.dataset.active = 'true';
     draggingRef.current = true;
     startXRef.current = ev.clientX;
     startWidthRef.current = width;
@@ -167,6 +169,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     const onUp = () => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
+      delete resizer.dataset.active;
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       const finalWidthStr = document.documentElement.style.getPropertyValue('--za-workbench-width');

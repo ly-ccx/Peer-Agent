@@ -16,6 +16,26 @@
       @media (prefers-color-scheme: dark) {
         html, body, #root { background: #16191D; }
       }
+      /* macOS 真毛玻璃：main.tsx 挂载时打上 data-vibrancy，放开这层未分层的
+         首帧兜底实色（未分层样式会压过 @layer base 里的透明规则，必须在此同步放开）。
+         标记不存在（首帧/bootstrap 失败/非 macOS）时上面的实色兜底照常生效。 */
+      html[data-vibrancy='true'],
+      html[data-vibrancy='true'] body,
+      html[data-vibrancy='true'] #root {
+        background: transparent;
+      }
+      @media (prefers-reduced-transparency: reduce) {
+        html[data-vibrancy='true'],
+        html[data-vibrancy='true'] body {
+          background: #F4F6F9;
+        }
+        @media (prefers-color-scheme: dark) {
+          html[data-vibrancy='true'],
+          html[data-vibrancy='true'] body {
+            background: #16191D;
+          }
+        }
+      }
     </style>
     <link rel="icon" type="image/png" href="./favicon-light.png" media="(prefers-color-scheme: light)" />
     <link rel="icon" type="image/png" href="./favicon-dark.png" media="(prefers-color-scheme: dark)" />

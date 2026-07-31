@@ -14,7 +14,8 @@
     -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
     backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
     box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
-    border-left: 1px solid var(--ui-border-subtle, var(--za-line));
+    /* 常态不画分隔线，保留 1px 透明槽位供 resizer 交互反馈，避免拖拽时布局抖动。 */
+    border-left: 1px solid transparent;
     overflow: hidden;
     transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease),
       border-color var(--za-motion-fast);
@@ -35,7 +36,25 @@
     border-left: none;
   }
 
-  /* 拖拽分隔线：6px hit area，无独立指示条；不额外染色，避免形成左侧 accent rail。 */
+  /* 镜像 Sidebar 右缘阴影：主会话向右侧 Workbench 投下同强度、同范围的轻量阴影。
+     z-index 低于 resizer(5)，不遮挡 hover / focus / 拖拽强调色反馈。 */
+  .workbench-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 8px;
+    z-index: 4;
+    pointer-events: none;
+    background: linear-gradient(to left, transparent, rgba(0, 0, 0, 0.03));
+  }
+
+  .workbench-panel:not(.workbench-panel--open)::before {
+    content: none;
+  }
+
+  /* 拖拽分隔线：6px hit area，无独立指示条；由 panel 的透明 border 提供交互态反馈。 */
   .workbench-resizer {
     position: absolute;
     top: 0;
@@ -48,6 +67,11 @@
   }
   .workbench-resizer:focus-visible {
     outline: none;
+  }
+  .workbench-panel:has(.workbench-resizer:hover),
+  .workbench-panel:has(.workbench-resizer:focus-visible),
+  .workbench-panel:has(.workbench-resizer[data-active='true']) {
+    border-left-color: var(--za-accent, #4c8dff);
   }
   /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。 */
   .workbench-tab-rail {

@@ -48,7 +48,9 @@
   -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
-  border-right: 1px solid var(--chrome-hairline);
+  /* 常态不画分隔线，保持 Sidebar 与中间 glass-chrome 材质连续；
+     保留 1px 透明槽位，供下方 resizer hover/active/阻尼状态显示反馈且不引发布局抖动。 */
+  border-right: 1px solid transparent;
   padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
@@ -64,7 +66,7 @@
   }
 }
 
-/* 中间内容区向左投下的内侧阴影：保留 1px 分隔线，同时轻量增强栏间层次。 */
+/* 中间内容区向左投下的轻量内侧阴影；常态不再画 1px 实线分隔。 */
 .app-sidebar::after {
   content: '';
   position: absolute;

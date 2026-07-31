@@ -26,6 +26,27 @@
     background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
   }
 
+  /*
+   * macOS 真毛玻璃：React 成功挂载后由 main.tsx 打上 data-vibrancy 标记，
+   * 才放开文档层实色，让窗口 vibrancy 从侧栏/Chrome 区域透出。
+   * bootstrap 失败时标记不存在 → 上方实色兜底仍然生效；
+   * 非 macOS 不打标 → 保持实色回退。内容主区 (.main-panel) 自带实色纸面，不受影响。
+   */
+  html[data-vibrancy='true'],
+  html[data-vibrancy='true'] body,
+  html[data-vibrancy='true'] #root {
+    background: transparent;
+  }
+
+  /* 用户开启"降低透明度"时回到实色，与侧栏玻璃的降级策略一致。 */
+  @media (prefers-reduced-transparency: reduce) {
+    html[data-vibrancy='true'],
+    html[data-vibrancy='true'] body,
+    html[data-vibrancy='true'] #root {
+      background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
+    }
+  }
+
   button,
   input,
   select,
