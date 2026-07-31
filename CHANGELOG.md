@@ -1,22 +1,30 @@
 # Changelog
 
-## 0.0.1-beta.46
-
-### Added
-- Startup Full Disk Access gate: preflight on main-shell ready with brand logo drag grant UI.
-
-### Fixed
-- React #310 white screen from TokenUsageDisplay conditional hooks after early return.
-- Startup gate portal rewrite; remove 24h dismiss silence.
-
-
 All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.1-beta.46 - 2026-07-31
+
+### Added
+
+- Quick Chat system menus: workspace / mode / access / effort via native `Menu.popup`; models grouped by provider submenus.
+- Single-line Quick Chat capsule by default (grows with content); Codex-style image attachment chips.
+
+### Changed
+
+- Quick Chat theme sync with light/dark/system; rely on window vibrancy without CSS fill covering native material.
+- Shorter Agent/Plan mode menu copy; denser capsule spacing.
+
 ### Fixed
 
-- Desktop provider, OAuth, quota, model-catalog, context-count, pricing, and connection-test traffic now stays on Electron `net.fetch`, preserving the system proxy and macOS trust store instead of falling through to raw Node fetch.
+- IME composition Enter no longer sends in main Composer and Quick Chat.
+- Quick Chat menu selection updates the bar (selection IPC + Menu click/close race).
+- Menu.popup uses window-local coordinates so menus stay near the trigger.
+- Composer attachment strip isolated from draft re-renders.
+- Desktop provider/OAuth/quota/model-catalog traffic stays on Electron `net.fetch` (system proxy + macOS trust store).
+- Cold-start first paint: defer window show until ready-to-show; boot background + error boundary.
+- TUI: Desktop model-entry uuid binding; system-context prompt alignment; workspace name in terminal tab title; hide sticky YOU while target user bubble is visible.
 
 ## 0.0.1-beta.45 - 2026-07-29
 
