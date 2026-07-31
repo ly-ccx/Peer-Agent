@@ -98,7 +98,7 @@ function usageFrom(streamUsage: QoderPrivateStreamResult['streamUsage']): ModelU
     return {
       ...usage,
       cacheReadTokens: streamUsage.cacheReadTokens,
-      cacheWriteTokens: 0,
+      // 缓存写：Qoder 上游无 cache write 数据，留空（区别于「真 0」）。
     };
   }
   return usage;

@@ -198,6 +198,18 @@ function extractCachedPromptTokens(usage) {
     ?? 0;
 }
 
+// 缓存写：上游有字段才记账；字段缺失返回 null（区别于「真 0」）。
+// Grok 官方等 OpenAI-compatible 上游实测不返回任何 cache write 字段。
+function extractCacheWritePromptTokens(usage) {
+  const value = usage?.prompt_tokens_details?.cache_write_tokens
+    ?? usage?.input_tokens_details?.cache_write_tokens
+    ?? usage?.cache_creation_input_tokens
+    ?? null;
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null, options = {}) {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -301,6 +313,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     if (parsed.usage) {
       const u = parsed.usage;
       const cachedTokens = extractCachedPromptTokens(u);
+      const cacheWriteTokens = extractCacheWritePromptTokens(u);
       const promptTokens = u.prompt_tokens ?? 0;
       state.usage = {
         // OpenAI-compatible prompt_tokens 已包含 cached_tokens。内部账本约定
@@ -308,7 +321,8 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
         inputTokens: Math.max(0, promptTokens - cachedTokens),
         outputTokens: u.completion_tokens ?? 0,
         cacheReadTokens: cachedTokens,
-        cacheWriteTokens: 0,
+        // 缓存写：上游无字段（Grok 等）时留空，区别于「真 0」；显示层渲染「—」。
+        ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),
       };
       webContents.send('chat:stream:usage', { streamId, usage: state.usage });
     }

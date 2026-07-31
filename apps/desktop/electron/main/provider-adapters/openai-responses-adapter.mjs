@@ -126,6 +126,19 @@ function extractCachedInputTokens(usage) {
     ?? 0;
 }
 
+// 缓存写：上游有字段才记账；字段缺失返回 null（区别于「真 0」），
+// 让下游把「无数据」留空而不是记成误导性的 0。
+// ChatGPT/Responses 实测返回 input_tokens_details.cache_write_tokens。
+function extractCacheWriteTokens(usage) {
+  const value = usage?.input_tokens_details?.cache_write_tokens
+    ?? usage?.prompt_tokens_details?.cache_write_tokens
+    ?? usage?.cache_creation_input_tokens
+    ?? null;
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function streamIdleTimeoutError(ms) {
   const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
   error.type = 'provider_stream_idle_timeout';
@@ -231,6 +244,7 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
       const usage = parsed.response?.usage;
       if (usage) {
         const cachedTokens = extractCachedInputTokens(usage);
+        const cacheWriteTokens = extractCacheWriteTokens(usage);
         const inputTokens = usage.input_tokens ?? 0;
         state.usage = {
           // Responses input_tokens 已包含 cached_tokens；内部账本字段必须互斥，
@@ -238,7 +252,8 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
           inputTokens: Math.max(0, inputTokens - cachedTokens),
           outputTokens: usage.output_tokens ?? 0,
           cacheReadTokens: cachedTokens,
-          cacheWriteTokens: 0,
+          // 无数据（字段缺失）时留空，区别于上游明确返回的 0。
+          ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),
         };
         webContents.send('chat:stream:usage', { streamId, usage: state.usage });
       }

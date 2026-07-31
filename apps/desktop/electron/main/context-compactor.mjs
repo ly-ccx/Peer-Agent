@@ -738,7 +738,7 @@ async function summarizeWithLLM({
           inputTokens: Math.max(0, (usage.input_tokens ?? 0) - cached),
           outputTokens: usage.output_tokens ?? 0,
           cacheReadTokens: cached,
-          cacheWriteTokens: 0,
+          // 缓存写：无上游数据时留空，不再硬编码 0（区别于「真 0」）。
         };
       }
     });
@@ -809,7 +809,7 @@ async function summarizeWithLLM({
         inputTokens: Math.max(0, (evt.usage.prompt_tokens ?? 0) - cached),
         outputTokens: evt.usage.completion_tokens ?? 0,
         cacheReadTokens: cached,
-        cacheWriteTokens: 0,
+        // 缓存写：无上游数据时留空，不再硬编码 0（区别于「真 0」）。
       };
     }
   });

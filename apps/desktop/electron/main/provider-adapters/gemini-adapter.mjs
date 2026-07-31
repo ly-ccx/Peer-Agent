@@ -19,7 +19,7 @@ function normalizeGeminiUsage(usage) {
     inputTokens: usage.promptTokenCount ?? 0,
     outputTokens: usage.candidatesTokenCount ?? 0,
     cacheReadTokens: usage.cachedContentTokenCount ?? 0,
-    cacheWriteTokens: 0,
+    // Gemini usageMetadata 不提供 cache write 计数；留空（区别于「真 0」），显示层渲染「—」。
   };
 }
 

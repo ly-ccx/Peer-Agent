@@ -113,7 +113,9 @@ function GroupTable({
                 <td title={formatCount(row.inputTokens)}>{formatTokenCount(row.inputTokens)}</td>
                 <td title={formatCount(row.outputTokens)}>{formatTokenCount(row.outputTokens)}</td>
                 <td title={formatCount(row.cacheReadTokens)}>{formatTokenCount(row.cacheReadTokens)}</td>
-                <td title={formatCount(row.cacheWriteTokens)}>{formatTokenCount(row.cacheWriteTokens)}</td>
+                <td title={row.cacheWriteTokens > 0 ? formatCount(row.cacheWriteTokens) : undefined}>
+                  {row.cacheWriteTokens > 0 ? formatTokenCount(row.cacheWriteTokens) : '—'}
+                </td>
                 <td title={formatCount(row.totalTokens)}>{formatTokenCount(row.totalTokens)}</td>
                 <td>{formatUsd(row.estimatedCostUsd)}</td>
               </tr>
@@ -600,7 +602,7 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
               <span className="usage-stats-metric__hint">
                 {i18n.t('settings.usage.cacheSplit', {
                   read: formatTokenCount(totals.cacheReadTokens),
-                  write: formatTokenCount(totals.cacheWriteTokens),
+                  write: totals.cacheWriteTokens > 0 ? formatTokenCount(totals.cacheWriteTokens) : '—',
                 })}
               </span>
             </article>

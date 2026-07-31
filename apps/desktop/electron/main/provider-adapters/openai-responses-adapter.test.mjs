@@ -88,11 +88,11 @@ test('consumeResponsesStream ends on response.completed even if TCP stays open',
 
   assert.equal(result.content, 'hello');
   assert.equal(result.streamError, null);
+  // 上游未返回 cache_write_tokens 字段时不虚报 0（无数据留空）。
   assert.deepEqual(result.streamUsage, {
     inputTokens: 10,
     outputTokens: 2,
     cacheReadTokens: 0,
-    cacheWriteTokens: 0,
   });
   assert.equal(body.cancelled, true);
   assert.ok(elapsed < 500, `expected early exit, took ${elapsed}ms`);
@@ -100,6 +100,39 @@ test('consumeResponsesStream ends on response.completed even if TCP stays open',
     webContents.events.some((event) => event.channel === 'chat:stream:delta' && event.payload.content === 'hello'),
   );
   assert.ok(webContents.events.some((event) => event.channel === 'chat:stream:usage'));
+});
+
+test('consumeResponsesStream maps upstream cache_write_tokens when present', async () => {
+  const webContents = createWebContents();
+  const body = createHangAfterCompletedBody([
+    { type: 'response.output_text.delta', delta: 'hi' },
+    {
+      type: 'response.completed',
+      response: {
+        usage: {
+          input_tokens: 100,
+          output_tokens: 3,
+          input_tokens_details: { cached_tokens: 20, cache_write_tokens: 64 },
+        },
+      },
+    },
+  ]);
+
+  const result = await consumeResponsesStream(
+    { body },
+    webContents,
+    'stream-cache-write',
+    null,
+    null,
+    { streamIdleTimeoutMs: 5_000 },
+  );
+
+  assert.deepEqual(result.streamUsage, {
+    inputTokens: 80,
+    outputTokens: 3,
+    cacheReadTokens: 20,
+    cacheWriteTokens: 64,
+  });
 });
 
 test('consumeResponsesStream idle-timeouts when no terminal event arrives', async () => {

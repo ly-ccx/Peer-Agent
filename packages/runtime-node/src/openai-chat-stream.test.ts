@@ -56,7 +56,6 @@ test('consumes standard OpenAI text, reasoning, fragmented tools, and cached usa
     outputTokens: 4,
     totalTokens: 14,
     cacheReadTokens: 3,
-    cacheWriteTokens: 0,
   });
   assert.deepEqual(events.map((event) => event.type), [
     'text.delta',

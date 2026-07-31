@@ -118,7 +118,7 @@ function usageFrom(chunk: OpenAIChunk): ModelUsage | undefined {
     inputTokens: Math.max(0, promptTokens - cacheReadTokens),
     outputTokens: chunk.usage.completion_tokens ?? 0,
     totalTokens: chunk.usage.total_tokens,
-    ...(cacheReadTokens > 0 ? { cacheReadTokens, cacheWriteTokens: 0 } : {}),
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
   };
 }
 

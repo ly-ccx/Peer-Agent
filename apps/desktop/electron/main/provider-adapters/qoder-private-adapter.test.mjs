@@ -366,7 +366,6 @@ describe('qoder private adapter', () => {
       inputTokens: 3,
       outputTokens: 2,
       cacheReadTokens: 0,
-      cacheWriteTokens: 0,
     });
     assert.equal(sent.some(([event]) => event === 'chat:stream:delta'), true);
     assert.equal(sent.some(([event]) => event === 'chat:stream:thinking'), true);
