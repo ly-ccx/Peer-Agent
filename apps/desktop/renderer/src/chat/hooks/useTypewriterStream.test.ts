@@ -6,14 +6,13 @@ import {
 } from './useTypewriterStream.ts';
 
 describe('typewriter stream pacing', () => {
-  it('uses a smooth default cadence without returning to frame-rate updates', () => {
+  it('uses requestAnimationFrame as the only pacing clock', () => {
     assert.deepEqual(DEFAULT_TYPEWRITER_OPTIONS, {
       minCharsPerFrame: 1,
       maxCharsPerFrame: 80,
       framesToDrain: 10,
-      minIntervalMs: 40,
     });
-    assert.ok(DEFAULT_TYPEWRITER_OPTIONS.minIntervalMs > 16);
+    assert.equal('minIntervalMs' in DEFAULT_TYPEWRITER_OPTIONS, false);
   });
 
   it('emits small chunks for a lightly buffered stream', () => {
@@ -33,7 +32,6 @@ describe('typewriter stream pacing', () => {
       minCharsPerFrame: 2,
       maxCharsPerFrame: 20,
       framesToDrain: 5,
-      minIntervalMs: 50,
     };
     assert.equal(typewriterChunkSize(1, options), 2);
     assert.equal(typewriterChunkSize(50, options), 10);
