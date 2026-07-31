@@ -334,6 +334,13 @@ export function createConversationStore({
   migrateLegacyGoalMode(storeDir, indexFile);
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
+  /**
+   * 流式中间态 sidecar：只承载「当前正在流式生成的那一条 assistant 消息」的补丁。
+   * 高频写整份 JSONL 会在主进程主线程同步读写数 MB 文件，把所有窗口打卡死
+   * （trace: 单次 updateMessageById 230ms+）。sidecar 只有几十 KB，写入 <1ms；
+   * 终态仍走 updateMessageById 全量落盘并清理 sidecar。
+   */
+  function streamPatchFile(id) { return path.join(storeDir, `${id}.stream.json`); }
   function contextSnapshotFile(id) {
     return path.join(contextSnapshotDir, `${encodeURIComponent(id)}.json`);
   }
@@ -675,8 +682,49 @@ export function createConversationStore({
     return {
       ...meta,
       contextSnapshot: durableContextSnapshot(meta),
-      messages,
+      messages: mergeStreamPatch(id, messages),
     };
+  }
+
+  /**
+   * 读取时合并流式 sidecar：主进程若在流式期间崩溃，JSONL 里那条 assistant
+   * 消息可能落后于 sidecar 中的最新正文；按 messageId 匹配并浅合并，保证
+   * 重启后正文不丢。正常终态路径会先全量落盘再清 sidecar，此函数即无操作。
+   */
+  function mergeStreamPatch(id, messages) {
+    const sidecar = readJson(streamPatchFile(id));
+    if (!sidecar || sidecar.version !== 1 || !sidecar.messageId || !sidecar.patch) return messages;
+    const targetIndex = messages.findIndex((m) => m && m.id === sidecar.messageId);
+    if (targetIndex < 0) return messages;
+    const merged = messages.slice();
+    merged[targetIndex] = { ...merged[targetIndex], ...sidecar.patch };
+    return merged;
+  }
+
+  /**
+   * 流式期间的高频落盘原语：只写 sidecar 小文件，不读不写整份 JSONL，
+   * 不 bump contentRevision，也不广播 change（避免高频唤醒 watch 方）。
+   * messageId 必填 —— sidecar 与 updateMessageById 不同，没有「最后一条
+   * assistant」回退，不允许模糊定位。
+   */
+  function patchStreamingMessage(id, messageId, patch) {
+    if (!id || !messageId || !patch || typeof patch !== 'object') return false;
+    writeJson(streamPatchFile(id), {
+      version: 1,
+      conversationId: id,
+      messageId,
+      patch,
+      patchedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  /** 终态（或放弃）后清理 sidecar；幂等。 */
+  function clearStreamPatch(id) {
+    try {
+      const filePath = streamPatchFile(id);
+      if (existsSync(filePath)) unlinkSync(filePath);
+    } catch {}
   }
 
   /**
@@ -833,6 +881,8 @@ export function createConversationStore({
     if (targetIndex < 0) return null;
     messages[targetIndex] = { ...messages[targetIndex], ...patch };
     writeJsonl(convFile(id), messages);
+    // 全量落盘已包含最新正文；流式 sidecar 使命完成，避免读取端再做无谓合并。
+    clearStreamPatch(id);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (meta) {
@@ -1087,6 +1137,7 @@ export function createConversationStore({
     const index = readIndex().filter((c) => c.id !== id);
     writeJsonl(indexFile, index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
+    clearStreamPatch(id);
     try {
       const snapshotFile = contextSnapshotFile(id);
       if (existsSync(snapshotFile)) unlinkSync(snapshotFile);
@@ -1159,6 +1210,9 @@ export function createConversationStore({
     appendMessage: changed(appendMessage, 'messages-updated'),
     updateLastMessage: changed(updateLastMessage, 'messages-updated'),
     updateMessageById: changed(updateMessageById, 'messages-updated'),
+    // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
+    patchStreamingMessage,
+    clearStreamPatch,
     replaceMessages: changed(replaceMessages, 'messages-updated'),
     addUsage: changed(addUsage, 'metadata-updated'),
     recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),

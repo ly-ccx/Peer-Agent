@@ -87,8 +87,6 @@ export function normalizeClientToolCallFromToolCallStart(event: ChatStreamEvent)
 
   const capabilityId = decodeToolNameToCapabilityId(toolName);
 
-  console.log('[Step2 客户端接收 normalizeClientToolCallFromToolCallStart] 收到 tool_call_start 事件 → toolCallId:', toolCallId, 'toolName:', toolName, '→ capabilityId:', capabilityId);
-
   return {
     toolCallId,
     capabilityId,

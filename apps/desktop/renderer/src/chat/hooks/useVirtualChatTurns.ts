@@ -78,6 +78,13 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
   const viewportRef = useRef<ViewportGeometry>({ scrollTop: 0, clientHeight: 0 });
   const forcedIndexRef = useRef<number | null>(null);
   const rangeRef = useRef<VirtualTurnRange>(EMPTY_RANGE);
+  /** 帧内累计的 scrollTop 补偿量（见 measureElement），一帧只写一次 DOM。 */
+  const pendingScrollCompensationRef = useRef(0);
+  /** 测量结果的帧级汇聚：一帧内多个 turn 完成测量时只触发一次补偿 + 范围同步。 */
+  const measurementFlushRef = useRef(createFrameCoalescer({
+    request: (callback) => window.requestAnimationFrame(callback),
+    cancel: (frameId) => window.cancelAnimationFrame(frameId),
+  }));
   const [range, setRange] = useState<VirtualTurnRange>(EMPTY_RANGE);
 
   const computeRange = useCallback((forceIndex: number | null = forcedIndexRef.current): VirtualTurnRange => {
@@ -185,6 +192,8 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
   useEffect(() => () => {
     observersRef.current.clear();
     forcedIndexReleaseRef.current.cancel();
+    measurementFlushRef.current.cancel();
+    pendingScrollCompensationRef.current = 0;
   }, []);
 
   const measureElement = useCallback((
@@ -212,14 +221,25 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
       measuredSizesRef.current.set(index, nextSize);
       if (scrollElement && oldOffset < scrollElement.scrollTop) {
         const oldSize = previousSize ?? DEFAULT_TURN_ESTIMATE_PX;
-        scrollElement.scrollTop += nextSize - oldSize;
-        viewportRef.current = {
-          scrollTop: scrollElement.scrollTop,
-          clientHeight: scrollElement.clientHeight,
-        };
+        // 累积到帧级一次性补偿：快滚时一帧会挂载/测量多个 turn，
+        // 若每个都同步改 scrollTop，会与用户滚动惯性打架（表现为“回跳”），
+        // 且每次测量都 setState 会让 React 在滚动中风暴式重渲染。
+        pendingScrollCompensationRef.current += nextSize - oldSize;
       }
-      // Measurement changes may alter offsets/padding even when start/end stay put.
-      syncRangeRef.current();
+      measurementFlushRef.current.request(() => {
+        const scrollNode = scrollRef.current;
+        const compensation = pendingScrollCompensationRef.current;
+        pendingScrollCompensationRef.current = 0;
+        if (scrollNode && compensation !== 0) {
+          scrollNode.scrollTop += compensation;
+          viewportRef.current = {
+            scrollTop: scrollNode.scrollTop,
+            clientHeight: scrollNode.clientHeight,
+          };
+        }
+        // Measurement changes may alter offsets/padding even when start/end stay put.
+        syncRangeRef.current();
+      });
     };
 
     element.dataset.virtualTurnIndex = String(index);

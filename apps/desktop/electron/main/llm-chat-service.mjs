@@ -396,11 +396,30 @@ function wrapWebContentsForRuntimeEvents(
     }
     if (final && interrupted) patch.interrupted = true;
     try {
-      conversationStore.updateMessageById(
-        streamRecord.conversationId,
-        streamRecord.assistantMessageId ?? null,
-        patch,
-      );
+      if (final) {
+        // 终态：全量落盘（会同步重写整份 JSONL，一次性成本可接受）并清理流式 sidecar。
+        conversationStore.updateMessageById(
+          streamRecord.conversationId,
+          streamRecord.assistantMessageId ?? null,
+          patch,
+        );
+      } else if (typeof conversationStore.patchStreamingMessage === 'function') {
+        // 流式中间态：只写几十 KB 的 sidecar。此前这里直接走 updateMessageById，
+        // 大会话（数 MB JSONL）每 500ms 同步读写一次，把主进程主线程打满
+        //（trace: 单次 230ms+ × 35 次），所有窗口一起卡死。
+        conversationStore.patchStreamingMessage(
+          streamRecord.conversationId,
+          streamRecord.assistantMessageId,
+          patch,
+        );
+      } else {
+        // 旧 store 兼容路径（无 sidecar 能力时保持原行为）。
+        conversationStore.updateMessageById(
+          streamRecord.conversationId,
+          streamRecord.assistantMessageId ?? null,
+          patch,
+        );
+      }
     } catch (err) {
       console.warn('[llm-chat] persist stream record failed:', err?.message || err);
     }

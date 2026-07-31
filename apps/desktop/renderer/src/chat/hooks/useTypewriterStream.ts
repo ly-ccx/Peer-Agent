@@ -15,22 +15,40 @@ import { useCallback, useEffect, useRef } from 'react';
  */
 
 export interface TypewriterOptions {
-  /** 每帧最少吐出的字符数（buffer 不空时的下限） */
+  /** 每次吐字最少的字符数（buffer 不空时的下限） */
   readonly minCharsPerFrame?: number;
-  /** 每帧最多吐出的字符数（防止超大 buffer 一帧全吐导致不平滑） */
+  /** 每次吐字最多的字符数（防止超大 buffer 一口全吐导致不平滑） */
   readonly maxCharsPerFrame?: number;
   /**
-   * 期望在多少帧内把当前积压消化完。越小越快、越激进。
+   * 期望在多少个吐字周期内把当前积压消化完。越小越快、越激进。
    * 实际速率 = ceil(buffer.length / framesToDrain)，再 clamp 到 [min, max]。
    */
   readonly framesToDrain?: number;
+  /**
+   * 两次吐字之间的最小间隔（ms）。
+   * 每次吐字都会触发一整条 React 流水线（setState → reconcile → Markdown parse →
+   * Layout/Paint）。60Hz（每帧）会让长会话在流式期间产生过多工作，因此显示层
+   * 以约 25Hz 的节奏小批量排空：保留连续打字观感，同时把 React commit 频率
+   * 控制在逐帧更新的一半以下。
+   */
+  readonly minIntervalMs?: number;
 }
 
-const DEFAULTS: Required<TypewriterOptions> = {
+export const DEFAULT_TYPEWRITER_OPTIONS: Required<TypewriterOptions> = {
   minCharsPerFrame: 1,
-  maxCharsPerFrame: 90,
-  framesToDrain: 18,
+  maxCharsPerFrame: 80,
+  framesToDrain: 10,
+  minIntervalMs: 40,
 };
+
+export function typewriterChunkSize(
+  bufferLength: number,
+  options: Required<TypewriterOptions> = DEFAULT_TYPEWRITER_OPTIONS,
+): number {
+  if (bufferLength <= 0) return 0;
+  const target = Math.ceil(bufferLength / options.framesToDrain);
+  return Math.max(options.minCharsPerFrame, Math.min(options.maxCharsPerFrame, target));
+}
 
 export interface TypewriterController {
   /** 追加新收到的文本片段（来自网络 delta） */
@@ -45,9 +63,10 @@ export function useTypewriterStream(
   onText: (chunk: string) => void,
   options: TypewriterOptions = {},
 ): TypewriterController {
-  const opts = { ...DEFAULTS, ...options };
+  const opts = { ...DEFAULT_TYPEWRITER_OPTIONS, ...options };
   const bufferRef = useRef('');
   const rafRef = useRef<number | null>(null);
+  const lastEmitRef = useRef(0);
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
@@ -65,14 +84,20 @@ export function useTypewriterStream(
       rafRef.current = null;
       return;
     }
-    // 自适应速率：积压越多吐越快。
-    const target = Math.ceil(buffer.length / opts.framesToDrain);
-    const take = Math.max(opts.minCharsPerFrame, Math.min(opts.maxCharsPerFrame, target));
+    // 节流：距上次吐字不足 minIntervalMs 时只续帧、不触发 React 更新。
+    const now = performance.now();
+    if (now - lastEmitRef.current < opts.minIntervalMs) {
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+    lastEmitRef.current = now;
+    // 自适应速率：积压越多吐越快，但保持小批量排空上限。
+    const take = typewriterChunkSize(buffer.length, opts);
     const chunk = buffer.slice(0, take);
     bufferRef.current = buffer.slice(take);
     onTextRef.current(chunk);
     rafRef.current = requestAnimationFrame(tick);
-  }, [opts.framesToDrain, opts.minCharsPerFrame, opts.maxCharsPerFrame]);
+  }, [opts.framesToDrain, opts.minCharsPerFrame, opts.maxCharsPerFrame, opts.minIntervalMs]);
 
   const ensureRunning = useCallback(() => {
     if (rafRef.current == null) {

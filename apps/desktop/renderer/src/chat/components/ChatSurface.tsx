@@ -45,7 +45,10 @@ import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
 } from '../state/messageQueueDispatch';
-import { shouldRestoreContextAccounting } from '../state/contextRestore';
+import {
+  contextAccountingRestoreKey,
+  shouldStartContextAccountingRestore,
+} from '../state/contextRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
@@ -546,9 +549,10 @@ export function ChatSurface({
     const computeRemaining = () =>
       Math.max(0, Math.ceil((delayMs - (Date.now() - startedAt)) / 1000));
     setConnectionRetryRemainingSeconds(computeRemaining());
+    // 1s is enough for "约 Xs 后重试"; 250ms forced 4 React updates/sec for the whole ChatSurface.
     const intervalId = window.setInterval(() => {
       setConnectionRetryRemainingSeconds(computeRemaining());
-    }, 250);
+    }, 1000);
     return () => window.clearInterval(intervalId);
   }, [
     providerRecoveryNotice?.kind,
@@ -924,16 +928,24 @@ export function ChatSurface({
 
   // restored 计量:会话就绪但无权威快照(缺失/失效/跨宿主被守卫置 null)时,
   // 请求 Runtime 按完整成分重算;未知期间圆环保持 unknown,不渲染伪造百分比。
+  // 同一会话、模型和内容版本只尝试一次。unknown 是合法结果，不能让它触发重投影死循环。
   // 运行中不触发:计量由 Runtime context.accounting 事件接管。
+  const contextRestoreAttemptedKeysRef = useRef(new Set<string>());
   useEffect(() => {
     if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
-    const requiresRestore = shouldRestoreContextAccounting({
+    const restoreInput = {
+      conversationId,
       snapshot: contextAccounting,
       providerId: activeProvider?.id ?? modelProviderId,
       model: activeProvider?.model,
+    };
+    const requiresRestore = shouldStartContextAccountingRestore({
+      attemptedKeys: contextRestoreAttemptedKeysRef.current,
+      ...restoreInput,
     });
     if (!requiresRestore || isBusy) return;
     if (typeof clientApi.chatContextRestored !== 'function') return;
+    contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey(restoreInput));
     let cancelled = false;
     void clientApi.chatContextRestored({
       conversationId,
@@ -941,10 +953,14 @@ export function ChatSurface({
     })
       .then((snap) => {
         if (cancelled || !snap) return;
+        contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey({
+          ...restoreInput,
+          snapshot: snap,
+        }));
         setContextAccountingSnapshot(snap);
       })
       .catch(() => {
-        // 重投影失败保持未知,下一轮 done 仍会带来新快照。
+        // 重投影失败保持未知；内容修订或模型变化会生成新 key，并允许再次恢复。
       });
     return () => { cancelled = true; };
   }, [
