@@ -239,11 +239,65 @@ body:has(.quick-chat-shell) {
 
 .quick-chat-composer > .attachment-strip {
   width: 100%;
-  max-height: 132px;
+  max-height: 96px;
+  gap: 6px;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 2px 0 0;
 }
+
+/* Compact attachment chips for Quick Chat (main chat rem sizes look oversized here). */
+.quick-chat-composer .attachment-chip {
+  gap: 6px;
+  max-width: min(100%, 220px);
+  padding: 3px 5px;
+}
+
+.quick-chat-composer .attachment-thumb-btn,
+.quick-chat-composer .attachment-file-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.quick-chat-composer .attachment-file-icon {
+  font-size: 9px;
+}
+
+.quick-chat-composer .attachment-meta {
+  gap: 0;
+  min-width: 0;
+}
+
+.quick-chat-composer .attachment-name {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.quick-chat-composer .attachment-sub {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.quick-chat-composer .attachment-remove {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+
+/* Image chips follow Codex tile style even inside Quick Chat. */
+.quick-chat-composer .attachment-chip.image {
+  width: 56px;
+  height: 56px;
+  max-width: 56px;
+  padding: 0;
+  gap: 0;
+}
+.quick-chat-composer .attachment-chip.image .attachment-thumb-btn,
+.quick-chat-composer .attachment-chip.image .attachment-file-icon {
+  width: 100%;
+  height: 100%;
+}
+
 
 .quick-chat-input-row {
   display: flex;
@@ -351,6 +405,8 @@ body:has(.quick-chat-shell) {
 .quick-chat-popover-shell {
   position: absolute;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   /* Compact floating card under the bar — single outline, no nested double border. */
   border: 1px solid var(--chrome-hairline, var(--quick-border));
@@ -379,10 +435,17 @@ body:has(.quick-chat-shell) {
 .quick-chat-popover-panel {
   display: flex;
   width: 100%;
+  /* Critical for independent host window: min-height:0 lets the panel shrink
+     inside the fixed BrowserWindow so overflow-y can actually scroll. */
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   flex-direction: column;
   gap: 2px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 6px;
   /* Single surface: panel stays transparent so shell owns the border/fill. */
   background: transparent;
@@ -424,21 +487,25 @@ body:has(.quick-chat-shell) {
   gap: 3px;
 }
 
-.quick-chat-popover-copy strong,
-.quick-chat-popover-copy span {
+.quick-chat-popover-copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.quick-chat-popover-copy strong {
   font-size: 12px;
   font-weight: 600;
 }
 
 .quick-chat-popover-copy span {
+  /* Access-level descriptions need wrap; paths still clamp to 2 lines. */
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--graphite-fade);
   font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .quick-chat-popover-check {
@@ -448,23 +515,35 @@ body:has(.quick-chat-shell) {
 }
 
 .quick-chat-effort-panel {
+  box-sizing: border-box;
+  display: flex;
   width: 100%;
-  height: 100%;
-  padding: 10px 12px;
-  background: var(--chrome-canvas);
+  /* Prefer content-sized height; fill host only when parent has real height. */
+  min-height: 64px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow: visible;
+  background: transparent;
 }
 
 .quick-chat-effort-heading {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
-  margin-bottom: 6px;
-  color: var(--graphite-fade);
+  margin: 0;
+  color: var(--graphite-fade, #6b7280);
   font-size: 11px;
+  line-height: 1.2;
+  opacity: 1;
+  visibility: visible;
 }
 
 .quick-chat-effort-heading strong {
-  color: var(--graphite-base);
+  color: var(--graphite-base, #1f2937);
   font-weight: 600;
 }
 
@@ -477,12 +556,20 @@ body:has(.quick-chat-shell) {
   appearance: none;
   background: transparent;
   cursor: grab;
+  opacity: 1;
+  visibility: visible;
 }
 
 .quick-chat-effort-slider::-webkit-slider-runnable-track {
   height: 3px;
-  border-radius: var(--ui-radius-round);
-  background: linear-gradient(to right, var(--graphite-base) 0%, var(--graphite-base) var(--effort-progress), var(--za-line-strong) var(--effort-progress), var(--za-line-strong) 100%);
+  border-radius: var(--ui-radius-round, 999px);
+  background: linear-gradient(
+    to right,
+    var(--graphite-base, #1f2937) 0%,
+    var(--graphite-base, #1f2937) var(--effort-progress),
+    var(--za-line-strong, #d1d5db) var(--effort-progress),
+    var(--za-line-strong, #d1d5db) 100%
+  );
 }
 
 .quick-chat-effort-slider::-webkit-slider-thumb {
@@ -490,10 +577,10 @@ body:has(.quick-chat-shell) {
   height: 13px;
   margin-top: -5px;
   appearance: none;
-  border: 2px solid var(--chrome-canvas);
+  border: 2px solid var(--chrome-canvas, #ffffff);
   border-radius: 50%;
-  background: var(--graphite-base);
-  box-shadow: 0 0 0 1px var(--za-line-strong);
+  background: var(--graphite-base, #1f2937);
+  box-shadow: 0 0 0 1px var(--za-line-strong, #d1d5db);
 }
 
 .quick-chat-task-card {
@@ -612,4 +699,58 @@ body:has(.quick-chat-shell) {
 
 @media (prefers-reduced-motion: reduce) {
   .quick-chat-spinner { animation: none; }
+}
+
+
+/* Independent popover BrowserWindow host (ADR 60)
+   Full height chain: html → body → #root → host → shell → panel.
+   Missing #root previously collapsed effort content to 0 height. */
+html.quick-chat-popover-window,
+body.quick-chat-popover-window,
+html.quick-chat-popover-window #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+html.quick-chat-popover-window,
+body.quick-chat-popover-window,
+html.quick-chat-popover-window #root {
+  display: flex;
+  flex-direction: column;
+}
+
+.quick-chat-popover-host {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--graphite-base, #1f2937);
+  background: transparent;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.quick-chat-popover-shell.is-host {
+  position: relative !important;
+  inset: auto;
+  display: flex !important;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  overflow: hidden;
+  /* Ensure text tokens resolve even if theme vars are late/missing. */
+  color: var(--graphite-base, #1f2937);
 }

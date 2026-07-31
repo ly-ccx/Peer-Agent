@@ -16,7 +16,7 @@ type CaptureFeedback =
 
 /**
  * Appshots 设置分区（P0a 最小版，产品文档 §6.4）：
- * 总开关 / 当前热键展示（只读，改键走「快捷键」分区 P1）/ Screen Recording 权限状态 / 测试捕获。
+ * 总开关 / 热键状态（当前无全局热键，双 ⌘ 暂缓）/ Screen Recording 权限状态 / 测试捕获。
  * 权限真值在主进程（ADR 59）；这里只表达状态，不做本地权限判断。
  */
 export function AppshotsPanel() {
@@ -110,9 +110,13 @@ export function AppshotsPanel() {
         <div className="settings-row">
           <span>
             <strong>{isZh ? '捕获热键' : 'Capture hotkey'}</strong>
-            <small>{isZh ? '可在「快捷键」分区修改。' : 'Change it in the Keyboard shortcuts section.'}</small>
+            <small>
+              {isZh
+                ? '全局热键暂未启用（目标为左右 ⌘ 同按，待开发者账号就绪后再做）。当前请用下方「测试捕获」。'
+                : 'No global hotkey for now (target is left+right ⌘; deferred until developer signing). Use Test capture below.'}
+            </small>
           </span>
-          <kbd>{hotkey ? displayShortcut(hotkey) : '…'}</kbd>
+          <kbd>{hotkey ? displayShortcut(hotkey) : (isZh ? '未绑定' : 'Unbound')}</kbd>
         </div>
 
         <div className="settings-row">

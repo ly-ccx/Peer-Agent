@@ -100,92 +100,29 @@ test('backward-compatible update(accelerator) still targets quickChat', () => {
   assert.equal(getSettings().shortcuts.quickChat, 'CommandOrControl+Shift+Y');
 });
 
-test('appshot registers alongside quickChat with per-action callbacks', () => {
+test('appshot has no default global shortcut and does not occupy CommandOrControl+Shift+A', () => {
+  assert.equal(Object.prototype.hasOwnProperty.call(DEFAULT_SHORTCUTS, 'appshot'), false);
   const registered = new Map();
   const globalShortcut = {
     register(accelerator, handler) { registered.set(accelerator, handler); return true; },
     unregister(accelerator) { registered.delete(accelerator); },
     isRegistered(accelerator) { return registered.has(accelerator); },
   };
-  let settings = {};
+  let settings = { shortcuts: { appshot: 'CommandOrControl+Shift+A' } };
   const settingsStore = {
     getAll: () => settings,
     merge: (patch) => { settings = { ...settings, ...patch }; },
   };
-  const calls = [];
   const service = createShortcutService({
     globalShortcut,
     settingsStore,
-    onQuickChat: () => calls.push('quickChat'),
-    onAppshot: () => calls.push('appshot'),
+    onQuickChat: () => {},
   });
-  const result = service.register();
-  assert.equal(result.actions.quickChat.success, true);
-  assert.equal(result.actions.appshot.success, true);
-  assert.equal(result.actions.appshot.accelerator, DEFAULT_SHORTCUTS.appshot);
-  // Callbacks are per-action: firing the appshot accelerator invokes appshot only.
-  registered.get(DEFAULT_SHORTCUTS.appshot)();
-  registered.get(DEFAULT_SHORTCUTS.quickChat)();
-  assert.deepEqual(calls, ['appshot', 'quickChat']);
-  // status() exposes appshot state.
-  assert.equal(service.status().appshot.registered, true);
-});
-
-test('appshot cannot steal quickChat accelerator (cross-action conflict)', () => {
-  const registered = new Map();
-  const globalShortcut = {
-    register(accelerator, handler) { registered.set(accelerator, handler); return true; },
-    unregister(accelerator) { registered.delete(accelerator); },
-    isRegistered(accelerator) { return registered.has(accelerator); },
-  };
-  let settings = {};
-  const settingsStore = { getAll: () => settings, merge: (p) => { settings = { ...settings, ...p }; } };
-  const service = createShortcutService({
-    globalShortcut, settingsStore, onQuickChat: () => {}, onAppshot: () => {},
-  });
-  service.register();
-  const result = service.update('appshot', DEFAULT_SHORTCUTS.quickChat);
-  assert.equal(result.success, false);
-  assert.equal(result.error, 'conflict-with-other-action');
-  // quickChat binding is untouched.
-  assert.equal(service.status().quickChat.registered, true);
-});
-
-test('appshot registration failure keeps previous appshot binding (rollback)', () => {
-  const registered = new Map();
-  const globalShortcut = {
-    register(accelerator, handler) {
-      if (accelerator.includes('Taken')) return false;
-      registered.set(accelerator, handler); return true;
-    },
-    unregister(accelerator) { registered.delete(accelerator); },
-    isRegistered(accelerator) { return registered.has(accelerator); },
-  };
-  let settings = {};
-  const settingsStore = { getAll: () => settings, merge: (p) => { settings = { ...settings, ...p }; } };
-  const service = createShortcutService({
-    globalShortcut, settingsStore, onQuickChat: () => {}, onAppshot: () => {},
-  });
-  service.register();
-  const result = service.update('appshot', 'CommandOrControl+Shift+Taken');
-  assert.equal(result.success, false);
-  // Old binding still live after failed update.
-  assert.equal(registered.has(DEFAULT_SHORTCUTS.appshot), true);
-  assert.equal(service.status().appshot.active, DEFAULT_SHORTCUTS.appshot);
-});
-
-test('register() without onAppshot handler skips appshot gracefully', () => {
-  const registered = new Map();
-  const globalShortcut = {
-    register(a, h) { registered.set(a, h); return true; },
-    unregister(a) { registered.delete(a); },
-    isRegistered(a) { return registered.has(a); },
-  };
-  let settings = {};
-  const settingsStore = { getAll: () => settings, merge: (p) => { settings = { ...settings, ...p }; } };
-  const service = createShortcutService({ globalShortcut, settingsStore, onQuickChat: () => {} });
   const result = service.register();
   assert.equal(result.actions.quickChat.success, true);
   assert.equal(result.actions.appshot, undefined);
-  assert.equal(registered.has(DEFAULT_SHORTCUTS.appshot), false);
+  assert.equal(registered.has('CommandOrControl+Shift+A'), false);
+  assert.equal(service.status().appshot.registered, false);
+  assert.equal(service.status().appshot.configured, '');
+  assert.equal(service.status().appshot.active, null);
 });

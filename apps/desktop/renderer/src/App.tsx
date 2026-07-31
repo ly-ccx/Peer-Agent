@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { FullDiskAccessStartupGate } from './app/components/FullDiskAccessStartupGate';
+import { QuickChatPopoverHost } from './app/components/QuickChatPopoverHost';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
 import { useConfirm } from './app/components/ConfirmProvider';
@@ -93,6 +94,7 @@ function readGitBranchPrefix(settings: Record<string, unknown> | null | undefine
 export function App() {
   const windowView = new URLSearchParams(window.location.search).get('window');
   if (windowView === 'quick-chat') return <QuickChatWindow />;
+  if (windowView === 'quick-chat-popover') return <QuickChatPopoverHost />;
 
   return <MainApp />;
 }

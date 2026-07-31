@@ -397,6 +397,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
             if ((event.key === 'Tab' || event.key === 'Enter')
+              && !event.nativeEvent.isComposing
+              && event.keyCode !== 229
               && draft !== slashCommands[activeSlashIndex]?.value) {
               event.preventDefault();
               const command = slashCommands[activeSlashIndex] ?? slashCommands[0];
@@ -422,7 +424,10 @@ const ComposerDraftField = memo(function ComposerDraftField({
               setActiveSessionIndex((index) => (index - 1 + sessionHits.length) % sessionHits.length);
               return;
             }
-            if ((event.key === 'Tab' || event.key === 'Enter') && sessionHits.length > 0) {
+            if ((event.key === 'Tab' || event.key === 'Enter')
+              && sessionHits.length > 0
+              && !event.nativeEvent.isComposing
+              && event.keyCode !== 229) {
               event.preventDefault();
               const hit = sessionHits[activeSessionIndex] ?? sessionHits[0];
               if (hit) applySessionMention(hit);
@@ -434,7 +439,13 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
           }
-          if (event.key === 'Enter' && !event.shiftKey) {
+          // IME composition (Chinese/Japanese/etc.): Enter confirms candidate, must not send.
+          if (
+            event.key === 'Enter'
+            && !event.shiftKey
+            && !event.nativeEvent.isComposing
+            && event.keyCode !== 229
+          ) {
             event.preventDefault();
             onPrimaryAction();
           }

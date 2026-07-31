@@ -3,15 +3,18 @@ import type {
   QuickChatPopoverState,
 } from '../../preload/contracts/bootstrapPreloadApi.ts';
 
-export const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
+export const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 360 });
 /** Flush under the Quick bar bottom (no floating air gap / double seam). */
 export const POPOVER_GAP = 0;
 const VIEWPORT_INSET = 8;
+/** Panel padding 6+6 + shell border 1+1 — keep in sync with quick-chat.css / main. */
+const POPOVER_CHROME_HEIGHT = 14;
 /** Model / effort hang from the right edge of their trigger. */
 export const RIGHT_ALIGNED_KINDS = new Set(['model', 'effort'] as const);
 
 /**
  * Compact popover size from menu content (not the full input bar width).
+ * Keep in sync with apps/desktop/electron/main/quick-chat-window.mjs.
  */
 export function resolveQuickChatPopoverVisualSize(state: QuickChatPopoverState & {
   readonly anchorRect?: QuickChatPopoverAnchorRect | null;
@@ -22,17 +25,31 @@ export function resolveQuickChatPopoverVisualSize(state: QuickChatPopoverState &
     item.label.length,
     item.detail?.length ?? 0,
   ), 0);
-  const rowHeight = hasDetails ? 44 : 34;
-  const minWidth = state.kind === 'workspace' ? 280 : state.kind === 'effort' ? 240 : 190;
+  const rowHeight = state.kind === 'access'
+    ? 58
+    : hasDetails
+      ? 52
+      : 36;
+  const minWidth = state.kind === 'workspace'
+    ? 300
+    : state.kind === 'effort'
+      ? 240
+      : state.kind === 'access'
+        ? 280
+        : 190;
   const width = state.kind === 'effort'
     ? 240
     : Math.min(
       POPOVER_MAX_SIZE.width,
       Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
     );
+  // Keep in sync with main resolveQuickChatPopoverSize — tight, not airy.
   const height = state.kind === 'effort'
-    ? 72
-    : Math.min(POPOVER_MAX_SIZE.height, 12 + Math.max(1, state.items.length) * rowHeight);
+    ? 84
+    : Math.min(
+      POPOVER_MAX_SIZE.height,
+      POPOVER_CHROME_HEIGHT + Math.max(1, state.items.length) * rowHeight,
+    );
   return { width: Math.round(width), height: Math.round(height) };
 }
 

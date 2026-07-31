@@ -1,13 +1,13 @@
 export const DEFAULT_SHORTCUTS = Object.freeze({
   quickChat: process.platform === 'darwin' ? 'CommandOrControl+Shift+N' : 'Control+Shift+N',
   newTask: 'CommandOrControl+N',
-  // Appshots P0a (ADR 59 / spike S3): double-Command is not expressible as an
-  // Electron accelerator, so the default is a standard chord.
-  appshot: 'CommandOrControl+Shift+A',
+  // Appshots: no default global shortcut while double-⌘ is deferred (user decision
+  // 2026-07-30: wait for developer signing). Capture remains available via settings
+  // "Test capture" only — do not occupy ⌘⇧A or any other accelerator.
 });
 
 /** Actions registered via Electron globalShortcut (OS-level). Others are app-local. */
-const GLOBAL_ACTIONS = new Set(['quickChat', 'appshot']);
+const GLOBAL_ACTIONS = new Set(['quickChat']);
 
 const RESERVED_SHORTCUTS = new Set(
   process.platform === 'darwin'
@@ -45,11 +45,11 @@ function isKnownAction(action) {
  * previous working binding on failure. App-local actions (newTask) only persist
  * configuration for the renderer to bind.
  */
-export function createShortcutService({ globalShortcut, settingsStore, onQuickChat, onAppshot }) {
-  // Per-action callback table (T4). Legacy param onQuickChat maps to quickChat.
+export function createShortcutService({ globalShortcut, settingsStore, onQuickChat }) {
+  // Per-action callback table. Legacy param onQuickChat maps to quickChat.
+  // Appshot has no global accelerator while double-⌘ is deferred.
   const actionHandlers = {
     quickChat: onQuickChat,
-    appshot: onAppshot,
   };
   // Per-action registration state: action -> { active, error }.
   const registration = new Map();
@@ -180,7 +180,15 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     return {
       quickChat: actionStatus('quickChat'),
       newTask: actionStatus('newTask'),
-      appshot: actionStatus('appshot'),
+      // Explicit empty status so settings UI can show "no global hotkey" without
+      // implying a registered accelerator. Not a DEFAULT_SHORTCUTS / GLOBAL_ACTIONS entry.
+      appshot: {
+        configured: '',
+        active: null,
+        registered: false,
+        error: null,
+        isDefault: true,
+      },
     };
   }
 

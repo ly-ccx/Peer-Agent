@@ -130,11 +130,12 @@ export const AttachmentStrip = memo(function AttachmentStrip({
             }}
           >
             {attachment.kind === 'image' && attachment.dataUrl ? (
+              // Codex-style: image chips are thumb-only; no filename/size chrome.
               <button
                 type="button"
                 className="attachment-thumb-btn"
                 onClick={() => onPreviewImage?.(attachment)}
-                title={isZh ? '预览图片' : 'Preview image'}
+                title={attachment.name}
                 aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
               >
                 <AttachmentThumb
@@ -166,18 +167,18 @@ export const AttachmentStrip = memo(function AttachmentStrip({
                 </svg>
               </span>
             )}
-            <div className="attachment-meta">
-              <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
-              <span className="attachment-sub">
-                {attachment.kind === 'image'
-                  ? (isZh ? '图片' : 'Image')
-                  : attachment.appshot
+            {attachment.kind === 'image' && attachment.dataUrl ? null : (
+              <div className="attachment-meta">
+                <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
+                <span className="attachment-sub">
+                  {attachment.appshot
                     ? (isZh ? '截图' : 'Shot')
                     : (isZh ? '文件' : 'File')}
-                {' · '}
-                {formatBytes(attachment.size)}
-              </span>
-            </div>
+                  {' · '}
+                  {formatBytes(attachment.size)}
+                </span>
+              </div>
+            )}
             {!readOnly && onRemove ? (
               <button
                 type="button"

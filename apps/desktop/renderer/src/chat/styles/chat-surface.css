@@ -1310,18 +1310,65 @@
 .attachment-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  max-width: min(100%, 280px);
+  gap: 6px;
+  max-width: min(100%, 240px);
   min-width: 0;
-  padding: 4px 6px;
+  padding: 3px 5px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-sm);
   background: var(--paper-sheet);
   color: var(--graphite-soft);
+  /* Pin density so rem/root scaling can't blow up chip text. */
+  font-size: 11px;
+  line-height: 1.2;
 }
 .attachment-strip.reorderable .attachment-chip {
   cursor: grab;
 }
+
+/* Codex-style image chips: pure thumbnail tile + corner remove, no text chrome. */
+.attachment-chip.image {
+  position: relative;
+  gap: 0;
+  width: 64px;
+  height: 64px;
+  max-width: 64px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--chrome-sunken, #eef1f4);
+}
+.attachment-chip.image .attachment-thumb-btn {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 12px;
+  cursor: zoom-in;
+}
+.attachment-chip.image .attachment-thumb,
+.attachment-chip.image .attachment-thumb-pending {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.attachment-chip.image .attachment-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #111 72%, transparent);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.attachment-chip.image .attachment-remove:hover {
+  background: color-mix(in srgb, #111 86%, transparent);
+  color: #fff;
+}
+
 .attachment-chip.is-dragging {
   opacity: 0.45;
   cursor: grabbing;
@@ -1334,8 +1381,8 @@
   background: var(--chrome-sunken);
 }
 .attachment-thumb-btn {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
@@ -1361,8 +1408,8 @@
   background: var(--chrome-sunken);
 }
 .attachment-file-icon {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--ui-radius-control);
   display: inline-flex;
   align-items: center;
@@ -1371,13 +1418,13 @@
   background: var(--chrome-sunken);
   color: var(--graphite-mute);
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 9px;
   font-weight: 700;
 }
 .attachment-meta {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 .attachment-name {
@@ -1385,17 +1432,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
+  font-size: 11px;
+  line-height: 1.2;
   color: var(--graphite-base);
 }
+/* Markup uses .attachment-sub; keep .attachment-size as alias. */
+.attachment-sub,
 .attachment-size {
-  font-size: 0.62rem;
+  font-size: 10px;
+  line-height: 1.2;
   color: var(--graphite-mute);
   white-space: nowrap;
 }
 .attachment-remove {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border: none;
   border-radius: 5px;
   background: transparent;
@@ -1405,6 +1456,7 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  font-size: 12px;
 }
 .attachment-remove:hover {
   background: var(--chrome-sunken);

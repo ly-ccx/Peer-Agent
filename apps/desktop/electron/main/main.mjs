@@ -1198,9 +1198,48 @@ function createQuickChatWindow() {
   return quickWindow;
 }
 
+/** Independent menu host — never shares bounds with the Quick Chat bar (ADR 60). */
+function createQuickChatPopoverWindow() {
+  const isMac = process.platform === 'darwin';
+  const popoverWindow = new BrowserWindow({
+    width: 280,
+    height: 160,
+    minWidth: 120,
+    minHeight: 72,
+    maxWidth: 360,
+    maxHeight: 360,
+    useContentSize: true,
+    backgroundColor: '#00000000',
+    transparent: true,
+    ...(isMac
+      ? {
+          vibrancy: 'popover',
+          visualEffectState: 'active',
+        }
+      : {}),
+    show: false,
+    frame: false,
+    roundedCorners: true,
+    resizable: false,
+    hasShadow: true,
+    skipTaskbar: true,
+    focusable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  loadRendererWindow(popoverWindow, { window: 'quick-chat-popover' });
+  return popoverWindow;
+}
+
 const quickChatWindowController = createQuickChatWindowController({
   screen,
   createWindow: createQuickChatWindow,
+  createPopoverWindow: createQuickChatPopoverWindow,
 });
 
 // Appshots P0a (ADR 59): user-gesture-only capture; never exposed as a model tool.
@@ -1303,7 +1342,8 @@ const shortcutService = createShortcutService({
   globalShortcut,
   settingsStore,
   onQuickChat: () => quickChatWindowController.toggle(),
-  onAppshot: () => { void handleAppshotHotkey(); },
+  // Appshot: no global accelerator while double-⌘ is deferred (do not occupy ⌘⇧A).
+  // Capture remains available via settings "Test capture" / appshot:capture IPC.
 });
 
 ipcMain.handle('appshot:capture', () => handleAppshotHotkey('settings-test'));
@@ -4429,12 +4469,20 @@ app.whenReady().then(async () => {
   if (!shortcutRegistration.success) {
     console.warn('[shortcuts] Quick Chat global shortcut unavailable:', shortcutRegistration.error);
   }
-  if (shortcutRegistration.actions?.appshot && !shortcutRegistration.actions.appshot.success) {
-    console.warn('[shortcuts] Appshot global shortcut unavailable:', shortcutRegistration.actions.appshot.error);
+  // Drop any previously persisted Appshot accelerator so it cannot re-occupy ⌘⇧A
+  // after the double-⌘ deferral (user decision 2026-07-30).
+  try {
+    const shortcuts = settingsStore.getAll().shortcuts;
+    if (shortcuts && typeof shortcuts === 'object' && shortcuts.appshot) {
+      const { appshot: _removed, ...rest } = shortcuts;
+      settingsStore.merge({ shortcuts: rest });
+    }
+  } catch (err) {
+    console.warn('[appshot] failed to clear persisted appshot shortcut:', err?.message ?? err);
   }
 
   // Appshots T3.1: absorb the one-time window-list binary compile + first-exec
-  // security scan at startup instead of on the user's first hotkey press.
+  // security scan at startup (still useful for settings-test capture latency).
   void appshotService.warmup();
 
   // 自定义应用菜单替换 Electron 默认菜单：移除生产环境整窗 Reload/Force Reload，

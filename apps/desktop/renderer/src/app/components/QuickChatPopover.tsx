@@ -11,13 +11,15 @@ import {
 } from './quickChatPopoverLayout.ts';
 
 export type InlineQuickChatPopoverState = QuickChatPopoverState & {
-  readonly anchorRect: QuickChatPopoverAnchorRect;
+  readonly anchorRect?: QuickChatPopoverAnchorRect;
 };
 
 interface QuickChatPopoverProps {
   readonly state: InlineQuickChatPopoverState;
   readonly onSelect: (value: string) => void;
   readonly onDismiss: () => void;
+  /** host = independent BrowserWindow fills itself; inline = absolute under bar (legacy). */
+  readonly layout?: 'host' | 'inline';
 }
 
 export {
@@ -25,7 +27,7 @@ export {
   resolveQuickChatPopoverVisualSize,
 } from './quickChatPopoverLayout.ts';
 
-export function QuickChatPopover({ state, onSelect, onDismiss }: QuickChatPopoverProps) {
+export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline' }: QuickChatPopoverProps) {
   const shellRef = useRef<HTMLElement>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const previewFrameRef = useRef<number | null>(null);
@@ -42,13 +44,15 @@ export function QuickChatPopover({ state, onSelect, onDismiss }: QuickChatPopove
   const previewEffort = effortLevels[previewIndex]
     ?? (isEffortLevel(state.selectedValue) ? state.selectedValue : 'default');
   const size = resolveQuickChatPopoverVisualSize(state);
-  // state.anchorRect is the trigger button; vertical flush uses bar bottom encoded as
-  // y/height of a synthetic rect (see QuickChatWindow.togglePopover).
-  const { left, top } = resolveQuickChatPopoverPosition({
-    kind: state.kind,
-    anchorRect: state.anchorRect,
-    size,
-  });
+  // host window is already positioned by main; only inline layout needs DOM offsets.
+  const position = layout === 'host' || !state.anchorRect
+    ? { left: 0, top: 0 }
+    : resolveQuickChatPopoverPosition({
+        kind: state.kind,
+        anchorRect: state.anchorRect,
+        size,
+      });
+  const { left, top } = position;
 
   useEffect(() => {
     setActiveIndex(selectedIndex);
@@ -85,11 +89,17 @@ export function QuickChatPopover({ state, onSelect, onDismiss }: QuickChatPopove
     if (level) onSelect(level);
   };
 
+  const shellStyle = (
+    layout === 'host'
+      ? { width: '100%', height: '100%', left: 0, top: 0, position: 'relative' }
+      : { left, top, width: size.width, height: size.height }
+  ) as CSSProperties;
+
   return (
     <main
       ref={shellRef}
-      className="quick-chat-popover-shell"
-      style={{ left, top, width: size.width, height: size.height } as CSSProperties}
+      className={`quick-chat-popover-shell${layout === 'host' ? ' is-host' : ''}`}
+      style={shellStyle}
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {

@@ -36,7 +36,7 @@ import { getClipboardFiles, hasQuickChatContent } from '../../chat/state/quickCh
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { AttachmentStrip, PEER_ATTACHMENT_DND_TYPE } from '../../chat/components/thread/AttachmentStrip';
 import type { QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
-import { QuickChatPopover, type InlineQuickChatPopoverState } from './QuickChatPopover';
+import { type InlineQuickChatPopoverState } from './QuickChatPopover';
 import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
 
@@ -377,7 +377,16 @@ export function QuickChatWindow() {
                 else void clientApi.quickChatHide?.();
                 return;
               }
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(event.metaKey || event.ctrlKey); }
+              // IME composition: Enter confirms candidate; also ignore keyCode 229 (legacy IME).
+              if (
+                event.key === 'Enter'
+                && !event.shiftKey
+                && !event.nativeEvent.isComposing
+                && event.keyCode !== 229
+              ) {
+                event.preventDefault();
+                void submit(event.metaKey || event.ctrlKey);
+              }
             }} />
             <input ref={fileInputRef} className="quick-chat-file-input" type="file" multiple onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ''; }} />
             <button type="button" className="quick-chat-attach" aria-label="添加附件" title="添加附件" disabled={sending} onClick={() => fileInputRef.current?.click()}>
@@ -440,16 +449,7 @@ export function QuickChatWindow() {
           {error ? <span className="quick-chat-error" role="alert">{error}</span> : null}
         </div>
       </section>
-      {popoverState ? (
-        <QuickChatPopover
-          state={popoverState}
-          onDismiss={dismissPopover}
-          onSelect={(value) => {
-            selectPopoverValue(popoverState.kind, value);
-            dismissPopover();
-          }}
-        />
-      ) : null}
+      {/* Menus render in the independent quick-chat-popover window (ADR 60). */}
     </main>
   );
 }
