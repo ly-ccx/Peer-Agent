@@ -106,6 +106,77 @@ describe('qoder private adapter', () => {
     assert.deepEqual(body.business, {});
   });
 
+  it('keeps image_url parts in both content and contents for vision user messages', () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W7tUAAAAASUVORK5CYII=';
+    const body = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      requestId: 'req-vl',
+      requestSetId: 'set-vl',
+      sessionId: 'session-vl',
+      taskId: 'task-vl',
+      messages: [
+        { role: 'system', content: 'system prompt' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '这张图里有什么？' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      metadata: {
+        id: 'ultimate',
+        label: 'Ultimate',
+        source: 'system',
+        format: 'openai',
+        supportsVision: true,
+        supportsReasoning: false,
+      },
+    });
+
+    const user = body.messages.find((message) => message.role === 'user');
+    // qodercli 1.1.7 对带图 user 消息：content 与 contents 都携带 image_url 分片。
+    assert.deepEqual(user.content, [
+      { type: 'text', text: '这张图里有什么？' },
+      { type: 'image_url', image_url: { url: dataUrl } },
+    ]);
+    assert.deepEqual(user.contents, [
+      { type: 'text', text: '这张图里有什么？' },
+      { type: 'image_url', image_url: { url: dataUrl } },
+    ]);
+    assert.equal(body.model_config.is_vl, true);
+  });
+
+  it('keeps image-only user contents non-empty so upstream sees the image', () => {
+    const dataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    const body = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      requestId: 'req-vl2',
+      requestSetId: 'set-vl2',
+      sessionId: 'session-vl2',
+      taskId: 'task-vl2',
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: dataUrl } }],
+        },
+      ],
+      metadata: {
+        id: 'ultimate',
+        label: 'Ultimate',
+        source: 'system',
+        format: 'openai',
+        supportsVision: true,
+        supportsReasoning: false,
+      },
+    });
+
+    const user = body.messages.find((message) => message.role === 'user');
+    assert.deepEqual(user.contents, [
+      { type: 'image_url', image_url: { url: dataUrl } },
+    ]);
+  });
+
   it('uses empty contents for tool-only assistant and drops empty user messages', () => {
     const body = buildQoderRemoteChatAsk({
       model: 'kmodel_latest',

@@ -394,7 +394,10 @@ function qoderContentPart(part) {
   if (!part || typeof part !== 'object') return null;
   if (part.type === 'text' && typeof part.text === 'string') return { type: 'text', text: part.text };
   if (part.type === 'image_url' && part.image_url?.url) {
-    return { type: 'image_url', image_url: { url: part.image_url.url, detail: part.image_url.detail } };
+    const imageUrl = { url: part.image_url.url };
+    // qodercli 的 qbR 只产出 {url}；detail 仅在显式设置时透传，避免悬空 undefined。
+    if (part.image_url.detail != null) imageUrl.detail = part.image_url.detail;
+    return { type: 'image_url', image_url: imageUrl };
   }
   if (part.type === 'tool_use') {
     const name = typeof part.name === 'string' ? part.name : 'tool';
@@ -461,6 +464,9 @@ function qoderToolCall(toolCall, index) {
 /**
  * qodercli 对 user/assistant 会同时发送 content 与 contents。
  * - 有文本时：contents=[{type:'text', text}]
+ * - 带图片时：contents 同样携带 {type:'image_url', image_url:{url}} 分片
+ *   （qodercli 1.1.7 逆向确认：user 消息的 contents=Q 包含 image_url 分片，
+ *   base64 data URL 与普通 URL 均合法；chat_context.imageUrls 官方恒为 null）。
  * - 无文本时（如 assistant 仅 tool_calls）：contents=[]
  * 不要发 contents=[{type:'text', text:''}]，Kimi 等上游会报
  * "Invalid request: text content is empty"。
@@ -478,6 +484,10 @@ function qoderMessageContents(content) {
       }
       if (part?.type === 'text' && typeof part.text === 'string') {
         if (part.text.trim()) parts.push({ type: 'text', text: part.text });
+        continue;
+      }
+      if (part?.type === 'image_url' && part.image_url?.url) {
+        parts.push({ type: 'image_url', image_url: { url: String(part.image_url.url) } });
       }
     }
     return parts;
