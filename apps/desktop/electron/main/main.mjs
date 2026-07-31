@@ -4514,9 +4514,10 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    // 不能用 getAllWindows().length === 0 判断：quick-chat/popover 等隐藏预热窗口
+    // 常驻后台，导致关闭主窗后窗口数恒 >0，Dock 点击永远无法重建主窗。
+    // 直接按「主窗口是否存在」处理：存在则唤起，不存在则新建。
+    showOrCreateMainWindow();
   });
 });
 
