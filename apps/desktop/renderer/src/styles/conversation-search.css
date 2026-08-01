@@ -2,7 +2,7 @@
   .conversation-search-panel {
     width: min(560px, calc(100vw - 48px));
     max-height: min(70vh, 560px);
-    border-radius: 14px;
+    border-radius: var(--ui-radius-modal, 16px);
     /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
     overflow: hidden;
     display: flex;
@@ -37,7 +37,7 @@
     outline: none;
     background: transparent;
     color: var(--pa-text-primary);
-    font-size: 15px;
+    font-size: var(--ui-font-body-lg, 0.9375rem);
     line-height: 1.4;
   }
 
@@ -47,7 +47,7 @@
 
   .conversation-search-kbd {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 0.6875rem);
     line-height: 1;
     padding: 4px 6px;
     border-radius: 6px;
@@ -65,7 +65,7 @@
 
   .conversation-search-section-label {
     padding: 8px 10px 4px;
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 0.6875rem);
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -78,7 +78,7 @@
 
   .conversation-search-empty {
     padding: 12px 10px;
-    font-size: 13px;
+    font-size: var(--ui-font-control, 0.8125rem);
     color: var(--pa-text-secondary, var(--graphite-soft));
   }
 
@@ -90,7 +90,7 @@
     border: 0;
     background: transparent;
     text-align: left;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control, 6px);
     padding: 10px;
     cursor: pointer;
     color: inherit;
@@ -110,7 +110,7 @@
   }
 
   .conversation-search-item-title {
-    font-size: 13.5px;
+    font-size: var(--ui-font-body, 0.875rem);
     line-height: 1.35;
     color: var(--pa-text-primary);
     white-space: nowrap;
@@ -126,7 +126,7 @@
   }
 
   .conversation-search-item-meta {
-    font-size: 12px;
+    font-size: var(--ui-font-meta, 0.75rem);
     line-height: 1.3;
     color: var(--pa-text-secondary, var(--graphite-soft));
     white-space: nowrap;
@@ -140,7 +140,7 @@
 
   .conversation-search-item-shortcut {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 0.6875rem);
     line-height: 1;
     padding: 3px 5px;
     border-radius: 6px;

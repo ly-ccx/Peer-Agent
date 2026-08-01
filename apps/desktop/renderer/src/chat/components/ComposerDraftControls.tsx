@@ -359,14 +359,18 @@ const ComposerDraftField = memo(function ComposerDraftField({
                 type="button"
                 role="option"
                 aria-selected={index === activeSessionIndex}
-                className={`slash-command-item${index === activeSessionIndex ? ' active' : ''}`}
+                className={`slash-command-item session-mention-item${index === activeSessionIndex ? ' active' : ''}`}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   applySessionMention(hit);
                 }}
               >
-                <span className="slash-command-label">{hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session')}</span>
-                <span className="slash-command-description">{hit.id}</span>
+                <span className="session-mention-main">
+                  <span className="session-mention-title">
+                    {hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session')}
+                  </span>
+                  <span className="session-mention-id">{hit.id}</span>
+                </span>
               </button>
             ))
           )}

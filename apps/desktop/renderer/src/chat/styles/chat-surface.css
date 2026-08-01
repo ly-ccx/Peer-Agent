@@ -1209,7 +1209,7 @@
   padding: var(--space-2);
   background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-panel, var(--za-radius));
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
   z-index: 20;
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
@@ -1222,7 +1222,7 @@
   min-height: 44px;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
   background: transparent;
   color: var(--graphite-base);
   text-align: left;
@@ -1242,7 +1242,7 @@
   background: var(--azure-trace);
   color: var(--azure-seal);
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--ui-font-control, 0.8125rem);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -1254,11 +1254,11 @@
 }
 .slash-command-label {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--ui-font-control, 0.8125rem);
   color: var(--graphite-base);
 }
 .slash-command-desc {
-  font-size: 0.72rem;
+  font-size: var(--ui-font-meta, 0.75rem);
   color: var(--graphite-mute);
 }
 
@@ -1270,9 +1270,41 @@
   min-height: 0;
 }
 
+.session-mention-item {
+  align-items: flex-start;
+}
+
+.session-mention-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-mention-title {
+  overflow: hidden;
+  color: var(--graphite-base);
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-mention-id {
+  overflow: hidden;
+  color: var(--graphite-mute);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 0.6875rem);
+  line-height: 1.3;
+  opacity: 0.72;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-mention-menu .session-mention-empty {
   padding: var(--space-2) var(--space-3);
-  font-size: 0.78rem;
+  font-size: var(--ui-font-meta, 0.75rem);
   color: var(--graphite-mute);
 }
 
