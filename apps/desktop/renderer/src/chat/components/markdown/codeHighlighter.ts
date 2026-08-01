@@ -150,6 +150,26 @@ function normalizeLanguage(raw: string | undefined): string | null {
 }
 
 /**
+ * diff 行级 token（addition / deletion / meta）在 CSS 里是 display:block，
+ * 以便底色铺满整行。但 highlight.js 把换行符留在 </span> 之外：
+ *
+ *   <span class="hljs-addition">+ foo</span>\n
+ *
+ * block 元素本身已经断行，紧随其后的 \n 在 <pre> 中又是一个真实换行，
+ * 于是每个着色行后面都会多出一行空白。这里把行尾换行移入 span 内部，
+ * 让"断行"只由 block 布局产生一次。
+ *
+ * 只处理紧贴 </span> 之后的单个换行，缩进与行内空白不受影响。
+ */
+const BLOCK_DIFF_TOKEN = /(<span class="hljs-(?:addition|deletion|meta|comment)">[^]*?<\/span>)\n/g;
+
+function absorbTrailingNewlineIntoBlockTokens(html: string): string {
+  return html.replace(BLOCK_DIFF_TOKEN, (_match, span: string) =>
+    span.replace(/<\/span>$/, '\n</span>'),
+  );
+}
+
+/**
  * 对代码块做同步语法高亮。
  *
  * 未指定语言、语言未注册、代码过长或高亮抛错时，返回 html=null，
@@ -173,7 +193,10 @@ export function highlightCode(code: string, rawLanguage: string | undefined): Hi
 
   try {
     const result = hljs.highlight(code, { language, ignoreIllegals: true });
-    const value: HighlightedCode = { html: result.value, language };
+    const html = language === 'diff'
+      ? absorbTrailingNewlineIntoBlockTokens(result.value)
+      : result.value;
+    const value: HighlightedCode = { html, language };
     writeCache(cacheKey, value);
     return value;
   } catch {

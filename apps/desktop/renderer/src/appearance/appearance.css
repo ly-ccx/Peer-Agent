@@ -175,6 +175,12 @@
     @apply m-0 whitespace-pre-wrap;
   }
 
+  /* 每一行代码是独立的 <code>（inline 元素），彼此之间没有换行符。
+     必须显式成块，否则所有行会挤在同一行（如注释与首行代码相连）。 */
+  .appearance-live-code code {
+    @apply block;
+  }
+
   .appearance-live-code .tok-comment {
     color: color-mix(in srgb, var(--preview-fg, var(--za-text)) 45%, transparent);
     font-style: italic;

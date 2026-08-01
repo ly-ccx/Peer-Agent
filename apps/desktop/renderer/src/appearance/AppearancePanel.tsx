@@ -266,7 +266,7 @@ export function ThemeLivePreview({
       }}
     >
       <div className="appearance-live-preview-pane">
-        <div className="appearance-live-preview-caption">{i18n.t('appearance.preview')}</div>
+        <div className="appearance-live-preview-caption">{i18n.t('appearance.codePreview')}</div>
         <pre className="appearance-live-code" aria-hidden="true">
           {codeLines.map((line) => (
             <code key={line.text}>
