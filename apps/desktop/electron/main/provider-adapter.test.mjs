@@ -809,7 +809,6 @@ describe('Provider adapters', () => {
         inputTokens: 5,
         outputTokens: 3,
         cacheReadTokens: 0,
-        cacheWriteTokens: 0,
       });
     } finally {
       globalThis.fetch = previousFetch;

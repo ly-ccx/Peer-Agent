@@ -50,10 +50,13 @@ const samplePlan = {
   },
 };
 
-test('chat mode renders nothing', () => {
+test('legacy chat wire mode renders the active Agent goal context', () => {
   const source = createGoalRunnerPromptSource();
   const observation = source.observe({ mode: 'chat', goalPlanStore: makeStore(samplePlan) });
-  assert.deepEqual(source.render(observation), []);
+  const sections = source.render(observation);
+
+  assert.ok(sections.some((section) => section.id === 'runtime.goal-runner.facts'));
+  assert.ok(sections.some((section) => section.id === 'runtime.goal-runner.contract'));
 });
 
 test('goal mode without active plan renders nothing', () => {

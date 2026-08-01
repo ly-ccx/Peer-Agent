@@ -152,7 +152,7 @@ describe('agentLoopQoder', () => {
     assert.equal(attempts.length, 2);
     assert.deepEqual(attempts[0].tools, tools);
     assert.deepEqual(attempts[1].tools, tools);
-    assert.ok(attempts[1].messages.some((message) => /emitted tool-call protocol text/.test(message.content)));
+    assert.ok(attempts[1].messages.some((message) => /leaked tool protocol/.test(message.content)));
     assert.equal(attempts[1].messages.some((message) => /tool-call dialect/i.test(message.content)), false);
     assert.equal(sent.some((event) => event.channel === 'chat:stream:tool-call'), false);
     assert.ok(sent.some((event) => event.channel === 'chat:stream:done'));

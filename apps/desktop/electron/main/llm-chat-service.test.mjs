@@ -528,7 +528,7 @@ describe('llm chat service tool materialization', () => {
       capturedBodies.push(body);
       if (capturedBodies.length === 1) {
         return new Response(sse([
-          { choices: [{ delta: { content: 'summary of older context' } }] },
+          { choices: [{ delta: { content: 'summary of older context with enough continuity detail' } }] },
           '[DONE]',
         ]), { status: 200 });
       }
@@ -548,9 +548,9 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            // 内置工具 schema 与 system context 固定占用较大；9k 窗口仍让压前总量越过 80% 软线，
-            // 同时允许压后 handoff + 工具真实回到软线以下。
-            contextWindow: 9_000,
+            // 增大可压缩的旧历史，使压前请求越过 17k 窗口的 80% 软线；
+            // 17k 同时为有效 canonical checkpoint 留出稳定的压后请求预算。
+            contextWindow: 17_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -560,8 +560,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
-              inputTokens: 8_500,
-              contextWindow: 9_000,
+              inputTokens: 16_000,
+              contextWindow: 17_000,
             }),
           }),
         },
@@ -569,8 +569,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(4000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(4000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(10_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(10_000)}` },
           { role: 'user', content: latestUser },
         ],
         streamId: 's-compact-continue',
@@ -614,7 +614,7 @@ describe('llm chat service tool materialization', () => {
     globalThis.fetch = async () => {
       fetchCount += 1;
       return new Response(sse([
-        { choices: [{ delta: { content: 'summary before persist failure' } }] },
+        { choices: [{ delta: { content: 'summary before persist failure with continuity detail' } }] },
         '[DONE]',
       ]), { status: 200 });
     };
@@ -630,7 +630,7 @@ describe('llm chat service tool materialization', () => {
             isDefault: true,
             apiKeyConfigured: true,
             // 保持与上一个自动压缩集成场景相同的可实现预算。
-            contextWindow: 9_000,
+            contextWindow: 17_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -640,8 +640,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
               modelKey: 'p1::test-model',
-              inputTokens: 8_500,
-              contextWindow: 9_000,
+              inputTokens: 16_000,
+              contextWindow: 17_000,
             }),
           }),
         },
@@ -652,8 +652,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(4000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(4000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(10_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(10_000)}` },
           { role: 'user', content: 'latest user survives only if compaction persists' },
         ],
         streamId: 's-compact-persist-fail',
@@ -671,10 +671,14 @@ describe('llm chat service tool materialization', () => {
     const errorEvent = events.find((event) => event.channel === 'chat:stream:error');
     assert.ok(errorEvent, 'expected stream error');
     assert.match(errorEvent.payload.error, /persist failed for test/);
-    const compactionStages = events
-      .filter((event) => event.channel === 'chat:compaction')
-      .map((event) => event.payload.stage);
-    assert.equal(compactionStages.includes('idle'), true);
+    const failedCompactionEvent = events.find((event) => (
+      event.channel === 'chat:compaction' && event.payload.stage === 'failed'
+    ));
+    assert.ok(failedCompactionEvent, 'expected queryable compaction failure state');
+    assert.equal(failedCompactionEvent.payload.errorCode, 'CONTEXT_COMPACTION_PERSIST_FAILED');
+    assert.equal(events.some((event) => (
+      event.channel === 'chat:compaction' && event.payload.stage === 'idle'
+    )), false);
   });
 
   it('retries an OpenAI-compatible reasoning-only response before surfacing an explicit error', async () => {

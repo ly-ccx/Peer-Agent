@@ -147,7 +147,7 @@ describe('local goal provider', () => {
           occurredAt: new Date().toISOString(),
         },
       },
-      { locale: 'zh-CN', toolContext: { conversationId: 'conv-1' } },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-1', mode: 'plan' } },
     );
 
     assert.equal(execution.grant.granted, true);

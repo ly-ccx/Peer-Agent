@@ -15,14 +15,26 @@ import {
 // 模式独占;goal 是自驱目标模式,不施加「计划审批门」——有副作用能力由 Runner 托管、高风险
 // 动作走逐动作 hooks 确认,故在本闸门直接放行。
 describe('evaluateGoalModeGate', () => {
-  it('does not gate chat mode', () => {
+  it('does not add Goal hooks to legacy chat wire mode without an active plan', () => {
     const r = evaluateGoalModeGate({
       mode: 'chat',
       toolName: 'bash',
       riskLevel: 'L4_privileged',
       planGate: { hasPlan: false, hasApprovedPlan: false },
     });
+    assert.deepEqual(r, { allowed: true });
+  });
+
+  it('keeps Goal hooks active in legacy chat wire mode when a plan exists', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'chat',
+      toolName: 'bash',
+      riskLevel: 'L4_privileged',
+      planGate: { hasPlan: true, hasApprovedPlan: true },
+    });
     assert.equal(r.allowed, true);
+    assert.equal(r.requiresConfirmation, true);
+    assert.equal(r.confirmation?.kind, 'high_risk');
   });
 
   it('does not gate goal mode (self-driven): side-effecting tools allowed without an approved plan', () => {

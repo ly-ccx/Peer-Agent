@@ -125,6 +125,9 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
     const args = parseArgs(call);
     const conversationId = context.toolContext?.conversationId ?? null;
     const mode = context.toolContext?.mode ?? 'chat';
+    // Agent 的 legacy wire value 仍可能是 chat；与 legacy goal 一样都走自驱契约。
+    // 保持在函数作用域，因为创建后的 Tool Result / control signal 也需要此判定。
+    const selfDriven = mode === 'goal' || mode === 'chat';
     const originWorkspacePath =
       nonEmptyString(args.originWorkspacePath) ||
       nonEmptyString(context.toolContext?.originWorkspacePath) ||
@@ -159,7 +162,6 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           createdBy: 'agent',
         };
         // Agent 默认（chat）与 legacy goal：创建即 accepted 自驱契约；plan 模式仍走 awaiting_approval。
-        const selfDriven = mode === 'goal' || mode === 'chat';
         const plan = selfDriven && typeof goalPlanStore.upsertGoalContract === 'function'
           ? goalPlanStore.upsertGoalContract(conversationId, {
             ...draft,

@@ -45,14 +45,18 @@ describe('goal-plan prompt source', () => {
     assert.equal(section.source.planCount, 1);
   });
 
-  it('renders nothing in chat mode', () => {
+  it('renders the active Agent plan in legacy chat wire mode', () => {
     const source = createGoalPlanPromptSource();
     const observation = source.observe({
       mode: 'chat',
       conversationId: 'conv-1',
       goalPlanStore: fakeStore({ 'conv-1': [ACTIVE_PLAN] }),
     });
-    assert.deepEqual(source.render(observation), []);
+    const sections = source.render(observation);
+
+    assert.equal(sections.length, 1);
+    assert.match(sections[0].content, /task-1/);
+    assert.match(sections[0].content, /task-2/);
   });
 
   it('renders nothing when there is no active plan', () => {

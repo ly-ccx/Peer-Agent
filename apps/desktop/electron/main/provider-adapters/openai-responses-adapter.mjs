@@ -505,7 +505,7 @@ export async function sendOpenAIResponsesStream(options = {}) {
     ...sendOptions
   } = options;
   return sendOpenAIResponsesStreamWithResilience(
-    () => sendOpenAIResponsesStreamOnce(sendOptions),
+    () => sendOpenAIResponsesStreamOnce({ ...sendOptions, signal }),
     { signal, transientRetryDelaysMs, waitImpl }
   );
 }

@@ -297,8 +297,11 @@ export function evaluateGoalModeGate({
 } = {}) {
   // wire 值迁移后（见 ADR 41 / agent-mode-default-and-adaptive-planning）：
   // - plan 模式：审批门。计划获批前拒绝一切有副作用能力（下方逻辑）。
-  // - Agent 默认（wire=chat）与 legacy goal：自驱内核，不施加整模式「计划审批门」，
-  //   改用确定性 hooks·阶段一（写盘范围 / 不可逆确认 / intake write-gate）。
+  // - Agent 默认（wire=chat）只有在会话已有活跃计划时才启用 Goal hooks；没有计划的普通
+  //   Agent 工具调用继续由 Capability Provider 自身的权限 / Evidence 链治理，避免重复确认。
+  // - legacy goal 始终使用自驱内核，不施加整模式「计划审批门」。
+  if (mode === 'chat' && !planGate?.hasPlan) return { allowed: true };
+
   if (mode === 'goal' || mode === 'chat') {
     // 规划 / 回写 / 提问：始终放行。
     if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
