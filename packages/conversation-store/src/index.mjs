@@ -936,6 +936,40 @@ export function createConversationStore(options = {}) {
   }
 
   /**
+   * Merge one runtime turn into the per-model ledger slice of lifetimeUsage.
+   * Keyed by modelProviderId (fallback 'unknown' when attribution is absent),
+   * so switching providers keeps historical per-model totals accurate.
+   */
+  function mergeLifetimeUsageByModel(previousByModel = {}, { attribution = {}, tokens, estimatedCostUsd }) {
+    const modelProviderId =
+      typeof attribution.modelProviderId === 'string' && attribution.modelProviderId.trim()
+        ? attribution.modelProviderId.trim()
+        : 'unknown';
+    const previousEntry = previousByModel[modelProviderId] || {};
+    const inputTokens = Number(previousEntry.inputTokens || 0) + Number(tokens.inputTokens || 0);
+    const outputTokens = Number(previousEntry.outputTokens || 0) + Number(tokens.outputTokens || 0);
+    const cacheReadTokens = Number(previousEntry.cacheReadTokens || 0) + Number(tokens.cacheReadTokens || 0);
+    const cacheWriteTokens = Number(previousEntry.cacheWriteTokens || 0) + Number(tokens.cacheWriteTokens || 0);
+    const requestCount = Number(previousEntry.requestCount || 0) + 1;
+    return {
+      ...previousByModel,
+      [modelProviderId]: {
+        modelProviderId,
+        model: attribution.model || previousEntry.model || undefined,
+        providerName: attribution.providerName || previousEntry.providerName || undefined,
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        estimatedCostUsd:
+          Number(previousEntry.estimatedCostUsd || 0) + (Number.isFinite(estimatedCostUsd) ? estimatedCostUsd : 0),
+        requestCount,
+      },
+    };
+  }
+
+  /**
    * Canonical durable sink for one completed runtime turn.
    *
    * This is intentionally deeper than the Desktop/TUI hosts: it validates the
@@ -976,6 +1010,7 @@ export function createConversationStore(options = {}) {
                   + Number(meta.lifetimeUsage?.outputTokens || 0)
                   + Number(meta.lifetimeUsage?.cacheReadTokens || 0)
                   + Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
+                ...(meta.lifetimeUsage?.byModel ? { byModel: meta.lifetimeUsage.byModel } : {}),
               },
               ledgerRow: existing,
             }
@@ -1001,6 +1036,12 @@ export function createConversationStore(options = {}) {
         outputTokens: Number(previous.outputTokens || 0) + tokens.outputTokens,
         cacheReadTokens: Number(previous.cacheReadTokens || 0) + tokens.cacheReadTokens,
         cacheWriteTokens: Number(previous.cacheWriteTokens || 0) + tokens.cacheWriteTokens,
+        // 按模型拆分累计：切换 Provider 后历史累计仍按各自模型归因，不再串账。
+        byModel: mergeLifetimeUsageByModel(previous.byModel, {
+          attribution,
+          tokens,
+          estimatedCostUsd: Number(attribution.estimatedCostUsd) || 0,
+        }),
       };
       meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
       meta.updatedAt = new Date().toISOString();

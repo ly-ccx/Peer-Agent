@@ -1,13 +1,13 @@
 /**
  * 跨会话用量汇总（精简版使用统计）。
  *
- * 数据源：
- * - conversation index meta.lifetimeUsage（ADR 23）
- * - conversation meta.modelProviderId / model
- * - llm-config listProviders() 上的单价字段（USD / 1M tokens）
- *
- * 不包含：逐条请求日志、时间序列趋势。成本仅为按当前配置单价估算。
+ * 数据源（主）：usage/requests.jsonl 请求级快照（当次请求实际模型 + 当时单价），
+ * 切换 Provider 后历史成本仍归因到各自模型，不串账。
+ * 数据源（回退）：conversation index meta.lifetimeUsage + 当前配置单价估算，
+ * 仅在没有请求快照时使用。
  */
+
+import { createUsageRequestLog } from './usage-request-log.mjs';
 
 const TOKENS_PER_MILLION = 1_000_000;
 
@@ -282,13 +282,163 @@ function sortGroupRows(rows) {
 }
 
 /**
- * @param {{ conversations?: readonly object[], providers?: readonly object[], generatedAt?: string }} input
+ * 请求级快照（usage/requests.jsonl 记录）按 Provider / 模型聚合。
+ *
+ * 与按会话 lifetimeUsage 聚合的本质区别：每条记录的 tokens 与成本都按
+ * 「当次请求实际使用的模型 + 当时单价」落账（estimatedCostUsd 已在写入时算好），
+ * 因此切换 Provider 后历史成本仍归因到各自模型，不会串账。
+ *
+ * @param {readonly object[]} requests usage-request-log 的 readAll() 记录
+ * @returns {{ totals: object, byProvider: Map<string, object>, byModel: Map<string, object>,
+ *            estimatedCostUsd: number, hasAnyPricing: boolean, requestCount: number }}
+ */
+export function aggregateRequestUsage(requests = []) {
+  const totals = emptyTokenBucket();
+  /** @type {Map<string, any>} */
+  const byProvider = new Map();
+  /** @type {Map<string, any>} */
+  const byModel = new Map();
+  let estimatedCostUsd = 0;
+  let hasAnyPricing = false;
+  let requestCount = 0;
+
+  const bucketFromRow = (row) => ({
+    inputTokens: finiteNumber(row.inputTokens),
+    outputTokens: finiteNumber(row.outputTokens),
+    cacheReadTokens: finiteNumber(row.cacheReadTokens),
+    cacheWriteTokens: finiteNumber(row.cacheWriteTokens),
+    totalTokens: finiteNumber(row.totalTokens)
+      || (finiteNumber(row.inputTokens) + finiteNumber(row.outputTokens)
+        + finiteNumber(row.cacheReadTokens) + finiteNumber(row.cacheWriteTokens)),
+  });
+
+  const modelProviderId = (row) => (
+    typeof row.modelProviderId === 'string' && row.modelProviderId.trim()
+      ? row.modelProviderId.trim()
+      : UNBOUND_PROVIDER_KEY
+  );
+  const providerKey = (row) => {
+    const composite = splitCompositeProviderId(modelProviderId(row));
+    return composite.groupId || modelProviderId(row);
+  };
+  const displayModel = (row) => (
+    typeof row.model === 'string' && row.model.trim()
+      ? row.model.trim()
+      : (row.providerName || modelProviderId(row))
+  );
+
+  for (const row of requests) {
+    if (!row || typeof row !== 'object') continue;
+    const bucket = bucketFromRow(row);
+    if (
+      bucket.inputTokens === 0
+      && bucket.outputTokens === 0
+      && bucket.cacheReadTokens === 0
+      && bucket.cacheWriteTokens === 0
+    ) {
+      continue;
+    }
+    requestCount += 1;
+    Object.assign(totals, addTokenBuckets(totals, bucket));
+
+    const cost = finiteNumber(row.estimatedCostUsd);
+    const priced = cost > 0 || row.pricingSource != null;
+
+    // Provider 维度。
+    const pKey = providerKey(row);
+    const providerRow = byProvider.get(pKey) || {
+      key: pKey,
+      label: row.providerName || pKey,
+      providerId: pKey === UNBOUND_PROVIDER_KEY ? null : pKey,
+      providerName: row.providerName || null,
+      conversationCount: 0,
+      requestCount: 0,
+      ...emptyTokenBucket(),
+      estimatedCostUsd: 0,
+      hasPricing: false,
+    };
+    providerRow.conversationCount += 1;
+    providerRow.requestCount += 1;
+    Object.assign(providerRow, { ...providerRow, ...addTokenBuckets(providerRow, bucket) });
+    if (priced) {
+      providerRow.hasPricing = true;
+      providerRow.estimatedCostUsd += cost;
+    }
+    byProvider.set(pKey, providerRow);
+
+    // 模型维度：key = modelProviderId（含模型），label 用记录 model。
+    const mKey = modelProviderId(row);
+    const modelRow = byModel.get(mKey) || {
+      key: mKey,
+      label: displayModel(row),
+      providerId: pKey === UNBOUND_PROVIDER_KEY ? null : pKey,
+      providerName: row.providerName || null,
+      model: displayModel(row),
+      conversationCount: 0,
+      requestCount: 0,
+      ...emptyTokenBucket(),
+      estimatedCostUsd: 0,
+      hasPricing: false,
+    };
+    modelRow.conversationCount += 1;
+    modelRow.requestCount += 1;
+    Object.assign(modelRow, { ...modelRow, ...addTokenBuckets(modelRow, bucket) });
+    if (displayModel(row) !== mKey) {
+      modelRow.label = displayModel(row);
+      modelRow.model = displayModel(row);
+    }
+    if (priced) {
+      modelRow.hasPricing = true;
+      modelRow.estimatedCostUsd += cost;
+    }
+    byModel.set(mKey, modelRow);
+
+    if (priced) {
+      hasAnyPricing = true;
+      estimatedCostUsd += cost;
+    }
+  }
+
+  return { totals, byProvider, byModel, estimatedCostUsd, hasAnyPricing, requestCount };
+}
+
+/**
+ * @param {{ conversations?: readonly object[], providers?: readonly object[], requests?: readonly object[], generatedAt?: string }} input
  */
 export function buildUsageStatsSnapshot({
   conversations = [],
   providers = [],
+  requests = null,
   generatedAt = new Date().toISOString(),
 } = {}) {
+  // 主路径：请求级快照聚合。成本按当次请求实际模型与当时单价归因，切模型不串账。
+  if (Array.isArray(requests) && requests.length > 0) {
+    const aggregated = aggregateRequestUsage(requests);
+    const finalizeRow = (row) => ({
+      ...row,
+      estimatedCostUsd: row.hasPricing ? row.estimatedCostUsd : null,
+    });
+    return {
+      generatedAt,
+      totals: {
+        ...aggregated.totals,
+        conversationCount: aggregated.requestCount,
+        pricedConversationCount: aggregated.hasAnyPricing ? aggregated.requestCount : 0,
+        estimatedCostUsd: aggregated.hasAnyPricing ? aggregated.estimatedCostUsd : null,
+      },
+      byProvider: sortGroupRows([...aggregated.byProvider.values()].map(finalizeRow)),
+      byModel: sortGroupRows([...aggregated.byModel.values()].map(finalizeRow)),
+      notes: {
+        unpricedConversationCount: 0,
+        missingProviderCount: 0,
+        pricingUnit: 'USD_per_1M_tokens',
+        scope: 'request_snapshot',
+        requestCount: aggregated.requestCount,
+      },
+    };
+  }
+
+  // 回退路径：无请求日志时保留原「会话 lifetimeUsage × 当前单价」估算。
   const providerIndex = buildProviderIndex(providers);
   const totals = emptyTokenBucket();
   let conversationCount = 0;
@@ -409,14 +559,23 @@ export function buildUsageStatsSnapshot({
 
 /**
  * 从 store 读取并汇总。conversationStore.listConversations / llmConfigStore.listProviders
- * 都是同步接口。
+ * 都是同步接口。请求级快照（usage/requests.jsonl）存在时作为主数据源，成本按当次
+ * 请求实际模型归因；无快照时回退到「会话 lifetimeUsage × 当前单价」估算。
  */
-export function collectUsageStats({ conversationStore, llmConfigStore } = {}) {
+export function collectUsageStats({ conversationStore, llmConfigStore, usageRequestLog = null } = {}) {
   const conversations = conversationStore?.listConversations
     ? conversationStore.listConversations({ includeMessageCount: false })
     : [];
   const providers = llmConfigStore?.listProviders
     ? llmConfigStore.listProviders()
     : [];
-  return buildUsageStatsSnapshot({ conversations, providers });
+  let requests = null;
+  try {
+    const log = usageRequestLog || createUsageRequestLog();
+    requests = log.readAll({ limit: 200_000 });
+  } catch (error) {
+    console.warn('[usage-stats] failed to read request log, falling back to lifetime estimate:', error?.message || error);
+    requests = null;
+  }
+  return buildUsageStatsSnapshot({ conversations, providers, requests });
 }

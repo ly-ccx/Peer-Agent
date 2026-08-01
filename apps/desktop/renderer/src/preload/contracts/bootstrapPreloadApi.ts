@@ -152,6 +152,22 @@ export interface LifetimeUsage {
   readonly outputTokens: number;
   readonly cacheWriteTokens: number;
   readonly cacheReadTokens: number;
+  /** Per-model split of the lifetime totals, keyed by modelProviderId (ADR 23 byModel). */
+  readonly byModel?: Readonly<Record<string, LifetimeModelUsage>>;
+}
+
+/** One model slice inside LifetimeUsage.byModel (conversation ledger). */
+export interface LifetimeModelUsage {
+  readonly modelProviderId: string;
+  readonly model?: string;
+  readonly providerName?: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly estimatedCostUsd: number;
+  readonly requestCount: number;
 }
 
 /** 跨会话用量汇总（精简使用统计页，对应 main `usage:stats`）。 */

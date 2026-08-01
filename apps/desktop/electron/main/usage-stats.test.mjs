@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addTokenBuckets,
+  aggregateRequestUsage,
   buildUsageStatsSnapshot,
   emptyTokenBucket,
   estimateUsageCostUsd,
@@ -303,4 +304,115 @@ test('addTokenBuckets is pure and additive', () => {
     cacheWriteTokens: 10,
     totalTokens: 40,
   });
+});
+
+test('aggregateRequestUsage groups by provider and model with per-request cost', () => {
+  const requests = [
+    {
+      conversationId: 'c1',
+      modelProviderId: 'gpt-sub::gpt-5.6-sol',
+      model: 'gpt-5.6-sol',
+      providerName: 'ChatGPT 订阅',
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 1500,
+      estimatedCostUsd: 0.05,
+      pricingSource: 'models.dev-reference',
+    },
+    {
+      conversationId: 'c1',
+      modelProviderId: 'gpt-sub::gpt-5.6-sol',
+      model: 'gpt-5.6-sol',
+      providerName: 'ChatGPT 订阅',
+      inputTokens: 2000,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 2300,
+      estimatedCostUsd: 0.08,
+    },
+    {
+      conversationId: 'c2',
+      modelProviderId: 'deepseek::deepseek-v4',
+      model: 'deepseek-v4',
+      providerName: 'DeepSeek',
+      inputTokens: 300,
+      outputTokens: 150,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 450,
+      estimatedCostUsd: 0.002,
+    },
+  ];
+
+  const { byModel, byProvider, estimatedCostUsd, requestCount } = aggregateRequestUsage(requests);
+
+  assert.equal(requestCount, 3);
+  assert.ok(Math.abs(estimatedCostUsd - 0.132) < 1e-9);
+
+  const gpt = byModel.get('gpt-sub::gpt-5.6-sol');
+  const deepseek = byModel.get('deepseek::deepseek-v4');
+  assert.ok(gpt);
+  assert.equal(gpt.requestCount, 2);
+  assert.equal(gpt.inputTokens, 3000);
+  assert.ok(Math.abs(gpt.estimatedCostUsd - 0.13) < 1e-9);
+  assert.equal(gpt.label, 'gpt-5.6-sol');
+
+  assert.ok(deepseek);
+  assert.equal(deepseek.requestCount, 1);
+  assert.equal(deepseek.inputTokens, 300);
+  assert.ok(Math.abs(deepseek.estimatedCostUsd - 0.002) < 1e-9);
+
+  // Provider 维度：两个 provider 各自一行。
+  assert.equal(byProvider.size, 2);
+  const gptProvider = byProvider.get('gpt-sub');
+  assert.ok(gptProvider);
+  assert.equal(gptProvider.label, 'ChatGPT 订阅');
+});
+
+test('buildUsageStatsSnapshot prefers request snapshot over lifetime estimate', () => {
+  // conversations 故意用「当前绑定 DeepSeek」+ 错误累计，验证请求级快照不被其污染。
+  const snapshot = buildUsageStatsSnapshot({
+    generatedAt: '2026-07-18T00:00:00.000Z',
+    providers: [{ id: 'deepseek', groupId: 'deepseek', name: 'DeepSeek', model: 'deepseek-v4', inputPrice: 1, outputPrice: 2 }],
+    conversations: [
+      {
+        id: 'c1',
+        modelProviderId: 'deepseek::deepseek-v4',
+        model: 'deepseek-v4',
+        lifetimeUsage: { inputTokens: 100_000, outputTokens: 0 },
+      },
+    ],
+    requests: [
+      {
+        conversationId: 'c1',
+        modelProviderId: 'gpt-sub::gpt-5.6-sol',
+        model: 'gpt-5.6-sol',
+        providerName: 'ChatGPT 订阅',
+        inputTokens: 1000,
+        outputTokens: 500,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 1500,
+        estimatedCostUsd: 0.05,
+        pricingSource: 'models.dev-reference',
+      },
+    ],
+  });
+
+  assert.equal(snapshot.notes.scope, 'request_snapshot');
+  assert.equal(snapshot.notes.requestCount, 1);
+  assert.ok(Math.abs(snapshot.totals.estimatedCostUsd - 0.05) < 1e-9);
+  assert.equal(snapshot.totals.inputTokens, 1000, 'tokens come from request snapshot, not lifetimeUsage');
+
+  const byModel = snapshot.byModel.find((row) => row.key === 'gpt-sub::gpt-5.6-sol');
+  assert.ok(byModel, 'request model row present');
+  assert.equal(byModel.label, 'gpt-5.6-sol');
+  assert.equal(byModel.inputTokens, 1000);
+
+  // 不得出现 deepseek 的串账行（conversations 绑定了 deepseek 且有 lifetimeUsage）。
+  const deepseekRows = snapshot.byModel.filter((row) => row.providerName === 'DeepSeek');
+  assert.equal(deepseekRows.length, 0);
 });
