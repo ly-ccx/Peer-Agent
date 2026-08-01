@@ -605,7 +605,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, progressStage, attempt, maxAttempts, inputTokenBudget, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
+      ({ conversationId, streamId, stage, percent, progressStage, attempt, maxAttempts, inputTokenBudget, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, errorCode, message }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -641,6 +641,22 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               streamId,
             }),
           }));
+          return;
+        }
+        if (stage === 'failed') {
+          // 主进程压缩失败：如实展示真实错误，而不是把 failed 事件误当 done 处理
+          // （旧逻辑会因 failed 事件缺少 summary 字段而误报"压缩失败"且无法恢复）。
+          cancelCompactionDoneTimer(cid, streamId);
+          conversationStore.setState(cid, {
+            compactionState: {
+              phase: 'failed',
+              percent: 100,
+              streamId,
+              errorCode: typeof errorCode === 'string' ? errorCode : undefined,
+              error: typeof message === 'string' ? message : undefined,
+              failedAt: Date.now(),
+            },
+          });
           return;
         }
         const activeCompaction = conversationStore.getSnapshot(cid).compactionState;

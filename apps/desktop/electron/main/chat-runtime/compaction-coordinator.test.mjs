@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
+  acquireCompactionLock,
   applyMicrocompaction,
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
@@ -10,6 +11,7 @@ import {
   contextTokensFromUsageSnapshot,
   isPromptTooLongResponse,
   rehydrateSystemPromptAfterCompaction,
+  releaseCompactionLock,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
 import {
@@ -728,6 +730,87 @@ describe('P0 summary reserve + post-compact rehydration', () => {
     assert.equal(result.systemPrompt, 'KEEP');
     assert.equal(result.rehydrated, false);
     assert.equal(result.reason, 'no_rebuild_hook');
+  });
+});
+
+describe('同会话压缩互斥（并发压缩根因防护）', () => {
+  it('acquireCompactionLock：同会话不同流被跳过，同流重入放行，不同会话互不阻塞', () => {
+    assert.equal(acquireCompactionLock('conv-1', 'stream-a'), 'acquired');
+    // 同会话第二个流：必须被拦截（并发压缩根因）。
+    assert.equal(acquireCompactionLock('conv-1', 'stream-b'), 'skipped');
+    // 同会话同流（同一请求重入）：放行并覆盖为最新。
+    assert.equal(acquireCompactionLock('conv-1', 'stream-a'), 'acquired');
+    // 不同会话：各自可压缩，不互相阻塞。
+    assert.equal(acquireCompactionLock('conv-2', 'stream-x'), 'acquired');
+    // 缺会话/流 id：不参与互斥。
+    assert.equal(acquireCompactionLock(null, 's'), 'acquired');
+    assert.equal(acquireCompactionLock('c', null), 'acquired');
+
+    // 清理，避免污染其它用例。
+    releaseCompactionLock('conv-1', 'stream-a');
+    releaseCompactionLock('conv-2', 'stream-x');
+  });
+
+  it('releaseCompactionLock：释放后同会话可再次压缩，且不误释他人新锁', () => {
+    acquireCompactionLock('conv-3', 'stream-old');
+    assert.equal(acquireCompactionLock('conv-3', 'stream-new'), 'skipped');
+    // 旧流的 release 不应误释新流持有的锁（这里锁仍归 stream-old）。
+    releaseCompactionLock('conv-3', 'stream-new');
+    assert.equal(acquireCompactionLock('conv-3', 'stream-new2'), 'skipped', '锁仍被 stream-old 持有');
+    // 持有者释放后，后续流可获取。
+    releaseCompactionLock('conv-3', 'stream-old');
+    assert.equal(acquireCompactionLock('conv-3', 'stream-new2'), 'acquired');
+    releaseCompactionLock('conv-3', 'stream-new2');
+  });
+
+  it('runCompactionCheck：同会话已有压缩在跑时返回 skipped，不发起压缩横幅', async () => {
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'u'.repeat(200) },
+      { role: 'assistant', content: 'a'.repeat(200) },
+      { role: 'user', content: 'next' },
+      { role: 'assistant', content: 'prev' },
+      { role: 'user', content: 'latest' },
+    ];
+    const contextWindow = 10_000;
+    const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
+
+    // 预置同会话锁：模拟另一流正在压缩。
+    assert.equal(acquireCompactionLock('conv-lock', 'stream-running'), 'acquired');
+
+    const events = [];
+    const result = await runCompactionCheck({
+      messages,
+      systemPrompt: 'sys',
+      contextWindow,
+      providerConfig: null,
+      usageSnapshot: { inputTokens: softLimit + 50, cacheReadTokens: 0 },
+      streamId: 'stream-late',
+      conversationId: 'conv-lock',
+      webContents: {
+        send(channel, payload) {
+          events.push({ channel, payload });
+        },
+      },
+    });
+
+    try {
+      assert.equal(result.compacted, false);
+      assert.equal(result.skipped, true, '同会话已有压缩时必须跳过');
+      assert.equal(result.reason, 'compaction_already_running');
+      assert.equal(
+        events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'start'),
+        false,
+        '被跳过时不得发出压缩 start 横幅',
+      );
+      assert.equal(
+        events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'failed'),
+        false,
+        '被跳过时不得误报压缩失败',
+      );
+    } finally {
+      releaseCompactionLock('conv-lock', 'stream-running');
+    }
   });
 });
 

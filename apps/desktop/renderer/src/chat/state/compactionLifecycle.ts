@@ -30,6 +30,7 @@ export function reduceCompactionLifecycle(
   event: CompactionLifecycleEvent,
 ): CompactionState {
   if (event.stage === 'start') {
+    // 新一轮压缩开始：无条件覆盖（含 phase:'failed'），让失败态可被下一次压缩恢复。
     return {
       phase: 'running',
       percent: null,
@@ -40,6 +41,8 @@ export function reduceCompactionLifecycle(
 
   if (belongsToAnotherActiveStream(state, event.streamId)) return state;
 
+  // idle 是终端事件：同 streamId 时把 failed / finalizing / running 一律复位为 idle，
+  // 保证失败横幅可被主进程后续的 idle 通知关闭（failed 状态不永久残留）。
   if (event.stage === 'idle') return IDLE_COMPACTION_STATE;
   if (event.stage === 'finalizing') {
     return {

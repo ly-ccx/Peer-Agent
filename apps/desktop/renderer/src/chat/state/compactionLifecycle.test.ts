@@ -121,4 +121,53 @@ describe('compaction lifecycle', () => {
     });
     assert.deepEqual(settled, { phase: 'idle' });
   });
+
+  it('recovers a failed state via the next start event of the same stream', () => {
+    const failed: CompactionState = {
+      phase: 'failed',
+      percent: 100,
+      streamId: 'stream-1',
+      errorCode: 'CONTEXT_COMPACTION_PERSIST_FAILED',
+      error: 'boom',
+      failedAt: 20,
+    };
+
+    const next = reduceCompactionLifecycle(failed, {
+      stage: 'start',
+      streamId: 'stream-1',
+      now: 30,
+    });
+
+    assert.deepEqual(next, {
+      phase: 'running',
+      percent: null,
+      streamId: 'stream-1',
+      startedAt: 30,
+    });
+  });
+
+  it('recovers a failed state via idle of the same stream, but not of another stream', () => {
+    const failed: CompactionState = {
+      phase: 'failed',
+      percent: 100,
+      streamId: 'stream-1',
+      error: 'boom',
+      failedAt: 20,
+    };
+
+    // 异流 idle：失败状态必须保留（避免旧任务清新会话状态）。
+    const kept = reduceCompactionLifecycle(failed, {
+      stage: 'idle',
+      streamId: 'stream-other',
+    });
+    assert.equal(kept, failed);
+    assert.equal(kept.phase, 'failed');
+
+    // 同流 idle：失败横幅可被主进程后续 idle 通知关闭。
+    const settled = reduceCompactionLifecycle(failed, {
+      stage: 'idle',
+      streamId: 'stream-1',
+    });
+    assert.deepEqual(settled, { phase: 'idle' });
+  });
 });

@@ -14,6 +14,41 @@ import {
   updateCompactionProgress,
 } from './compaction-registry.mjs';
 
+/**
+ * 同会话压缩互斥锁：同一会话同一时间只允许一个 Layer 2 压缩在跑。
+ *
+ * 为什么独立于 compaction-registry：registry 的 beginCompaction 只在需要展示
+ * 横幅（showStart）时登记，showStart=false 的自动压缩不会留下条目；而并发竞态
+ * （两次 summarize 交叠 + 两次 persist 整写同一会话文件）正是"压缩成功却显示失败"
+ * 的根因，自动压缩同样必须被互斥保护。这里用独立的执行锁覆盖所有进入 Layer 2 的路径。
+ */
+const activeCompactionLocks = new Map();
+
+/**
+ * 尝试为某会话获取压缩锁。
+ * @returns {'acquired' | 'skipped'} acquired=可继续压缩；skipped=同会话已有其他流在压缩。
+ *   同 streamId 视为同一请求的重入，直接放行（覆盖为最新，语义与 beginCompaction 一致）。
+ * @note 导出仅供测试直接断言互斥语义；生产路径只由 runCompactionCheck 调用。
+ */
+export function acquireCompactionLock(conversationId, streamId) {
+  if (!conversationId || !streamId) return 'acquired';
+  const running = activeCompactionLocks.get(conversationId);
+  if (running && running !== streamId) return 'skipped';
+  activeCompactionLocks.set(conversationId, streamId);
+  return 'acquired';
+}
+
+/**
+ * 释放某会话的压缩锁。仅当锁仍属于当前 streamId 时才删除，避免误释他人新锁。
+ * @note 导出仅供测试直接断言互斥语义；生产路径只由 runCompactionCheck 调用。
+ */
+export function releaseCompactionLock(conversationId, streamId) {
+  if (!conversationId || !streamId) return;
+  if (activeCompactionLocks.get(conversationId) === streamId) {
+    activeCompactionLocks.delete(conversationId);
+  }
+}
+
 export function buildCompactionProviderConfig({
   provider,
   baseUrl,
@@ -376,6 +411,16 @@ export async function runCompactionCheck({
   let activeGoalCheckpointId = null;
   // 只在真正会进入 Layer2 压缩时写 checkpoint，避免每次 preflight 误写。
   const willAttemptLayer2 = Boolean(force || emergency || budget.shouldCompact);
+
+  // 同会话压缩互斥：同一会话已有其他流在压缩时，跳过本次触发。
+  // 并发 summarize + 并发 persist 整写同一会话文件，是"压缩成功却显示失败"的根因。
+  // 必须在 beginCompaction/start 横幅之前判定，被跳过的触发不得露出任何压缩 UI。
+  if (willAttemptLayer2 && acquireCompactionLock(conversationId, streamId) === 'skipped') {
+    console.log(
+      `[compaction] skip concurrent trigger conversation=${conversationId} stream=${streamId} (already running)`,
+    );
+    return { compacted: false, skipped: true, reason: 'compaction_already_running', messages };
+  }
   if (
     willAttemptLayer2
     && goalKeepPolicy
@@ -654,5 +699,8 @@ export async function runCompactionCheck({
       });
     }
     throw err;
+  } finally {
+    // 压缩结束（成功/失败/异常）都必须释放会话锁，否则同会话后续压缩会被永久跳过。
+    releaseCompactionLock(conversationId, streamId);
   }
 }

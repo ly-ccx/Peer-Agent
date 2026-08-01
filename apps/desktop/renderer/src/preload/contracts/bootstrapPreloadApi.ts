@@ -887,7 +887,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onChatCompaction: (listener: (payload: {
     conversationId: string;
     streamId: string;
-    stage?: 'start' | 'progress' | 'done' | 'idle';
+    stage?: 'start' | 'progress' | 'done' | 'failed' | 'idle';
     percent?: number;
     receivedChars?: number;
     estimatedTotalChars?: number;
@@ -901,6 +901,8 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     oldMessageCount?: number;
     keptMessageCount?: number;
     microcompacted?: boolean;
+    errorCode?: string;
+    message?: string;
   }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
