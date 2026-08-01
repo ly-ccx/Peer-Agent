@@ -294,7 +294,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, conversationId, usage, lifetimeUsage, contextAccounting }) => {
+      ({ streamId, conversationId, reason, usage, lifetimeUsage, contextAccounting }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -365,8 +365,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             const patched: ChatMsg = {
               ...last,
               ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
-              // 终态兜底：若仍有 tool-call 段未拿到结果，补写中断标记避免永久转圈。
-              segments: markDanglingToolCallsInterrupted(last.segments, '工具结果未返回（本轮已结束）'),
+              // Goal handoff 会在 tool result 回流前先解锁 intake UI；该结果仍由主进程
+              // Runtime 持久化，不能在表达层提前固化成中断文案。
+              segments: reason === 'goal_handoff'
+                ? last.segments
+                : markDanglingToolCallsInterrupted(last.segments, '工具结果未返回（本轮已结束）'),
             };
             const updated = [...msgs.slice(0, -1), patched];
             // Main already persisted the final assistant payload and the

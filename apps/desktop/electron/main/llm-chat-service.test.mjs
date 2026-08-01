@@ -2364,6 +2364,13 @@ describe('finalizeDanglingToolSegments (terminal persist fallback)', () => {
 
     const done = finalizeDanglingToolSegments(segments, 'done');
     assert.equal(done[1].result, '工具结果未返回（本轮已结束）');
+
+    const handoff = finalizeDanglingToolSegments(segments, 'goal_handoff');
+    assert.equal(
+      handoff[1].result,
+      undefined,
+      'goal handoff must leave an in-flight tool result open for the Runtime to persist',
+    );
   });
 
   it('leaves resolved and synthetic tool-call segments untouched', async () => {

@@ -230,12 +230,15 @@ describe('Desktop chat Runtime session lifecycle', () => {
         }),
       ]),
     );
+    const doneEvent = runtimeEvents.find((event) => event.channel === 'chat:stream:done');
+    assert.ok(doneEvent, 'timeout fallback must still unlock the renderer');
+    assert.equal(doneEvent.payload.reason, 'goal_handoff');
+    const outcome = await outcomePromise;
     assert.equal(
-      runtimeEvents.some((event) => event.channel === 'chat:stream:done'),
-      true,
-      'timeout fallback must still unlock the renderer',
+      outcome.terminalStatus,
+      'goal_handoff',
+      'handoff cancellation is an expected lifecycle transition, not a connection error',
     );
-    await outcomePromise;
     assert.equal(runtimeSessionAdapter.getSession('conversation-handoff')?.status, 'idle');
   });
 

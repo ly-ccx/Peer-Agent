@@ -858,6 +858,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onChatStreamDone: (listener: (payload: {
     streamId: string;
     conversationId?: string;
+    reason?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
     contextAccounting?: ContextAccountingSnapshot;

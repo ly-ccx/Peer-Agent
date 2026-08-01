@@ -301,6 +301,7 @@ function noteNativeReasoningFallback(provider, details = {}) {
 // 与渲染层口径一致：result === undefined 且 synthetic !== true 视为悬空段。
 // 纯函数：无悬空段时返回原数组引用，调用方据此可跳过无谓写入。
 function terminalDanglingNote(terminalStatus) {
+  if (terminalStatus === 'goal_handoff') return null;
   if (terminalStatus === 'aborted') return '工具调用已中断（生成停止）';
   if (terminalStatus === 'error') return '工具调用已中断（连接出错）';
   return '工具结果未返回（本轮已结束）';
@@ -309,6 +310,7 @@ function terminalDanglingNote(terminalStatus) {
 function finalizeDanglingToolSegments(segments, terminalStatus) {
   if (!Array.isArray(segments)) return segments;
   const note = terminalDanglingNote(terminalStatus);
+  if (note == null) return segments;
   let changed = false;
   const next = segments.map((segment) => {
     if (segment?.type === 'tool-call' && segment.result === undefined && segment.synthetic !== true) {
@@ -541,10 +543,14 @@ function wrapWebContentsForRuntimeEvents(
           payload = { ...payload, lifetimeUsage };
         }
         streamRecord.terminalEventSent = true;
-        // 终结态强制落盘：done 视为正常完成；error 标记 interrupted=true，
-        // 让切回时表达层能区分「完成」与「中断」。
+        // 终结态强制落盘：done 视为正常完成；Goal intake 被 Runner 接管时使用显式
+        // goal_handoff 非错误终态；error 才标记 interrupted=true。
         const erroredTerminal = channel === 'chat:stream:error';
-        streamRecord.terminalStatus = erroredTerminal ? 'error' : 'done';
+        const goalHandoffTerminal = channel === 'chat:stream:done'
+          && payload?.reason === 'goal_handoff';
+        streamRecord.terminalStatus = erroredTerminal
+          ? 'error'
+          : (goalHandoffTerminal ? 'goal_handoff' : 'done');
         streamRecord.interrupted = erroredTerminal;
         if (payload?.usage) streamRecord.finalUsage = payload.usage;
         if (payload?.lifetimeUsage) streamRecord.lifetimeUsage = payload.lifetimeUsage;
@@ -803,6 +809,7 @@ export function createLlmChatService({
       runtimeSessionId: runtimeTurn.sessionId,
       runtimeTurn,
       webContents,
+      runtimeWebContents: null,
       permissionIds: new Set(),
       conversationId,
       // 正文持久化主键：主进程据此把累积正文/segments patch 回 store 的 assistant 消息。
@@ -883,6 +890,7 @@ export function createLlmChatService({
         emitRuntimeEvent,
         failRuntimeTurn: (reason) => runtimeSessions.failStream(streamId, reason),
       });
+      streamRecord.runtimeWebContents = accumulatingWebContents;
 
       const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
       // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
@@ -1385,13 +1393,17 @@ export function createLlmChatService({
           reason,
         };
         try {
-          record.webContents?.send?.('chat:stream:done', payload);
+          (record.runtimeWebContents || record.webContents)?.send?.('chat:stream:done', payload);
         } catch (error) {
           console.warn('[llm-chat] force-complete done send failed:', error?.message || error);
         }
-        record.terminalEventSent = true;
-        record.terminalStatus = 'completed';
-        record.interrupted = false;
+        // runtimeWebContents owns terminal persistence and maps this reason to goal_handoff.
+        // Keep the fallback assignment for records created before that wrapper is available.
+        if (!record.terminalEventSent) {
+          record.terminalEventSent = true;
+          record.terminalStatus = reason === 'goal_handoff' ? 'goal_handoff' : 'done';
+          record.interrupted = false;
+        }
 
         try {
           runtimeSessions.cancelStream(streamId, reason);
