@@ -10,6 +10,10 @@
     var(--za-workbench-current-width, 0px);
   height: 100vh;
   min-height: 0;
+  /* 三栏共享同一层 Chrome 材质；直接子列只负责布局与内容表面。 */
+  background: var(--glass-chrome, var(--chrome-canvas, var(--za-app-bg)));
+  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   transition: grid-template-columns var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
 }
 
@@ -43,45 +47,42 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  /* Chrome 毛玻璃：半透明底 + blur；macOS 下再叠 Electron vibrancy，勿用纯不透明底盖死。 */
-  background: var(--glass-chrome, var(--za-sidebar-bg));
-  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
-  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
-  box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
-  /* 常态不画分隔线，保持 Sidebar 与中间 glass-chrome 材质连续；
-     保留 1px 透明槽位，供下方 resizer hover/active/阻尼状态显示反馈且不引发布局抖动。 */
-  border-right: 1px solid transparent;
+  /* 桌面基础材质由 .app-layout 统一提供，Sidebar 仅承载内容。 */
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  /* 常态不画分隔线；拖拽反馈由 resizer 自身表达。 */
+  border-right: none;
   padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
-  transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .app-sidebar {
-    background: var(--za-sidebar-bg);
+  .app-layout {
+    background: var(--za-app-bg);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    box-shadow: none;
   }
 }
 
-/* 中间内容区向左投下的轻量内侧阴影；常态不再画 1px 实线分隔。 */
-.app-sidebar::after {
+/* Resizer 自身承载 1px 交互反馈，不改变 6px 命中区和列几何。 */
+.sidebar-resizer::after {
   content: '';
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 8px;
-  z-index: 4;
+  width: 1px;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.03));
+  background: transparent;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
 }
 
 /* ── Sidebar Resizer（左栏右缘拖拽条，镜像右侧 workbench-resizer）── */
-/* 拖拽分隔线：6px hit area，无独立指示条；hover/聚焦/拖拽时让侧栏自身的
-   1px border-right 变为强调色，始终呈现为一条干净的线（无双线）。 */
+/* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
 .sidebar-resizer {
   position: absolute;
   top: 0;
@@ -98,14 +99,14 @@
 .sidebar-resizer:focus-visible {
   outline: none;
 }
-.app-sidebar:has(.sidebar-resizer:hover),
-.app-sidebar:has(.sidebar-resizer:focus-visible),
-.app-sidebar:has(.sidebar-resizer[data-active='true']) {
-  border-right-color: var(--za-accent, #4c8dff);
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.sidebar-resizer[data-active='true']::after {
+  background: var(--za-accent, #4c8dff);
 }
 /* 阻尼区视觉提示：宽度已拖到最小展开宽度以下、即将触发收起。 */
-.app-sidebar:has(.sidebar-resizer[data-damping='true']) {
-  border-right-color: var(--za-warning, #f0a020);
+.sidebar-resizer[data-damping='true']::after {
+  background: var(--za-warning, #f0a020);
 }
 
 /* 全屏时 macOS 交通灯被系统隐藏,收掉侧栏为其预留的顶部留白(权威状态来自 main 广播)。 */
@@ -732,7 +733,8 @@
   margin-left: 6px;
   font-size: 0.65rem;
   line-height: 1;
-  color: var(--graphite-mute);
+  /* 深色下 --graphite-mute 对比度过低；时间戳用次级文字色，保证可读且仍弱于标题。 */
+  color: var(--graphite-fade, var(--graphite-mute));
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }

@@ -36,20 +36,12 @@
     @apply grid h-screen min-h-0 min-w-0 overflow-hidden;
     position: relative;
     grid-template-rows: minmax(0, 1fr) auto;
-    /* 中间列是基础 Chrome 容器：直角铺满列并承载玻璃材质；
+    /* 中间列是直角内容容器；三栏共享 Chrome 材质由 .app-layout 统一提供。
        往下的内容区块各自决定圆角与实色背景，避免容器圆角在列交界处挖出缺口。 */
-    background: var(--glass-chrome, var(--chrome-canvas, var(--za-app-bg)));
-    -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
-    backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     border-radius: 0;
-  }
-
-  @media (prefers-reduced-transparency: reduce) {
-    .main-panel {
-      background: var(--chrome-canvas, var(--za-app-bg));
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
-    }
   }
 
   .profile-chip {

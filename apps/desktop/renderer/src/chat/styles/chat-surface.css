@@ -92,17 +92,19 @@
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
   border-radius: 0 0 var(--ui-radius-panel, var(--radius-md)) var(--ui-radius-panel, var(--radius-md));
+  /* 独立于三栏基础 Chrome 的局部玻璃层：保留透明采样，并用高光和投影明确悬浮层级。 */
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--chrome-canvas) 72%, transparent),
-      color-mix(in srgb, var(--chrome-canvas) 54%, transparent)
+      color-mix(in srgb, var(--glass-chrome-hover) 92%, transparent),
+      color-mix(in srgb, var(--glass-chrome-hover) 76%, transparent)
     );
   box-shadow:
-    0 14px 30px color-mix(in srgb, var(--chrome-canvas) 34%, transparent),
-    0 4px 12px color-mix(in srgb, var(--ink-base) 7%, transparent);
-  -webkit-backdrop-filter: blur(24px) saturate(1.18);
-  backdrop-filter: blur(24px) saturate(1.18);
+    var(--glass-edge-highlight),
+    0 12px 28px color-mix(in srgb, var(--ink-base) 14%, transparent),
+    0 3px 10px color-mix(in srgb, var(--ink-base) 9%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
+  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
   pointer-events: none;
 }
 
@@ -851,7 +853,8 @@
 .chat-composer-toolbar {
   --composer-addon-height: 24px;
   --composer-addon-font-size: 0.68rem;
-  --composer-addon-color: var(--graphite-mute);
+  /* 深色下 mute 过暗；工具栏默认用次级文字色，hover 仍升到 soft。 */
+  --composer-addon-color: var(--graphite-fade, var(--graphite-mute));
   --composer-addon-hover-bg: var(--control-composer);
 }
 
@@ -2624,7 +2627,16 @@
   justify-content: space-between;
   height: 40px;
   padding: 0 var(--space-5);
-  background: var(--chrome-canvas);
+  /* 与下方当前问题条同层的局部玻璃：半透明 tint + 局部 blur + 边缘高光。 */
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--glass-chrome-hover) 92%, transparent),
+      color-mix(in srgb, var(--glass-chrome-hover) 76%, transparent)
+    );
+  box-shadow: var(--glass-edge-highlight);
+  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
+  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
   border-bottom: 1px solid transparent;
   -webkit-app-region: drag;
   transition: border-color var(--za-motion-fast);
