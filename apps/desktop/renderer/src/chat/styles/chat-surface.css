@@ -2232,7 +2232,7 @@
       color-mix(in srgb, var(--chrome-canvas) 56%, transparent)
     );
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--ui-radius-modal, var(--radius-xl));
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
   -webkit-backdrop-filter: blur(20px) saturate(1.12);
   backdrop-filter: blur(20px) saturate(1.12);
@@ -3162,8 +3162,10 @@
   backdrop-filter: blur(var(--blur-popover));
   -webkit-backdrop-filter: blur(var(--blur-popover));
   border: none;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+  border-radius: var(--ui-radius-modal, var(--radius-xl));
+  /* 去掉 --glass-edge-highlight：inset 顶部高光在此弹层上表现为一条亮白横线（“边边”），
+     与 message-rail-panel 的浮层观感保持一致，只留外阴影。 */
+  box-shadow: var(--shadow-popover);
   isolation: isolate;
 }
 
@@ -3185,8 +3187,10 @@
   backdrop-filter: blur(var(--blur-popover));
   -webkit-backdrop-filter: blur(var(--blur-popover));
   border: none;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+  /* 去掉 --glass-edge-highlight：inset 顶部高光在此弹层上表现为一条亮白横线（“边边”），
+     与 message-rail-panel 的浮层观感保持一致，只留外阴影。 */
+  border-radius: var(--ui-radius-modal, var(--radius-xl));
+  box-shadow: var(--shadow-popover);
   isolation: isolate;
 }
 
@@ -3237,20 +3241,21 @@
 
 .pa-cascading-menu-panel::-webkit-scrollbar,
 .pa-cascading-submenu-panel::-webkit-scrollbar {
-  width: 8px;
+  /* 6px 更接近 macOS 原生 overlay 滚动条，窄弹层里不抢眼 */
+  width: 6px;
 }
 
 .pa-cascading-menu-panel::-webkit-scrollbar-thumb,
 .pa-cascading-submenu-panel::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--graphite-base) 28%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 22%, transparent);
   border-radius: 999px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: content-box;
 }
 
 .pa-cascading-menu-panel::-webkit-scrollbar-thumb:hover,
 .pa-cascading-submenu-panel::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--graphite-base) 42%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 34%, transparent);
   background-clip: content-box;
 }
 
