@@ -1498,14 +1498,6 @@
     height: 100%;
     min-height: 0;
   }
-  .workbench-files-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-shrink: 0;
-    padding: 6px 10px 2px;
-  }
   .workbench-files .workbench-tree {
     flex: 1;
     min-height: 0;
@@ -1513,7 +1505,7 @@
   .workbench-tree {
     height: 100%;
     overflow: auto;
-    padding: 8px 6px;
+    padding: 6px;
     font-size: var(--ui-font-control, 13px);
     line-height: var(--ui-line-control, 1.35);
     user-select: none;
@@ -1521,10 +1513,10 @@
   .workbench-tree-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    min-height: 28px;
+    gap: 5px;
+    min-height: 30px;
     margin: 1px 0;
-    padding-right: 10px;
+    padding-right: 6px;
     border: 1px solid transparent;
     border-radius: var(--ui-radius-row, 8px);
     color: var(--za-text);
@@ -1570,10 +1562,94 @@
   .workbench-tree-row[data-selected='true'] .workbench-tree-twisty {
     color: var(--za-text-muted, var(--graphite-mute));
   }
+  .workbench-tree-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 19px;
+    height: 19px;
+    align-items: center;
+    justify-content: center;
+    color: var(--za-text-muted, var(--graphite-mute));
+  }
+  .workbench-tree-file-icon {
+    width: 18px;
+    height: 18px;
+  }
+  .workbench-tree-icon[data-kind='folder'] {
+    color: var(--za-accent, #8ba6ff);
+  }
+  .workbench-tree-icon[data-kind='markdown'] {
+    color: #79a8e8;
+  }
+  .workbench-tree-icon[data-kind='code'] {
+    color: #c29af0;
+  }
+  .workbench-tree-icon[data-kind='style'] {
+    color: #dd8fc0;
+  }
+  .workbench-tree-icon[data-kind='config'] {
+    color: #d6aa69;
+  }
+  .workbench-tree-icon[data-kind='image'] {
+    color: #70bd9b;
+  }
+  .workbench-tree-icon[data-kind='archive'] {
+    color: #d28b72;
+  }
+  .workbench-tree-icon[data-kind='git'] {
+    color: #e38265;
+  }
   .workbench-tree-name {
     flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .workbench-tree-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+  .workbench-tree-action {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--za-text-faint);
+    cursor: pointer;
+    opacity: 0.62;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast), opacity var(--za-motion-fast);
+  }
+  .workbench-tree-action svg {
+    width: 16px;
+    height: 16px;
+  }
+  .workbench-tree-row:hover .workbench-tree-action,
+  .workbench-tree-action:focus-visible {
+    opacity: 1;
+  }
+  .workbench-tree-action:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--za-text);
+  }
+  .workbench-tree-action:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  }
+  .workbench-tree-action:disabled {
+    cursor: progress;
+    opacity: 0.4;
+  }
+  .workbench-tree-action:disabled svg {
+    animation: workbench-tree-spin 0.8s linear infinite;
+  }
+  @keyframes workbench-tree-spin {
+    to { transform: rotate(360deg); }
   }
   .workbench-tree-hint {
     min-height: 22px;

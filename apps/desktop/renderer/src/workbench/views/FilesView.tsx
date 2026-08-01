@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { clientApi } from '../../clientApi';
 import { useWorkbench } from '../WorkbenchContext';
 import {
@@ -8,6 +8,7 @@ import {
   pruneAfterDirReload,
   stripTrailingSep,
 } from './filesTreeRefresh';
+import { getFileVisualKind, type FileVisualKind } from './filesTreePresentation';
 
 interface FilesViewProps {
   readonly isZh: boolean;
@@ -30,6 +31,58 @@ function baseName(p: string): string {
   const norm = stripTrailingSep(toForward(p));
   const idx = norm.lastIndexOf('/');
   return idx < 0 ? norm : norm.slice(idx + 1);
+}
+
+const ICON_PROPS = {
+  viewBox: '0 0 20 20',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+};
+
+function FileTreeIcon({ kind, open = false }: { readonly kind: FileVisualKind; readonly open?: boolean }) {
+  let paths: ReactNode;
+  switch (kind) {
+    case 'folder':
+      paths = open ? (
+        <path d="M2.7 7.1h14.6l-1.55 7.55a1.5 1.5 0 0 1-1.47 1.2H4.7a1.5 1.5 0 0 1-1.47-1.2L2.7 7.1Zm.8 0V5.65a1.5 1.5 0 0 1 1.5-1.5h3l1.6 1.7h5.4a1.5 1.5 0 0 1 1.5 1.25" />
+      ) : (
+        <path d="M2.75 5.8a1.5 1.5 0 0 1 1.5-1.5h3.4l1.55 1.75h6.55a1.5 1.5 0 0 1 1.5 1.5v6.65a1.5 1.5 0 0 1-1.5 1.5H4.25a1.5 1.5 0 0 1-1.5-1.5V5.8Z" />
+      );
+      break;
+    case 'markdown':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M6.3 13v-3l1.45 1.8L9.2 10v3m1.55-3 1.5 3 1.5-3m-3 2h3" /></>;
+      break;
+    case 'code':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M8.4 10 6.8 11.6l1.6 1.6m3.2-3.2 1.6 1.6-1.6 1.6" /></>;
+      break;
+    case 'style':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M7 10.2c1.7-1 4.3-1 6 0m-5.3 2c1.25-.7 3.35-.7 4.6 0M9 14.2c.55-.3 1.45-.3 2 0" /></>;
+      break;
+    case 'config':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M7 10h6M7 13h6M9 9v2m3 1v2" /></>;
+      break;
+    case 'image':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M6.5 14l2.3-2.7 1.65 1.65 1.3-1.35 1.75 2.4M7.5 8.8h.01" /></>;
+      break;
+    case 'archive':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M8.5 5.1h2M8.5 7.2h2m-2 2.1h2m-2 2.1h2v3h-2z" /></>;
+      break;
+    case 'git':
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4M8 9.2v4.9m0-3.6 3.5 2v-3M8 9.2h.01m0 4.9h.01m3.5-4.9h.01" /></>;
+      break;
+    default:
+      paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4" /></>;
+  }
+
+  return <svg {...ICON_PROPS} className="workbench-tree-file-icon">{paths}</svg>;
+}
+
+function RefreshIcon() {
+  return <svg {...ICON_PROPS} viewBox="0 0 20 20"><path d="M15.8 7.1A6.25 6.25 0 1 0 16 12M15.8 7.1V3.8m0 3.3h-3.3" /></svg>;
 }
 
 /**
@@ -61,6 +114,7 @@ interface TreeNodeProps {
   readonly isZh: boolean;
   readonly onToggleDir: (absPath: string) => void;
   readonly onOpenFile: (entry: DirEntry) => void;
+  readonly rootAction?: ReactNode;
 }
 
 function TreeNode({
@@ -73,6 +127,7 @@ function TreeNode({
   isZh,
   onToggleDir,
   onOpenFile,
+  rootAction,
 }: TreeNodeProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const key = toForward(stripTrailingSep(entry.absPath));
@@ -80,6 +135,7 @@ function TreeNode({
   const isOpen = entry.isDir && expanded.has(entry.absPath);
   const isLoading = entry.isDir && loading.has(entry.absPath);
   const kids = entry.isDir ? children.get(entry.absPath) : undefined;
+  const visualKind = getFileVisualKind(entry.name, entry.isDir);
 
   useEffect(() => {
     if (isSelected && rowRef.current) {
@@ -119,7 +175,11 @@ function TreeNode({
         >
           {entry.isDir ? '›' : ''}
         </span>
+        <span className="workbench-tree-icon" data-kind={visualKind} data-open={isOpen}>
+          <FileTreeIcon kind={visualKind} open={isOpen} />
+        </span>
         <span className="workbench-tree-name">{entry.name}</span>
+        {depth === 0 && rootAction ? <span className="workbench-tree-actions">{rootAction}</span> : null}
       </div>
       {isOpen ? (
         <div className="workbench-tree-children" role="group">
@@ -400,17 +460,6 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
 
   return (
     <div className="workbench-files">
-      <div className="workbench-files-toolbar">
-        <button
-          type="button"
-          className="workbench-diff-btn"
-          onClick={() => void refreshAllExpanded()}
-          disabled={refreshing}
-          title={isZh ? '刷新文件树' : 'Refresh file tree'}
-        >
-          {refreshing ? (isZh ? '刷新中…' : 'Refreshing…') : isZh ? '刷新' : 'Refresh'}
-        </button>
-      </div>
       <div className="workbench-tree" role="tree" aria-label={isZh ? '文件树' : 'File tree'}>
         <TreeNode
           entry={rootEntry}
@@ -422,6 +471,21 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
           isZh={isZh}
           onToggleDir={toggleDir}
           onOpenFile={openFile}
+          rootAction={(
+            <button
+              type="button"
+              className="workbench-tree-action"
+              onClick={(event) => {
+                event.stopPropagation();
+                void refreshAllExpanded();
+              }}
+              disabled={refreshing}
+              aria-label={isZh ? '刷新文件树' : 'Refresh file tree'}
+              title={isZh ? '刷新文件树' : 'Refresh file tree'}
+            >
+              <RefreshIcon />
+            </button>
+          )}
         />
       </div>
     </div>
