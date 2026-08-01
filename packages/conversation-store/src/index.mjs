@@ -323,10 +323,25 @@ function sortByUpdatedAtDesc(items) {
   });
 }
 
-export function createConversationStore({
-  storeDir = defaultStoreDir(),
-  usageLogFile = path.join(path.dirname(storeDir), 'usage', 'requests.jsonl'),
-} = {}) {
+export function createConversationStore(options = {}) {
+  // 防御：曾出现测试误传位置参数 createConversationStore(dir)，解构后 storeDir 静默回落到
+  // defaultStoreDir()，把测试会话写进真实用户会话库（~/.peer-agent/conversations）。
+  // 存储根目录是数据边界，宁可显式失败也不要静默落到用户真实数据上。
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError(
+      'createConversationStore(options): options must be an object, e.g. { storeDir }. '
+      + `Received ${Array.isArray(options) ? 'array' : typeof options}.`,
+    );
+  }
+  const storeDir = options.storeDir === undefined ? defaultStoreDir() : options.storeDir;
+  // storeDir 必须先校验：usageLogFile 的默认值依赖 path.dirname(storeDir)，
+  // 若放到解构默认值里求值，非法 storeDir 会先抛 Node 的 ERR_INVALID_ARG_TYPE，掩盖真正的调用错误。
+  if (typeof storeDir !== 'string' || !storeDir.trim()) {
+    throw new TypeError('createConversationStore(options): storeDir must be a non-empty string.');
+  }
+  const usageLogFile = options.usageLogFile === undefined
+    ? path.join(path.dirname(storeDir), 'usage', 'requests.jsonl')
+    : options.usageLogFile;
   const indexFile = path.join(storeDir, 'index.jsonl');
   const contextSnapshotDir = path.join(storeDir, '.context-snapshots');
 

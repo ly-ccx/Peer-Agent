@@ -7,7 +7,7 @@ import { createConversationStore } from './index.mjs';
 
 describe('conversation-store empty user message guard', () => {
   const dir = mkdtempSync(join(tmpdir(), 'peer-empty-user-'));
-  const store = createConversationStore(dir);
+  const store = createConversationStore({ storeDir: dir });
   after(() => {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
