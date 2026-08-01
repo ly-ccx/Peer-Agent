@@ -35,6 +35,47 @@ async function withQoderConfig(fn, optionOverrides = {}) {
             '1M': { token_count: 1000000 },
             '260K': { token_count: 260000, is_default: true },
           },
+          thinking_config: {
+            disabled: { description: 'Disable thinking' },
+            enabled: {
+              description: 'Enable thinking',
+              is_default: true,
+              efforts: {
+                low: {},
+                medium: {},
+                high: { is_default: true },
+                xhigh: {},
+                max: {},
+              },
+            },
+          },
+        },
+        {
+          key: 'performance',
+          display_name: 'Performance',
+          max_input_tokens: 1000000,
+          max_output_tokens: 32000,
+          is_vl: true,
+          is_reasoning: false,
+          context_config: {
+            '272K': { token_count: 272000, is_default: true },
+            '400K': { token_count: 400000 },
+            '1M': { token_count: 1000000 },
+          },
+          thinking_config: {
+            disabled: { description: 'Disable thinking' },
+            enabled: {
+              description: 'Enable thinking',
+              is_default: true,
+              efforts: {
+                low: {},
+                medium: { is_default: true },
+                high: {},
+                xhigh: {},
+                max: {},
+              },
+            },
+          },
         },
       ],
       quest: [
@@ -126,12 +167,14 @@ describe('qoder model catalog', () => {
     const result = await listQoderModels(options);
 
     assert.equal(result.source, 'local');
-    assert.deepEqual(result.models.map((model) => model.id), ['auto', 'ultimate']);
+    assert.deepEqual(result.models.map((model) => model.id), ['auto', 'ultimate', 'performance']);
     assert.equal(result.models[0].contextWindow, 180000);
     assert.equal(result.models[0].maxOutputTokens, 32768);
     assert.equal(result.models[0].supportsVision, true);
     assert.equal(result.models[1].contextWindow, 1000000);
     assert.equal(result.models[1].supportsReasoning, true);
+    assert.equal(result.models[2].id, 'performance');
+    assert.equal(result.models[2].supportsReasoning, true);
   }));
 
   it('looks up metadata case-insensitively', async () => withQoderConfig((options) => {
@@ -239,6 +282,28 @@ describe('qoder model catalog', () => {
     assert.equal(result.source, 'fallback');
     assert.deepEqual(result.models.map((model) => model.id), ['auto']);
   });
+
+  it('projects thinking_config into effort levels for ultimate/performance', async () => withQoderConfig(async (options) => {
+    const result = await listQoderModels(options);
+    assert.equal(result.source, 'local');
+
+    const ultimate = result.models.find((model) => model.id === 'ultimate');
+    assert.ok(ultimate);
+    assert.equal(ultimate.supportsReasoning, true);
+    assert.deepEqual(ultimate.reasoningEffortLevels, ['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+    assert.equal(ultimate.reasoningDefaultEffort, 'high');
+
+    // performance has is_reasoning=false but still exposes thinking_config.
+    const performance = result.models.find((model) => model.id === 'performance');
+    assert.ok(performance);
+    assert.equal(performance.supportsReasoning, true);
+    assert.deepEqual(performance.reasoningEffortLevels, ['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+    assert.equal(performance.reasoningDefaultEffort, 'medium');
+
+    const cached = getQoderModelMetadata('performance', options);
+    assert.equal(cached?.supportsReasoning, true);
+    assert.equal(cached?.reasoningDefaultEffort, 'medium');
+  }));
 });
 
 it('preserves non-ENOENT encrypted catalog errors when legacy cache is missing', async () => {

@@ -1086,6 +1086,7 @@ export function createLlmChatService({
               contextWindow,
               modelOptions: provider.modelOptions,
               modelOptionValues: provider.modelOptionValues,
+              effort,
               maxOutputTokens,
               conversationId,
               toolContext,

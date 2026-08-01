@@ -15,6 +15,7 @@ import {
   mergeConsecutiveAssistants,
   qoderModelServerBaseUrl,
   qoderTurnTaskId,
+  resolveQoderReasoningEffortParam,
   sanitizeQoderToolPairing,
   sendQoderPrivateStream,
 } from './qoder-private-adapter.mjs';
@@ -245,6 +246,43 @@ describe('qoder private adapter', () => {
 
     assert.equal(body.model_config.max_input_tokens, 1000000);
     assert.equal(body.model_config.contextTier, '1M');
+  });
+
+  it('maps peer effort to parameters.reasoning_effort and enables is_reasoning', () => {
+    assert.equal(resolveQoderReasoningEffortParam('off'), 'none');
+    assert.equal(resolveQoderReasoningEffortParam('max'), 'max');
+    assert.equal(
+      resolveQoderReasoningEffortParam('default', { reasoningDefaultEffort: 'high' }),
+      'high',
+    );
+
+    const performanceBody = buildQoderRemoteChatAsk({
+      model: 'performance',
+      messages: [{ role: 'user', content: 'hello' }],
+      metadata: {
+        id: 'performance',
+        supportsReasoning: true,
+        reasoningDefaultEffort: 'medium',
+        reasoningEffortLevels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 272000,
+      },
+      effort: 'xhigh',
+    });
+    assert.equal(performanceBody.parameters.reasoning_effort, 'xhigh');
+    assert.equal(performanceBody.model_config.is_reasoning, true);
+
+    const offBody = buildQoderRemoteChatAsk({
+      model: 'ultimate',
+      messages: [{ role: 'user', content: 'hello' }],
+      metadata: {
+        id: 'ultimate',
+        supportsReasoning: true,
+        reasoningDefaultEffort: 'high',
+        contextWindow: 1000000,
+      },
+      effort: 'off',
+    });
+    assert.equal(offBody.parameters.reasoning_effort, 'none');
   });
 
   it('builds bearer headers for direct private API calls', () => {

@@ -184,6 +184,9 @@ function applyQoderModelMetadata(item) {
   const metadata = catalogMetadata || {
     contextWindow: item.contextWindow,
     modelOptions: item.modelOptions,
+    supportsReasoning: item.supportsReasoning,
+    reasoningEffortLevels: item.reasoningEffortLevels,
+    reasoningDefaultEffort: item.reasoningDefaultEffort,
   };
   // 与发送链路同口径：按 contextTier 档位投影后的可用输入窗口（1M 档 − 输出预留），
   // 而非目录原始窗口。历史模型不在实时目录时，继续使用持久化的 modelOptions，
@@ -193,8 +196,20 @@ function applyQoderModelMetadata(item) {
     ?? metadata?.contextWindow
     ?? item.contextWindow;
   item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
+  if (Array.isArray(metadata?.modelOptions) && metadata.modelOptions.length) {
+    item.modelOptions = metadata.modelOptions;
+  }
   if (typeof metadata?.supportsVision === 'boolean') item.supportsVision = metadata.supportsVision;
-  if (typeof metadata?.supportsReasoning === 'boolean') item.supportsReasoning = metadata.supportsReasoning;
+  // thinking_config 投影优先：有 reasoningEffortLevels 即支持思考（性能档 is_reasoning=false 也要开）。
+  if (Array.isArray(metadata?.reasoningEffortLevels) && metadata.reasoningEffortLevels.length) {
+    item.supportsReasoning = true;
+    item.reasoningEffortLevels = [...metadata.reasoningEffortLevels];
+    if (metadata.reasoningDefaultEffort) {
+      item.reasoningDefaultEffort = metadata.reasoningDefaultEffort;
+    }
+  } else if (typeof metadata?.supportsReasoning === 'boolean') {
+    item.supportsReasoning = metadata.supportsReasoning;
+  }
   // Qoder's catalog does not currently declare prompt-cache support. Keep that
   // capability unknown instead of turning missing metadata into an explicit no.
   delete item.supportsPromptCaching;
@@ -927,14 +942,15 @@ export function createLlmConfigStore({
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
       supportsVision: isSubscription
         ? subscriptionMetadata?.supportsVision
-        : (isLocalQoderAuth ? false : supportsVision),
-      // 订阅链路(codex/responses)原生支持思考强度,默认开启；API Key 目录未返回的能力保持未知。
+        : (isLocalQoderAuth ? undefined : supportsVision),
+      // 订阅链路(codex/responses)原生支持思考强度,默认开启。
+      // Qoder 本地鉴权由 applyQoderModelMetadata 按 thinking_config 投影，不在这里写死 false。
       supportsReasoning: isSubscription
         ? (subscriptionMetadata?.supportsReasoning ?? true)
-        : (isLocalQoderAuth ? false : supportsReasoning),
+        : (isLocalQoderAuth ? undefined : supportsReasoning),
       supportsPromptCaching: isSubscription
         ? (subscriptionMetadata?.supportsPromptCaching ?? subscriptionMetadata?.cacheReadPrice !== undefined)
-        : (isLocalQoderAuth ? false : supportsPromptCaching),
+        : (isLocalQoderAuth ? undefined : supportsPromptCaching),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
       reasoningEffortLevels: subscriptionMetadata?.reasoningEffortLevels

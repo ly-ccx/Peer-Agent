@@ -63,6 +63,70 @@ function encryptedCatalogCandidates(uid, options = {}) {
   return ['catalog-v5', 'catalog-v4', 'catalog-v2', 'catalog'].map((name) => path.join(dir, name));
 }
 
+// Peer Agent effort order (UI). Qoder catalog uses low/medium/high/xhigh/max;
+// disabled thinking maps to our "off".
+const QODER_EFFORT_ORDER = ['off', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+function thinkingConfigOf(raw) {
+  if (raw?.thinking_config && typeof raw.thinking_config === 'object') return raw.thinking_config;
+  if (raw?.serverModel?.thinking_config && typeof raw.serverModel.thinking_config === 'object') {
+    return raw.serverModel.thinking_config;
+  }
+  return null;
+}
+
+/**
+ * Project Qoder thinking_config into Peer Agent reasoning effort levels.
+ * - disabled present → include "off"
+ * - enabled.efforts keys → low/medium/high/xhigh/max (stable order)
+ * - default from enabled.efforts[*].is_default, else enabled.is_default → first effort, else off if allowed
+ */
+function resolveThinkingEffortProjection(raw) {
+  const thinking = thinkingConfigOf(raw);
+  if (!thinking || typeof thinking !== 'object') return null;
+
+  const hasDisabled = Boolean(thinking.disabled && typeof thinking.disabled === 'object');
+  const enabled = thinking.enabled && typeof thinking.enabled === 'object' ? thinking.enabled : null;
+  if (!enabled && !hasDisabled) return null;
+
+  const effortKeys = enabled?.efforts && typeof enabled.efforts === 'object'
+    ? Object.keys(enabled.efforts).map((key) => String(key || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  const levels = [];
+  if (hasDisabled) levels.push('off');
+  for (const key of QODER_EFFORT_ORDER) {
+    if (key === 'off') continue;
+    if (effortKeys.includes(key) && !levels.includes(key)) levels.push(key);
+  }
+  // Preserve any unknown effort names after known ones (defensive).
+  for (const key of effortKeys) {
+    if (!levels.includes(key) && key !== 'default') levels.push(key);
+  }
+  if (!levels.length) return null;
+
+  let defaultEffort;
+  if (enabled?.efforts && typeof enabled.efforts === 'object') {
+    const defaultEntry = Object.entries(enabled.efforts)
+      .find(([, config]) => config && typeof config === 'object' && config.is_default === true);
+    if (defaultEntry) defaultEffort = String(defaultEntry[0] || '').trim().toLowerCase();
+  }
+  if (!defaultEffort && enabled?.is_default === true) {
+    defaultEffort = levels.find((level) => level !== 'off') || levels[0];
+  }
+  if (!defaultEffort && hasDisabled && thinking.disabled?.is_default === true) {
+    defaultEffort = 'off';
+  }
+  if (!defaultEffort || !levels.includes(defaultEffort)) {
+    defaultEffort = levels.find((level) => level !== 'off') || levels[0];
+  }
+
+  return {
+    supportsReasoning: true,
+    reasoningEffortLevels: levels,
+    reasoningDefaultEffort: defaultEffort,
+  };
+}
+
 function normalizeContextTierOption(raw) {
   const entries = Object.entries(raw?.context_config || {})
     .filter(([key, config]) => key.trim() && config && Number.isFinite(config.token_count) && config.token_count > 0);
@@ -128,6 +192,12 @@ function normalizeModel(raw) {
   const id = String(raw.key || raw.id || raw.model || '').trim();
   if (!id) return null;
   const contextTierOption = normalizeContextTierOption(raw);
+  // thinking_config is the source of truth for effort UI; fall back to is_reasoning
+  // only when the catalog has no thinking_config (legacy models).
+  const thinkingProjection = resolveThinkingEffortProjection(raw);
+  const supportsReasoning = thinkingProjection
+    ? true
+    : (typeof raw.is_reasoning === 'boolean' ? raw.is_reasoning : undefined);
   return {
     id,
     label: String(raw.display_name || raw.displayName || raw.label || id),
@@ -143,7 +213,9 @@ function normalizeModel(raw) {
       : undefined,
     maxOutputTokens: Number.isFinite(raw.max_output_tokens) ? raw.max_output_tokens : undefined,
     supportsVision: typeof raw.is_vl === 'boolean' ? raw.is_vl : undefined,
-    supportsReasoning: typeof raw.is_reasoning === 'boolean' ? raw.is_reasoning : undefined,
+    supportsReasoning,
+    reasoningEffortLevels: thinkingProjection?.reasoningEffortLevels,
+    reasoningDefaultEffort: thinkingProjection?.reasoningDefaultEffort,
     modelOptions: contextTierOption ? [contextTierOption] : undefined,
     raw,
   };
@@ -190,6 +262,10 @@ function normalizeOfficialModel(raw) {
     is_vl: raw.isVl ?? serverModel.is_vl,
     is_reasoning: raw.isReasoning ?? serverModel.is_reasoning,
     context_config: officialContextConfig(raw),
+    thinking_config: raw.thinking_config
+      ?? raw.thinkingConfig
+      ?? serverModel.thinking_config
+      ?? serverModel.thinkingConfig,
   });
 }
 

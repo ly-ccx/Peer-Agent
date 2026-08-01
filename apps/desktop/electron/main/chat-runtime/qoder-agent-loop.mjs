@@ -55,6 +55,7 @@ export async function agentLoopQoder({
   contextWindow,
   modelOptions,
   modelOptionValues = {},
+  effort = null,
   conversationId,
   toolContext,
   workspacePath,
@@ -166,6 +167,7 @@ export async function agentLoopQoder({
             bufferThinkingDeltas: false,
             emitBufferedThinkingDeltas: true,
             streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
+            effort,
           }),
         });
         apiMessages = execution.messages;

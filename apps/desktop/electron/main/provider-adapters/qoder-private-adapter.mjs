@@ -763,6 +763,23 @@ function qoderCompatibleTools(tools) {
   return tools.map(qoderCompatibleTool).filter(Boolean);
 }
 
+/**
+ * Map Peer Agent effort to Qoder parameters.reasoning_effort.
+ * Qoder uses "none" for disabled thinking; our UI uses "off".
+ * "default" falls through to the catalog default when present.
+ */
+export function resolveQoderReasoningEffortParam(effort, metadata = null) {
+  const raw = String(effort || '').trim().toLowerCase();
+  if (!raw || raw === 'default') {
+    const fallback = String(metadata?.reasoningDefaultEffort || '').trim().toLowerCase();
+    if (fallback === 'off' || fallback === 'none') return 'none';
+    if (fallback) return fallback;
+    return undefined;
+  }
+  if (raw === 'off' || raw === 'none') return 'none';
+  return raw;
+}
+
 export function buildQoderRemoteChatAsk({
   model,
   messages,
@@ -775,6 +792,7 @@ export function buildQoderRemoteChatAsk({
   isRetry = false,
   metadata = null,
   modelOptionValues = {},
+  effort = null,
 } = {}) {
   const optionProjection = resolveQoderModelOptionProjection(metadata, modelOptionValues);
   const sanitizedInput = mergeConsecutiveAssistants(sanitizeQoderToolPairing(messages));
@@ -790,10 +808,17 @@ export function buildQoderRemoteChatAsk({
     : conversationMessages;
   const modelKey = metadata?.id || normalizeQoderModel(model);
   const source = metadata?.source || 'system';
-  const isReasoning = Boolean(metadata?.supportsReasoning);
+  // Prefer thinking_config-backed supportsReasoning; if user picked a non-off
+  // effort, still enable is_reasoning so performance-tier thinking works.
+  const resolvedEffort = resolveQoderReasoningEffortParam(effort, metadata);
+  const isReasoning = Boolean(metadata?.supportsReasoning)
+    || Boolean(resolvedEffort && resolvedEffort !== 'none');
   const parameters = {};
   if (Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) {
     parameters.max_tokens = Math.trunc(maxOutputTokens);
+  }
+  if (resolvedEffort) {
+    parameters.reasoning_effort = resolvedEffort;
   }
   return {
     request_id: requestId,
@@ -871,6 +896,7 @@ async function sendQoderPreparedStream({
   streamIdleTimeoutMs = 0,
   modelOptions,
   modelOptionValues = {},
+  effort = null,
 } = {}) {
   // Keep non-identity payload (messages/tools/metadata) stable across connection
   // recovery, but regenerate request_id/session_id/task_id on every attempt so a
@@ -898,6 +924,7 @@ async function sendQoderPreparedStream({
       isRetry,
       metadata,
       modelOptionValues,
+      effort,
     });
     const prepared = await prepareQoderInferRequest({
       requestBody,
@@ -924,11 +951,12 @@ async function sendQoderPreparedStream({
   // Build the first attempt eagerly so requestBody is available for tracing and
   // error paths even if recovery never succeeds.
   const firstInit = await buildConnectionAttemptInit({ isRetry: false });
+  const resolvedEffort = resolveQoderReasoningEffortParam(effort, metadata);
   const trace = createProviderStreamTrace({
     provider: 'qoder',
     baseUrl: preparedUrl || endpoint,
     model: requestBody.model_config.key,
-    effort: 'off',
+    effort: resolvedEffort || effort || 'off',
     supportsReasoning: Boolean(requestBody.model_config.is_reasoning),
     streamId,
     requestBody: {
@@ -937,6 +965,7 @@ async function sendQoderPreparedStream({
       tools: requestBody.tools,
       stream: true,
       max_tokens: requestBody.parameters?.max_tokens,
+      reasoning_effort: requestBody.parameters?.reasoning_effort,
     },
   });
 
@@ -1088,6 +1117,7 @@ export async function sendQoderPrivateStream({
   streamIdleTimeoutMs = 0,
   modelOptions,
   modelOptionValues = {},
+  effort = null,
   maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
   transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
   waitImpl = sleepMs,
@@ -1128,6 +1158,7 @@ export async function sendQoderPrivateStream({
       streamIdleTimeoutMs,
       modelOptions: metadata.modelOptions,
       modelOptionValues,
+      effort,
     });
   }
   const root = String(baseUrl || qoderModelServerBaseUrl()).replace(/\/+$/, '');
