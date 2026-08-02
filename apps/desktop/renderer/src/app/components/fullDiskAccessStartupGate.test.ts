@@ -32,8 +32,11 @@ test('startup gate checks Agent-required OS permissions, not Chrome import', () 
   assert.match(src, /apps never auto-appear|列表不会自动出现/);
   assert.match(src, /visibilitychange/);
   assert.match(src, /addEventListener\('focus'/);
-  assert.doesNotMatch(src, /from '\.\/Overlay'/);
-  assert.match(src, /createPortal/);
+  // Modal expression stays on the shared Overlay seam rather than creating a local portal.
+  assert.match(src, /from '\.\/Overlay'/);
+  assert.match(src, /<Overlay[\s\S]*panelClassName="fda-startup-gate"/);
+  assert.match(src, /<\/Overlay>/);
+  assert.doesNotMatch(src, /createPortal/);
   assert.doesNotMatch(src, /在 Finder 中显示 App|Reveal app in Finder|revealAppInFinder/);
   assert.match(src, /getStartupOsPermissions/);
 });

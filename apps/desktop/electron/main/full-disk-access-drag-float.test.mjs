@@ -113,11 +113,15 @@ test('float should glue to settings bottom inside with 4px padding', () => {
   assert.equal(x, Math.round(260 + (920 - 380) / 2));
 });
 
-test('main wires delayed float show after opening settings', () => {
+test('main wires the drag-float controller into the service that owns delayed show', () => {
   const main = readFileSync(join(here, 'main.mjs'), 'utf8');
+  const service = readFileSync(join(here, 'browser-fda-drag-application-service.mjs'), 'utf8');
   assert.match(main, /createFullDiskAccessDragFloatController/);
-  assert.match(main, /fullDiskAccessDragFloatController\.show/);
-  assert.match(main, /showFloat\(/);
-  assert.match(main, /for \(const ms of \[250, 500, 900, 1500, 2400\]\)/);
-  assert.match(main, /hide-fda-drag-float|hideFdaDragFloat/);
+  assert.match(main, /showFloat: \(payload\) => fullDiskAccessDragFloatController\.show\(payload\)/);
+  assert.match(main, /hideFloat: \(\) => fullDiskAccessDragFloatController\.hide\(\)/);
+  assert.match(main, /full-disk-access-drag-float/);
+  assert.match(main, /fullDiskAccessDragFloatController\.destroy\(\)/);
+  assert.match(service, /ports\.showFloat\(/);
+  assert.match(service, /FLOAT_RETRY_DELAYS_MS = Object\.freeze\(\[250, 500, 900, 1500, 2400\]\)/);
+  assert.match(service, /for \(const delay of FLOAT_RETRY_DELAYS_MS\)/);
 });
