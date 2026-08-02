@@ -12,8 +12,8 @@
  * hooks 数量必须恒定：所有 hooks 在任何 early return 之前。
  */
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
+import { Overlay } from './Overlay';
 
 const BRAND_LOGO_SRC = './logo.png';
 
@@ -221,15 +221,13 @@ export function FullDiskAccessStartupGate({
   const displayName = snapshot?.dragTarget?.displayName || 'Peer Agent';
   const canDrag = Boolean(snapshot?.dragTarget?.ok && snapshot?.dragTarget?.appPath);
 
-  const node = (
-    <div className="pa-overlay-backdrop" role="presentation">
-      <div
-        className="pa-overlay-panel fda-startup-gate"
-        role="dialog"
-        aria-modal="true"
-        aria-label={isZh ? 'Agent 必需权限' : 'Required permissions for Agent'}
-        onClick={(e) => e.stopPropagation()}
-      >
+  return (
+    <Overlay
+      onClose={() => setOpen(false)}
+      closeOnBackdrop={false}
+      ariaLabel={isZh ? 'Agent 必需权限' : 'Required permissions for Agent'}
+      panelClassName="fda-startup-gate"
+    >
         <div className="fda-startup-gate-body">
           <h2 className="fda-startup-gate-title">
             {isZh ? '需要授予 Agent 必需权限' : 'Required permissions for Agent'}
@@ -365,10 +363,6 @@ export function FullDiskAccessStartupGate({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Overlay>
   );
-
-  if (typeof document === 'undefined') return node;
-  return createPortal(node, document.body);
 }

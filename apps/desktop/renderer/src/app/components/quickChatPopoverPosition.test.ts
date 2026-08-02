@@ -21,7 +21,7 @@ test('sizes compact popover from content, not full bar width', () => {
   });
   assert.equal(size.width < barRect.width, true);
   assert.equal(size.width >= 190, true);
-  assert.equal(size.height, 12 + 2 * 34);
+  assert.equal(size.height, 18 + 2 * 34);
 });
 
 test('right-aligns model menu to the trigger and flushes under the bar', () => {

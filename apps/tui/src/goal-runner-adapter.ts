@@ -9,9 +9,9 @@
  *   于是计划停在 `0/0 · accepted` 永远不动。
  *
  * 本模块做三件事，与 Desktop 对齐：
- * 1. 直接复用 apps/desktop/electron/main/goal-runner.mjs 的 createGoalRunner
- *    （同一份编排逻辑，不复制），chatRuntime.runGoalTurn 由 TUI chat 会话驱动；
- * 2. 复用 goal-intake-convergence.mjs 的 auto-start 闸门纯函数，
+ * 1. 直接复用 @peer-agent/runtime-node 的 createGoalRunner
+ *    （Desktop/TUI 同一份编排逻辑），chatRuntime.runGoalTurn 由 TUI chat 会话驱动；
+ * 2. 复用共享 Goal intake 的 auto-start 闸门纯函数，
  *    只有 intake → accepted_goal 这一次领域跃迁会 kick Runner，Runner 自己写盘
  *    触发的 change 不会反向自激；
  * 3. 向 TUI 暴露 runner 状态订阅（供状态面板展示）与控制入口（/goal pause 等）。
@@ -22,10 +22,10 @@
  *   因此共享 Runner 不接触模型、工具投影或主聊天历史。
  */
 
-// @ts-expect-error -- shared .mjs modules ship without adjacent .d.ts（同 goal-bridge.ts 的处理）
-import { createGoalRunner } from '../../desktop/electron/main/goal-runner.mjs';
-// @ts-expect-error -- shared .mjs module without declarations
-import { shouldAutoStartAcceptedGoalRunnerFromChange } from '../../desktop/electron/main/goal-intake-convergence.mjs';
+import {
+  createGoalRunner,
+  shouldAutoStartAcceptedGoalRunnerFromChange,
+} from '@peer-agent/runtime-node';
 
 import type { ChatController } from './chat-controller.ts';
 import type { TuiGoalBridge } from './goal-bridge.ts';

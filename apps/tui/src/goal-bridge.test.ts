@@ -6,10 +6,10 @@ import path from 'node:path';
 import { createTuiGoalBridge, GOAL_CAPABILITY_IDS, GOAL_TOOL_NAMES } from './goal-bridge.ts';
 
 describe('TuiGoalBridge', () => {
-  test('statically imports Desktop createGoalPlanStore for packaged CLI', async () => {
+  test('statically imports the shared Node GoalPlan store for packaged CLI', async () => {
     const source = await readFile(new URL('./goal-bridge.ts', import.meta.url), 'utf8');
-    expect(source).toContain("from '../../desktop/electron/main/goal-plan-store.mjs'");
-    expect(source).toContain("from '../../desktop/electron/main/data-store.mjs'");
+    expect(source).toContain("from '@peer-agent/runtime-node'");
+    expect(source).not.toContain('../../desktop/electron/main');
     expect(source).toContain("return pathOf('goalPlans')");
     expect(source).toContain('createGoalPlanStore({');
     expect(source).toContain('subscribeChanges: subscribeLocalChanges');

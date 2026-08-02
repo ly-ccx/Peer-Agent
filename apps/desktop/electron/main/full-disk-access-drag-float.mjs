@@ -21,6 +21,7 @@ const FOLLOW_INTERVAL_MS = 1600;
  *   resolveDragTarget: () => { ok: boolean, appPath?: string, displayName?: string, error?: string },
  *   resolveLogoFilePath?: () => string | null,
  *   resolveLogoDataUrl?: () => string | null,
+ *   registerTrustedWindow?: (input: { window: import('electron').BrowserWindow, url: string }) => (() => void),
  *   isZh?: () => boolean,
  * }} deps
  */
@@ -34,6 +35,7 @@ export function createFullDiskAccessDragFloatController(deps) {
     resolveDragTarget,
     resolveLogoFilePath,
     resolveLogoDataUrl,
+    registerTrustedWindow = () => () => {},
     isZh = () => true,
   } = deps;
 
@@ -41,6 +43,7 @@ export function createFullDiskAccessDragFloatController(deps) {
   let floatWindow = null;
   let hideTimer = null;
   let followTimer = null;
+  let unregisterTrustedWindow = null;
   /** @type {{ at: number, bounds: { x:number,y:number,width:number,height:number } | null } | null} */
   let settingsBoundsCache = null;
   let dragging = false;
@@ -62,6 +65,8 @@ export function createFullDiskAccessDragFloatController(deps) {
   function destroy() {
     clearHideTimer();
     clearFollowTimer();
+    unregisterTrustedWindow?.();
+    unregisterTrustedWindow = null;
     if (floatWindow && !floatWindow.isDestroyed()) {
       try { floatWindow.close(); } catch { /* ignore */ }
     }
@@ -456,6 +461,8 @@ export function createFullDiskAccessDragFloatController(deps) {
       floatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     } catch { /* ignore */ }
     floatWindow.on('closed', () => {
+      unregisterTrustedWindow?.();
+      unregisterTrustedWindow = null;
       floatWindow = null;
       clearHideTimer();
       clearFollowTimer();
@@ -511,6 +518,8 @@ export function createFullDiskAccessDragFloatController(deps) {
     const html = buildHtml(payload);
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     const win = ensureWindow();
+    unregisterTrustedWindow?.();
+    unregisterTrustedWindow = registerTrustedWindow({ window: win, url });
     // 首次显示强制读设置窗，避免用过期 cache / fallback 贴底
     try { readSystemSettingsWindowBounds({ force: true }); } catch { /* ignore */ }
     const bounds = positionWindow(win);

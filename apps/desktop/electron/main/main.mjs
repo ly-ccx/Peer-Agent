@@ -1,10 +1,10 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
@@ -43,7 +43,6 @@ import { createLocalShellProvider } from './runtime-gateway/local-shell-provider
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
-import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './data-store.mjs';
 import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
 import { createAppshotService } from './appshot-service.mjs';
@@ -61,20 +60,32 @@ import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
 import { collectUsageDaily } from './usage-daily.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
-import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
-import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
-import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
-import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
-import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
-import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
-import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
+import { createHostRestartApplicationService } from './host-restart-application-service.mjs';
+import { createMcpApplicationService } from './mcp-application-service.mjs';
+import { createPendingTaskApplicationService } from './pending-task-application-service.mjs';
+import { createProviderConfigurationApplicationService } from './provider-configuration-application-service.mjs';
+import { createProviderAccessApplicationService } from './provider-access-application-service.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { createTrayController, TRAY_RECENT_EXPANDED_LIMIT, TRAY_RECENT_LIMIT } from './tray-controller.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
-import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
+import {
+  createGoalPlanStore,
+  createGoalRunner,
+  decideIntakeConvergence,
+  exportBundle,
+  getDataHome,
+  goalPlanIsSelfDriven,
+  importBundle,
+  migrateFromLegacy,
+  removeConversationToolArtifacts,
+  serializeAcceptedGoalRunnerHandoff,
+  shouldAutoStartAcceptedGoalRunner,
+  shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
+} from '@peer-agent/runtime-node';
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
@@ -91,22 +102,13 @@ import { createContextBaselineRecorder } from './prompt/context-baseline-recorde
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
-import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
-import {
-  decideIntakeConvergence,
-  serializeAcceptedGoalRunnerHandoff,
-  shouldAutoStartAcceptedGoalRunner,
-  shouldAutoStartAcceptedGoalRunnerFromChange,
-  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-} from './goal-intake-convergence.mjs';
-import { createGoalRunner } from './goal-runner.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
-import { fetchProviderSubscriptionQuota, resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
+import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
 import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import {
@@ -117,6 +119,45 @@ import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
 import { applyMicrocompaction } from './chat-runtime/compaction-coordinator.mjs';
 import { getCompaction } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
+import {
+  bindDesktopAppLifecycle,
+  createDesktopCompositionRoot,
+} from './desktop-composition-root.mjs';
+import { createCatalogIpcMain } from './ipc/catalog-ipc-main.mjs';
+import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
+import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
+import { createConversationSessionIpcRegistrations } from './ipc/register-conversation-session-ipc.mjs';
+import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
+import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
+import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
+import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
+import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
+import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
+import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
+import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
+import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
+import { createProviderAccessIpcRegistrations } from './ipc/register-provider-access-ipc.mjs';
+import { createRuntimeHostIpcRegistrations } from './ipc/register-runtime-host-ipc.mjs';
+import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mjs';
+import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
+import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
+import { registerIpcOwners } from './ipc/register-all.mjs';
+import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
+import {
+  createPermissionGrantService,
+  createSettingsApplicationService,
+} from './settings-application-service.mjs';
+import { createBrowserCoreApplicationService } from './browser-core-application-service.mjs';
+import { createBrowserFdaDragApplicationService } from './browser-fda-drag-application-service.mjs';
+import { createBrowserSessionImportApplicationService } from './browser-session-import-application-service.mjs';
+import { createChatStreamApplicationService } from './chat-stream-application-service.mjs';
+import { createConversationApplicationService } from './conversation-application-service.mjs';
+import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
+import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+import { createGoalApplicationService } from './goal-application-service.mjs';
+import { createOpenPathApplicationService } from './open-path-application-service.mjs';
+import { createPasswordVaultFillApplicationService } from './password-vault-fill-application-service.mjs';
+import { createWorkspaceApplicationService } from './workspace-application-service.mjs';
 import {
   initAutoUpdater,
   stopAutoUpdater,
@@ -130,6 +171,13 @@ import {
 } from './auto-updater.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const trustedWindowRegistry = createTrustedWindowRegistry({
+  openExternal: (url) => shell.openExternal(url),
+});
+const ipcMain = createCatalogIpcMain({
+  ipcMain: electronIpcMain,
+  authorize: trustedWindowRegistry.authorize,
+});
 
 function findWorkspaceRoot(startDir) {
   let current = startDir;
@@ -278,20 +326,6 @@ function waitForMcpOAuthCallback(expectedState) {
   });
 }
 
-function createMcpProbeResponse(probe, view) {
-  return {
-    ...probe,
-    success: probe.state === 'connected',
-    toolCount: probe.toolsCount,
-    view,
-  };
-}
-
-function persistMcpProbeResult(serverId, probe) {
-  if (probe.state === 'connected' && probe.manifest) return mcpRegistry.updateManifest(serverId, probe.manifest);
-  return mcpRegistry.updateHealth(serverId, probe.health);
-}
-
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
@@ -305,8 +339,6 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
   broadcastToAllWindows('conversations:changed', event);
   trayController?.scheduleRefresh?.();
 });
-// 主窗口当前前台会话（由 renderer 通过 conversation:set-active 上报），用于同会话通知抑制。
-let activeConversationIdForNotifications = null;
 
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
@@ -331,8 +363,10 @@ const goalPlanStore = createGoalPlanStore({
   },
 });
 let goalRunner = null;
+let localToolHost = null;
 let taskNotificationBroker = null;
 let trayController = null;
+let desktopLifecycleBinding = null;
 const stopGoalPlanChangeSubscription = bindExternalGoalPlanChanges({
   goalPlanStore,
   broadcast: broadcastToAllWindows,
@@ -343,12 +377,6 @@ const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
   getWorkspacePath: () => settingsStore.getAll().activeWorkspace || null,
 });
-
-function providerPromptTargetChanged(before = null, after = null) {
-  if (!after?.isDefault) return false;
-  if (!before) return true;
-  return before.provider !== after.provider || before.model !== after.model;
-}
 
 function recordProviderBaseline(reason, provider) {
   contextBaselineRecorder.recordProviderBaseline({ reason, provider });
@@ -920,6 +948,13 @@ const llmChatService = createLlmChatService({
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
+const chatStreamApplicationService = createChatStreamApplicationService({
+  abortStream: (streamId) => llmChatService.abort(streamId),
+  reattachStream: (input) => llmChatService.reattach(input),
+  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
+  listActiveStreams: () => llmChatService.listActiveStreams(),
+});
+
 goalRunner = createGoalRunner({
   goalPlanStore,
   chatRuntime: {
@@ -1160,16 +1195,25 @@ function buildRuntimeProjection() {
   };
 }
 
+function getRendererIndexPath() {
+  return isPackaged
+    ? path.join(__dirname, '../../dist/index.html')
+    : path.join(workspaceRoot, 'apps/desktop/dist/index.html');
+}
+
+function getTrustedRendererLocation() {
+  return isDev
+    ? new URL(process.env.VITE_DEV_SERVER_URL).toString()
+    : pathToFileURL(getRendererIndexPath()).toString();
+}
+
 function loadRendererWindow(targetWindow, query = {}) {
   if (isDev) {
-    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    const url = new URL(getTrustedRendererLocation());
     Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
     void targetWindow.loadURL(url.toString());
   } else {
-    const indexPath = isPackaged
-      ? path.join(__dirname, '../../dist/index.html')
-      : path.join(workspaceRoot, 'apps/desktop/dist/index.html');
-    void targetWindow.loadFile(indexPath, { query });
+    void targetWindow.loadFile(getRendererIndexPath(), { query });
   }
 }
 
@@ -1204,6 +1248,11 @@ function createQuickChatWindow() {
       // 隐藏态不节流 renderer，避免再次唤醒时先“醒进程”再出首帧。
       backgroundThrottling: false,
     },
+  });
+  trustedWindowRegistry.registerWindow({
+    window: quickWindow,
+    role: 'quick-chat',
+    allowedLocations: [getTrustedRendererLocation()],
   });
   loadRendererWindow(quickWindow, { window: 'quick-chat' });
   return quickWindow;
@@ -1242,6 +1291,11 @@ function createQuickChatPopoverWindow() {
       sandbox: true,
       backgroundThrottling: false,
     },
+  });
+  trustedWindowRegistry.registerWindow({
+    window: popoverWindow,
+    role: 'quick-chat-popover',
+    allowedLocations: [getTrustedRendererLocation()],
   });
   loadRendererWindow(popoverWindow, { window: 'quick-chat-popover' });
   return popoverWindow;
@@ -1358,87 +1412,583 @@ const shortcutService = createShortcutService({
   // Capture remains available via settings "Test capture" / appshot:capture IPC.
 });
 
-ipcMain.handle('appshot:capture', () => handleAppshotHotkey('settings-test'));
-ipcMain.handle('appshot:permission-status', () => buildAppshotPermissionPreflight({
-  getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
-}));
-ipcMain.handle('appshot:open-screen-settings', () =>
-  openScreenRecordingSettings({ shellOpenExternal: (url) => shell.openExternal(url) }));
-
-ipcMain.handle('shortcuts:status', () => shortcutService.status());
-ipcMain.handle('shortcuts:update', (_event, actionOrAccelerator, accelerator) =>
-  shortcutService.update(actionOrAccelerator, accelerator));
-ipcMain.handle('shortcuts:reset', (_event, action) => shortcutService.reset(action));
-
-ipcMain.handle('quick-chat:hide', () => {
-  quickChatWindowController.hide();
-  return { ok: true };
-});
-ipcMain.handle('quick-chat-popover:show', (_event, payload = {}) => ({
-  ok: quickChatWindowController.showPopover(payload),
-}));
-ipcMain.handle('quick-chat:set-task-card-visible', (_event, payload = {}) => ({
-  ok: quickChatWindowController.setTaskCardVisible(payload.visible === true),
-}));
-ipcMain.handle('quick-chat:set-content-height', (_event, payload = {}) => (
-  quickChatWindowController.setContentHeight(payload?.height)
-));
-ipcMain.handle('quick-chat-popover:hide', () => {
-  quickChatWindowController.hidePopover({ restoreFocus: true });
-  return { ok: true };
-});
-ipcMain.handle('quick-chat-popover:select', (_event, value) => ({
-  ok: quickChatWindowController.selectPopoverValue(value),
-}));
-ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
-  quickChatWindowController.hide();
-  const mainWindow = getPeerAgentMainWindow();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('quick-chat:conversation-created', payload);
-    if (payload.openMainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send('quick-chat:open-conversation', payload);
-    }
-  }
-  return { ok: true };
+const settingsApplicationService = createSettingsApplicationService({
+  getSettings: () => settingsStore.getAll(),
+  mergeSettings: (partial) => settingsStore.merge(partial),
+  applyAppearance: (appearance) => {
+    const quickWindow = quickChatWindowController.getWindow();
+    setDockIcon(appearance);
+    quickWindow?.webContents.send('appearance:changed', appearance);
+  },
+  normalizeSystemInstructions,
+  recordInstructionBaseline,
+  resolveLocalAccessLevel,
+  setSessionAccessLevel: (accessLevel) => sessionStore.setAccessLevel(accessLevel),
+  setRuntimeAccessLevel: (accessLevel) => llmChatService.setLocalAccessLevel(accessLevel),
+  chooseExportDirectory: async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '选择导出目录',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return canceled ? null : (filePaths?.[0] ?? null);
+  },
+  chooseImportDirectory: async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '选择要导入的配置目录',
+      properties: ['openDirectory'],
+    });
+    return canceled ? null : (filePaths?.[0] ?? null);
+  },
+  exportBundle: (targetDirectory) => exportBundle(targetDirectory),
+  importBundle: (sourceDirectory) => importBundle(sourceDirectory),
+  diagnostics: () => ({
+    dataHome,
+    isDev,
+    isPackaged,
+    resourcesRoot,
+    workspaceRoot,
+    loadedEnvKeys,
+  }),
+  setSessionLocale: (locale) => sessionStore.setLocale(locale),
+  rebuildAppMenu: () => rebuildAppMenu(),
+  getSession: () => sessionStore.getSession(),
 });
 
-// renderer 上报当前前台会话，供任务系统通知做「同会话抑制」。
-ipcMain.handle('conversation:set-active', (_event, payload = {}) => {
-  const conversationId =
-    payload && typeof payload.conversationId === 'string' && payload.conversationId.trim()
-      ? payload.conversationId.trim()
-      : null;
-  activeConversationIdForNotifications = conversationId;
-  if (conversationId) {
-    const activeGoal = goalPlanStore.getActivePlanByConversation?.(conversationId) ?? null;
-    if (shouldRecoverAcceptedGoalRunnerOnConversationOpen(activeGoal)) {
-      // 主进程重载会丢失内存 session，但磁盘 runner 仍是 running。打开会话时
-      // 幂等 kick 即可恢复；若 session 本就存在，Goal Runner.start 会直接 no-op。
-      queueMicrotask(() => {
-        void goalRunner?.start(activeGoal.planId).catch((error) => {
-          console.error('[main] recover active goal runner failed:', error?.message || error);
-        });
-      });
-    }
-  }
-  if (conversationId && taskNotificationBroker) {
-    // 打开会话即视为已读该会话下当前 attention（若已知 planId 则精确标记）。
-    const planId =
-      payload && typeof payload.planId === 'string' && payload.planId.trim()
-        ? payload.planId.trim()
-        : null;
-    if (planId) {
-      try {
-        taskNotificationBroker.markTaskRead(planId);
-      } catch (err) {
-        console.warn('[task-notification] markTaskRead failed:', err);
-      }
-    }
-  }
-  return { ok: true, conversationId: activeConversationIdForNotifications };
+const permissionGrantService = createPermissionGrantService({
+  createId: () => randomUUID(),
+  now: () => new Date(),
+  resolveGrant: (toolCallId, grant) => llmChatService.resolvePermissionGrant(toolCallId, grant),
 });
+
+const hostRestarter = createHostRestarter({ workspaceRoot });
+const hostRestartApplicationService = createHostRestartApplicationService({
+  workspaceRoot,
+  restartHost: (options) => hostRestarter.restartHost(options),
+  writePendingTask: (task) => writePendingTask(task),
+  reportPendingTaskError: (error) => {
+    console.error('[pending-task] failed to persist before restart:', error);
+  },
+});
+
+const pendingTaskApplicationService = createPendingTaskApplicationService({
+  workspaceRoot,
+  writePendingTask: (task) => writePendingTask(task),
+  consumePendingTask: () => readAndClearPendingTask(),
+  peekPendingTask: () => peekPendingTask(),
+  clearPendingTask: () => clearPendingTask(),
+  reportWorkspaceMismatch: (recordWorkspace, currentWorkspace) => {
+    console.warn(
+      '[pending-task] workspace mismatch, discarding:',
+      recordWorkspace,
+      '!=',
+      currentWorkspace,
+    );
+  },
+});
+
+const providerConfigurationApplicationService = createProviderConfigurationApplicationService({
+  listChannels: () => listChannelDescriptors(),
+  refreshExpiredOAuth: () => refreshExpiredOAuthProviders({ llmConfigStore }),
+  backfillMissingPricing: () => llmConfigStore.backfillMissingPricingFromModelsDev(),
+  listProviders: () => llmConfigStore.listProviders(),
+  listGroups: () => llmConfigStore.listGroups(),
+  addProvider: (config) => llmConfigStore.addProvider(config),
+  updateProvider: (id, patch) => llmConfigStore.updateProvider(id, patch),
+  duplicateProvider: (id) => llmConfigStore.duplicateProvider(id),
+  duplicateModel: (id) => llmConfigStore.duplicateModel(id),
+  addModel: (groupId, patch) => llmConfigStore.addModel(groupId, patch),
+  removeProvider: (id) => llmConfigStore.removeProvider(id),
+  removeGroup: (groupId) => llmConfigStore.removeGroup(groupId),
+  setDefault: (id) => llmConfigStore.setDefault(id),
+  testConnection: (id) => llmConfigStore.testConnection(id),
+  recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
+  reportRefreshError: (error) => {
+    console.warn('[llm] silent oauth refresh failed:', error?.message || error);
+  },
+  reportBackfillResult: (reason, result) => {
+    if (result?.updated) {
+      console.info(
+        `[llm] models.dev pricing backfill (${reason}): updated ${result.updated}/${result.examined}`,
+      );
+    }
+  },
+  reportBackfillError: (error) => {
+    console.warn('[llm] models.dev pricing backfill failed:', error?.message || error);
+  },
+});
+
+const providerAccessApplicationService = createProviderAccessApplicationService({
+  fetchQuota: (id, force) => fetchProviderSubscriptionQuota({
+    providerId: id,
+    llmConfigStore,
+    force,
+    fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
+      provider: 'subscription-quota',
+      model: 'quota',
+    }),
+  }),
+  listProviders: () => llmConfigStore.listProviders(),
+  addProvider: (draft) => llmConfigStore.addProvider(draft),
+  updateProvider: (id, patch) => llmConfigStore.updateProvider(id, patch),
+  removeProvider: (id) => llmConfigStore.removeProvider(id),
+  getCredential: (id) => llmConfigStore.getCredential(id),
+  setOAuthTokens: (id, tokens) => llmConfigStore.setOAuthTokens(id, tokens),
+  getApiKeyRequestConfig: (id) => llmConfigStore.getApiKeyRequestConfig(id),
+  fetchWithRecovery: (url, init, context) => fetchWithConnectionRecovery(url, init, context),
+  openExternal: (url) => shell.openExternal(url),
+  writeClipboard: (text) => clipboard.writeText(text),
+  sendOAuthEvent: (sender, channel, payload) => {
+    const target = getOAuthWindowWebContents(sender, BrowserWindow.getAllWindows());
+    target?.send(channel, payload);
+  },
+  recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
+  reportProjectResolutionError: (error) => {
+    console.warn('[oauth] resolve Gemini Code Assist project failed:', error?.message || error);
+  },
+});
+
+const mcpApplicationService = createMcpApplicationService({
+  listInstalled: () => mcpRegistry.listInstalled(),
+  listCapabilities: () => mcpRegistry.listCapabilityManifests(),
+  listCredentials: () => mcpCredentialStore.listCredentials(),
+  putCredential: (item) => mcpCredentialStore.putCredential(item),
+  deleteCredential: (credentialRef) => mcpCredentialStore.deleteCredential(credentialRef),
+  installServer: (item) => mcpRegistry.install(item),
+  upsertServer: (item) => mcpRegistry.upsertServer(item),
+  getServer: (serverId) => mcpRegistry.getServer(serverId),
+  uninstallServer: (serverId) => mcpRegistry.uninstall(serverId),
+  setServerEnabled: (serverId, enabled) => mcpRegistry.setEnabled(serverId, enabled),
+  setToolVisibility: (serverId, toolName, visible) =>
+    mcpRegistry.setToolVisibility(serverId, toolName, visible),
+  updateManifest: (serverId, manifest) => mcpRegistry.updateManifest(serverId, manifest),
+  updateHealth: (serverId, health) => mcpRegistry.updateHealth(serverId, health),
+  testConnection: (server) =>
+    testMcpConnection(server, { credentialResolver: mcpCredentialResolver }),
+  probeConnection: (server) =>
+    probeMcpConnection(server, { credentialResolver: mcpCredentialResolver }),
+  disconnectServer: (server) => disconnectMcp(server),
+  waitForOAuthCallback: () => waitForMcpOAuthCallback(),
+  closeOAuthCallback: () => closeMcpOAuthCallback(),
+  startOAuth: (server) =>
+    startMcpOAuth(server, { credentialResolver: mcpCredentialResolver }),
+  finishOAuth: (server, authorizationCode) =>
+    finishMcpOAuth(server, authorizationCode, { credentialResolver: mcpCredentialResolver }),
+  readResource: (server, uri) =>
+    readMcpResource(server, uri, { credentialResolver: mcpCredentialResolver }),
+  getPrompt: (server, name, args) =>
+    getMcpPrompt(server, name, args, { credentialResolver: mcpCredentialResolver }),
+  reportCredentialCleanupError: (error) => {
+    console.warn('[mcp] failed to remove bound credential:', error?.message ?? error);
+  },
+});
+
+const conversationApplicationService = createConversationApplicationService({
+  listConversations: (params) => conversationStore.listConversations(params),
+  listConversationsByWorkspace: (workspacePath, params) =>
+    conversationStore.listConversationsByWorkspace(workspacePath, params),
+  searchConversations: (params) => conversationStore.searchConversations(params),
+  createConversation: (params) => conversationStore.createConversation(params),
+  getConversation: (id) => conversationStore.getConversation(id),
+  updateTitle: (id, title) => conversationStore.updateTitle(id, title),
+  updateMode: (id, mode) => conversationStore.updateMode(id, mode),
+  updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
+  appendMessage: (id, message) => conversationStore.appendMessage(id, message),
+  updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
+  replaceMessages: (id, messages, options) =>
+    conversationStore.replaceMessages(id, messages, options),
+  archiveConversation: (id) => conversationStore.archiveConversation(id),
+  restoreConversation: (id) => conversationStore.restoreConversation(id),
+  pinConversation: (id) => conversationStore.pinConversation(id),
+  unpinConversation: (id) => conversationStore.unpinConversation(id),
+  reorderPinnedConversations: (ids) => conversationStore.reorderPinnedConversations(ids),
+  autoArchiveConversations: (params) => conversationStore.autoArchiveConversations(params),
+  deleteConversation: (id) => conversationStore.deleteConversation(id),
+  addUsage: (id, usage) => conversationStore.addUsage(id, usage),
+  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
+  deletePlanByConversation: (id) => goalPlanStore.deletePlanByConversation(id),
+  removeConversationToolArtifacts: (params) => removeConversationToolArtifacts(params),
+  reportCascadeFailure: (operation, error) => {
+    console.warn(`[main] cascade ${operation} failed:`, error);
+  },
+});
+
+const browserCoreApplicationService = createBrowserCoreApplicationService({
+  getActiveWebContentsId: () => getActiveWebContentsId(),
+  registerWebContents: (registration) => registerBrowserWebContents(registration),
+  unregisterWebContents: (registration) => unregisterBrowserWebContents(registration),
+  rebuildMenu: () => rebuildAppMenu(),
+  getBrowserSession: () => session.fromPartition(PEER_BROWSER_PARTITION),
+  getWebContentsById: (id) => webContents.fromId(id),
+  resolveWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender),
+  showSaveDialog: (window, options) => dialog.showSaveDialog(window, options),
+  getDownloadsPath: () => app.getPath('downloads'),
+  joinPath: (...parts) => path.join(...parts),
+  now: () => new Date(),
+  writeFile: (targetPath, content) => writeFile(targetPath, content),
+});
+
+const browserSessionImportApplicationService = createBrowserSessionImportApplicationService({
+  getPlatform: () => process.platform,
+  buildPreflight: (platform) => buildSessionImportPreflight({ platform }),
+  resolveDragTarget: (platform) => resolveFullDiskAccessDragTarget({
+    platform,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  }),
+  resolveDragIconDataUrl: (appPath) => resolveDragIconDataUrl(appPath),
+  listBrowserSources: () => listChromeBrowserSources(),
+  scanProfileSites: (profileId) => scanProfileSites(profileId),
+  loadCookiesForSites: (input) => loadCookiesForSites(input),
+  getBrowserSession: () => session.fromPartition(PEER_BROWSER_PARTITION),
+  applyCookiesToSession: (browserSession, cookies) =>
+    applyCookiesToSession(browserSession, cookies),
+  redactLoadedCookies: (loaded) => redactLoadedCookies(loaded),
+});
+
+const browserFdaDragApplicationService = createBrowserFdaDragApplicationService({
+  getPlatform: () => process.platform,
+  openSettings: () => openFullDiskAccessSettings({
+    shellOpenExternal: (url) => shell.openExternal(url),
+  }),
+  showFloat: (payload) => fullDiskAccessDragFloatController.show(payload),
+  hideFloat: () => fullDiskAccessDragFloatController.hide(),
+  setDragging: (dragging) => fullDiskAccessDragFloatController.setDragging?.(dragging),
+  schedule: (callback, delay) => setTimeout(callback, delay),
+  resolveDragTarget: () => resolveFullDiskAccessDragTarget({
+    platform: process.platform,
+    appGetPath: (name) => app.getPath(name),
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  }),
+  pathSeparator: path.sep,
+  pathExists: (candidate) => existsSync(candidate),
+  getCachedDragIcon: (appPath) => getCachedFdaDragIcon(appPath),
+  startDrag: ({ sender, filePath, dragIcon }) => sender.startDrag({
+    file: filePath,
+    icon: dragIcon,
+  }),
+  resolveDragIconDataUrl: (appPath) => resolveDragIconDataUrl(appPath),
+  warn: (...args) => console.warn(...args),
+});
+
+const passwordVaultFillApplicationService = createPasswordVaultFillApplicationService({
+  revealPassword: (id) => passwordVaultStore.revealPassword(id),
+  getWebContents: (id) => webContents.fromId(id),
+});
+
+const conversationSessionApplicationService = createConversationSessionApplicationService({
+  getActiveGoalByConversation: (conversationId) =>
+    goalPlanStore.getActivePlanByConversation?.(conversationId) ?? null,
+  shouldRecoverGoal: (plan) => shouldRecoverAcceptedGoalRunnerOnConversationOpen(plan),
+  scheduleRecovery: (task) => queueMicrotask(task),
+  startGoalRunner: (planId) => goalRunner?.start(planId) ?? null,
+  markTaskRead: (planId) => taskNotificationBroker?.markTaskRead(planId),
+  reportRecoveryFailure: (error) => {
+    console.error('[main] recover active goal runner failed:', error?.message || error);
+  },
+  reportNotificationFailure: (error) => {
+    console.warn('[task-notification] markTaskRead failed:', error);
+  },
+});
+
+const openPathApplicationService = createOpenPathApplicationService({
+  openPath: (target) => shell.openPath(target),
+  showItemInFolder: (target) => shell.showItemInFolder(target),
+});
+
+const workspaceApplicationService = createWorkspaceApplicationService({
+  getSettings: () => settingsStore.getAll(),
+  mergeSettings: (patch) => settingsStore.merge(patch),
+  listConversations: (options) => conversationStore.listConversations(options),
+  pathExists: (candidate) => existsSync(candidate),
+  basename: (candidate) => path.basename(candidate),
+  getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),
+  ensureDirectory: (candidate) => mkdirSync(candidate, { recursive: true }),
+  chooseDirectory: async (sender) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(
+      BrowserWindow.fromWebContents(sender),
+      { title: '选择项目目录', properties: ['openDirectory'] },
+    );
+    return canceled ? null : (filePaths?.[0] ?? null);
+  },
+  setChatWorkspacePath: (candidate) => llmChatService.setWorkspacePath(candidate),
+  setSkillWorkspacePath: (candidate) => skillStore?.setWorkspacePath?.(candidate),
+  readProjectIndex: (options) => readProjectIndex(options),
+});
+
+const fileAccessApplicationService = createFileAccessApplicationService({
+  getSettings: () => settingsStore.getAll(),
+  pathExists: (candidate) => existsSync(candidate),
+  statPath: (candidate) => statSync(candidate),
+  readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
+  readFile: (candidate) => readFileSync(candidate),
+  watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
+  executeGit: (cwd, args, options) =>
+    execFileAsync('git', ['-C', cwd, ...args], options),
+});
+
+const goalApplicationService = createGoalApplicationService({
+  listPlanDetails: () => goalPlanStore.listPlanDetails(),
+  listPlanDetailsByConversation: (conversationId) =>
+    goalPlanStore.listPlanDetailsByConversation(conversationId),
+  countAwaitingApprovalsByConversation: () =>
+    goalPlanStore.countAwaitingApprovalsByConversation(),
+  getPlan: (planId) => goalPlanStore.getPlan(planId),
+  createPlan: (draft) => goalPlanStore.createPlan(draft),
+  revisePlan: (planId, patch, options) => goalPlanStore.revisePlan(planId, patch, options),
+  recordApproval: (planId, approval) => goalPlanStore.recordApproval(planId, approval),
+  setPlanStatus: (planId, status) => goalPlanStore.setPlanStatus(planId, status),
+  recordManualConfirmation: (planId, confirmation) =>
+    goalPlanStore.recordManualConfirmation(planId, confirmation),
+  recordTaskEvidence: (planId, taskId, change) =>
+    goalPlanStore.recordTaskEvidence(planId, taskId, change),
+  deletePlan: (planId) => goalPlanStore.deletePlan(planId),
+  startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
+  getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,
+  pauseRunner: (planId) => goalRunner?.pause(planId) ?? null,
+  resumeRunner: (planId, options) => goalRunner?.resume(planId, options) ?? null,
+  clearRunner: (planId) => goalRunner?.clear(planId) ?? null,
+});
+
+function registerDesktopIpcHost() {
+  return registerIpcOwners({
+  ipc: ipcMain,
+  registrations: [
+    ...createDesktopIpcRegistrations({
+    appshot: {
+      capture: () => handleAppshotHotkey('settings-test'),
+      getPermissionStatus: () => buildAppshotPermissionPreflight({
+        getMediaAccessStatus: (type) => systemPreferences.getMediaAccessStatus(type),
+      }),
+      openScreenSettings: () => openScreenRecordingSettings({
+        shellOpenExternal: (url) => shell.openExternal(url),
+      }),
+    },
+    shortcuts: {
+      status: () => shortcutService.status(),
+      update: (actionOrAccelerator, accelerator) =>
+        shortcutService.update(actionOrAccelerator, accelerator),
+      reset: (action) => shortcutService.reset(action),
+    },
+    quickChat: {
+      hide: () => quickChatWindowController.hide(),
+      showPopover: (payload) => quickChatWindowController.showPopover(payload),
+      setTaskCardVisible: (visible) => quickChatWindowController.setTaskCardVisible(visible),
+      setContentHeight: (height) => quickChatWindowController.setContentHeight(height),
+      hidePopover: () => quickChatWindowController.hidePopover({ restoreFocus: true }),
+      selectPopover: (value) => quickChatWindowController.selectPopoverValue(value),
+      submit: (payload) => {
+        quickChatWindowController.hide();
+        const mainWindow = getPeerAgentMainWindow();
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.send('quick-chat:conversation-created', payload);
+        if (payload.openMainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          mainWindow.webContents.send('quick-chat:open-conversation', payload);
+        }
+      },
+    },
+    bootstrap: {
+      getBootstrap: async () => ({
+        session: sessionStore.getSession(),
+        capabilities: capabilityRegistry.refreshCapabilities(),
+        // 冷启动：monorepo git 项目索引不阻塞 bootstrap；projects:list 仍可按需同步读取。
+        projects: [],
+        activeProjectId: 'workspace-root',
+        availableLocales,
+        llmProviders: llmConfigStore.listProviders(),
+      }),
+      getSession: () => sessionStore.getSession(),
+      listCapabilities: () => capabilityRegistry.refreshCapabilities(),
+      listProjects: () => readProjectIndex({ workspaceRoot: resourcesRoot }),
+      getRuntimeProjection: () => buildRuntimeProjection(),
+    },
+    updater: {
+      getStatus: () => getUpdaterStatus(),
+      check: () => checkForUpdates(),
+      download: () => downloadUpdate(),
+      install: () => {
+        const updaterStatus = getUpdaterStatus();
+        if (
+          process.platform === 'win32'
+          && updaterStatus?.enabled === true
+          && updaterStatus?.phase === 'downloaded'
+          && desktopLifecycleBinding
+        ) {
+          return desktopLifecycleBinding.shutdown({ resume: () => quitAndInstall() });
+        }
+        return quitAndInstall();
+      },
+      openInstaller: () => openInstaller(),
+      openReleasePage: () => openReleasePage(),
+      setChannel: (preference) => {
+        // settings 是通道偏好的权限真相，先写回再切换运行时配置。
+        const pref =
+          preference === 'beta' || preference === 'stable' || preference === 'auto'
+            ? preference
+            : 'auto';
+        settingsStore.merge({ updateChannel: pref });
+        const status = setChannelPreference(pref);
+        // 切换通道后用新通道重新检查一次（事件会经 updater:event 广播给渲染层）。
+        void checkForUpdates();
+        return status;
+      },
+    },
+    }),
+    ...createSettingsIpcRegistrations({
+      settings: settingsApplicationService,
+      permissions: permissionGrantService,
+    }),
+    ...createHostIpcRegistrations({
+      os: {
+        getStartupPermissions: async () => {
+          try {
+            return await buildStartupOsPermissionsPayload();
+          } catch (error) {
+            return {
+              ok: false,
+              blocked: true,
+              checks: [],
+              required: [],
+              error: error?.message || 'startup_permissions_failed',
+            };
+          }
+        },
+      },
+      host: hostRestartApplicationService,
+    }),
+    ...createBrowserIpcRegistrations({
+      browser: browserCoreApplicationService,
+      sessionImport: browserSessionImportApplicationService,
+      fdaDrag: browserFdaDragApplicationService,
+    }),
+    ...createChatIpcRegistrations({
+      chat: {
+        send: handleChatSend,
+        abort: (payload) => chatStreamApplicationService.abort(payload),
+        reattach: (payload) => chatStreamApplicationService.reattach(payload),
+        listActive: () => chatStreamApplicationService.listActive(),
+        compact: handleChatCompact,
+        getCompaction: ({ conversationId } = {}) => getCompaction(conversationId),
+        contextRestored: handleChatContextRestored,
+      },
+    }),
+    ...createConversationSessionIpcRegistrations({
+      conversationSession: conversationSessionApplicationService,
+    }),
+    ...createDataIpcRegistrations({
+      conversations: conversationApplicationService,
+      promptSnapshots: {
+        list: (params) => promptSnapshotStore.list(params),
+        get: (id) => promptSnapshotStore.get(id),
+        listContextEpochs: (params) => promptSnapshotStore.listContextEpochs(params),
+        listContextEpochEvents: (params) => promptSnapshotStore.listContextEpochEvents(params),
+        getContextEpochChain: (params) => promptSnapshotStore.getContextEpochChain(params),
+      },
+      usage: {
+        stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
+        daily: (params) => collectUsageDaily(params),
+      },
+    }),
+    ...createGoalIpcRegistrations({
+      goalPlans: goalApplicationService,
+      goalRunner: {
+        getState: (payload) => goalApplicationService.getRunnerState(payload),
+        start: (payload) => goalApplicationService.startRunner(payload),
+        pause: (payload) => goalApplicationService.pauseRunner(payload),
+        resume: (payload) => goalApplicationService.resumeRunner(payload),
+        clear: (payload) => goalApplicationService.clearRunner(payload),
+      },
+    }),
+    ...createRuntimeHostIpcRegistrations({
+      shell: {
+        openPath: (payload) => openPathApplicationService.open(payload),
+        listTasks: () => localToolHost?.listShellTasks() ?? [],
+        stopActiveTask: () => localToolHost?.stopActiveShellTask() ?? false,
+        stopTask: (taskId) => localToolHost?.stopShellTask(taskId) ?? false,
+        listPermissionRules: () => localToolHost?.permissionReview.listShellRules() ?? [],
+        addPermissionRule: (payload) => {
+          if (!localToolHost) throw new Error('local_tool_host_not_ready');
+          return localToolHost.permissionReview.addShellRule(payload);
+        },
+      },
+      clientTool: {
+        execute: (payload) => {
+          if (!localToolHost) throw new Error('local_tool_host_not_ready');
+          return localToolHost.execute(
+            { call: payload?.call },
+            { localApproval: payload?.grant, source: 'renderer_client_tool_polling' },
+          );
+        },
+      },
+    }),
+    ...createSkillsIpcRegistrations({
+      skills: {
+        list: () => skillStore?.listSkills() ?? [],
+        getDetail: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.getSkillDetail(skillId);
+        },
+        refresh: () => {
+          skillStore?.refresh();
+          return skillStore?.listSkills() ?? [];
+        },
+        upload: (zipBase64) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
+        },
+        enable: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.enableSkill(skillId);
+        },
+        disable: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.disableSkill(skillId);
+        },
+        listAvailable: () => skillStore?.listAvailableSkills() ?? [],
+        link: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.linkSkill(skillId);
+        },
+        unlink: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.unlinkSkill(skillId);
+        },
+      },
+    }),
+    ...createPendingTaskIpcRegistrations({
+      pendingTask: pendingTaskApplicationService,
+    }),
+    ...createMcpIpcRegistrations({
+      mcp: mcpApplicationService,
+    }),
+    ...createPasswordVaultIpcRegistrations({
+      passwordVault: {
+        listEntries: () => passwordVaultStore.listEntries(),
+        listForOrigin: (origin) => passwordVaultStore.listForOrigin(origin),
+        upsertEntry: (payload) => passwordVaultStore.upsertEntry(payload),
+        deleteEntry: (id) => passwordVaultStore.deleteEntry(id),
+        revealPassword: (id) => passwordVaultStore.revealPassword(id),
+        fill: (payload) => passwordVaultFillApplicationService.fill(payload),
+      },
+    }),
+    ...createProviderConfigurationIpcRegistrations({
+      providers: providerConfigurationApplicationService,
+    }),
+    ...createProviderAccessIpcRegistrations({
+      providers: providerAccessApplicationService,
+    }),
+    ...createWorkspaceIpcRegistrations({
+      workspace: workspaceApplicationService,
+    }),
+    ...createFileAccessIpcRegistrations({
+      fileAccess: fileAccessApplicationService,
+    }),
+  ],
+  });
+}
 
 function createWindow() {
   // macOS 原生毛玻璃：透明底 + vibrancy，让渲染层 --glass-* 半透明色透出桌面材质。
@@ -1472,6 +2022,11 @@ function createWindow() {
     },
   });
   mainWindow.__peerAgentMainWindow = true;
+  trustedWindowRegistry.registerWindow({
+    window: mainWindow,
+    role: 'main',
+    allowedLocations: [getTrustedRendererLocation()],
+  });
 
   // 全屏状态作为窗口的权威事实，由主进程广播给渲染层。
   // macOS 原生全屏会隐藏交通灯，但 :fullscreen CSS 伪类在 Electron 原生全屏下不可靠，
@@ -1501,136 +2056,9 @@ function createWindow() {
     setTimeout(revealMainWindow, 0);
   });
 
-  if (isDev) {
-    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    const indexPath = isPackaged
-      ? path.join(__dirname, '../../dist/index.html')
-      : path.join(workspaceRoot, 'apps/desktop/dist/index.html');
-    void mainWindow.loadFile(indexPath);
-  }
+  loadRendererWindow(mainWindow);
   return mainWindow;
 }
-
-// ── Bootstrap & Session ──
-ipcMain.handle('bootstrap:get', async () => ({
-  session: sessionStore.getSession(),
-  capabilities: capabilityRegistry.refreshCapabilities(),
-  // 冷启动：monorepo git 项目索引不阻塞 bootstrap；projects:list 仍可按需同步读取。
-  projects: [],
-  activeProjectId: 'workspace-root',
-  availableLocales,
-  llmProviders: llmConfigStore.listProviders(),
-}));
-
-ipcMain.handle('session:get', () => sessionStore.getSession());
-ipcMain.handle('capabilities:list', () => capabilityRegistry.refreshCapabilities());
-ipcMain.handle('projects:list', () => readProjectIndex({ workspaceRoot: resourcesRoot }));
-ipcMain.handle('runtime-projection:get', () => buildRuntimeProjection());
-
-// ── Updater ──
-// 渲染层只表达；检查/下载/安装/通道切换都在主进程执行。
-ipcMain.handle('updater:get-status', () => getUpdaterStatus());
-ipcMain.handle('updater:check', async () => await checkForUpdates());
-ipcMain.handle('updater:download', async () => await downloadUpdate());
-ipcMain.handle('updater:install', () => {
-  quitAndInstall();
-});
-ipcMain.handle('updater:open-installer', async () => await openInstaller());
-ipcMain.handle('updater:open-release-page', async () => await openReleasePage());
-ipcMain.handle('updater:set-channel', (_event, preference) => {
-  // settings 是通道偏好的权限真相，先写回再切换运行时配置。
-  const pref =
-    preference === 'beta' || preference === 'stable' || preference === 'auto' ? preference : 'auto';
-  settingsStore.merge({ updateChannel: pref });
-  const status = setChannelPreference(pref);
-  // 切换通道后用新通道重新检查一次（事件会经 updater:event 广播给渲染层）。
-  void checkForUpdates();
-  return status;
-});
-
-// ── Settings ──
-ipcMain.handle('settings:get', () => settingsStore.getAll());
-ipcMain.handle('settings:update', (_event, partial) => {
-  const before = settingsStore.getAll();
-  const next = settingsStore.merge(partial);
-  if (
-    partial
-    && typeof partial === 'object'
-    && !Array.isArray(partial)
-    && Object.prototype.hasOwnProperty.call(partial, 'appearance')
-  ) {
-    const quickWindow = quickChatWindowController.getWindow();
-    setDockIcon(next.appearance);
-    quickWindow?.webContents.send('appearance:changed', next.appearance);
-  }
-  if (
-    partial
-    && typeof partial === 'object'
-    && !Array.isArray(partial)
-    && Object.prototype.hasOwnProperty.call(partial, 'systemInstructions')
-    && normalizeSystemInstructions(before.systemInstructions) !== normalizeSystemInstructions(next.systemInstructions)
-  ) {
-    recordInstructionBaseline(next.systemInstructions);
-  }
-  if (
-    partial
-    && typeof partial === 'object'
-    && !Array.isArray(partial)
-    && Object.prototype.hasOwnProperty.call(partial, 'localAccessLevel')
-  ) {
-    const accessLevel = resolveLocalAccessLevel(next.localAccessLevel);
-    sessionStore.setAccessLevel(accessLevel);
-    llmChatService.setLocalAccessLevel(accessLevel);
-    if (next.localAccessLevel !== accessLevel) {
-      settingsStore.merge({ localAccessLevel: accessLevel });
-      return { ...next, localAccessLevel: accessLevel };
-    }
-  }
-  return next;
-});
-
-ipcMain.handle('developer-settings:get', () => settingsStore.getAll().developer ?? {});
-ipcMain.handle('developer-settings:update', (_event, partial) => {
-  const current = settingsStore.getAll().developer;
-  const currentDeveloper = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-  const nextPartial = partial && typeof partial === 'object' && !Array.isArray(partial) ? partial : {};
-  const next = { ...currentDeveloper, ...nextPartial };
-  settingsStore.merge({ developer: next });
-  return next;
-});
-ipcMain.handle('developer-settings:reset', () => {
-  settingsStore.merge({ developer: {} });
-  return {};
-});
-ipcMain.handle('developer-settings:diagnostics', () => ({
-  dataHome,
-  isDev,
-  isPackaged,
-  resourcesRoot,
-  workspaceRoot,
-  loadedEnvKeys,
-}));
-
-ipcMain.on('settings:get-sync', (event) => {
-  event.returnValue = settingsStore.getAll();
-});
-ipcMain.handle('settings:export', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: '选择导出目录',
-    properties: ['openDirectory', 'createDirectory'],
-  });
-  if (canceled || !filePaths?.[0]) return { canceled: true, exported: [] };
-  return { canceled: false, ...exportBundle(filePaths[0]) };
-});
-ipcMain.handle('settings:import', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: '选择要导入的配置目录',
-    properties: ['openDirectory'],
-  });
-  if (canceled || !filePaths?.[0]) return { canceled: true, imported: [] };
-  return { canceled: false, ...importBundle(filePaths[0]) };
-});
 
 // ── 应用菜单（方案 B：⌘R 收归刷新内嵌浏览器页）──
 // 替换 Electron 默认菜单，移除生产环境的整窗 Reload/Force Reload；
@@ -1650,690 +2078,6 @@ function rebuildAppMenu() {
   });
   Menu.setApplicationMenu(menu);
 }
-
-// ── Locale ──
-ipcMain.handle('locale:set', (_event, payload) => {
-  sessionStore.setLocale(payload.locale);
-  settingsStore.merge({ locale: payload.locale });
-  rebuildAppMenu();
-  return sessionStore.getSession();
-});
-
-// ── Permission ──
-function createPermissionGrant({ toolCallId, granted, duration, scope }) {
-  return {
-    grantId: randomUUID(),
-    toolCallId,
-    granted,
-    duration: granted ? (duration || 'once') : 'denied',
-    scope: scope || 'client_session',
-    decidedAt: new Date().toISOString(),
-  };
-}
-ipcMain.handle('permission:approve', (_event, payload) => {
-  const grant = createPermissionGrant({
-    toolCallId: payload.toolCallId,
-    granted: true,
-    duration: payload.duration,
-    scope: payload.scope,
-  });
-  llmChatService.resolvePermissionGrant(payload.toolCallId, grant);
-  return grant;
-});
-ipcMain.handle('permission:deny', (_event, payload) => {
-  const grant = createPermissionGrant({ toolCallId: payload.toolCallId, granted: false });
-  llmChatService.resolvePermissionGrant(payload.toolCallId, grant);
-  return grant;
-});
-
-// ── Workspace ──
-ipcMain.handle('workspace:list', () => {
-  const all = settingsStore.getAll();
-  const configured = all.workspaces || [];
-  const knownPaths = new Set(configured.map((workspace) => workspace.path));
-  const discovered = conversationStore.listConversations({ includeMessageCount: false })
-    .map((conversation) => conversation.workspacePath)
-    .filter((workspacePath) => typeof workspacePath === 'string' && existsSync(workspacePath))
-    .filter((workspacePath) => {
-      if (knownPaths.has(workspacePath)) return false;
-      knownPaths.add(workspacePath);
-      return true;
-    })
-    .map((workspacePath) => ({
-      path: workspacePath,
-      name: path.basename(workspacePath),
-      addedAt: new Date(0).toISOString(),
-    }));
-  return {
-    workspaces: [...configured, ...discovered],
-    activeWorkspace: all.activeWorkspace || null,
-  };
-});
-
-ipcMain.handle('workspace:ensure-default', () => {
-  const all = settingsStore.getAll();
-  const workspaces = all.workspaces || [];
-  // 已有 active 工作区：直接返回，不做任何事
-  if (all.activeWorkspace && existsSync(all.activeWorkspace)) {
-    return { path: all.activeWorkspace, name: path.basename(all.activeWorkspace), created: false };
-  }
-  // 没有 active：在用户主目录下初始化一个默认工作区
-  const defaultDir = path.join(app.getPath('home'), 'PeerAgent');
-  let created = false;
-  if (!existsSync(defaultDir)) {
-    mkdirSync(defaultDir, { recursive: true });
-    created = true;
-  }
-  const name = path.basename(defaultDir);
-  if (!workspaces.some((w) => w.path === defaultDir)) {
-    workspaces.push({ path: defaultDir, name, addedAt: new Date().toISOString() });
-  }
-  settingsStore.merge({ workspaces, activeWorkspace: defaultDir });
-  llmChatService.setWorkspacePath(defaultDir);
-  skillStore?.setWorkspacePath?.(defaultDir);
-  return { path: defaultDir, name, created };
-});
-
-ipcMain.handle('workspace:add', async (event) => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(
-    BrowserWindow.fromWebContents(event.sender),
-    { title: '选择项目目录', properties: ['openDirectory'] },
-  );
-  if (canceled || !filePaths?.[0]) return null;
-  const dir = filePaths[0];
-  const name = path.basename(dir);
-  const all = settingsStore.getAll();
-  const workspaces = all.workspaces || [];
-  if (workspaces.some((w) => w.path === dir)) {
-    settingsStore.merge({ activeWorkspace: dir });
-    // 与 workspace:set-active 对齐：选中工作区后同步全局兜底态，避免「新增/选中后
-    // 全局 activeWorkspacePath 滞后」导致兜底链取到旧值（运行根目录主真值已按会话解析，
-    // 此处仅保证兜底一致性）。
-    llmChatService.setWorkspacePath(dir);
-    skillStore?.setWorkspacePath?.(dir);
-    return { path: dir, name, existing: true };
-  }
-  workspaces.push({ path: dir, name, addedAt: new Date().toISOString() });
-  settingsStore.merge({ workspaces, activeWorkspace: dir });
-  llmChatService.setWorkspacePath(dir);
-  skillStore?.setWorkspacePath?.(dir);
-  return { path: dir, name, existing: false };
-});
-
-ipcMain.handle('workspace:set-active', (_, { path: wsPath }) => {
-  settingsStore.merge({ activeWorkspace: wsPath || null });
-  llmChatService.setWorkspacePath(wsPath || null);
-  skillStore?.setWorkspacePath?.(wsPath || null);
-  return { activeWorkspace: wsPath || null };
-});
-
-ipcMain.handle('workspace:remove', (_, { path: wsPath }) => {
-  const all = settingsStore.getAll();
-  const workspaces = (all.workspaces || []).filter((w) => w.path !== wsPath);
-  const active = all.activeWorkspace === wsPath ? null : all.activeWorkspace;
-  settingsStore.merge({ workspaces, activeWorkspace: active });
-  skillStore?.setWorkspacePath?.(active || null);
-  return { workspaces, activeWorkspace: active };
-});
-
-ipcMain.handle('workspace:info', (_, { path: wsPath }) => {
-  if (!wsPath) return null;
-  return readProjectIndex({ workspaceRoot: wsPath })?.[0] || { name: path.basename(wsPath), absolutePath: wsPath };
-});
-
-// 打开渲染层点击的文件路径：优先用系统默认程序打开，失败回退到在文件管理器中定位。
-// 入参 absPath 必须是绝对路径（相对路径由渲染层基于 workspacePath 解析后再传入）。
-// 做基本的存在性校验；可选 workspaceRoot 用于越界校验，越界则拒绝。
-ipcMain.handle('shell:open-path', async (_event, { absPath, workspaceRoot } = {}) => {
-  try {
-    if (!absPath || typeof absPath !== 'string') {
-      return { ok: false, reason: 'invalid_path' };
-    }
-    const target = path.normalize(absPath);
-    if (!path.isAbsolute(target)) {
-      return { ok: false, reason: 'not_absolute' };
-    }
-    // 越界校验：若提供了 workspaceRoot，目标必须位于其内部。
-    if (workspaceRoot && typeof workspaceRoot === 'string') {
-      const root = path.resolve(workspaceRoot);
-      const rel = path.relative(root, target);
-      if (rel.startsWith('..') || path.isAbsolute(rel)) {
-        return { ok: false, reason: 'out_of_workspace' };
-      }
-    }
-    if (!existsSync(target)) {
-      return { ok: false, reason: 'not_found' };
-    }
-    let isDirectory = false;
-    try {
-      isDirectory = statSync(target).isDirectory();
-    } catch {
-      isDirectory = false;
-    }
-    // 目录直接在文件管理器中打开；文件优先用默认程序打开。
-    if (isDirectory) {
-      const err = await shell.openPath(target);
-      if (err) {
-        shell.showItemInFolder(target);
-        return { ok: true, fallback: 'show-in-folder' };
-      }
-      return { ok: true };
-    }
-    const err = await shell.openPath(target);
-    if (err) {
-      // openPath 失败（无关联程序等）：回退到在文件管理器中定位高亮。
-      shell.showItemInFolder(target);
-      return { ok: true, fallback: 'show-in-folder' };
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, reason: 'error', message: err?.message || String(err) };
-  }
-});
-
-// 计算指定文件的 git diff，供渲染层在 Workbench 的 Diff 视图中展示。
-// 入参 absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录）。
-// 策略：优先 working tree diff；为空时回退 staged diff；仍为空且文件被跟踪时回退 HEAD 对比；
-// 未跟踪文件用 git diff --no-index 与 /dev/null 对比。返回 { ok, diffText, status, error? }。
-ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot, relPath } = {}) => {
-  try {
-    if (!absPath || typeof absPath !== 'string') {
-      return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_path' };
-    }
-    let target = path.normalize(absPath);
-    if (!path.isAbsolute(target)) {
-      return { ok: false, status: 'invalid_path', diffText: '', error: 'not_absolute' };
-    }
-    // 跨仓库回退：absPath 在当前 workspace 找不到，但调用方提供了原始相对路径时，
-    // 遍历所有已知 workspace 拼 relPath 查找，命中则改用该路径并标注实际命中的仓库。
-    let resolvedFrom;
-    if (!existsSync(target)) {
-      let recovered = false;
-      const cleanRel = typeof relPath === 'string' && relPath.trim()
-        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
-        : '';
-      if (cleanRel) {
-        const all = settingsStore.getAll();
-        const candidates = [
-          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
-          all.activeWorkspace,
-        ].filter((p) => typeof p === 'string' && p);
-        const seen = new Set();
-        for (const ws of candidates) {
-          if (seen.has(ws)) continue;
-          seen.add(ws);
-          const candidate = path.normalize(path.join(ws, cleanRel));
-          if (existsSync(candidate)) {
-            target = candidate;
-            resolvedFrom = ws;
-            recovered = true;
-            break;
-          }
-        }
-      }
-      if (!recovered) {
-        return { ok: false, status: 'not_found', diffText: '', error: 'file_not_found' };
-      }
-    }
-    const cwd = resolvedFrom
-      ? resolvedFrom
-      : (workspaceRoot && typeof workspaceRoot === 'string' && existsSync(workspaceRoot)
-        ? workspaceRoot
-        : path.dirname(target));
-
-    // 解析仓库根，确认是 git 仓库。
-    let repoRoot;
-    try {
-      const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
-        maxBuffer: 1024 * 1024 * 16,
-      });
-      repoRoot = stdout.trim();
-    } catch {
-      return { ok: false, status: 'not_git_repo', diffText: '', error: 'not_a_git_repository' };
-    }
-
-    // 注意：此处的 repoRelPath 是相对「仓库根」的路径，与入参 relPath（相对调用方 workspace）不同名以避免遮蔽。
-    const repoRelPath = path.relative(repoRoot, target);
-
-    // 判断文件是否被 git 跟踪。
-    let tracked = true;
-    try {
-      await execFileAsync('git', ['-C', repoRoot, 'ls-files', '--error-unmatch', '--', repoRelPath], {
-        maxBuffer: 1024 * 1024 * 16,
-      });
-    } catch {
-      tracked = false;
-    }
-
-    const runGit = async (args) => {
-      try {
-        const { stdout } = await execFileAsync('git', ['-C', repoRoot, ...args], {
-          maxBuffer: 1024 * 1024 * 32,
-        });
-        return stdout;
-      } catch (err) {
-        // git diff --no-index 在有差异时以退出码 1 返回，stdout 仍含 diff。
-        if (err && typeof err.stdout === 'string' && err.stdout.length > 0) return err.stdout;
-        throw err;
-      }
-    };
-
-    if (!tracked) {
-      // 未跟踪文件：与空文件对比，展示为全新增内容。
-      const diffText = await runGit(['diff', '--no-index', '--', '/dev/null', target]);
-      return { ok: true, status: diffText.trim() ? 'untracked' : 'no_changes', diffText, resolvedFrom };
-    }
-
-    // 1) working tree 改动
-    let diffText = await runGit(['diff', '--', repoRelPath]);
-    if (diffText.trim()) {
-      return { ok: true, status: 'modified', diffText, resolvedFrom };
-    }
-    // 2) 已暂存改动
-    diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
-    if (diffText.trim()) {
-      return { ok: true, status: 'staged', diffText, resolvedFrom };
-    }
-    // 3) 无未提交改动：回退展示与上一次提交（HEAD~1）的对比，便于查看最近一次改动。
-    try {
-      diffText = await runGit(['diff', 'HEAD~1', 'HEAD', '--', repoRelPath]);
-      if (diffText.trim()) {
-        return { ok: true, status: 'last_commit', diffText, resolvedFrom };
-      }
-    } catch {
-      // 仓库可能只有一次提交或无 HEAD~1，忽略。
-    }
-    return { ok: true, status: 'no_changes', diffText: '', resolvedFrom };
-  } catch (err) {
-    return { ok: false, status: 'error', diffText: '', error: err?.message || String(err) };
-  }
-});
-
-// 校验给定路径是否对应磁盘上真实存在的文件。供渲染层判断聊天中的「路径样式文本」
-// 是否为真实文件引用：git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）
-// 因磁盘上不存在而返回 exists:false，从而不被升级为可点链接——无需去识别「它是不是 git」。
-// absPath 在当前 workspace 找不到时，复用 git:diff 的跨 workspace 回退：用 relPath 逐一拼接已知 workspace。
-ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) => {
-  try {
-    if (!absPath || typeof absPath !== 'string') return { exists: false };
-    const target = path.normalize(absPath);
-    if (!path.isAbsolute(target)) return { exists: false };
-    if (existsSync(target)) {
-      return { exists: true, isDir: statSync(target).isDirectory() };
-    }
-    const cleanRel = typeof relPath === 'string' && relPath.trim()
-      ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
-      : '';
-    if (cleanRel) {
-      const all = settingsStore.getAll();
-      const candidates = [
-        ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
-        all.activeWorkspace,
-        workspaceRoot,
-      ].filter((p) => typeof p === 'string' && p);
-      const seen = new Set();
-      for (const ws of candidates) {
-        if (seen.has(ws)) continue;
-        seen.add(ws);
-        const candidate = path.normalize(path.join(ws, cleanRel));
-        if (existsSync(candidate)) {
-          return { exists: true, isDir: statSync(candidate).isDirectory(), resolvedFrom: ws };
-        }
-      }
-    }
-    return { exists: false };
-  } catch {
-    return { exists: false };
-  }
-});
-
-// 列出指定目录的单层子条目，供 Workbench「文件」视图的文件树懒加载/逐层展开。
-// 入参 absPath 必须是绝对目录路径；absPath 在当前 workspace 找不到时复用 fs:exists/file:read
-// 的跨 workspace 回退逻辑（用 relPath 逐一拼接已知 workspace）。
-// 返回 { ok, status, entries:[{ name, isDir, absPath }], resolvedFrom?, error? }。
-// entries 按「目录在前、同类按名称不区分大小写」排序；隐藏点文件（. 开头）一并返回，由渲染层决定是否显示。
-ipcMain.handle('fs:read-dir', (_event, { absPath, workspaceRoot, relPath } = {}) => {
-  try {
-    if (!absPath || typeof absPath !== 'string') {
-      return { ok: false, status: 'invalid_path', entries: [], error: 'invalid_path' };
-    }
-    let target = path.normalize(absPath);
-    if (!path.isAbsolute(target)) {
-      return { ok: false, status: 'invalid_path', entries: [], error: 'not_absolute' };
-    }
-    // 跨 workspace 回退：absPath 不存在但提供了 relPath 时，逐一拼接已知 workspace 查找。
-    let resolvedFrom;
-    if (!existsSync(target)) {
-      let recovered = false;
-      const cleanRel = typeof relPath === 'string' && relPath.trim()
-        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
-        : '';
-      if (cleanRel) {
-        const all = settingsStore.getAll();
-        const candidates = [
-          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
-          all.activeWorkspace,
-          workspaceRoot,
-        ].filter((p) => typeof p === 'string' && p);
-        const seen = new Set();
-        for (const ws of candidates) {
-          if (seen.has(ws)) continue;
-          seen.add(ws);
-          const candidate = path.normalize(path.join(ws, cleanRel));
-          if (existsSync(candidate)) {
-            target = candidate;
-            resolvedFrom = ws;
-            recovered = true;
-            break;
-          }
-        }
-      }
-      if (!recovered) {
-        return { ok: false, status: 'not_found', entries: [], error: 'dir_not_found' };
-      }
-    }
-    let stat;
-    try {
-      stat = statSync(target);
-    } catch {
-      return { ok: false, status: 'not_found', entries: [], error: 'stat_failed' };
-    }
-    if (!stat.isDirectory()) {
-      return { ok: false, status: 'not_dir', entries: [], resolvedFrom, error: 'not_a_directory' };
-    }
-    const dirents = readdirSync(target, { withFileTypes: true });
-    const entries = dirents
-      .map((d) => ({
-        name: d.name,
-        isDir: d.isDirectory(),
-        absPath: path.join(target, d.name),
-      }))
-      .sort((a, b) => {
-        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'accent' });
-      });
-    return { ok: true, status: 'ok', entries, resolvedFrom };
-  } catch {
-    return { ok: false, status: 'error', entries: [], error: 'read_dir_failed' };
-  }
-});
-
-// Workbench 文件树轻量目录监听：只 watch 调用方传入的目录列表（根 + 已展开），
-// 不递归整仓。每个 webContents 维护一份 watcher 集合；目录集合变化时做 diff 增删。
-// 事件经 fs:dir-changed 推回对应 renderer，payload 为 { dirPath }。
-const fileTreeWatchersByWebContents = new Map();
-
-function stopAllFileTreeWatchers(webContentsId) {
-  const map = fileTreeWatchersByWebContents.get(webContentsId);
-  if (!map) return;
-  for (const watcher of map.values()) {
-    try {
-      watcher.close();
-    } catch {
-      /* ignore close errors */
-    }
-  }
-  fileTreeWatchersByWebContents.delete(webContentsId);
-}
-
-function resolveWatchDirPath(absPath, workspaceRoot) {
-  if (!absPath || typeof absPath !== 'string') {
-    return { ok: false, resolvedPath: null };
-  }
-  try {
-    if (existsSync(absPath) && statSync(absPath).isDirectory()) {
-      return { ok: true, resolvedPath: absPath };
-    }
-  } catch {
-    /* fall through */
-  }
-  if (typeof workspaceRoot === 'string' && workspaceRoot) {
-    try {
-      const candidate = path.isAbsolute(absPath) ? absPath : path.join(workspaceRoot, absPath);
-      if (existsSync(candidate) && statSync(candidate).isDirectory()) {
-        return { ok: true, resolvedPath: candidate };
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return { ok: false, resolvedPath: null };
-}
-
-ipcMain.handle('fs:watch-dirs', (event, { paths, workspaceRoot } = {}) => {
-  const sender = event.sender;
-  const webContentsId = sender.id;
-  const requested = Array.isArray(paths)
-    ? paths.filter((p) => typeof p === 'string' && p.trim())
-    : [];
-
-  if (!fileTreeWatchersByWebContents.has(webContentsId)) {
-    fileTreeWatchersByWebContents.set(webContentsId, new Map());
-    sender.once('destroyed', () => stopAllFileTreeWatchers(webContentsId));
-  }
-  const current = fileTreeWatchersByWebContents.get(webContentsId);
-
-  const desired = new Map();
-  for (const raw of requested) {
-    const resolved = resolveWatchDirPath(raw, workspaceRoot);
-    if (resolved.ok && resolved.resolvedPath) {
-      desired.set(resolved.resolvedPath, true);
-    }
-  }
-
-  for (const [dirPath, watcher] of current.entries()) {
-    if (!desired.has(dirPath)) {
-      try {
-        watcher.close();
-      } catch {
-        /* ignore */
-      }
-      current.delete(dirPath);
-    }
-  }
-
-  for (const dirPath of desired.keys()) {
-    if (current.has(dirPath)) continue;
-    try {
-      const watcher = fsWatch(dirPath, { persistent: false }, () => {
-        if (sender.isDestroyed()) return;
-        sender.send('fs:dir-changed', { dirPath });
-      });
-      if (typeof watcher.on === 'function') {
-        watcher.on('error', () => {
-          try {
-            watcher.close();
-          } catch {
-            /* ignore */
-          }
-          current.delete(dirPath);
-        });
-      }
-      current.set(dirPath, watcher);
-    } catch {
-      /* 目录瞬时消失 / 权限问题：跳过该路径 */
-    }
-  }
-
-  return {
-    ok: true,
-    watching: [...current.keys()],
-  };
-});
-
-// 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。
-// 入参 absPath 必须是绝对路径；absPath 在当前 workspace 找不到时复用 git:diff/fs:exists 的
-// 跨 workspace 回退逻辑（用 relPath 逐一拼接已知 workspace）。
-// 兜底：> 2MB 返回 too_large；检测到 NUL 字节判定二进制返回 binary；不存在返回 not_found。
-// 返回 { ok, status, content, size?, resolvedFrom?, error? }。
-ipcMain.handle('file:read', async (_event, { absPath, workspaceRoot, relPath } = {}) => {
-  const MAX_BYTES = 2 * 1024 * 1024; // 2MB 上限
-  try {
-    if (!absPath || typeof absPath !== 'string') {
-      return { ok: false, status: 'invalid_path', content: '', error: 'invalid_path' };
-    }
-    let target = path.normalize(absPath);
-    if (!path.isAbsolute(target)) {
-      return { ok: false, status: 'invalid_path', content: '', error: 'not_absolute' };
-    }
-    // 跨 workspace 回退：absPath 不存在但提供了 relPath 时，逐一拼接已知 workspace 查找。
-    let resolvedFrom;
-    if (!existsSync(target)) {
-      let recovered = false;
-      const cleanRel = typeof relPath === 'string' && relPath.trim()
-        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
-        : '';
-      if (cleanRel) {
-        const all = settingsStore.getAll();
-        const candidates = [
-          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
-          all.activeWorkspace,
-          workspaceRoot,
-        ].filter((p) => typeof p === 'string' && p);
-        const seen = new Set();
-        for (const ws of candidates) {
-          if (seen.has(ws)) continue;
-          seen.add(ws);
-          const candidate = path.normalize(path.join(ws, cleanRel));
-          if (existsSync(candidate)) {
-            target = candidate;
-            resolvedFrom = ws;
-            recovered = true;
-            break;
-          }
-        }
-      }
-      if (!recovered) {
-        return { ok: false, status: 'not_found', content: '', error: 'file_not_found' };
-      }
-    }
-    // 必须是文件（拒绝目录）。
-    let stat;
-    try {
-      stat = statSync(target);
-    } catch {
-      return { ok: false, status: 'not_found', content: '', error: 'stat_failed' };
-    }
-    if (!stat.isFile()) {
-      return { ok: false, status: 'not_file', content: '', error: 'not_a_file', resolvedFrom };
-    }
-    if (stat.size > MAX_BYTES) {
-      return { ok: false, status: 'too_large', content: '', size: stat.size, resolvedFrom, error: 'file_too_large' };
-    }
-    const buf = readFileSync(target);
-    // 二进制检测：扫描前 8KB 是否含 NUL 字节。
-    const sniffLen = Math.min(buf.length, 8192);
-    for (let i = 0; i < sniffLen; i += 1) {
-      if (buf[i] === 0) {
-        return { ok: false, status: 'binary', content: '', size: stat.size, resolvedFrom, error: 'binary_file' };
-      }
-    }
-    return { ok: true, status: 'ok', content: buf.toString('utf8'), size: stat.size, resolvedFrom };
-  } catch (err) {
-    return { ok: false, status: 'error', content: '', error: err?.message || 'read_failed' };
-  }
-});
-
-// ── 会话级内嵌浏览器标签控制句柄注册（见 ADR 40 / 46）──
-// renderer 上报 webContentsId + conversationId + browserTabId；main 按会话登记活跃标签，
-// Agent 的 browser_* provider 只解析工具调用所属会话的目标。webview 卸载时注销。
-ipcMain.handle('browser:register-webcontents', (_event, registration = {}) => {
-  const hadActiveBrowser = getActiveWebContentsId() != null;
-  const result = registerBrowserWebContents(registration);
-  if (hadActiveBrowser !== (getActiveWebContentsId() != null)) rebuildAppMenu();
-  return result;
-});
-ipcMain.handle('browser:unregister-webcontents', (_event, registration = {}) => {
-  const hadActiveBrowser = getActiveWebContentsId() != null;
-  const result = unregisterBrowserWebContents(registration);
-  if (hadActiveBrowser !== (getActiveWebContentsId() != null)) rebuildAppMenu();
-  return result;
-});
-
-/**
- * 清除 peer-browser 分区中与当前 origin 相关的站点数据（Cookie + 本地存储 + 缓存）。
- * 入参 url 为当前标签页 URL；非 http(s) 时拒绝。
- * 注意：与 Password Vault 分轨，本 IPC 不触碰密码库。
- */
-ipcMain.handle('browser:clear-site-data', async (_event, { url } = {}) => {
-  try {
-    if (!url || typeof url !== 'string') {
-      return { ok: false, error: 'invalid_url' };
-    }
-    let origin;
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        return { ok: false, error: 'unsupported_scheme' };
-      }
-      origin = parsed.origin;
-    } catch {
-      return { ok: false, error: 'invalid_url' };
-    }
-    const ses = session.fromPartition(PEER_BROWSER_PARTITION);
-    await ses.clearStorageData({
-      origin,
-      storages: [
-        'cookies',
-        'localstorage',
-        'indexdb',
-        'shadercache',
-        'websql',
-        'serviceworkers',
-        'cachestorage',
-      ],
-    });
-    // 再按 origin 清理 HTTP 缓存（Electron 版本差异下尽力而为）
-    try {
-      await ses.clearCache();
-    } catch {
-      /* ignore cache clear failures */
-    }
-    return { ok: true, origin };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'clear_site_data_failed' };
-  }
-});
-
-/**
- * 截取指定 webContents 的可见页面并保存为 PNG。
- * savePath 可选；缺省则弹出保存对话框。
- */
-ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath } = {}) => {
-  try {
-    const id = Number(webContentsId);
-    if (!Number.isInteger(id) || id <= 0) {
-      return { ok: false, error: 'invalid_web_contents_id' };
-    }
-    const wc = webContents.fromId(id);
-    if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
-      return { ok: false, error: 'browser_unavailable' };
-    }
-    const image = await wc.capturePage();
-    if (!image || image.isEmpty?.()) {
-      return { ok: false, error: 'empty_capture' };
-    }
-    const png = image.toPNG();
-    let targetPath = typeof savePath === 'string' && savePath.trim() ? savePath.trim() : '';
-    if (!targetPath) {
-      const win = BrowserWindow.fromWebContents(event.sender);
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const result = await dialog.showSaveDialog(win ?? undefined, {
-        title: 'Save screenshot',
-        defaultPath: path.join(app.getPath('downloads'), `peer-browser-${stamp}.png`),
-        filters: [{ name: 'PNG', extensions: ['png'] }],
-      });
-      if (result.canceled || !result.filePath) {
-        return { ok: false, error: 'cancelled' };
-      }
-      targetPath = result.filePath;
-    }
-    await writeFile(targetPath, png);
-    return { ok: true, path: targetPath, bytes: png.length };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'capture_failed' };
-  }
-});
 
 /**
  * 站点会话导入（仅 Cookie，不导入密码）。
@@ -2517,6 +2261,11 @@ const fullDiskAccessDragFloatController = createFullDiskAccessDragFloatControlle
   }),
   resolveLogoFilePath: resolveFdaFloatLogoPath,
   resolveLogoDataUrl: resolveFdaFloatLogoDataUrl,
+  registerTrustedWindow: ({ window, url }) => trustedWindowRegistry.registerWindow({
+    window,
+    role: 'permission-drag-float',
+    allowedLocations: [url],
+  }),
   isZh: () => {
     try {
       // best-effort locale; renderer also passes isZh when available
@@ -2561,559 +2310,6 @@ async function buildStartupOsPermissionsPayload() {
         },
   };
 }
-
-async function buildSessionImportPreflightPayload() {
-  // 注意：这里必须调用纯探测函数 buildSessionImportPreflight，
-  // 不能 await 自己，否则会无限递归，导致 dragTarget 永远生成失败、UI 不显示可拖 App。
-  const preflight = buildSessionImportPreflight({ platform: process.platform });
-  const dragTarget = resolveFullDiskAccessDragTarget({
-    platform: process.platform,
-    appGetPath: (name) => app.getPath(name),
-    execPath: process.execPath,
-    resourcesPath: process.resourcesPath,
-  });
-  const iconDataUrl = dragTarget.ok && dragTarget.appPath
-    ? await resolveDragIconDataUrl(dragTarget.appPath)
-    : null;
-  return {
-    ...preflight,
-    dragTarget: dragTarget.ok
-      ? {
-          ok: true,
-          appPath: dragTarget.appPath,
-          displayName: dragTarget.displayName,
-          kind: dragTarget.kind,
-          isPackagedApp: dragTarget.isPackagedApp,
-          iconDataUrl,
-        }
-      : {
-          ok: false,
-          error: dragTarget.error || 'app_path_not_found',
-        },
-  };
-}
-
-ipcMain.handle('browser:list-session-sources', async () => {
-  try {
-    if (process.platform !== 'darwin') {
-      return {
-        ok: false,
-        error: 'unsupported_platform',
-        sources: [],
-        preflight: await buildSessionImportPreflightPayload(),
-      };
-    }
-    const preflight = await buildSessionImportPreflightPayload();
-    const sources = listChromeBrowserSources().map((src) => ({
-      adapterId: src.adapterId,
-      browserName: src.browserName,
-      bundleId: src.bundleId,
-      profiles: (src.profiles || []).map((p) => ({
-        profileId: p.profileId,
-        displayName: p.displayName,
-        directory: p.directory,
-        hasCookieDb: Boolean(p.cookieDbPath),
-      })),
-    }));
-    // 权限被拦截时 sources 可能为空；仍返回 ok=true + preflight，让 UI 先展示自检引导。
-    return {
-      ok: true,
-      sources,
-      preflight,
-      error: sources.length === 0 && preflight.blocked
-        ? (preflight.checks.find((c) => c.status === 'blocked')?.detail || 'permission_denied')
-        : undefined,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err?.message || 'list_sources_failed',
-      sources: [],
-      preflight: await buildSessionImportPreflightPayload(),
-    };
-  }
-});
-
-ipcMain.handle('os:startup-permissions', async () => {
-  try {
-    return await buildStartupOsPermissionsPayload();
-  } catch (err) {
-    return {
-      ok: false,
-      blocked: true,
-      checks: [],
-      required: [],
-      error: err?.message || 'startup_permissions_failed',
-    };
-  }
-});
-
-ipcMain.handle('browser:session-import-preflight', async () => {
-  try {
-    return await buildSessionImportPreflightPayload();
-  } catch (err) {
-    return {
-      ok: false,
-      ready: false,
-      blocked: true,
-      checks: [],
-      error: err?.message || 'preflight_failed',
-    };
-  }
-});
-
-ipcMain.handle('browser:open-full-disk-access-settings', async (_event, payload = {}) => {
-  try {
-    if (process.platform !== 'darwin') {
-      return { ok: false, error: 'unsupported_platform' };
-    }
-    const opened = await openFullDiskAccessSettings({
-      shellOpenExternal: (url) => shell.openExternal(url),
-    });
-    // AskForPermission 风格：贴在系统设置窗口正下方的拖拽浮窗。
-    // 先打开设置，稍等窗口出现后再 show，才能用 AX/System Events 读到 bounds。
-    let floatResult = null;
-    const showFloat = () => {
-      try {
-        const shown = fullDiskAccessDragFloatController.show({
-          isZh: payload?.isZh,
-        });
-        // 预热拖拽图标，避免第一次 dragstart 卡顿
-        try {
-          if (shown?.ok && shown.appPath) getCachedFdaDragIcon(shown.appPath);
-        } catch { /* ignore */ }
-        return shown;
-      } catch (err) {
-        console.warn('[fda-drag-float] show failed:', err?.message || err);
-        return { ok: false, error: err?.message || 'float_show_failed' };
-      }
-    };
-    // 立即 + 多次延迟：等 System Settings 真正出现后再贴边
-    //（osascript 无辅助功能权限时依赖 swift CG；窗口创建也有时序）
-    floatResult = showFloat();
-    for (const ms of [250, 500, 900, 1500, 2400]) {
-      setTimeout(() => {
-        try { showFloat(); } catch { /* ignore */ }
-      }, ms);
-    }
-    return {
-      ...opened,
-      dragFloat: floatResult,
-    };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'open_settings_failed' };
-  }
-});
-
-ipcMain.handle('browser:hide-fda-drag-float', async () => {
-  try {
-    fullDiskAccessDragFloatController.hide();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'hide_float_failed' };
-  }
-});
-
-ipcMain.on('browser:fda-drag-float-dragging', (_event, payload = {}) => {
-  try {
-    fullDiskAccessDragFloatController.setDragging?.(Boolean(payload?.dragging));
-  } catch { /* ignore */ }
-});
-
-ipcMain.on('browser:hide-fda-drag-float-sync', (event) => {
-
-  try {
-    fullDiskAccessDragFloatController.hide();
-    event.returnValue = { ok: true };
-  } catch (err) {
-    event.returnValue = { ok: false, error: err?.message || 'hide_float_failed' };
-  }
-});
-
-// Codex 同类链路：渲染层拖拽 App 图标时，主进程把真实 .app 路径交给系统设置列表。
-// 关键：必须在 dragstart 同步路径里调用 startDrag。
-// 因此 preload 用 sendSync，这里禁止 async/await（否则系统设置接不住，表现为“拖了没反应”）。
-ipcMain.on('browser:start-app-drag', (event, payload = {}) => {
-  const fail = (error) => {
-    try { event.returnValue = { ok: false, error: error || 'start_drag_failed' }; } catch { /* ignore */ }
-  };
-  try {
-    if (process.platform !== 'darwin') {
-      fail('unsupported_platform');
-      return;
-    }
-    const requestedPath = typeof payload?.appPath === 'string' ? payload.appPath.trim() : '';
-    const resolved = resolveFullDiskAccessDragTarget({
-      platform: process.platform,
-      appGetPath: (name) => app.getPath(name),
-      execPath: process.execPath,
-      resourcesPath: process.resourcesPath,
-    });
-    let filePath = requestedPath || (resolved.ok ? resolved.appPath : '');
-    if (!filePath) {
-      fail('app_path_missing');
-      return;
-    }
-    // 规范化到 .app bundle
-    const marker = `${path.sep}Contents${path.sep}MacOS${path.sep}`;
-    const idx = filePath.lastIndexOf(marker);
-    if (idx > 0) filePath = filePath.slice(0, idx);
-    if (!existsSync(filePath)) {
-      fail('app_path_not_found');
-      return;
-    }
-    // 使用缓存的小图标，避免每次 dragstart 解码大 PNG/icns 导致卡顿、不跟手
-    const icon = getCachedFdaDragIcon(filePath);
-    event.sender.startDrag({
-      file: filePath,
-      icon,
-    });
-    try { event.returnValue = { ok: true, filePath }; } catch { /* ignore */ }
-  } catch (err) {
-    console.warn('[session-import] start-app-drag failed:', err?.message || err);
-    fail(err?.message || 'start_drag_failed');
-  }
-});
-
-ipcMain.handle('browser:get-app-drag-target', async () => {
-  try {
-    const resolved = resolveFullDiskAccessDragTarget({
-      platform: process.platform,
-      appGetPath: (name) => app.getPath(name),
-      execPath: process.execPath,
-      resourcesPath: process.resourcesPath,
-    });
-    if (!resolved.ok) return resolved;
-    const iconDataUrl = await resolveDragIconDataUrl(resolved.appPath);
-    return { ...resolved, iconDataUrl };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'get_app_drag_target_failed' };
-  }
-});
-
-
-function humanizeSessionImportError(err, isZh = true) {
-  const msg = err instanceof Error ? err.message : String(err || '');
-  if (/cookie_db_permission_denied|EPERM|EACCES|operation not permitted|copyfile/i.test(msg)) {
-    return isZh
-      ? '无法复制浏览器 Cookies 文件（系统拒绝访问）。请到「系统设置 → 隐私与安全性 → 完全磁盘访问权限」允许 Peer Agent（开发态可能是 Electron），然后完全退出并重启应用后再试。'
-      : 'Cannot copy browser Cookies (permission denied). Grant Full Disk Access to Peer Agent under System Settings → Privacy & Security, fully quit and relaunch, then retry.';
-  }
-  return msg || (isZh ? '导入失败' : 'import_failed');
-}
-
-ipcMain.handle('browser:list-session-sites', async (_event, { profileId } = {}) => {
-  try {
-    if (!profileId || typeof profileId !== 'string') {
-      return { ok: false, error: 'invalid_profile' };
-    }
-    return await scanProfileSites(profileId);
-  } catch (err) {
-    return {
-      ok: false,
-      error: humanizeSessionImportError(err, true),
-      code: err?.code || (/cookie_db_permission_denied|EPERM|EACCES/i.test(String(err?.message || '')) ? 'permission_denied' : undefined),
-    };
-  }
-});
-
-ipcMain.handle(
-  'browser:import-site-session',
-  async (_event, { profileId, registrableDomains, includeSubdomains = true } = {}) => {
-    try {
-      if (!profileId || typeof profileId !== 'string') {
-        return { ok: false, error: 'invalid_profile' };
-      }
-      const domains = Array.isArray(registrableDomains) ? registrableDomains : [];
-      if (domains.length === 0) {
-        return { ok: false, error: 'no_domains_selected' };
-      }
-
-      const loaded = await loadCookiesForSites({
-        profileId,
-        registrableDomains: domains,
-        includeSubdomains: includeSubdomains !== false,
-      });
-      if (!loaded.ok) {
-        return {
-          ok: false,
-          error: humanizeSessionImportError(loaded.error || 'load_cookies_failed', true),
-          code: /cookie_db_permission_denied|EPERM|EACCES/i.test(String(loaded.error || '')) ? 'permission_denied' : undefined,
-          stats: loaded.stats,
-        };
-      }
-
-      const ses = session.fromPartition(PEER_BROWSER_PARTITION);
-      const applied = await applyCookiesToSession(ses, loaded.cookies);
-      const summary = redactLoadedCookies(loaded);
-
-      return {
-        ok: applied.ok || applied.added > 0,
-        status: applied.failed === 0 ? 'cookies_applied' : 'partially_applied',
-        profileId: loaded.profileId,
-        browserName: loaded.browserName,
-        registrableDomains: domains,
-        added: applied.added,
-        failed: applied.failed,
-        stats: loaded.stats,
-        // 仅元数据，无 value
-        cookieSummaries: summary.cookies,
-        applyErrors: applied.errors,
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        error: humanizeSessionImportError(err, true),
-        code: /cookie_db_permission_denied|EPERM|EACCES/i.test(String(err?.message || '')) ? 'permission_denied' : undefined,
-      };
-    }
-  },
-);
-
-/**
- * Password manager Phase 1（用户面）。
- * 不投影给 Agent；reveal/fill 仅在用户手势后调用。
- */
-ipcMain.handle('password-vault:list', async (_event, { origin } = {}) => {
-  try {
-    if (origin) {
-      return { ok: true, entries: passwordVaultStore.listForOrigin(origin) };
-    }
-    return { ok: true, entries: passwordVaultStore.listEntries() };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'list_failed', entries: [] };
-  }
-});
-
-ipcMain.handle('password-vault:upsert', async (_event, payload = {}) => {
-  try {
-    const entry = passwordVaultStore.upsertEntry(payload);
-    return { ok: true, entry };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'upsert_failed' };
-  }
-});
-
-ipcMain.handle('password-vault:delete', async (_event, { id } = {}) => {
-  try {
-    return passwordVaultStore.deleteEntry(id);
-  } catch (err) {
-    return { ok: false, error: err?.message || 'delete_failed' };
-  }
-});
-
-ipcMain.handle('password-vault:reveal', async (_event, { id } = {}) => {
-  try {
-    return passwordVaultStore.revealPassword(id);
-  } catch (err) {
-    return { ok: false, error: err?.message || 'reveal_failed' };
-  }
-});
-
-/**
- * 用户手选：向指定 webContents 的密码框填充用户名/密码。
- * 使用 sendInputEvent 输入，避免把明文写进可序列化 tool log。
- */
-ipcMain.handle(
-  'password-vault:fill',
-  async (_event, { id, webContentsId, fillUsername = true } = {}) => {
-    try {
-      const revealed = passwordVaultStore.revealPassword(id);
-      if (!revealed?.ok) return revealed;
-
-      const wcId = Number(webContentsId);
-      if (!Number.isInteger(wcId) || wcId <= 0) {
-        return { ok: false, error: 'invalid_web_contents_id' };
-      }
-      const wc = webContents.fromId(wcId);
-      if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
-        return { ok: false, error: 'browser_unavailable' };
-      }
-
-      const fieldInfo = await wc.executeJavaScript(
-        [
-          '(() => {',
-          '  const isVisible = (el) => {',
-          '    if (!el) return false;',
-          '    const s = window.getComputedStyle(el);',
-          "    return s && s.visibility !== 'hidden' && s.display !== 'none' && el.offsetParent !== null;",
-          '  };',
-          '  const passwords = [...document.querySelectorAll(\'input[type="password"]\')].filter(isVisible);',
-          '  const password = passwords[0] || null;',
-          "  if (!password) return { ok: false, reason: 'no_password_field' };",
-          '  const form = password.form;',
-          '  const candidates = form',
-          "    ? [...form.querySelectorAll('input')]",
-          "    : [...document.querySelectorAll('input')];",
-          '  const username = candidates.find((el) => {',
-          '    if (!isVisible(el) || el === password) return false;',
-          "    const type = (el.type || 'text').toLowerCase();",
-          "    if (['hidden', 'submit', 'button', 'checkbox', 'radio', 'file', 'password'].includes(type)) return false;",
-          "    const auto = (el.autocomplete || '').toLowerCase();",
-          "    const name = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();",
-          "    return auto.includes('username') || auto.includes('email') || type === 'email' || /user|email|login|account/.test(name);",
-          '  }) || null;',
-          "  const mark = 'data-peer-pw-fill';",
-          "  document.querySelectorAll('[' + mark + ']').forEach((el) => el.removeAttribute(mark));",
-          "  if (username) username.setAttribute(mark, 'username');",
-          "  password.setAttribute(mark, 'password');",
-          '  return { ok: true, hasUsername: Boolean(username), origin: location.origin };',
-          '})()',
-        ].join('\n'),
-        true,
-      );
-
-      if (!fieldInfo?.ok) {
-        return { ok: false, error: fieldInfo?.reason || 'no_password_field' };
-      }
-
-      const typeIntoMarked = async (mark, text) => {
-        const sel = "[data-peer-pw-fill=\"" + mark + "\"]";
-        await wc.executeJavaScript(
-          [
-            '(() => {',
-            "  const el = document.querySelector(" + JSON.stringify(sel) + ");",
-            '  if (!el) return false;',
-            '  el.focus();',
-            "  el.value = '';",
-            "  el.dispatchEvent(new Event('input', { bubbles: true }));",
-            '  return true;',
-            '})()',
-          ].join('\n'),
-          true,
-        );
-        for (const ch of String(text)) {
-          wc.sendInputEvent({ type: 'char', keyCode: ch });
-        }
-        await wc.executeJavaScript(
-          [
-            '(() => {',
-            "  const el = document.querySelector(" + JSON.stringify(sel) + ");",
-            '  if (!el) return;',
-            "  el.dispatchEvent(new Event('input', { bubbles: true }));",
-            "  el.dispatchEvent(new Event('change', { bubbles: true }));",
-            '})()',
-          ].join('\n'),
-          true,
-        );
-      };
-
-      if (fillUsername && fieldInfo.hasUsername && revealed.username) {
-        await typeIntoMarked('username', revealed.username);
-      }
-      await typeIntoMarked('password', revealed.password);
-
-      await wc.executeJavaScript(
-        "document.querySelectorAll('[data-peer-pw-fill]').forEach((el) => el.removeAttribute('data-peer-pw-fill')); true;",
-        true,
-      );
-
-      return {
-        ok: true,
-        id: revealed.id,
-        origin: revealed.origin,
-        filledUsername: Boolean(fillUsername && fieldInfo.hasUsername),
-        pageOrigin: fieldInfo.origin,
-      };
-    } catch (err) {
-      return { ok: false, error: err?.message || 'fill_failed' };
-    }
-  },
-);
-
-// ── Conversations ──
-ipcMain.handle('conversations:list', (_, params = {}) => {
-  const wantsPage = params?.paginated === true || params?.limit != null || params?.cursor != null;
-  const listParams = {
-    status: params?.status,
-    includeMessageCount: params?.includeMessageCount,
-    backfillMessageCount: params?.backfillMessageCount,
-    limit: params?.limit,
-    cursor: params?.cursor,
-    paginated: wantsPage,
-  };
-  if (params?.workspacePath !== undefined) {
-    return conversationStore.listConversationsByWorkspace(params.workspacePath, listParams);
-  }
-  return conversationStore.listConversations(listParams);
-});
-ipcMain.handle('conversations:search', (_, params) => conversationStore.searchConversations(params || {}));
-ipcMain.handle('conversations:create', (_, params) => conversationStore.createConversation(params));
-ipcMain.handle('conversations:get', (_, { id }) => conversationStore.getConversation(id));
-ipcMain.handle('conversations:update-title', (_, { id, title }) => conversationStore.updateTitle(id, title));
-ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationStore.updateMode(id, mode));
-ipcMain.handle('conversations:update-model-effort', (_, { id, effort, modelProviderId }) => conversationStore.updateModelEffort(id, { effort, modelProviderId }));
-ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
-ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
-ipcMain.handle('conversations:replace-messages', (_, { id, messages, allowEmpty = false }) => conversationStore.replaceMessages(id, messages, { allowEmpty }));
-ipcMain.handle('conversations:archive', (_, { id }) => conversationStore.archiveConversation(id));
-ipcMain.handle('conversations:restore', (_, { id }) => conversationStore.restoreConversation(id));
-ipcMain.handle('conversations:pin', (_, { id }) => conversationStore.pinConversation(id));
-ipcMain.handle('conversations:unpin', (_, { id }) => conversationStore.unpinConversation(id));
-ipcMain.handle('conversations:reorder-pinned', (_, { ids }) => conversationStore.reorderPinnedConversations(ids));
-ipcMain.handle('conversations:auto-archive', (_, { before, excludeIds } = {}) => {
-  const activeStreamIds = llmChatService.listActiveConversationIds();
-  return conversationStore.autoArchiveConversations({ before, excludeIds: [...new Set([...(excludeIds || []), ...activeStreamIds])] });
-});
-ipcMain.handle('conversations:delete', (_, { id }) => {
-  // IPC 层编排：删除会话后级联硬删除该会话名下的全部 Goal 计划（见 ADR 34）。
-  // 两个 store 保持独立（互不 import），仅在此组合层互相知晓。
-  const result = conversationStore.deleteConversation(id);
-  try {
-    goalPlanStore.deletePlanByConversation(id);
-  } catch (err) {
-    // 级联清理失败不回滚会话删除，但显式告警以便排查（不要静默吞）。
-    console.warn('[main] cascade deletePlanByConversation failed:', err);
-  }
-  try {
-    // 工具结果材料化 artifact 随会话级联清理(17 号文档阶段 E / ADR 34 同口径)。
-    removeConversationToolArtifacts({ conversationId: id });
-  } catch (err) {
-    console.warn('[main] cascade removeConversationToolArtifacts failed:', err);
-  }
-  return result;
-});
-// 累计计费账本:独立于消息/压缩,累加到 index meta 的 lifetimeUsage(见 ADR 23)。
-// 压缩(replace-messages)只重写消息文件,不碰 meta,故 lifetimeUsage 不受压缩影响。
-ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStore.addUsage(id, usage));
-
-// ── Goal Plans（Plan 审批计划 / Goal 自驱目标追踪，均持久化为 Evidence/artifact）──
-// 见 Plan / Goal 模式设计。progress 由 store 自底向上聚合，调用方不可手填。
-ipcMain.handle('goalPlans:list', (_, params) => {
-  if (params?.conversationId !== undefined) return goalPlanStore.listPlanDetailsByConversation(params.conversationId);
-  return goalPlanStore.listPlanDetails();
-});
-// 侧栏徽标：只返回 awaiting_approval 计数聚合，避免全量 hydrate GoalPlan。
-ipcMain.handle('goalPlans:awaiting-counts', () => goalPlanStore.countAwaitingApprovalsByConversation());
-ipcMain.handle('goalPlans:get', (_, { planId }) => goalPlanStore.getPlan(planId));
-ipcMain.handle('goalPlans:create', (_, { draft }) => goalPlanStore.createPlan(draft));
-ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
-  goalPlanStore.revisePlan(planId, patch, { reason, changedBy }));
-ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => {
-  const plan = goalPlanStore.recordApproval(planId, approval);
-  // plan/goal 执行段合一(修订 ADR 41,见 B2-b):批准即自动启动 Runner 托管推进,
-  // 兑现「批准并执行」按钮的字面语义。plan 与 goal 的差异收敛到「批准前的规划把关粒度」;
-  // 批准后二者共用同一自驱 Runner,且因 runGoalTurn 写死 mode:'goal',续推上下文注入、
-  // 防偏航 re-anchor、Verification Gate 三大护栏对 plan 同样生效。
-  if (approval?.decision === 'approve') {
-    void goalRunner?.start(planId);
-  }
-  return plan;
-});
-ipcMain.handle('goalPlans:set-status', (_, { planId, status }) => goalPlanStore.setPlanStatus(planId, status));
-ipcMain.handle('goalPlans:record-manual-confirmation', (_, { planId, confirmation }) =>
-  goalPlanStore.recordManualConfirmation(planId, confirmation));
-ipcMain.handle('goalRunner:get-state', (_, { planId }) => goalRunner?.getState(planId) ?? null);
-ipcMain.handle('goalRunner:start', (_, { planId, options } = {}) => goalRunner?.start(planId, options) ?? null);
-ipcMain.handle('goalRunner:pause', (_, { planId }) => goalRunner?.pause(planId) ?? null);
-ipcMain.handle('goalRunner:resume', (_, { planId, options } = {}) => goalRunner?.resume(planId, options) ?? null);
-ipcMain.handle('goalRunner:clear', (_, { planId }) => goalRunner?.clear(planId) ?? null);
-ipcMain.handle('goalPlans:record-task-evidence', (_, { planId, taskId, change }) =>
-  goalPlanStore.recordTaskEvidence(planId, taskId, change));
-ipcMain.handle('goalPlans:delete', (_, { planId }) => {
-  goalPlanStore.deletePlan(planId);
-  return goalPlanStore.listPlanDetails();
-});
 
 // ── LLM Chat ──
 function latestUserTextFromProviderMessages(messages = []) {
@@ -3179,7 +2375,7 @@ function convergeIntakeAfterGoalTurn(conversationId, outcome) {
   }
 }
 
-ipcMain.handle('chat:send', (event, {
+function handleChatSend({
   messages: legacyMessages,
   streamId,
   effort,
@@ -3194,7 +2390,7 @@ ipcMain.handle('chat:send', (event, {
   continuityContext,
   configInstructions,
   contextExtensions,
-}) => {
+}, sender) {
   const persistedConversation = conversationId
     ? conversationStore.getConversation(conversationId)
     : null;
@@ -3271,7 +2467,7 @@ ipcMain.handle('chat:send', (event, {
     ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
   const outcomePromise = llmChatService.sendMessage({
     messages,
-    webContents: event.sender,
+    webContents: sender,
     streamId,
     effort,
     mode,
@@ -3310,26 +2506,15 @@ ipcMain.handle('chat:send', (event, {
     });
   }
   return outcomePromise;
-});
-ipcMain.handle('chat:abort', (_, { streamId }) =>
-  llmChatService.abort(streamId));
+}
 
 // ── Stream reattach (ADR 22) ──
 // renderer 经 HMR 重载或重新打开后,内存里的流式状态丢失,但 main 进程的
-// 流式推理仍在继续。renderer 挂载时调用此入口,询问"当前有无活跃流",
-// 若有则取回已累积的正文/思考文本,无缝接回 UI(不重发、不打断后端)。
-ipcMain.handle('chat:stream:reattach', (_event, { streamId, conversationId } = {}) =>
-  llmChatService.reattach({ streamId, conversationId }));
+// 流式推理仍在继续。renderer 挂载时由 chat-ipc owner 投影到共享流服务。
 
-// 全局活跃流查询:renderer 挂载时拉取当前正在运行的会话列表,补齐"未点进去"的会话状态。
-// 之后的变更由 main 主动广播 chat:stream:active-changed 推送。
-ipcMain.handle('chat:stream:list-active', () => ({
-  // ADR 27: 保留 conversationIds(既有消费者),附带带工作区维度的 streams。
-  conversationIds: llmChatService.listActiveConversationIds(),
-  streams: llmChatService.listActiveStreams(),
-}));
+// 全局活跃流查询也由 chat-ipc owner 投影；服务保留既有 conversationIds 与 streams 形状。
 
-ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
+async function handleChatCompact({ conversationId, streamId }, sender) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return { compacted: false };
 
@@ -3495,7 +2680,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
           }),
           conversationId,
           streamId,
-          webContents: event.sender,
+          webContents: sender,
           force: true,
           manual: true,
           preserveLatestUserTurn: false,
@@ -3563,23 +2748,19 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     // 横幅收尾（idle）已由 coordinator 的 settleBannerIdle 处理，这里只上报错误。
     throw error;
   }
-});
+}
 
 // ── 压缩态查询（按 conversationId）──
-// 渲染层切会话时调用：返回该会话当前是否正在压缩及进度，用于恢复横幅。
-// 压缩态真值落在主进程登记表，渲染层只负责表达，不再各自持有运行真值。
-ipcMain.handle('chat:compaction:get', (_event, { conversationId } = {}) =>
-  getCompaction(conversationId));
+// 渲染层切会话时由 chat-ipc owner 查询主进程登记表，渲染层只负责表达。
 
 // ── restored 重投影(21 号文档 13.3 / 23 号治理文档 Phase 1.4)──
 // 会话打开时若持久化快照缺失/失效/来自其他宿主(source ≠ desktop),renderer 调此处
 // 按当前宿主的完整成分(全量 system context + 模式投影工具 schema + active 历史)重算投影,
 // 而不是用缺成分的本地估算兜底(那正是历史上 RC1 失准的根源)。
 // 重算成功后回写 contextSnapshot(source: desktop),下次打开直接命中。
-ipcMain.handle('chat:context:restored', async (
-  _event,
+async function handleChatContextRestored(
   { conversationId, modelProviderId = null } = {},
-) => {
+) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return null;
 
@@ -3755,567 +2936,9 @@ ipcMain.handle('chat:context:restored', async (
     console.warn('[main] failed to persist restored projection:', error?.message || error);
   }
   return snapshot;
-});
-
-ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
-  promptSnapshotStore.list({ limit: params?.limit }));
-ipcMain.handle('prompt-snapshots:get', (_event, { id }) =>
-  promptSnapshotStore.get(id));
-ipcMain.handle('prompt-context-epochs:list', (_event, params = {}) =>
-  promptSnapshotStore.listContextEpochs({ limit: params?.limit }));
-ipcMain.handle('prompt-context-epochs:events', (_event, params = {}) =>
-  promptSnapshotStore.listContextEpochEvents({
-    limit: params?.limit,
-    conversationId: params?.conversationId,
-    contextEpochId: params?.contextEpochId,
-  }));
-ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
-  promptSnapshotStore.getContextEpochChain({
-    conversationId: params?.conversationId ?? null,
-    contextEpochId: params?.contextEpochId ?? null,
-    limit: params?.limit,
-  }));
-
-// ── LLM Providers ──
-ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
-
-// 设置页/模型列表加载前，对 access 过期的 OAuth 渠道静默 ensureFresh 并写回 token，
-// 避免 refresh 仍可用时误报「登录已过期」。失败不抛，UI 继续用本地 oauthStatus。
-let missingPricingBackfillPromise = null;
-
-function scheduleMissingPricingBackfill(reason = 'startup') {
-  if (typeof llmConfigStore.backfillMissingPricingFromModelsDev !== 'function') return;
-  if (missingPricingBackfillPromise) return missingPricingBackfillPromise;
-  missingPricingBackfillPromise = llmConfigStore.backfillMissingPricingFromModelsDev()
-    .then((result) => {
-      if (result?.updated) {
-        console.info(`[llm] models.dev pricing backfill (${reason}): updated ${result.updated}/${result.examined}`);
-      }
-      return result;
-    })
-    .catch((err) => {
-      console.warn('[llm] models.dev pricing backfill failed:', err?.message || err);
-      return null;
-    })
-    .finally(() => {
-      missingPricingBackfillPromise = null;
-    });
-  return missingPricingBackfillPromise;
 }
-
-async function listProvidersWithSilentOAuthRefresh() {
-  try {
-    await refreshExpiredOAuthProviders({ llmConfigStore });
-  } catch (err) {
-    console.warn('[llm] silent oauth refresh failed:', err?.message || err);
-  }
-  // Fire-and-forget: fill missing prices for saved models when settings/model list loads.
-  void scheduleMissingPricingBackfill('llm:list');
-  return llmConfigStore.listProviders();
-}
-
-async function listGroupsWithSilentOAuthRefresh() {
-  try {
-    await refreshExpiredOAuthProviders({ llmConfigStore });
-  } catch (err) {
-    console.warn('[llm] silent oauth refresh failed:', err?.message || err);
-  }
-  return llmConfigStore.listGroups();
-}
-
-// 跨会话用量汇总（精简使用统计页）：会话 lifetimeUsage + 当前 provider 单价估算。
-ipcMain.handle('usage:stats', () => collectUsageStats({ conversationStore, llmConfigStore }));
-// 请求日志按天聚合（Token 热力图 / 趋势）：range = 7d|1m|3m|6m|1y。
-ipcMain.handle('usage:daily', (_event, params) => collectUsageDaily({ range: params?.range }));
-
-// 设置页读取独立渠道视图，包含尚未配置任何模型的空渠道。
-ipcMain.handle('llm:groups:list', () => listGroupsWithSilentOAuthRefresh());
-ipcMain.handle('llm:list', () => listProvidersWithSilentOAuthRefresh());
-// 兼容旧 preload API；聊天与设置统一返回已配置模型真值，不再投影目录候选。
-ipcMain.handle('llm:chat:list', () => listProvidersWithSilentOAuthRefresh());
-ipcMain.handle('llm:add', (_, config) => {
-  const provider = llmConfigStore.addProvider(config);
-  if (provider.isDefault) recordProviderBaseline('initial', provider);
-  return provider;
-});
-ipcMain.handle('llm:update', (_, { id, ...patch }) => {
-  const before = llmConfigStore.listProviders().find((provider) => provider.id === id) ?? null;
-  const updated = llmConfigStore.updateProvider(id, patch);
-  if (providerPromptTargetChanged(before, updated)) {
-    recordProviderBaseline('model_switch', updated);
-  }
-  return updated;
-});
-ipcMain.handle('llm:duplicate', (_, { id }) => {
-  llmConfigStore.duplicateProvider(id);
-  return llmConfigStore.listProviders();
-});
-// 同渠道复制一条模型配置（模型参数克隆，凭证继承）。
-ipcMain.handle('llm:duplicate-model', (_, { id }) => {
-  llmConfigStore.duplicateModel(id);
-  return llmConfigStore.listProviders();
-});
-// B-2 在已有 provider 组内新增一个模型:凭证继承自组内首条,无需重填 apiKey。
-ipcMain.handle('llm:add-model', (_, { groupId, ...patch }) => {
-  llmConfigStore.addModel(groupId, patch);
-  return llmConfigStore.listProviders();
-});
-ipcMain.handle('llm:remove', (_, { id }) => {
-  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
-  const providers = llmConfigStore.removeProvider(id);
-  const afterDefault = providers.find((provider) => provider.isDefault) ?? null;
-  if (beforeDefault?.id === id && afterDefault) {
-    recordProviderBaseline('model_switch', afterDefault);
-  }
-  return providers;
-});
-// B-2 删除整个 provider 组(同 groupId 的全部模型)。若删掉的组含当前默认模型,
-// removeGroup 会把默认转移到剩余首条,这里据此记录 baseline。
-ipcMain.handle('llm:remove-group', (_, { groupId }) => {
-  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
-  const providers = llmConfigStore.removeGroup(groupId);
-  const afterDefault = providers.find((provider) => provider.isDefault) ?? null;
-  if (beforeDefault && (beforeDefault.groupId ?? beforeDefault.id) === groupId && afterDefault) {
-    recordProviderBaseline('model_switch', afterDefault);
-  }
-  return providers;
-});
-ipcMain.handle('llm:set-default', (_, { id }) => {
-  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
-  const providers = llmConfigStore.setDefault(id);
-  const afterDefault = providers.find((provider) => provider.id === id) ?? null;
-  if (afterDefault && beforeDefault?.id !== afterDefault.id) {
-    recordProviderBaseline('model_switch', afterDefault);
-  }
-  return providers;
-});
-ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
-ipcMain.handle('llm:quota', async (_, { id, force } = {}) => fetchProviderSubscriptionQuota({
-  providerId: id,
-  llmConfigStore,
-  force: Boolean(force),
-  // 与 OAuth / 模型调用一致：统一走 Electron 网络栈，继承系统代理与信任库。
-  fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
-    provider: 'subscription-quota',
-    model: 'quota',
-  }),
-}));
-
-// ── Provider OAuth(ADR 28+) ──
-// 同一时刻只允许一个进行中的 browser 登录会话,便于取消。
-let activeOAuthLogin = null;
-let activeOAuthVerificationUrl = null;
-
-ipcMain.handle('llm:oauth:start', async (event, params) => {
-  // ADR 28: 订阅登录链路必须"先登录、成功后才落盘"。
-  // - { id }   : 对已存在的订阅 provider 重新登录(刷新 token)。
-  // - { draft }: 新建订阅。draft 是表单草稿,登录成功后才创建 provider;
-  //              登录失败/取消则什么都不写入,绝不留下没有 token 的死配置。
-  const id = params?.id ?? null;
-  const draft = params?.draft ?? null;
-  if (!id && !draft) throw new Error('provider id or draft required');
-  const existing = id ? llmConfigStore.listProviders().find((provider) => provider.id === id) : null;
-  const authMethod = draft?.authMethod || existing?.authMethod || 'oauth_chatgpt';
-  if (authMethod !== 'oauth_chatgpt' && authMethod !== 'oauth_google' && authMethod !== 'oauth_grok') {
-    throw new Error(`unsupported_oauth_method:${authMethod}`);
-  }
-  if (activeOAuthLogin) {
-    try { activeOAuthLogin.cancel(); } catch {}
-    activeOAuthLogin = null;
-    // cancel() 触发的本地回调 server.close() 是异步释放端口的,
-    // 稍等一拍再起新登录,避免立刻 listen 撞上尚未释放的回调端口
-    // (EADDRINUSE)。oauth 模块内部还有一次重试兜底。
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  const session = authMethod === 'oauth_google'
-    ? startGoogleBrowserLogin()
-    : authMethod === 'oauth_grok'
-      ? startGrokOAuthLogin({
-        fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
-          provider: 'grok',
-          model: 'oauth',
-          maxRetries: 1,
-        }),
-        openExternal: async (url) => {
-          activeOAuthVerificationUrl = url;
-          await shell.openExternal(url);
-        },
-        onPending: (pending) => {
-          activeOAuthVerificationUrl = pending.verificationUrl;
-          clipboard.writeText(pending.userCode);
-          const target = getOAuthWindowWebContents(event.sender, BrowserWindow.getAllWindows());
-          target?.send('llm:oauth:pending', pending);
-        },
-        onTokenReady: () => {
-          const target = getOAuthWindowWebContents(event.sender, BrowserWindow.getAllWindows());
-          target?.send('llm:oauth:authorized');
-        },
-      })
-      : startBrowserLogin();
-  activeOAuthLogin = session;
-  let createdId = null;
-  try {
-    // 先完成浏览器授权,拿到 token 之后再决定是否落盘。
-    const tokens = await session.promise;
-    // 新建订阅:授权成功后才原子创建 provider。
-    const targetId = id
-      ?? (createdId = llmConfigStore.addProvider({ ...draft, authMethod }).id);
-    llmConfigStore.setOAuthTokens(targetId, tokens);
-    let provider = llmConfigStore.listProviders().find((p) => p.id === targetId) ?? null;
-    let models = null;
-    if (authMethod === 'oauth_grok') {
-      const catalog = await listGrokBuildModels(tokens.access, { baseUrl: provider?.baseUrl });
-      models = catalog.models;
-      const preferred = models.find((model) => model.id === 'grok-4.5') ?? models[0] ?? null;
-      if (preferred && provider?.model !== preferred.id) {
-        provider = llmConfigStore.updateProvider(targetId, {
-          model: preferred.id,
-          contextWindow: preferred.contextWindow,
-          supportsVision: preferred.supportsVision,
-          supportsReasoning: preferred.supportsReasoning,
-        });
-      }
-    } else if (authMethod === 'oauth_google') {
-      // 对齐 gemini-cli：登录成功后挂 curated 模型目录，默认 DEFAULT_GEMINI_MODEL。
-      // 不调用 GET /v1beta/models；目录来自 gemini-cli 本地常量。
-      const catalog = await listGeminiModels(tokens);
-      models = catalog.models;
-      const preferred = preferGeminiModel(models);
-      let oauthProjectId = null;
-      try {
-        oauthProjectId = await resolveGeminiCodeAssistProjectId({
-          accessToken: tokens.access,
-          fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init),
-        });
-      } catch (error) {
-        console.warn('[oauth] resolve Gemini Code Assist project failed:', error?.message || error);
-      }
-      if (preferred?.id || oauthProjectId) {
-        provider = llmConfigStore.updateProvider(targetId, {
-          ...(preferred?.id ? {
-            model: preferred.id,
-            modelLabel: preferred.label || preferred.id,
-            contextWindow: preferred.contextWindow,
-            maxOutputTokens: preferred.maxOutputTokens,
-            metadataSource: catalog.source || 'builtin',
-            metadataSyncedAt: new Date().toISOString(),
-          } : {}),
-          ...(oauthProjectId ? { oauthProjectId } : {}),
-        }) || provider;
-      }
-    }
-    if (provider) recordProviderBaseline('oauth_login', provider);
-    return { success: true, provider, models };
-  } catch (err) {
-    // 若已创建了草稿 provider 但 token 写入失败,回滚以保持"失败不留痕"。
-    if (createdId) {
-      try { llmConfigStore.removeProvider(createdId); } catch {}
-    }
-    return { success: false, error: err?.message || 'oauth_login_failed' };
-  } finally {
-    if (activeOAuthLogin === session) {
-      activeOAuthLogin = null;
-      activeOAuthVerificationUrl = null;
-    }
-  }
-});
-
-ipcMain.handle('llm:oauth:open-pending', async () => {
-  if (!activeOAuthLogin || !activeOAuthVerificationUrl) {
-    return { success: false, error: 'oauth_pending_url_unavailable' };
-  }
-  try {
-    await shell.openExternal(activeOAuthVerificationUrl);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err?.message || 'oauth_open_browser_failed' };
-  }
-});
-
-ipcMain.handle('llm:oauth:cancel', () => {
-  if (activeOAuthLogin) {
-    try { activeOAuthLogin.cancel(); } catch {}
-    activeOAuthLogin = null;
-  }
-  activeOAuthVerificationUrl = null;
-  return { success: true };
-});
-
-// 登录后远程拉取可用模型(失败回退内置清单)。临近过期则刷新并回写 token。
-ipcMain.handle('llm:models:list', async (_event, { id }) => {
-  if (!id) throw new Error('provider id required');
-  const credential = llmConfigStore.getCredential(id);
-  const provider = llmConfigStore.listProviders().find((p) => p.id === id) ?? null;
-  const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
-  // channelId=qoder 也视为 Qoder 私有接口，避免历史配置 authMethod 写错时误走 OpenAI /models。
-  if (
-    authMethod === 'qoder_local_auth'
-    || authMethod === 'local_cli'
-    || provider?.channelId === 'qoder'
-  ) {
-    const { models, source, error } = await listQoderModels();
-    return { success: true, models, source, error };
-  }
-  // 自带 API key 的 provider:从 /v1/models(及 Anthropic/Gemini 兼容端点)远程拉取。
-  // 复用 store 解析好的 wire/baseUrl/headers/apiKey。拉取失败时返回明确错误与空列表:
-  // 不套用订阅(gpt-5 家族)目录做兜底——那对 DeepSeek/Qwen 等第三方后端毫无意义且会误导,
-  // 用户可据错误改配置或手动填模型。
-  if (authMethod === 'api_key') {
-    const reqConfig = llmConfigStore.getApiKeyRequestConfig(id);
-    if (!reqConfig) {
-      return { success: false, models: [], error: 'api_key_not_configured' };
-    }
-    try {
-      const { models, source } = await listOpenAICompatibleModels(reqConfig);
-      return { success: true, models, source };
-    } catch (err) {
-      return { success: false, models: [], error: err?.message || 'models_list_failed' };
-    }
-  }
-  const tokens = credential?.tokens || null;
-  if (!tokens?.access) {
-    return { success: false, models: [], error: 'oauth_not_logged_in' };
-  }
-  try {
-    const { tokens: fresh, refreshed } = authMethod === 'oauth_google'
-      ? await ensureFreshGoogleTokens(tokens)
-      : authMethod === 'oauth_grok'
-        ? await ensureFreshGrokTokens(tokens)
-        : await ensureFreshTokens(tokens);
-    if (refreshed) llmConfigStore.setOAuthTokens(id, fresh);
-    const { models, source, error } = authMethod === 'oauth_google'
-      ? await listGeminiModels(fresh)
-      : authMethod === 'oauth_grok'
-        ? await listGrokBuildModels(fresh.access, { baseUrl: provider?.baseUrl })
-        : await listSubscriptionModels(fresh);
-    return { success: true, models, source, error };
-  } catch (err) {
-    return { success: false, models: [], error: err?.message || 'models_list_failed' };
-  }
-});
-
-// 用表单里填的临时配置(baseUrl/apiKey/channelId 等)直接拉模型,不落盘、不需要 provider id。
-// 供"添加渠道"弹窗在保存前预览可用模型、勾选多个模型一次性创建。
-ipcMain.handle('llm:models:fetch', async (_event, config) => {
-  if (!config) return { success: false, models: [], error: 'config_required' };
-  try {
-    const authMethod = config.authMethod || 'api_key';
-    // Qoder 私有接口复用本机 CLI 登录态；目录优先走官方 SDK，失败再读 ~/.qoder 缓存。
-    if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli' || config.channelId === 'qoder') {
-      const { models, source, error } = await listQoderModels();
-      return {
-        success: true,
-        models,
-        source,
-        ...(error ? { error } : {}),
-      };
-    }
-    const resolved = resolveChannel({
-      channelId: config.channelId,
-      wireOverride: config.wireOverride,
-      authMethod: 'api_key',
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      customHeaders: config.customHeaders,
-    });
-    const { models, source } = await listOpenAICompatibleModels({
-      baseUrl: resolved.baseUrl,
-      headers: resolved.headers,
-      wire: resolved.wire,
-      apiKey: config.apiKey,
-    });
-    return { success: true, models, source };
-  } catch (err) {
-    return { success: false, models: [], error: err?.message || 'models_fetch_failed' };
-  }
-});
-
-// ── Host restart (self-iteration M3, see docs/architecture/21-...) ──
-// 由实验体(lab)程序化重启本体(host)。施动者在本体进程树之外，故 lab 调用安全。
-const hostRestarter = createHostRestarter({ workspaceRoot });
-ipcMain.handle('host:restart', (_event, payload = {}) => {
-  // hostDir 优先使用调用方显式传入；否则按"当前 lab 工作区去掉 -lab 后缀"推导本体目录。
-  let hostDir = payload.hostDir;
-  if (!hostDir && workspaceRoot) {
-    hostDir = workspaceRoot.endsWith('-lab')
-      ? workspaceRoot.slice(0, -'-lab'.length)
-      : workspaceRoot;
-  }
-  // 原子续传:若调用方随重启带了 pendingTask,先落盘再重启。
-  // 这样新实例启动后 consume 即可取回,避免"写了没重启/重启没写"竞态。
-  if (payload.pendingTask) {
-    try {
-      writePendingTask(payload.pendingTask);
-    } catch (err) {
-      // 落盘失败不阻断重启;续传降级为本次不可用,记录供排查。
-      console.error('[pending-task] failed to persist before restart:', err);
-    }
-  }
-  return hostRestarter.restartHost({ hostDir, port: payload.port });
-});
-
-// ── Pending Task 续传(跨重启)──
-// 重启会中断当前会话;为免用户手动说"继续",重启前由 renderer 调 write 把待办落盘,
-// 新实例启动后 renderer 主动调 consume 取回(read-and-clear,一次性),
-// 再由 renderer 用自身上下文发起 chat:send 续执行。
-// 续传必须走 renderer 拉取,因为 chat:send 依赖 event.sender 推流回发起方;
-// main 主动发起没有 renderer 上下文,故不能在 main 内直接调 chat:send。
-// 会话锚定(ADR 21):workspace 由 main 持有并负责补齐 + 校验,
-// renderer 只需提供 { sessionId, task }(它有 conversationId,但拿不到 workspace 绝对路径)。
-function withWorkspace(task) {
-  return { ...task, workspace: workspaceRoot ?? null };
-}
-// 读回时校验 workspace 匹配:防止把 A 工作区的续传任务恢复到 B 工作区。
-// workspaceRoot 为 null(打包态)时不做跨工作区校验,直接放行。
-function matchWorkspace(record) {
-  if (!record) return null;
-  if (workspaceRoot && record.workspace && record.workspace !== workspaceRoot) {
-    console.warn('[pending-task] workspace mismatch, discarding:', record.workspace, '!=', workspaceRoot);
-    clearPendingTask();
-    return null;
-  }
-  return record;
-}
-ipcMain.handle('pending-task:write', (_event, task = {}) => {
-  return writePendingTask(withWorkspace(task));
-});
-ipcMain.handle('pending-task:consume', () => {
-  return matchWorkspace(readAndClearPendingTask());
-});
-// peek/clear 分离:解决 React StrictMode 双挂载 + 未就绪时序导致的"读后即清却没发出去"。
-// renderer 启动时先 peek(文件保留)拿到任务并自动发送;发送成功后再显式 clear。
-// 任一环节中断(重挂载/崩溃/未就绪),文件仍在,下次启动可重试,任务不被吞。
-ipcMain.handle('pending-task:peek', () => {
-  return matchWorkspace(peekPendingTask());
-});
-ipcMain.handle('pending-task:clear', () => {
-  clearPendingTask();
-  return true;
-});
-
-// ── MCP (local only) ──
-ipcMain.handle('mcp:list-installed', () => mcpRegistry.listInstalled());
-ipcMain.handle('mcp:list-capabilities', () => mcpRegistry.listCapabilityManifests());
-ipcMain.handle('mcp:list-credentials', () => mcpCredentialStore.listCredentials());
-ipcMain.handle('mcp:put-credential', (_, item) => mcpCredentialStore.putCredential(item));
-ipcMain.handle('mcp:delete-credential', (_, params) => mcpCredentialStore.deleteCredential(params?.credentialRef ?? params));
-ipcMain.handle('mcp:install', (_, item) => mcpRegistry.install(item));
-ipcMain.handle('mcp:upsert-server', (_, item) => mcpRegistry.upsertServer(item));
-ipcMain.handle('mcp:uninstall', (_, params) => {
-  const serverId = params?.mcpId ?? params?.serverId;
-  // 卸载前取出该 server 绑定的 credentialRef，卸载后连带删除，
-  // 避免凭证变成孤儿留在库里（重新添加同名 server 时会再堆一条重复凭证）。
-  let boundCredentialRef = null;
-  try {
-    boundCredentialRef = mcpRegistry.getServer(serverId)?.auth?.credentialRef ?? null;
-  } catch {
-    boundCredentialRef = null;
-  }
-  const result = mcpRegistry.uninstall(serverId);
-  if (boundCredentialRef) {
-    try {
-      mcpCredentialStore.deleteCredential(boundCredentialRef);
-    } catch (err) {
-      console.error('[mcp] delete bound credential on uninstall failed:', err);
-    }
-  }
-  return result;
-});
-ipcMain.handle('mcp:set-enabled', (_, params) => mcpRegistry.setEnabled(params?.serverId ?? params?.mcpId, params?.enabled));
-ipcMain.handle('mcp:set-tool-visibility', (_, params) => mcpRegistry.setToolVisibility(params?.serverId ?? params?.mcpId, params?.toolName, params?.visible));
-ipcMain.handle('mcp:test-connection', async (_, params) => {
-  const server = params?.serverId || params?.mcpId ? mcpRegistry.getServer(params.serverId ?? params.mcpId) : params;
-  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  const result = await testMcpConnection(server, { credentialResolver: mcpCredentialResolver });
-  if (params?.serverId || params?.mcpId) mcpRegistry.updateHealth(server.id, result.health);
-  return result;
-});
-ipcMain.handle('mcp:refresh-manifest', async (_, params) => {
-  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
-  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
-  const view = persistMcpProbeResult(server.id, probe);
-  disconnectMcp(mcpRegistry.getServer(server.id));
-  return createMcpProbeResponse(probe, view);
-});
-ipcMain.handle('mcp:start-oauth', async (_, params) => {
-  const serverId = params?.serverId ?? params?.mcpId;
-  const server = mcpRegistry.getServer(serverId);
-  if (!server) throw new Error(`MCP server not found: ${serverId ?? ''}`);
-  // 一键 OAuth：先挂起 loopback 回调监听，再触发授权发现并打开系统浏览器。
-  const callbackPromise = waitForMcpOAuthCallback();
-  let start;
-  try {
-    start = await startMcpOAuth(server, { credentialResolver: mcpCredentialResolver });
-  } catch (error) {
-    closeMcpOAuthCallback();
-    throw error;
-  }
-  // 已持有有效 token（无需浏览器交互）：直接收尾，重新探测并持久化 manifest/health。
-  if (start?.status === 'authorized' || start?.redirected === false) {
-    closeMcpOAuthCallback();
-    const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
-    const view = persistMcpProbeResult(server.id, probe);
-    disconnectMcp(mcpRegistry.getServer(server.id));
-    return { ...createMcpProbeResponse(probe, view), oauth: 'authorized' };
-  }
-  // 已打开浏览器：等待用户在浏览器完成授权后 loopback 回调带回的 code，再交换 token。
-  const code = await callbackPromise;
-  await finishMcpOAuth(server, code, { credentialResolver: mcpCredentialResolver });
-  disconnectMcp(mcpRegistry.getServer(server.id));
-  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
-  const view = persistMcpProbeResult(server.id, probe);
-  disconnectMcp(mcpRegistry.getServer(server.id));
-  return { ...createMcpProbeResponse(probe, view), oauth: 'connected' };
-});
-
-ipcMain.handle('mcp:finish-oauth', async (_, params) => {
-  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
-  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  const result = await finishMcpOAuth(server, params?.authorizationCode ?? params?.code, { credentialResolver: mcpCredentialResolver });
-  disconnectMcp(server);
-  return result;
-});
-ipcMain.handle('mcp:read-resource', async (_, params) => {
-  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
-  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  return readMcpResource(server, params?.uri, { credentialResolver: mcpCredentialResolver });
-});
-ipcMain.handle('mcp:get-prompt', async (_, params) => {
-  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
-  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  return getMcpPrompt(server, params?.name, params?.arguments ?? {}, { credentialResolver: mcpCredentialResolver });
-});
-ipcMain.handle('mcp:connect-and-register', async (_, { serverUrl, serverName }) => {
-  if (!serverUrl || !serverName) throw new Error('serverUrl and serverName are required');
-  const view = mcpRegistry.upsertServer({
-    displayName: serverName,
-    name: serverName,
-    transport: 'streamable_http',
-    url: serverUrl,
-    serverUrl,
-    auth: { mode: 'none' },
-    enabled: true,
-  });
-  const server = mcpRegistry.getServer(view.id);
-  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
-  let refreshed = view;
-  if (probe.state === 'connected' && probe.manifest) {
-    refreshed = mcpRegistry.updateManifest(view.id, probe.manifest);
-  } else {
-    refreshed = mcpRegistry.updateHealth(view.id, probe.health);
-  }
-  disconnectMcp(mcpRegistry.getServer(view.id));
-  return {
-    ...probe,
-    success: probe.state === 'connected',
-    toolCount: probe.toolsCount,
-    view: refreshed,
-  };
-});
 
 // ── Local Tool Host ──
-let localToolHost;
 const pendingRuntimeEvents = [];
 
 function forwardRuntimeEvent(event) {
@@ -4337,7 +2960,7 @@ function flushPendingRuntimeEvents() {
   }
 }
 
-app.whenReady().then(async () => {
+async function startRecoveryAndAppearance() {
   // Milestone C: 进程重启后扫描 interrupted Goal compaction/resume 状态。
   // 必须在 UI/IPC 就绪前尽早 kick，避免用户打开会话前 runner 一直挂着。
   try {
@@ -4353,12 +2976,20 @@ app.whenReady().then(async () => {
     console.error('[main] recoverContextCheckpoints failed:', error?.message || error);
   }
   setDockIcon();
-  nativeTheme.on('updated', () => {
+  const onNativeThemeUpdated = () => {
     const appearance = settingsStore.getAll().appearance;
     if (appearance?.mode !== 'system') return;
     setDockIcon(appearance);
     quickChatWindowController.getWindow()?.webContents.send('appearance:changed', appearance);
-  });
+  };
+  nativeTheme.on('updated', onNativeThemeUpdated);
+  return {
+    name: 'native-theme-listener',
+    dispose: () => nativeTheme.removeListener('updated', onNativeThemeUpdated),
+  };
+}
+
+function startLocalRuntime() {
   const userDataPath = dataHome;
   const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
   // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
@@ -4371,13 +3002,6 @@ app.whenReady().then(async () => {
         sourceRoots,
         workspacePath: settingsStore.getAll().activeWorkspace || null,
       });
-
-  // 冷启动：shell 环境快照与首窗创建并行，不阻塞 createWindow。
-  // buildShellSpawnArgs 在快照未就绪时会 fallback 到 login shell。
-  void scheduleMissingPricingBackfill('startup');
-  void createShellEnvSnapshot().catch((err) => {
-    console.warn('[shell-env-snapshot] background create failed:', err?.message || err);
-  });
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,
@@ -4398,53 +3022,42 @@ app.whenReady().then(async () => {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
+  return {
+    name: 'local-tool-host-events',
+    dispose: () => {
+      localToolHost?.unsubscribeRuntimeEvents?.();
+      localToolHost = null;
+    },
+  };
+}
 
-  ipcMain.handle('client-tool:execute', (_event, payload) => {
-    if (!localToolHost) throw new Error('local_tool_host_not_ready');
-    return localToolHost.execute(
-      { call: payload?.call },
-      { localApproval: payload?.grant, source: 'renderer_client_tool_polling' },
-    );
-  });
-  ipcMain.handle('shell:tasks:list', () => localToolHost.listShellTasks());
-  ipcMain.handle('shell:tasks:stop-active', () => localToolHost.stopActiveShellTask());
-  ipcMain.handle('shell:tasks:stop', (_event, payload) => localToolHost.stopShellTask(payload?.taskId || payload?.toolCallId));
-  ipcMain.handle('shell:permissions:list', () => localToolHost.permissionReview.listShellRules());
-  ipcMain.handle('shell:permissions:add', (_event, payload) => localToolHost.permissionReview.addShellRule(payload));
+function startDesktopAffordances() {
+  const owner = {
+    name: 'desktop-affordances',
+    dispose: () => {
+      const failures = [];
+      for (const dispose of [
+        () => stopAutoUpdater(),
+        () => shortcutService.dispose(),
+        () => trayController?.destroy?.(),
+        () => quickChatWindowController.destroy(),
+      ]) {
+        try {
+          dispose();
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      trayController = null;
+      taskNotificationBroker = null;
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Desktop affordances cleanup failed');
+      }
+    },
+  };
 
-  // ── Skills (local only) ──
-  ipcMain.handle('skills:list', () => skillStore?.listSkills() ?? []);
-  ipcMain.handle('skills:get-detail', (_event, { skillId } = {}) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.getSkillDetail(skillId);
-  });
-  ipcMain.handle('skills:refresh', () => { skillStore?.refresh(); return skillStore?.listSkills() ?? []; });
-  ipcMain.handle('skills:upload', (_event, { zipBase64 }) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
-  });
-  ipcMain.handle('skills:enable', (_event, { skillId }) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.enableSkill(skillId);
-  });
-  ipcMain.handle('skills:disable', (_event, { skillId }) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.disableSkill(skillId);
-  });
-  // ── 从 a1 公共仓借用技能（软链投影）──
-  ipcMain.handle('skills:list-available', () => skillStore?.listAvailableSkills() ?? []);
-  ipcMain.handle('skills:link', (_event, { skillId }) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.linkSkill(skillId);
-  });
-  ipcMain.handle('skills:unlink', (_event, { skillId }) => {
-    if (!skillStore) throw new Error('skill_store_not_available');
-    return skillStore.unlinkSkill(skillId);
-  });
-
-  createWindow();
-
-  // 菜单栏托盘：Recent 会话 + New Chat / Open / Quit（P0 原生 Menu）。
+  try {
+    // 菜单栏托盘：Recent 会话 + New Chat / Open / Quit（P0 原生 Menu）。
   try {
     trayController = createAppTrayController();
   } catch (err) {
@@ -4459,7 +3072,8 @@ app.whenReady().then(async () => {
       listPlans: () => goalPlanStore.listPlanDetails(),
       getSettings: () => settingsStore.getAll(),
       isAppForeground: () => isMainAppForegroundForNotifications(),
-      getActiveConversationId: () => activeConversationIdForNotifications,
+      getActiveConversationId: () =>
+        conversationSessionApplicationService.getActiveConversationId(),
       openConversation: (payload) => openConversationFromTaskNotification(payload),
       showNotification: (payload) => showTaskSystemNotification(payload),
       isNotificationSupported: () => Notification.isSupported(),
@@ -4513,36 +3127,69 @@ app.whenReady().then(async () => {
     console.error('[updater] init failed:', err);
   }
 
-  app.on('activate', () => {
-    // 不能用 getAllWindows().length === 0 判断：quick-chat/popover 等隐藏预热窗口
-    // 常驻后台，导致关闭主窗后窗口数恒 >0，Dock 点击永远无法重建主窗。
-    // 直接按「主窗口是否存在」处理：存在则唤起，不存在则新建。
-    showOrCreateMainWindow();
+    return owner;
+  } catch (error) {
+    try {
+      owner.dispose();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Desktop affordances startup and rollback both failed',
+      );
+    }
+    throw error;
+  }
+}
+
+function startBackgroundWork() {
+  // 首窗和 IPC ready 后再启动非关键后台工作；失败只降级，不影响 Desktop 可用性。
+  void providerConfigurationApplicationService.scheduleMissingPricingBackfill('startup');
+  void createShellEnvSnapshot().catch((err) => {
+    console.warn('[shell-env-snapshot] background create failed:', err?.message || err);
   });
+}
+
+const desktopCompositionRoot = createDesktopCompositionRoot({
+  logger: console,
+  initialOwners: [
+    { name: 'conversation-change-subscription', dispose: stopConversationChangeSubscription },
+    { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
+    { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
+    { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
+    { name: 'trusted-window-registry', dispose: () => trustedWindowRegistry.dispose() },
+    { name: 'full-disk-access-drag-float', dispose: () => fullDiskAccessDragFloatController.destroy() },
+  ],
+  phases: [
+    { name: 'recovery-and-appearance', start: startRecoveryAndAppearance },
+    { name: 'local-runtime', start: startLocalRuntime },
+    { name: 'desktop-ipc', start: () => registerDesktopIpcHost() },
+    {
+      name: 'first-main-window',
+      start: () => {
+        const mainWindow = createWindow();
+        return {
+          name: 'first-main-window',
+          dispose: () => {
+            if (!mainWindow.isDestroyed()) mainWindow.close();
+          },
+        };
+      },
+    },
+    { name: 'desktop-affordances', optional: true, start: startDesktopAffordances },
+    { name: 'background-work', optional: true, start: startBackgroundWork },
+  ],
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+desktopLifecycleBinding = bindDesktopAppLifecycle({
+  app,
+  root: desktopCompositionRoot,
+  platform: process.platform,
+  logger: console,
+  onActivate: () => {
+    // Quick Chat 等隐藏窗口不能代表主窗口存在；按主窗口角色决定唤起或重建。
+    showOrCreateMainWindow();
+  },
+  onFatalStartupError: (error) => {
+    console.error('[main] desktop composition startup failed:', error);
+  },
 });
-
-// 退出前清理自动更新周期检测定时器，避免定时器泄漏。
-app.on('before-quit', () => {
-  stopConversationChangeSubscription();
-  stopGoalPlanChangeSubscription();
-  shortcutService.dispose();
-  try {
-    trayController?.destroy?.();
-  } catch (err) {
-    console.warn('[tray] destroy failed:', err);
-  }
-  trayController = null;
-  try {
-    stopAutoUpdater();
-  } catch (err) {
-    console.error('[updater] stop failed:', err);
-  }
-});
-
-app.once('will-quit', () => { try { fullDiskAccessDragFloatController.destroy(); } catch { /* ignore */ } });

@@ -17,13 +17,17 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@peer-agent/protocol": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*",
-    "@peer-agent/runtime-sdk": "workspace:*"
+    "@peer-agent/runtime-sdk": "workspace:*",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.15",
+    "adm-zip": "^0.5.17",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

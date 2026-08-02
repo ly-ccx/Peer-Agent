@@ -588,11 +588,26 @@ export function createQuickChatWindowController({
     return popoverWindow && !popoverWindow.isDestroyed() ? popoverWindow : null;
   }
 
+  function destroy() {
+    popoverState = null;
+    nativeMenuOpen = false;
+    menuSelection = null;
+
+    const popover = popoverWindow;
+    const quickChat = quickChatWindow;
+    popoverWindow = null;
+    quickChatWindow = null;
+
+    if (popover && !popover.isDestroyed()) popover.close();
+    if (quickChat && !quickChat.isDestroyed()) quickChat.close();
+  }
+
   return {
     show,
     toggle,
     hide,
     prewarm,
+    destroy,
     setTaskCardVisible,
     setContentHeight,
     getWindow,

@@ -35,7 +35,7 @@ import { getProviderModelDisplayLabel } from '../../chat/state/providerDisplay';
 import { getClipboardFiles, hasQuickChatContent } from '../../chat/state/quickChatAttachments';
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { AttachmentStrip, PEER_ATTACHMENT_DND_TYPE } from '../../chat/components/thread/AttachmentStrip';
-import type { QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
+import type { QuickChatPopoverAnchorRect, QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
 import { type InlineQuickChatPopoverState } from './QuickChatPopover';
 import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
@@ -234,7 +234,7 @@ export function QuickChatWindow() {
           : kind === 'mode'
             ? modePickerValue(mode)
             : localAccessLevel;
-    const nextState: InlineQuickChatPopoverState = {
+    const nextState: InlineQuickChatPopoverState & { anchorRect: QuickChatPopoverAnchorRect } = {
       kind,
       items,
       selectedValue,

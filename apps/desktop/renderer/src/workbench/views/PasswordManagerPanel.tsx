@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Overlay } from '../../app/components/Overlay';
 
 export interface PasswordManagerPanelProps {
   readonly open: boolean;
@@ -208,8 +209,12 @@ export function PasswordManagerPanel({
   if (!open) return null;
 
   return (
-    <div className="session-import-overlay" role="dialog" aria-modal="true" aria-label={t.title}>
-      <div className="session-import-modal password-manager-modal">
+    <Overlay
+      onClose={onClose}
+      ariaLabel={t.title}
+      backdropClassName="session-import-overlay"
+      panelClassName="session-import-modal password-manager-modal"
+    >
         <header className="session-import-header">
           <div>
             <h2 className="session-import-title">{t.title}</h2>
@@ -312,7 +317,6 @@ export function PasswordManagerPanel({
             </ul>
           )}
         </section>
-      </div>
-    </div>
+    </Overlay>
   );
 }

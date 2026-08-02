@@ -5,6 +5,7 @@ import path from 'node:path';
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname);
 
 const failures = [];
+const scope = process.argv[2] ?? 'all';
 
 function fail(message) {
   failures.push(message);
@@ -573,22 +574,32 @@ function assertPromptBaselineIsRecorded() {
   }
 
   const main = readText('apps/desktop/electron/main/main.mjs');
+  const settingsService = readText('apps/desktop/electron/main/settings-application-service.mjs');
+  const dataIpcRegistrar = readText('apps/desktop/electron/main/ipc/register-data-ipc.mjs');
   if (!main.includes('recordBaseline')) {
     fail('manual chat:compact must record a prompt baseline after successful compaction.');
   }
-  if (!main.includes('createContextBaselineRecorder') || !main.includes("'model_switch'")) {
+  if (
+    !main.includes('createContextBaselineRecorder')
+    || !baselineRecorderPath
+    || !readText(baselineRecorderPath).includes('recordProviderBaseline')
+  ) {
     fail('LLM provider default/model changes must record a Context Baseline through context-baseline-recorder.');
   }
-  if (!main.includes("'instruction_change'") || !main.includes('systemInstructions')) {
+  if (
+    !settingsService.includes('recordInstructionBaseline')
+    || !readText(baselineRecorderPath).includes("'instruction_change'")
+    || !readText(baselineRecorderPath).includes('systemInstructions')
+  ) {
     fail('Configured instruction changes must record an instruction_change Context Baseline.');
   }
   if (!main.includes('getActiveContextEpochId')) {
     fail('Manual compaction prompt snapshots must be anchored to the active Context Epoch.');
   }
   if (
-    !main.includes('prompt-context-epochs:list')
-    || !main.includes('prompt-context-epochs:events')
-    || !main.includes('prompt-context-epochs:chain')
+    !dataIpcRegistrar.includes('prompt-context-epochs:list')
+    || !dataIpcRegistrar.includes('prompt-context-epochs:events')
+    || !dataIpcRegistrar.includes('prompt-context-epochs:chain')
   ) {
     fail('Durable Context Epoch ledger must be queryable through typed IPC handlers.');
   }
@@ -904,9 +915,80 @@ function assertMotionPrimitivesAreCentralized() {
   }
 }
 
-assertAgentRules();
-assertArchitectureDocsStayLocal();
-assertOverlayMotionAdmission();
+function assertDesktopMainCompositionRootIsGoverned() {
+  const mainPath = 'apps/desktop/electron/main/main.mjs';
+  const rootPath = 'apps/desktop/electron/main/desktop-composition-root.mjs';
+  const ipcCatalogPath = 'apps/desktop/electron/ipc/channels.mjs';
+  const preloadSourcePath = 'apps/desktop/electron/preload/preload.source.cjs';
+
+  for (const requiredPath of [rootPath, ipcCatalogPath, preloadSourcePath]) {
+    if (!existsSync(path.join(repoRoot, requiredPath))) {
+      fail(`Desktop governance module is missing: ${requiredPath}`);
+    }
+  }
+  if (!existsSync(path.join(repoRoot, mainPath))) return;
+
+  const main = readText(mainPath);
+  for (const required of [
+    'createDesktopCompositionRoot({',
+    'bindDesktopAppLifecycle({',
+    "name: 'local-runtime'",
+    "name: 'desktop-ipc'",
+    "name: 'first-main-window'",
+    'unsubscribeRuntimeEvents',
+    "nativeTheme.removeListener('updated'",
+    'quickChatWindowController.destroy()',
+    'closeMcpOAuthCallback',
+  ]) {
+    if (!main.includes(required)) {
+      fail(`${mainPath} must keep governed Desktop Composition Root ownership: ${required}`);
+    }
+  }
+
+  const ownsReadyLifecycle = /app\.whenReady\s*\(/.test(main);
+  const ownsExitLifecycle = /app\.(?:on|once)\s*\(\s*['"](?:activate|window-all-closed|before-quit|will-quit)['"]/.test(main);
+  if (ownsReadyLifecycle || ownsExitLifecycle) {
+    fail(`${mainPath} must delegate Electron lifecycle listeners to bindDesktopAppLifecycle.`);
+  }
+  if (/ipcMain\.(?:handle|on)\s*\(/.test(main)) {
+    fail(`${mainPath} must not register IPC directly; use catalog-backed domain registrars.`);
+  }
+  if (main.includes('desktopIpcRegistrationHost')) {
+    fail(`${mainPath} must not restore the legacy eager Desktop IPC host.`);
+  }
+
+  const localRuntimeIndex = main.indexOf("name: 'local-runtime'");
+  const desktopIpcIndex = main.indexOf("name: 'desktop-ipc'");
+  const firstWindowIndex = main.indexOf("name: 'first-main-window'");
+  if (!(localRuntimeIndex < desktopIpcIndex && desktopIpcIndex < firstWindowIndex)) {
+    fail(`${mainPath} startup order must remain local-runtime -> desktop-ipc -> first-main-window.`);
+  }
+
+  const tuiFiles = collectFiles('apps/tui/src', ['.ts', '.tsx', '.js', '.jsx', '.mjs']);
+  for (const filePath of tuiFiles) {
+    if (/\.test\.[^.]+$/.test(filePath)) continue;
+    const content = readFileSync(filePath, 'utf8');
+    if (/apps\/desktop|desktop\/electron\/main|@peer-agent\/desktop/.test(content)) {
+      fail(`${relative(filePath)} must not import or reference Desktop production source.`);
+    }
+  }
+
+  const runtimeNodeFiles = collectFiles('packages/runtime-node/src', ['.ts', '.js', '.mjs']);
+  for (const filePath of runtimeNodeFiles) {
+    const content = readFileSync(filePath, 'utf8');
+    if (/from\s+['"]electron['"]|require\(\s*['"]electron['"]\s*\)/.test(content)) {
+      fail(`${relative(filePath)} must stay host-neutral and must not import Electron.`);
+    }
+  }
+}
+
+if (scope === 'desktop-main') {
+  assertDesktopMainCompositionRootIsGoverned();
+} else if (scope === 'all') {
+  assertAgentRules();
+  assertArchitectureDocsStayLocal();
+  assertDesktopMainCompositionRootIsGoverned();
+  assertOverlayMotionAdmission();
 assertMotionPrimitivesAreCentralized();
 assertRendererHasNoHighPrivilegeImports();
 assertNoStreamReplaceChannel();
@@ -924,6 +1006,9 @@ assertChatRuntimeResponseGuardIsModular();
 assertPromptBaselineIsRecorded();
 assertChatRuntimeAgentLoopsAreModular();
 assertContextAccountingPolicyIsCentralized();
+} else {
+  fail(`Unknown architecture governance scope: ${scope}`);
+}
 
 if (failures.length > 0) {
   console.error('Architecture governance check failed:');

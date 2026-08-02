@@ -1,82 +1,104 @@
 /**
- * Single seam for Desktop Main stream/auth adapters used by TUI providers.
+ * Transitional host seam for provider stream/auth adapters used by TUI.
  *
- * This does NOT make CLI depend on the Desktop app at install/runtime.
- * Monorepo builds may still compile these modules into the `peer` binary.
- * Hosts should inject fakes in tests; production defaults load Desktop adapters
- * dynamically so the import surface stays localized.
+ * Reusable Node algorithms come from `@peer-agent/runtime-node` and receive the
+ * TUI transport as a host port. OAuth UI adapters remain host-local while
+ * reusable provider algorithms stay behind the shared Node seam.
  */
 
-import type { ChatGptOAuthTokens } from '@peer-agent/runtime-node';
+import {
+  countAnthropicCanonicalRequest,
+  countGeminiCanonicalRequest,
+  ensureFreshGoogleTokens,
+  ensureFreshGrokTokens,
+  loadQoderAccessToken,
+  sendAnthropicMessagesStream,
+  sendGeminiStream,
+  sendQoderPrivateStream,
+  startGrokOAuthLogin,
+  type ChatGptOAuthTokens,
+} from '@peer-agent/runtime-node';
+
+import { createTuiProviderFetch } from './provider-transport.ts';
+import type { RecoveringFetchOptions } from './recovering-fetch.ts';
 
 export type DesktopStreamArgs = Record<string, unknown>;
 
+let tuiProviderFetch: ReturnType<typeof createTuiProviderFetch> | null = null;
+
+function getTuiProviderFetch(): ReturnType<typeof createTuiProviderFetch> {
+  tuiProviderFetch ??= createTuiProviderFetch();
+  return tuiProviderFetch;
+}
+
+function resolveProviderFetch(value: unknown): typeof fetch {
+  return typeof value === 'function' ? value as typeof fetch : getTuiProviderFetch();
+}
+
 export async function loadQoderAccessTokenFromDesktop(): Promise<string> {
-  const { loadQoderAccessToken } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs'
-  );
   return loadQoderAccessToken();
 }
 
 export async function sendQoderPrivateStreamFromDesktop(
   args: DesktopStreamArgs,
 ): Promise<Record<string, unknown>> {
-  const { sendQoderPrivateStream } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/qoder-private-adapter.mjs'
-  );
-  return sendQoderPrivateStream(args) as Promise<Record<string, unknown>>;
+  return sendQoderPrivateStream({
+    ...args,
+    fetchWithRecovery: (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+      recovery: Omit<RecoveringFetchOptions, 'fetchImpl'> = {},
+    ) => createTuiProviderFetch({
+      recovery,
+    })(input, init),
+  }) as Promise<Record<string, unknown>>;
 }
 
 export async function sendAnthropicMessagesStreamFromDesktop(
   args: DesktopStreamArgs,
 ): Promise<Record<string, unknown>> {
-  const { sendAnthropicMessagesStream } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/anthropic-messages-adapter.mjs'
-  );
-  return sendAnthropicMessagesStream(args) as Promise<Record<string, unknown>>;
+  return sendAnthropicMessagesStream({
+    ...args,
+    fetchImpl: resolveProviderFetch(args.fetchImpl),
+  }) as Promise<Record<string, unknown>>;
 }
 
 export async function sendGeminiStreamFromDesktop(
   args: DesktopStreamArgs,
 ): Promise<Record<string, unknown>> {
-  const { sendGeminiStream } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/gemini-adapter.mjs'
-  );
-  return sendGeminiStream(args) as Promise<Record<string, unknown>>;
+  return sendGeminiStream({
+    ...args,
+    fetchImpl: resolveProviderFetch(args.fetchImpl),
+  }) as Promise<Record<string, unknown>>;
 }
 
 export async function countAnthropicRequestFromDesktop(
   args: DesktopStreamArgs,
 ): Promise<{ inputTokens: number; source: 'provider_count_api' }> {
-  const { countAnthropicCanonicalRequest } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/context-count-adapter.mjs'
-  );
-  return countAnthropicCanonicalRequest(args);
+  return countAnthropicCanonicalRequest({
+    ...args,
+    fetchImpl: resolveProviderFetch(args.fetchImpl),
+  });
 }
 
 export async function countGeminiRequestFromDesktop(
   args: DesktopStreamArgs,
 ): Promise<{ inputTokens: number; source: 'provider_count_api' }> {
-  const { countGeminiCanonicalRequest } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/context-count-adapter.mjs'
-  );
-  return countGeminiCanonicalRequest(args);
+  return countGeminiCanonicalRequest({
+    ...args,
+    fetchImpl: resolveProviderFetch(args.fetchImpl),
+  });
 }
 
 export async function ensureFreshGoogleTokensFromDesktop(
   tokens: ChatGptOAuthTokens,
+  options?: { fetchImpl?: typeof fetch },
 ): Promise<ChatGptOAuthTokens> {
-  const { ensureFreshGoogleTokens } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/llm-oauth/google-oauth.mjs'
-  );
-  return ensureFreshGoogleTokens(tokens);
+  const fresh = await ensureFreshGoogleTokens(tokens, {
+    ...options,
+    fetchImpl: options?.fetchImpl ?? getTuiProviderFetch(),
+  });
+  return fresh.tokens;
 }
 
 /** Code Assist base used by Desktop for oauth_google (not generativelanguage openai shim). */
@@ -89,11 +111,10 @@ export async function ensureFreshGrokTokensFromDesktop(
   tokens: ChatGptOAuthTokens;
   [key: string]: unknown;
 }> {
-  const { ensureFreshGrokTokens } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/llm-oauth/grok-oauth.mjs'
-  );
-  return ensureFreshGrokTokens(tokens, options);
+  return ensureFreshGrokTokens(tokens, {
+    ...options,
+    fetchImpl: options?.fetchImpl ?? getTuiProviderFetch(),
+  });
 }
 
 /**
@@ -114,10 +135,6 @@ export async function ensureFreshGrokTokensFromDesktop(
 export async function startGrokReLoginFromDesktop(
   options?: { fetchImpl?: typeof fetch },
 ): Promise<ChatGptOAuthTokens> {
-  const { startGrokOAuthLogin } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/llm-oauth/grok-oauth.mjs'
-  );
   const { spawn } = await import('node:child_process');
 
   function copyToClipboard(value: string): Promise<boolean> {
@@ -173,7 +190,7 @@ export async function startGrokReLoginFromDesktop(
   });
 
   const session = startGrokOAuthLogin({
-    fetchImpl: options?.fetchImpl,
+    fetchImpl: options?.fetchImpl ?? getTuiProviderFetch(),
     openExternal: async (url: string) => {
       browserOpened = await openBrowser(url);
     },

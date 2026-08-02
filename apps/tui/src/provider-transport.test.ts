@@ -179,6 +179,51 @@ describe('TUI provider transport', () => {
     expect(response.status).toBe(204);
     expect(attempts).toBe(2);
   });
+
+  test('projects recovery buildInit through the TUI proxy and TLS transport', async () => {
+    const attempts: RequestInit[] = [];
+    const fakeFetch = Object.assign(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        attempts.push(init ?? {});
+        if (attempts.length === 1) throw connectionError('fetch failed', 'ECONNRESET');
+        return new Response(null, { status: 204 });
+      },
+      { preconnect() {} },
+    ) as typeof globalThis.fetch;
+    const providerFetch = createTuiProviderFetch({
+      env: {},
+      systemRootCertificates: ['system-ca'],
+      macosTrustedCertificates: [],
+      systemProxy: { https: 'http://proxy.example:8443' },
+      fetch: fakeFetch,
+      recovery: {
+        retryDelaysMs: [0],
+        retryJitterRatio: 0,
+        connectTimeoutMs: 0,
+        waitImpl: async () => {},
+        buildInit: ({ attempt, isRetry }) => ({
+          body: JSON.stringify({ request_id: `req-${attempt}`, is_retry: isRetry }),
+        }),
+      },
+    });
+
+    const response = await providerFetch('https://api.example.test/chat', {
+      method: 'POST',
+      headers: { 'x-base': 'kept' },
+    });
+
+    expect(response.status).toBe(204);
+    expect(attempts.map((init) => init.body)).toEqual([
+      JSON.stringify({ request_id: 'req-0', is_retry: false }),
+      JSON.stringify({ request_id: 'req-1', is_retry: true }),
+    ]);
+    for (const init of attempts) {
+      expect(init.method).toBe('POST');
+      expect((init as RequestInit & { proxy?: string }).proxy).toBe('http://proxy.example:8443');
+      expect((init as RequestInit & { tls?: { rejectUnauthorized?: boolean } }).tls?.rejectUnauthorized)
+        .toBe(true);
+    }
+  });
 });
 
 test('production transport keeps TLS certificate verification enabled', async () => {

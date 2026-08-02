@@ -498,3 +498,20 @@ test('menuSelection survives popup callback after click', () => {
   assert.equal(closed.length, 0);
 });
 
+test('destroy closes owned windows once and clears controller references', () => {
+  const parent = createFakeWindow();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+  });
+
+  controller.prewarm();
+  assert.equal(controller.getWindow(), parent);
+
+  controller.destroy();
+  controller.destroy();
+
+  assert.equal(parent.isDestroyed(), true);
+  assert.equal(controller.getWindow(), null);
+});
+

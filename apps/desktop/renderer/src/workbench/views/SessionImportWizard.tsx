@@ -4,6 +4,7 @@
  */
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Overlay } from '../../app/components/Overlay';
 
 const BRAND_LOGO_SRC = './logo.png';
 
@@ -333,8 +334,12 @@ export function SessionImportWizard({
   const selectedProfile = profiles.find((p) => p.profileId === profileId) || null;
 
   return (
-    <div className="session-import-overlay" role="dialog" aria-modal="true" aria-label={t.title}>
-      <div className="session-import-modal">
+    <Overlay
+      onClose={onClose}
+      ariaLabel={t.title}
+      backdropClassName="session-import-overlay"
+      panelClassName="session-import-modal"
+    >
         <header className="session-import-header">
           <div>
             <h2 className="session-import-title">{t.title}</h2>
@@ -566,7 +571,6 @@ export function SessionImportWizard({
             </footer>
           </section>
         ) : null}
-      </div>
-    </div>
+    </Overlay>
   );
 }

@@ -40,6 +40,11 @@ export const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
 
 export interface RecoveringFetchOptions {
   readonly fetchImpl?: FetchLike;
+  readonly buildInit?: (context: {
+    readonly attempt: number;
+    readonly isRetry: boolean;
+    readonly baseInit: RequestInit;
+  }) => RequestInit | null | undefined | Promise<RequestInit | null | undefined>;
   readonly retryDelaysMs?: readonly number[];
   readonly retryJitterRatio?: number;
   readonly randomImpl?: () => number;
@@ -179,6 +184,21 @@ export async function fetchWithConnectionRecovery(
   options: RecoveringFetchOptions = {},
 ): Promise<Response> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const baseInit = init ?? {};
+  const resolveAttemptInit = async (attempt: number): Promise<RequestInit> => {
+    if (typeof options.buildInit !== 'function') return baseInit;
+    const rebuilt = await options.buildInit({
+      attempt,
+      isRetry: attempt > 0,
+      baseInit,
+    });
+    if (!rebuilt || typeof rebuilt !== 'object') return baseInit;
+    return {
+      ...baseInit,
+      ...rebuilt,
+      signal: rebuilt.signal ?? baseInit.signal,
+    };
+  };
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_CONNECTION_RETRY_DELAYS_MS;
   const retryJitterRatio = options.retryJitterRatio
     ?? (options.retryDelaysMs ? 0 : DEFAULT_CONNECTION_RETRY_JITTER_RATIO);
@@ -190,13 +210,14 @@ export async function fetchWithConnectionRecovery(
   let lastError: unknown;
 
   for (let round = 0; round <= maxRetries; round += 1) {
-    if (init?.signal?.aborted) throw createAbortError();
+    if (baseInit.signal?.aborted) throw createAbortError();
+    const attemptInit = await resolveAttemptInit(round);
 
     try {
       return await callWithConnectTimeout(
         fetchImpl,
         input,
-        init,
+        attemptInit,
         connectTimeoutMs,
         scheduleTimeout,
       );
@@ -215,7 +236,7 @@ export async function fetchWithConnectionRecovery(
         reason: describeConnectionFailure(error),
       });
       if (delayMs > 0) {
-        await waitImpl(delayMs, init?.signal ?? undefined);
+        await waitImpl(delayMs, baseInit.signal ?? undefined);
       }
     }
   }

@@ -165,3 +165,169 @@ export {
 export type { CreateChatGptResponsesProviderOptions } from './chatgpt-responses-provider.ts';
 export { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts';
 export { refreshChatGptOAuthTokens } from './chatgpt-oauth.ts';
+
+// Shared Node Goal runtime. Desktop and TUI inject their host-specific chat,
+// interaction, Explorer, Verifier, and notification ports into this one pump.
+export {
+  DATA_STORE_ENTRIES,
+  exportBundle,
+  getDataHome,
+  importBundle,
+  listEntries,
+  migrateFromLegacy,
+  pathOf,
+} from './data-store.mjs';
+export {
+  aggregateProgress,
+  applyGoalTimingTransition,
+  createGoalPlanStore,
+  derivePlanStatus,
+  goalPlanIsSelfDriven,
+  goalPlanRequiresApproval,
+  normalizeGoalTiming,
+} from './goal-plan-store.mjs';
+export {
+  computePlanScopeSnapshot,
+  computeReanchorInterval,
+  createDeterministicExplorePlan,
+  createGoalRunner,
+  detectPlanDrift,
+  evaluateVerificationGate,
+  shouldReanchor,
+} from './goal-runner.mjs';
+export {
+  decideIntakeConvergence,
+  isIntakeContract,
+  serializeAcceptedGoalRunnerHandoff,
+  shouldAutoStartAcceptedGoalRunner,
+  shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
+} from './goal-intake-convergence.mjs';
+
+// Shared Node Skill/MCP runtime. Hosts own discovery, authorization UI, and
+// lifecycle wiring; this package owns the reusable registries, providers,
+// client transport, tool projection, and structured result construction.
+export { createMcpRegistry, slugifyMcpId } from './mcp-registry.mjs';
+export { createSkillStore } from './skill-store.mjs';
+export {
+  __mcpClientInternals,
+  callMcpTool,
+  disconnectAll,
+  disconnectMcp,
+  discoverMcpManifest,
+  finishMcpOAuth,
+  getMcpPrompt,
+  listMcpTools,
+  normalizeMcpToolResult,
+  probeMcpConnection,
+  readMcpResource,
+  startMcpOAuth,
+  testMcpConnection,
+} from './mcp-client.mjs';
+export { createLocalMcpProvider } from './local-mcp-provider.mjs';
+export { createLocalSkillProvider } from './local-skill-provider.mjs';
+export { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
+export {
+  createFailedClientToolResult,
+  createPermissionGrant,
+  nowIso,
+} from './tool-result-factory.mjs';
+
+// Shared provider request/stream algorithms. Hosts must inject their network
+// transport so Desktop keeps Electron net.fetch semantics while TUI keeps its
+// proxy, trust-store, and recovery policy.
+export { sendAnthropicMessagesStream } from './provider-adapters/anthropic-messages-adapter.mjs';
+export { sendGeminiStream } from './provider-adapters/gemini-adapter.mjs';
+export {
+  contextCountCapabilityForProvider,
+  countAnthropicCanonicalRequest,
+  countGeminiCanonicalRequest,
+} from './provider-adapters/context-count-adapter.mjs';
+export {
+  ensureFreshGoogleTokens,
+  refreshGoogleAccessToken,
+  startGoogleBrowserLogin,
+} from './llm-oauth/google-oauth.mjs';
+export {
+  GROK_CLI_CLIENT_ID,
+  GROK_LOGIN_SCOPE,
+  GROK_OIDC_ISSUER,
+  GROK_REQUIRED_API_SCOPE,
+  ensureFreshGrokTokens,
+  refreshGrokTokens,
+  startGrokOAuthLogin,
+} from './llm-oauth/grok-oauth.mjs';
+export {
+  clearSubscriptionQuotaCache,
+  expireFreshSubscriptionQuotaCache,
+  fetchChatGptUsage,
+  fetchGeminiQuota,
+  fetchGrokQuota,
+  fetchProviderSubscriptionQuota,
+  fetchQoderQuota,
+  mapQoderUsageToQuota,
+  resolveGeminiCodeAssistProjectId,
+  supportsSubscriptionQuota,
+} from './subscription-quota.mjs';
+export {
+  decryptQoderModelCache,
+  extractEmbeddedAuthWasmBytes,
+  loadQoderAccessToken,
+  loadQoderLocalAuth,
+  prepareQoderInferRequest,
+  resolveQoderCliBinary,
+  resolveQoderConfigDir,
+  resolveQoderInferenceEndpoint,
+} from './provider-adapters/qoder-local-auth.mjs';
+export {
+  getQoderModelCatalog,
+  getQoderModelMetadata,
+  listQoderModels,
+  qoderModelsPathForDebug,
+  resolveQoderModelOptionProjection,
+} from './provider-adapters/qoder-model-catalog.mjs';
+export {
+  fetchOfficialQoderModelCatalog,
+  fetchQoderUsageInfo,
+} from './provider-adapters/qoder-official-model-catalog.mjs';
+export {
+  consumeOpenAIStream,
+  sendOpenAIChatStream,
+  shouldUsePublicOpenAIChatStream,
+} from './provider-adapters/openai-chat-adapter.mjs';
+export {
+  emptyModelResponseCorrection,
+  emptyModelResponseError,
+  hasEmptyWriteNarration,
+  hasLiteralToolCallSyntax,
+  hasUnsupportedToolClaim,
+  shouldRetryNoToolResponse,
+  thinkingOnlyResponseCorrection,
+  thinkingOnlyResponseError,
+  unsupportedToolResponseCorrection,
+  unsupportedToolResponseError,
+} from './chat-runtime/response-guard.mjs';
+export {
+  QODER_CONNECTION_RETRY_DELAYS_MS,
+  QODER_QUEUE_DEFAULT_WAIT_MS,
+  QODER_QUEUE_LONG_WAIT_HINT_MS,
+  QODER_QUEUE_MAX_RETRIES,
+  QODER_QUEUE_MAX_WAIT_MS,
+  QODER_TRANSIENT_RETRY_DELAYS_MS,
+  buildQoderPrivateHeaders,
+  buildQoderPrivateRequestBody,
+  buildQoderRemoteChatAsk,
+  classifyQoderStreamFailure,
+  computeQoderQueueWaitMs,
+  formatQoderDuplicateError,
+  formatQoderQueueError,
+  formatQoderQueueStatusMessage,
+  mergeConsecutiveAssistants,
+  normalizeQoderModel,
+  normalizeQoderPreparedEndpoint,
+  qoderModelServerBaseUrl,
+  qoderTurnTaskId,
+  resolveQoderReasoningEffortParam,
+  sanitizeQoderToolPairing,
+  sendQoderPrivateStream,
+} from './provider-adapters/qoder-private-adapter.mjs';

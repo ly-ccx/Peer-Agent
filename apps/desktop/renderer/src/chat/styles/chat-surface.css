@@ -144,14 +144,11 @@
   border-radius: 999px;
   border: 2px solid color-mix(in srgb, var(--graphite-mute) 35%, transparent);
   border-top-color: var(--azure-seal, #3b82f6);
-  animation: chat-thread-loading-spin 0.8s linear infinite;
+  animation: motion-spin 0.8s linear infinite;
 }
 .chat-thread-loading p {
   margin: 0;
   font-size: 0.86rem;
-}
-@keyframes chat-thread-loading-spin {
-  to { transform: rotate(360deg); }
 }
 
 .chat-empty-state {

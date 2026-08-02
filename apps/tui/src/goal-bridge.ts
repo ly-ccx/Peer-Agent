@@ -1,5 +1,5 @@
 /**
- * CLI Goal bridge: reuse Desktop goal-plan-store on disk and expose the same
+ * CLI Goal bridge: reuse the shared Node GoalPlan store on disk and expose the same
  * goal_create_plan / goal_update_task / goal_get_plan tools to TUI runtime.
  *
  * Also enforces Goal-mode intake: before an accepted/executing plan exists for
@@ -11,13 +11,7 @@ import {
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
-// Static import so `bun --compile` embeds the shared Desktop store into peer.
-// Runtime path-walking fails inside /$bunfs of the packaged binary.
-// Desktop store is plain ESM without a declaration file.
-// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
-import { createGoalPlanStore } from '../../desktop/electron/main/goal-plan-store.mjs';
-// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
-import { pathOf } from '../../desktop/electron/main/data-store.mjs';
+import { createGoalPlanStore, pathOf } from '@peer-agent/runtime-node';
 
 import type { TuiMode } from './tui-mode.ts';
 

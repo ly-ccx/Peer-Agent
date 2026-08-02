@@ -1646,10 +1646,7 @@
     opacity: 0.4;
   }
   .workbench-tree-action:disabled svg {
-    animation: workbench-tree-spin 0.8s linear infinite;
-  }
-  @keyframes workbench-tree-spin {
-    to { transform: rotate(360deg); }
+    animation: motion-spin 0.8s linear infinite;
   }
   .workbench-tree-hint {
     min-height: 22px;

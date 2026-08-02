@@ -3,6 +3,9 @@ import path from 'node:path';
 
 import type { LlmSubscriptionQuota } from '@peer-agent/protocol';
 import {
+  fetchChatGptUsage,
+  fetchGeminiQuota,
+  fetchGrokQuota,
   loadSharedModelMetadataList,
   loadSharedModelSelection,
   refreshChatGptOAuthTokens,
@@ -114,12 +117,11 @@ function createQuotaFetchImpl(): typeof fetch {
 }
 
 async function loadQuotaFetchers(): Promise<QuotaFetchers> {
-  // Reuse Desktop main-process fetchers (already unit-tested against provider payloads).
-  // TUI already imports Desktop ESM adapters the same way for OAuth refresh.
-  return import(
-    // @ts-expect-error Desktop ESM module does not publish declarations.
-    '../../desktop/electron/main/subscription-quota.mjs'
-  ) as Promise<QuotaFetchers>;
+  return {
+    fetchChatGptUsage,
+    fetchGeminiQuota,
+    fetchGrokQuota,
+  };
 }
 
 export type FetchTuiSubscriptionQuotaOptions = {

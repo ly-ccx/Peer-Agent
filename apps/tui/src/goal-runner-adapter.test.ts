@@ -70,12 +70,12 @@ async function waitFor(
 }
 
 describe('createTuiSharedGoalRunner', () => {
-  test('静态复用 Desktop goal-runner 与 intake 收敛闸门（不复制编排逻辑）', async () => {
+  test('静态复用 runtime-node Goal Runner 与 intake 闸门且不反向依赖 Desktop', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(new URL('./goal-runner-adapter.ts', import.meta.url), 'utf8'),
     );
-    expect(source).toContain("from '../../desktop/electron/main/goal-runner.mjs'");
-    expect(source).toContain("from '../../desktop/electron/main/goal-intake-convergence.mjs'");
+    expect(source).toContain("from '@peer-agent/runtime-node'");
+    expect(source).not.toContain('../../desktop/electron/main');
     expect(source).toContain('createGoalRunner({');
     expect(source).toContain('recoverContextCheckpoints');
     expect(source).toContain('shouldAutoStartAcceptedGoalRunnerFromChange');

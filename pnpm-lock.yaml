@@ -232,6 +232,9 @@ importers:
 
   packages/runtime-node:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
       '@peer-agent/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -241,6 +244,15 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
+      '@qoder-ai/qoder-agent-sdk':
+        specifier: ^1.0.15
+        version: 1.0.15(zod@4.4.3)
+      adm-zip:
+        specifier: ^0.5.17
+        version: 0.5.17
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       typescript:
         specifier: ^5.9.3

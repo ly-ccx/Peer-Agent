@@ -1,22 +1,18 @@
 /**
- * CLI Skill/MCP bridge: reuse the Desktop registries/providers while keeping
+ * CLI Skill/MCP bridge: reuse the shared Node registries/providers while keeping
  * projection and execution behind the TUI host boundary.
  */
 import path from 'node:path';
 
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  createLocalMcpProvider,
+  createLocalSkillProvider,
+  createMcpRegistry,
+  createMcpToolDefinitionsFromRegistry,
+  createSkillStore,
+} from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
-// Static imports let `bun --compile` embed the shared plain-ESM implementations.
-// @ts-expect-error Shared Desktop ESM module has no declaration file.
-import { createMcpRegistry } from '../../desktop/electron/main/mcp-registry.mjs';
-// @ts-expect-error Shared Desktop ESM module has no declaration file.
-import { createSkillStore } from '../../desktop/electron/main/skill-store.mjs';
-// @ts-expect-error Shared Desktop ESM module has no declaration file.
-import { createLocalMcpProvider } from '../../desktop/electron/main/runtime-gateway/local-mcp-provider.mjs';
-// @ts-expect-error Shared Desktop ESM module has no declaration file.
-import { createLocalSkillProvider } from '../../desktop/electron/main/runtime-gateway/local-skill-provider.mjs';
-// @ts-expect-error Shared Desktop ESM module has no declaration file.
-import { createMcpToolDefinitionsFromRegistry } from '../../desktop/electron/main/tools/mcp-tool-definitions.mjs';
 
 const MCP_PREFIX = 'local.mcp.';
 const SKILL_PREFIX = 'local.skill.';

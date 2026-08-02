@@ -11,8 +11,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 test('drag float html uses native startAppDrag + preventDefault', () => {
   const loads = [];
   const bounds = [];
+  const lifecycle = [];
+  const registrations = [];
   /** @type {any} */
   let created = null;
+  let closedHandler = null;
   const BrowserWindow = function BrowserWindow(opts) {
     created = {
       opts,
@@ -21,13 +24,23 @@ test('drag float html uses native startAppDrag + preventDefault', () => {
       isVisible: () => created._visible,
       showInactive() { created._visible = true; },
       hide() { created._visible = false; },
-      close() { created._visible = false; },
+      close() {
+        created._visible = false;
+        lifecycle.push('close');
+        closedHandler?.();
+      },
       setAlwaysOnTop() {},
       setVisibleOnAllWorkspaces() {},
       moveTop() {},
       setBounds(b) { bounds.push({ ...b }); },
-      loadURL(url) { loads.push(url); return Promise.resolve(); },
-      on() {},
+      loadURL(url) {
+        loads.push(url);
+        lifecycle.push(`load:${url}`);
+        return Promise.resolve();
+      },
+      on(name, handler) {
+        if (name === 'closed') closedHandler = handler;
+      },
     };
     return created;
   };
@@ -43,20 +56,48 @@ test('drag float html uses native startAppDrag + preventDefault', () => {
     preloadPath: '/tmp/preload.cjs',
     resolveDragTarget: () => ({ ok: true, appPath: '/Applications/Peer Agent.app', displayName: 'Peer Agent' }),
     resolveLogoDataUrl: () => 'data:image/png;base64,aaa',
+    registerTrustedWindow: ({ window, url }) => {
+      assert.equal(window, created);
+      registrations.push(url);
+      lifecycle.push(`register:${url}`);
+      let disposed = false;
+      return () => {
+        if (disposed) return false;
+        disposed = true;
+        lifecycle.push(`dispose:${url}`);
+        return true;
+      };
+    },
     isZh: () => true,
   });
   const res = controller.show({ isZh: true, ttlMs: 0 });
   assert.equal(res.ok, true);
   assert.equal(created.opts.alwaysOnTop, true);
+  assert.equal(registrations[0], loads[0]);
+  assert.deepEqual(lifecycle.slice(0, 2), [`register:${loads[0]}`, `load:${loads[0]}`]);
   const html = decodeURIComponent(loads[0].slice('data:text/html;charset=utf-8,'.length));
   assert.match(html, /startAppDrag/);
+  assert.match(html, /hideFdaDragFloat/);
   assert.match(html, /preventDefault/);
+  controller.show({ isZh: false, ttlMs: 0 });
+  assert.notEqual(loads[1], loads[0]);
+  assert.equal(registrations[1], loads[1]);
+  assert.deepEqual(lifecycle.slice(2, 5), [
+    `dispose:${loads[0]}`,
+    `register:${loads[1]}`,
+    `load:${loads[1]}`,
+  ]);
   assert.equal(controller.isOpen(), true);
   controller.hide();
   assert.equal(controller.isOpen(), false);
   assert.equal(typeof controller.setDragging, 'function');
   controller.setDragging(true);
   controller.setDragging(false);
+  assert.ok(bounds.length >= 1);
+  controller.destroy();
+  assert.deepEqual(lifecycle.slice(-2), [`dispose:${loads[1]}`, 'close']);
+  controller.destroy();
+  assert.equal(lifecycle.filter((entry) => entry === `dispose:${loads[1]}`).length, 1);
 });
 
 test('float should glue to settings bottom inside with 4px padding', () => {

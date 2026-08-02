@@ -257,7 +257,7 @@ export function ImagePreviewOverlay({
   readonly onClose: () => void;
 }) {
   return (
-    <Overlay className="image-preview-overlay" onBackdropClick={onClose}>
+    <Overlay onClose={onClose} backdropClassName="image-preview-overlay" ariaLabel={isZh ? '图片预览' : 'Image preview'}>
       <figure className="image-preview-dialog" role="dialog" aria-modal="true" aria-label={isZh ? '图片预览' : 'Image preview'}>
         <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
         <figcaption className="image-preview-meta">

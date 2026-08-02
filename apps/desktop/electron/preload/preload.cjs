@@ -1,4 +1,21 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer: electronIpcRenderer } = require('electron');
+
+const channelOverrides = new Map(/* generated from electron/ipc/channels.mjs */ []);
+const resolveChannel = (key) => channelOverrides.get(key) ?? key;
+const listenerChannels = new WeakMap();
+const ipcRenderer = Object.freeze({
+  invoke: (key, ...args) => electronIpcRenderer.invoke(resolveChannel(key), ...args),
+  send: (key, ...args) => electronIpcRenderer.send(resolveChannel(key), ...args),
+  sendSync: (key, ...args) => electronIpcRenderer.sendSync(resolveChannel(key), ...args),
+  on: (key, listener) => {
+    listenerChannels.set(listener, resolveChannel(key));
+    electronIpcRenderer.on(resolveChannel(key), listener);
+  },
+  removeListener: (key, listener) => {
+    electronIpcRenderer.removeListener(listenerChannels.get(listener) ?? resolveChannel(key), listener);
+    listenerChannels.delete(listener);
+  },
+});
 
 function readInitialSettings() {
   try {

@@ -3,7 +3,10 @@ import { rootCertificates } from 'node:tls';
 
 import { loadMacosTrustedCertificates } from './macos-trusted-certificates.ts';
 import { readMacosSystemProxy, type SystemProxyConfig } from './macos-system-proxy.ts';
-import { fetchWithConnectionRecovery } from './recovering-fetch.ts';
+import {
+  fetchWithConnectionRecovery,
+  type RecoveringFetchOptions,
+} from './recovering-fetch.ts';
 
 export interface TuiProviderTransportEnvironment {
   readonly [key: string]: string | undefined;
@@ -106,6 +109,7 @@ export interface CreateTuiProviderFetchOptions {
   /** Optional system-proxy reader used when `systemProxy` is not fixed. */
   readonly readSystemProxy?: () => SystemProxyConfig;
   readonly fetch?: typeof globalThis.fetch;
+  readonly recovery?: Omit<RecoveringFetchOptions, 'fetchImpl'>;
   /** Disable connect/request recovery (useful in focused unit tests). */
   readonly connectionRecovery?: boolean;
 }
@@ -168,6 +172,7 @@ export function createTuiProviderFetch(
     }
 
     return fetchWithConnectionRecovery(input, requestInit, {
+      ...options.recovery,
       fetchImpl: underlyingFetch,
     });
   };

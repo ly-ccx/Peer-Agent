@@ -92,7 +92,46 @@ describe('CLI recovering fetch', () => {
     expect(isRecoverableConnectionFailure(connectionError('other side closed'))).toBe(true);
     expect(isRecoverableConnectionFailure(connectionError('premature close'))).toBe(true);
   });
-test('describes connection failures with optional cause codes', () => {
+test('rebuilds request init for every connection attempt', async () => {
+    const attempts: Array<{ attempt: number; isRetry: boolean }> = [];
+    const bodies: string[] = [];
+    let calls = 0;
+
+    const response = await fetchWithConnectionRecovery('https://api.example.test/chat', {
+      method: 'POST',
+      headers: { 'x-base': 'kept' },
+      body: JSON.stringify({ request_id: 'base' }),
+    }, {
+      retryDelaysMs: [0],
+      retryJitterRatio: 0,
+      connectTimeoutMs: 0,
+      waitImpl: async () => {},
+      buildInit: ({ attempt, isRetry }) => {
+        attempts.push({ attempt, isRetry });
+        return {
+          body: JSON.stringify({ request_id: `req-${attempt}`, is_retry: isRetry }),
+        };
+      },
+      fetchImpl: async (_input, init) => {
+        calls += 1;
+        bodies.push(String(init?.body));
+        if (calls === 1) throw connectionError('fetch failed', 'ECONNRESET');
+        return new Response('ok');
+      },
+    });
+
+    expect(await response.text()).toBe('ok');
+    expect(attempts).toEqual([
+      { attempt: 0, isRetry: false },
+      { attempt: 1, isRetry: true },
+    ]);
+    expect(bodies).toEqual([
+      JSON.stringify({ request_id: 'req-0', is_retry: false }),
+      JSON.stringify({ request_id: 'req-1', is_retry: true }),
+    ]);
+  });
+
+  test('describes connection failures with optional cause codes', () => {
     expect(describeConnectionFailure(connectionError('fetch failed', 'ECONNRESET')))
       .toBe('fetch failed (ECONNRESET)');
   });
