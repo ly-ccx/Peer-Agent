@@ -18,6 +18,7 @@ import {
   migrateToSegments,
   parseSerializedToolSegments,
 } from './streamSegments';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import type {
   ChatAttachment,
   ChatMsg,
@@ -60,9 +61,12 @@ export async function loadConversationMessages(conversationId: string): Promise<
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
+  contextAccounting: ContextAccountingSnapshot | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat' };
+  if (!conv?.messages) {
+    return { messages: [], tokenUsage: null, mode: 'chat', contextAccounting: null };
+  }
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
@@ -112,6 +116,8 @@ export async function loadConversationMessages(conversationId: string): Promise<
     }
     return msg;
   }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
+  const contextAccounting: ContextAccountingSnapshot | null =
+    conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as
@@ -128,6 +134,7 @@ export async function loadConversationMessages(conversationId: string): Promise<
       messages: loaded,
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
+      contextAccounting,
     };
   }
   return {
@@ -136,5 +143,6 @@ export async function loadConversationMessages(conversationId: string): Promise<
       ? { input: totalInput, output: totalOutput, cacheWrite: totalCacheWrite, cacheRead: totalCacheRead }
       : null,
     mode: convMode,
+    contextAccounting,
   };
 }

@@ -33,6 +33,23 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
   });
 
+  it('refreshes ring occupancy from the persisted snapshot after compaction reload', () => {
+    const compactionDoneHandler = routerSource.match(
+      /\/\/ 完成态：重载会话[\s\S]*?const timer = setTimeout\(\(\) => \{/,
+    )?.[0];
+    assert.ok(compactionDoneHandler, 'compaction done reload branch must remain discoverable');
+    assert.match(
+      compactionDoneHandler,
+      /contextAccounting,[\s\S]*await loadConversationMessages\(cid\)/,
+      'compaction reload must read the persisted accounting snapshot',
+    );
+    assert.match(
+      compactionDoneHandler,
+      /contextAccounting: acceptAccountingSnapshot\(\s*prev\.contextAccounting,\s*contextAccounting,?\s*\)/,
+      'compaction reload must merge accounting through the revision guard',
+    );
+  });
+
   it('keeps ring occupancy on the shared Runtime accounting snapshot', () => {
     assert.match(
       routerSource,

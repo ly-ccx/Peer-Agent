@@ -701,7 +701,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         // 完成态：重载会话，压缩点以 CompactionSummaryCard(msg.compaction) 就地出现在时间线。
         void (async () => {
           try {
-            const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(cid);
+            const {
+              messages: loaded,
+              tokenUsage: usage,
+              contextAccounting,
+            } = await loadConversationMessages(cid);
             conversationStore.setState(cid, (prev) => {
               // 压缩若在流式进行中完成，loadConversationMessages 会剥离正在接收 delta 的空
               // assistant 占位。这里在流仍活跃时把内存中的 assistant 尾消息接回压缩后的列表，
@@ -712,6 +716,14 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
                   streamMatches: prev.streamId === streamId,
                 }),
                 ...(usage ? { tokenUsage: usage } : {}),
+                ...(contextAccounting
+                  ? {
+                    contextAccounting: acceptAccountingSnapshot(
+                      prev.contextAccounting,
+                      contextAccounting,
+                    ),
+                  }
+                  : {}),
               };
             });
             onUpdatedRef.current?.(cid);
