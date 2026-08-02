@@ -9,13 +9,13 @@ import { GitPanel } from './GitPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { ShortcutsPanel } from './ShortcutsPanel';
-import { AppshotsPanel } from './AppshotsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-export type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appshots' | 'appearance' | 'updates' | 'archived' | 'usage';
+export type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
 
+// Appshots is intentionally hidden from Settings for now (not part of public beta surface).
 const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'general',
   'model',
@@ -23,7 +23,6 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'instructions',
   'git',
   'shortcuts',
-  'appshots',
   'appearance',
   'updates',
   'archived',
@@ -31,6 +30,7 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
 ]);
 
 function resolveSettingsSection(value: string | null | undefined): SettingsSection {
+  // Legacy deep-links like ?section=appshots fall back to general.
   if (value && SETTINGS_SECTIONS.has(value as SettingsSection)) {
     return value as SettingsSection;
   }
@@ -91,7 +91,6 @@ export function SettingsPage({
       items: [
         { key: 'model', label: isZh ? '模型与渠道' : 'Models & providers' },
         { key: 'skills', label: isZh ? '工具与能力' : 'Tools & capabilities' },
-        { key: 'appshots', label: 'Appshots' },
         { key: 'usage', label: i18n.t('settings.usage') },
       ],
     },
@@ -181,8 +180,6 @@ export function SettingsPage({
           <GitPanel i18n={i18n} onGitBranchPrefixChanged={onGitBranchPrefixChanged} />
         ) : section === 'shortcuts' ? (
           <ShortcutsPanel />
-        ) : section === 'appshots' ? (
-          <AppshotsPanel />
         ) : section === 'updates' ? (
           <UpdatesPanel i18n={i18n} />
         ) : section === 'archived' ? (
