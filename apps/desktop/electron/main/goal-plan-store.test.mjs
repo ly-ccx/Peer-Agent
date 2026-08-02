@@ -1617,6 +1617,7 @@ test('context checkpoint: prepare/commit/consume CAS happy path', () => {
     ],
   });
   // seed evidence index so createPlan validation is fine; also enable runner
+  store.setPlanStatus(plan.planId, 'executing');
   store.setRunnerState(plan.planId, {
     enabled: true,
     status: 'running',
@@ -1662,6 +1663,17 @@ test('context checkpoint: prepare/commit/consume CAS happy path', () => {
   assert.equal(committed.runner.contextCheckpoint.status, 'committed');
   assert.ok(committed.runner.contextCheckpoint.committedAt);
 
+  // A user-input pause may close the active timing segment while the committed
+  // checkpoint is still waiting to be persisted. Compaction resume must reopen it.
+  const blocked = store.setRunnerState(plan.planId, {
+    status: 'blocked',
+    phase: 'blocked',
+    intent: 'block',
+    blockedReason: 'requested_user_input',
+  });
+  assert.equal(blocked.timing.activeSegmentStartedAt, undefined);
+  const pausedAccumulatedMs = blocked.timing.activeAccumulatedMs;
+
   const persisted = store.markContextCompactionPersisted(plan.planId, {
     checkpointId: committed.runner.contextCheckpoint.checkpointId,
     conversationRevision: 'rev-1',
@@ -1669,12 +1681,16 @@ test('context checkpoint: prepare/commit/consume CAS happy path', () => {
   assert.equal(persisted.runner.status, 'resuming_after_compaction');
   assert.equal(persisted.runner.compactionCount, 1);
   assert.equal(persisted.runner.contextCheckpoint.conversationRevision, 'rev-1');
+  assert.equal(persisted.timing.activeAccumulatedMs, pausedAccumulatedMs);
+  assert.ok(persisted.timing.activeSegmentStartedAt);
 
+  const resumedAt = persisted.timing.activeSegmentStartedAt;
   const consumed = store.markContextCheckpointConsumed(plan.planId, {
     checkpointId: persisted.runner.contextCheckpoint.checkpointId,
   });
   assert.equal(consumed.runner.status, 'running');
   assert.equal(consumed.runner.contextCheckpoint, undefined);
+  assert.equal(consumed.timing.activeSegmentStartedAt, resumedAt);
   assert.equal(
     consumed.runner.lastConsumedCheckpointId,
     persisted.runner.contextCheckpoint.checkpointId,
