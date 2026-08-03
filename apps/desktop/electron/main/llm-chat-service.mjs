@@ -213,6 +213,24 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
       || actualModelProviderId
       || requestedModelProviderId
       || null;
+    // 用量归因必须带渠道 groupId：统计按 Provider 分组时以渠道为键，
+    // 不能让模型条目 uuid 代替渠道（否则同一渠道的每个模型条目各占一行）。
+    const resolvedProvider = providers.find((candidate) => (
+      candidate?.id === modelProviderId
+      || (candidate?.groupId && candidate.groupId === modelProviderId)
+      || (
+        modelProviderId
+        && candidate?.groupId
+        && candidate?.model
+        && modelProviderId === `${candidate.groupId}::${candidate.model}`
+      )
+    )) || null;
+    const compositeSeparator = typeof modelProviderId === 'string'
+      ? modelProviderId.indexOf('::')
+      : -1;
+    const groupId = (resolvedProvider?.groupId || '').trim()
+      || (compositeSeparator > 0 ? modelProviderId.slice(0, compositeSeparator).trim() : '')
+      || null;
     try {
       if (typeof conversationStore.updateModelEffort === 'function') {
         conversationStore.updateModelEffort(streamRecord.conversationId, patch);
@@ -235,6 +253,7 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
             id: streamRecord.streamId || undefined,
             streamId: streamRecord.streamId || null,
             modelProviderId,
+            groupId,
             model,
             providerName: streamRecord.actualProviderName || null,
             estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
@@ -254,6 +273,7 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
           conversationId: streamRecord.conversationId,
           streamId: streamRecord.streamId || null,
           modelProviderId,
+          groupId,
           model,
           providerName: streamRecord.actualProviderName || null,
           usage,

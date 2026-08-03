@@ -122,7 +122,7 @@ function providerModelLabel(provider) {
  * - 渠道 / 组 groupId
  * - 复合 id：groupId::model
  */
-function buildProviderIndex(providers = []) {
+export function buildProviderIndex(providers = []) {
   const byId = new Map();
   const byGroupId = new Map();
   const byComposite = new Map();
@@ -289,10 +289,13 @@ function sortGroupRows(rows) {
  * 因此切换 Provider 后历史成本仍归因到各自模型，不会串账。
  *
  * @param {readonly object[]} requests usage-request-log 的 readAll() 记录
+ * @param {{ providerIndex?: { byId?: Map, byGroupId?: Map, byComposite?: Map } | null }} [options]
+ *   providerIndex 用于把历史裸 uuid 记录归一到渠道 groupId（新写入行已自带 groupId 字段，
+ *   见 usage-request-log 的 resolveGroupId）。索引缺失或查不到时回退原 key，不破历史行为。
  * @returns {{ totals: object, byProvider: Map<string, object>, byModel: Map<string, object>,
  *            estimatedCostUsd: number, hasAnyPricing: boolean, requestCount: number }}
  */
-export function aggregateRequestUsage(requests = []) {
+export function aggregateRequestUsage(requests = [], { providerIndex = null } = {}) {
   const totals = emptyTokenBucket();
   /** @type {Map<string, any>} */
   const byProvider = new Map();
@@ -318,8 +321,25 @@ export function aggregateRequestUsage(requests = []) {
       : UNBOUND_PROVIDER_KEY
   );
   const providerKey = (row) => {
+    // 归组优先级：写入层落的 groupId（新数据真值）> 复合 id 拆出的 groupId
+    // > provider 索引把历史裸 uuid 归一到渠道 groupId > 原值回退（历史行渠道已删除等）。
+    const writtenGroupId = typeof row.groupId === 'string' && row.groupId.trim()
+      ? row.groupId.trim()
+      : '';
+    if (writtenGroupId && writtenGroupId !== UNBOUND_PROVIDER_KEY) return writtenGroupId;
     const composite = splitCompositeProviderId(modelProviderId(row));
-    return composite.groupId || modelProviderId(row);
+    if (composite.groupId) return composite.groupId;
+    const rawId = modelProviderId(row);
+    if (rawId === UNBOUND_PROVIDER_KEY) return rawId;
+    if (providerIndex && !composite.model) {
+      const byId = providerIndex.byId;
+      const byGroupId = providerIndex.byGroupId;
+      const hit = (typeof byId?.get === 'function' ? byId.get(rawId) : null)
+        || (typeof byGroupId?.get === 'function' ? byGroupId.get(rawId) : null);
+      const resolvedGroup = hit ? providerGroupKey(hit) : '';
+      if (resolvedGroup) return resolvedGroup;
+    }
+    return rawId;
   };
   const displayModel = (row) => (
     typeof row.model === 'string' && row.model.trim()
@@ -412,8 +432,11 @@ export function buildUsageStatsSnapshot({
   generatedAt = new Date().toISOString(),
 } = {}) {
   // 主路径：请求级快照聚合。成本按当次请求实际模型与当时单价归因，切模型不串账。
+  // providerIndex 用于把历史裸 uuid 快照归一到渠道 groupId，保证「按 Provider」一行一渠道。
   if (Array.isArray(requests) && requests.length > 0) {
-    const aggregated = aggregateRequestUsage(requests);
+    const aggregated = aggregateRequestUsage(requests, {
+      providerIndex: buildProviderIndex(providers),
+    });
     const finalizeRow = (row) => ({
       ...row,
       estimatedCostUsd: row.hasPricing ? row.estimatedCostUsd : null,

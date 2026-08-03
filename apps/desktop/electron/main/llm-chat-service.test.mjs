@@ -1065,6 +1065,8 @@ describe('llm chat service tool materialization', () => {
         id: 's1',
         streamId: 's1',
         modelProviderId: 'p1',
+        // 统计按渠道归组：写入层现在会解析渠道 groupId；该测试 provider 无 groupId，故为 null。
+        groupId: null,
         model: 'test-model',
         providerName: null,
         estimatedCostUsd: null,

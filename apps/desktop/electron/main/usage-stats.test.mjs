@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   addTokenBuckets,
   aggregateRequestUsage,
+  buildProviderIndex,
   buildUsageStatsSnapshot,
   emptyTokenBucket,
   estimateUsageCostUsd,
@@ -415,4 +416,79 @@ test('buildUsageStatsSnapshot prefers request snapshot over lifetime estimate', 
   // 不得出现 deepseek 的串账行（conversations 绑定了 deepseek 且有 lifetimeUsage）。
   const deepseekRows = snapshot.byModel.filter((row) => row.providerName === 'DeepSeek');
   assert.equal(deepseekRows.length, 0);
+});
+
+test('aggregateRequestUsage merges bare-uuid rows into one channel row via provider index (方案 A)', () => {
+  // 历史快照 modelProviderId 是裸 uuid（模型条目 id），同一渠道多个模型条目
+  // 必须归一到渠道 groupId，而不是每个 uuid 各占一行。
+  const providers = [
+    { id: 'uuid-ultimate', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'ultimate' },
+    { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel' },
+  ];
+  const requests = [
+    { modelProviderId: 'uuid-ultimate', model: 'ultimate', providerName: 'Qoder CLI', inputTokens: 100, outputTokens: 10 },
+    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 200, outputTokens: 20 },
+  ];
+
+  const { byProvider, byModel } = aggregateRequestUsage(requests, {
+    providerIndex: buildProviderIndex(providers),
+  });
+
+  assert.equal(byProvider.size, 1, '同一渠道只出一行');
+  const row = byProvider.get('qoder-cli');
+  assert.ok(row, 'provider 行以渠道 groupId 为键');
+  assert.equal(row.inputTokens, 300);
+  assert.equal(row.outputTokens, 30);
+  assert.equal(row.requestCount, 2);
+
+  // 模型维度保持按条目拆分，不受渠道归组影响。
+  assert.equal(byModel.size, 2);
+});
+
+test('aggregateRequestUsage prefers written groupId over provider index (方案 B)', () => {
+  const requests = [
+    { modelProviderId: 'uuid-x', groupId: 'qoder-cli', model: 'ultimate', inputTokens: 10 },
+    { modelProviderId: 'uuid-y', groupId: 'qoder-cli', model: 'cmodel', inputTokens: 20 },
+  ];
+  const { byProvider } = aggregateRequestUsage(requests);
+  assert.equal(byProvider.size, 1);
+  assert.equal(byProvider.get('qoder-cli').inputTokens, 30);
+});
+
+test('aggregateRequestUsage falls back to raw id when uuid not in current providers', () => {
+  // 渠道已删除 / 索引缺失时，历史行回退原 key，不丢行、不串账。
+  const requests = [
+    { modelProviderId: 'legacy-uuid', model: 'old-model', inputTokens: 5 },
+  ];
+  const { byProvider } = aggregateRequestUsage(requests, {
+    providerIndex: buildProviderIndex([]),
+  });
+  assert.equal(byProvider.size, 1);
+  assert.ok(byProvider.get('legacy-uuid'), '未匹配索引时保留原 key');
+});
+
+test('buildUsageStatsSnapshot collapses Qoder CLI uuid rows into a single provider row', () => {
+  const snapshot = buildUsageStatsSnapshot({
+    generatedAt: '2026-08-03T00:00:00.000Z',
+    providers: [
+      { id: 'uuid-ultimate', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'ultimate' },
+      { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel' },
+      { id: 'gemini-entry', groupId: 'gemini-oauth', name: 'Gemini OAuth', model: 'gemini-3.1-flash-lite', inputPrice: 1 },
+    ],
+    conversations: [],
+    requests: [
+      { modelProviderId: 'uuid-ultimate', model: 'ultimate', providerName: 'Qoder CLI', inputTokens: 205_000_000, outputTokens: 900_000 },
+      { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 9_000, outputTokens: 191 },
+      { modelProviderId: 'gemini-oauth::gemini-3.1-flash-lite', model: 'gemini-3.1-flash-lite', providerName: 'Gemini OAuth', inputTokens: 19_000, outputTokens: 762 },
+    ],
+  });
+
+  assert.equal(snapshot.notes.scope, 'request_snapshot');
+  assert.equal(snapshot.byProvider.length, 2, '两个渠道各一行');
+  const qoder = snapshot.byProvider.find((row) => row.key === 'qoder-cli');
+  assert.ok(qoder, 'Qoder CLI 收敛为单行');
+  assert.equal(qoder.inputTokens, 205_009_000);
+  assert.equal(qoder.requestCount, 2);
+  const gemini = snapshot.byProvider.find((row) => row.key === 'gemini-oauth');
+  assert.ok(gemini, 'Gemini OAuth 复合 id 仍归到渠道');
 });

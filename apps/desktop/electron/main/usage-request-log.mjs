@@ -24,6 +24,19 @@ function optionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+// 统计分组键：优先用写入方解析好的渠道 groupId；否则尝试从复合 id 拆回 groupId。
+// 裸 uuid 不在这里猜，留给聚合层用 provider 索引归组，历史行无 groupId 时回退原值。
+function resolveGroupId(entry) {
+  const explicit = optionalText(entry.groupId);
+  if (explicit) return explicit;
+  const modelProviderId = optionalText(entry.modelProviderId);
+  if (modelProviderId && modelProviderId.includes('::')) {
+    const groupId = modelProviderId.slice(0, modelProviderId.indexOf('::')).trim();
+    if (groupId) return groupId;
+  }
+  return null;
+}
+
 export function createUsageRequestLog({
   logFile = pathOf('usageRequests'),
   estimateCost = estimateUsageCostUsd,
@@ -53,6 +66,7 @@ export function createUsageRequestLog({
       conversationId: optionalText(entry.conversationId),
       streamId: optionalText(entry.streamId),
       modelProviderId: optionalText(entry.modelProviderId),
+      groupId: resolveGroupId(entry),
       model: optionalText(entry.model),
       providerName: optionalText(entry.providerName),
       usageScope: 'runtime_turn',

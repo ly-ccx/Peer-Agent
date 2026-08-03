@@ -1057,6 +1057,18 @@ export function createConversationStore(options = {}) {
         conversationId,
         streamId: optionalText(attribution.streamId),
         modelProviderId: optionalText(attribution.modelProviderId),
+        // 统计按渠道归组：优先写入方解析好的 groupId；回退从复合 id 拆。
+        // 裸 uuid（模型条目 id）不猜，留给聚合层用 provider 索引归组。
+        groupId: (() => {
+          const explicit = optionalText(attribution.groupId);
+          if (explicit) return explicit;
+          const raw = optionalText(attribution.modelProviderId);
+          if (raw && raw.includes('::')) {
+            const group = raw.slice(0, raw.indexOf('::')).trim();
+            if (group) return group;
+          }
+          return null;
+        })(),
         model: optionalText(attribution.model),
         providerName: optionalText(attribution.providerName),
         usageScope: 'runtime_turn',

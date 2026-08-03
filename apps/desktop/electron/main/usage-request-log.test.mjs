@@ -70,3 +70,46 @@ test('readAll returns trailing entries', () => {
   assert.equal(rows.length, 2);
   assert.equal(rows[1].id, 'b');
 });
+
+test('append persists explicit channel groupId (写入层方案 B)', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-'));
+  const logFile = path.join(dir, 'requests.jsonl');
+  const log = createUsageRequestLog({ logFile });
+  // Desktop 写入方解析出的真实渠道 groupId 必须原样落盘，聚合层优先使用它归组。
+  const record = log.append({
+    id: 'req-grouped',
+    modelProviderId: '7f2c1a3e-条目-uuid',
+    groupId: 'qoder-cli',
+    model: 'ultimate',
+    usage: { inputTokens: 10 },
+  });
+  assert.equal(record.groupId, 'qoder-cli');
+  const saved = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').at(-1));
+  assert.equal(saved.groupId, 'qoder-cli');
+});
+
+test('append derives groupId from composite modelProviderId when not given', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-'));
+  const logFile = path.join(dir, 'requests.jsonl');
+  const log = createUsageRequestLog({ logFile });
+  const record = log.append({
+    id: 'req-composite',
+    modelProviderId: 'gemini-oauth::gemini-3.1-flash-lite',
+    model: 'gemini-3.1-flash-lite',
+    usage: { inputTokens: 10 },
+  });
+  assert.equal(record.groupId, 'gemini-oauth');
+});
+
+test('append leaves groupId null for bare uuid (留给聚合层用 provider 索引归组)', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-'));
+  const logFile = path.join(dir, 'requests.jsonl');
+  const log = createUsageRequestLog({ logFile });
+  const record = log.append({
+    id: 'req-uuid',
+    modelProviderId: '7f2c1a3e-entry-uuid',
+    model: 'ultimate',
+    usage: { inputTokens: 10 },
+  });
+  assert.equal(record.groupId, null);
+});
