@@ -1507,6 +1507,10 @@ const providerConfigurationApplicationService = createProviderConfigurationAppli
   setDefault: (id) => llmConfigStore.setDefault(id),
   testConnection: (id) => llmConfigStore.testConnection(id),
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
+  notifyOAuthRefreshed: ({ reason, refreshed }) => {
+    console.info(`[llm] silent oauth refresh (${reason}): refreshed ${refreshed} credential(s)`);
+    broadcastToAllWindows('llm:oauth:refreshed', { reason, refreshed });
+  },
   reportRefreshError: (error) => {
     console.warn('[llm] silent oauth refresh failed:', error?.message || error);
   },

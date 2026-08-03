@@ -26,6 +26,7 @@ export function createProviderConfigurationApplicationService({
   setDefault,
   testConnection,
   recordBaseline,
+  notifyOAuthRefreshed = () => {},
   reportRefreshError = () => {},
   reportBackfillResult = () => {},
   reportBackfillError = () => {},
@@ -50,11 +51,32 @@ export function createProviderConfigurationApplicationService({
     setDefault: assertFunction(setDefault, 'setDefault'),
     testConnection: assertFunction(testConnection, 'testConnection'),
     recordBaseline: assertFunction(recordBaseline, 'recordBaseline'),
+    notifyOAuthRefreshed: assertFunction(notifyOAuthRefreshed, 'notifyOAuthRefreshed'),
     reportRefreshError: assertFunction(reportRefreshError, 'reportRefreshError'),
     reportBackfillResult: assertFunction(reportBackfillResult, 'reportBackfillResult'),
     reportBackfillError: assertFunction(reportBackfillError, 'reportBackfillError'),
   };
   let backfillPromise = null;
+  let oauthRefreshPromise = null;
+
+  // 列表请求不再把 OAuth 静默刷新作为前置卡口：立即返回本地列表，
+  // 后台合并触发一次刷新；真正刷到 token 后通过 notifyOAuthRefreshed 通知渲染层增量刷新。
+  function scheduleOAuthRefresh(reason = 'llm:list') {
+    if (oauthRefreshPromise) return oauthRefreshPromise;
+    oauthRefreshPromise = Promise.resolve()
+      .then(() => ports.refreshExpiredOAuth())
+      .then((result) => {
+        const refreshed = Number(result?.refreshed) || 0;
+        if (refreshed > 0) ports.notifyOAuthRefreshed({ reason, refreshed });
+      })
+      .catch((error) => {
+        ports.reportRefreshError(error);
+      })
+      .finally(() => {
+        oauthRefreshPromise = null;
+      });
+    return oauthRefreshPromise;
+  }
 
   function scheduleMissingPricingBackfill(reason = 'startup') {
     if (backfillPromise) return backfillPromise;
@@ -74,22 +96,14 @@ export function createProviderConfigurationApplicationService({
     return backfillPromise;
   }
 
-  async function silentlyRefreshOAuth() {
-    try {
-      await ports.refreshExpiredOAuth();
-    } catch (error) {
-      ports.reportRefreshError(error);
-    }
-  }
-
-  async function getProviders() {
-    await silentlyRefreshOAuth();
+  function getProviders() {
+    void scheduleOAuthRefresh('llm:list');
     void scheduleMissingPricingBackfill('llm:list');
     return ports.listProviders();
   }
 
-  async function getGroups() {
-    await silentlyRefreshOAuth();
+  function getGroups() {
+    void scheduleOAuthRefresh('llm:list');
     return ports.listGroups();
   }
 

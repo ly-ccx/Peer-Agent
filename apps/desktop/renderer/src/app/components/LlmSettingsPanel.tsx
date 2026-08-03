@@ -144,7 +144,7 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
   },
   {
     id: 'qoder',
-    label: 'Qoder 私有接口',
+    label: 'Qoder（本机 CLI）',
     legacyProvider: 'openai',
     defaultWire: 'qoder-private',
     allowedWires: ['qoder-private'],
@@ -207,7 +207,7 @@ function wireLabel(wire: string | undefined, locale: string): string {
     case 'gemini':
       return zh ? 'Gemini GenerateContent' : 'Gemini GenerateContent';
     case 'qoder-private':
-      return zh ? 'Qoder 私有接口' : 'Qoder Private API';
+      return zh ? 'Qoder（本机 CLI）' : 'Qoder (local CLI)';
     default:
       return wire || (zh ? '未解析' : 'Unresolved');
   }
@@ -577,6 +577,11 @@ export function LlmSettingsPanel({
     setOauthPending(null);
   }), []);
 
+  // 后台静默刷新真正更新凭证后，增量刷新渠道列表（不阻塞首屏）。
+  useEffect(() => clientApi.onLlmOAuthRefreshed(() => {
+    void refresh();
+  }), [refresh]);
+
   useEffect(() => {
     let cancelled = false;
     void clientApi.llmListChannels()
@@ -798,7 +803,7 @@ export function LlmSettingsPanel({
           customHeaders,
           authMethod: form.authMethod,
           name: form.name || (localCli
-            ? 'Qoder 私有接口'
+            ? 'Qoder（本机 CLI）'
             : form.authMethod === 'oauth_google'
               ? 'Gemini OAuth'
               : form.authMethod === 'oauth_grok'
@@ -1504,7 +1509,7 @@ export function LlmSettingsPanel({
             <>
               <label>
                 <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder="Qoder 私有接口" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+                <input value={form.name} placeholder="Qoder（本机 CLI）" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
               </label>
             </>
           ) : (

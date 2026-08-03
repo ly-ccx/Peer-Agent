@@ -989,6 +989,11 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     expiresAt: string;
   }) => void) => () => void;
   readonly onLlmOAuthAuthorized: (listener: () => void) => () => void;
+  /** 静默 OAuth 刷新完成且确有凭证被更新时触发；渲染层应增量刷新渠道列表。 */
+  readonly onLlmOAuthRefreshed: (listener: (payload: {
+    reason: string;
+    refreshed: number;
+  }) => void) => () => void;
   // ADR 28(方案 B): 列出订阅可用模型(远程拉取,失败回退内置清单)。
   readonly llmListModels: (params: { id: string }) => Promise<LlmModelListResult>;
   // 用表单临时配置(未落盘)直接拉模型,供"添加渠道"弹窗预览/多选。

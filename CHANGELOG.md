@@ -4,6 +4,10 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+### Changed
+
+- Model / channel settings lists no longer block on OAuth silent refresh: `llm:list-groups` / `llm:list-providers` return local data immediately, coalesce a single background refresh, and push an `llm:oauth:refreshed` event when credentials actually change so the renderer incrementally re-fetches. Removes the up-to-20s-per-credential network gate when opening the settings page offline or with an unreachable auth endpoint.
+
 ### Fixed
 
 - Qoder context-tier projection no longer anchors the input reserve to the default tier; when the catalog default tier window exceeds `max_input_tokens` (e.g. Cantus: default 1M tier with a 180k max input), the reserve now anchors to the smallest tier that fits `max_input_tokens`, so a selected 1M tier projects ~980k usable input instead of collapsing to 180k and smaller tiers no longer degrade to 1 token.

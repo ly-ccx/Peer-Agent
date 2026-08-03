@@ -51,6 +51,7 @@ function createHarness(overrides = {}) {
     },
     testConnection: (id) => ({ id, ok: true }),
     recordBaseline: (reason, provider) => calls.push(['baseline', reason, provider.id]),
+    notifyOAuthRefreshed: (payload) => calls.push(['refreshed', payload]),
     reportRefreshError: (error) => calls.push(['refresh-error', error.message]),
     reportBackfillResult: (reason, result) => calls.push(['backfill-result', reason, result]),
     reportBackfillError: (error) => calls.push(['backfill-error', error.message]),
@@ -60,19 +61,75 @@ function createHarness(overrides = {}) {
   return { calls, getProviders: () => providers, service };
 }
 
-test('provider lists silently refresh OAuth and provider list schedules pricing backfill', async () => {
+test('provider lists return immediately and schedule one background OAuth refresh', async () => {
   const { calls, service } = createHarness();
 
   assert.deepEqual(await service.listGroups(), [{ id: 'g1' }]);
   assert.equal((await service.listProviders()).length, 2);
   await service.scheduleMissingPricingBackfill('joined');
+  // 后台刷新/回填在微任务里完成后断言
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [
-    ['refresh'],
     ['refresh'],
     ['backfill'],
     ['backfill-result', 'llm:list', { updated: 1, examined: 2 }],
   ]);
+});
+
+test('provider list requests coalesce concurrent background OAuth refreshes', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { calls, service } = createHarness({
+    refreshExpiredOAuth: async () => {
+      calls.push(['refresh']);
+      await gate;
+      return { attempted: 1, refreshed: 1 };
+    },
+  });
+
+  // 用 listGroups（不触发 pricing backfill）聚焦验证刷新合并语义。
+  const first = service.listGroups();
+  const second = service.listGroups();
+  const third = service.listGroups();
+  assert.deepEqual(await first, [{ id: 'g1' }]);
+  assert.deepEqual(await second, [{ id: 'g1' }]);
+  assert.deepEqual(await third, [{ id: 'g1' }]);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // 三次列表请求只合并成一次后台刷新，且刷新完成后通知一次。
+  assert.deepEqual(calls, [
+    ['refresh'],
+    ['refreshed', { reason: 'llm:list', refreshed: 1 }],
+  ]);
+});
+
+test('background OAuth refresh does not notify when nothing was refreshed', async () => {
+  const { calls, service } = createHarness({
+    refreshExpiredOAuth: async () => {
+      calls.push(['refresh']);
+      return { attempted: 0, refreshed: 0 };
+    },
+  });
+
+  assert.deepEqual(await service.listGroups(), [{ id: 'g1' }]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [['refresh']]);
+});
+
+test('provider list requests are not blocked by a pending OAuth refresh', async () => {
+  // 模拟一个永远挂起的刷新（如网络卡死）：列表必须立即返回，不等待。
+  const { service } = createHarness({
+    refreshExpiredOAuth: () => new Promise(() => {}),
+  });
+
+  const listed = await Promise.race([
+    service.listGroups(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('listGroups blocked on refresh')), 50)),
+  ]);
+  assert.deepEqual(listed, [{ id: 'g1' }]);
 });
 
 test('provider silent refresh and pricing backfill failures are degraded', async () => {
@@ -85,6 +142,7 @@ test('provider silent refresh and pricing backfill failures are degraded', async
 
   assert.equal((await service.listProviders()).length, 2);
   assert.equal(await service.scheduleMissingPricingBackfill('joined'), null);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [
     ['refresh-error', 'refresh failed'],
     ['backfill-error', 'backfill failed'],

@@ -345,6 +345,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('llm:oauth:authorized', handler);
     return () => ipcRenderer.removeListener('llm:oauth:authorized', handler);
   },
+  onLlmOAuthRefreshed: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('llm:oauth:refreshed', handler);
+    return () => ipcRenderer.removeListener('llm:oauth:refreshed', handler);
+  },
   llmListModels: (params) => ipcRenderer.invoke('llm:models:list', params),
   llmFetchModels: (params) => ipcRenderer.invoke('llm:models:fetch', params),
   restartHost: (options) => ipcRenderer.invoke('host:restart', options || {}),

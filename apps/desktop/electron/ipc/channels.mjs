@@ -255,6 +255,7 @@ const EVENT_CHANNELS = Object.freeze([
   'goalRunner:changed',
   'llm:oauth:authorized',
   'llm:oauth:pending',
+  'llm:oauth:refreshed',
   'quick-chat-popover:state',
   'quick-chat:conversation-created',
   'quick-chat:open-conversation',
