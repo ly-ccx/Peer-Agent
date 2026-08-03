@@ -14,6 +14,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
+import { useConfirm } from './ConfirmProvider';
 import { LlmBrandIcon } from './LlmBrandIcon';
 import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
@@ -508,6 +509,7 @@ export function LlmSettingsPanel({
   readonly i18n: I18nRuntime;
   readonly onBack?: () => void;
 }) {
+  const confirm = useConfirm();
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
@@ -869,7 +871,20 @@ export function LlmSettingsPanel({
   };
 
   // B-2 删除整个 provider 组(该 provider 及其下全部模型)。
-  const handleRemoveGroup = async (groupId: string) => {
+  const handleRemoveGroup = async (groupId: string, groupLabel?: string) => {
+    const zh = i18n.locale === 'zh-CN';
+    const label = (groupLabel || groupId).trim() || groupId;
+    const ok = await confirm({
+      title: zh ? '删除渠道' : 'Remove provider',
+      message: zh
+        ? `确认删除渠道「${label}」及其全部模型？此操作不可撤销。`
+        : `Delete provider “${label}” and all its models? This cannot be undone.`,
+      confirmText: zh ? '删除' : 'Delete',
+      cancelText: zh ? '取消' : 'Cancel',
+      tone: 'danger',
+    });
+    if (!ok) return;
+
     setRemovingGroupId(groupId);
     try {
       await clientApi.llmRemoveGroup({ groupId });
@@ -1336,7 +1351,12 @@ export function LlmSettingsPanel({
                     {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                   </button>
                 ) : null}
-                <button type="button" className="danger" onClick={() => handleRemoveGroup(g.groupId)} disabled={removingGroupId === g.groupId}>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => void handleRemoveGroup(g.groupId, head.name || head.provider)}
+                  disabled={removingGroupId === g.groupId}
+                >
                   {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider')}
                 </button>
               </div>
