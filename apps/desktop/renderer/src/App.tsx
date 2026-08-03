@@ -379,14 +379,14 @@ function MainApp() {
     })();
   }, [setupModelAutoOpened]);
 
-  // Gate A：未配置模型时，首启自动进入 Settings/模型 一次（可返回；之后只靠空态 CTA）。
+  // Gate A：未配置服务时，首启自动进入 Settings/服务商 一次（可返回；之后只靠空态 CTA）。
   useEffect(() => {
     if (!showMainShell || !providersReady) return;
     if (setupModelAutoOpened || setupModelAutoOpenAttemptedRef.current) return;
     if (providers.some((p) => p.apiKeyConfigured)) return;
     setupModelAutoOpenAttemptedRef.current = true;
     markSetupModelAutoOpened();
-    openSettings('model');
+    openSettings('providers');
   }, [
     markSetupModelAutoOpened,
     openSettings,
@@ -842,7 +842,7 @@ function MainApp() {
                     setResumeTask(null);
                     void clientApi.clearPendingTask().catch(() => {});
                   }}
-                  onOpenSettings={() => openSettings('model')}
+                  onOpenSettings={() => openSettings('providers')}
                   onConversationUpdated={() => { void refreshConversations(); }}
                   onStreamingChange={(convId, streaming) => {
                     if (!convId) return;

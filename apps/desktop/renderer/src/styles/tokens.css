@@ -54,7 +54,7 @@
   --blur-popover: 24px;
   /* 与 blur 搭配：saturate 让磨砂更厚、更糊，而不是单 blur 的薄透明感 */
   --blur-saturate: 1.6;
-  /* 顶部用户对话浮条同款真实磨砂配方：弹窗/模态必须复用这一组，而不是只套 glass-popover 半透明底色。 */
+  /* 顶部用户对话浮条同款真实磨砂配方：只作为顶部浮条源，不直接套到大面积弹窗。 */
   --glass-frosted-chrome-background:
     linear-gradient(
       180deg,
@@ -156,6 +156,20 @@
   --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
   --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
+  /* 弹窗专用磨砂：浅色主题不能整块发白，面板采样顶部浮条的 blur，但用更薄的冷灰玻璃和明确边界。 */
+  --glass-modal-scrim: color-mix(in srgb, var(--chrome-sunken) 30%, transparent);
+  --glass-modal-background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--chrome-raised) 54%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 42%, transparent)
+    );
+  --glass-modal-filter: blur(var(--blur-chrome, 24px)) saturate(1.18);
+  --glass-modal-border: color-mix(in srgb, var(--ink-hairline) 52%, transparent);
+  --glass-modal-shadow:
+    var(--glass-edge-highlight),
+    0 20px 46px color-mix(in srgb, var(--ink-base) 16%, transparent),
+    0 6px 18px color-mix(in srgb, var(--ink-base) 10%, transparent);
   /* 统一软阴影：输入框 / 侧栏选中态等同级轻浮起。 */
   --shadow-soft: 0 1px 2px rgba(26, 29, 33, 0.06), 0 6px 18px rgba(26, 29, 33, 0.08);
   --shadow-composer: var(--shadow-soft);
@@ -402,6 +416,20 @@
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
   --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
+  /* 弹窗专用磨砂：深色主题保持顶部浮条的真实 blur，但用深色玻璃，避免浅色 token 把暗底洗灰。 */
+  --glass-modal-scrim: color-mix(in srgb, var(--chrome-canvas) 62%, transparent);
+  --glass-modal-background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--chrome-raised) 62%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 50%, transparent)
+    );
+  --glass-modal-filter: blur(var(--blur-chrome, 24px)) saturate(1.24);
+  --glass-modal-border: color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+  --glass-modal-shadow:
+    var(--glass-edge-highlight),
+    0 22px 52px rgba(0, 0, 0, 0.42),
+    0 6px 20px rgba(0, 0, 0, 0.32);
   /* 深色统一软阴影：略加重，避免在暗底上“贴死”。 */
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.28), 0 8px 22px rgba(0, 0, 0, 0.34);
   --shadow-composer: var(--shadow-soft);

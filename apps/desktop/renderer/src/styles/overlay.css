@@ -16,10 +16,10 @@
     display: grid;
     place-items: center;
     padding: var(--space-8);
-    /* 统一冷调遮罩：半透 + 中等磨砂，给面板毛玻璃留出景深 */
-    background: rgba(8, 12, 18, 0.42);
-    backdrop-filter: blur(14px) saturate(var(--blur-saturate, 1.6));
-    -webkit-backdrop-filter: blur(14px) saturate(var(--blur-saturate, 1.6));
+    /* 主题化弹窗遮罩：只给景深，不把整屏洗成灰白/黑雾。 */
+    background: var(--glass-modal-scrim);
+    backdrop-filter: var(--glass-modal-filter);
+    -webkit-backdrop-filter: var(--glass-modal-filter);
     /* 动效基元（motion.css）：backdrop 只淡入，位移交给面板。 */
     animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
   }
@@ -30,8 +30,8 @@
     position: relative;
     isolation: isolate;
     background: transparent;
-    border: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
-    box-shadow: var(--glass-frosted-chrome-shadow);
+    border: 1px solid var(--glass-modal-border);
+    box-shadow: var(--glass-modal-shadow);
     /* 动效基元：淡入 + 上移（enter-rise）。 */
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
@@ -43,9 +43,9 @@
     z-index: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: var(--glass-frosted-chrome-background);
-    backdrop-filter: var(--glass-frosted-chrome-filter);
-    -webkit-backdrop-filter: var(--glass-frosted-chrome-filter);
+    background: var(--glass-modal-background);
+    backdrop-filter: var(--glass-modal-filter);
+    -webkit-backdrop-filter: var(--glass-modal-filter);
   }
 
   .pa-overlay-panel > * {

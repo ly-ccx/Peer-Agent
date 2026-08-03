@@ -18,7 +18,11 @@ import {
 } from '@peer-agent/credential-helper';
 import { getDataHome, pathOf } from './data-store.mjs';
 import { createDesktopModelCredentialClient } from './model-credential-client.mjs';
-import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
+import {
+  deriveOAuthStatus,
+  enrichTestResultWithDiagnostics,
+  resolveSubscriptionTestResult,
+} from './provider-connectivity.mjs';
 import {
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
@@ -34,6 +38,7 @@ import {
   inferChannelId,
   legacyProviderForWire,
   resolveChannel,
+  resolveServiceTemplateId,
   validateCustomHeaders,
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
@@ -818,6 +823,20 @@ export function createLlmConfigStore({
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
+      serviceTemplateId:
+        item.serviceTemplateId
+        || resolveServiceTemplateId({
+          channelId: item.channelId || inferChannelId(item),
+          authMethod: item.authMethod || 'api_key',
+        })
+        || undefined,
+      connectionState: item.connectionState || undefined,
+      connectionStateReason: item.connectionStateReason || undefined,
+      configVersion: item.configVersion || undefined,
+      lastCheckedAt: item.lastCheckedAt || undefined,
+      lastSuccessAt: item.lastSuccessAt || undefined,
+      lastErrorCategory: item.lastErrorCategory || undefined,
+      lastDiagnostic: item.lastDiagnostic || undefined,
       apiKeyMasked: item.apiKeyMasked || '',
       // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准；
       // 本机 CLI 链路的登录态由外部应用维护,Peer Agent 只检查命令与登录态是否可用。
@@ -867,7 +886,7 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders, serviceTemplateId }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -914,6 +933,11 @@ export function createLlmConfigStore({
       channelId,
       wireOverride: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? undefined : wireOverride,
       authMethod: method,
+      serviceTemplateId: serviceTemplateId
+        || resolveServiceTemplateId({ channelId, authMethod: method })
+        || undefined,
+      configVersion: 1,
+      connectionState: 'pending_verification',
       name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? GEMINI_OAUTH_NAME : isGrokOAuth ? (name || 'Grok 官方') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isGoogleOAuth ? GEMINI_CODE_ASSIST_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
@@ -1376,38 +1400,89 @@ export function createLlmConfigStore({
   async function testConnection(id) {
     const items = readAll();
     const item = items.find((i) => i.id === id);
-    if (!item) return { success: false, error: 'Provider not found' };
+    if (!item) {
+      return enrichTestResultWithDiagnostics(
+        { success: false, error: 'Provider not found' },
+        { connectionId: id, trigger: 'user' },
+      );
+    }
+
+    const diagnosticContext = {
+      connectionId: id,
+      configVersion: item.configVersion,
+      authMethod: item.authMethod,
+      hasApiKey: Boolean(item.apiKeyConfigured),
+      baseUrl: item.baseUrl,
+      trigger: 'user',
+    };
 
     // 订阅(ChatGPT OAuth)provider 不持有 apiKey；连通性以 OAuth 登录态为准。
     // 真正的远程模型探测走 `llm:models:list`(main 层,含 token 刷新)，此处只判定凭证有效性，
     // 避免存储层反向依赖 provider 网络适配器，也避免对订阅误报 "API key not configured"。
+    let result;
     if (isOAuthAuthMethod(item.authMethod)) {
-      return resolveSubscriptionTestResult(oauthStatusOf(item), item.model);
+      result = resolveSubscriptionTestResult(oauthStatusOf(item), item.model);
+    } else if (isLocalCliAuthMethod(item.authMethod)) {
+      result = enrichTestResultWithDiagnostics(
+        await testQoderPrivate(item.model),
+        diagnosticContext,
+      );
+    } else {
+      const apiKey = readApiKey(item);
+      if (!apiKey) {
+        result = enrichTestResultWithDiagnostics(
+          { success: false, error: 'API key not configured' },
+          { ...diagnosticContext, hasApiKey: false },
+        );
+      } else {
+        const start = Date.now();
+        try {
+          const resolved = resolveChannel({ ...item, apiKey });
+          if (resolved.wire === 'anthropic-messages') {
+            result = await testAnthropic(resolved, item.model, start, providerFetch);
+          } else if (resolved.wire === 'openai-responses') {
+            result = await testOpenAIResponses(resolved, item.model, start, providerFetch);
+          } else if (resolved.wire === 'gemini') {
+            result = await testGemini(resolved, item.model, start, providerFetch);
+          } else {
+            result = await testOpenAI(resolved, item.model, start, providerFetch);
+          }
+          result = enrichTestResultWithDiagnostics(result, {
+            ...diagnosticContext,
+            hasApiKey: true,
+          });
+        } catch (err) {
+          result = enrichTestResultWithDiagnostics(
+            {
+              success: false,
+              error: err?.message || 'Connection failed',
+              latencyMs: Date.now() - start,
+            },
+            {
+              ...diagnosticContext,
+              hasApiKey: true,
+            },
+          );
+        }
+      }
     }
 
-    if (isLocalCliAuthMethod(item.authMethod)) {
-      return testQoderPrivate(item.model);
+    // 把最近诊断结果写回连接，供服务详情/列表读取。
+    const nextItems = readAll();
+    const nextItem = nextItems.find((entry) => entry.id === id);
+    if (nextItem && result) {
+      const now = new Date().toISOString();
+      nextItem.lastCheckedAt = now;
+      nextItem.lastDiagnostic = result.diagnostic;
+      nextItem.lastErrorCategory = result.errorCategory;
+      nextItem.connectionState = result.connectionState || nextItem.connectionState;
+      nextItem.connectionStateReason = result.connectionStateReason || nextItem.connectionStateReason;
+      if (result.success) nextItem.lastSuccessAt = now;
+      nextItem.configVersion = Number(nextItem.configVersion || 0) || 1;
+      writeAll(nextItems);
     }
 
-    const apiKey = readApiKey(item);
-    if (!apiKey) return { success: false, error: 'API key not configured' };
-
-    const start = Date.now();
-    try {
-      const resolved = resolveChannel({ ...item, apiKey });
-      if (resolved.wire === 'anthropic-messages') {
-        return await testAnthropic(resolved, item.model, start, providerFetch);
-      }
-      if (resolved.wire === 'openai-responses') {
-        return await testOpenAIResponses(resolved, item.model, start, providerFetch);
-      }
-      if (resolved.wire === 'gemini') {
-        return await testGemini(resolved, item.model, start, providerFetch);
-      }
-      return await testOpenAI(resolved, item.model, start, providerFetch);
-    } catch (err) {
-      return { success: false, error: err?.message || 'Connection failed', latencyMs: Date.now() - start };
-    }
+    return result;
   }
 
 

@@ -5,6 +5,8 @@ import {
   listChannelDescriptors,
   resolveChannel,
   validateCustomHeaders,
+  listServiceTemplates,
+  resolveServiceTemplateId,
 } from './provider-channels.mjs';
 
 describe('provider channel registry', () => {
@@ -178,5 +180,23 @@ describe('provider channel registry', () => {
     assert.deepEqual(resolved.headers, {});
     assert.equal(resolved.supportsReasoning, false);
     assert.equal(resolved.descriptor.capabilities.toolUse, false);
+  });
+});
+
+describe('service templates', () => {
+  it('returns P0 catalog with distinct access methods', () => {
+    const templates = listServiceTemplates();
+    assert.ok(templates.length >= 9);
+    assert.ok(templates.some((item) => item.id === 'openai-api'));
+    assert.ok(templates.some((item) => item.id === 'openai-chatgpt'));
+    assert.ok(templates.some((item) => item.id === 'openai-compatible'));
+    assert.equal(
+      resolveServiceTemplateId({ channelId: 'openai', authMethod: 'oauth_chatgpt' }),
+      'openai-chatgpt',
+    );
+    assert.equal(
+      resolveServiceTemplateId({ channelId: 'openai', authMethod: 'api_key' }),
+      'openai-api',
+    );
   });
 });

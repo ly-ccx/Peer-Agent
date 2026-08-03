@@ -357,6 +357,114 @@ export type LlmReasoningParamStyle =
   | 'none';
 export type LlmReasoningEffortMap = Readonly<Record<string, string | number>>;
 
+/**
+ * 服务连接用户可见主状态（服务商中心 P0）。
+ * 配置是否完整、凭据是否有效、端点是否可达、模型是否可用是内部事实；
+ * UI 将这些事实归纳为少量连接状态，而不是把“已保存”当成“可用”。
+ */
+export type LlmConnectionState =
+  | 'draft'
+  | 'pending_verification'
+  | 'checking'
+  | 'available'
+  | 'partial'
+  | 'needs_attention'
+  | 'unavailable'
+  | 'disabled';
+
+/** 服务模板支持级别：原生适配 / 验证兼容 / 自定义兼容 / 实验性。 */
+export type LlmServiceSupportTier = 'native' | 'verified' | 'custom' | 'experimental';
+
+/**
+ * 添加服务目录的接入分类。
+ * 先按接入方式分组，再展示品牌卡片。
+ */
+export type LlmServiceAccessCategory =
+  | 'recommended'
+  | 'oauth'
+  | 'official_api'
+  | 'cloud'
+  | 'third_party'
+  | 'local'
+  | 'custom_compatible';
+
+/** 阶段化诊断的检查层次。 */
+export type LlmDiagnosticStageId =
+  | 'config'
+  | 'connectivity'
+  | 'auth'
+  | 'catalog'
+  | 'min_inference'
+  | 'agent_capability';
+
+export type LlmDiagnosticStageStatus = 'passed' | 'failed' | 'skipped' | 'pending';
+
+/**
+ * 面向用户的错误分类（诊断 / 聊天修复共用）。
+ * 技术错误码可进入 sanitizedDetail，不应直接作为主文案。
+ */
+export type LlmDiagnosticErrorCategory =
+  | 'credential_missing'
+  | 'credential_invalid'
+  | 'auth_expired'
+  | 'endpoint_unreachable'
+  | 'rate_limited'
+  | 'quota_exhausted'
+  | 'permission_denied'
+  | 'model_not_found'
+  | 'protocol_mismatch'
+  | 'capability_mismatch'
+  | 'local_runtime_stopped'
+  | 'timeout'
+  | 'unknown';
+
+export interface LlmDiagnosticStage {
+  readonly id: LlmDiagnosticStageId;
+  readonly status: LlmDiagnosticStageStatus;
+  readonly title: string;
+  readonly detail?: string;
+  readonly durationMs?: number;
+}
+
+export interface LlmDiagnosticSnapshot {
+  readonly connectionId?: string;
+  readonly configVersion?: number;
+  readonly startedAt: string;
+  readonly finishedAt?: string;
+  readonly trigger?: 'user' | 'background' | 'request' | 'add_flow';
+  readonly stages: readonly LlmDiagnosticStage[];
+  readonly errorCategory?: LlmDiagnosticErrorCategory;
+  readonly sanitizedDetail?: string;
+  readonly suggestedActions?: readonly string[];
+}
+
+/**
+ * 服务模板：用户发现与默认配置的产品对象。
+ * 一个 channel 可映射多个模板（例如 OpenAI API Key 与 ChatGPT 订阅）。
+ */
+export interface LlmServiceTemplateDescriptor {
+  readonly id: string;
+  readonly brand: string;
+  readonly title: string;
+  readonly description: string;
+  readonly accessCategory: LlmServiceAccessCategory;
+  readonly supportTier: LlmServiceSupportTier;
+  readonly channelId: LlmChannelId;
+  readonly authMethod: LlmAuthMethod;
+  readonly legacyProvider: LlmProviderType;
+  readonly defaultWire: LlmWireProtocol;
+  readonly defaults: {
+    readonly baseUrl: string;
+    readonly model: string;
+    readonly hideBaseUrlByDefault?: boolean;
+  };
+  readonly searchAliases?: readonly string[];
+  readonly regions?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly docsUrl?: string;
+  readonly knownLimitations?: readonly string[];
+}
+
 export interface LlmChannelDescriptor {
   readonly id: LlmChannelId;
   readonly label: string;
@@ -381,6 +489,8 @@ export interface LlmChannelDescriptor {
     readonly temperature?: boolean;
   };
   readonly authMethods?: Partial<Readonly<Record<LlmAuthMethod, { readonly wire: LlmWireProtocol }>>>;
+  /** 可选：将该 channel 映射到一个或多个服务模板（添加服务目录）。 */
+  readonly serviceTemplates?: readonly LlmServiceTemplateDescriptor[];
 }
 
 // 鉴权方式与协议族(provider)正交(ADR 28)。
@@ -488,6 +598,19 @@ export interface LlmProviderConfig {
   readonly oauthProjectId?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly customHeadersInvalid?: boolean;
+  /**
+   * 服务模板 ID（服务商中心）。
+   * 旧配置可缺省；UI/迁移层按 channelId+authMethod 回填。
+   */
+  readonly serviceTemplateId?: string;
+  /** 服务连接用户可见状态；缺省时由 UI/服务层按凭据与诊断推导。 */
+  readonly connectionState?: LlmConnectionState;
+  readonly connectionStateReason?: string;
+  /** 配置版本：诊断结果必须绑定版本，避免旧结果污染新配置。 */
+  readonly configVersion?: number;
+  readonly lastCheckedAt?: string;
+  readonly lastSuccessAt?: string;
+  readonly lastErrorCategory?: LlmDiagnosticErrorCategory;
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {
@@ -498,6 +621,8 @@ export interface LlmProviderConfigView extends LlmProviderConfig {
   // 仅存在于「聊天列表展开」出的虚拟记录（订阅/多模型）：其复合 id 在存储里不存在，
   // 凭证解析/刷新据此回退到原始记录 id 取 OAuth token / apiKey。普通记录不带此字段。
   readonly credentialId?: string;
+  /** 最近一次脱敏诊断快照（可选）。 */
+  readonly lastDiagnostic?: LlmDiagnosticSnapshot;
 }
 
 // ── Provider 多模型（父子）模型 ─────────────────────────────────────────────
@@ -667,6 +792,14 @@ export interface LlmProviderTestResult {
   readonly model?: string;
   readonly latencyMs?: number;
   readonly error?: string;
+  /** 面向用户的错误分类；缺省时 UI 可回退到 unknown。 */
+  readonly errorCategory?: LlmDiagnosticErrorCategory;
+  /** 阶段化诊断结果（配置 / 网络 / 认证 / 目录 / 最小请求…）。 */
+  readonly stages?: readonly LlmDiagnosticStage[];
+  readonly diagnostic?: LlmDiagnosticSnapshot;
+  /** 测试后推导出的连接状态建议。 */
+  readonly connectionState?: LlmConnectionState;
+  readonly connectionStateReason?: string;
 }
 
 export interface ClientBootstrap {

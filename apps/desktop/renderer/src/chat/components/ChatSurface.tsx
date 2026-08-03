@@ -2129,7 +2129,7 @@ export function ChatSurface({
             </div>
             <h2>
               {!hasProvider
-                ? (isZh ? '先接通模型，再开始任务' : 'Connect a model to get started')
+                ? (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')
                 : workspaceLabel
                   ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
                   : (isZh ? '接下来做什么？' : 'What should we work on?')}
@@ -2139,13 +2139,13 @@ export function ChatSurface({
                 <p>
                   {isZh ? '请先' : 'Please '}
                   <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
-                    {isZh ? '配置模型' : 'configure a model'}
+                    {isZh ? '连接 AI 服务' : 'connect an AI service'}
                   </button>
                   {isZh ? '后开始对话。' : ' to start chatting.'}
                 </p>
                 <div className="chat-empty-actions">
                   <button type="button" className="chat-empty-primary-btn" onClick={onOpenSettings}>
-                    {isZh ? '配置模型' : 'Configure model'}
+                    {isZh ? '连接 AI 服务' : 'Connect AI service'}
                   </button>
                 </div>
               </>

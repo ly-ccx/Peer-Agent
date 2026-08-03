@@ -321,6 +321,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmListProviders: () => ipcRenderer.invoke('llm:list'),
   llmListChatProviders: () => ipcRenderer.invoke('llm:chat:list'),
   llmListChannels: () => ipcRenderer.invoke('llm:channels:list'),
+  llmListServiceTemplates: () => ipcRenderer.invoke('llm:service-templates:list'),
   llmAddProvider: (config) => ipcRenderer.invoke('llm:add', config),
   llmUpdateProvider: (params) => ipcRenderer.invoke('llm:update', params),
   llmDuplicateProvider: (params) => ipcRenderer.invoke('llm:duplicate', params),

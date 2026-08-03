@@ -12,13 +12,15 @@ import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-export type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
+export type SettingsSection = 'general' | 'providers' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
+// 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
 
 // Appshots is intentionally hidden from Settings for now (not part of public beta surface).
 const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'general',
-  'model',
+  'providers',
+  'model', // legacy alias → providers
   'skills',
   'instructions',
   'git',
@@ -31,6 +33,8 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
 
 function resolveSettingsSection(value: string | null | undefined): SettingsSection {
   // Legacy deep-links like ?section=appshots fall back to general.
+  // 旧 model 分区统一映射到服务商（以服务商为聚合源头，不设独立模型页）。
+  if (value === 'model' || value === 'models') return 'providers';
   if (value && SETTINGS_SECTIONS.has(value as SettingsSection)) {
     return value as SettingsSection;
   }
@@ -39,7 +43,7 @@ function resolveSettingsSection(value: string | null | undefined): SettingsSecti
 
 /**
  * SettingsPage 是设置入口的单一表达层:
- *   - 左侧:设置分区列表(通用 / 模型配置 / 个性化设置 / 外观)
+ *   - 左侧:设置分区列表(通用 / 服务商 / 个性化设置 / 外观)
  *   - 右侧:当前选中分区的具体配置内容
  *
  * 它本身不承载任何能力执行,只负责在已有的配置面板
@@ -47,7 +51,7 @@ function resolveSettingsSection(value: string | null | undefined): SettingsSecti
  * 做分区切换与布局。各面板的数据读写仍走各自既有的 clientApi 契约。
  *
  * 系统指令属于 System Context 输入,与模型 Provider 连接配置职责不同,
- * 因此独立成分区,不再内嵌于模型配置面板。
+ * 因此独立成分区,不再内嵌于服务商面板。
  */
 export function SettingsPage({
   availableLocales,
@@ -63,7 +67,7 @@ export function SettingsPage({
 }: {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
-  /** 打开设置页时落到的分区；首启配置模型应传 `model`。 */
+  /** 打开设置页时落到的分区；首启连接服务应传 `providers`。 */
   readonly initialSection?: SettingsSection | null;
   readonly onBack: () => void;
   readonly onLocaleChanged: () => Promise<void> | void;
@@ -89,7 +93,7 @@ export function SettingsPage({
     {
       label: 'AI',
       items: [
-        { key: 'model', label: isZh ? '模型与渠道' : 'Models & providers' },
+        { key: 'providers', label: isZh ? '服务商' : 'Providers' },
         { key: 'skills', label: isZh ? '工具与能力' : 'Tools & capabilities' },
         { key: 'usage', label: i18n.t('settings.usage') },
       ],
@@ -167,7 +171,7 @@ export function SettingsPage({
             onLocaleChanged={onLocaleChanged}
             onReplyLanguageChanged={onReplyLanguageChanged}
           />
-        ) : section === 'model' ? (
+        ) : section === 'providers' || section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
         ) : section === 'skills' ? (
           <CapabilitiesPanel />

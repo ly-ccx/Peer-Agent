@@ -384,7 +384,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
           ? isBusy
             ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
             : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
-          : (isZh ? '请先在设置中配置模型提供商' : 'Configure a model provider in Settings first')}
+          : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
         rows={1}
         onPaste={onPaste}
         onChange={(event) => setDraft(event.target.value)}

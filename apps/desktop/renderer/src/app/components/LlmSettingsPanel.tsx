@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
   LlmAuthMethod,
   LlmChannelDescriptor,
+  LlmServiceTemplateDescriptor,
   LlmModelInfo,
   LlmModelListResult,
   LlmProviderConfigView,
@@ -10,7 +11,7 @@ import type {
   LlmReasoningParamStyle,
   LlmWireProtocol,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { Drawer } from './Drawer';
@@ -404,6 +405,101 @@ function friendlyTestError(error: string | undefined, locale: string): string {
   }
 }
 
+
+const ACCESS_CATEGORY_ORDER = [
+  'oauth',
+  'official_api',
+  'cloud',
+  'third_party',
+  'local',
+  'custom_compatible',
+  'recommended',
+] as const;
+
+function accessCategoryLabel(category: string, zh: boolean): string {
+  switch (category) {
+    case 'oauth':
+      return zh ? '授权登录' : 'Sign-in';
+    case 'official_api':
+      return zh ? '官方 API（直连）' : 'Official API';
+    case 'cloud':
+      return zh ? '云平台' : 'Cloud platforms';
+    case 'third_party':
+      return zh ? '第三方与套餐' : 'Third-party & plans';
+    case 'local':
+      return zh ? '本地服务' : 'Local services';
+    case 'custom_compatible':
+      return zh ? '自定义兼容' : 'Custom compatible';
+    case 'recommended':
+      return zh ? '推荐' : 'Recommended';
+    default:
+      return category;
+  }
+}
+
+function supportTierLabel(tier: string, zh: boolean): string {
+  switch (tier) {
+    case 'native':
+      return zh ? '原生适配' : 'Native';
+    case 'verified':
+      return zh ? '验证兼容' : 'Verified';
+    case 'custom':
+      return zh ? '自定义兼容' : 'Custom';
+    case 'experimental':
+      return zh ? '实验性' : 'Experimental';
+    default:
+      return tier;
+  }
+}
+
+function connectionStatusLabel(
+  provider: LlmProviderConfigView,
+  zh: boolean,
+): { text: string; tone: 'ok' | 'warn' | 'bad' | 'muted' } {
+  if (provider.connectionState === 'available') {
+    return { text: zh ? '可用' : 'Available', tone: 'ok' };
+  }
+  if (provider.connectionState === 'partial') {
+    return { text: zh ? '部分可用' : 'Partial', tone: 'warn' };
+  }
+  if (provider.connectionState === 'needs_attention') {
+    return { text: zh ? '需要操作' : 'Needs attention', tone: 'warn' };
+  }
+  if (provider.connectionState === 'unavailable') {
+    return { text: zh ? '不可用' : 'Unavailable', tone: 'bad' };
+  }
+  if (provider.connectionState === 'disabled') {
+    return { text: zh ? '已停用' : 'Disabled', tone: 'muted' };
+  }
+  if (provider.connectionState === 'checking') {
+    return { text: zh ? '检查中' : 'Checking', tone: 'muted' };
+  }
+  if (isOAuthMethod(provider.authMethod)) {
+    if (provider.oauthStatus?.status === 'connected') {
+      return { text: zh ? '已登录' : 'Signed in', tone: 'ok' };
+    }
+    if (provider.oauthStatus?.status === 'expired') {
+      return { text: zh ? '登录已过期' : 'Session expired', tone: 'warn' };
+    }
+    return { text: zh ? '未登录' : 'Not signed in', tone: 'warn' };
+  }
+  if (provider.apiKeyConfigured) {
+    return { text: zh ? '已配置' : 'Configured', tone: 'ok' };
+  }
+  return { text: zh ? '未配置' : 'Not configured', tone: 'muted' };
+}
+
+function accessMethodLabel(provider: LlmProviderConfigView, zh: boolean): string {
+  if (isOAuthMethod(provider.authMethod)) return zh ? '授权登录' : 'Sign-in';
+  if (provider.authMethod === 'qoder_local_auth' || provider.authMethod === 'local_cli') {
+    return zh ? '本地 / 私有' : 'Local / private';
+  }
+  if ((provider.channelId || '').includes('compatible')) {
+    return zh ? '自定义兼容' : 'Custom compatible';
+  }
+  return zh ? 'API Key' : 'API Key';
+}
+
 export function LlmSettingsPanel({
   i18n,
   onBack,
@@ -413,6 +509,11 @@ export function LlmSettingsPanel({
 }) {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
+  const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogClosing, setCatalogClosing] = useState(false);
+  const catalogCloseTimer = useRef<number | null>(null);
+  const [catalogQuery, setCatalogQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
@@ -483,6 +584,12 @@ export function LlmSettingsPanel({
         if (!cancelled && list.length) setChannels(list);
       })
       .catch(() => {});
+    void (clientApi as { llmListServiceTemplates?: () => Promise<readonly LlmServiceTemplateDescriptor[]> })
+      .llmListServiceTemplates?.()
+      .then((list) => {
+        if (!cancelled && Array.isArray(list) && list.length) setServiceTemplates(list);
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -544,9 +651,47 @@ export function LlmSettingsPanel({
   };
 
   const openAdd = () => {
+    if (catalogCloseTimer.current !== null) {
+      window.clearTimeout(catalogCloseTimer.current);
+      catalogCloseTimer.current = null;
+    }
+    setCatalogQuery('');
+    setCatalogClosing(false);
+    setCatalogOpen(true);
+  };
+
+  const closeCatalog = () => {
+    setCatalogClosing(true);
+    if (catalogCloseTimer.current !== null) {
+      window.clearTimeout(catalogCloseTimer.current);
+    }
+    catalogCloseTimer.current = window.setTimeout(() => {
+      catalogCloseTimer.current = null;
+      setCatalogOpen(false);
+      setCatalogClosing(false);
+    }, 170);
+  };
+
+  const openAddFromTemplate = (template: LlmServiceTemplateDescriptor) => {
     setEditingId(null);
     setAddModelGroupId(null);
-    setForm(emptyForm(channels));
+    setCatalogOpen(false);
+    const channel = descriptorFor(template.channelId, channels);
+    const next = emptyForm(channels, template.channelId);
+    setForm({
+      ...next,
+      provider: template.legacyProvider,
+      channelId: template.channelId,
+      authMethod: template.authMethod,
+      wireOverride: '',
+      baseUrl: template.defaults.baseUrl || channel.defaults.baseUrl,
+      model: template.defaults.model || channel.defaults.model,
+      name: template.title,
+      supportsVision: channel.capabilities?.vision ?? false,
+      supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
+      supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+      reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
+    });
     setShowForm(true);
   };
 
@@ -834,6 +979,8 @@ export function LlmSettingsPanel({
     try {
       const result = await clientApi.llmTestConnection({ id });
       setTestResults((prev) => ({ ...prev, [id]: result }));
+      // 诊断结果会写回 connectionState / lastDiagnostic，刷新列表以更新服务卡片状态。
+      await refresh();
     } catch (err: unknown) {
       setTestResults((prev) => ({ ...prev, [id]: { success: false, error: err instanceof Error ? err.message : 'Test failed' } }));
     } finally {
@@ -983,26 +1130,125 @@ export function LlmSettingsPanel({
               <path d="m12 19-7-7 7-7" />
             </svg>
           </button>
-          <strong>{i18n.locale === 'zh-CN' ? '模型配置' : 'Model Settings'}</strong>
+          <strong>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</strong>
         </header>
       ) : null}
 
       <div className="llm-list-toolbar">
         <div className="llm-list-summary">
-          <strong>{i18n.locale === 'zh-CN' ? '渠道' : 'Channels'}</strong>
+          <strong>{i18n.locale === 'zh-CN' ? '已连接服务' : 'Connected services'}</strong>
           <span>{groups.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
         </div>
         <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
-          ＋ {i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel'}
+          ＋ {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
         </button>
       </div>
 
-      <div className="llm-provider-list">
-        {providers.length === 0 ? (
+            {catalogOpen ? (
+
+        <div className={`llm-service-catalog${catalogClosing ? ' is-closing' : ''}`} role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
+          <div className="llm-service-catalog-header">
+            <div>
+              <strong>{i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}</strong>
+              <p>
+                {i18n.locale === 'zh-CN'
+                  ? '通过订阅、API Key、第三方中转或本地模型接入新服务'
+                  : 'Connect via subscription, API key, third-party gateway, or local models'}
+              </p>
+            </div>
+            <button type="button" className="llm-catalog-back-btn" onClick={closeCatalog}>
+              {i18n.locale === 'zh-CN' ? '← 返回' : '← Back'}
+            </button>
+          </div>
+          <label className="llm-service-catalog-search">
+            <span className="sr-only">{i18n.locale === 'zh-CN' ? '搜索服务' : 'Search services'}</span>
+            <input
+              value={catalogQuery}
+              onChange={(e) => setCatalogQuery(e.target.value)}
+              placeholder={i18n.locale === 'zh-CN' ? '搜索服务、平台或接入方式' : 'Search services, platforms, or access methods'}
+            />
+          </label>
+          {(() => {
+            const zh = i18n.locale === 'zh-CN';
+            const q = catalogQuery.trim().toLowerCase();
+            const filtered = (serviceTemplates.length ? serviceTemplates : []).filter((template) => {
+              if (!q) return true;
+              const hay = [
+                template.title,
+                template.brand,
+                template.description,
+                template.accessCategory,
+                template.supportTier,
+                ...(template.searchAliases || []),
+                ...(template.tags || []),
+              ].join(' ').toLowerCase();
+              return hay.includes(q);
+            });
+            if (!filtered.length) {
+              return (
+                <div className="llm-empty">
+                  <p>{zh ? '没有匹配的服务模板' : 'No matching service templates'}</p>
+                  <button
+                    type="button"
+                    className="llm-add-channel-btn"
+                    onClick={() => openAddFromTemplate({
+                      id: 'openai-compatible',
+                      brand: 'OpenAI Compatible',
+                      title: zh ? 'OpenAI 兼容' : 'OpenAI Compatible',
+                      description: '',
+                      accessCategory: 'custom_compatible',
+                      supportTier: 'custom',
+                      channelId: 'openai-compatible',
+                      authMethod: 'api_key',
+                      legacyProvider: 'openai',
+                      defaultWire: 'openai-chat',
+                      defaults: { baseUrl: '', model: 'gpt-4o' },
+                    })}
+                  >
+                    {zh ? '添加自定义兼容服务' : 'Add custom compatible service'}
+                  </button>
+                </div>
+              );
+            }
+            const groups = ACCESS_CATEGORY_ORDER
+              .map((category) => ({
+                category,
+                items: filtered.filter((item) => item.accessCategory === category),
+              }))
+              .filter((group) => group.items.length > 0);
+            return groups.map((group) => (
+              <section key={group.category} className="llm-service-catalog-group">
+                <h4>{accessCategoryLabel(group.category, zh)}</h4>
+                <div className="llm-service-catalog-grid">
+                  {group.items.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className="llm-service-template-card"
+                      onClick={() => openAddFromTemplate(template)}
+                    >
+                      <div className="llm-service-template-card-title">
+                        <strong>{template.title}</strong>
+                        <span className="llm-service-tier">{supportTierLabel(template.supportTier, zh)}</span>
+                      </div>
+                      <p>{template.description}</p>
+                      <span className="llm-service-template-meta">
+                        {(template.tags && template.tags[0]) || accessCategoryLabel(template.accessCategory, zh)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ));
+          })()}
+        </div>
+      ) : (
+        <div className="llm-provider-list">
+{providers.length === 0 ? (
           <div className="llm-empty">
-            <p>{i18n.locale === 'zh-CN' ? '尚未配置任何模型渠道。' : 'No model channels configured.'}</p>
+            <p>{i18n.locale === 'zh-CN' ? '还没有连接 AI 服务。' : 'No AI services connected yet.'}</p>
             <button type="button" onClick={openAdd}>
-              ＋ {i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel'}
+              ＋ {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
             </button>
           </div>
         ) : groups.map((g) => {
@@ -1049,7 +1295,16 @@ export function LlmSettingsPanel({
                 </small>
               ) : (
                 <small className="llm-provider-key">
-                  {head.apiKeyConfigured ? `Key: ${head.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
+                  {(() => {
+                    const status = connectionStatusLabel(head, i18n.locale === 'zh-CN');
+                    return (
+                      <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
+                        {status.text}
+                        <span className="llm-connection-method"> · {accessMethodLabel(head, i18n.locale === 'zh-CN')}</span>
+                        {head.apiKeyConfigured ? ` · ${head.apiKeyMasked || 'Key'}` : ''}
+                      </span>
+                    );
+                  })()}
                 </small>
               )}
               <div className="llm-group-actions">
@@ -1125,9 +1380,10 @@ export function LlmSettingsPanel({
           </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
-      {showForm ? (
+{showForm ? (
         <Drawer
           onClose={() => { setShowForm(false); setEditingId(null); }}
           closeOnBackdrop={!saving && !oauthBusyId}

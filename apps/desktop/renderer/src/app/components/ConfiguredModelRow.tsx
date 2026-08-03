@@ -94,7 +94,27 @@ export function ConfiguredModelRow({
             })}
           </div>
           <small>{zh ? '元数据来源' : 'Metadata source'}: {metadataSource}{model.metadataSyncedAt ? ` · ${model.metadataSyncedAt}` : ''}</small>
-          {result ? <small className={`llm-test-result ${result.success ? 'success' : 'fail'}`}>{result.success ? `✓ ${result.model} (${result.latencyMs}ms)` : `✗ ${result.error || 'connection_failed'}`}</small> : null}
+          {result ? (
+            <div className={`llm-test-result ${result.success ? 'success' : 'fail'}`}>
+              <small>
+                {result.success
+                  ? `✓ ${result.model || model.model}${result.latencyMs != null ? ` (${result.latencyMs}ms)` : ''}`
+                  : `✗ ${result.connectionStateReason || result.error || 'connection_failed'}`}
+              </small>
+              {result.stages && result.stages.length > 0 ? (
+                <ul className="llm-test-stages">
+                  {result.stages.map((stage) => (
+                    <li key={stage.id} className={`stage-${stage.status}`}>
+                      {stage.status === 'passed' ? '✓' : stage.status === 'failed' ? '×' : '–'} {stage.title}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {result.errorCategory ? (
+                <small className="llm-test-error-category">{result.errorCategory}</small>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         
 

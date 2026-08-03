@@ -10,6 +10,10 @@ function owner(ownerName, register) {
 export function createProviderConfigurationIpcRegistrations({ providers } = {}) {
   const ports = {
     listChannels: assertFunction(providers?.listChannels, 'providers.listChannels'),
+    listServiceTemplates: assertFunction(
+      providers?.listServiceTemplates || (() => []),
+      'providers.listServiceTemplates',
+    ),
     listGroups: assertFunction(providers?.listGroups, 'providers.listGroups'),
     listProviders: assertFunction(providers?.listProviders, 'providers.listProviders'),
     listChatProviders: assertFunction(providers?.listChatProviders, 'providers.listChatProviders'),
@@ -27,6 +31,7 @@ export function createProviderConfigurationIpcRegistrations({ providers } = {}) 
   return Object.freeze([
     owner('provider-configuration-ipc', (ipc) => {
       ipc.handle('llm:channels:list', () => ports.listChannels());
+      ipc.handle('llm:service-templates:list', () => ports.listServiceTemplates());
       ipc.handle('llm:groups:list', () => ports.listGroups());
       ipc.handle('llm:list', () => ports.listProviders());
       ipc.handle('llm:chat:list', () => ports.listChatProviders());

@@ -207,6 +207,186 @@ const CHANNEL_DESCRIPTORS = {
   },
 };
 
+/**
+ * P0 服务模板注册表：用户发现入口，不等于 channel 枚举。
+ * 同一 channel 可对应多个模板（例如 OpenAI API Key 与 ChatGPT 订阅）。
+ */
+const SERVICE_TEMPLATES = [
+  {
+    id: 'openai-api',
+    brand: 'OpenAI',
+    title: 'OpenAI',
+    description: '官方 API Key 直连 · 无需订阅登录',
+    accessCategory: 'official_api',
+    supportTier: 'native',
+    channelId: CHANNEL_IDS.OPENAI,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['openai', 'gpt', 'chatgpt api'],
+    tags: ['原生适配', 'API Key'],
+  },
+  {
+    id: 'openai-chatgpt',
+    brand: 'OpenAI',
+    title: 'ChatGPT 订阅 / Codex 账号',
+    description: '使用 ChatGPT Plus/Pro 订阅登录，无需 API Key',
+    accessCategory: 'oauth',
+    supportTier: 'native',
+    channelId: CHANNEL_IDS.OPENAI,
+    authMethod: 'oauth_chatgpt',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-responses',
+    defaults: {
+      baseUrl: CHATGPT_SUBSCRIPTION_BASE_URL,
+      model: 'gpt-5.3-codex',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['chatgpt', 'codex', 'subscription', '订阅'],
+    tags: ['授权登录', '原生适配'],
+  },
+  {
+    id: 'anthropic-api',
+    brand: 'Anthropic',
+    title: 'Anthropic',
+    description: 'Anthropic 官方 API',
+    accessCategory: 'official_api',
+    supportTier: 'native',
+    channelId: CHANNEL_IDS.ANTHROPIC,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-20250514',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['claude', 'anthropic'],
+    tags: ['原生适配', 'API Key'],
+  },
+  {
+    id: 'google-ai-api',
+    brand: 'Google',
+    title: 'Google AI / Gemini',
+    description: 'Gemini 官方 API Key',
+    accessCategory: 'official_api',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.GOOGLE_AI,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'gemini',
+    defaults: {
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      model: 'gemini-2.5-pro',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['gemini', 'google', 'google ai'],
+    tags: ['验证兼容', 'API Key'],
+  },
+  {
+    id: 'google-oauth',
+    brand: 'Google',
+    title: 'Gemini OAuth',
+    description: '使用 Google 账号授权登录',
+    accessCategory: 'oauth',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.GOOGLE_AI,
+    authMethod: 'oauth_google',
+    legacyProvider: 'openai',
+    defaultWire: 'gemini',
+    defaults: {
+      baseUrl: GEMINI_CODE_ASSIST_BASE_URL,
+      model: 'gemini-2.5-pro',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['gemini oauth', 'google login'],
+    tags: ['授权登录'],
+  },
+  {
+    id: 'grok-oauth',
+    brand: 'xAI',
+    title: GROK_OFFICIAL_NAME,
+    description: '登录 Grok 账号使用官方订阅通道',
+    accessCategory: 'oauth',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.GROK,
+    authMethod: 'oauth_grok',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: GROK_SUBSCRIPTION_BASE_URL,
+      model: 'grok-code',
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['grok', 'xai'],
+    tags: ['授权登录'],
+  },
+  {
+    id: 'qoder-local',
+    brand: 'Qoder',
+    title: QODER_PRIVATE_NAME,
+    description: '本机 / 私有 Qoder 接口',
+    accessCategory: 'local',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.QODER,
+    authMethod: 'qoder_local_auth',
+    legacyProvider: 'openai',
+    defaultWire: 'qoder-private',
+    defaults: {
+      baseUrl: 'https://api2-v2.qoder.sh/model/v1',
+      model: 'auto',
+      hideBaseUrlByDefault: false,
+    },
+    searchAliases: ['qoder', 'local'],
+    tags: ['本地 / 私有'],
+  },
+  {
+    id: 'openai-compatible',
+    brand: 'OpenAI Compatible',
+    title: 'OpenAI 兼容',
+    description: '自定义 OpenAI 兼容地址 · 不保证全部高级能力',
+    accessCategory: 'custom_compatible',
+    supportTier: 'custom',
+    channelId: CHANNEL_IDS.OPENAI_COMPATIBLE,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: '',
+      model: 'gpt-4o',
+      hideBaseUrlByDefault: false,
+    },
+    searchAliases: ['compatible', '兼容', 'gateway', '中转'],
+    tags: ['自定义兼容'],
+    knownLimitations: ['只验证当前请求链路，不保证完整官方能力'],
+  },
+  {
+    id: 'anthropic-compatible',
+    brand: 'Anthropic Compatible',
+    title: 'Anthropic 兼容',
+    description: '自定义 Anthropic 兼容地址 · 不保证全部高级能力',
+    accessCategory: 'custom_compatible',
+    supportTier: 'custom',
+    channelId: CHANNEL_IDS.ANTHROPIC_COMPATIBLE,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: '',
+      model: 'claude-sonnet-4-20250514',
+      hideBaseUrlByDefault: false,
+    },
+    searchAliases: ['claude compatible', 'anthropic 兼容'],
+    tags: ['自定义兼容'],
+    knownLimitations: ['只验证当前请求链路，不保证完整官方能力'],
+  },
+];
+
 function normalizeReasoningEffortMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const normalized = {};
@@ -228,6 +408,29 @@ export function listChannelDescriptors() {
 
 export function getChannelDescriptor(channelId) {
   return CHANNEL_DESCRIPTORS[channelId] ?? null;
+}
+
+export function listServiceTemplates() {
+  return SERVICE_TEMPLATES.map((template) => structuredClone(template));
+}
+
+export function getServiceTemplate(templateId) {
+  if (!templateId) return null;
+  return SERVICE_TEMPLATES.find((item) => item.id === String(templateId)) ?? null;
+}
+
+/**
+ * 按 channelId + authMethod 反查服务模板（旧配置迁移 / 回填）。
+ */
+export function resolveServiceTemplateId({ channelId, authMethod } = {}) {
+  if (!channelId) return null;
+  const method = authMethod || 'api_key';
+  const exact = SERVICE_TEMPLATES.find(
+    (item) => item.channelId === channelId && item.authMethod === method,
+  );
+  if (exact) return exact.id;
+  const byChannel = SERVICE_TEMPLATES.find((item) => item.channelId === channelId);
+  return byChannel?.id ?? null;
 }
 
 export function inferChannelId(config = {}) {

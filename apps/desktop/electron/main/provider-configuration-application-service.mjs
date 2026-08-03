@@ -11,6 +11,7 @@ function promptTargetChanged(before = null, after = null) {
 
 export function createProviderConfigurationApplicationService({
   listChannels,
+  listServiceTemplates,
   refreshExpiredOAuth,
   backfillMissingPricing,
   listProviders,
@@ -31,6 +32,10 @@ export function createProviderConfigurationApplicationService({
 } = {}) {
   const ports = {
     listChannels: assertFunction(listChannels, 'listChannels'),
+    listServiceTemplates: assertFunction(
+      listServiceTemplates || (() => []),
+      'listServiceTemplates',
+    ),
     refreshExpiredOAuth: assertFunction(refreshExpiredOAuth, 'refreshExpiredOAuth'),
     backfillMissingPricing: assertFunction(backfillMissingPricing, 'backfillMissingPricing'),
     listProviders: assertFunction(listProviders, 'listProviders'),
@@ -94,6 +99,7 @@ export function createProviderConfigurationApplicationService({
 
   return Object.freeze({
     listChannels: () => ports.listChannels(),
+    listServiceTemplates: () => ports.listServiceTemplates(),
     listGroups: getGroups,
     listProviders: getProviders,
     listChatProviders: getProviders,

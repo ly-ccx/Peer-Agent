@@ -60,7 +60,7 @@ import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMc
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
 import { collectUsageDaily } from './usage-daily.mjs';
-import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
+import { listChannelDescriptors, listServiceTemplates, resolveChannel } from './provider-channels.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { createHostRestartApplicationService } from './host-restart-application-service.mjs';
@@ -1492,6 +1492,7 @@ const pendingTaskApplicationService = createPendingTaskApplicationService({
 
 const providerConfigurationApplicationService = createProviderConfigurationApplicationService({
   listChannels: () => listChannelDescriptors(),
+  listServiceTemplates: () => listServiceTemplates(),
   refreshExpiredOAuth: () => refreshExpiredOAuthProviders({ llmConfigStore }),
   backfillMissingPricing: () => llmConfigStore.backfillMissingPricingFromModelsDev(),
   listProviders: () => llmConfigStore.listProviders(),

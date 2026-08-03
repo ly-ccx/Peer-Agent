@@ -16,6 +16,7 @@ import type {
   LlmModelFetchRequest,
   LlmModelInfo,
   LlmChannelDescriptor,
+  LlmServiceTemplateDescriptor,
   LlmProviderConfigView,
   LlmProviderTestResult, LlmSubscriptionQuota,
   LocalMcpServerUpsertRequest,
@@ -956,6 +957,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
    */
   readonly llmListChatProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmListChannels: () => Promise<readonly LlmChannelDescriptor[]>;
+  readonly llmListServiceTemplates: () => Promise<readonly LlmServiceTemplateDescriptor[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
   // 复制一个已有 provider（订阅类型不支持），返回复制后的完整列表。
