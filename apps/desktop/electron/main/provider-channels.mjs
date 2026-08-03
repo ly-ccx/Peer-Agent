@@ -6,7 +6,7 @@ export const GROK_OFFICIAL_NAME = 'Grok 官方';
 export const GROK_SUBSCRIPTION_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
 export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
-export const QODER_PRIVATE_NAME = 'Qoder 私有接口';
+export const QODER_PRIVATE_NAME = 'Qoder（本机 CLI）';
 
 export const CHANNEL_IDS = {
   OPENAI: 'openai',
@@ -330,7 +330,7 @@ const SERVICE_TEMPLATES = [
     id: 'qoder-local',
     brand: 'Qoder',
     title: QODER_PRIVATE_NAME,
-    description: '本机 / 私有 Qoder 接口',
+    description: '本机已登录的 Qoder CLI',
     accessCategory: 'local',
     supportTier: 'verified',
     channelId: CHANNEL_IDS.QODER,
