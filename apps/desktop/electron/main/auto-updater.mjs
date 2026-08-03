@@ -18,6 +18,11 @@
  *     下载完成后调用 quitAndInstall() 重启安装。
  *   - 开发环境（!app.isPackaged）默认跳过，避免本地 dev 误触；可用
  *     PEER_AGENT_FORCE_UPDATER=1 强制联调。
+ *   - auto 通道毕业（ADR-61）：preference='auto' 且当前版本含预发布后缀时，
+ *     checkForUpdates 先静默探查 stable 通道（latest*.yml）：stable 存在严格
+ *     更新的版本 → 毕业（切到 stable 通道并表达 update-available）；否则回退
+ *     beta 通道做常规检查。显式 beta/stable 偏好不受毕业逻辑影响；毕业单向，
+ *     升到 stable 后版本号不再含预发布后缀，auto 解析自动留在 stable。
  */
 
 import { createWriteStream } from 'node:fs';
@@ -27,6 +32,7 @@ import path from 'node:path';
 import { app, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+import { isNewerVersion } from './update-version.mjs';
 
 export { buildDmgUrl, buildReleaseUrl, mapArch };
 
@@ -74,6 +80,12 @@ const state = {
   /** 偏好读取器（main 注入，从 settingsStore 读取） */
   getPreference: undefined,
   wired: false,
+  /**
+   * 毕业探查中（ADR-61）：auto 偏好下静默探查 stable 通道期间置 true，
+   * wireEvents 的事件处理器据此跳过状态写入与事件广播，避免探查的中间态
+   * 泄漏给渲染层（探查结果由 probeStableGraduation 自行判定与表达）。
+   */
+  probing: false,
   /** 周期检测定时器 id（setInterval 返回值），应用退出时清理 */
   checkTimer: undefined,
 };
@@ -200,6 +212,43 @@ export function setChannelPreference(preference) {
   return getUpdaterStatus();
 }
 
+/**
+ * 毕业探查（ADR-61）：auto 偏好 + 预发布版本时，静默检查 stable 通道
+ * （latest*.yml）是否存在严格大于当前安装版本的正式版。
+ *
+ * 探查期间 state.probing=true，wireEvents 的事件处理器跳过状态写入与广播，
+ * 探查的中间态不泄漏给渲染层；结果由本函数返回，checkForUpdates 据此决定
+ * 毕业（表达 update-available）或回退 beta 通道常规检查。
+ *
+ * 探查自身失败（如无网络、无 stable 清单）按「未毕业」处理，不升级错误态——
+ * 毕业是增强路径，失败时应无缝回退原有 beta 检查。
+ *
+ * @returns {Promise<{ graduated: boolean, version?: string, releaseNotes?: string }>}
+ */
+async function probeStableGraduation() {
+  try {
+    state.probing = true;
+    applyChannel('stable');
+    const result = await autoUpdater.checkForUpdates();
+    const candidate = result?.updateInfo?.version;
+    // 毕业判定信号：stable 版本严格大于当前安装版本（semver：
+    // 1.0.0 > 1.0.0-beta.5）。electron-updater 的 update-available 语义
+    // 与此一致，此处显式比较保证契约清晰。
+    if (candidate && isNewerVersion(candidate, state.currentVersion)) {
+      return {
+        graduated: true,
+        version: candidate,
+        releaseNotes: normalizeReleaseNotes(result?.updateInfo?.releaseNotes),
+      };
+    }
+    return { graduated: false };
+  } catch {
+    return { graduated: false };
+  } finally {
+    state.probing = false;
+  }
+}
+
 /** 主动检查更新（不下载）。 */
 export async function checkForUpdates() {
   if (!state.enabled) {
@@ -208,6 +257,31 @@ export async function checkForUpdates() {
   }
   try {
     setPhase('checking');
+
+    // ADR-61 毕业探查：仅 auto 偏好 + 当前版本含预发布后缀时触发。
+    // 显式 beta/stable 偏好不走毕业（尊重用户显式选择）。
+    if (state.preference === 'auto' && PRERELEASE_PATTERN.test(state.currentVersion)) {
+      const probe = await probeStableGraduation();
+      if (probe.graduated) {
+        // 毕业：切到 stable 通道并表达 update-available。偏好保持 auto——
+        // 安装 stable 后版本号不再含预发布后缀，resolveUpdateChannel 的
+        // auto 回退会自然留在 stable（单向毕业，无需持久化状态）。
+        state.channel = 'stable';
+        applyChannel('stable');
+        state.availableVersion = probe.version;
+        state.releaseNotes = probe.releaseNotes;
+        setPhase('available');
+        emit('update-available', {
+          version: probe.version,
+          releaseNotes: probe.releaseNotes,
+        });
+        log(`graduated beta -> stable. available=${probe.version}`);
+        return getUpdaterStatus();
+      }
+      // 未毕业：恢复 beta 通道，继续常规检查。
+      applyChannel('beta');
+    }
+
     await autoUpdater.checkForUpdates();
   } catch (err) {
     state.error = err?.message ?? String(err);
@@ -457,12 +531,18 @@ function wireEvents() {
   if (state.wired) return;
   state.wired = true;
 
+  // ADR-61：毕业探查（state.probing）期间，以下六个处理器一律跳过状态写入
+  // 与事件广播——探查只是静默探测 stable 清单，中间态与结果都不能经由事件
+  // 通道泄漏给渲染层；探查结论由 checkForUpdates 统一表达。
+
   autoUpdater.on('checking-for-update', () => {
+    if (state.probing) return;
     setPhase('checking');
     emit('checking-for-update');
   });
 
   autoUpdater.on('update-available', (info) => {
+    if (state.probing) return;
     state.availableVersion = info?.version;
     state.releaseNotes = normalizeReleaseNotes(info?.releaseNotes);
     setPhase('available');
@@ -473,24 +553,28 @@ function wireEvents() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    if (state.probing) return;
     state.availableVersion = undefined;
     setPhase('not-available');
     emit('update-not-available', { version: info?.version });
   });
 
   autoUpdater.on('download-progress', (p) => {
+    if (state.probing) return;
     state.percent = Math.round(p?.percent ?? 0);
     setPhase('downloading');
     emit('download-progress', { percent: state.percent });
   });
 
   autoUpdater.on('error', (err) => {
+    if (state.probing) return;
     state.error = err?.message ?? String(err);
     setPhase('error');
     emit('error', { message: state.error });
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    if (state.probing) return;
     state.availableVersion = info?.version;
     state.percent = 100;
     setPhase('downloaded');
