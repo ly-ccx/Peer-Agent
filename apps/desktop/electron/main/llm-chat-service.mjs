@@ -670,6 +670,8 @@ export function createLlmChatService({
   // main 注入的带 onChange 的 goalPlanStore 单例。AI 工具(goal_create_plan/
   // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
   goalPlanStore = null,
+  // main 注入的 Browser 工作现场 reveal 桥；Agent 工具路径创建 LocalToolHost 时需要它。
+  ensureBrowserReady = null,
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
@@ -1129,6 +1131,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              ensureBrowserReady,
               agentProgress,
               resolvedChannel,
               // qoder 与其他 loop 同权:压缩必须持久化、携带连续性上下文、支持压缩后 system 重建。
@@ -1170,6 +1173,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              ensureBrowserReady,
               onNativeReasoningFallback,
               resolvedChannel,
               emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
@@ -1206,6 +1210,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              ensureBrowserReady,
               resolvedChannel,
               authMethod: credential.authMethod,
               emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
@@ -1243,6 +1248,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              ensureBrowserReady,
               onNativeReasoningFallback,
               authMethod: credential.authMethod,
               accountId: credential.accountId,

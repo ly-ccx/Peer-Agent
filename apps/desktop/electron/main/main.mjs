@@ -949,6 +949,8 @@ const llmChatService = createLlmChatService({
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
+  // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
+  ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);

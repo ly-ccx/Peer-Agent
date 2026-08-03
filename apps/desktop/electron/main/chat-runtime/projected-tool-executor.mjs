@@ -166,6 +166,8 @@ export async function executeProjectedModelTool({
   locale = 'zh-CN',
   toolCallId = null,
   goalPlanStore = undefined,
+  // main 注入的 Browser 工作现场 reveal 桥；缺失时 browser_open_panel 会硬失败。
+  ensureBrowserReady = null,
 }) {
   const projection = resolveProjectedModelToolCall({
     name,
@@ -283,6 +285,9 @@ export async function executeProjectedModelTool({
     // goalPlanStore 实例（带 onChange → 广播）；否则用默认无 onChange 实例落库，
     // 计划变更不会推送到渲染端，浮条只能靠切会话重挂载才更新。
     ...(goalPlanStore ? { goalProvider: createLocalGoalProvider({ goalPlanStore }) } : {}),
+    // 与 main 全局 localToolHost 一致：Agent 工具路径也必须持有 reveal 桥，
+    // 否则 browser_open_panel / browser_navigate 在 ensureBrowserReady 入口被硬拒绝。
+    ...(typeof ensureBrowserReady === 'function' ? { ensureBrowserReady } : {}),
     shellProvider: createLocalShellProvider({
       workspaceRoot: cwd,
       userDataPath,

@@ -64,6 +64,7 @@ export async function agentLoopQoder({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
+  ensureBrowserReady = null,
   agentProgress = null,
   maxOutputTokens = 0,
   resolvedChannel = null,
@@ -269,6 +270,7 @@ export async function agentLoopQoder({
           runtimeProjection,
           mcpRegistry,
           goalPlanStore,
+          ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
         // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：

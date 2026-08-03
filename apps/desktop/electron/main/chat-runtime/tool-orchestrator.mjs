@@ -313,6 +313,7 @@ export async function executeModelToolCall({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
+  ensureBrowserReady = null,
 }) {
   const args = safeParseJson(rawArguments);
   // displayName 是后端 Runtime Projection 注入的固定展示文案（MCP 工具为
@@ -473,6 +474,7 @@ export async function executeModelToolCall({
     runtimeProjection,
     mcpRegistry,
     goalPlanStore,
+    ensureBrowserReady,
   });
   if (signal?.aborted) {
     const endedAtMs = Date.now();

@@ -8,13 +8,24 @@ import {
   executeProjectedModelTool,
   resolveProjectedModelToolCall,
 } from './projected-tool-executor.mjs';
+import {
+  createRuntimeProjectionFromToolRegistry,
+  createRuntimeToolRegistry,
+} from '../tools/index.mjs';
 
 let tmpDir;
+let browserToolRegistry;
+let browserRuntimeProjection;
 
 describe('projected model tool executor', () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), 'projected-model-tool-'));
     process.env.PEER_AGENT_HOME = tmpDir;
+    browserToolRegistry = createRuntimeToolRegistry();
+    browserRuntimeProjection = createRuntimeProjectionFromToolRegistry(browserToolRegistry, {
+      mode: 'chat',
+      workspacePath: tmpDir,
+    });
   });
 
   afterEach(() => {
@@ -220,5 +231,53 @@ describe('projected model tool executor', () => {
     assert.equal(result.execution.result.status, 'cancelled');
     assert.equal(result.execution.result.outputPreview.interrupted, true);
     assert.equal(existsSync(markerPath), false);
+  });
+
+  it('fails browser_open_panel when ensureBrowserReady is not injected', async () => {
+    const result = await executeProjectedModelTool({
+      name: 'browser_open_panel',
+      args: { focus: true },
+      workspacePath: tmpDir,
+      toolContext: { conversationId: 'conversation-browser' },
+      toolCallId: 'tc_browser_open_missing',
+      locale: 'zh-CN',
+      registry: browserToolRegistry,
+      runtimeProjection: browserRuntimeProjection,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.execution.result.status, 'failed');
+    assert.match(
+      String(result.execution.result.outputPreview?.reason || result.output || ''),
+      /启动服务尚未就绪|reveal service is unavailable/i,
+    );
+  });
+
+  it('passes ensureBrowserReady into projected browser_open_panel execution', async () => {
+    const revealRequests = [];
+    const result = await executeProjectedModelTool({
+      name: 'browser_open_panel',
+      args: { focus: true },
+      workspacePath: tmpDir,
+      toolContext: { conversationId: 'conversation-browser' },
+      toolCallId: 'tc_browser_open_ready',
+      locale: 'en-US',
+      registry: browserToolRegistry,
+      runtimeProjection: browserRuntimeProjection,
+      ensureBrowserReady: async (request) => {
+        revealRequests.push(request);
+        return {
+          status: 'activated',
+          sessionId: 'conversation-browser',
+          focused: true,
+        };
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.execution.result.status, 'success');
+    assert.equal(revealRequests.length, 1);
+    assert.equal(revealRequests[0].conversationId, 'conversation-browser');
+    assert.equal(revealRequests[0].focus, true);
   });
 });

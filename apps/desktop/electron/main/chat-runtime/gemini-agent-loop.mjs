@@ -44,6 +44,7 @@ export async function agentLoopGemini({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
+  ensureBrowserReady = null,
   resolvedChannel = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
@@ -271,6 +272,7 @@ export async function agentLoopGemini({
           runtimeProjection,
           mcpRegistry,
           goalPlanStore,
+          ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
         // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
