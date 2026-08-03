@@ -14,6 +14,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
+import { LlmBrandIcon } from './LlmBrandIcon';
 import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
 import { ModelCatalogDialog } from './ModelCatalogDialog';
@@ -1233,6 +1234,7 @@ export function LlmSettingsPanel({
                       onClick={() => openAddFromTemplate(template)}
                     >
                       <div className="llm-service-template-card-title">
+                        <LlmBrandIcon brand={template.brand} channelId={template.channelId} serviceTemplateId={template.id} />
                         <strong>{template.title}</strong>
                         <span className="llm-service-tier">{supportTierLabel(template.supportTier, zh)}</span>
                       </div>
@@ -1265,6 +1267,11 @@ export function LlmSettingsPanel({
             <div className="llm-group-header">
               <div className="llm-group-header-main">
               <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
+                <LlmBrandIcon
+                  channelId={head.channelId}
+                  providerName={head.name}
+                  serviceTemplateId={head.serviceTemplateId}
+                />
                 <svg
                   className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`}
                   width="14"

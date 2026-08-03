@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { PeerAgentPreloadApi } from './preload/contracts/peerAgentPreloadApi';
 
 declare global {

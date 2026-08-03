@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
+import { LlmBrandIcon } from './LlmBrandIcon';
 import { modelMetadataCompletion, selectedModelContextWindow } from './llmModelConfiguration';
 
 function compactTokens(value: number | undefined): string | null {
@@ -63,6 +64,13 @@ export function ConfiguredModelRow({
   return (
     <details className={`llm-configured-model-row ${model.isDefault ? 'is-default' : ''}`}>
       <summary className="llm-configured-model-summary">
+        <LlmBrandIcon
+          className="llm-brand-icon-model"
+          channelId={model.channelId}
+          providerName={model.name}
+          serviceTemplateId={model.serviceTemplateId}
+          modelId={model.model}
+        />
         <div className="llm-configured-model-main">
           <div className="llm-configured-model-title">
             <strong>{model.modelLabel || model.model}</strong>

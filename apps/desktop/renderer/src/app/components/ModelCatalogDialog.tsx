@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmModelInfo, LlmModelListResult, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LlmBrandIcon } from './LlmBrandIcon';
 import { Overlay } from './Overlay';
 import {
   buildModelCatalog,
@@ -271,6 +272,7 @@ export function ModelCatalogDialog({
               return (
                 <label key={model.id} className={`llm-catalog-item ${configured ? 'is-configured' : ''} ${checked ? 'is-selected' : ''}`}>
                   <input type="checkbox" checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} />
+                  <LlmBrandIcon className="llm-brand-icon-model" providerName={providerName} modelId={model.id} />
                   <span className="llm-catalog-item-main">
                     <strong>{model.label || model.id}</strong>
                     <code>{model.id}</code>
