@@ -78,6 +78,7 @@ test('legacy names and capability IDs normalize without entering the canonical s
 
 test('Desktop-only browser contracts are explicit and excluded from shared parity', () => {
   assert.deepEqual(DESKTOP_ONLY_LOCAL_TOOL_CONTRACT_LIST, [
+    { toolName: 'browser_open_panel', capabilityId: 'local.web.control.openPanel' },
     { toolName: 'browser_navigate', capabilityId: 'local.web.control.navigate' },
     { toolName: 'browser_click', capabilityId: 'local.web.control.click' },
     { toolName: 'browser_type', capabilityId: 'local.web.control.type' },

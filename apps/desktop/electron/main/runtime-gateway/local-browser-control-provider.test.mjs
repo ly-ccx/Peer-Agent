@@ -34,7 +34,95 @@ function navigateCall(url) {
   };
 }
 
+function openPanelCall(focus = true) {
+  return {
+    call: {
+      toolCallId: 'tool-call-open-panel',
+      capabilityId: 'local.web.control.openPanel',
+      toolName: 'browser_open_panel',
+      arguments: { focus },
+      riskLevel: 'L1_local_read',
+      dataLevel: 'D1_internal',
+    },
+  };
+}
+
 test.beforeEach(() => resetBrowserControlRegistryForTests());
+
+test('browser_open_panel returns the reveal state without requesting network permission', async () => {
+  const revealRequests = [];
+  let permissionRequests = 0;
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {},
+    ensureBrowserReady: async (request) => {
+      revealRequests.push(request);
+      return { status: 'activated', sessionId: 'conversation-a', focused: true };
+    },
+  });
+
+  const execution = await provider.executeCapability(openPanelCall(), {
+    locale: 'en-US',
+    toolContext: { conversationId: 'conversation-a' },
+    requestPermission: async () => {
+      permissionRequests += 1;
+      return { granted: true };
+    },
+  });
+
+  assert.equal(execution.result.status, 'success');
+  assert.equal(permissionRequests, 0);
+  assert.equal(revealRequests.length, 1);
+  assert.equal(revealRequests[0].conversationId, 'conversation-a');
+  assert.equal(revealRequests[0].focus, true);
+  assert.deepEqual(JSON.parse(execution.result.output), {
+    status: 'activated',
+    conversationId: 'conversation-a',
+    sessionId: 'conversation-a',
+    visible: true,
+    focused: true,
+  });
+});
+
+test('browser provider reveals before navigation even when the Browser WebContents is already registered', async () => {
+  const browser = createWebContents('https://example.com');
+  const order = [];
+  registerBrowserWebContents({
+    webContentsId: 31,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-1',
+    active: true,
+    url: browser.getURL(),
+  });
+  const originalLoadUrl = browser.loadURL;
+  browser.loadURL = async (url) => {
+    order.push('navigate');
+    return originalLoadUrl(url);
+  };
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {},
+    resolveWebContents: (id) => id === 31 ? browser : null,
+    ensureBrowserReady: async ({ conversationId, focus }) => {
+      order.push('reveal');
+      assert.equal(conversationId, 'conversation-a');
+      assert.equal(focus, true);
+      return { status: 'opened' };
+    },
+  });
+
+  const execution = await provider.executeCapability(
+    navigateCall('https://openai.com'),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+
+  assert.equal(execution.result.status, 'success');
+  assert.deepEqual(order, ['reveal', 'navigate']);
+});
 
 test('browser provider resolves the active tab from the tool conversation context', async () => {
   const browserA = createWebContents('https://example.com/a');

@@ -293,6 +293,26 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
+  useEffect(() => clientApi.onBrowserPanelRevealRequest((request) => {
+    if (!conversationId || request.conversationId !== conversationId) return;
+    const wasOpen = openRef.current;
+    const wasBrowser = latestRef.current.activeTabMap[currentSessionKey] === 'browser';
+    const existing = latestRef.current.browserSessionMap[currentSessionKey]
+      ?? defaultBrowserSessionsRef.current[currentSessionKey];
+    const session = existing ?? createBrowserSessionState();
+    if (!existing) setBrowserSession(session);
+    setOpen(true);
+    setActiveTab('browser');
+    void clientApi.acknowledgeBrowserPanelReveal({
+      requestId: request.requestId,
+      conversationId,
+      ok: true,
+      status: wasOpen && wasBrowser ? 'already_active' : wasOpen ? 'activated' : 'opened',
+      sessionId: currentSessionKey,
+      focused: request.focus !== false,
+    });
+  }), [conversationId, currentSessionKey, setActiveTab, setBrowserSession, setOpen]);
+
   const setDocumentSession = useCallback((next: DocumentSessionUpdater) => {
     const key = workbenchSessionKey(conversationId);
     setDocumentSessionMap((prev) => {

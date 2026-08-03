@@ -20,6 +20,9 @@ function createServices(calls) {
       listSessionSites: port('list-session-sites'),
       importSiteSession: port('import-site-session'),
     },
+    panelReveal: {
+      acknowledge: port('acknowledge-panel-reveal'),
+    },
     fdaDrag: {
       openFullDiskAccessSettings: port('open-fda-settings'),
       hideDragFloat: port('hide-float'),
@@ -63,6 +66,7 @@ test('browser owner registers Browser, Session Import, and FDA channels once', (
     'browser:open-full-disk-access-settings',
     'browser:hide-fda-drag-float',
     'browser:get-app-drag-target',
+    'browser:panel-reveal-ack',
   ]);
   assert.deepEqual([...listeners.keys()], [
     'browser:fda-drag-float-dragging',
@@ -148,6 +152,15 @@ test('browser owner preserves FDA payloads and synchronous returnValue semantics
     handlers.get('browser:get-app-drag-target')({ sender }),
     'get-app-drag-target-result',
   );
+  assert.equal(
+    handlers.get('browser:panel-reveal-ack')({ sender }, {
+      requestId: 'request-1',
+      conversationId: 'conversation-a',
+      ok: true,
+      status: 'opened',
+    }),
+    'acknowledge-panel-reveal-result',
+  );
 
   listeners.get('browser:fda-drag-float-dragging')(
     { sender },
@@ -167,6 +180,12 @@ test('browser owner preserves FDA payloads and synchronous returnValue semantics
     ['open-fda-settings', { isZh: true }],
     ['hide-float'],
     ['get-app-drag-target'],
+    ['acknowledge-panel-reveal', {
+      requestId: 'request-1',
+      conversationId: 'conversation-a',
+      ok: true,
+      status: 'opened',
+    }],
     ['set-dragging', { dragging: true }],
     ['hide-float-sync'],
     ['start-app-drag', { appPath: '/Applications/Peer Agent.app' }, sender],
@@ -186,6 +205,7 @@ test('browser owner preserves default empty payloads', () => {
   handlers.get('browser:list-session-sites')({ sender });
   handlers.get('browser:import-site-session')({ sender });
   handlers.get('browser:open-full-disk-access-settings')({ sender });
+  handlers.get('browser:panel-reveal-ack')({ sender });
   listeners.get('browser:fda-drag-float-dragging')({ sender });
   listeners.get('browser:start-app-drag')({ sender });
 
@@ -199,6 +219,7 @@ test('browser owner preserves default empty payloads', () => {
     ['list-session-sites', {}],
     ['import-site-session', {}],
     ['open-fda-settings', {}],
+    ['acknowledge-panel-reveal', {}],
     ['set-dragging', {}],
     ['start-app-drag', {}, sender],
   ]);

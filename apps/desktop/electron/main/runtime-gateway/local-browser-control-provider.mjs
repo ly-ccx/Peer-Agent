@@ -29,13 +29,14 @@ const { webContents: electronWebContents } = electron;
  * evidencePolicy=artifact_ref。
  */
 
+const OPEN_PANEL = 'local.web.control.openPanel';
 const NAVIGATE = 'local.web.control.navigate';
 const CLICK = 'local.web.control.click';
 const TYPE = 'local.web.control.type';
 const SCREENSHOT = 'local.web.control.screenshot';
 const READ_DOM = 'local.web.control.readDom';
 
-const CONTROL_CAPABILITIES = Object.freeze([NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM]);
+const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM]);
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
@@ -152,12 +153,18 @@ export function createLocalBrowserControlProvider({
 
   async function resolveTarget(context = {}) {
     const conversationId = context?.toolContext?.conversationId ?? null;
-    const immediate = resolveRegisteredTarget(conversationId);
-    if (immediate.ok || !conversationId) return immediate;
+    if (!conversationId) return resolveRegisteredTarget(null);
 
-    // tool-call 事件会先通知 Renderer 自动展开 Browser。这里等待对应会话的
-    // webview 完成注册，避免 Provider 抢在 React/dom-ready 前失败。
-    await ensureBrowserReady?.({ conversationId, timeoutMs: browserReadyTimeoutMs });
+    // 可见 Browser 工具必须先确保当前 Conversation 的工作现场已展开。BrowserView
+    // 为保留网页 Session 会持续 mounted，因此 Registry 有 entry 不代表用户看得见面板。
+    // reveal ack 后再解析/等待同会话 WebContents，保持可见语义与控制目标一致。
+    await ensureBrowserReady?.({
+      conversationId,
+      focus: true,
+      timeoutMs: browserReadyTimeoutMs,
+    });
+    const immediate = resolveRegisteredTarget(conversationId);
+    if (immediate.ok) return immediate;
     await waitForActiveBrowserEntry(conversationId, { timeoutMs: browserReadyTimeoutMs });
     return resolveRegisteredTarget(conversationId);
   }
@@ -177,6 +184,69 @@ export function createLocalBrowserControlProvider({
     const zh = locale === 'zh-CN';
     const args = call.arguments ?? call.argumentsPreview ?? {};
     const capabilityId = call.capabilityId;
+
+    if (capabilityId === OPEN_PANEL) {
+      const conversationId = context?.toolContext?.conversationId ?? null;
+      if (!conversationId) {
+        return failed({
+          call,
+          locale,
+          reason: zh ? '缺少当前会话，无法打开 Browser 工作现场。' : 'No current conversation is available for the Browser workspace.',
+          dataLevel: 'D1_internal',
+        });
+      }
+      if (typeof ensureBrowserReady !== 'function') {
+        return failed({
+          call,
+          locale,
+          reason: zh ? 'Browser 工作现场启动服务尚未就绪。' : 'The Browser workspace reveal service is unavailable.',
+          dataLevel: 'D1_internal',
+        });
+      }
+      try {
+        const reveal = await ensureBrowserReady({
+          conversationId,
+          focus: args?.focus !== false,
+          timeoutMs: browserReadyTimeoutMs,
+        });
+        const status = reveal?.status ?? 'opened';
+        const sessionId = reveal?.sessionId ?? null;
+        return {
+          call,
+          permissionGrant: createPermissionGrant({
+            toolCallId: call.toolCallId,
+            granted: true,
+            scope: { kind: 'browser-panel', conversationId },
+          }),
+          result: {
+            toolCallId: call.toolCallId,
+            status: 'success',
+            output: JSON.stringify({
+              status,
+              conversationId,
+              sessionId,
+              visible: true,
+              focused: reveal?.focused !== false,
+            }),
+            dataLevel: 'D1_internal',
+            evidence: {
+              summary: `Browser workspace ${status} for conversation ${conversationId}`,
+              source: 'local.browser.control',
+              observedAt: nowIso(),
+            },
+          },
+        };
+      } catch (err) {
+        return failed({
+          call,
+          locale,
+          reason: zh
+            ? `无法打开 Browser 工作现场：${err?.message ?? String(err)}`
+            : `Unable to open the Browser workspace: ${err?.message ?? String(err)}`,
+          dataLevel: 'D1_internal',
+        });
+      }
+    }
 
     // navigate 必填 url 的早校验。
     if (capabilityId === NAVIGATE) {

@@ -1,0 +1,39 @@
+{
+  "capabilityId": "local.web.control.openPanel",
+  "name": "Open Browser workspace",
+  "description": "Idempotently reveals the embedded Browser workspace for the current conversation and reuses or creates its local Browser session without navigating.",
+  "localizedName": {
+    "zh-CN": "打开浏览器工作现场",
+    "en-US": "Open Browser workspace"
+  },
+  "localizedDescription": {
+    "zh-CN": "幂等展开当前会话的工作台并切换到内嵌浏览器，复用或创建该会话的本地 Browser Session；不发起网络导航。",
+    "en-US": "Idempotently reveals the embedded Browser workspace for the current conversation and reuses or creates its local Browser session without navigating."
+  },
+  "source": "web",
+  "riskLevel": "L1_local_read",
+  "dataLevel": "D1_internal",
+  "health": "available",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "focus": {
+        "type": "boolean",
+        "description": "Focus the Browser workspace after opening. Defaults to true."
+      }
+    },
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "inline",
+    "maxChars": 2000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "allow",
+    "readOnlyAutoAllow": true,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

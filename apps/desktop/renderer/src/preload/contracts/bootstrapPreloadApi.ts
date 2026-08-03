@@ -439,6 +439,21 @@ export interface BootstrapPreloadApi {
     readonly browserTabId?: string;
     readonly error?: string;
   }>;
+  readonly onBrowserPanelRevealRequest: (listener: (request: {
+    readonly requestId: string;
+    readonly conversationId: string;
+    readonly focus: boolean;
+    readonly sessionPolicy: 'reuse-or-create';
+  }) => void) => () => void;
+  readonly acknowledgeBrowserPanelReveal: (payload: {
+    readonly requestId: string;
+    readonly conversationId: string;
+    readonly ok: boolean;
+    readonly status?: 'opened' | 'activated' | 'already_active';
+    readonly sessionId?: string;
+    readonly focused?: boolean;
+    readonly error?: string;
+  }) => Promise<boolean>;
   readonly unregisterBrowserWebContents: (registration: {
     readonly webContentsId: number;
     readonly conversationId: string | null;

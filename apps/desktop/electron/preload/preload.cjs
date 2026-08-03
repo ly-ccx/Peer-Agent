@@ -75,6 +75,13 @@ contextBridge.exposeInMainWorld('peerAgent', {
   // 会话级内嵌浏览器标签控制句柄注册（见 ADR 40 / 46）。
   registerBrowserWebContents: (registration) =>
     ipcRenderer.invoke('browser:register-webcontents', registration),
+  onBrowserPanelRevealRequest: (listener) => {
+    const handler = (_event, request) => listener(request);
+    ipcRenderer.on('browser:panel-reveal-request', handler);
+    return () => ipcRenderer.removeListener('browser:panel-reveal-request', handler);
+  },
+  acknowledgeBrowserPanelReveal: (payload) =>
+    ipcRenderer.invoke('browser:panel-reveal-ack', payload),
   unregisterBrowserWebContents: (registration) =>
     ipcRenderer.invoke('browser:unregister-webcontents', registration),
   /** 清除当前 origin 的站点 Cookie/存储（peer-browser 分区）；不触碰密码库。 */

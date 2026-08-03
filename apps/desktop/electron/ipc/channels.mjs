@@ -61,6 +61,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'browser:list-session-sites',
   'browser:list-session-sources',
   'browser:open-full-disk-access-settings',
+  'browser:panel-reveal-ack',
   'browser:register-webcontents',
   'browser:session-import-preflight',
   'browser:unregister-webcontents',
@@ -232,6 +233,7 @@ const SEND_CHANNELS = Object.freeze([
 
 const EVENT_CHANNELS = Object.freeze([
   'appearance:changed',
+  'browser:panel-reveal-request',
   'chat:compaction',
   'chat:stream:aborted',
   'chat:stream:active-changed',

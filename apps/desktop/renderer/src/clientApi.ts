@@ -26,6 +26,8 @@ const unavailableApi: ClientApi = {
   watchDirs: unavailableMethod('watchDirs'),
   onFsDirChanged: () => () => {},
   registerBrowserWebContents: unavailableMethod('registerBrowserWebContents'),
+  onBrowserPanelRevealRequest: unavailableMethod('onBrowserPanelRevealRequest'),
+  acknowledgeBrowserPanelReveal: unavailableMethod('acknowledgeBrowserPanelReveal'),
   unregisterBrowserWebContents: unavailableMethod('unregisterBrowserWebContents'),
   clearBrowserSiteData: unavailableMethod('clearBrowserSiteData'),
   captureBrowserPage: unavailableMethod('captureBrowserPage'),

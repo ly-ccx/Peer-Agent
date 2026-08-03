@@ -18,6 +18,7 @@ import { DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
  */
 
 export const BROWSER_TOOL_NAMES = Object.freeze({
+  openPanel: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserOpenPanel.toolName,
   navigate: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserNavigate.toolName,
   click: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserClick.toolName,
   type: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.toolName,
@@ -30,6 +31,7 @@ export const BROWSER_TOOL_NAMES = Object.freeze({
  * 并按 call.capabilityId 分流到具体工具（仿 local.file provider）。
  */
 export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserOpenPanel.capabilityId]: BROWSER_TOOL_NAMES.openPanel,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserNavigate.capabilityId]: BROWSER_TOOL_NAMES.navigate,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserClick.capabilityId]: BROWSER_TOOL_NAMES.click,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.capabilityId]: BROWSER_TOOL_NAMES.type,
@@ -38,6 +40,12 @@ export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
 });
 
 const BROWSER_CONTROL_MODE_SCOPES = Object.freeze(['chat', 'goal']);
+
+const OPEN_PANEL_PROMPT = [
+  'Open the embedded Browser workspace for the current conversation.',
+  'This operation is idempotent: it expands the Workbench, selects Browser, and reuses',
+  'or creates the conversation Browser session without navigating or duplicating tabs.',
+].join(' ');
 
 const NAVIGATE_PROMPT = [
   'Navigate the active browser tab bound to the current conversation (the one shown in the',
@@ -83,6 +91,27 @@ function browserContractFields(contract) {
       ...BROWSER_CONTROL_RUNTIME,
       executorCapabilityId: contract.capabilityId,
     }),
+  };
+}
+
+function openPanelTool() {
+  const contract = DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserOpenPanel;
+  return {
+    name: contract.toolName,
+    description: 'Open the embedded Browser workspace for the current conversation. This is idempotent: it reuses the conversation Browser session and does not navigate or duplicate tabs.',
+    ...browserContractFields(contract),
+    prompt: () => OPEN_PANEL_PROMPT,
+    permissionPolicy: Object.freeze({ kind: 'browser-reveal' }),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        focus: {
+          type: 'boolean',
+          description: 'Focus the Browser workspace after opening. Defaults to true.',
+        },
+      },
+      additionalProperties: false,
+    },
   };
 }
 
@@ -208,6 +237,7 @@ function readDomTool() {
 }
 
 export const BROWSER_TOOL_DEFINITIONS = [
+  openPanelTool(),
   navigateTool(),
   clickTool(),
   typeTool(),

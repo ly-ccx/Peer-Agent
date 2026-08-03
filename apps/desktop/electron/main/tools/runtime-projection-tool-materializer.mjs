@@ -42,6 +42,8 @@ function riskForTool(tool) {
   }
   // web-fetch: 联网读取外部网页，按 ADR 38 归为 L3_external_write（需联网授权）。
   if (policy.kind === 'web-fetch') return 'L3_external_write';
+  // browser-reveal: 只在当前会话中显式打开本地 Workbench Browser，不联网、不改外部状态。
+  if (policy.kind === 'browser-reveal') return 'L1_local_read';
   // browser-control: 操控可见内嵌浏览器（导航/点击/输入/截图/读DOM），按 ADR 40 归为
   // L3_external_write（导航联网 + 页面副作用，需授权）。
   if (policy.kind === 'browser-control') return 'L3_external_write';
@@ -50,7 +52,7 @@ function riskForTool(tool) {
 
 function dataLevelForTool(tool) {
   const policy = tool.permissionPolicy ?? {};
-  if (policy.kind === 'file-read') return 'D1_internal';
+  if (policy.kind === 'file-read' || policy.kind === 'browser-reveal') return 'D1_internal';
   if (policy.kind === 'interaction') return 'D0_public';
   return 'D2_sensitive';
 }

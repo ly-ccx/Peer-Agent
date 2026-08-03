@@ -7,7 +7,7 @@ function owner(ownerName, register) {
   return Object.freeze({ owner: ownerName, register });
 }
 
-export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag } = {}) {
+export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag, panelReveal } = {}) {
   const ports = {
     registerWebContents: assertFunction(
       browser?.registerWebContents,
@@ -50,6 +50,10 @@ export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag 
     ),
     startAppDrag: assertFunction(fdaDrag?.startAppDrag, 'fdaDrag.startAppDrag'),
     getAppDragTarget: assertFunction(fdaDrag?.getAppDragTarget, 'fdaDrag.getAppDragTarget'),
+    acknowledgePanelReveal: assertFunction(
+      panelReveal?.acknowledge,
+      'panelReveal.acknowledge',
+    ),
   };
 
   return [
@@ -82,6 +86,8 @@ export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag 
         event.returnValue = ports.startAppDrag(payload, event.sender);
       });
       ipc.handle('browser:get-app-drag-target', () => ports.getAppDragTarget());
+      ipc.handle('browser:panel-reveal-ack', (_event, payload = {}) =>
+        ports.acknowledgePanelReveal(payload));
     }),
   ];
 }

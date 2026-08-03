@@ -57,6 +57,7 @@ export const SHARED_LOCAL_TOOL_CONTRACT_LIST = Object.freeze(
  * these contracts instead of ignoring arbitrary browser-prefixed additions.
  */
 export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS = Object.freeze({
+  browserOpenPanel: defineToolContract('browser_open_panel', 'local.web.control.openPanel'),
   browserNavigate: defineToolContract('browser_navigate', 'local.web.control.navigate'),
   browserClick: defineToolContract('browser_click', 'local.web.control.click'),
   browserType: defineToolContract('browser_type', 'local.web.control.type'),

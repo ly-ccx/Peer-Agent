@@ -18,6 +18,7 @@ import { loadLocalEnv } from './env-loader.mjs';
 import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
+import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   registerBrowserWebContents,
   unregisterBrowserWebContents,
@@ -364,6 +365,9 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let localToolHost = null;
+const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
+  broadcast: broadcastToAllWindows,
+});
 let taskNotificationBroker = null;
 let trayController = null;
 let desktopLifecycleBinding = null;
@@ -1863,6 +1867,7 @@ function registerDesktopIpcHost() {
       browser: browserCoreApplicationService,
       sessionImport: browserSessionImportApplicationService,
       fdaDrag: browserFdaDragApplicationService,
+      panelReveal: browserPanelRevealCoordinator,
     }),
     ...createChatIpcRegistrations({
       chat: {
@@ -3018,6 +3023,7 @@ function startLocalRuntime() {
     // 让 AI 工具路径（goal_create_plan / goal_update_task）与 IPC 路径共享同一个
     // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
     goalProvider: createLocalGoalProvider({ goalPlanStore }),
+    ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
     extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
     onRuntimeEvent: forwardRuntimeEvent,
   });
