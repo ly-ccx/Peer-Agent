@@ -20,6 +20,7 @@ import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
+  getActiveBrowserEntry,
   registerBrowserWebContents,
   unregisterBrowserWebContents,
   getActiveWebContentsId,
@@ -368,6 +369,12 @@ let goalRunner = null;
 let localToolHost = null;
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
+  isBrowserReady: (conversationId) => {
+    const entry = getActiveBrowserEntry(conversationId);
+    if (!entry?.webContentsId) return false;
+    const browserWebContents = webContents.fromId(entry.webContentsId);
+    return Boolean(browserWebContents && !browserWebContents.isDestroyed());
+  },
 });
 let taskNotificationBroker = null;
 let trayController = null;
