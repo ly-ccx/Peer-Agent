@@ -184,6 +184,36 @@ test('listOpenAICompatibleModels fetches /models, strips content-type, filters n
   assert.deepEqual(res.models.map((m) => m.id), ['new-chat', 'old-chat']);
 });
 
+test('listOpenAICompatibleModels requests the DeepSeek official catalog with Bearer auth', async () => {
+  let seenUrl = '';
+  let seenHeaders = null;
+  const res = await listOpenAICompatibleModels({
+    baseUrl: 'https://api.deepseek.com',
+    wire: 'openai-chat',
+    headers: { Authorization: 'Bearer deepseek-test-key', 'Content-Type': 'application/json' },
+    fetchImpl: async (url, init) => {
+      seenUrl = url;
+      seenHeaders = init.headers;
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'deepseek-chat' },
+            { id: 'deepseek-reasoner' },
+            { id: 'deepseek-embedding' },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(seenUrl, 'https://api.deepseek.com/models');
+  assert.equal(seenHeaders.Authorization, 'Bearer deepseek-test-key');
+  assert.equal(seenHeaders['Content-Type'], undefined);
+  assert.equal(res.source, 'remote');
+  assert.deepEqual(res.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+});
+
 test('listOpenAICompatibleModels enriches exact IDs while preserving provider fields', async () => {
   const res = await listOpenAICompatibleModels({
     baseUrl: 'https://example.test/v1',

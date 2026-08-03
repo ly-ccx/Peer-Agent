@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CHANNEL_IDS,
   listChannelDescriptors,
   resolveChannel,
   validateCustomHeaders,
@@ -13,6 +14,37 @@ describe('provider channel registry', () => {
   it('uses the official Grok display name', () => {
     const grok = listChannelDescriptors().find((channel) => channel.id === 'grok');
     assert.equal(grok?.label, 'Grok 官方');
+  });
+
+  it('registers and resolves DeepSeek as an independent official channel', () => {
+    assert.equal(CHANNEL_IDS.DEEPSEEK, 'deepseek');
+    const descriptor = listChannelDescriptors().find((channel) => channel.id === CHANNEL_IDS.DEEPSEEK);
+
+    assert.equal(descriptor?.label, 'DeepSeek 官方');
+    assert.equal(descriptor?.defaultWire, 'openai-chat');
+    assert.deepEqual(descriptor?.allowedWires, ['openai-chat']);
+    assert.equal(descriptor?.authMethods.api_key.wire, 'openai-chat');
+    assert.equal(descriptor?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(descriptor?.defaults.model, 'deepseek-chat');
+
+    const resolved = resolveChannel({
+      channelId: CHANNEL_IDS.DEEPSEEK,
+      authMethod: 'api_key',
+      apiKey: 'deepseek-test-key',
+    });
+    assert.equal(resolved.wire, 'openai-chat');
+    assert.equal(resolved.baseUrl, 'https://api.deepseek.com');
+    assert.equal(resolved.endpoint, 'https://api.deepseek.com/chat/completions');
+    assert.equal(resolved.headers.Authorization, 'Bearer deepseek-test-key');
+    assert.throws(
+      () => resolveChannel({
+        channelId: CHANNEL_IDS.DEEPSEEK,
+        authMethod: 'api_key',
+        wireOverride: 'openai-responses',
+        apiKey: 'deepseek-test-key',
+      }),
+      /unsupported_wire:deepseek:openai-responses/,
+    );
   });
 
   it('resolves ChatGPT OAuth through OpenAI official responses wire only', () => {
@@ -190,6 +222,18 @@ describe('service templates', () => {
     assert.ok(templates.some((item) => item.id === 'openai-api'));
     assert.ok(templates.some((item) => item.id === 'openai-chatgpt'));
     assert.ok(templates.some((item) => item.id === 'openai-compatible'));
+    const deepseek = templates.find((item) => item.id === 'deepseek-api');
+    assert.equal(deepseek?.brand, 'DeepSeek');
+    assert.equal(deepseek?.title, 'DeepSeek');
+    assert.equal(deepseek?.accessCategory, 'official_api');
+    assert.equal(deepseek?.channelId, CHANNEL_IDS.DEEPSEEK);
+    assert.equal(deepseek?.authMethod, 'api_key');
+    assert.equal(deepseek?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(deepseek?.defaults.model, 'deepseek-chat');
+    assert.equal(
+      resolveServiceTemplateId({ channelId: CHANNEL_IDS.DEEPSEEK, authMethod: 'api_key' }),
+      'deepseek-api',
+    );
     assert.equal(
       resolveServiceTemplateId({ channelId: 'openai', authMethod: 'oauth_chatgpt' }),
       'openai-chatgpt',
