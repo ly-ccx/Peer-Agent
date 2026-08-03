@@ -1336,6 +1336,53 @@ test('backfillMissingPricingFromModelsDev matches canonical model ids', async ()
   assert.equal(reloaded.outputPrice, 10);
 }));
 
+test('backfillMissingPricingFromModelsDev does not thrash ChatGPT subscription cacheWritePrice', async () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    name: 'ChatGPT',
+    provider: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.4',
+  });
+  // Seed main prices so the only missing field is cacheWrite (subscription-cleared).
+  store.updateProvider(provider.id, {
+    inputPrice: 2.5,
+    outputPrice: 15,
+    cacheReadPrice: 0.25,
+    pricingSource: 'models.dev-reference',
+  });
+
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      openai: {
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            cost: {
+              input: 2.5,
+              output: 15,
+              cache_read: 0.25,
+              cache_write: 6.25,
+            },
+          },
+        },
+      },
+    }),
+  });
+
+  const first = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
+  const second = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
+  assert.equal(first.updated, 0);
+  assert.equal(second.updated, 0);
+
+  const reloaded = store.listProviders().find((item) => item.id === provider.id);
+  assert.equal(reloaded.cacheWritePrice, undefined);
+  assert.equal(reloaded.inputPrice, 2.5);
+  assert.equal(reloaded.outputPrice, 15);
+  assert.equal(reloaded.cacheReadPrice, 0.25);
+}));
+
 
 test('duplicateModel clones model metadata in the same group with -copy model id', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });

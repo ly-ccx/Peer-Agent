@@ -95,6 +95,41 @@ test('fillMissingPricingFromRegistry skips provider-owned pricing', () => {
   assert.equal(item.inputPrice, undefined);
 });
 
+test('fillMissingPricingFromRegistry skips cacheWritePrice for ChatGPT subscription models', () => {
+  const index = buildModelsDevIndex(registryPayload);
+  const { item, changed } = fillMissingPricingFromRegistry(
+    {
+      model: 'gpt-5.6-terra',
+      authMethod: 'oauth_chatgpt',
+      inputPrice: 5,
+      outputPrice: 15,
+      cacheReadPrice: 0.5,
+      // cacheWrite intentionally absent — subscription migrate clears it
+    },
+    index,
+  );
+  assert.equal(changed, false);
+  assert.equal(item.cacheWritePrice, undefined);
+});
+
+test('fillMissingPricingFromRegistry still fills non-cacheWrite prices for ChatGPT subscription models', () => {
+  const index = buildModelsDevIndex(registryPayload);
+  const { item, changed } = fillMissingPricingFromRegistry(
+    {
+      model: 'gpt-5.6-terra',
+      authMethod: 'oauth_chatgpt',
+      // all prices missing
+    },
+    index,
+  );
+  assert.equal(changed, true);
+  assert.equal(item.inputPrice, 5);
+  assert.equal(item.outputPrice, 15);
+  assert.equal(item.cacheReadPrice, 0.5);
+  assert.equal(item.cacheWritePrice, undefined);
+  assert.equal(item.pricingSource, 'models.dev-reference');
+});
+
 test('fetchModelsDevRegistry uses MODELS_DEV_URL and caches result', async () => {
   resetModelsDevRegistryCacheForTests();
   let calls = 0;
