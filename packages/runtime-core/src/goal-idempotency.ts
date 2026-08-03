@@ -217,11 +217,9 @@ export function decideGoalToolReplay(input: {
   }
 
   const openCalls = Array.isArray(input.openToolCalls) ? input.openToolCalls : [];
+  // Replay protection only applies to an exact logical-call match. Tool names are
+  // not identities: two different bash commands (or writes) may run in one Goal.
   const matched = openCalls.find((call) => asString(call.idempotencyKey) === idempotencyKey)
-    || openCalls.find((call) => (
-      asString(call.toolName) === asString(input.toolName)
-      && (call.status === 'running' || call.status === 'requested' || call.status === 'completed')
-    ))
     || null;
 
   if (matched?.status === 'completed' && (matched.resultEvidenceRefs?.length ?? 0) > 0) {
@@ -257,17 +255,9 @@ export function decideGoalToolReplay(input: {
     };
   }
 
-  if (mutationClass === 'unknown') {
-    return {
-      action: 'ask_user',
-      reason: 'unknown_mutation_class',
-      policy: 'ask_user',
-      mutationClass,
-      idempotencyKey,
-      matchedCall: matched,
-    };
-  }
-
+  // No exact ledger/checkpoint match means this is a fresh call, not a replay.
+  // Unknown mutation safety still matters for a matched unsettled call above, but
+  // must not pre-empt the downstream PermissionGate on first execution.
   return {
     action: 'execute',
     reason: 'no_prior_attempt',

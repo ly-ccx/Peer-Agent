@@ -150,6 +150,65 @@ describe('tool evidence refs', () => {
     }
   });
 
+  it('lets a fresh unknown Goal command reach the shell permission layer', async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'tool-orchestrator-fresh-command-'));
+    try {
+      const goalPlanStore = createGoalPlanStore({ storeDir: path.join(tmpRoot, 'goal-plans') });
+      const plan = goalPlanStore.createGoalContract({
+        conversationId: 'conv-fresh-command',
+        title: 'verify desktop',
+        goal: 'run the repository validation command',
+        successCriteria: ['command reaches the governed shell provider'],
+        tasks: [{ taskId: 't1', order: 0, title: 'Verify', status: 'pending', evidenceRefs: [] }],
+      });
+      goalPlanStore.setRunnerState(plan.planId, {
+        enabled: true,
+        status: 'running',
+        runId: 'run-fresh-command',
+        currentTaskId: 't1',
+      });
+      const shellApprovals = [];
+      const permissionGate = {
+        createFilePermissionRequester: () => async () => ({ granted: true }),
+        createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),
+        createShellApprovalDecider: () => async (request) => {
+          shellApprovals.push(request);
+          return { granted: false, reason: 'test_stop_before_spawn' };
+        },
+      };
+      const { registry, projection } = createRuntimeToolProjection({
+        projectionOptions: { mode: 'goal' },
+      });
+
+      const toolExecution = await executeModelToolCall({
+        name: 'bash',
+        rawArguments: JSON.stringify({ command: 'pnpm --dir apps/desktop ipc:check' }),
+        toolCallId: 'call_fresh_unknown_command',
+        workspacePath: tmpRoot,
+        toolContext: {
+          mode: 'goal',
+          conversationId: 'conv-fresh-command',
+          goalPlanId: plan.planId,
+          goalRuntime: { runId: 'run-fresh-command', currentTaskId: 't1' },
+        },
+        permissionGate,
+        webContents: { send: () => {} },
+        streamId: 'stream-fresh-command',
+        conversationId: 'conv-fresh-command',
+        registry,
+        runtimeProjection: projection,
+        goalPlanStore,
+      });
+
+      assert.equal(toolExecution.aborted, false);
+      assert.equal(shellApprovals.length, 1, `unexpected output: ${toolExecution.output}`);
+      assert.match(toolExecution.output, /test_stop_before_spawn/);
+      assert.doesNotMatch(toolExecution.output, /Blocked tool replay|unknown_mutation_class/);
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
   it('routes Goal confirmation requests through local capability permission, not file permission', async () => {
     const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'tool-orchestrator-confirmation-'));
     try {

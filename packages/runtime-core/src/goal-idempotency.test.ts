@@ -106,6 +106,77 @@ test('decideGoalToolReplay allows fresh read_only execute', () => {
   assert.equal(decision.mutationClass, 'read_only');
 });
 
+test('decideGoalToolReplay lets a fresh unknown command reach the permission layer', () => {
+  const decision = decideGoalToolReplay({
+    planId: 'plan-1',
+    runId: 'run-1',
+    taskId: 'task-a',
+    toolName: 'bash',
+    args: { command: 'pnpm --dir apps/desktop ipc:check' },
+  });
+
+  assert.equal(decision.action, 'execute');
+  assert.equal(decision.reason, 'no_prior_attempt');
+  assert.equal(decision.mutationClass, 'unknown');
+  assert.equal(decision.matchedCall, null);
+});
+
+test('decideGoalToolReplay does not treat a different command using the same tool as a replay', () => {
+  const priorKey = buildGoalIdempotencyKey({
+    planId: 'plan-1',
+    runId: 'run-1',
+    taskId: 'task-a',
+    toolName: 'bash',
+    args: { command: 'pnpm ipc:check' },
+  });
+  const decision = decideGoalToolReplay({
+    planId: 'plan-1',
+    runId: 'run-1',
+    taskId: 'task-a',
+    toolName: 'bash',
+    args: { command: 'pnpm typecheck' },
+    openToolCalls: [{
+      toolCallId: 'call-other-command',
+      toolName: 'bash',
+      status: 'running',
+      idempotencyKey: priorKey,
+    }],
+  });
+
+  assert.equal(decision.action, 'execute');
+  assert.equal(decision.reason, 'no_prior_attempt');
+  assert.equal(decision.matchedCall, null);
+});
+
+test('decideGoalToolReplay still blocks an exact unsettled unknown replay', () => {
+  const args = { command: 'pnpm --dir apps/desktop ipc:check' };
+  const idempotencyKey = buildGoalIdempotencyKey({
+    planId: 'plan-1',
+    runId: 'run-1',
+    taskId: 'task-a',
+    toolName: 'bash',
+    args,
+  });
+  const decision = decideGoalToolReplay({
+    planId: 'plan-1',
+    runId: 'run-1',
+    taskId: 'task-a',
+    toolName: 'bash',
+    args,
+    openToolCalls: [{
+      toolCallId: 'call-exact-replay',
+      toolName: 'bash',
+      status: 'running',
+      idempotencyKey,
+    }],
+  });
+
+  assert.equal(decision.action, 'block');
+  assert.equal(decision.reason, 'tool_still_running');
+  assert.equal(decision.mutationClass, 'unknown');
+  assert.equal(decision.matchedCall?.toolCallId, 'call-exact-replay');
+});
+
 test('createDurableGoalIdempotencyLedger survives process-local reload from disk', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'goal-idempotency-'));
   try {
