@@ -269,7 +269,8 @@
   color: var(--graphite-fade);
   background: var(--chrome-sunken);
   padding: 1px 6px;
-  border-radius: var(--radius-xs);
+  /* inline chip: 4px (not radius-xs 2px indicator) */
+  border-radius: var(--ui-radius-chip);
   font-family: var(--font-mono);
 }
 
