@@ -4,6 +4,36 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.1-beta.47 - 2026-08-02
+
+### Added
+
+- Markdown code-block syntax highlighting and diff add/remove coloring.
+- Per-request Provider / Model attribution for billing and token usage.
+- Desktop architecture gates for lifecycle, IPC ownership, dependency direction, overlay, and motion primitives.
+
+### Changed
+
+- Unified Desktop glass styling (window chrome, vibrancy layout, dark contrast, shared overlay radius).
+- Improved file-tree information hierarchy and browsing presentation.
+- Electron Main single Composition Root with named startup phases, fatal/optional semantics, reverse rollback, and idempotent cleanup.
+- Governed startup order: Local Runtime ready → Desktop IPC registration → first Renderer window.
+- Centralized IPC / preload catalog; no direct IPC registration in `main.mjs`.
+- Shared Desktop/TUI host-neutral surface via `@peer-agent/runtime-node`.
+- Hide unfinished Appshots settings entry from the product surface.
+
+### Fixed
+
+- Long-conversation main-thread stalls by moving expensive work off critical interaction paths.
+- Stream text jitter via animation-frame paced incremental updates.
+- Compaction concurrency for a single conversation; surface real failures and refresh context usage after compaction.
+- Goal handoff terminal-state retention and runner timing sync after recovery.
+- macOS Dock reactivation recreates the main window after it was closed.
+- Qoder FREE_INPUT keeps `image_url` parts; thinking effort aligns with `reasoning_effort`.
+- Missing cache-write tokens no longer reported as a fabricated zero.
+- Conversation Store tests no longer read/write real user data.
+- Appearance-preview duplicate titles, lost code line breaks, and extra blank spacing in diff lines.
+
 ## 0.0.1-beta.46 - 2026-07-31
 
 ### Added

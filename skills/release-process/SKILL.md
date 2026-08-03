@@ -2,7 +2,7 @@
 name: release-process
 description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、GitHub Pages 文档站、打 tag 触发 CI）。
 whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、检查/更新根 README、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
-version: 0.1.1
+version: 0.1.2
 ---
 
 # Peer Agent 发布流程 Skill
@@ -107,22 +107,54 @@ release-notes/v<version>.md
 
 | 文件 | 何时必须改 |
 |---|---|
-| `docs/changelog.html` | 新版本 notes 已写：确认生成逻辑仍读取 `release-notes/`；若是静态嵌入数据，重新生成/同步条目 |
+| `docs/changelog.html` | **硬门禁**：新版本 notes 已写则必须同步；静态 `ENTRIES` 时首项必须是本版（`idx === 0` 显示「最新」） |
 | `docs/docs.html` | 用户可见行为/命令/安装/能力（Skill/Plugin/MCP/权限）有变更 |
 | `docs/index.html` | 定位文案、下载入口、入口能力（Desktop/CLI）有变更 |
 | `docs/logo*.png` / `favicon*.png` | 品牌资源变更时同步 |
 
+#### `docs/changelog.html` 硬门禁（禁止 stamp / tag 前跳过）
+
+`release-notes/v<version>.md` 写了**不等于**站点已更新。`docs/changelog.html` 当前是**静态嵌入** `var ENTRIES = [...]`，不会自动读取 `release-notes/`。
+
+发版前必须同时满足：
+
+1. `CHANGELOG.md` 含本版标题（如 `## 0.0.1-beta.N`）
+2. `docs/changelog.html` 的 `ENTRIES[0].version` / `label` 为本版（页面「最新」徽章依赖 `idx === 0`）
+3. 本版中英段落与 notes 事实一致（至少 note / added|changed|fixed / cli）
+
+本地核验（失败则**禁止**进入 stamp / tag）：
+
+```bash
+# 把 VERSION 换成目标版本号，如 0.0.1-beta.47
+VERSION=0.0.1-beta.47
+rg -n "## ${VERSION}" CHANGELOG.md
+python3 - <<PY
+import re
+from pathlib import Path
+v = "${VERSION}"
+html = Path("docs/changelog.html").read_text(encoding="utf-8")
+m = re.search(r"var ENTRIES\s*=\s*\[", html)
+assert m, "ENTRIES missing"
+mm = re.search(r'"version"\s*:\s*"([^"]+)"', html[m.end(): m.end() + 240])
+assert mm, "first version missing"
+first = mm.group(1).lstrip("v")
+assert first == v, f"latest entry is {first}, expected {v}"
+print("changelog_site_latest_ok", first)
+PY
+```
+
 操作要点：
 
 1. 以 `release-notes/` + 代码真实行为为准，**禁止**文档继续描述已删除命令/别名（例如独立 `/history-earlier`）。
-2. 本地预览（可选但推荐）：
+2. **禁止**只写 notes 就 stamp/tag；CHANGELOG + `docs/changelog.html` 未过硬门禁则停。
+3. 本地预览（可选但推荐）：
 
 ```bash
 python3 -m http.server 8777 --directory docs
 # 打开 http://127.0.0.1:8777/ 与 /docs.html /changelog.html
 ```
 
-3. 提交 `docs/*` 与 notes 到将要打 tag 的分支（Pages 若绑定 `dev/0.0.1` 的 `/docs`，确保该分支包含站点提交）。
+4. 提交 `docs/*`、`CHANGELOG.md` 与 notes 到将要打 tag 的分支（Pages 若绑定 `dev/0.0.1` 的 `/docs`，确保该分支包含站点提交）。
 
 ### 3.5) 根 `README.md` 漂移检查（每次必做，条件更新）
 
@@ -224,9 +256,10 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 
 - [ ] `release-notes/v<version>.md` 存在且含 zh-CN + en-US
 - [ ] `CHANGELOG.md` 含该版本条目
+- [ ] **硬门禁**：`docs/changelog.html` 的 `ENTRIES[0]` 为本版（「最新」徽章落在本版）
+- [ ] 已用本地核验命令确认 CHANGELOG + changelog 站点首项；失败则未 stamp/tag
 - [ ] 用户可见产品变更已反映到 `docs/docs.html`（若有）
-- [ ] `docs/changelog.html` 能展示该版本（生成或静态数据已更新）
-- [ ] 相关 `docs/*` 已提交并推到 Pages 源分支
+- [ ] 相关 `docs/*` 与 `CHANGELOG.md` 已提交并推到 Pages 源分支
 - [ ] 已完成根 `README.md` 漂移检查（版本 / 安装 / 入口 / 能力 / 链接）
 - [ ] 若命中 README 触发条件：已更新并随发版提交；否则汇报中记录 `README: no-op`
 - [ ] `stamp-version` + `check-version` 通过
@@ -245,7 +278,7 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 |---|---|
 | `check-version.mjs` 失败 | 先 `stamp-version.mjs` 再检查；勿手改漏文件 |
 | Release CI 未触发 | 确认 tag 名 `v*` 且已 `git push origin v…` |
-| Pages 无新 changelog | 确认 `release-notes` 已进源分支；必要时重生成 `docs/changelog.html` 数据 |
+| Pages 无新 changelog / 「最新」仍是上版 | **硬门禁未过**：补 `CHANGELOG.md` + 把本版插入 `docs/changelog.html` `ENTRIES[0]`，再推 Pages 源分支；不要假设 notes 会自动进站点 |
 | CLI 归档缺 helper | 以 workflow 为准；文档/notes 写清 `peer` + `peer-credential-helper` 同目录要求 |
 | 文档仍写已删命令 | 发版前以代码 registry 为准扫一遍 `docs/docs.html` |
 | 根 README 仍写旧入口/死链 | 执行 3.5 漂移检查；命中触发条件则更新，勿用 notes 顶替 |
@@ -253,10 +286,11 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 ## Agent 执行协议
 
 1. 先复述将要发布的 **version**、分支、是否含 docs / README 变更，再动版本文件。
-2. 每完成一个大步骤（notes → changelog → docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
-3. README 步骤必须给出 `README: no-op` 或 `README: updated`，禁止静默跳过检查。
-4. 任何一步失败：停止后续 stamp/tag，保留已改文件说明，不要强行推 tag。
-5. 用户若只要“写 notes 不发版”：只做 0–3.5 步，不 stamp、不 tag。
+2. 每完成一个大步骤（notes → CHANGELOG → docs/changelog 硬门禁 → 其他 docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
+3. 进入 stamp/tag 前必须贴出 changelog 站点硬门禁核验输出（`changelog_site_latest_ok <version>`）；缺失则停。
+4. README 步骤必须给出 `README: no-op` 或 `README: updated`，禁止静默跳过检查。
+5. 任何一步失败：停止后续 stamp/tag，保留已改文件说明，不要强行推 tag。
+6. 用户若只要“写 notes 不发版”：只做 0–3.5 步，不 stamp、不 tag。
 
 ## 最小命令速查
 
