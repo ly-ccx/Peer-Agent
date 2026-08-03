@@ -7,7 +7,13 @@ const devPort = Number(process.env.PEER_DEV_PORT ?? 5173);
 
 export default defineConfig({
   base: './',
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    // Let Vite optimize the final CSS against the Electron Chromium target.
+    // Tailwind's generic production optimizer otherwise rewrites the standard
+    // backdrop-filter declaration into a WebKit-only declaration.
+    tailwindcss({ optimize: false }),
+  ],
   root: '.',
   server: {
     host: '127.0.0.1',
@@ -15,6 +21,11 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
+    // Desktop CSS only runs in the bundled Electron Chromium. Targeting generic
+    // browsers can rewrite standard backdrop-filter into a WebKit-only
+    // declaration, which Electron ignores and makes production glass diverge
+    // from Vite dev.
+    cssTarget: 'chrome146',
     outDir: 'dist',
     emptyOutDir: true,
   },

@@ -89,6 +89,7 @@ test('recordRuntimeTurnUsage serializes scoped lifetime and runtime-turn ledger 
       at: recorded.ledgerRow.at,
       conversationId: conv.id,
       streamId: null,
+      groupId: null,
       modelProviderId: 'provider-1',
       model: 'grok-4.5',
       providerName: null,
