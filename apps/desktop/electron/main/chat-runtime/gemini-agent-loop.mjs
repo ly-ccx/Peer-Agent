@@ -18,6 +18,7 @@ import {
   runDesktopRuntimePipeline,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
+import { createGeminiVisualObservationParts } from './visual-observation-projection.mjs';
 
 export async function agentLoopGemini({
   baseUrl,
@@ -245,10 +246,12 @@ export async function agentLoopGemini({
             },
           };
         });
+        const visualObservationParts = createGeminiVisualObservationParts(executions);
+        const parts = [...functionResponses, ...visualObservationParts];
         apiMessages.push({
           role: 'tool',
           content: JSON.stringify(functionResponses),
-          geminiContent: { role: 'user', parts: functionResponses },
+          geminiContent: { role: 'user', parts },
         });
         return state;
       },

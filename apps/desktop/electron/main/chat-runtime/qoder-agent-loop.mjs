@@ -17,6 +17,7 @@ import {
   runDesktopRuntimePipeline,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
+import { createOpenAIVisualObservationMessage } from './visual-observation-projection.mjs';
 
 // Reasoning models and slow queues may pause SSE longer than a short chat idle window.
 // Keep a hard cap so hung streams still fail, but avoid treating 30s thinking gaps as fatal.
@@ -248,6 +249,8 @@ export async function agentLoopQoder({
             content: toolExecution.output,
           });
         }
+        const visualObservation = createOpenAIVisualObservationMessage(executions);
+        if (visualObservation) apiMessages.push(visualObservation);
         return state;
       },
       onStopped: () => loop.sendDone(),

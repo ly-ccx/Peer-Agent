@@ -576,5 +576,24 @@ export async function executeModelToolCall({
   }
 
   const controlSignal = extractToolControlSignal(result);
-  return { aborted: false, args, output: providerOutput, result, controlSignal };
+  const visualObservations = Array.isArray(result.execution?.result?.modelContext?.visualObservations)
+    ? result.execution.result.modelContext.visualObservations.filter((observation) => (
+        observation?.kind === 'browser_screenshot'
+        && observation?.mediaType === 'image/png'
+        && typeof observation?.artifactRef === 'string'
+        && observation.artifactRef.startsWith('local-browser-artifact://')
+        && typeof observation?.dataUrl === 'string'
+        && observation.dataUrl.startsWith('data:image/png;base64,')
+      ))
+    : [];
+  return {
+    aborted: false,
+    args,
+    output: providerOutput,
+    result,
+    controlSignal,
+    // Side-band, current-turn-only visual context. It is deliberately excluded from
+    // output/providerOutput so Evidence and tool cards never persist image bytes.
+    visualObservations,
+  };
 }

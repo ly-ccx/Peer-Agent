@@ -21,6 +21,7 @@ import {
   runDesktopRuntimePipeline,
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
+import { createOpenAIVisualObservationMessage } from './visual-observation-projection.mjs';
 
 export async function agentLoopOpenAI({
   baseUrl,
@@ -247,6 +248,8 @@ export async function agentLoopOpenAI({
             content: toolExecution.output,
           });
         }
+        const visualObservation = createOpenAIVisualObservationMessage(executions);
+        if (visualObservation) apiMessages.push(visualObservation);
         return state;
       },
       onStopped: () => loop.sendDone(),

@@ -228,3 +228,62 @@ test('browser provider fails after readiness timeout instead of falling back to 
   assert.equal(execution.result.status, 'failed');
   assert.deepEqual(browserA.navigations, []);
 });
+
+test('browser screenshot exposes ephemeral visual context without putting bytes in tool output', async () => {
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+  const browser = {
+    ...createWebContents('https://example.com/visual'),
+    capturePage: async () => ({
+      toPNG: () => Buffer.from('png-bytes'),
+      toDataURL: () => dataUrl,
+      getSize: () => ({ width: 800, height: 600 }),
+    }),
+  };
+  registerBrowserWebContents({
+    webContentsId: 41,
+    conversationId: 'conversation-visual',
+    browserTabId: 'visual-1',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {
+      writeImageArtifact: async () => ({
+        artifactRef: 'local-browser-artifact://shot-1',
+        artifactRefs: [
+          'local-browser-artifact://shot-1/screenshot',
+          'local-browser-artifact://shot-1/metadata',
+        ],
+        bytes: 9,
+      }),
+    },
+    resolveWebContents: () => browser,
+  });
+
+  const execution = await provider.executeCapability({
+    call: {
+      toolCallId: 'tool-call-screenshot',
+      capabilityId: 'local.web.control.screenshot',
+      toolName: 'browser_screenshot',
+      arguments: {},
+      riskLevel: 'L2_external_read',
+      dataLevel: 'D2_sensitive',
+    },
+  }, {
+    locale: 'en-US',
+    toolContext: { conversationId: 'conversation-visual' },
+    requestPermission: async () => ({ granted: true }),
+  });
+
+  assert.equal(execution.result.status, 'success');
+  assert.deepEqual(execution.result.modelContext.visualObservations, [{
+    kind: 'browser_screenshot',
+    mediaType: 'image/png',
+    artifactRef: 'local-browser-artifact://shot-1',
+    dataUrl,
+  }]);
+  assert.equal(JSON.stringify(execution.result.outputPreview).includes('base64'), false);
+  assert.equal(JSON.stringify(execution.result.output).includes('base64'), false);
+  assert.equal(execution.result.output.visualObservation.artifactRef, 'local-browser-artifact://shot-1');
+});

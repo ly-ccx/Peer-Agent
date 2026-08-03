@@ -345,6 +345,7 @@ export function createLocalBrowserControlProvider({
       let evidenceSummary;
       let evidenceArtifactRefs = [];
       let returnedToCloud = true;
+      let visualObservations = [];
 
       if (capabilityId === NAVIGATE) {
         const url = String(args.url).trim();
@@ -425,8 +426,27 @@ export function createLocalBrowserControlProvider({
           metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
+        visualObservations = [{
+          kind: 'browser_screenshot',
+          mediaType: 'image/png',
+          artifactRef: artifact.artifactRef,
+          dataUrl: image.toDataURL(),
+        }];
         outputPreview = { status: 'success', action: 'screenshot', width: size.width, height: size.height, bytes: artifact.bytes, artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, ...targetIdentity };
-        output = { action: 'screenshot', width: size.width, height: size.height, artifactRef: artifact.artifactRef, ...targetIdentity };
+        output = {
+          action: 'screenshot',
+          width: size.width,
+          height: size.height,
+          artifactRef: artifact.artifactRef,
+          // Provider-neutral observation contract. Keep image bytes out of Tool Result,
+          // Evidence, and logs; the model-request seam materializes this governed ref once.
+          visualObservation: {
+            kind: 'browser_screenshot',
+            mediaType: 'image/png',
+            artifactRef: artifact.artifactRef,
+          },
+          ...targetIdentity,
+        };
         evidenceSummary = zh
           ? `已对内嵌浏览器截图（${size.width}×${size.height}），图片已落盘（${artifact.artifactRef}）。`
           : `Captured the in-app browser (${size.width}×${size.height}); image stored at ${artifact.artifactRef}.`;
@@ -487,6 +507,13 @@ export function createLocalBrowserControlProvider({
             },
           },
           completedAt,
+          ...(visualObservations.length > 0
+            ? {
+                // Ephemeral model context: never serialized into outputPreview/output/Evidence.
+                // Runtime Projection may forward it only to the current provider turn.
+                modelContext: { visualObservations },
+              }
+            : {}),
         },
       };
     } catch (err) {

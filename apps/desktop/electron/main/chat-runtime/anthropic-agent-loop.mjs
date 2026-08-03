@@ -21,6 +21,7 @@ import {
   executeModelToolCall,
   safeParseJson,
 } from './tool-orchestrator.mjs';
+import { createAnthropicToolResultContent } from './visual-observation-projection.mjs';
 
 export async function agentLoopAnthropic({
   baseUrl,
@@ -270,7 +271,7 @@ export async function agentLoopAnthropic({
           return {
             type: 'tool_result',
             tool_use_id: execution.call.toolCallId,
-            content: toolExecution.output,
+            content: createAnthropicToolResultContent(toolExecution),
           };
         });
         // 先配对所有 tool_use，再由 Pipeline 根据 terminal signal 决定是否停止。
