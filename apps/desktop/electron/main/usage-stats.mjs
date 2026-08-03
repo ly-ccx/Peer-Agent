@@ -341,11 +341,21 @@ export function aggregateRequestUsage(requests = [], { providerIndex = null } = 
     }
     return rawId;
   };
-  const displayModel = (row) => (
-    typeof row.model === 'string' && row.model.trim()
+  const displayModel = (row) => {
+    const recorded = typeof row.model === 'string' && row.model.trim()
       ? row.model.trim()
-      : (row.providerName || modelProviderId(row))
-  );
+      : (row.providerName || modelProviderId(row));
+    if (!providerIndex) return recorded;
+    const rawId = modelProviderId(row);
+    if (rawId === UNBOUND_PROVIDER_KEY) return recorded;
+    // label 展示态：快照只落了模型 id，显示时借 provider 索引反查用户可见的 modelLabel。
+    const byId = providerIndex.byId;
+    const byComposite = providerIndex.byComposite;
+    const hit = (typeof byId?.get === 'function' ? byId.get(rawId) : null)
+      || (typeof byComposite?.get === 'function' ? byComposite.get(rawId) : null);
+    const label = hit ? providerModelLabel(hit) : '';
+    return label || recorded;
+  };
 
   for (const row of requests) {
     if (!row || typeof row !== 'object') continue;

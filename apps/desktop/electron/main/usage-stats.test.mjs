@@ -492,3 +492,34 @@ test('buildUsageStatsSnapshot collapses Qoder CLI uuid rows into a single provid
   const gemini = snapshot.byProvider.find((row) => row.key === 'gemini-oauth');
   assert.ok(gemini, 'Gemini OAuth 复合 id 仍归到渠道');
 });
+
+test('aggregateRequestUsage labels models via provider index modelLabel (方案 A label)', () => {
+  const providers = [
+    { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel', modelLabel: 'Cantus' },
+    { id: 'uuid-kmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'kmodel_latest', modelLabel: 'Kimi-K3' },
+  ];
+  const requests = [
+    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 100 },
+    { modelProviderId: 'uuid-kmodel', model: 'kmodel_latest', providerName: 'Qoder CLI', inputTokens: 50 },
+  ];
+
+  const { byModel } = aggregateRequestUsage(requests, {
+    providerIndex: buildProviderIndex(providers),
+  });
+
+  const cantus = byModel.get('uuid-cmodel');
+  assert.equal(cantus.label, 'Cantus', '显示配置的 modelLabel 而非快照里的模型 id');
+  assert.equal(cantus.model, 'Cantus');
+  assert.equal(byModel.get('uuid-kmodel').label, 'Kimi-K3');
+});
+
+test('aggregateRequestUsage falls back to recorded model id when no label matches', () => {
+  // 渠道已删 / 条目无 modelLabel 时，保留快照里的原始 id，不留空 label。
+  const requests = [
+    { modelProviderId: 'gone-uuid', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 10 },
+  ];
+  const { byModel } = aggregateRequestUsage(requests, {
+    providerIndex: buildProviderIndex([]),
+  });
+  assert.equal(byModel.get('gone-uuid').label, 'cmodel');
+});
