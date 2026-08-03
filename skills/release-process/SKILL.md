@@ -1,8 +1,8 @@
 ---
 name: release-process
-description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、GitHub Pages 文档站、打 tag 触发 CI）。
-whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
-version: 0.1.0
+description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、GitHub Pages 文档站、打 tag 触发 CI）。
+whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、检查/更新根 README、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
+version: 0.1.1
 ---
 
 # Peer Agent 发布流程 Skill
@@ -18,6 +18,7 @@ version: 0.1.0
 | 仓库基线版本文件 | `VERSION` + 各 `package.json` / Cargo 清单（由 `scripts/stamp-version.mjs` 回写） |
 | 产品说明（中英） | `release-notes/vX.Y.Z.md`（`<!-- locale:zh-CN -->` / `<!-- locale:en-US -->`） |
 | 累积 Changelog | `CHANGELOG.md` |
+| 产品入口说明 | 根 `README.md`（定位 / 安装 / 入口面 / 能力 / 仓库结构 / 文档入口；**不是**变更日志） |
 | 用户向站点 | `docs/index.html`（落地）、`docs/docs.html`（文档）、`docs/changelog.html`（独立更新日志） |
 | Pages | 仓库 GitHub Pages：`source` 当前为 `dev/0.0.1` + `/docs`（以仓库设置为准） |
 | 构建/发布 CI | `.github/workflows/release.yml`（推送 `v*` tag 触发） |
@@ -123,6 +124,40 @@ python3 -m http.server 8777 --directory docs
 
 3. 提交 `docs/*` 与 notes 到将要打 tag 的分支（Pages 若绑定 `dev/0.0.1` 的 `/docs`，确保该分支包含站点提交）。
 
+### 3.5) 根 `README.md` 漂移检查（每次必做，条件更新）
+
+**检查必做；完整重写不默认。** 根 README 是产品入口页，不是 `CHANGELOG` / `release-notes` 的替代品。
+
+#### 每次发版至少扫这些字段
+
+1. **版本表述** — 是否仍写过时 early-development / 旧版本号；可写当前系列（如 `0.0.1-beta.N`）或指向 `VERSION` / Release。
+2. **安装路径** — `@peer-agent/cli`、`peer`、Desktop 开发/打包命令是否与本轮一致。
+3. **入口面** — Desktop / TUI / CLI 是否仍与产品一致。
+4. **核心能力** — Agent / Plan / Goal / Quick Chat / Browser·Workbench / MCP / Skills 等用户可见能力是否过时或遗漏。
+5. **链接存活** — 相对链接与文档入口是否可达；禁止再把已迁出的架构文档写成代码仓内死链。
+
+#### 仅在命中触发条件时更新 README
+
+| 触发条件 | 动作 |
+|---|---|
+| 纯 bugfix / 内部重构 / 文案微调 | 通常 **no-op**（记录已检查） |
+| 安装方式、入口面（Desktop / TUI / CLI）变化 | **更新** |
+| 主能力上线/下线或对外叙事变化（模式、Goal、Quick Chat、Browser 等） | **更新** |
+| Roadmap 大项完成态变化 | **建议更新** |
+| 文档结构迁移导致 README 死链 | **更新** |
+| 正式版（非 beta）或重大定位调整 | **更新** |
+
+结果只允许两种，并在发版汇报中写明：
+
+- `README: no-op` — 已检查，无需改
+- `README: updated` — 本轮已改并随发版准备提交
+
+**非目标：**
+
+- 不要把每条 bugfix 写进 README
+- 不要把 README 当 CHANGELOG 用
+- 不要在发版流程里维护 `peer-knowledge` 架构长文
+
 ### 4) 版本戳（工作区）
 
 ```bash
@@ -144,10 +179,11 @@ release: prepare v<version>
 
 - release-notes + CHANGELOG
 - docs site sync (changelog/docs/landing as needed)
+- README drift check (no-op or update)
 - stamp version manifests
 ```
 
-只提交发版相关文件；不要夹带无关本地实验。
+只提交发版相关文件；不要夹带无关本地实验。若本轮更新了根 `README.md`，一并纳入该准备提交。
 
 ### 6) 打 tag 并推送（触发 CI）
 
@@ -191,6 +227,8 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 - [ ] 用户可见产品变更已反映到 `docs/docs.html`（若有）
 - [ ] `docs/changelog.html` 能展示该版本（生成或静态数据已更新）
 - [ ] 相关 `docs/*` 已提交并推到 Pages 源分支
+- [ ] 已完成根 `README.md` 漂移检查（版本 / 安装 / 入口 / 能力 / 链接）
+- [ ] 若命中 README 触发条件：已更新并随发版提交；否则汇报中记录 `README: no-op`
 - [ ] `stamp-version` + `check-version` 通过
 - [ ] `v<version>` tag 已推送且 CI 触发
 - [ ] 线上 Pages / Release 冒烟通过
@@ -210,26 +248,29 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 | Pages 无新 changelog | 确认 `release-notes` 已进源分支；必要时重生成 `docs/changelog.html` 数据 |
 | CLI 归档缺 helper | 以 workflow 为准；文档/notes 写清 `peer` + `peer-credential-helper` 同目录要求 |
 | 文档仍写已删命令 | 发版前以代码 registry 为准扫一遍 `docs/docs.html` |
+| 根 README 仍写旧入口/死链 | 执行 3.5 漂移检查；命中触发条件则更新，勿用 notes 顶替 |
 
 ## Agent 执行协议
 
-1. 先复述将要发布的 **version**、分支、是否含 docs 变更，再动版本文件。
-2. 每完成一个大步骤（notes → changelog → docs → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
-3. 任何一步失败：停止后续 stamp/tag，保留已改文件说明，不要强行推 tag。
-4. 用户若只要“写 notes 不发版”：只做 0–3 步，不 stamp、不 tag。
+1. 先复述将要发布的 **version**、分支、是否含 docs / README 变更，再动版本文件。
+2. 每完成一个大步骤（notes → changelog → docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
+3. README 步骤必须给出 `README: no-op` 或 `README: updated`，禁止静默跳过检查。
+4. 任何一步失败：停止后续 stamp/tag，保留已改文件说明，不要强行推 tag。
+5. 用户若只要“写 notes 不发版”：只做 0–3.5 步，不 stamp、不 tag。
 
 ## 最小命令速查
 
 ```bash
 # 1) 准备说明与文档（编辑器/补丁）
 # release-notes/vX.Y.Z.md, CHANGELOG.md, docs/*
+# 根 README.md：漂移检查；仅触发时更新
 
 # 2) 版本对齐
 node scripts/stamp-version.mjs X.Y.Z
 node scripts/check-version.mjs
 
 # 3) 提交并推送分支
-git add release-notes CHANGELOG.md docs VERSION package.json apps packages crates Cargo.lock
+git add release-notes CHANGELOG.md docs README.md VERSION package.json apps packages crates Cargo.lock
 git commit -m "release: prepare vX.Y.Z"
 git push origin HEAD
 
