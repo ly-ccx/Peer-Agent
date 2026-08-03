@@ -70,7 +70,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-8) var(--space-6);
-  padding-top: 40px;
+  padding-top: calc(40px + var(--space-4));
   display: flex;
   flex-direction: column;
 }
@@ -2674,7 +2674,7 @@
 }
 
 .app-shell.is-fullscreen .chat-thread {
-  padding-top: 40px;
+  padding-top: calc(40px + var(--space-4));
 }
 
 /* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
