@@ -93,18 +93,10 @@
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
   border-radius: 0 0 var(--ui-radius-panel, var(--radius-md)) var(--ui-radius-panel, var(--radius-md));
   /* 独立于三栏基础 Chrome 的局部玻璃层：保留透明采样，并用高光和投影明确悬浮层级。 */
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--glass-chrome-hover) 92%, transparent),
-      color-mix(in srgb, var(--glass-chrome-hover) 76%, transparent)
-    );
-  box-shadow:
-    var(--glass-edge-highlight),
-    0 12px 28px color-mix(in srgb, var(--ink-base) 14%, transparent),
-    0 3px 10px color-mix(in srgb, var(--ink-base) 9%, transparent);
-  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
-  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
+  background: var(--glass-frosted-chrome-background);
+  box-shadow: var(--glass-frosted-chrome-shadow);
+  -webkit-backdrop-filter: var(--glass-frosted-chrome-filter);
+  backdrop-filter: var(--glass-frosted-chrome-filter);
   pointer-events: none;
 }
 
@@ -1745,13 +1737,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--chrome-hairline);
+  border: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
   border-radius: var(--radius-xl);
-  /* 图片预览卡片：glass-popover 毛玻璃 */
-  background: var(--glass-popover);
-  backdrop-filter: blur(var(--blur-popover));
-  -webkit-backdrop-filter: blur(var(--blur-popover));
-  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+  /* 图片预览也是 role="dialog"：复用顶部用户对话浮条同款真实磨砂配方。 */
+  background: var(--glass-frosted-chrome-background);
+  backdrop-filter: var(--glass-frosted-chrome-filter);
+  -webkit-backdrop-filter: var(--glass-frosted-chrome-filter);
+  box-shadow: var(--glass-frosted-chrome-shadow);
 }
 .image-preview-img {
   display: block;

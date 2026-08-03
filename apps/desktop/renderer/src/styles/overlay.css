@@ -30,8 +30,8 @@
     position: relative;
     isolation: isolate;
     background: transparent;
-    border: 1px solid var(--chrome-hairline, var(--za-line));
-    box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+    border: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+    box-shadow: var(--glass-frosted-chrome-shadow);
     /* 动效基元：淡入 + 上移（enter-rise）。 */
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
@@ -43,9 +43,9 @@
     z-index: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: var(--glass-popover);
-    backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
-    -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+    background: var(--glass-frosted-chrome-background);
+    backdrop-filter: var(--glass-frosted-chrome-filter);
+    -webkit-backdrop-filter: var(--glass-frosted-chrome-filter);
   }
 
   .pa-overlay-panel > * {

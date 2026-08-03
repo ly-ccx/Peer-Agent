@@ -54,6 +54,18 @@
   --blur-popover: 24px;
   /* 与 blur 搭配：saturate 让磨砂更厚、更糊，而不是单 blur 的薄透明感 */
   --blur-saturate: 1.6;
+  /* 顶部用户对话浮条同款真实磨砂配方：弹窗/模态必须复用这一组，而不是只套 glass-popover 半透明底色。 */
+  --glass-frosted-chrome-background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--glass-chrome-hover) 92%, transparent),
+      color-mix(in srgb, var(--glass-chrome-hover) 76%, transparent)
+    );
+  --glass-frosted-chrome-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
+  --glass-frosted-chrome-shadow:
+    var(--glass-edge-highlight),
+    0 12px 28px color-mix(in srgb, var(--ink-base) 14%, transparent),
+    0 3px 10px color-mix(in srgb, var(--ink-base) 9%, transparent);
 }
 
 /* ─────────────────────────────────────────────────────────────
