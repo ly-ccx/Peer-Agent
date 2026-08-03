@@ -7,12 +7,14 @@ This file governs the entire repository. All future code changes in this reposit
 Peer Agent follows the 端云能力代理设计原则:
 
 ```text
-云端负责认知。
+模型负责认知。
 本地负责能力。
 界面负责表达。
 契约负责边界。
 证据负责治理。
 ```
+
+`模型` names a role, not a deployment location: cognition may come from a cloud provider or from a future on-device runtime. Capability execution, authorization, and Evidence remain local either way.
 
 Architecture knowledge lives in the companion knowledge base `peer-knowledge` (not in this code repo). The detailed governance baseline is in `peer-knowledge/knowledge/architecture/20-architecture-governance.md`. Existing architecture context is in:
 

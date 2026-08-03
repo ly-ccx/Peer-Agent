@@ -51,7 +51,7 @@ function assertAgentRules() {
   const content = readText(agentPath);
   const requiredSnippets = [
     '端云能力代理设计原则',
-    '云端负责认知',
+    '模型负责认知',
     'Capability Provider',
     'Runtime Projection',
     'PermissionGrant',

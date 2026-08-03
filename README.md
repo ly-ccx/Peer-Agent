@@ -29,7 +29,7 @@ Peer Agent is a privacy-first local agent platform with three first-class shells
 Peer Agent is built on the **Capability Agent** model:
 
 ```text
-云端负责认知。
+模型负责认知。
 本地负责能力。
 界面负责表达。
 契约负责边界。
@@ -37,11 +37,14 @@ Peer Agent is built on the **Capability Agent** model:
 ```
 
 ```text
+The model owns cognition.
 Local owns capability.
 Interface owns expression.
 Contract owns boundaries.
 Evidence owns governance.
 ```
+
+> "模型 / the model" is a **role, not a location**. It may be a cloud provider today, or the on-device Local Agent Runtime once it lands. Either way, capability execution, authorization, and Evidence stay on your machine.
 
 Every local action flows through one non-negotiable runtime chain:
 
