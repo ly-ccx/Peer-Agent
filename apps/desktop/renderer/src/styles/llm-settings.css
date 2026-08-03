@@ -2092,9 +2092,26 @@
   width: 100%;
   box-sizing: border-box;
   border-radius: 10px;
-  border: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  border: 1px solid var(--chrome-hairline);
   padding: 10px 12px;
-  background: var(--surface-elevated, rgba(255,255,255,0.72));
+  background: var(--control-fill);
+  color: var(--graphite-base);
+  caret-color: var(--azure-seal);
+  transition: background var(--za-motion-fast), border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
+}
+
+.llm-service-catalog-search input::placeholder {
+  color: var(--graphite-fade);
+}
+
+.llm-service-catalog-search input:hover {
+  background: var(--control-fill-hover);
+}
+
+.llm-service-catalog-search input:focus-visible {
+  outline: none;
+  border-color: var(--azure-seal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--azure-seal) 18%, transparent);
 }
 
 .llm-service-catalog-group h4 {
@@ -2114,15 +2131,23 @@
 .llm-service-template-card {
   text-align: left;
   border-radius: 14px;
-  border: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
-  background: var(--surface-elevated, rgba(255,255,255,0.72));
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
   padding: 14px;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color var(--za-motion-fast), background var(--za-motion-fast), box-shadow var(--za-motion-fast);
 }
 
 .llm-service-template-card:hover {
-  border-color: color-mix(in srgb, var(--accent, #5b8cff) 45%, transparent);
+  background: var(--paper-hover);
+  border-color: color-mix(in srgb, var(--azure-seal) 45%, var(--chrome-hairline));
+}
+
+.llm-service-template-card:focus-visible {
+  outline: none;
+  border-color: var(--azure-seal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--azure-seal) 18%, transparent);
 }
 
 .llm-service-template-card-title {
