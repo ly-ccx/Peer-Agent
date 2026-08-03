@@ -11,6 +11,7 @@ function createHarness() {
   const registrations = createProviderConfigurationIpcRegistrations({
     providers: {
       listChannels: port('list-channels'),
+      listServiceTemplates: port('list-service-templates'),
       listGroups: port('list-groups'),
       listProviders: port('list-providers'),
       listChatProviders: port('list-chat-providers'),
@@ -36,7 +37,7 @@ function createHarness() {
   return { calls, handlers, registrations };
 }
 
-test('provider configuration IPC has one owner for the exact 13-channel set', () => {
+test('provider configuration IPC has one owner for the exact 14-channel set', () => {
   const { handlers, registrations } = createHarness();
 
   assert.deepEqual(registrations.map(({ owner }) => owner), ['provider-configuration-ipc']);
@@ -51,6 +52,7 @@ test('provider configuration IPC has one owner for the exact 13-channel set', ()
     'llm:list',
     'llm:remove',
     'llm:remove-group',
+    'llm:service-templates:list',
     'llm:set-default',
     'llm:test',
     'llm:update',
@@ -72,6 +74,7 @@ test('provider configuration IPC preserves payload projections and results', asy
   assert.equal(await handlers.get('llm:add-model')(null, { groupId: 'g1', model: 'm3' }), 'add-model');
   assert.equal(await handlers.get('llm:remove')(null, { id: 'p1' }), 'remove');
   assert.equal(await handlers.get('llm:remove-group')(null, { groupId: 'g1' }), 'remove-group');
+  assert.equal(await handlers.get('llm:service-templates:list')(), 'list-service-templates');
   assert.equal(await handlers.get('llm:set-default')(null, { id: 'p2' }), 'set-default');
   assert.equal(await handlers.get('llm:test')(null, { id: 'p2' }), 'test');
 
@@ -87,6 +90,7 @@ test('provider configuration IPC preserves payload projections and results', asy
     ['add-model', 'g1', { model: 'm3' }],
     ['remove', 'p1'],
     ['remove-group', 'g1'],
+    ['list-service-templates'],
     ['set-default', 'p2'],
     ['test', 'p2'],
   ]);
