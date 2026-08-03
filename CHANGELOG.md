@@ -4,13 +4,28 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.1-beta.48 - 2026-08-03
+
+### Added
+
+- Unified provider catalog with service templates and catalog motion on the connect-a-model surface.
+- Conversation-bound Browser panel reveal for the current chat.
+- Qoder private-channel copy labels the channel as local CLI and documents connect prerequisites.
+
 ### Changed
 
-- Model / channel settings lists no longer block on OAuth silent refresh: `llm:list-groups` / `llm:list-providers` return local data immediately, coalesce a single background refresh, and push an `llm:oauth:refreshed` event when credentials actually change so the renderer incrementally re-fetches. Removes the up-to-20s-per-credential network gate when opening the settings page offline or with an unreachable auth endpoint.
+- Model / channel settings lists no longer block on OAuth silent refresh: list APIs return local data immediately, coalesce a single background refresh, and push `llm:oauth:refreshed` only when credentials actually change.
+- Desktop auto-update channel graduates from beta to stable by default for installed clients.
+- Usage stats group providers by channel instead of model-entry UUID; By Model shows the configured `modelLabel`.
 
 ### Fixed
 
-- Qoder context-tier projection no longer anchors the input reserve to the default tier; when the catalog default tier window exceeds `max_input_tokens` (e.g. Cantus: default 1M tier with a 180k max input), the reserve now anchors to the smallest tier that fits `max_input_tokens`, so a selected 1M tier projects ~980k usable input instead of collapsing to 180k and smaller tiers no longer degrade to 1 token.
+- Qoder context-tier projection anchors the input reserve to the smallest tier that fits `max_input_tokens`, so a selected 1M tier projects ~980k usable input instead of collapsing to 180k.
+- Restored conversation context windows reproject capacity from the live model tier while keeping occupied tokens from the snapshot (no more stale 180k UI after tier changes).
+- Goal Runner stream remaps keep `turnStartedAt`, so the turn timer no longer resets mid-run.
+- Goal permission gate allows fresh command requests through instead of blocking legitimate capabilities.
+- ChatGPT subscription pricing no longer thrash-backfills models.dev prices.
+- UI polish: unify modal frosted glass and chip/panel radii for tooltips and sidebar branch badges.
 
 ## 0.0.1-beta.47 - 2026-08-02
 
