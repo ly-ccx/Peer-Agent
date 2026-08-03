@@ -92,6 +92,7 @@ import {
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
   projectConversationHistory,
+  reprojectContextAccountingWindow,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
@@ -1597,7 +1598,23 @@ const conversationApplicationService = createConversationApplicationService({
     conversationStore.listConversationsByWorkspace(workspacePath, params),
   searchConversations: (params) => conversationStore.searchConversations(params),
   createConversation: (params) => conversationStore.createConversation(params),
-  getConversation: (id) => conversationStore.getConversation(id),
+  getConversation: (id) => {
+    const conv = conversationStore.getConversation(id);
+    if (!conv?.contextSnapshot || conv.contextSnapshot.version !== 1) return conv;
+    const providers = llmConfigStore.listProviders();
+    const boundId = conv.modelProviderId;
+    const provider = (boundId && providers.find((p) => p.id === boundId))
+      || providers.find((p) => p.isDefault)
+      || providers[0]
+      || null;
+    if (!provider?.contextWindow) return conv;
+    const projected = reprojectContextAccountingWindow(
+      conv.contextSnapshot,
+      provider.contextWindow,
+    );
+    if (!projected || projected === conv.contextSnapshot) return conv;
+    return { ...conv, contextSnapshot: projected };
+  },
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
@@ -2633,11 +2650,13 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
       countCapability: exactAnthropic || exactGemini
         ? { kind: 'provider_count_api' }
         : { kind: 'observed_usage_only' },
-      initialSnapshot:
+      initialSnapshot: reprojectContextAccountingWindow(
         conv.contextSnapshot?.version === 1
         && conv.contextSnapshot.modelKey === contextAccountingModelKey(provider?.id, provider?.model)
           ? conv.contextSnapshot
           : null,
+        provider?.contextWindow,
+      ),
       buildRequest(state) {
         if (exactAnthropic) {
           const system = state.messages
@@ -2877,11 +2896,13 @@ async function handleChatContextRestored(
       identity,
       contextWindow: provider.contextWindow || null,
       countCapability,
-      initialSnapshot:
+      initialSnapshot: reprojectContextAccountingWindow(
         conv.contextSnapshot?.version === 1
         && conv.contextSnapshot.modelKey === identity.modelKey
           ? conv.contextSnapshot
           : null,
+        provider?.contextWindow,
+      ),
       buildRequest: () => canonicalRequest,
       countRequest: exactAnthropic
         ? (request) => countAnthropicCanonicalRequest({

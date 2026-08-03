@@ -92,6 +92,44 @@ export function isContextAccountingSnapshotCurrent(
 }
 
 /**
+ * Reproject a restored/displayed context-accounting snapshot onto the current
+ * model config window (e.g. Qoder tier projection). Occupied tokens stay from
+ * the snapshot; only capacity fields + percent are refreshed so UI/runtime do
+ * not keep a stale window after the user changes tiers or projection is fixed.
+ */
+export function reprojectContextAccountingWindow(
+  snapshot: ContextAccountingSnapshot | null | undefined,
+  contextWindow: number | null | undefined,
+): ContextAccountingSnapshot | null {
+  if (!snapshot || snapshot.version !== 1) return snapshot ?? null;
+  const nextWindow = normalizeWindow(contextWindow);
+  if (nextWindow == null) return snapshot;
+
+  const nextThreshold = Math.floor(nextWindow * 0.8);
+  const authoritative = snapshot.authoritativeInputTokens;
+  const nextPercent = typeof authoritative === 'number' && Number.isFinite(authoritative)
+    ? Math.min(100, Math.round((authoritative / nextWindow) * 100))
+    : null;
+
+  if (
+    snapshot.contextWindow === nextWindow
+    && snapshot.inputBudget === nextWindow
+    && snapshot.compactionThresholdTokens === nextThreshold
+    && snapshot.percent === nextPercent
+  ) {
+    return snapshot;
+  }
+
+  return Object.freeze({
+    ...snapshot,
+    contextWindow: nextWindow,
+    inputBudget: nextWindow,
+    compactionThresholdTokens: nextThreshold,
+    percent: nextPercent,
+  });
+}
+
+/**
  * Owns accounting revision order and pending-content transitions for one host
  * turn. Both Desktop and TUI publish this exact snapshot; presentation never
  * estimates or merges token counts.

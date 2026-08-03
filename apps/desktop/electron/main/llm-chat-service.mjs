@@ -9,6 +9,7 @@ import {
   renderSystemContext,
 } from './llm-prompts.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
+import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
 import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
@@ -996,11 +997,15 @@ export function createLlmChatService({
               : 0,
           modelKey: contextAccountingModelKey(provider.id, provider.model),
         };
-        const initialContextAccounting =
+        // Prefer current provider window (already tier-projected for Qoder) so
+        // restored snapshots do not keep a stale capacity like 180k after 1M tier.
+        const initialContextAccounting = reprojectContextAccountingWindow(
           storedConversation?.contextSnapshot?.version === 1
           && storedConversation.contextSnapshot.modelKey === accountingIdentity.modelKey
             ? storedConversation.contextSnapshot
-            : null;
+            : null,
+          provider.contextWindow,
+        );
 
         const systemContext = buildSystemContext(runWorkspacePath, {
           contextAttachments,

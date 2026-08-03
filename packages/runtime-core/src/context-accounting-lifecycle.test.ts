@@ -5,6 +5,7 @@ import {
   createContextAccountingLifecycle,
   createUnknownContextAccountingSnapshot,
   isContextAccountingSnapshotCurrent,
+  reprojectContextAccountingWindow,
 } from './context-accounting-lifecycle.ts';
 
 const identity = {
@@ -84,3 +85,40 @@ test('snapshot identity validation rejects another revision or model', () => {
     false,
   );
 });
+
+test('reprojectContextAccountingWindow keeps occupied tokens and refreshes window from current config', () => {
+  const stale = createUnknownContextAccountingSnapshot({
+    identity,
+    contextWindow: 180_000,
+    countCapability: { kind: 'observed_usage_only' },
+    now: 1,
+  });
+  const occupied = Object.freeze({
+    ...stale,
+    authoritativeInputTokens: 43_631,
+    percent: 24,
+    pressureSource: 'provider_usage' as const,
+    lastObserved: {
+      inputTokens: 43_631,
+      requestFingerprint: 'ctx_request',
+      compactionEpoch: 0,
+      source: 'provider_usage' as const,
+      observedAt: 1,
+    },
+  });
+
+  const projected = reprojectContextAccountingWindow(occupied, 980_000);
+  assert.ok(projected);
+  assert.equal(projected.contextWindow, 980_000);
+  assert.equal(projected.inputBudget, 980_000);
+  assert.equal(projected.compactionThresholdTokens, 784_000);
+  assert.equal(projected.authoritativeInputTokens, 43_631);
+  assert.equal(projected.percent, 4);
+  assert.equal(projected.lastObserved?.inputTokens, 43_631);
+
+  // null/invalid target window leaves snapshot untouched
+  assert.equal(reprojectContextAccountingWindow(occupied, null), occupied);
+  assert.equal(reprojectContextAccountingWindow(occupied, 0), occupied);
+  assert.equal(reprojectContextAccountingWindow(null, 980_000), null);
+});
+
