@@ -8,7 +8,8 @@
   gap: 2px;
   max-width: 280px;
   padding: 6px 9px;
-  border-radius: var(--ui-radius-control, var(--radius-sm, 6px));
+  /* popover-level floating surface: 12px panel, not control 6px */
+  border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
   background: var(--glass-popover, var(--ui-tooltip-bg, rgba(28, 30, 36, 0.88)));
   backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
   -webkit-backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
