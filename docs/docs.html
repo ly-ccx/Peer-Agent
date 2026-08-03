@@ -703,6 +703,22 @@ peer</code></pre>
             In TUI, use <code>/model</code> to choose model and reasoning effort, and <code>/language</code> if you need Chinese/English reply policy changes.
             Provider credentials still resolve through the same local Runtime home.
           </p>
+          <h2 id="model-qoder" data-i18n="model.qoderTitle">Qoder private channel</h2>
+          <p data-i18n="model.qoderBody">
+            The Qoder private channel is not an API-key service. It reuses the login state of a local Qoder CLI (<code>qodercli</code>)
+            to reach Qoder's private inference endpoint. No key input is required — the signed-in CLI on this machine is the credential source.
+          </p>
+          <h3 id="model-qoder-prereq" data-i18n="model.qoderPrereqTitle">Prerequisites</h3>
+          <ol>
+            <li data-i18n="model.qoderPrereq1">Install the Qoder CLI (<code>qodercli</code>) on this machine. Peer reads the CLI's local login files and uses the CLI's embedded auth module to sign requests; without the CLI this channel cannot work at all.</li>
+            <li data-i18n="model.qoderPrereq2">Sign in with <code>qodercli</code> first, and keep the session valid. Credentials live under <code>~/.qoder/.auth/</code>; if you never signed in or the session expired, sign in again with the CLI.</li>
+          </ol>
+          <p data-i18n="model.qoderEnv">
+            Optional: set <code>QODER_ACCESS_TOKEN</code> / <code>QODER_PERSONAL_ACCESS_TOKEN</code> / <code>QODER_PAT</code> in the environment to supply the token instead of the local login files — but installing and signing into <code>qodercli</code> is still required for request signing.
+          </p>
+          <p data-i18n="model.qoderTrouble">
+            If connecting fails, check the two prerequisites in order: CLI not installed → install <code>qodercli</code>; not signed in or session expired → sign in again in a terminal; empty model list → sign in once so the CLI caches the model catalog locally.
+          </p>
           <div class="callout warn" data-i18n="model.warn">
             <strong>Security:</strong> do not paste long-lived keys into chat transcripts. Prefer Settings / credential helper storage.
           </div>
@@ -1465,6 +1481,13 @@ Evidence owns governance.</code></pre>
             "model.s5": "先发一条极简提示验证连通，再做真实工作。",
             "model.cliTitle": "CLI",
             "model.cliBody": "TUI 里用 /model 选择模型与 reasoning effort；需要中英文回复策略时用 /language。Provider 凭证仍解析到同一本地 Runtime 主目录。",
+            "model.qoderTitle": "Qoder 私有接口",
+            "model.qoderBody": "Qoder 私有接口不是填 API Key 的公开服务，而是复用本机 Qoder CLI（qodercli）的登录态来请求 Qoder 私有推理链路。无需输入任何密钥——这台电脑上已登录的 qodercli 本身就是凭据来源。",
+            "model.qoderPrereqTitle": "前提条件",
+            "model.qoderPrereq1": "本机已安装 Qoder CLI（qodercli）。Peer 需要读取 CLI 的本地登录文件，并使用 CLI 内嵌的鉴权模块为请求签名；没有安装 qodercli，该渠道完全不可用。",
+            "model.qoderPrereq2": "先用 qodercli 完成登录，并保持登录态有效。登录凭据保存在 ~/.qoder/.auth/ 下；从未登录或登录已过期时，请在 CLI 中重新登录。",
+            "model.qoderEnv": "可选：设置环境变量 QODER_ACCESS_TOKEN / QODER_PERSONAL_ACCESS_TOKEN / QODER_PAT，用它们代替本机登录文件提供 token；但请求签名仍要求本机安装并登录过 qodercli。",
+            "model.qoderTrouble": "连接失败时按前提条件顺序自查：未安装 CLI → 安装 qodercli；未登录或登录过期 → 在终端重新登录；模型列表为空 → 先登录一次，让 CLI 在本机缓存模型目录。",
             "model.warn": "安全：不要把长期 key 粘进聊天记录。优先 Settings / credential helper 存储。",
             "runtime.title": "本地 Runtime",
             "runtime.lede": "Peer Agent 的产品主轴是本地 Capability Runtime。Desktop 与 CLI 是壳。能力真相在本地。",
