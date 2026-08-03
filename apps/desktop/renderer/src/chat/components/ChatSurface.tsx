@@ -138,6 +138,7 @@ import {
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
 import { shouldHardBeginConversationLoad } from '../state/conversationLoadGate';
+import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import {
   getTurnUserMessage,
   groupMessagesIntoTurnsIncremental,
@@ -1164,9 +1165,22 @@ export function ChatSurface({
           });
           if (running) {
             streamIdRef.current = live.streamId;
-            setTurnStartedAt(liveStartedAt);
+            // 切换回进行中会话：优先恢复 bucket 既有锚点 / 最后用户消息时间戳，
+            // 不能直接用 live.startedAt（Goal Runner 每 tick 换流，那是当前 tick 起点）。
+            const existingAnchor = conversationStore.getSnapshot(conversationId).turnStartedAt;
+            const restoredAnchor = resolveTurnStartedAt({
+              existing: existingAnchor,
+              messages: loaded,
+              fallback: liveStartedAt,
+            });
+            if (restoredAnchor != null) {
+              setTurnStartedAt(restoredAnchor);
+            }
             conversationStore.routeStream(live.streamId, conversationId);
-            conversationStore.setState(conversationId, { streamId: live.streamId, turnStartedAt: liveStartedAt });
+            conversationStore.setState(conversationId, {
+              streamId: live.streamId,
+              ...(restoredAnchor != null ? { turnStartedAt: restoredAnchor } : {}),
+            });
             setIsStreaming(true);
           }
         }
@@ -1179,7 +1193,7 @@ export function ChatSurface({
       convActions.commitLoad({});
     })();
     return () => { cancelled = true; };
-  }, [conversationId, convActions]);
+  }, [conversationId, convActions, setTurnStartedAt]);
 
   // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
   useEffect(() => {
@@ -1231,9 +1245,24 @@ export function ChatSurface({
         timestamp: now,
       };
       streamIdRef.current = streamId;
-      setTurnStartedAt(now);
+      // 计时真值是「本轮用户消息发送时刻」。Goal Runner 每 tick 都会换新 stream，
+      // 这里只绑定流与消息占位；仅当 bucket 尚无锚点时才补种，绝不覆盖已有起点。
+      const bucket = conversationStore.getSnapshot(conversationId);
+      const turnStartedAt = resolveTurnStartedAt({
+        existing: bucket.turnStartedAt,
+        messages: bucket.messages,
+        fallback: now,
+      });
+      if (turnStartedAt != null) {
+        setTurnStartedAt(turnStartedAt);
+      }
       conversationStore.routeStream(streamId, conversationId);
-      conversationStore.setState(conversationId, { streamId, turnStartedAt: now });
+      conversationStore.setState(conversationId, {
+        streamId,
+        ...(turnStartedAt != null && bucket.turnStartedAt == null
+          ? { turnStartedAt }
+          : {}),
+      });
       setStreamError(null);
       setActiveUsage(null);
       setProviderRecoveryNotice(null);
@@ -1263,7 +1292,7 @@ export function ChatSurface({
       // 主进程已 append 同 id 占位；此处不再二次 append，避免重复空 assistant。
       onConversationUpdated?.();
     });
-  }, [conversationId, onConversationUpdated]);
+  }, [conversationId, onConversationUpdated, setTurnStartedAt]);
 
   // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
   const {

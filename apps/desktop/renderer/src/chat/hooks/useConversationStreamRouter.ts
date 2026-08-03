@@ -317,14 +317,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             }
           : null;
 
-        // 运行态收尾 + streamId 清理 + 回合计时清零。
+        // 运行态收尾 + streamId 清理。
+        // goal_handoff 只是 Goal Runner 本 tick 交接，不是整轮用户回合结束，
+        // 必须保留 turnStartedAt，否则下一 tick / 会话切换会把计时重新归零。
         conversationStore.setState(cid, {
           isStreaming: false,
           activeUsage: null,
           pendingPermissionCalls: [],
           toolProgress: null,
-          turnStartedAt: null,
           streamId: null,
+          ...(reason === 'goal_handoff' ? {} : { turnStartedAt: null }),
         });
 
         if (contextAccounting?.version === 1) {
