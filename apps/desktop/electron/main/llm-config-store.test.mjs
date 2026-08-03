@@ -1436,6 +1436,43 @@ test('backfillMissingPricingFromModelsDev does not thrash ChatGPT subscription c
   assert.equal(reloaded.cacheReadPrice, 0.25);
 }));
 
+test('backfillMissingPricingFromModelsDev does not thrash Qoder zero cache prices', async () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    name: 'Qoder CLI',
+    provider: 'qoder',
+    channelId: 'qoder',
+    authMethod: 'qoder_local_auth',
+    model: 'qwen3.8-max-preview',
+    inputPrice: 0,
+    outputPrice: 0,
+    pricingSource: 'models.dev-reference',
+  });
+
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      qoder: {
+        models: {
+          'qwen3.8-max-preview': {
+            id: 'qwen3.8-max-preview',
+            cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+          },
+        },
+      },
+    }),
+  });
+
+  const first = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
+  const second = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
+  assert.equal(first.updated, 0);
+  assert.equal(second.updated, 0);
+
+  const reloaded = store.listProviders().find((item) => item.id === provider.id);
+  assert.equal(reloaded.cacheReadPrice, undefined);
+  assert.equal(reloaded.cacheWritePrice, undefined);
+}));
+
 
 test('duplicateModel clones model metadata in the same group with -copy model id', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });

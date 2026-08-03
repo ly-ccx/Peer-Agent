@@ -174,14 +174,16 @@ function fillMissingPricingFromRegistry(item, registry) {
   // Do not clobber prices the user explicitly marked as provider-owned.
   if (item.pricingSource === 'provider') return { item, changed: false };
 
-  // ChatGPT subscription pricing uses cacheReadPrice only; llm-config-store
-  // migrates cacheWritePrice away on every read. Filling it here thrash-loops
-  // backfill (updated N/total forever on llm:list).
+  // Some provider adapters explicitly own cache semantics and remove unsupported
+  // cache prices while normalizing their catalog records. Do not reintroduce those
+  // fields from the reference registry or read -> backfill will never be idempotent.
   const skipCacheWrite = item.authMethod === 'oauth_chatgpt';
+  const skipCachePricing = item.channelId === 'qoder' || item.authMethod === 'qoder_local_auth';
 
   let changed = false;
   const next = { ...item };
   for (const field of PRICING_FIELDS) {
+    if (skipCachePricing && (field === 'cacheReadPrice' || field === 'cacheWritePrice')) continue;
     if (skipCacheWrite && field === 'cacheWritePrice') continue;
     if (next[field] === undefined && metadata[field] !== undefined) {
       next[field] = metadata[field];

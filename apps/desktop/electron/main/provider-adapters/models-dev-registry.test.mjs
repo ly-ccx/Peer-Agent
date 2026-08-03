@@ -130,6 +130,24 @@ test('fillMissingPricingFromRegistry still fills non-cacheWrite prices for ChatG
   assert.equal(item.pricingSource, 'models.dev-reference');
 });
 
+test('fillMissingPricingFromRegistry does not reintroduce Qoder cache prices', () => {
+  const index = buildModelsDevIndex(registryPayload);
+  const { item, changed } = fillMissingPricingFromRegistry(
+    {
+      model: 'gpt-5.6-terra',
+      channelId: 'qoder',
+      authMethod: 'qoder_local_auth',
+      inputPrice: 0,
+      outputPrice: 0,
+      pricingSource: 'models.dev-reference',
+    },
+    index,
+  );
+  assert.equal(changed, false);
+  assert.equal(item.cacheReadPrice, undefined);
+  assert.equal(item.cacheWritePrice, undefined);
+});
+
 test('fetchModelsDevRegistry uses MODELS_DEV_URL and caches result', async () => {
   resetModelsDevRegistryCacheForTests();
   let calls = 0;
