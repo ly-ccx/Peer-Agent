@@ -163,6 +163,46 @@ describe('qoder model catalog', () => {
     }],
   }));
 
+  it('keeps large tiers usable when the default tier window exceeds max_input_tokens (Cantus shape)', async () => withQoderConfig(async (options) => {
+    // Cantus 形态：默认档 1M，但官方 max_input_tokens 只有 180k。
+    // 预留量必须锚定「≥ max_input_tokens 的最小档位」（200K），
+    // 而不是默认档（1M），否则 1M 档会被压成 180k、小档位塌缩成 1。
+    const result = await listQoderModels(options);
+    const model = result.models[0];
+
+    assert.equal(model.id, 'cmodel');
+    assert.equal(model.contextWindow, 180000);
+    const tierOption = model.modelOptions[0];
+    const choiceFor = (value) => tierOption.choices.find((choice) => choice.value === value);
+
+    assert.deepEqual(choiceFor('1M'), {
+      value: '1M', label: '1M', requestValue: '1M', contextWindow: 1000000, inputTokenLimit: 980000,
+    });
+    assert.deepEqual(choiceFor('400K'), {
+      value: '400K', label: '400K', requestValue: '400K', contextWindow: 400000, inputTokenLimit: 380000,
+    });
+    assert.deepEqual(choiceFor('200K'), {
+      value: '200K', label: '200K', requestValue: '200K', contextWindow: 200000, inputTokenLimit: 180000,
+    });
+    assert.deepEqual(resolveQoderModelOptionProjection(model, { contextTier: '1M' }), {
+      contextWindow: 1000000,
+      inputTokenLimit: 980000,
+      requestOptions: { contextTier: '1M' },
+    });
+  }, {
+    officialCatalogLoader: async () => [{
+      value: 'cmodel',
+      displayName: 'Cantus',
+      maxInputTokens: 180000,
+      maxOutputTokens: 32768,
+      context_config: {
+        '200K': { token_count: 200000 },
+        '400K': { token_count: 400000 },
+        '1M': { token_count: 1000000, is_default: true },
+      },
+    }],
+  }));
+
   it('lists chat models from the local Qoder catalog', async () => withQoderConfig(async (options) => {
     const result = await listQoderModels(options);
 

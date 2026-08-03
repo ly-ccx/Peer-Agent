@@ -4,6 +4,10 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+### Fixed
+
+- Qoder context-tier projection no longer anchors the input reserve to the default tier; when the catalog default tier window exceeds `max_input_tokens` (e.g. Cantus: default 1M tier with a 180k max input), the reserve now anchors to the smallest tier that fits `max_input_tokens`, so a selected 1M tier projects ~980k usable input instead of collapsing to 180k and smaller tiers no longer degrade to 1 token.
+
 ## 0.0.1-beta.47 - 2026-08-02
 
 ### Added

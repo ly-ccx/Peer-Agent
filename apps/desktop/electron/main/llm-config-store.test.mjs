@@ -520,6 +520,59 @@ test('Qoder local auth provider exposes catalog display label without changing r
   }
 }));
 
+test('Qoder 1M tier keeps ~980k usable input when the default tier window exceeds max_input_tokens (Cantus shape)', () => withStore(({ configFile, dir }) => {
+  // Cantus 形态：默认档 1M、官方 max_input_tokens 只有 180k。
+  // 回归断言：选中 1M 档后 contextWindow 应为 980k，而不是被「默认档预留」
+  // 旧公式压回 180k、小档塌缩成 1；后续元数据重投影也不回退。
+  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
+  const qoderDir = path.join(dir, '.qoder');
+  mkdirSync(path.join(qoderDir, '.auth'), { recursive: true });
+  writeFileSync(path.join(qoderDir, '.auth/models'), JSON.stringify({
+    chat: [
+      {
+        key: 'cmodel',
+        display_name: 'Cantus',
+        max_input_tokens: 180_000,
+        max_output_tokens: 32_000,
+        is_vl: true,
+        is_reasoning: true,
+        context_config: {
+          '200K': { token_count: 200_000 },
+          '400K': { token_count: 400_000 },
+          '1M': { token_count: 1_000_000, is_default: true },
+        },
+      },
+    ],
+  }), 'utf8');
+  process.env.QODER_CONFIG_DIR = qoderDir;
+
+  try {
+    const store = createLlmConfigStore({ configFile });
+    const provider = store.addProvider({
+      provider: 'openai',
+      channelId: 'qoder',
+      authMethod: 'qoder_local_auth',
+      name: 'Qoder',
+      model: 'cmodel',
+      modelOptionValues: { contextTier: '1M' },
+    });
+
+    assert.equal(provider.modelLabel, 'Cantus');
+    assert.equal(provider.contextWindow, 980_000);
+    const choices = provider.modelOptions?.[0]?.choices || [];
+    assert.equal(choices.find((choice) => choice.value === '200K')?.inputTokenLimit, 180_000);
+    assert.equal(choices.find((choice) => choice.value === '400K')?.inputTokenLimit, 380_000);
+    assert.equal(choices.find((choice) => choice.value === '1M')?.inputTokenLimit, 980_000);
+
+    // 任意后续 patch 触发 applyQoderModelMetadata 重投影时仍保持 980k。
+    const refreshed = store.updateProvider(provider.id, { name: 'Qoder Cantus' });
+    assert.equal(refreshed.contextWindow, 980_000);
+  } finally {
+    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
+    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
+  }
+}));
+
 test('Qoder keeps the selected context tier when a saved model is absent from the live catalog', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({

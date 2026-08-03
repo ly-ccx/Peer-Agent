@@ -137,7 +137,14 @@ function normalizeContextTierOption(raw) {
   const defaultInputTokenLimit = Number.isFinite(raw.max_input_tokens) && raw.max_input_tokens > 0
     ? raw.max_input_tokens
     : defaultContextWindow;
-  const reservedTokens = Math.max(0, defaultContextWindow - defaultInputTokenLimit);
+  // 预留量必须锚定「能装下官方 max_input_tokens 的最小档位」，而不是默认档。
+  // Cantus 形态（默认档 1M、max_input_tokens 180k）下若锚定默认档会预留 820k，
+  // 把 1M 档可用输入压成 180k、小档位塌缩成 1；锚定最小可用档（200K）则预留 20k，
+  // 各档投影 980k/380k/180k。旧形态（默认 200K + 180k）锚点不变，结果向后兼容。
+  const sortedByWindow = [...entries].sort((a, b) => a[1].token_count - b[1].token_count);
+  const anchorEntry = sortedByWindow.find(([, config]) => config.token_count >= defaultInputTokenLimit)
+    || sortedByWindow[sortedByWindow.length - 1];
+  const reservedTokens = Math.max(0, anchorEntry[1].token_count - defaultInputTokenLimit);
 
   return {
     id: 'contextTier',
