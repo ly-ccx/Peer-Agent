@@ -4,6 +4,24 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.1-beta.49 - 2026-08-04
+
+### Added
+
+- Third-party / coding-plan service templates: GLM Coding Plan (CN/Global), Kimi Coding Plan, Moonshot, MiniMax (CN/Global), Volcengine Ark, Xiaomi MiMo / Token Plan, Aliyun Bailian Coding Plan, and OpenCode Go (OpenAI / Anthropic).
+- DeepSeek official API channel (`api.deepseek.com`).
+- Provider / model brand icons for Zhipu, Kimi/Moonshot, MiniMax, Volcengine, Xiaomi, Bailian, and OpenCode.
+- Locked provider setup modal: keep the service catalog behind a centered modal; lock channel + auth to the selected template; collapse official advanced fields with expand/collapse animation.
+- Confirm-before-delete for provider channel groups.
+
+### Fixed
+
+- Browser workbench waits for workspace registration; inject `ensureBrowserReady` into the agent tool path; feed screenshots into visual context.
+- Preserve frosted glass styling in production builds.
+- Service catalog dark-theme surfaces.
+- Stop Qoder pricing backfill thrash.
+- Add spacing above the first chat message.
+
 ## 0.0.1-beta.48 - 2026-08-03
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/task-thread",
-  "version": "0.0.1-beta.48",
+  "version": "0.0.1-beta.49",
   "private": true,
   "type": "module",
   "exports": {

@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-node",
-  "version": "0.0.1-beta.48",
+  "version": "0.0.1-beta.49",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

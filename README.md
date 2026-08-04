@@ -9,7 +9,7 @@ Local-first. Permission-gated. Evidence-backed.
 Peer Agent is a privacy-first local agent platform with three first-class shells — **Desktop**, **TUI**, and **CLI** — on one shared capability runtime. An agent can read files, run commands, drive a browser, call MCP tools, and automate work **on your computer**, under explicit, auditable control.
 
 > [!NOTE]
-> Current series: **`0.0.1-beta.48`**. The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
+> Current series: **`0.0.1-beta.49`**. The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
 
 ---
 
@@ -131,7 +131,7 @@ peer --version
 peer
 ```
 
-`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (`v0.0.1-beta.48` assets for this version). Requires **Node.js 20+**.
+`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (`v0.0.1-beta.49` assets for this version). Requires **Node.js 20+**.
 
 Supported installer platforms today: **macOS / Linux** (`darwin`/`linux` × `arm64`/`x64`). See [`packages/npm-cli/README.md`](./packages/npm-cli/README.md) for env overrides and manual tarball install.
 
@@ -201,7 +201,7 @@ peer_agent/
 ├── release-notes/            # Per-version release notes
 ├── scripts/                  # Version, pack, architecture checks
 ├── CHANGELOG.md
-├── VERSION                   # 0.0.1-beta.48
+├── VERSION                   # 0.0.1-beta.49
 └── AGENTS.md                 # Repo engineering rules for agents
 ```
 
