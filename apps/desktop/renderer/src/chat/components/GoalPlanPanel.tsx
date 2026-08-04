@@ -19,6 +19,7 @@ import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
+import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { buildGoalPlanTreeRows, goalPlanTreeDepth } from './goal/goalPlanTree';
@@ -1979,14 +1980,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
   const dockedExecuting = hasExecutingPlan && !expanded;
-  // A：折叠态浮条「完成」标志——当不存在执行中 / 待批准的计划，且至少有一个计划已完成时，
-  // 视为整体处于「完成态」，给浮条停止扫光并显示静态完成视觉（完成色描边 + 对勾）。
+  // A：折叠态浮条「完成」标志只反馈正式 Goal 的执行完成。
+  // intake 草稿即使已收束为 completed，也不代表用户目标已执行完成，因此不展示完成视觉。
   // 注意优先级：执行中 / 待批准会压过完成态（dockedExecuting 与 lockedOpen 优先），
   // 避免「一个完成、另一个仍在跑」时误显示完成。
   const hasAwaitingPlan = hasPendingGoalApproval(plans);
-  const hasCompletedPlan = plans.some((plan) => plan.status === 'completed');
+  const hasCompletedFormalGoal = plans.some(shouldShowGoalCompletionFeedback);
   const dockedCompleted =
-    hasCompletedPlan && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
+    hasCompletedFormalGoal && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
   const summary = isZh
     ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
     : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
