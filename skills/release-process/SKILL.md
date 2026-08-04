@@ -16,11 +16,11 @@ version: 0.1.2
 |---|---|
 | 版本权威（发布时） | git tag `v*`（如 `v0.0.1-beta.44` / `v0.1.0`） |
 | 仓库基线版本文件 | `VERSION` + 各 `package.json` / Cargo 清单（由 `scripts/stamp-version.mjs` 回写） |
-| 产品说明（中英） | `release-notes/vX.Y.Z.md`（`<!-- locale:zh-CN -->` / `<!-- locale:en-US -->`） |
+| 产品说明（中英） | `release-notes/vX.Y.Z.md`（更新日志唯一内容来源；`<!-- locale:zh-CN -->` / `<!-- locale:en-US -->`） |
 | 累积 Changelog | `CHANGELOG.md` |
 | 产品入口说明 | 根 `README.md`（定位 / 安装 / 入口面 / 能力 / 仓库结构 / 文档入口；**不是**变更日志） |
-| 用户向站点 | `docs/index.html`（落地）、`docs/docs.html`（文档）、`docs/changelog.html`（独立更新日志） |
-| Pages | 仓库 GitHub Pages：`source` 当前为 `dev/0.0.1` + `/docs`（以仓库设置为准） |
+| 用户向站点 | `docs/index.html`（落地）、`docs/docs.html`（文档）、`docs/changelog.html`（由 release notes 生成内容） |
+| Pages | `.github/workflows/pages.yml` 构建 `docs` artifact 并通过 GitHub Actions 部署 |
 | 构建/发布 CI | `.github/workflows/release.yml`（推送 `v*` tag 触发） |
 
 **不要**把 `docs/architecture/*` 或 `peer-knowledge` 工程合同文档当成对外发版站点内容提交进产品仓（架构文档默认 local-only）。
@@ -107,20 +107,20 @@ release-notes/v<version>.md
 
 | 文件 | 何时必须改 |
 |---|---|
-| `docs/changelog.html` | **硬门禁**：新版本 notes 已写则必须同步；静态 `ENTRIES` 时首项必须是本版（`idx === 0` 显示「最新」） |
+| `docs/changelog.html` | **生成门禁**：新版本 notes 已写则运行 `pnpm build:changelog`；禁止手工维护 `ENTRIES` |
 | `docs/docs.html` | 用户可见行为/命令/安装/能力（Skill/Plugin/MCP/权限）有变更 |
 | `docs/index.html` | 定位文案、下载入口、入口能力（Desktop/CLI）有变更 |
 | `docs/logo*.png` / `favicon*.png` | 品牌资源变更时同步 |
 
-#### `docs/changelog.html` 硬门禁（禁止 stamp / tag 前跳过）
+#### `docs/changelog.html` 生成门禁（禁止 stamp / tag 前跳过）
 
-`release-notes/v<version>.md` 写了**不等于**站点已更新。`docs/changelog.html` 当前是**静态嵌入** `var ENTRIES = [...]`，不会自动读取 `release-notes/`。
+`release-notes/*.md` 是更新日志唯一内容来源。不要手工编辑 `docs/changelog.html` 中的 `ENTRIES`；运行生成器后再提交生成结果，Pages Actions 也会在部署前从 notes 重新生成。
 
 发版前必须同时满足：
 
 1. `CHANGELOG.md` 含本版标题（如 `## 0.0.1-beta.N`）
-2. `docs/changelog.html` 的 `ENTRIES[0].version` / `label` 为本版（页面「最新」徽章依赖 `idx === 0`）
-3. 本版中英段落与 notes 事实一致（至少 note / added|changed|fixed / cli）
+2. `pnpm build:changelog` 成功，随后 `pnpm check:changelog` 通过
+3. 目标版本的 notes 含非空的 zh-CN 与 en-US 段落
 
 本地核验（失败则**禁止**进入 stamp / tag）：
 
@@ -128,19 +128,9 @@ release-notes/v<version>.md
 # 把 VERSION 换成目标版本号，如 0.0.1-beta.47
 VERSION=0.0.1-beta.47
 rg -n "## ${VERSION}" CHANGELOG.md
-python3 - <<PY
-import re
-from pathlib import Path
-v = "${VERSION}"
-html = Path("docs/changelog.html").read_text(encoding="utf-8")
-m = re.search(r"var ENTRIES\s*=\s*\[", html)
-assert m, "ENTRIES missing"
-mm = re.search(r'"version"\s*:\s*"([^"]+)"', html[m.end(): m.end() + 240])
-assert mm, "first version missing"
-first = mm.group(1).lstrip("v")
-assert first == v, f"latest entry is {first}, expected {v}"
-print("changelog_site_latest_ok", first)
-PY
+pnpm build:changelog
+pnpm check:changelog
+rg -n "v${VERSION}" docs/changelog.html | head
 ```
 
 操作要点：
@@ -256,10 +246,10 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 
 - [ ] `release-notes/v<version>.md` 存在且含 zh-CN + en-US
 - [ ] `CHANGELOG.md` 含该版本条目
-- [ ] **硬门禁**：`docs/changelog.html` 的 `ENTRIES[0]` 为本版（「最新」徽章落在本版）
-- [ ] 已用本地核验命令确认 CHANGELOG + changelog 站点首项；失败则未 stamp/tag
+- [ ] **生成门禁**：`pnpm build:changelog && pnpm check:changelog` 通过
+- [ ] 已用本地核验命令确认 CHANGELOG + 生成后的 changelog 包含本版；失败则未 stamp/tag
 - [ ] 用户可见产品变更已反映到 `docs/docs.html`（若有）
-- [ ] 相关 `docs/*` 与 `CHANGELOG.md` 已提交并推到 Pages 源分支
+- [ ] 相关 release notes、生成器、`docs/*` 与 `CHANGELOG.md` 已提交；Pages workflow 可从该 ref 构建
 - [ ] 已完成根 `README.md` 漂移检查（版本 / 安装 / 入口 / 能力 / 链接）
 - [ ] 若命中 README 触发条件：已更新并随发版提交；否则汇报中记录 `README: no-op`
 - [ ] `stamp-version` + `check-version` 通过
@@ -278,7 +268,7 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 |---|---|
 | `check-version.mjs` 失败 | 先 `stamp-version.mjs` 再检查；勿手改漏文件 |
 | Release CI 未触发 | 确认 tag 名 `v*` 且已 `git push origin v…` |
-| Pages 无新 changelog / 「最新」仍是上版 | **硬门禁未过**：补 `CHANGELOG.md` + 把本版插入 `docs/changelog.html` `ENTRIES[0]`，再推 Pages 源分支；不要假设 notes 会自动进站点 |
+| Pages 无新 changelog / 「最新」仍是上版 | 先运行生成与检查命令，再检查 `Deploy GitHub Pages` workflow；不要手工修改 `ENTRIES` 或切换版本分支 |
 | CLI 归档缺 helper | 以 workflow 为准；文档/notes 写清 `peer` + `peer-credential-helper` 同目录要求 |
 | 文档仍写已删命令 | 发版前以代码 registry 为准扫一遍 `docs/docs.html` |
 | 根 README 仍写旧入口/死链 | 执行 3.5 漂移检查；命中触发条件则更新，勿用 notes 顶替 |
@@ -286,8 +276,8 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 ## Agent 执行协议
 
 1. 先复述将要发布的 **version**、分支、是否含 docs / README 变更，再动版本文件。
-2. 每完成一个大步骤（notes → CHANGELOG → docs/changelog 硬门禁 → 其他 docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
-3. 进入 stamp/tag 前必须贴出 changelog 站点硬门禁核验输出（`changelog_site_latest_ok <version>`）；缺失则停。
+2. 每完成一个大步骤（notes → CHANGELOG → changelog 生成门禁 → 其他 docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
+3. 进入 stamp/tag 前必须贴出 `pnpm check:changelog` 的通过输出；缺失则停。
 4. README 步骤必须给出 `README: no-op` 或 `README: updated`，禁止静默跳过检查。
 5. 任何一步失败：停止后续 stamp/tag，保留已改文件说明，不要强行推 tag。
 6. 用户若只要“写 notes 不发版”：只做 0–3.5 步，不 stamp、不 tag。

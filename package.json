@@ -11,6 +11,8 @@
     "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs",
     "version:check": "node scripts/check-version.mjs",
+    "build:changelog": "node scripts/build-changelog.mjs",
+    "check:changelog": "node scripts/build-changelog.mjs --check",
     "runtime:pack-check": "node scripts/check-runtime-packages.mjs --contents",
     "runtime:pack-smoke": "node scripts/check-runtime-packages.mjs --smoke",
     "build:core": "cargo build --workspace",
