@@ -54,6 +54,7 @@ import {
   buildMessageRailItemsIncremental,
   type MessageRailItemCache,
 } from '../state/messageRailItems';
+import { findMessageTargetWithRetry } from '../state/messageNavigation';
 import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
@@ -759,20 +760,20 @@ export function ChatSurface({
     shouldAutoScrollRef.current = false;
     setIsThreadAtBottom((previous) => (previous ? false : previous));
     scrollToTurn(turnIndex, { align: 'center' });
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (
-          messageNavigationRequestRef.current !== requestId
-          || conversationIdRef.current !== requestConversationId
-        ) return;
-        const target = container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-        if (!target) return;
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.remove('chat-msg-flash');
-        void target.offsetWidth;
-        target.classList.add('chat-msg-flash');
-        window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
-      });
+    void findMessageTargetWithRetry({
+      findTarget: () => container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`),
+      scheduleFrame: (callback) => window.requestAnimationFrame(callback),
+      isActive: () => (
+        messageNavigationRequestRef.current === requestId
+        && conversationIdRef.current === requestConversationId
+      ),
+    }).then((target) => {
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.remove('chat-msg-flash');
+      void target.offsetWidth;
+      target.classList.add('chat-msg-flash');
+      window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
     });
   }, [messageTurnIndex, scrollToTurn]);
 
