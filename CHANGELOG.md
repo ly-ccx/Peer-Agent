@@ -6,18 +6,27 @@ All notable changes to Peer Agent are tracked here.
 
 ## 0.0.1 - 2026-08-04
 
-### Added
-
-- First stable release (latest channel), frozen from 0.0.1-beta.49.
-- Desktop shell, CLI (`peer`), Agent/Plan workflows, and local MCP capability paths.
-- Provider connection center with official API, OAuth, and third-party / coding-plan templates (DeepSeek, GLM CN/Global, Kimi/Moonshot, MiniMax CN/Global, Volcengine Ark, Xiaomi MiMo/Token Plan, Aliyun Bailian, OpenCode Go, and more).
-- Brand icons for major providers; locked centered modal for add-provider setup; confirm-before-delete for provider groups.
-- Browser workbench with workspace registration readiness and screenshot visual context.
-
 ### Notes
 
-- On-device LLM inference (Local Agent Runtime) remains in progress.
-- CLI install channel for this release: `@peer-agent/cli@latest` / `0.0.1`.
+- First stable / latest release. **Graduates the full `0.0.1-beta.7` → `0.0.1-beta.49` line**, not just the beta.49 delta.
+- beta.49 is only the freeze point; this section summarizes the product surface proven across the beta series.
+
+### Added
+
+- Desktop shell + CLI (`peer`) with shared runtime/config model.
+- Agent / Plan self-driven workflows (plans, subtasks, evidence, next steps).
+- Conversation UX foundations: streaming, reasoning display, trackable compression, long-session stability, attachments/queue.
+- Provider connection center: official API, OAuth, custom compatible, and third-party / coding-plan templates.
+- Brand icons + locked centered modal for add-provider setup; confirm-before-delete for provider groups.
+- Third-party / coding-plan channel set (DeepSeek, GLM CN/Global, Kimi/Moonshot, MiniMax CN/Global, Volcengine Ark, Xiaomi MiMo/Token Plan, Aliyun Bailian, OpenCode Go, and more).
+- MCP local management / OAuth / tool toggles.
+- Browser workbench readiness + screenshot visual context.
+- Usage/quota surfaces and Desktop/CLI accounting alignment.
+
+### Fixed / Hardened
+
+- Runtime hardening across compression, usage, stream-loop guards, main-process and update paths (accumulated through the beta line).
+- Local credential security paths (e.g. OS keychain).
 
 ## 0.0.1-beta.49 - 2026-08-04
 
