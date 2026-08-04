@@ -91,12 +91,18 @@ describe('TUI Runtime host', () => {
       mode: 'chat' | 'plan' | 'goal' | 'explorer' | 'compact' | 'system',
     ) => (host.toolDefinitionsForMode?.(mode) ?? []).map((tool) => tool.capabilityId);
 
+    // Agent is represented by the legacy chat wire mode and must receive the
+    // same Goal planning tools as Desktop Agent mode.
     expect(capabilities('chat')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
       'local.file.write',
       'local.shell.exec',
       'local.shell.stop',
+      'local.goal.create_plan',
+      'local.goal.update_task',
+      'local.goal.get_plan',
+      'local.goal.explore',
     ]));
     // Goal mode keeps chat write/shell tools and adds shared Desktop goal tools.
     expect(capabilities('goal')).toEqual(expect.arrayContaining([
@@ -137,6 +143,10 @@ describe('TUI Runtime host', () => {
     expect(toolNames('plan')).not.toContain('local.shell.stop');
     expect(toolNames('plan')).not.toContain('local.goal.explore');
     expect(toolNames('explorer')).not.toContain('local.shell.stop');
+    expect(toolNames('chat')).toContain('local.goal.create_plan');
+    expect(toolNames('chat')).toContain('local.goal.update_task');
+    expect(toolNames('chat')).toContain('local.goal.get_plan');
+    expect(toolNames('chat')).toContain('local.goal.explore');
     expect(toolNames('goal')).toContain('local.goal.create_plan');
     expect(toolNames('goal')).toContain('local.goal.explore');
     expect(toolNames('goal')).toContain('local.shell.exec');
