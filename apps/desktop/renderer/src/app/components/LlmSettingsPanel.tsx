@@ -16,7 +16,6 @@ import { clientApi } from '../../clientApi';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
 import { LlmBrandIcon } from './LlmBrandIcon';
-import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
 import { ModelCatalogDialog } from './ModelCatalogDialog';
 import { ModelSettingsDialog } from './ModelSettingsDialog';
@@ -49,6 +48,9 @@ interface PendingProviderDraft extends Record<string, unknown> {
   readonly name: string;
   readonly authMethod: LlmAuthMethod;
 }
+
+/** 表单打开来源：template 表示从服务目录卡片进入，应锁定渠道与鉴权。 */
+type FormLockSource = 'manual' | 'template' | 'edit' | 'add-model';
 
 interface FormState {
   provider: LlmProviderType;
@@ -519,6 +521,9 @@ export function LlmSettingsPanel({
   const [catalogQuery, setCatalogQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  /** 控制是否允许在表单内切换渠道/鉴权：template 来源锁定。 */
+  const [formLockSource, setFormLockSource] = useState<FormLockSource>('manual');
+  const [showAdvancedFields, setShowAdvancedFields] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -683,7 +688,9 @@ export function LlmSettingsPanel({
   const openAddFromTemplate = (template: LlmServiceTemplateDescriptor) => {
     setEditingId(null);
     setAddModelGroupId(null);
-    setCatalogOpen(false);
+    // 保持服务目录在背景；仅打开配置 Modal，并锁定模板的渠道与鉴权。
+    setFormLockSource('template');
+    setShowAdvancedFields(false);
     const channel = descriptorFor(template.channelId, channels);
     const next = emptyForm(channels, template.channelId);
     setForm({
@@ -708,6 +715,8 @@ export function LlmSettingsPanel({
   const openAddModel = (group: LlmProviderConfigView) => {
     setEditingId(null);
     setAddModelGroupId(group.groupId ?? group.id);
+    setFormLockSource('add-model');
+    setShowAdvancedFields(false);
     const channel = descriptorFor(group.channelId || (group.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
     setForm({
       ...emptyForm(channels, group.channelId || channel.id),
@@ -735,6 +744,8 @@ export function LlmSettingsPanel({
   const openEdit = (p: LlmProviderConfigView) => {
     setEditingId(p.id);
     setAddModelGroupId(null);
+    setFormLockSource('edit');
+    setShowAdvancedFields(false);
     const channel = descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
     setForm({
       provider: p.provider,
@@ -1113,6 +1124,17 @@ export function LlmSettingsPanel({
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
   const isAddModel = Boolean(addModelGroupId);
   const isLocalCliAuth = isLocalCliMethod(form.authMethod);
+  /** 从服务目录卡片进入：锁定渠道与鉴权，不允许在 Modal 内二次选择。 */
+  const templateLocked = formLockSource === 'template';
+  const hideChannelPicker = templateLocked || formLockSource === 'edit' || formLockSource === 'add-model';
+  const hideAuthPicker = templateLocked || formLockSource === 'edit' || formLockSource === 'add-model' || Boolean(editingId);
+  const activeTemplate = templateLocked
+    ? serviceTemplates.find((item) => item.channelId === form.channelId && item.authMethod === form.authMethod)
+    : undefined;
+  const hideBaseUrlByDefault = Boolean(
+    (activeTemplate?.defaults as { hideBaseUrlByDefault?: boolean } | undefined)?.hideBaseUrlByDefault,
+  );
+  const collapseOfficialAdvanced = templateLocked && !isOAuthMethod(form.authMethod) && !isLocalCliAuth;
   const editingProvider = editingId ? providers.find((provider) => provider.id === editingId) : undefined;
   const formValidationError = validateForm(
     form,
@@ -1416,25 +1438,51 @@ export function LlmSettingsPanel({
       )}
 
 {showForm ? (
-        <Drawer
-          onClose={() => { setShowForm(false); setEditingId(null); }}
+        <Overlay
+          onClose={() => {
+            setShowForm(false);
+            setEditingId(null);
+            setAddModelGroupId(null);
+            setFormLockSource('manual');
+            setShowAdvancedFields(false);
+          }}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
             ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
             : isAddModel
               ? (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')
-              : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}
-          panelClassName="llm-drawer"
-          softBackdrop
+              : (i18n.locale === 'zh-CN'
+                ? `连接 ${activeTemplate?.title || selectedChannel.label || form.name || '服务'}`
+                : `Connect ${activeTemplate?.title || selectedChannel.label || form.name || 'service'}`)}
+          panelClassName="pa-overlay-panel llm-provider-modal"
         >
           {({ requestClose }) => (
           <>
             <header className="llm-modal-header">
-              <h3>{editingId
-                ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
-                : isAddModel
-                  ? (i18n.locale === 'zh-CN' ? `给 ${form.name} 加模型` : `Add model to ${form.name}`)
-                  : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}</h3>
+              <div className="llm-provider-modal-title">
+                <LlmBrandIcon
+                  brand={activeTemplate?.brand || selectedChannel.label || form.name || form.provider}
+                  channelId={form.channelId}
+                  serviceTemplateId={activeTemplate?.id}
+                  providerName={form.name || selectedChannel.label}
+                />
+                <div>
+                  <h3>{editingId
+                    ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
+                    : isAddModel
+                      ? (i18n.locale === 'zh-CN' ? `给 ${form.name} 加模型` : `Add model to ${form.name}`)
+                      : (i18n.locale === 'zh-CN'
+                        ? `连接 ${activeTemplate?.title || selectedChannel.label || form.name || '服务'}`
+                        : `Connect ${activeTemplate?.title || selectedChannel.label || form.name || 'service'}`)}</h3>
+                  {templateLocked && activeTemplate ? (
+                    <p className="llm-provider-modal-subtitle">
+                      {activeTemplate.description || (isOAuthMethod(form.authMethod)
+                        ? (i18n.locale === 'zh-CN' ? '授权登录' : 'Sign-in')
+                        : (i18n.locale === 'zh-CN' ? 'API Key' : 'API Key'))}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
               <button
                 type="button"
                 className="llm-modal-close"
@@ -1448,6 +1496,7 @@ export function LlmSettingsPanel({
 
           {!isAddModel && (
           <>
+          {!hideChannelPicker ? (
           <label>
             <span>{i18n.locale === 'zh-CN' ? '渠道' : 'Channel'}</span>
             <Dropdown
@@ -1460,8 +1509,9 @@ export function LlmSettingsPanel({
               onChange={handleChannelChange}
             />
           </label>
+          ) : null}
 
-          {canUseOAuth && !editingId ? (
+          {canUseOAuth && !hideAuthPicker ? (
             <label>
               <span>{i18n.locale === 'zh-CN' ? '鉴权方式' : 'Auth Method'}</span>
               <div className="llm-radio-group">
@@ -1483,7 +1533,7 @@ export function LlmSettingsPanel({
             </label>
           ) : null}
 
-          {canChooseWire ? (
+          {canChooseWire && !collapseOfficialAdvanced ? (
             <label>
               <span>{i18n.locale === 'zh-CN' ? 'Wire 协议' : 'Wire Protocol'}</span>
               <Dropdown
@@ -1541,20 +1591,73 @@ export function LlmSettingsPanel({
             </>
           ) : (
             <>
-              <label>
-                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder={selectedChannel.label || form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-              </label>
-
-              <label>
-                <span>Base URL</span>
-                <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
-              </label>
+              {!collapseOfficialAdvanced ? (
+                <label>
+                  <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                  <input value={form.name} placeholder={selectedChannel.label || form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+                </label>
+              ) : null}
 
               <label>
                 <span>API Key</span>
                 <input type="password" value={form.apiKey} placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''} onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))} />
               </label>
+
+              {collapseOfficialAdvanced ? (
+                <div className="llm-advanced-block">
+                  <button
+                    type="button"
+                    className="llm-advanced-toggle"
+                    aria-expanded={showAdvancedFields}
+                    onClick={() => setShowAdvancedFields((prev) => !prev)}
+                  >
+                    {showAdvancedFields
+                      ? (i18n.locale === 'zh-CN' ? '收起高级设置' : 'Hide advanced settings')
+                      : (i18n.locale === 'zh-CN' ? '高级设置' : 'Advanced settings')}
+                  </button>
+                  <div
+                    className={`llm-advanced-panel${showAdvancedFields ? ' is-open' : ''}`}
+                    aria-hidden={!showAdvancedFields}
+                  >
+                    <div className="llm-advanced-panel-inner">
+                      <div className="llm-advanced-fields">
+                        <label>
+                          <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                          <input value={form.name} placeholder={selectedChannel.label || form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+                        </label>
+                        {canChooseWire ? (
+                          <label>
+                            <span>{i18n.locale === 'zh-CN' ? 'Wire 协议' : 'Wire Protocol'}</span>
+                            <Dropdown
+                              value={form.wireOverride || selectedChannel.defaultWire}
+                              ariaLabel={i18n.locale === 'zh-CN' ? '选择 Wire 协议' : 'Select wire protocol'}
+                              options={selectedChannel.allowedWires.map((wire) => ({ value: wire, label: wireLabel(wire, i18n.locale) }))}
+                              onChange={(wire) => setForm((prev) => ({
+                                ...prev,
+                                wireOverride: wire === selectedChannel.defaultWire ? '' : wire as LlmWireProtocol,
+                              }))}
+                            />
+                          </label>
+                        ) : null}
+                        <label>
+                          <span>Base URL</span>
+                          <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+                          {hideBaseUrlByDefault ? (
+                            <small className="llm-field-hint">
+                              {i18n.locale === 'zh-CN' ? '官方默认端点，通常无需修改。' : 'Official default endpoint; usually no need to change.'}
+                            </small>
+                          ) : null}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <label>
+                  <span>Base URL</span>
+                  <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+                </label>
+              )}
             </>
           )}
           </>
@@ -1712,7 +1815,7 @@ export function LlmSettingsPanel({
             </div>
           </>
           )}
-        </Drawer>
+        </Overlay>
       ) : null}
 
       {pendingProviderDraft ? (

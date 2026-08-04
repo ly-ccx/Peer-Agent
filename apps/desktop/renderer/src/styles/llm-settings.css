@@ -936,6 +936,150 @@
   box-shadow: -18px 0 46px color-mix(in srgb, var(--graphite-base) 12%, transparent);
 }
 
+/* ── 添加渠道：居中 Modal（提供商页面保留在背景）── */
+.pa-overlay-panel.llm-provider-modal {
+  width: min(640px, 92vw);
+  max-height: min(86vh, 820px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 18px;
+  background: var(--paper-sheet);
+  box-shadow:
+    0 24px 64px color-mix(in srgb, var(--graphite-base) 18%, transparent),
+    0 2px 8px color-mix(in srgb, var(--graphite-base) 8%, transparent);
+}
+
+.llm-provider-modal-title {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.llm-provider-modal-title .llm-brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  margin-top: 1px;
+}
+
+.llm-provider-modal-title > div {
+  min-width: 0;
+}
+
+.llm-provider-modal-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--graphite-soft);
+}
+
+.llm-advanced-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.llm-advanced-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.llm-advanced-toggle:hover {
+  color: var(--graphite-base);
+}
+
+.llm-advanced-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.llm-advanced-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.llm-advanced-panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.llm-advanced-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper-sheet) 88%, var(--graphite-base) 4%);
+}
+
+/* Nested labels are not covered by `.llm-form > label` (direct-child only). */
+.llm-advanced-fields label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+}
+
+.llm-advanced-fields label > span {
+  color: var(--graphite-soft);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.llm-advanced-fields input[type="text"],
+.llm-advanced-fields input[type="password"],
+.llm-advanced-fields input[type="number"],
+.llm-advanced-fields input:not([type]) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--chrome-canvas);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  color: var(--graphite-base);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+  font-family: var(--font-mono);
+}
+
+.llm-advanced-fields input:focus {
+  outline: none;
+  border-color: var(--graphite-base);
+}
+
+.llm-advanced-fields .pa-dropdown {
+  width: 100%;
+  min-width: 0;
+}
+
+.llm-advanced-fields .llm-field-hint {
+  display: block;
+  margin-top: 2px;
+}
+
 .llm-modal-header {
   display: flex;
   align-items: center;
