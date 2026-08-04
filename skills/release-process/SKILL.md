@@ -19,7 +19,7 @@ version: 0.1.2
 | 产品说明（中英） | `release-notes/vX.Y.Z.md`（更新日志唯一内容来源；`<!-- locale:zh-CN -->` / `<!-- locale:en-US -->`） |
 | 累积 Changelog | `CHANGELOG.md` |
 | 产品入口说明 | 根 `README.md`（定位 / 安装 / 入口面 / 能力 / 仓库结构 / 文档入口；**不是**变更日志） |
-| 用户向站点 | `docs/index.html`（落地）、`docs/docs.html`（文档）、`docs/changelog.html`（由 release notes 生成内容） |
+| 用户向站点 | `docs/index.html`（落地）、`docs/docs.html`（文档）、`docs/changelog.html`（轻量页面外壳）、`docs/changelog-data/manifest.json` + `v<version>.json`（构建产物；按正式版/Beta 分组并按需加载） |
 | Pages | `.github/workflows/pages.yml` 构建 `docs` artifact 并通过 GitHub Actions 部署 |
 | 构建/发布 CI | `.github/workflows/release.yml`（推送 `v*` tag 触发） |
 
@@ -114,7 +114,7 @@ release-notes/v<version>.md
 
 #### `docs/changelog.html` 生成门禁（禁止 stamp / tag 前跳过）
 
-`release-notes/*.md` 是更新日志唯一内容来源。不要手工编辑 `docs/changelog.html` 中的 `ENTRIES`；运行生成器后再提交生成结果，Pages Actions 也会在部署前从 notes 重新生成。
+`release-notes/*.md` 是更新日志唯一内容来源。不要手工编辑 `docs/changelog-data/`；生成器会输出轻量 manifest，并为每个版本生成独立 JSON。`docs/changelog.html` 只保留页面与按需加载逻辑，Pages Actions 会在部署前从 notes 重新生成数据。
 
 发版前必须同时满足：
 
@@ -130,7 +130,8 @@ VERSION=0.0.1-beta.47
 rg -n "## ${VERSION}" CHANGELOG.md
 pnpm build:changelog
 pnpm check:changelog
-rg -n "v${VERSION}" docs/changelog.html | head
+test -f "docs/changelog-data/v${VERSION}.json"
+rg -n "\"version\":\"v${VERSION}\"" docs/changelog-data/manifest.json | head
 ```
 
 操作要点：
