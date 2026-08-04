@@ -9,7 +9,7 @@ Local-first. Permission-gated. Evidence-backed.
 Peer Agent is a privacy-first local agent platform with three first-class shells — **Desktop**, **TUI**, and **CLI** — on one shared capability runtime. An agent can read files, run commands, drive a browser, call MCP tools, and automate work **on your computer**, under explicit, auditable control.
 
 > [!NOTE]
-> Current series: **`0.0.1-beta.49`**. The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
+> Current series: **`0.0.1`** (stable / latest). The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
 
 ---
 
@@ -114,7 +114,7 @@ Desktop (Electron)     TUI / CLI (`peer`)
 
 | Entry | Who it's for | Install path |
 |-------|--------------|--------------|
-| **CLI / TUI (`peer`)** | Terminal-first use | `npm i -g @peer-agent/cli@beta` or build `apps/tui` |
+| **CLI / TUI (`peer`)** | Terminal-first use | `npm i -g @peer-agent/cli@latest` or build `apps/tui` |
 | **Desktop app** | GUI shell | Dev: `pnpm --filter @peer-agent/desktop dev` · Release: GitHub Releases / `pnpm dist` |
 
 Both share the same local Runtime and data under `~/.peer-agent` (settings, conversations, credentials).
@@ -124,14 +124,14 @@ Both share the same local Runtime and data under `~/.peer-agent` (settings, conv
 #### Option A — npm (beta)
 
 ```bash
-npm install -g @peer-agent/cli@beta
-# or: pnpm add -g @peer-agent/cli@beta
+npm install -g @peer-agent/cli@latest
+# or: pnpm add -g @peer-agent/cli@latest
 
 peer --version
 peer
 ```
 
-`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (`v0.0.1-beta.49` assets for this version). Requires **Node.js 20+**.
+`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (`v0.0.1` assets for this version). Requires **Node.js 20+**.
 
 Supported installer platforms today: **macOS / Linux** (`darwin`/`linux` × `arm64`/`x64`). See [`packages/npm-cli/README.md`](./packages/npm-cli/README.md) for env overrides and manual tarball install.
 
@@ -201,7 +201,7 @@ peer_agent/
 ├── release-notes/            # Per-version release notes
 ├── scripts/                  # Version, pack, architecture checks
 ├── CHANGELOG.md
-├── VERSION                   # 0.0.1-beta.49
+├── VERSION                   # 0.0.1
 └── AGENTS.md                 # Repo engineering rules for agents
 ```
 

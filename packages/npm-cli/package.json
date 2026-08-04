@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/cli",
-  "version": "0.0.1-beta.49",
+  "version": "0.0.1",
   "description": "Peer Agent CLI — install via npm; downloads the platform peer binary from GitHub Releases.",
   "publishConfig": {
     "access": "public"

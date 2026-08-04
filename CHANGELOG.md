@@ -4,6 +4,21 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.1 - 2026-08-04
+
+### Added
+
+- First stable release (latest channel), frozen from 0.0.1-beta.49.
+- Desktop shell, CLI (`peer`), Agent/Plan workflows, and local MCP capability paths.
+- Provider connection center with official API, OAuth, and third-party / coding-plan templates (DeepSeek, GLM CN/Global, Kimi/Moonshot, MiniMax CN/Global, Volcengine Ark, Xiaomi MiMo/Token Plan, Aliyun Bailian, OpenCode Go, and more).
+- Brand icons for major providers; locked centered modal for add-provider setup; confirm-before-delete for provider groups.
+- Browser workbench with workspace registration readiness and screenshot visual context.
+
+### Notes
+
+- On-device LLM inference (Local Agent Runtime) remains in progress.
+- CLI install channel for this release: `@peer-agent/cli@latest` / `0.0.1`.
+
 ## 0.0.1-beta.49 - 2026-08-04
 
 ### Added

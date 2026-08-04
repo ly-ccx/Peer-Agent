@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-sdk",
-  "version": "0.0.1-beta.49",
+  "version": "0.0.1",
   "description": "Public host-neutral orchestration SDK for Peer Agent runtimes.",
   "type": "module",
   "license": "MIT",
