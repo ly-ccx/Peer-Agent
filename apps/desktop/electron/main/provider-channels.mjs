@@ -12,6 +12,18 @@ export const CHANNEL_IDS = {
   OPENAI: 'openai',
   ANTHROPIC: 'anthropic',
   DEEPSEEK: 'deepseek',
+  GLM_CODING_PLAN_CN: 'glm-coding-plan-cn',
+  GLM_CODING_PLAN_GLOBAL: 'glm-coding-plan-global',
+  KIMI_CODING_PLAN: 'kimi-coding-plan',
+  MOONSHOT: 'moonshot',
+  MINIMAX_CN: 'minimax-cn',
+  MINIMAX_GLOBAL: 'minimax-global',
+  VOLCENGINE_ARK: 'volcengine-ark',
+  XIAOMI_MIMO: 'xiaomi-mimo',
+  XIAOMI_MIMO_TOKEN_PLAN: 'xiaomi-mimo-token-plan',
+  ALIYUN_BAILIAN: 'aliyun-bailian',
+  OPENCODE_GO_OPENAI: 'opencode-go-openai',
+  OPENCODE_GO_ANTHROPIC: 'opencode-go-anthropic',
   OPENAI_COMPATIBLE: 'openai-compatible',
   ANTHROPIC_COMPATIBLE: 'anthropic-compatible',
   GOOGLE_AI: 'google-ai',
@@ -19,6 +31,45 @@ export const CHANNEL_IDS = {
   QODER: 'qoder',
 };
 
+/** GLM Coding Plan Anthropic-compatible endpoints (region-specific; keys are not interchangeable). */
+export const GLM_CODING_PLAN_CN_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
+export const GLM_CODING_PLAN_GLOBAL_BASE_URL = 'https://api.z.ai/api/anthropic';
+export const GLM_CODING_PLAN_DEFAULT_MODEL = 'glm-4.7';
+
+/** Moonshot / Kimi OpenAI-compatible endpoints (CN vs international). */
+export const MOONSHOT_CN_BASE_URL = 'https://api.moonshot.cn/v1';
+export const MOONSHOT_GLOBAL_BASE_URL = 'https://api.moonshot.ai/v1';
+export const KIMI_CODING_PLAN_DEFAULT_MODEL = 'kimi-k2.7-code';
+export const MOONSHOT_DEFAULT_MODEL = 'kimi-k3';
+
+/** MiniMax Coding / Token Plan Anthropic-compatible endpoints (region-specific). */
+export const MINIMAX_CN_ANTHROPIC_BASE_URL = 'https://api.minimaxi.com/anthropic';
+export const MINIMAX_GLOBAL_ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+export const MINIMAX_DEFAULT_MODEL = 'MiniMax-M3';
+
+/** Volcengine Ark (Coding Plan / OpenAI-compatible inference). */
+export const VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
+/** Placeholder — replace with your Ark endpoint ID or model name from console. */
+export const VOLCENGINE_ARK_DEFAULT_MODEL = 'doubao-seed-1-6';
+
+/** Xiaomi MiMo — pay-as-you-go vs Token Plan use different hosts and key prefixes. */
+export const XIAOMI_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
+export const XIAOMI_MIMO_TOKEN_PLAN_BASE_URL = 'https://token-plan-cn.xiaomimimo.com/v1';
+export const XIAOMI_MIMO_DEFAULT_MODEL = 'mimo-v2.5-pro';
+
+/** Aliyun Bailian Coding Plan (dedicated coding.dashscope host + sk-sp- key). */
+export const ALIYUN_BAILIAN_CODING_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1';
+export const ALIYUN_BAILIAN_DEFAULT_MODEL = 'qwen3-coder-plus';
+
+/**
+ * OpenCode Zen / Go subscription endpoints.
+ * GPT family uses Responses API; Claude family uses Anthropic Messages.
+ * @see https://opencode.ai/docs/zen
+ */
+export const OPENCODE_ZEN_OPENAI_BASE_URL = 'https://opencode.ai/zen/v1';
+export const OPENCODE_ZEN_ANTHROPIC_BASE_URL = 'https://opencode.ai/zen';
+export const OPENCODE_ZEN_OPENAI_DEFAULT_MODEL = 'gpt-5.5';
+export const OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-5';
 const PROTECTED_HEADER_NAMES = new Set([
   'authorization',
   'x-api-key',
@@ -97,6 +148,299 @@ const CHANNEL_DESCRIPTORS = {
       },
       promptCache: true,
       vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.GLM_CODING_PLAN_CN]: {
+    id: CHANNEL_IDS.GLM_CODING_PLAN_CN,
+    label: 'GLM Coding Plan 国区',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: {
+      baseUrl: GLM_CODING_PLAN_CN_BASE_URL,
+      model: GLM_CODING_PLAN_DEFAULT_MODEL,
+    },
+    headers: buildClaudeCliIdentityHeaders(),
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'anthropic-enabled-budget',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.GLM_CODING_PLAN_GLOBAL]: {
+    id: CHANNEL_IDS.GLM_CODING_PLAN_GLOBAL,
+    label: 'GLM Coding Plan 国际区',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: {
+      baseUrl: GLM_CODING_PLAN_GLOBAL_BASE_URL,
+      model: GLM_CODING_PLAN_DEFAULT_MODEL,
+    },
+    headers: buildClaudeCliIdentityHeaders(),
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'anthropic-enabled-budget',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.KIMI_CODING_PLAN]: {
+    id: CHANNEL_IDS.KIMI_CODING_PLAN,
+    label: 'Kimi Coding Plan',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: MOONSHOT_CN_BASE_URL,
+      model: KIMI_CODING_PLAN_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.MOONSHOT]: {
+    id: CHANNEL_IDS.MOONSHOT,
+    label: 'Moonshot',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: MOONSHOT_CN_BASE_URL,
+      model: MOONSHOT_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.MINIMAX_CN]: {
+    id: CHANNEL_IDS.MINIMAX_CN,
+    label: 'MiniMax（国区）',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: {
+      baseUrl: MINIMAX_CN_ANTHROPIC_BASE_URL,
+      model: MINIMAX_DEFAULT_MODEL,
+    },
+    headers: buildClaudeCliIdentityHeaders(),
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'anthropic-enabled-budget',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.MINIMAX_GLOBAL]: {
+    id: CHANNEL_IDS.MINIMAX_GLOBAL,
+    label: 'MiniMax（国际区）',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: {
+      baseUrl: MINIMAX_GLOBAL_ANTHROPIC_BASE_URL,
+      model: MINIMAX_DEFAULT_MODEL,
+    },
+    headers: buildClaudeCliIdentityHeaders(),
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'anthropic-enabled-budget',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.VOLCENGINE_ARK]: {
+    id: CHANNEL_IDS.VOLCENGINE_ARK,
+    label: 'Volcengine Ark',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: VOLCENGINE_ARK_BASE_URL,
+      model: VOLCENGINE_ARK_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.XIAOMI_MIMO]: {
+    id: CHANNEL_IDS.XIAOMI_MIMO,
+    label: 'Xiaomi MiMo',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: XIAOMI_MIMO_BASE_URL,
+      model: XIAOMI_MIMO_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.XIAOMI_MIMO_TOKEN_PLAN]: {
+    id: CHANNEL_IDS.XIAOMI_MIMO_TOKEN_PLAN,
+    label: 'Xiaomi MiMo Token Plan',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: XIAOMI_MIMO_TOKEN_PLAN_BASE_URL,
+      model: XIAOMI_MIMO_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: false,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.ALIYUN_BAILIAN]: {
+    id: CHANNEL_IDS.ALIYUN_BAILIAN,
+    label: 'Aliyun Bailian Coding Plan',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: ALIYUN_BAILIAN_CODING_BASE_URL,
+      model: ALIYUN_BAILIAN_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'none',
+        effortLevels: ['off', 'default'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.OPENCODE_GO_OPENAI]: {
+    id: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+    label: 'OpenCode Go (OpenAI)',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-responses',
+    allowedWires: ['openai-responses'],
+    authMethods: { api_key: { wire: 'openai-responses' } },
+    defaults: {
+      baseUrl: OPENCODE_ZEN_OPENAI_BASE_URL,
+      model: OPENCODE_ZEN_OPENAI_DEFAULT_MODEL,
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.OPENCODE_GO_ANTHROPIC]: {
+    id: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+    label: 'OpenCode Go (Anthropic)',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: {
+      baseUrl: OPENCODE_ZEN_ANTHROPIC_BASE_URL,
+      model: OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL,
+    },
+    headers: buildClaudeCliIdentityHeaders(),
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'anthropic-enabled-budget',
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
       toolUse: true,
       temperature: true,
     },
@@ -309,6 +653,276 @@ const SERVICE_TEMPLATES = [
     },
     searchAliases: ['deepseek', '深度求索'],
     tags: ['官方 API', 'API Key'],
+  },
+  {
+    id: 'glm-coding-plan-cn',
+    brand: '智谱 GLM',
+    title: 'GLM Coding Plan（国区）',
+    description: '智谱 Coding Plan 国区 · open.bigmodel.cn Anthropic 兼容端点',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.GLM_CODING_PLAN_CN,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: GLM_CODING_PLAN_CN_BASE_URL,
+      model: GLM_CODING_PLAN_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['glm', 'zhipu', '智谱', 'coding plan', 'bigmodel', '国区'],
+    tags: ['Coding Plan', '国区'],
+    knownLimitations: ['套餐模型范围与额度以智谱 Coding Plan 为准；国区与国际区 Key/端点不可混用'],
+  },
+  {
+    id: 'glm-coding-plan-global',
+    brand: '智谱 GLM',
+    title: 'GLM Coding Plan（国际区）',
+    description: 'GLM Coding Plan 国际区 · api.z.ai Anthropic 兼容端点',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.GLM_CODING_PLAN_GLOBAL,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: GLM_CODING_PLAN_GLOBAL_BASE_URL,
+      model: GLM_CODING_PLAN_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['glm', 'zhipu', 'z.ai', 'coding plan', 'international', '国际区'],
+    tags: ['Coding Plan', '国际区'],
+    knownLimitations: ['套餐模型范围与额度以 GLM Coding Plan 为准；国区与国际区 Key/端点不可混用'],
+  },
+  {
+    id: 'kimi-coding-plan',
+    brand: 'Kimi',
+    title: 'Kimi Coding Plan',
+    description: 'Kimi 编程计划 API · 默认 Coding 模型（国区 moonshot.cn）',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.KIMI_CODING_PLAN,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: MOONSHOT_CN_BASE_URL,
+      model: KIMI_CODING_PLAN_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['kimi', 'coding plan', 'moonshot', 'k2.7', '编程计划'],
+    tags: ['Coding Plan', '国区'],
+    knownLimitations: [
+      'OpenAI 兼容；国际用户可改 baseUrl 为 https://api.moonshot.ai/v1',
+      '编程场景也可选用 kimi-k2.7-code-highspeed / kimi-k3',
+    ],
+  },
+  {
+    id: 'moonshot-api',
+    brand: 'Moonshot',
+    title: 'Moonshot',
+    description: '月之暗面 API · OpenAI 兼容（国区 moonshot.cn）',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.MOONSHOT,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: MOONSHOT_CN_BASE_URL,
+      model: MOONSHOT_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['moonshot', 'kimi', '月之暗面', 'k3'],
+    tags: ['套餐/API', '国区'],
+    knownLimitations: [
+      'OpenAI 兼容；国际用户可改 baseUrl 为 https://api.moonshot.ai/v1',
+    ],
+  },
+  {
+    id: 'minimax-cn',
+    brand: 'MiniMax',
+    title: 'MiniMax（CN）',
+    description: 'MiniMax 编程套餐 — 中国区（Anthropic 兼容）',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.MINIMAX_CN,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: MINIMAX_CN_ANTHROPIC_BASE_URL,
+      model: MINIMAX_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['minimax', 'minimaxi', '国区', 'coding', 'token plan'],
+    tags: ['Coding Plan', '国区'],
+    knownLimitations: [
+      '国区与国际区 Key/端点不可混用',
+      'Token Plan 请使用订阅 Key；按量付费使用普通 API Key',
+    ],
+  },
+  {
+    id: 'minimax-global',
+    brand: 'MiniMax',
+    title: 'MiniMax（Global）',
+    description: 'MiniMax 编程套餐 — 国际区（Anthropic 兼容）',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.MINIMAX_GLOBAL,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: MINIMAX_GLOBAL_ANTHROPIC_BASE_URL,
+      model: MINIMAX_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['minimax', 'global', 'international', 'coding', 'token plan'],
+    tags: ['Coding Plan', '国际区'],
+    knownLimitations: [
+      '国区与国际区 Key/端点不可混用',
+      'Token Plan 请使用订阅 Key；按量付费使用普通 API Key',
+    ],
+  },
+  {
+    id: 'volcengine-ark',
+    brand: 'Volcengine',
+    title: 'Volcengine Ark',
+    description: '字节火山方舟 Coding Plan — 豆包、GLM、DeepSeek 等',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.VOLCENGINE_ARK,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: VOLCENGINE_ARK_BASE_URL,
+      model: VOLCENGINE_ARK_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['volcengine', 'ark', '火山', '方舟', 'doubao', '豆包', 'coding plan'],
+    tags: ['Coding Plan'],
+    knownLimitations: [
+      'model 请填写方舟控制台中的推理接入点 ID 或模型名',
+      'Coding Plan 请使用套餐对应的个人版 API Key',
+    ],
+  },
+  {
+    id: 'xiaomi-mimo',
+    brand: 'Xiaomi MiMo',
+    title: 'Xiaomi MiMo',
+    description: '小米 MiMo 按量付费 — MiMo-V2.5-Pro',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.XIAOMI_MIMO,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: XIAOMI_MIMO_BASE_URL,
+      model: XIAOMI_MIMO_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['xiaomi', 'mimo', '小米', '按量'],
+    tags: ['按量付费'],
+    knownLimitations: [
+      '按量付费 Key 前缀 sk-；勿与 Token Plan 端点混用',
+      '也支持 Anthropic 兼容：https://api.xiaomimimo.com/anthropic',
+    ],
+  },
+  {
+    id: 'xiaomi-mimo-token-plan',
+    brand: 'Xiaomi MiMo',
+    title: 'Xiaomi MiMo Token Plan',
+    description: '小米 MiMo Token Plan 订阅套餐 — MiMo-V2.5-Pro',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.XIAOMI_MIMO_TOKEN_PLAN,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: XIAOMI_MIMO_TOKEN_PLAN_BASE_URL,
+      model: XIAOMI_MIMO_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['xiaomi', 'mimo', 'token plan', '小米', '订阅'],
+    tags: ['Token Plan'],
+    knownLimitations: [
+      'Token Plan Key 前缀 tp-；Base URL 与按量付费不同',
+      '也支持 Anthropic 兼容：https://token-plan-cn.xiaomimimo.com/anthropic',
+    ],
+  },
+  {
+    id: 'aliyun-bailian',
+    brand: 'Aliyun Bailian',
+    title: 'Aliyun Bailian',
+    description: '阿里云百炼 Coding Plan — 通义千问、GLM、Kimi 等',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.ALIYUN_BAILIAN,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: ALIYUN_BAILIAN_CODING_BASE_URL,
+      model: ALIYUN_BAILIAN_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['bailian', 'aliyun', 'dashscope', '百炼', 'coding plan', 'qwen'],
+    tags: ['Coding Plan'],
+    knownLimitations: [
+      '必须使用 Coding Plan 专属 API Key（sk-sp-）与 coding.dashscope 端点',
+      '与按量计费 sk- / dashscope.aliyuncs.com 不互通',
+      '也支持 Anthropic 兼容：https://coding.dashscope.aliyuncs.com/apps/anthropic',
+    ],
+  },
+  {
+    id: 'opencode-go-openai',
+    brand: 'OpenCode',
+    title: 'OpenCode Go (OpenAI)',
+    description: 'OpenCode Zen Go 订阅 — OpenAI 兼容模型（用 Responses API）',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-responses',
+    defaults: {
+      baseUrl: OPENCODE_ZEN_OPENAI_BASE_URL,
+      model: OPENCODE_ZEN_OPENAI_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['opencode', 'zen', 'go', 'gpt'],
+    tags: ['订阅', 'OpenAI'],
+    knownLimitations: [
+      'GPT 系列走 Responses API：https://opencode.ai/zen/v1/responses',
+      '在 opencode.ai 登录后复制 API Key；模型列表见 /zen/v1/models',
+    ],
+  },
+  {
+    id: 'opencode-go-anthropic',
+    brand: 'OpenCode',
+    title: 'OpenCode Go (Anthropic)',
+    description: 'OpenCode Zen Go 订阅 — Anthropic Messages 协议模型',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+    authMethod: 'api_key',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    defaults: {
+      baseUrl: OPENCODE_ZEN_ANTHROPIC_BASE_URL,
+      model: OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['opencode', 'zen', 'go', 'claude', 'anthropic'],
+    tags: ['订阅', 'Anthropic'],
+    knownLimitations: [
+      'Claude 系列走 Anthropic Messages：https://opencode.ai/zen/v1/messages',
+      '与 OpenAI 卡共用 Zen API Key，但 wire/baseUrl 不同',
+    ],
   },
   {
     id: 'google-ai-api',

@@ -15,6 +15,14 @@ const officialAssets = [
   'xai.png',
   'qoder.svg',
   'deepseek.png',
+  'zhipu.png',
+  'kimi.png',
+  'moonshot.png',
+  'minimax.png',
+  'volcengine.png',
+  'xiaomi.png',
+  'bailian.png',
+  'opencode.png',
   'qwen.png',
   'meta.png',
   'mistral.png',
@@ -27,11 +35,30 @@ describe('LLM brand icon resolution', () => {
     assert.equal(resolveLlmBrand({ brand: 'Google', channelId: 'gemini' }), 'google');
     assert.equal(resolveLlmBrand({ brand: 'xAI', serviceTemplateId: 'grok-api' }), 'xai');
     assert.equal(resolveLlmBrand({ providerName: 'Qoder CLI' }), 'qoder');
+    assert.equal(resolveLlmBrand({ brand: '智谱 GLM' }), 'zhipu');
+    assert.equal(resolveLlmBrand({ channelId: 'glm-coding-plan-cn' }), 'zhipu');
+    assert.equal(resolveLlmBrand({ channelId: 'glm-coding-plan-global' }), 'zhipu');
+    assert.equal(resolveLlmBrand({ serviceTemplateId: 'glm-coding-plan-cn' }), 'zhipu');
+    assert.equal(resolveLlmBrand({ brand: 'Kimi', channelId: 'kimi-coding-plan' }), 'kimi');
+    assert.equal(resolveLlmBrand({ brand: 'Moonshot', serviceTemplateId: 'moonshot-api' }), 'moonshot');
+    assert.equal(resolveLlmBrand({ brand: 'MiniMax', channelId: 'minimax-cn' }), 'minimax');
+    assert.equal(resolveLlmBrand({ channelId: 'minimax-global' }), 'minimax');
+    assert.equal(resolveLlmBrand({ brand: 'Volcengine', channelId: 'volcengine-ark' }), 'volcengine');
+    assert.equal(resolveLlmBrand({ brand: 'Xiaomi MiMo', channelId: 'xiaomi-mimo' }), 'xiaomi');
+    assert.equal(resolveLlmBrand({ channelId: 'xiaomi-mimo-token-plan' }), 'xiaomi');
+    assert.equal(resolveLlmBrand({ brand: 'Aliyun Bailian', channelId: 'aliyun-bailian' }), 'bailian');
+    assert.equal(resolveLlmBrand({ brand: 'OpenCode', channelId: 'opencode-go-openai' }), 'opencode');
+    assert.equal(resolveLlmBrand({ channelId: 'opencode-go-anthropic' }), 'opencode');
   });
 
   it('uses model family before a generic provider brand', () => {
     assert.equal(resolveLlmBrand({ providerName: 'OpenRouter', modelId: 'anthropic/claude-sonnet-4' }), 'anthropic');
     assert.equal(resolveLlmBrand({ providerName: 'OpenAI Compatible', modelId: 'deepseek-chat' }), 'deepseek');
+    assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'glm-4.7' }), 'zhipu');
+    assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'kimi-k2.7-code' }), 'kimi');
+    assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'MiniMax-M3' }), 'minimax');
+    assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'doubao-seed-1-6' }), 'volcengine');
+    assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'mimo-v2.5-pro' }), 'xiaomi');
     assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'qwen3-coder' }), 'qwen');
     assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'meta-llama/llama-4' }), 'meta');
     assert.equal(resolveLlmBrand({ providerName: 'Custom', modelId: 'mistral-large' }), 'mistral');

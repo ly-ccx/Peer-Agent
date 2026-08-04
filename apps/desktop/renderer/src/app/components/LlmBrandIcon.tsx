@@ -1,12 +1,20 @@
 import anthropicIcon from '../../assets/llm-providers/anthropic.png';
+import bailianIcon from '../../assets/llm-providers/bailian.png';
 import deepseekIcon from '../../assets/llm-providers/deepseek.png';
 import geminiIcon from '../../assets/llm-providers/gemini.jpg';
+import kimiIcon from '../../assets/llm-providers/kimi.png';
 import metaIcon from '../../assets/llm-providers/meta.png';
+import minimaxIcon from '../../assets/llm-providers/minimax.png';
 import mistralIcon from '../../assets/llm-providers/mistral.png';
+import moonshotIcon from '../../assets/llm-providers/moonshot.png';
 import openaiIcon from '../../assets/llm-providers/openai.png';
+import opencodeIcon from '../../assets/llm-providers/opencode.png';
 import qoderIcon from '../../assets/llm-providers/qoder.svg';
 import qwenIcon from '../../assets/llm-providers/qwen.png';
+import volcengineIcon from '../../assets/llm-providers/volcengine.png';
 import xaiIcon from '../../assets/llm-providers/xai.png';
+import xiaomiIcon from '../../assets/llm-providers/xiaomi.png';
+import zhipuIcon from '../../assets/llm-providers/zhipu.png';
 import { llmBrandLabel, resolveLlmBrand, type LlmBrandHints, type LlmBrandId } from './llmBrand';
 
 /** Original images published by the providers; provenance is recorded in assets/llm-providers/SOURCES.md. */
@@ -17,6 +25,14 @@ const OFFICIAL_ASSETS: Readonly<Partial<Record<LlmBrandId, string>>> = {
   xai: xaiIcon,
   qoder: qoderIcon,
   deepseek: deepseekIcon,
+  zhipu: zhipuIcon,
+  kimi: kimiIcon,
+  moonshot: moonshotIcon,
+  minimax: minimaxIcon,
+  volcengine: volcengineIcon,
+  xiaomi: xiaomiIcon,
+  bailian: bailianIcon,
+  opencode: opencodeIcon,
   qwen: qwenIcon,
   meta: metaIcon,
   mistral: mistralIcon,
