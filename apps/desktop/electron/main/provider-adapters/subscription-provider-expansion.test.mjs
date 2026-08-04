@@ -23,7 +23,7 @@ const SUB_PROVIDER = {
 };
 
 const CATALOG = [
-  { id: 'gpt-5.5', label: 'GPT-5.5', contextWindow: 258_000, maxOutputTokens: 128_000, inputPrice: 5, outputPrice: 30, cacheReadPrice: 0.5 },
+  { id: 'gpt-5.5', label: 'GPT-5.5', contextWindow: 272_000, maxOutputTokens: 128_000, inputPrice: 5, outputPrice: 30, cacheReadPrice: 0.5 },
   { id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 400_000, maxOutputTokens: 128_000, inputPrice: 0.75, outputPrice: 4.5, cacheReadPrice: 0.075, reasoningEffortLevels: ['low', 'default', 'high', 'max'] },
   { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3-Codex-Spark' },
 ];

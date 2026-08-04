@@ -84,13 +84,13 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
 
   assert.equal(provider.model, 'gpt-5.5');
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
   assert.equal(provider.cacheWritePrice, undefined);
-  assert.equal(provider.longContextInputThreshold, 258_000);
+  assert.equal(provider.longContextInputThreshold, 272_000);
   assert.equal(provider.longContextInputPrice, 10);
   assert.equal(provider.longContextCacheReadPrice, 1);
   assert.equal(provider.longContextOutputPrice, 45);
@@ -175,7 +175,7 @@ test('subscription provider migration backfills pricing and context metadata', (
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
@@ -186,7 +186,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(provider.supportsPromptCaching, true);
 
   const persisted = readPersistedModels(configFile)[0];
-  assert.equal(persisted.contextWindow, 258_000);
+  assert.equal(persisted.contextWindow, 272_000);
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);
@@ -212,12 +212,12 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.supportsPromptCaching, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const [persisted] = readPersistedModels(configFile);
-  assert.equal(persisted.contextWindow, 258_000);
+  assert.equal(persisted.contextWindow, 272_000);
   assert.equal(persisted.supportsPromptCaching, true);
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));

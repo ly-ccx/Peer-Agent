@@ -1190,7 +1190,7 @@ describe('P0 recoverable microcompact + summary budget', () => {
   it('resolveSummaryTokenBudget applies a conservative provider safety ratio to the model window', () => {
     const budget = resolveSummaryTokenBudget(
       { maxOutputTokens: 8000 },
-      { contextWindow: 258_000 },
+      { contextWindow: 272_000 },
     );
     assert.equal(budget.summaryMaxTokens, 8000);
     assert.ok(budget.outputReserveTokens >= COMPACTION_CONFIG.summaryOutputReserveTokens);
@@ -1198,12 +1198,12 @@ describe('P0 recoverable microcompact + summary budget', () => {
     assert.equal(
       budget.summaryMaxInputTokens,
       Math.floor(
-        (258_000 - budget.summaryMaxTokens - budget.safetyReserveTokens)
+        (272_000 - budget.summaryMaxTokens - budget.safetyReserveTokens)
         * COMPACTION_CONFIG.summaryInputSafetyRatio,
       ),
     );
     assert.ok(budget.summaryMaxInputTokens > 80_000);
-    assert.ok(budget.summaryMaxInputTokens < 258_000 / 2);
+    assert.ok(budget.summaryMaxInputTokens < 272_000 / 2);
   });
 
   it('resolveSummaryTokenBudget leaves input uncapped when the model window is unknown', () => {
@@ -1279,7 +1279,7 @@ describe('compaction summary quality regressions', () => {
     assert.ok(roomy.requestTargetTokens < 320_000, 'must reserve growth below the trigger line');
 
     const tight = planHandoffBudget({
-      contextWindow: 258_000,
+      contextWindow: 272_000,
       providerMaxOutputTokens: 64_000,
       systemTokens: 8_000,
       toolSchemaTokens: 3_000,
