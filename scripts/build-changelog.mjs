@@ -1,11 +1,14 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "..");
 const notesDir = path.join(root, "release-notes");
-const outputPath = path.join(root, "docs", "changelog.html");
-const dataPattern = /(\s*var ENTRIES = )\[[\s\S]*?\];\n(\s*var ui = )/;
+const docsDir = path.join(root, "docs");
+const outputPath = path.join(docsDir, "changelog.html");
+const dataDir = path.join(docsDir, "changelog-data");
+const manifestPath = path.join(dataDir, "manifest.json");
+const embeddedDataPattern = /\n\s*var ENTRIES = \[[\s\S]*?\];\n/;
 const localeMarker = /^(?:<!--\s*)?locale:(zh-CN|en-US)(?:\s*-->)?$/;
 
 const sectionKeys = {
@@ -77,10 +80,12 @@ function parseVersion(filename) {
   if (!match) throw new Error(`Unsupported release note filename: ${filename}`);
   const prerelease = match[4] ?? "";
   const beta = prerelease.match(/^beta\.(\d+)$/);
+  const channel = beta ? "beta" : "stable";
   return {
     version: `v${label}`,
     label,
-    n: beta ? Number(beta[1]) : 0,
+    channel,
+    file: `v${label}.json`,
     sort: [Number(match[1]), Number(match[2]), Number(match[3]), prerelease ? 0 : 1, beta ? Number(beta[1]) : 0, prerelease],
   };
 }
@@ -103,22 +108,51 @@ async function buildEntries() {
     return { ...metadata, zh, en };
   }));
   entries.sort(compareVersions);
-  return entries.map(({ sort: _sort, ...entry }) => entry);
+  return entries;
+}
+
+function json(value) {
+  return `${JSON.stringify(value)}\n`;
+}
+
+async function expectedOutputs(entries) {
+  const versions = entries.map(({ sort: _sort, zh: _zh, en: _en, ...metadata }) => metadata);
+  const stable = versions.filter((entry) => entry.channel === "stable");
+  const beta = versions.filter((entry) => entry.channel === "beta");
+  const manifest = {
+    generatedAt: new Date(0).toISOString(),
+    latest: { stable: stable[0]?.version ?? null, beta: beta[0]?.version ?? null },
+    channels: { stable, beta },
+  };
+  const outputs = new Map([[manifestPath, json(manifest)]]);
+  for (const { sort: _sort, file, ...entry } of entries) outputs.set(path.join(dataDir, file), json(entry));
+  return outputs;
+}
+
+async function checkOutputs(outputs) {
+  for (const [file, expected] of outputs) {
+    let actual;
+    try { actual = await readFile(file, "utf8"); } catch { throw new Error(`${path.relative(root, file)} is missing; run pnpm build:changelog`); }
+    if (actual !== expected) throw new Error(`${path.relative(root, file)} is stale; run pnpm build:changelog`);
+  }
+  const actualFiles = (await readdir(dataDir)).filter((name) => name.endsWith(".json"));
+  if (actualFiles.length !== outputs.size) throw new Error("changelog-data contains stale JSON files; run pnpm build:changelog");
+  const html = await readFile(outputPath, "utf8");
+  if (html.includes("var ENTRIES")) throw new Error("docs/changelog.html still embeds release bodies; run pnpm build:changelog");
 }
 
 const entries = await buildEntries();
-const html = await readFile(outputPath, "utf8");
-if (!dataPattern.test(html)) throw new Error("Could not locate the ENTRIES data block in docs/changelog.html");
-const generated = html.replace(dataPattern, `$1${JSON.stringify(entries)};\n$2`);
+const outputs = await expectedOutputs(entries);
 
 if (process.argv.includes("--check")) {
-  if (generated !== html) {
-    console.error("docs/changelog.html is stale; run pnpm build:changelog");
-    process.exitCode = 1;
-  } else {
-    console.log(`changelog is current (${entries.length} releases)`);
-  }
+  await checkOutputs(outputs);
+  console.log(`changelog data is current (${entries.length} releases, ${outputs.size} JSON files)`);
 } else {
-  await writeFile(outputPath, generated);
-  console.log(`generated docs/changelog.html from ${entries.length} release notes`);
+  await rm(dataDir, { recursive: true, force: true });
+  await mkdir(dataDir, { recursive: true });
+  await Promise.all([...outputs].map(([file, content]) => writeFile(file, content)));
+  const html = await readFile(outputPath, "utf8");
+  if (embeddedDataPattern.test(html)) await writeFile(outputPath, html.replace(embeddedDataPattern, "\n"));
+  await checkOutputs(outputs);
+  console.log(`generated manifest and ${entries.length} release files in docs/changelog-data`);
 }
