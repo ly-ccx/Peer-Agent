@@ -4,7 +4,7 @@
  * peer-credential-helper must live next to peer (same vendor/ directory).
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,9 +36,19 @@ if (!existsSync(binary) || !existsSync(helper)) {
   process.exit(1);
 }
 
+let installSource = 'npm';
+try {
+  const metadata = JSON.parse(
+    readFileSync(join(vendor, '.peer-agent-install.json'), 'utf8'),
+  );
+  if (metadata.source === 'pnpm') installSource = 'pnpm';
+} catch {
+  // Older installs predate source metadata; npm is the conservative default.
+}
+
 const child = spawn(binary, process.argv.slice(2), {
   stdio: 'inherit',
-  env: process.env,
+  env: { ...process.env, PEER_AGENT_INSTALL_SOURCE: installSource },
   windowsHide: true,
 });
 

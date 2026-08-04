@@ -15,6 +15,7 @@ import {
 
 import { App } from './app.tsx';
 import { handleCliVersionArgs } from './cli-version.ts';
+import { createCliUpdateController } from './cli-update.ts';
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
@@ -289,6 +290,7 @@ const model = provider
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
 renderer.setTerminalTitle(formatTerminalTitle(workspaceRoot));
+const cliUpdate = createCliUpdateController();
 const root = createRoot(renderer);
 const shutdown = createTuiShutdown({
   unmount: () => root.unmount(),
@@ -304,6 +306,8 @@ root.render(
     modelSelection={modelSelection}
     languageStore={languageStore}
     themeStore={themeStore}
+    cliUpdate={cliUpdate}
     onQuit={shutdown}
   />,
 );
+queueMicrotask(() => void cliUpdate.check());
