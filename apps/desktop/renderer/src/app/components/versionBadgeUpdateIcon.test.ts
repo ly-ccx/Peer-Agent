@@ -15,3 +15,11 @@ test('available updates use a styled icon instead of exposing an i18n key', () =
   assert.doesNotMatch(componentSource, /sidebar-version-new-tag/);
   assert.match(updaterStyles, /\.sidebar-version-update-icon\s*\{/);
 });
+
+test('the version badge renders a styled tag only for Vite development builds', () => {
+  assert.match(
+    componentSource,
+    /\{import\.meta\.env\.DEV \? \([\s\S]*?className="sidebar-version-dev-tag"[\s\S]*?开发[\s\S]*?\) : null\}/,
+  );
+  assert.match(updaterStyles, /\.sidebar-version-dev-tag\s*\{/);
+});

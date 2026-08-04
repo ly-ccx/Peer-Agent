@@ -102,6 +102,11 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           onClick={handleClick}
         >
           <span className="sidebar-version-text">v{status.currentVersion}</span>
+          {import.meta.env.DEV ? (
+            <span className="sidebar-version-dev-tag" aria-label="开发版本">
+              开发
+            </span>
+          ) : null}
           {isAvailable ? (
             <span className="sidebar-version-update-icon">
               <svg
