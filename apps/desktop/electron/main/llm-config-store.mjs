@@ -31,6 +31,7 @@ import {
 import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
+  DEEPSEEK_ANTHROPIC_BASE_URL,
   GEMINI_CODE_ASSIST_BASE_URL,
   GEMINI_OAUTH_NAME,
   QODER_PRIVATE_NAME,
@@ -537,6 +538,52 @@ export function createLlmConfigStore({
       });
       if (before !== after) changed = true;
     }
+    // DeepSeek 官方改走 Anthropic 兼容入口：旧 openai-chat + api.deepseek.com
+    // 必须迁到 anthropic-messages + api.deepseek.com/anthropic，否则思考强度契约不生效。
+    // 模型侧可能仍持久化旧档位 off/default（UI 会优先读模型字段，导致滑条仍只有“标准思考”）。
+    if (item.channelId === 'deepseek') {
+      const baseUrl = String(item.baseUrl || '').replace(/\/+$/, '');
+      const isLegacyDeepSeekOpenAI =
+        !baseUrl
+        || baseUrl === 'https://api.deepseek.com'
+        || baseUrl === 'https://api.deepseek.com/v1';
+      if (isLegacyDeepSeekOpenAI && baseUrl !== DEEPSEEK_ANTHROPIC_BASE_URL) {
+        item.baseUrl = DEEPSEEK_ANTHROPIC_BASE_URL;
+        changed = true;
+      }
+      if (item.wireOverride === 'openai-chat' || item.wireOverride === 'openai-responses') {
+        delete item.wireOverride;
+        changed = true;
+      }
+      if (item.provider === 'openai') {
+        item.provider = 'anthropic';
+        changed = true;
+      }
+      // 渠道能力真源：off/low/high/max（默认 high）。覆盖历史 off/default 与空值。
+      const targetLevels = ['off', 'low', 'high', 'max'];
+      const currentLevels = Array.isArray(item.reasoningEffortLevels)
+        ? item.reasoningEffortLevels
+        : null;
+      const levelsStale = !currentLevels
+        || currentLevels.length !== targetLevels.length
+        || currentLevels.some((level, index) => level !== targetLevels[index]);
+      if (levelsStale) {
+        item.reasoningEffortLevels = [...targetLevels];
+        changed = true;
+      }
+      if (item.reasoningDefaultEffort !== 'high') {
+        item.reasoningDefaultEffort = 'high';
+        changed = true;
+      }
+      if (item.supportsReasoning !== true) {
+        item.supportsReasoning = true;
+        changed = true;
+      }
+      if (item.reasoningParamStyle !== 'anthropic-enabled-output-effort') {
+        item.reasoningParamStyle = 'anthropic-enabled-output-effort';
+        changed = true;
+      }
+    }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
         validateCustomHeaders(item.customHeaders);
@@ -816,10 +863,24 @@ export function createLlmConfigStore({
       supportsVision: item.supportsVision ?? undefined,
       supportsReasoning: item.supportsReasoning ?? undefined,
       supportsPromptCaching: item.supportsPromptCaching ?? undefined,
-      reasoningParamStyle: item.reasoningParamStyle ?? undefined,
-      reasoningEffortMap: item.reasoningEffortMap ?? undefined,
-      reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
-      reasoningDefaultEffort: item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort ?? undefined,
+      // DeepSeek：渠道级思考契约优先于模型历史缓存，避免 off/default / 空 paramStyle 盖住新能力。
+      // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
+      reasoningParamStyle: item.channelId === 'deepseek'
+        ? (resolved?.reasoningParamStyle ?? item.reasoningParamStyle ?? undefined)
+        : (item.reasoningParamStyle ?? undefined),
+      reasoningEffortMap: item.channelId === 'deepseek'
+        ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
+        : (item.reasoningEffortMap ?? undefined),
+      reasoningEffortLevels: (
+        item.channelId === 'deepseek'
+          ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
+          : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
+      ) ?? undefined,
+      reasoningDefaultEffort: (
+        item.channelId === 'deepseek'
+          ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
+          : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
+      ) ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,

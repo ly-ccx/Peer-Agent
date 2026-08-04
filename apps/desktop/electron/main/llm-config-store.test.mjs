@@ -328,6 +328,51 @@ test('legacy provider entries migrate to channel fields without losing stored se
   assert.equal(store.getDecryptedApiKey('p1'), 'secret-key');
 }));
 
+test('DeepSeek models migrate off/default effort levels to Anthropic low/high/max', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'ds-group',
+      groupId: 'ds-group',
+      provider: 'openai',
+      channelId: 'deepseek',
+      authMethod: 'api_key',
+      name: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKeyConfigured: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'ds-model',
+      groupId: 'ds-group',
+      model: 'deepseek-v4-flash',
+      enabled: true,
+      isDefault: true,
+      supportsReasoning: true,
+      reasoningEffortLevels: ['off', 'default'],
+      reasoningDefaultEffort: 'default',
+      metadataSource: 'manual',
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.channelId, 'deepseek');
+  assert.equal(provider.provider, 'anthropic');
+  assert.equal(provider.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.equal(provider.resolvedWire, 'anthropic-messages');
+  assert.deepEqual(provider.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+  assert.equal(provider.reasoningDefaultEffort, 'high');
+  assert.equal(provider.reasoningParamStyle, 'anthropic-enabled-output-effort');
+  assert.equal(provider.supportsReasoning, true);
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.equal(persisted.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.deepEqual(persisted.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+  assert.equal(persisted.reasoningDefaultEffort, 'high');
+  assert.equal(persisted.reasoningParamStyle, 'anthropic-enabled-output-effort');
+}));
+
 test('manual provider creation and updates persist max output tokens', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({

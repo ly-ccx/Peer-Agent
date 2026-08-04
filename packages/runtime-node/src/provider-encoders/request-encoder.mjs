@@ -18,8 +18,24 @@ const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhig
 const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
 // Anthropic output_config.effort 原生枚举为 low/medium/high/xhigh/max（与 thinking 是
 // adaptive 还是 enabled 无关，effort 始终属于顶层 output_config）。Peer Agent 的 xhigh
-// 忠实映射到原生 xhigh；max 无对应 UI 档位，按 YAGNI 不引入。
-const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+// 忠实映射到原生 xhigh；max 对 Claude 非通用，但 DeepSeek Anthropic 官方支持 max。
+const ANTHROPIC_OUTPUT_EFFORT = {
+  low: 'low',
+  medium: 'medium',
+  default: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
+// DeepSeek Anthropic 兼容：output_config.effort 仅 low/high/max；官方 xhigh→high，默认 high。
+const DEEPSEEK_ANTHROPIC_OUTPUT_EFFORT = {
+  low: 'low',
+  medium: 'high',
+  default: 'high',
+  high: 'high',
+  xhigh: 'high',
+  max: 'max',
+};
 // Anthropic 约束: max_tokens 必须 > thinking.budget_tokens。
 // max_tokens 是 (思考 token + 回复 token) 的总额，因此开启 thinking 时
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
@@ -294,13 +310,29 @@ export function encodeAnthropicMessagesRequest({
     stream: true,
     tools,
   };
-  // 思考档位: off(关闭) / low / default / high / xhigh。
-  // off 不开 thinking; output_config.effort 原生支持 xhigh，直接透传(adaptive/output-effort
+  // 思考档位: off(关闭) / low / default / high / xhigh / max。
+  // off 通常不开 thinking; output_config.effort 原生支持 xhigh，直接透传(adaptive/output-effort
   // 两条链路都走 output_config.effort)。enabled-budget 旧代际无 effort，按 budget_tokens 折算。
+  // DeepSeek Anthropic 兼容(anthropic-enabled-output-effort) 例外：off 必须显式 disabled，
+  // 开启时用 type:'enabled'（不是 adaptive）+ output_config.effort low/high/max。
   const paramStyle = reasoningParamStyle
     ?? (reasoningFormat === 'adaptive' ? 'anthropic-adaptive-effort' : null)
     ?? (anthropicModelUsesEffortConfig(model) ? 'anthropic-output-effort' : 'anthropic-enabled-budget');
-  if (supportsReasoning && effort && effort !== 'off') {
+  if (supportsReasoning && effort && paramStyle === 'anthropic-enabled-output-effort') {
+    if (effort === 'off') {
+      body.thinking = { type: 'disabled' };
+    } else {
+      body.thinking = { type: 'enabled' };
+      body.output_config = {
+        effort: mappedEffortValue(
+          effort,
+          reasoningEffortMap,
+          DEEPSEEK_ANTHROPIC_OUTPUT_EFFORT,
+          'default',
+        ) ?? 'high',
+      };
+    }
+  } else if (supportsReasoning && effort && effort !== 'off') {
     if (paramStyle === 'anthropic-adaptive-effort') {
       // display:'summarized' 让思维链以摘要形式回流，否则新代际默认 omitted
       // (thinking 字段恒空、仅 signature)，UI 的思考区永远无内容可渲染。

@@ -21,29 +21,36 @@ describe('provider channel registry', () => {
     const descriptor = listChannelDescriptors().find((channel) => channel.id === CHANNEL_IDS.DEEPSEEK);
 
     assert.equal(descriptor?.label, 'DeepSeek 官方');
-    assert.equal(descriptor?.defaultWire, 'openai-chat');
-    assert.deepEqual(descriptor?.allowedWires, ['openai-chat']);
-    assert.equal(descriptor?.authMethods.api_key.wire, 'openai-chat');
-    assert.equal(descriptor?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(descriptor?.defaultWire, 'anthropic-messages');
+    assert.deepEqual(descriptor?.allowedWires, ['anthropic-messages']);
+    assert.equal(descriptor?.authMethods.api_key.wire, 'anthropic-messages');
+    assert.equal(descriptor?.defaults.baseUrl, 'https://api.deepseek.com/anthropic');
     assert.equal(descriptor?.defaults.model, 'deepseek-chat');
+    assert.equal(descriptor?.capabilities?.reasoning?.paramStyle, 'anthropic-enabled-output-effort');
+    assert.deepEqual(descriptor?.capabilities?.reasoning?.effortLevels, ['off', 'low', 'high', 'max']);
+    assert.equal(descriptor?.capabilities?.reasoning?.defaultEffort, 'high');
 
     const resolved = resolveChannel({
       channelId: CHANNEL_IDS.DEEPSEEK,
       authMethod: 'api_key',
       apiKey: 'deepseek-test-key',
     });
-    assert.equal(resolved.wire, 'openai-chat');
-    assert.equal(resolved.baseUrl, 'https://api.deepseek.com');
-    assert.equal(resolved.endpoint, 'https://api.deepseek.com/chat/completions');
-    assert.equal(resolved.headers.Authorization, 'Bearer deepseek-test-key');
+    assert.equal(resolved.wire, 'anthropic-messages');
+    assert.equal(resolved.baseUrl, 'https://api.deepseek.com/anthropic');
+    assert.equal(resolved.endpoint, 'https://api.deepseek.com/anthropic/v1/messages');
+    assert.equal(resolved.headers['x-api-key'], 'deepseek-test-key');
+    assert.equal(resolved.headers['anthropic-version'], '2023-06-01');
+    assert.equal(resolved.reasoningParamStyle, 'anthropic-enabled-output-effort');
+    assert.deepEqual(resolved.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+    assert.equal(resolved.reasoningDefaultEffort, 'high');
     assert.throws(
       () => resolveChannel({
         channelId: CHANNEL_IDS.DEEPSEEK,
         authMethod: 'api_key',
-        wireOverride: 'openai-responses',
+        wireOverride: 'openai-chat',
         apiKey: 'deepseek-test-key',
       }),
-      /unsupported_wire:deepseek:openai-responses/,
+      /unsupported_wire:deepseek:openai-chat/,
     );
   });
 
@@ -228,7 +235,8 @@ describe('service templates', () => {
     assert.equal(deepseek?.accessCategory, 'official_api');
     assert.equal(deepseek?.channelId, CHANNEL_IDS.DEEPSEEK);
     assert.equal(deepseek?.authMethod, 'api_key');
-    assert.equal(deepseek?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(deepseek?.defaultWire, 'anthropic-messages');
+    assert.equal(deepseek?.defaults.baseUrl, 'https://api.deepseek.com/anthropic');
     assert.equal(deepseek?.defaults.model, 'deepseek-chat');
     assert.equal(
       resolveServiceTemplateId({ channelId: CHANNEL_IDS.DEEPSEEK, authMethod: 'api_key' }),

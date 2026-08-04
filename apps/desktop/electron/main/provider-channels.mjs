@@ -31,6 +31,14 @@ export const CHANNEL_IDS = {
   QODER: 'qoder',
 };
 
+/**
+ * DeepSeek 官方 Anthropic 兼容入口。
+ * 文档: https://api-docs.deepseek.com/zh-cn/guides/anthropic_api
+ * 思考契约: thinking.type enabled/disabled + output_config.effort low/high/max
+ */
+export const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic';
+export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-chat';
+
 /** GLM Coding Plan Anthropic-compatible endpoints (region-specific; keys are not interchangeable). */
 export const GLM_CODING_PLAN_CN_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
 export const GLM_CODING_PLAN_GLOBAL_BASE_URL = 'https://api.z.ai/api/anthropic';
@@ -134,17 +142,30 @@ const CHANNEL_DESCRIPTORS = {
   [CHANNEL_IDS.DEEPSEEK]: {
     id: CHANNEL_IDS.DEEPSEEK,
     label: 'DeepSeek 官方',
-    legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
-    allowedWires: ['openai-chat'],
-    authMethods: { api_key: { wire: 'openai-chat' } },
-    defaults: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+    // 官方 Anthropic 兼容 API：base_url + /v1/messages，思考走 thinking + output_config.effort。
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: { baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL, model: DEEPSEEK_DEFAULT_MODEL },
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
-        defaultEffort: 'default',
+        // DeepSeek Anthropic: thinking.enabled/disabled + output_config.effort(low/high/max)
+        // 与 Claude adaptive 不同：不能发 type:'adaptive'，off 必须显式 disabled。
+        paramStyle: 'anthropic-enabled-output-effort',
+        // 官方档位 low/high/max；xhigh 官方映射到 high；default 对齐官方默认 high。
+        effortLevels: ['off', 'low', 'high', 'max'],
+        defaultEffort: 'high',
+        effortMap: {
+          off: 'disabled',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'high',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: false,
@@ -639,20 +660,20 @@ const SERVICE_TEMPLATES = [
     id: 'deepseek-api',
     brand: 'DeepSeek',
     title: 'DeepSeek',
-    description: 'DeepSeek 官方 API Key 直连',
+    description: 'DeepSeek 官方 Anthropic 兼容 API（思考强度 low/high/max）',
     accessCategory: 'official_api',
     supportTier: 'verified',
     channelId: CHANNEL_IDS.DEEPSEEK,
     authMethod: 'api_key',
-    legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
     defaults: {
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
+      baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL,
+      model: DEEPSEEK_DEFAULT_MODEL,
       hideBaseUrlByDefault: true,
     },
     searchAliases: ['deepseek', '深度求索'],
-    tags: ['官方 API', 'API Key'],
+    tags: ['官方 API', 'API Key', 'Anthropic 兼容'],
   },
   {
     id: 'glm-coding-plan-cn',

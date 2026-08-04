@@ -685,4 +685,46 @@ describe('Provider message encoders', () => {
     assert.ok(Array.isArray(body.system));
     assert.equal(body.system[0].cache_control.type, 'ephemeral');
   });
+
+  it('encodes DeepSeek Anthropic thinking enabled/disabled + output_config.effort', () => {
+    const make = (effort) => encodeAnthropicMessagesRequest({
+      model: 'deepseek-v4-flash',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort,
+      supportsReasoning: true,
+      reasoningParamStyle: 'anthropic-enabled-output-effort',
+      reasoningEffortMap: {
+        off: 'disabled',
+        low: 'low',
+        medium: 'high',
+        default: 'high',
+        high: 'high',
+        xhigh: 'high',
+        max: 'max',
+      },
+    });
+
+    const off = make('off');
+    assert.deepEqual(off.thinking, { type: 'disabled' });
+    assert.equal(off.output_config, undefined);
+
+    const low = make('low');
+    assert.deepEqual(low.thinking, { type: 'enabled' });
+    assert.deepEqual(low.output_config, { effort: 'low' });
+
+    const high = make('high');
+    assert.deepEqual(high.thinking, { type: 'enabled' });
+    assert.deepEqual(high.output_config, { effort: 'high' });
+
+    // 官方默认 high；default/medium/xhigh 都映射到 high。
+    assert.deepEqual(make('default').output_config, { effort: 'high' });
+    assert.deepEqual(make('medium').output_config, { effort: 'high' });
+    assert.deepEqual(make('xhigh').output_config, { effort: 'high' });
+
+    const max = make('max');
+    assert.deepEqual(max.thinking, { type: 'enabled' });
+    assert.deepEqual(max.output_config, { effort: 'max' });
+  });
 });
