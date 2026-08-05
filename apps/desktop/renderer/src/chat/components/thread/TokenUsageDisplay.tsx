@@ -1,17 +1,22 @@
-import type {
-  ContextAccountingSnapshot,
-  LlmProviderConfigView,
-  LlmSubscriptionQuota,
+import {
+  resolveLlmModelOptionValues,
+  type ContextAccountingSnapshot,
+  type LlmProviderConfigView,
+  type LlmSubscriptionQuota,
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import type { DropdownOption } from '../../../app/components/Dropdown';
+import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import {
   formatQuotaTooltipLine,
   isOAuthMethod,
   supportsSubscriptionQuotaMethod,
 } from '../../../app/components/llmSubscriptionQuota';
+import {
+  contextWindowDefinition,
+  selectedModelContextWindow,
+} from '../../../app/components/llmModelConfiguration';
 import { Tooltip } from '../../../app/components/Tooltip';
 import { clientApi } from '../../../clientApi';
 import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
@@ -20,6 +25,24 @@ import { getProviderDisplayName } from '../../state/providerDisplay';
 import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
 import { resolveStickyContextDisplay } from './stickyContextDisplay';
+
+/** 上下文档位标签：极简，如 500k / 1M / 272k。 */
+function formatContextWindowLabel(tokens: number | undefined): string {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) {
+    return '—';
+  }
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    const text = Number.isInteger(millions) ? `${millions}` : millions.toFixed(1).replace(/\.0$/, '');
+    return `${text}M`;
+  }
+  if (tokens >= 1000) {
+    const thousands = tokens / 1000;
+    const text = Number.isInteger(thousands) ? `${thousands}` : thousands.toFixed(1).replace(/\.0$/, '');
+    return `${text}k`;
+  }
+  return `${Math.round(tokens)}`;
+}
 
 function ReasoningEffortSlider({
   effort,
@@ -206,6 +229,7 @@ export function TokenUsageDisplay({
   selectedModelProviderId = null,
   showContextUsage = true,
   showModelControls = true,
+  onContextWindowChange,
 }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
@@ -231,6 +255,8 @@ export function TokenUsageDisplay({
   /** 首页框内只保留模型/思考；框下右侧单独放上下文统计。 */
   readonly showContextUsage?: boolean;
   readonly showModelControls?: boolean;
+  /** 多档上下文切换：写入 modelOptionValues，并刷新 provider 列表。 */
+  readonly onContextWindowChange?: (providerId: string, optionId: string, value: string) => void | Promise<void>;
 }) {
   // 当前展示的 provider：优先会话绑定的 modelProviderId（随会话切换模型），其次全局默认，
   // 最后取首个已配置 Key 的 provider。这样价格/上下文窗口/模型名都跟随会话选中的模型走。
@@ -427,6 +453,42 @@ export function TokenUsageDisplay({
       ]
     : [];
   const ctxTooltip = ctxTooltipLines.join('\n');
+  const contextOptionDefinition = useMemo(
+    () => (defaultProvider ? contextWindowDefinition(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const selectedContextWindow = useMemo(
+    () => (defaultProvider ? selectedModelContextWindow(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const contextOptionValues = useMemo(
+    () => (defaultProvider
+      ? resolveLlmModelOptionValues(defaultProvider.modelOptions, defaultProvider.modelOptionValues)
+      : {}),
+    [defaultProvider],
+  );
+  const selectedContextOptionValue = contextOptionDefinition
+    ? String(contextOptionValues[contextOptionDefinition.id] ?? contextOptionDefinition.defaultValue)
+    : '';
+  const contextWindowChoices = contextOptionDefinition?.choices.filter((choice) => (
+    typeof choice.contextWindow === 'number' && choice.contextWindow > 0
+  )) ?? [];
+  const canSwitchContextWindow = Boolean(
+    showModelControls
+    && defaultProvider
+    && onContextWindowChange
+    && contextOptionDefinition
+    && contextWindowChoices.length > 1,
+  );
+  const contextWindowOptions: DropdownOption[] = contextWindowChoices.map((choice) => ({
+    value: String(choice.value),
+    // 始终用极简档位文案（500k / 1M），不用 definition 里可能偏长的 label。
+    label: formatContextWindowLabel(choice.contextWindow),
+  }));
+  const fixedContextWindowLabel = formatContextWindowLabel(
+    selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow,
+  );
+
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
   const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
   const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
@@ -460,6 +522,27 @@ export function TokenUsageDisplay({
             disabled={Boolean(isStreaming)}
             onChange={onEffortChange}
           />
+        ) : null}
+        {showModelControls && canSwitchContextWindow && contextOptionDefinition && defaultProvider ? (
+          <Dropdown
+            className="composer-dropdown composer-context-window-dropdown"
+            value={selectedContextOptionValue}
+            options={contextWindowOptions}
+            onChange={(value) => {
+              void onContextWindowChange?.(defaultProvider.id, contextOptionDefinition.id, value);
+            }}
+            ariaLabel={isZh ? '上下文窗口' : 'Context window'}
+            title={isZh ? '切换上下文窗口' : 'Switch context window'}
+            menuPlacement="up"
+            disabled={Boolean(isStreaming)}
+          />
+        ) : showModelControls && (selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow) ? (
+          <span
+            className="token-usage-context-window"
+            title={isZh ? '当前上下文窗口' : 'Current context window'}
+          >
+            {fixedContextWindowLabel}
+          </span>
         ) : null}
         {showContextUsage && hasCtxRing ? (
           <Tooltip lines={ctxTooltipLines} placement="top">

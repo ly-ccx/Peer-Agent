@@ -16,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
+import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
@@ -362,6 +363,7 @@ export function ChatSurface({
   onEnsureConversation,
   onRenameConversation,
   onArchiveConversation,
+  onProvidersRefresh,
   workspacePath,
   isPageActive,
   messageTarget,
@@ -377,6 +379,7 @@ export function ChatSurface({
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
+  readonly onProvidersRefresh?: () => void | Promise<void>;
   readonly onConversationUpdated?: () => void;
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
@@ -2144,6 +2147,26 @@ export function ChatSurface({
     messageCount: messages.length,
   });
   const emptyHomeGreeting = conversationHomeGreeting(new Date().getHours(), isZh, workspaceLabel);
+  const handleContextWindowChange = useCallback(async (
+    providerId: string,
+    optionId: string,
+    value: string,
+  ) => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) return;
+    const nextValues = updateModelOptionSelection(
+      provider.modelOptions,
+      provider.modelOptionValues,
+      optionId,
+      value,
+    );
+    await clientApi.llmUpdateProvider({
+      id: providerId,
+      modelOptionValues: nextValues,
+    });
+    await onProvidersRefresh?.();
+  }, [onProvidersRefresh, providers]);
+
   // 框内：模型 + 思考；框下右侧：上下文统计（首页与普通会话统一）。
   const homeComposerModelControls = (
     <ComposerTokenUsageDisplay
@@ -2160,6 +2183,7 @@ export function ChatSurface({
       modelOptions={modelOptions}
       canSwitchModel={canSwitchModel}
       onModelChange={handleModelChange}
+      onContextWindowChange={handleContextWindowChange}
       selectedModelProviderId={modelProviderId}
       showContextUsage={false}
     />

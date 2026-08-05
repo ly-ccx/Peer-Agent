@@ -886,6 +886,7 @@ function MainApp() {
                     void clientApi.clearPendingTask().catch(() => {});
                   }}
                   onOpenSettings={() => openSettings('providers')}
+                  onProvidersRefresh={refreshProviders}
                   onConversationUpdated={() => { void refreshConversations(); }}
                   onStreamingChange={(convId, streaming) => {
                     if (!convId) return;

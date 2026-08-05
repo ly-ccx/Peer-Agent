@@ -15,7 +15,7 @@ export interface ModelCatalogEntry {
   readonly configured: boolean;
 }
 
-function contextWindowDefinition(model: Pick<LlmModelInfo, 'modelOptions'>) {
+export function contextWindowDefinition(model: Pick<LlmModelInfo, 'modelOptions'>) {
   return model.modelOptions?.find((definition) => definition.choices.some((choice) => (
     typeof choice.contextWindow === 'number' && choice.contextWindow > 0
   )));

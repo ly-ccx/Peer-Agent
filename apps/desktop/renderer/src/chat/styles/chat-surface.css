@@ -1175,6 +1175,31 @@
   font-weight: 500;
 }
 
+
+.token-usage-context-window {
+  display: inline-flex;
+  align-items: center;
+  max-width: 120px;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-family: var(--font-sans);
+  font-size: var(--ui-font-body, 0.875rem);
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-context-window-dropdown .pa-dropdown-trigger {
+  max-width: 140px;
+}
+
 .chat-composer {
   position: relative;
   display: flex;
