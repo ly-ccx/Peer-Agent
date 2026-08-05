@@ -121,7 +121,8 @@
     margin-inline: 1px;
     padding: 0 var(--space-3);
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-row, 8px);
+    /* Align selected outline with sidebar-new-chat / conversation-row panel radius. */
+    border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
     color: var(--za-text);
     background: transparent;
     font: inherit;
