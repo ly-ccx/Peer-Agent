@@ -69,9 +69,10 @@
   justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--za-line, rgba(0, 0, 0, 0.08));
+  border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.08)));
   border-radius: var(--radius-md, 10px);
-  background: color-mix(in srgb, var(--surface-raised, #fff) 88%, transparent);
+  /* Use the same surface token as provider groups so dark theme stays dark. */
+  background: var(--paper-sheet);
 }
 .llm-fallback-vision-copy {
   min-width: 0;
@@ -104,9 +105,9 @@
   height: 36px;
   min-height: 36px;
   justify-content: space-between;
-  border: 1px solid var(--za-line, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.12)));
   border-radius: 8px;
-  background: var(--surface-base, #fff);
+  background: var(--paper-base, var(--paper-sheet));
   color: var(--graphite-base);
   font: inherit;
   font-size: 0.86rem;
@@ -114,8 +115,8 @@
 }
 .llm-fallback-vision-menu .pa-cascading-trigger:hover:not(:disabled),
 .llm-fallback-vision-menu .pa-cascading-trigger.open {
-  background: color-mix(in srgb, var(--surface-raised, #fff) 92%, var(--graphite-base) 4%);
-  border-color: color-mix(in srgb, var(--za-line, rgba(0, 0, 0, 0.12)) 70%, var(--graphite-base) 30%);
+  background: color-mix(in srgb, var(--paper-hover, var(--paper-sheet)) 92%, var(--graphite-base) 4%);
+  border-color: color-mix(in srgb, var(--chrome-hairline, var(--za-line, rgba(0, 0, 0, 0.12))) 70%, var(--graphite-base) 30%);
   color: var(--graphite-base);
 }
 .llm-fallback-vision-menu .pa-cascading-value {
@@ -765,23 +766,14 @@
   font-size: 0.68rem;
 }
 
-.llm-form > label.llm-vision-toggle {
+.llm-form > .llm-vision-toggle {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: flex-start;
-  gap: var(--space-2);
+  justify-content: space-between;
+  gap: var(--space-3);
   color: var(--graphite-base);
   font-size: 0.82rem;
-  cursor: pointer;
-}
-.llm-vision-toggle input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  flex: none;
-  cursor: pointer;
-  accent-color: var(--za-primary-control-bg);
 }
 
 .llm-form-actions {
@@ -1411,13 +1403,18 @@
 .llm-configured-model-summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
+  justify-content: flex-start;
+  gap: var(--space-3);
   min-width: 0;
   padding: var(--space-3) var(--space-4);
   cursor: pointer;
   list-style: none;
   user-select: none;
+}
+
+.llm-configured-model-summary > .llm-brand-icon,
+.llm-configured-model-summary > .llm-brand {
+  flex: 0 0 auto;
 }
 
 .llm-configured-model-summary::-webkit-details-marker {
@@ -1432,7 +1429,9 @@
 .llm-configured-model-main {
   display: grid;
   gap: 3px;
+  flex: 1 1 auto;
   min-width: 0;
+  text-align: left;
 }
 
 .llm-configured-model-title {
@@ -1471,6 +1470,7 @@
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .llm-configured-model-chevron {
@@ -1611,7 +1611,7 @@
 .llm-catalog-toolbar button:hover:not(:disabled),
 .llm-catalog-summary button:hover:not(:disabled),
 .llm-catalog-manual button:hover:not(:disabled),
-.llm-dialog-footer button:hover:not(:disabled),
+.llm-dialog-footer button:hover:not(:disabled):not(.primary),
 .llm-dialog-close:hover:not(:disabled) {
   background: var(--chrome-hover);
 }
@@ -1911,6 +1911,29 @@
   background: rgba(78, 163, 217, 0.06);
 }
 
+/* Catalog rows: paper surface for resting/hover; checked = azure + white tick (light & dark). */
+.llm-catalog-item .peer-checkbox-box {
+  border-color: var(--chrome-hairline, var(--graphite-hairline));
+  background: var(--paper-base, var(--control-fill));
+  color: #fff;
+}
+
+.llm-catalog-item .peer-checkbox-input:hover:not(:disabled):not(:checked) + .peer-checkbox-box {
+  border-color: var(--graphite-fade);
+  background: var(--paper-hover, var(--control-fill-hover));
+}
+
+.llm-catalog-item .peer-checkbox-input:checked + .peer-checkbox-box,
+.llm-catalog-item .peer-checkbox-input:checked:hover:not(:disabled) + .peer-checkbox-box {
+  border-color: var(--azure-seal);
+  background: var(--azure-seal);
+  color: #fff;
+}
+
+.llm-catalog-item .peer-checkbox-input:checked + .peer-checkbox-box svg {
+  stroke: #fff;
+}
+
 .llm-catalog-item.is-configured {
   opacity: 0.62;
   cursor: default;
@@ -1998,6 +2021,14 @@
   border-color: transparent;
   background: var(--za-primary-control-bg);
   color: var(--za-primary-control-ink);
+}
+
+/* Keep primary fill/ink on hover; generic footer hover must not paint over it. */
+.llm-dialog-footer button.primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+  opacity: 0.9;
 }
 
 .llm-catalog-apply-button {
@@ -2502,5 +2533,157 @@
   .llm-service-template-card,
   .llm-service-catalog.is-closing .llm-service-template-card {
     animation: none;
+  }
+}
+
+/* Qoder / local CLI connect flow */
+.llm-local-cli-hint {
+  display: grid;
+  gap: 8px;
+}
+
+.llm-local-cli-checklist {
+  margin: 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary, #5c6570);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.llm-local-cli-steps {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.llm-local-cli-step {
+  border: 1px solid color-mix(in srgb, var(--border, #d7dde5) 88%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--bg-elevated, #fff) 92%, var(--bg-muted, #f5f7fa));
+}
+
+.llm-local-cli-step.is-running {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--border, #d7dde5));
+}
+
+.llm-local-cli-step.is-passed {
+  border-color: color-mix(in srgb, #22c55e 42%, var(--border, #d7dde5));
+}
+
+.llm-local-cli-step.is-failed {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--border, #d7dde5));
+  background: color-mix(in srgb, #ef4444 6%, var(--bg-elevated, #fff));
+}
+
+.llm-local-cli-step-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.llm-local-cli-step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #1f2933);
+}
+
+.llm-local-cli-step-status {
+  font-size: 12px;
+  color: var(--text-secondary, #5c6570);
+  white-space: nowrap;
+}
+
+.llm-local-cli-step.is-passed .llm-local-cli-step-status {
+  color: #15803d;
+}
+
+.llm-local-cli-step.is-failed .llm-local-cli-step-status {
+  color: #b91c1c;
+}
+
+.llm-local-cli-step.is-running .llm-local-cli-step-status {
+  color: var(--accent, #2563eb);
+}
+
+.llm-local-cli-step-detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary, #5c6570);
+}
+
+.llm-local-cli-success {
+  display: grid;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border, #d7dde5));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #22c55e 10%, transparent), transparent 48%),
+    var(--bg-elevated, #fff);
+}
+
+.llm-local-cli-success-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.llm-local-cli-success-meta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.llm-local-cli-success-meta li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.llm-local-cli-success-meta span {
+  color: var(--text-secondary, #5c6570);
+}
+
+.llm-local-cli-success-meta strong {
+  color: var(--text-primary, #1f2933);
+  font-weight: 600;
+  text-align: right;
+}
+
+.llm-local-cli-success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.llm-provider-group.is-highlight {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border, #d7dde5));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent, #3b82f6) 28%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+  animation: llm-group-highlight-pulse 1.6s ease-out 1;
+}
+
+@keyframes llm-group-highlight-pulse {
+  0% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent),
+      0 0 0 10px color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent, #3b82f6) 28%, transparent),
+      0 0 0 6px color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
   }
 }

@@ -14,6 +14,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { getProviderDisplayName } from '../../chat/state/providerDisplay';
+import { Switch } from '../../ui/boolean-controls';
 import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
@@ -185,6 +186,75 @@ function isLocalCliMethod(method: LlmAuthMethod): boolean {
   return method === 'qoder_local_auth' || method === 'local_cli';
 }
 
+type LocalCliDetectStepStatus = 'pending' | 'running' | 'passed' | 'failed';
+
+interface LocalCliDetectStep {
+  id: string;
+  labelZh: string;
+  labelEn: string;
+  status: LocalCliDetectStepStatus;
+  detail?: string;
+}
+
+function createLocalCliDetectSteps(): LocalCliDetectStep[] {
+  return [
+    { id: 'cli', labelZh: '查找本机 qodercli', labelEn: 'Locate local qodercli', status: 'pending' },
+    { id: 'auth', labelZh: '读取登录态', labelEn: 'Read login state', status: 'pending' },
+    { id: 'models', labelZh: '校验模型目录', labelEn: 'Validate model catalog', status: 'pending' },
+    { id: 'connect', labelZh: '建立连接', labelEn: 'Create connection', status: 'pending' },
+  ];
+}
+
+function localCliDetectStatusLabel(status: LocalCliDetectStepStatus, localeZh: boolean): string {
+  if (status === 'running') return localeZh ? '检测中…' : 'Checking…';
+  if (status === 'passed') return localeZh ? '通过' : 'Passed';
+  if (status === 'failed') return localeZh ? '失败' : 'Failed';
+  return localeZh ? '等待中' : 'Pending';
+}
+
+function friendlyLocalCliError(error: string | undefined, locale: string): string {
+  const zh = locale === 'zh-CN' || locale.startsWith('zh');
+  const raw = String(error || '').trim();
+  const lower = raw.toLowerCase();
+  if (!raw) {
+    return zh ? '检测失败，请确认本机已安装并登录 Qoder CLI。' : 'Detection failed. Install and sign in to Qoder CLI first.';
+  }
+  if (
+    lower.includes('not found')
+    || lower.includes('enoent')
+    || lower.includes('command not found')
+    || raw.includes('未找到')
+    || (lower.includes('qodercli') && (lower.includes('missing') || lower.includes('install')))
+  ) {
+    if (raw.includes('登录') || lower.includes('login') || lower.includes('auth') || lower.includes('expired')) {
+      return zh
+        ? '未找到本机 Qoder 登录态，或登录已过期。请在终端重新登录 qodercli 后重试。'
+        : 'Qoder login state is missing or expired. Sign in with qodercli in a terminal, then retry.';
+    }
+    return zh
+      ? '未找到本机 Qoder CLI（qodercli）。请先安装并确保可在终端执行。'
+      : 'Local Qoder CLI (qodercli) was not found. Install it and ensure it is available in your terminal.';
+  }
+  if (
+    raw.includes('登录已过期')
+    || raw.includes('未找到本机 Qoder 登录态')
+    || lower.includes('login')
+    || lower.includes('auth')
+    || lower.includes('expired')
+    || lower.includes('unauthorized')
+  ) {
+    return zh
+      ? '未找到本机 Qoder 登录态，或登录已过期。请在终端重新登录 qodercli 后重试。'
+      : 'Qoder login state is missing or expired. Sign in with qodercli in a terminal, then retry.';
+  }
+  if (raw.includes('模型') || lower.includes('model') || lower.includes('catalog')) {
+    return zh
+      ? '模型目录不可用。请确认 qodercli 已登录且本地缓存可用后重试。'
+      : 'Model catalog is unavailable. Sign in with qodercli and retry once the local cache is ready.';
+  }
+  return friendlyTestError(raw, locale);
+}
+
 function defaultAuthMethod(channel: LlmChannelDescriptor): LlmAuthMethod {
   if (channel.authMethods?.api_key) return 'api_key';
   if (channel.authMethods?.qoder_local_auth) return 'qoder_local_auth';
@@ -336,7 +406,7 @@ function emptyForm(channels: readonly LlmChannelDescriptor[] = FALLBACK_CHANNELS
     cacheReadPrice: '',
     supportsVision: channel.capabilities?.vision ?? false,
     supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
-    supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+    supportsPromptCaching: channel.capabilities?.promptCache ?? true,
   };
 }
 
@@ -551,6 +621,9 @@ export function LlmSettingsPanel({
   const [catalogResult, setCatalogResult] = useState<LlmModelListResult>({ success: true, models: [] });
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [modelSettingsId, setModelSettingsId] = useState<string | null>(null);
+  const [localCliDetectSteps, setLocalCliDetectSteps] = useState<LocalCliDetectStep[]>([]);
+  const [highlightGroupId, setHighlightGroupId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
 
   const clearTestResult = useCallback((id: string) => {
     setTestResults((prev) => {
@@ -730,7 +803,7 @@ export function LlmSettingsPanel({
       model: channel.defaults.model,
       supportsVision: channel.capabilities?.vision ?? false,
       supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
-      supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+      supportsPromptCaching: channel.capabilities?.promptCache ?? true,
       reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
       reasoningEffortMapText: '',
       customHeadersText: '',
@@ -759,9 +832,44 @@ export function LlmSettingsPanel({
     }, 170);
   };
 
+  const clearLocalCliFlow = useCallback(() => {
+    setLocalCliDetectSteps([]);
+  }, []);
+
+  const focusConnectedGroup = useCallback((groupId: string) => {
+    setHighlightGroupId(groupId);
+    if (highlightTimerRef.current != null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightGroupId((current) => (current === groupId ? null : current));
+      highlightTimerRef.current = null;
+    }, 3200);
+
+    // 服务目录关闭有 170ms 动画，列表 DOM 要稍后才挂载；重试滚动到新建项。
+    const tryScroll = (attempt: number) => {
+      const el = document.querySelector(`[data-llm-group-id="${groupId}"]`);
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
+      if (attempt < 12) {
+        window.setTimeout(() => tryScroll(attempt + 1), 50);
+      }
+    };
+    window.requestAnimationFrame(() => tryScroll(0));
+  }, []);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current != null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+  }, []);
+
   const openAddFromTemplate = (template: LlmServiceTemplateDescriptor) => {
     setEditingId(null);
     setAddModelGroupId(null);
+    clearLocalCliFlow();
     // 保持服务目录在背景；仅打开配置 Modal，并锁定模板的渠道与鉴权。
     setFormLockSource('template');
     setShowAdvancedFields(false);
@@ -778,7 +886,7 @@ export function LlmSettingsPanel({
       name: template.title,
       supportsVision: channel.capabilities?.vision ?? false,
       supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
-      supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+      supportsPromptCaching: channel.capabilities?.promptCache ?? true,
       reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
     });
     setShowForm(true);
@@ -818,6 +926,7 @@ export function LlmSettingsPanel({
   const openEdit = (p: LlmProviderConfigView) => {
     setEditingId(p.id);
     setAddModelGroupId(null);
+    clearLocalCliFlow();
     setFormLockSource('edit');
     setShowAdvancedFields(false);
     const channel = descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
@@ -844,7 +953,7 @@ export function LlmSettingsPanel({
       cacheReadPrice: p.cacheReadPrice != null ? String(p.cacheReadPrice) : '',
       supportsVision: p.supportsVision ?? false,
       supportsReasoning: p.supportsReasoning ?? false,
-      supportsPromptCaching: p.supportsPromptCaching ?? false,
+      supportsPromptCaching: p.supportsPromptCaching ?? true,
     });
     setShowForm(true);
   };
@@ -928,7 +1037,107 @@ export function LlmSettingsPanel({
           await handleOAuthLogin({ draft });
           return;
         } else if (localCli) {
-          await clientApi.llmAddProvider({ ...draft, model: form.model });
+          // Qoder / 本机 CLI：检测 CLI + 登录态 + 模型目录后落盘，成功后直接回列表并高亮新建连接。
+          const localeZh = i18n.locale === 'zh-CN';
+          const steps = createLocalCliDetectSteps();
+          const markStep = (id: string, status: LocalCliDetectStepStatus, detail?: string) => {
+            const next = steps.map((step) => (
+              step.id === id
+                ? { ...step, status, detail: detail ?? step.detail }
+                : step
+            ));
+            steps.splice(0, steps.length, ...next);
+            setLocalCliDetectSteps([...steps]);
+          };
+
+          setLocalCliDetectSteps(steps.map((step) => ({ ...step })));
+          markStep('cli', 'running');
+          markStep('auth', 'pending');
+          markStep('models', 'pending');
+          markStep('connect', 'pending');
+
+          let catalog: Awaited<ReturnType<typeof clientApi.llmFetchModels>>;
+          try {
+            catalog = await clientApi.llmFetchModels({
+              channelId: draft.channelId,
+              wireOverride: draft.wireOverride,
+              authMethod: draft.authMethod,
+              baseUrl: draft.baseUrl,
+              apiKey: draft.apiKey,
+              customHeaders: draft.customHeaders,
+            });
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'models_list_failed';
+            markStep('cli', 'failed', message);
+            markStep('auth', 'failed');
+            markStep('models', 'failed');
+            throw new Error(message);
+          }
+
+          if (!catalog.success) {
+            const message = catalog.error || 'models_list_failed';
+            const lower = message.toLowerCase();
+            const authFailed = (
+              message.includes('登录')
+              || lower.includes('login')
+              || lower.includes('auth')
+              || lower.includes('expired')
+              || lower.includes('unauthorized')
+            );
+            const cliFailed = (
+              lower.includes('not found')
+              || lower.includes('enoent')
+              || lower.includes('qodercli')
+              || message.includes('未找到')
+              || lower.includes('install')
+            );
+            if (cliFailed && !authFailed) {
+              markStep('cli', 'failed', message);
+              markStep('auth', 'pending');
+              markStep('models', 'pending');
+            } else if (authFailed) {
+              markStep('cli', 'passed');
+              markStep('auth', 'failed', message);
+              markStep('models', 'pending');
+            } else {
+              markStep('cli', 'passed');
+              markStep('auth', 'passed');
+              markStep('models', 'failed', message);
+            }
+            throw new Error(message);
+          }
+
+          markStep('cli', 'passed');
+          markStep('auth', 'passed');
+          markStep('models', 'passed', localeZh
+            ? `已发现 ${catalog.models.length} 个模型`
+            : `Found ${catalog.models.length} models`);
+          markStep('connect', 'running');
+
+          const preferredModel = (
+            form.model
+            || catalog.models[0]?.id
+            || selectedChannel?.defaults.model
+            || 'auto'
+          );
+          const created = await clientApi.llmAddProvider({
+            ...draft,
+            model: preferredModel,
+            modelLabel: catalog.models.find((item) => item.id === preferredModel)?.label,
+          });
+          markStep('connect', 'passed');
+          await refresh();
+          const connectedGroupId = created.groupId ?? created.id;
+          setShowForm(false);
+          setEditingId(null);
+          setAddModelGroupId(null);
+          setFormLockSource('manual');
+          setShowAdvancedFields(false);
+          clearLocalCliFlow();
+          // 回到「已连接服务」列表，避免停在添加服务目录页可重复点添加
+          closeCatalog();
+          focusConnectedGroup(connectedGroupId);
+          return;
         } else {
           setPendingProviderDraft(draft);
           setCatalogTargetId(null);
@@ -940,6 +1149,7 @@ export function LlmSettingsPanel({
       setShowForm(false);
       setEditingId(null);
       setAddModelGroupId(null);
+      clearLocalCliFlow();
       await refresh();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
@@ -1040,7 +1250,11 @@ export function LlmSettingsPanel({
         await refresh();
         throw error;
       }
-      return refresh();
+      const providersAfter = await refresh();
+      // 新建渠道选完模型后，退出服务目录回到已连接列表
+      closeCatalog();
+      if (createdGroupId) focusConnectedGroup(createdGroupId);
+      return providersAfter;
     }
 
     const target = providers.find((provider) => provider.id === catalogTargetId);
@@ -1181,7 +1395,13 @@ export function LlmSettingsPanel({
       }
       setShowForm(false);
       setEditingId(null);
+      setAddModelGroupId(null);
+      setFormLockSource('manual');
+      setShowAdvancedFields(false);
       await refresh();
+      // 从服务目录进入的订阅登录成功后，回到已连接列表
+      closeCatalog();
+      focusConnectedGroup(result.provider.groupId ?? result.provider.id);
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : 'Login failed';
       setFormError(error);
@@ -1393,7 +1613,7 @@ export function LlmSettingsPanel({
           const collapsed = !expandedGroups.has(g.groupId);
           const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
           return (
-          <div key={g.groupId} className="llm-provider-group">
+          <div key={g.groupId} data-llm-group-id={g.groupId} className={`llm-provider-group${highlightGroupId === g.groupId ? ' is-highlight' : ''}`}>
             <div className="llm-group-header">
               <div className="llm-group-header-main">
               <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
@@ -1538,6 +1758,7 @@ export function LlmSettingsPanel({
             setAddModelGroupId(null);
             setFormLockSource('manual');
             setShowAdvancedFields(false);
+            clearLocalCliFlow();
           }}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
@@ -1677,10 +1898,43 @@ export function LlmSettingsPanel({
             </>
           ) : isLocalCliAuth ? (
             <>
-              <label>
-                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder="Qoder（本机 CLI）" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-              </label>
+                <div className="llm-oauth-hint llm-local-cli-hint">
+                  {i18n.locale === 'zh-CN'
+                    ? '复用本机 Qoder CLI 登录态，请求发往 Qoder 私有端点（不是 Ollama 这类纯本地模型）。'
+                    : 'Reuses your local Qoder CLI login and sends requests to Qoder private endpoint (not a fully local runtime like Ollama).'}
+                  <ul className="llm-local-cli-checklist">
+                    <li>{i18n.locale === 'zh-CN' ? '本机已安装 Qoder CLI（qodercli）' : 'Qoder CLI (qodercli) is installed'}</li>
+                    <li>{i18n.locale === 'zh-CN' ? '已在终端登录，且登录态未过期' : 'Signed in via terminal with a valid session'}</li>
+                  </ul>
+                </div>
+                <label>
+                  <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                  <input
+                    value={form.name}
+                    placeholder="Qoder（本机 CLI）"
+                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                    disabled={saving}
+                  />
+                </label>
+                {localCliDetectSteps.length > 0 ? (
+                  <ol className="llm-local-cli-steps" aria-live="polite">
+                    {localCliDetectSteps.map((step) => (
+                      <li key={step.id} className={`llm-local-cli-step is-${step.status}`}>
+                        <div className="llm-local-cli-step-main">
+                          <span className="llm-local-cli-step-label">
+                            {i18n.locale === 'zh-CN' ? step.labelZh : step.labelEn}
+                          </span>
+                          <span className="llm-local-cli-step-status">
+                            {localCliDetectStatusLabel(step.status, i18n.locale === 'zh-CN')}
+                          </span>
+                        </div>
+                        {step.detail ? (
+                          <p className="llm-local-cli-step-detail">{friendlyLocalCliError(step.detail, i18n.locale)}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
             </>
           ) : (
             <>
@@ -1800,27 +2054,27 @@ export function LlmSettingsPanel({
             </div>
           </div>
 
-          <label className="llm-vision-toggle">
-            <input
-              type="checkbox"
-              checked={form.supportsVision}
-              onChange={(e) => setForm((prev) => ({ ...prev, supportsVision: e.target.checked }))}
-            />
+          <div className="llm-vision-toggle">
             <span>{i18n.locale === 'zh-CN' ? '支持多模态（图像输入）' : 'Multimodal (image input) support'}</span>
-          </label>
-
-          <label className="llm-vision-toggle">
-            <input
-              type="checkbox"
-              checked={form.supportsReasoning}
-              onChange={(e) => setForm((prev) => ({
-                ...prev,
-                supportsReasoning: e.target.checked,
-                reasoningEffortMapText: e.target.checked ? prev.reasoningEffortMapText : '',
-              }))}
+            <Switch
+              checked={form.supportsVision}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, supportsVision: checked }))}
+              aria-label={i18n.locale === 'zh-CN' ? '支持多模态（图像输入）' : 'Multimodal (image input) support'}
             />
+          </div>
+
+          <div className="llm-vision-toggle">
             <span>{i18n.locale === 'zh-CN' ? '支持原生推理参数（reasoning/thinking）' : 'Native reasoning/thinking parameters'}</span>
-          </label>
+            <Switch
+              checked={form.supportsReasoning}
+              onCheckedChange={(checked) => setForm((prev) => ({
+                ...prev,
+                supportsReasoning: checked,
+                reasoningEffortMapText: checked ? prev.reasoningEffortMapText : '',
+              }))}
+              aria-label={i18n.locale === 'zh-CN' ? '支持原生推理参数' : 'Native reasoning parameters'}
+            />
+          </div>
 
           {form.supportsReasoning ? (
             <>
@@ -1851,14 +2105,14 @@ export function LlmSettingsPanel({
             </>
           ) : null}
 
-          <label className="llm-vision-toggle">
-            <input
-              type="checkbox"
-              checked={form.supportsPromptCaching}
-              onChange={(e) => setForm((prev) => ({ ...prev, supportsPromptCaching: e.target.checked }))}
-            />
+          <div className="llm-vision-toggle">
             <span>{i18n.locale === 'zh-CN' ? '启用 Prompt 缓存（仅当网关真正复用缓存时开启，否则纯增成本）' : 'Enable prompt caching (only if the gateway actually reuses cache; otherwise pure cost)'}</span>
-          </label>
+            <Switch
+              checked={form.supportsPromptCaching}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, supportsPromptCaching: checked }))}
+              aria-label={i18n.locale === 'zh-CN' ? '启用 Prompt 缓存' : 'Enable prompt caching'}
+            />
+          </div>
 
           <label>
             <span>{i18n.locale === 'zh-CN' ? '自定义 Header' : 'Custom Headers'}</span>
@@ -1879,7 +2133,7 @@ export function LlmSettingsPanel({
           </>
           ) : null}
 
-          {formError ? <p className="llm-form-error">{friendlyTestError(formError, i18n.locale)}</p> : null}
+          {formError ? <p className="llm-form-error">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
             </div>
             <div className="llm-modal-footer">
             <button type="button" className="llm-modal-cancel" onClick={requestClose}>
@@ -1898,12 +2152,16 @@ export function LlmSettingsPanel({
               disabled={!canSubmit}
             >
               {saving || oauthBusyId
-                ? '...'
-                : (isOAuthMethod(form.authMethod) && !editingId
+                ? (isLocalCliAuth
+                    ? (i18n.locale === 'zh-CN' ? '检测中…' : 'Detecting…')
+                    : '...')
+                : (isLocalCliAuth && !editingId
+                    ? (i18n.locale === 'zh-CN' ? '检测并连接' : 'Detect & connect')
+                    : (isOAuthMethod(form.authMethod) && !editingId
                     ? subscriptionLoginLabel(form.authMethod, i18n.locale === 'zh-CN')
                     : (!editingId && !isAddModel && form.authMethod === 'api_key'
                       ? (i18n.locale === 'zh-CN' ? '下一步：选择模型' : 'Next: choose models')
-                      : (i18n.locale === 'zh-CN' ? '保存' : 'Save')))}
+                      : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))))}
             </button>
             </div>
           </>

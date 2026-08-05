@@ -1324,6 +1324,6 @@ export function resolveChannel(config = {}) {
     reasoningEffortLevels: capabilities.reasoning?.effortLevels || undefined,
     reasoningDefaultEffort: capabilities.reasoning?.defaultEffort || undefined,
     supportsReasoning: Boolean(capabilities.reasoning?.supported),
-    supportsPromptCaching: Boolean(capabilities.promptCache),
+    supportsPromptCaching: capabilities.promptCache !== false,
   };
 }

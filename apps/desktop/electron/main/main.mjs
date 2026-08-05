@@ -2746,7 +2746,7 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
             tools,
             effort: conv.effort || 'default',
             supportsReasoning: Boolean(provider.supportsReasoning),
-            promptCaching: Boolean(provider.supportsPromptCaching),
+            promptCaching: provider.supportsPromptCaching !== false,
             maxOutputTokens: provider.maxOutputTokens || 0,
           };
         }
@@ -2959,7 +2959,7 @@ async function handleChatContextRestored(
           tools,
           effort: conv.effort || 'default',
           supportsReasoning: Boolean(provider.supportsReasoning),
-          promptCaching: Boolean(provider.supportsPromptCaching),
+          promptCaching: provider.supportsPromptCaching !== false,
           maxOutputTokens: provider.maxOutputTokens || 0,
         }
       : {

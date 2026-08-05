@@ -58,7 +58,7 @@ export function ConfiguredModelRow({
   const capabilities = [
     { key: 'vision', label: zh ? '视觉' : 'Vision', value: model.supportsVision },
     { key: 'reasoning', label: zh ? '推理' : 'Reasoning', value: model.supportsReasoning },
-    { key: 'prompt-cache', label: zh ? '提示缓存' : 'Prompt cache', value: model.supportsPromptCaching },
+    { key: 'prompt-cache', label: zh ? '提示缓存' : 'Prompt cache', value: model.supportsPromptCaching !== false },
   ];
 
   return (

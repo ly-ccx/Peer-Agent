@@ -82,18 +82,28 @@
   border: 1px solid var(--graphite-hairline);
   border-radius: 5px;
   background: var(--control-fill);
-  color: var(--paper-sheet);
+  /* Tick color is white on azure when checked — do not use paper-sheet (white on light fill). */
+  color: #fff;
   transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
 }
 
-.peer-checkbox-input:hover:not(:disabled) + .peer-checkbox-box {
+.peer-checkbox-input:hover:not(:disabled):not(:checked) + .peer-checkbox-box {
   border-color: var(--graphite-fade);
   background: var(--control-fill-hover);
 }
 
 .peer-checkbox-input:checked + .peer-checkbox-box {
-  border-color: var(--state-active-on);
-  background: var(--state-active-on);
+  /* Brand fill + white check works in both light and dark themes. */
+  border-color: var(--azure-seal);
+  background: var(--azure-seal);
+  color: #fff;
+}
+
+/* Keep the selected surface when hovering a checked box; hover must not paint over it. */
+.peer-checkbox-input:checked:hover:not(:disabled) + .peer-checkbox-box {
+  border-color: var(--azure-seal);
+  background: var(--azure-seal);
+  color: #fff;
 }
 
 .peer-checkbox-box svg {
@@ -112,6 +122,7 @@
 .peer-checkbox-input:checked + .peer-checkbox-box svg {
   opacity: 1;
   transform: scale(1);
+  stroke: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {

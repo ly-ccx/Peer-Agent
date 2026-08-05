@@ -70,7 +70,8 @@ export function ModelSettingsDialog({
     cacheReadPrice: model.cacheReadPrice != null ? String(model.cacheReadPrice) : '',
     supportsVision: capabilityState(model.supportsVision),
     supportsReasoning: capabilityState(model.supportsReasoning),
-    supportsPromptCaching: capabilityState(model.supportsPromptCaching),
+    // Unknown prompt-cache support defaults to enabled.
+    supportsPromptCaching: capabilityState(model.supportsPromptCaching === undefined ? true : model.supportsPromptCaching),
     reasoningParamStyle: model.reasoningParamStyle ?? '',
     reasoningEffortMapText: formatReasoningEffortMap(model.reasoningEffortMap),
     modelOptionValues: resolveLlmModelOptionValues(model.modelOptions, model.modelOptionValues),

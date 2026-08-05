@@ -35,7 +35,7 @@ export async function agentLoopAnthropic({
   signal,
   effort,
   supportsReasoning = false,
-  supportsPromptCaching = false,
+  supportsPromptCaching = true,
   contextWindow,
   maxOutputTokens,
   conversationId,
