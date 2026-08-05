@@ -1776,7 +1776,7 @@
 
 .llm-catalog-skeleton {
   display: grid;
-  grid-template-columns: 18px minmax(100px, 1fr) 58px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   min-height: 58px;
@@ -1794,9 +1794,20 @@
   animation: llm-catalog-skeleton-shimmer 1.3s ease-in-out infinite;
 }
 
-.llm-catalog-skeleton span:first-child {
+.llm-catalog-skeleton span:nth-child(1) {
   width: 16px;
   height: 16px;
+}
+
+.llm-catalog-skeleton span:nth-child(2) {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.llm-catalog-skeleton span:nth-child(3) {
+  width: min(100%, 180px);
+  height: 28px;
 }
 
 .llm-catalog-skeleton span:last-child {
@@ -1883,7 +1894,7 @@
 
 .llm-catalog-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3);
@@ -2186,11 +2197,11 @@
   }
 
   .llm-catalog-item {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto auto minmax(0, 1fr);
   }
 
   .llm-catalog-status {
-    grid-column: 2;
+    grid-column: 3;
   }
 
   .llm-model-settings-body {

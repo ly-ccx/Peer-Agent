@@ -242,6 +242,7 @@ export function ModelCatalogDialog({
                       <span />
                       <span />
                       <span />
+                      <span />
                     </div>
                   ))}
                 </div>
