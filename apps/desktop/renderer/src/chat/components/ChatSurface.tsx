@@ -502,6 +502,7 @@ export function ChatSurface({
   >;
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  // 弱提示：非 vision 模型剥离本轮图片等（chat:stream:notice），不阻断发送。
   // 草稿态首条消息：create 完成后等会话 ready 再走 submitMessage，避免与加载竞态。
   const pendingFirstSendRef = useRef<{
     text: string;
@@ -533,6 +534,19 @@ export function ChatSurface({
     }, 3000);
     return () => window.clearTimeout(timeoutId);
   }, [providerRecoveryNotice]);
+
+  // 非 vision 模型剥离本轮图片等弱提示：不阻断发送，只在附件错误位短暂展示。
+  useEffect(() => {
+    if (typeof clientApi.onChatStreamNotice !== 'function') return undefined;
+    return clientApi.onChatStreamNotice((payload) => {
+      if (!payload || payload.code !== 'vision_images_stripped') return;
+      const hint = i18n.t('settings.fallbackVision.strippedHint');
+      setAttachmentError(hint);
+      window.setTimeout(() => {
+        setAttachmentError((current) => (current === hint ? null : current));
+      }, 6000);
+    });
+  }, [i18n]);
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。

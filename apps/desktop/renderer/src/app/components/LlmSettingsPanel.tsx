@@ -11,8 +11,10 @@ import type {
   LlmReasoningParamStyle,
   LlmWireProtocol,
 } from '@peer-agent/protocol';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { getProviderDisplayName } from '../../chat/state/providerDisplay';
+import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
 import { LlmBrandIcon } from './LlmBrandIcon';
@@ -513,6 +515,8 @@ export function LlmSettingsPanel({
 }) {
   const confirm = useConfirm();
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  const [fallbackVisionProviderId, setFallbackVisionProviderId] = useState<string>('');
+  const [fallbackVisionSaving, setFallbackVisionSaving] = useState(false);
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -576,6 +580,76 @@ export function LlmSettingsPanel({
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const settings = (clientApi.initialSettings || {}) as Record<string, unknown>;
+    const raw = settings.fallbackVision;
+    if (typeof raw === 'string' && raw.trim()) {
+      setFallbackVisionProviderId(raw.trim());
+      return;
+    }
+    if (raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string') {
+      setFallbackVisionProviderId(String((raw as { providerId: string }).providerId).trim());
+    }
+  }, []);
+
+  // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
+  const fallbackVisionMenuGroups: readonly CascadingMenuGroup[] = useMemo(() => {
+    const isZh = i18n.locale === 'zh-CN';
+    // CascadingMenu 触发器展示「分组 · 模型」；「不使用」拆成两级文案，避免重复。
+    const noneGroupLabel = isZh ? '不使用' : 'None';
+    const noneItemLabel = isZh ? '仅剥离图片' : 'Strip images only';
+    const order: string[] = [];
+    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
+    for (const prov of providers) {
+      if (!prov.supportsVision) continue;
+      const key = prov.groupId || prov.id;
+      let bucket = byGroup.get(key);
+      if (!bucket) {
+        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
+        byGroup.set(key, bucket);
+        order.push(key);
+      }
+      bucket.items.push({
+        id: prov.id,
+        label: prov.modelLabel || prov.model,
+        disabled: !prov.apiKeyConfigured,
+      });
+    }
+    const providerGroups = order.map((key) => {
+      const bucket = byGroup.get(key)!;
+      return {
+        id: key,
+        label: bucket.label,
+        items: bucket.items,
+        disabled: bucket.items.every((it) => it.disabled),
+      };
+    });
+    return [
+      {
+        id: '__none__',
+        label: noneGroupLabel,
+        items: [{ id: '__none__', label: noneItemLabel }],
+      },
+      ...providerGroups,
+    ];
+  }, [providers, i18n]);
+
+  const handleFallbackVisionChange = async (nextId: string) => {
+    const normalized = nextId === '__none__' ? '' : nextId;
+    const previous = fallbackVisionProviderId;
+    setFallbackVisionProviderId(normalized);
+    setFallbackVisionSaving(true);
+    try {
+      await clientApi.updateSettings({
+        fallbackVision: normalized ? { providerId: normalized } : null,
+      });
+    } catch {
+      setFallbackVisionProviderId(previous);
+    } finally {
+      setFallbackVisionSaving(false);
+    }
+  };
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {
     setOauthPending(pending);
@@ -1186,6 +1260,25 @@ export function LlmSettingsPanel({
           ＋ {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
         </button>
       </div>
+
+      <section className="llm-fallback-vision" aria-label={i18n.t('settings.fallbackVision')}>
+        <div className="llm-fallback-vision-copy">
+          <strong>{i18n.t('settings.fallbackVision')}</strong>
+          <p>{i18n.t('settings.fallbackVision.description')}</p>
+        </div>
+        <div className="llm-fallback-vision-select">
+          <CascadingMenu
+            className="llm-fallback-vision-menu"
+            value={fallbackVisionProviderId || '__none__'}
+            groups={fallbackVisionMenuGroups}
+            onChange={(nextId) => { void handleFallbackVisionChange(nextId); }}
+            disabled={fallbackVisionSaving}
+            ariaLabel={i18n.t('settings.fallbackVision')}
+            placeholder={i18n.t('settings.fallbackVision.none')}
+            menuPlacement="down"
+          />
+        </div>
+      </section>
 
             {catalogOpen ? (
 

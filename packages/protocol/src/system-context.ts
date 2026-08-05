@@ -6,6 +6,15 @@ export type AttachmentContextTransport =
   | 'metadata_only'
   | string;
 
+/**
+ * 全局「兜底多模态模型」配置。
+ * 主模型不支持 vision 时，可先用该模型识别本轮新图，再静默注入文本给主模型。
+ * providerId 指向 listProviders() 的复合 id；null/缺省表示未配置。
+ */
+export interface FallbackVisionModelSettings {
+  readonly providerId?: string | null;
+}
+
 export interface AttachmentContextItem {
   readonly id?: string;
   readonly name: string;

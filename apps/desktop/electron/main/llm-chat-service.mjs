@@ -37,6 +37,11 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
+import {
+  processTrailingUserImages,
+  readFallbackVisionProviderId,
+  recognizeImagesWithFallbackProvider,
+} from './chat-runtime/fallback-vision.mjs';
 import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
@@ -676,6 +681,8 @@ export function createLlmChatService({
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
   runtimeSessionAdapter = null,
+  // 读取全局 settings.json（含 fallbackVision 兜底多模态模型配置）。
+  getSettings = null,
 }) {
   permissionGate.setAccessLevel(preferredAccessLevel);
   const runtimeSessions = runtimeSessionAdapter ?? createDesktopRuntimeSessionAdapter();
@@ -771,8 +778,108 @@ export function createLlmChatService({
     return orderProviderCandidates(providers, preferredProviderId);
   }
 
+  /**
+   * 主模型不支持 vision 时，仅对本轮末尾 user 消息中的新图做：
+   * - 已配置兜底多模态模型：先识别，再静默注入文本
+   * - 未配置：剥离 image_url，并弱提示
+   * 历史图不触发。会话落盘仍保留原始附件，仅改发送给 provider 的 messages。
+   */
+  async function prepareMessagesForProviderVision(messagesInput, preferredProviderId, webContents, streamId) {
+    const source = Array.isArray(messagesInput) ? messagesInput : [];
+    const candidates = getProviderCandidates(preferredProviderId);
+    const primary = candidates[0] || null;
+    const supportsVision = Boolean(primary?.supportsVision);
+    const probe = processTrailingUserImages(source, { supportsVision });
+    if (supportsVision || !probe.imageUrls.length) {
+      return source;
+    }
+
+    const settings = typeof getSettings === 'function' ? getSettings() : null;
+    const fallbackId = readFallbackVisionProviderId(settings);
+    const allProviders = typeof llmConfigStore?.listProviders === 'function'
+      ? llmConfigStore.listProviders()
+      : candidates;
+    const fallbackProvider = fallbackId
+      ? allProviders.find((item) => item.id === fallbackId) || null
+      : null;
+
+    let imageDescriptions = null;
+    let credentialResolved = false;
+    let recognitionStatus = fallbackProvider ? 'not_started' : 'provider_not_found';
+    let recognitionError = null;
+    let recognitionWire = null;
+    if (fallbackProvider?.supportsVision) {
+      try {
+        recognitionStatus = 'started';
+        const recognition = await recognizeImagesWithFallbackProvider({
+          provider: fallbackProvider,
+          imageUrls: probe.imageUrls,
+          userText: probe.trailingUserText || '',
+          getCredential: async (id) => {
+            const target = allProviders.find((item) => item.id === id) || fallbackProvider;
+            const credential = await resolveProviderCredential({ provider: target, llmConfigStore });
+            credentialResolved = true;
+            return credential;
+          },
+          resolveChannel,
+          fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
+            webContents,
+            streamId,
+            provider: fallbackProvider.id,
+            model: fallbackProvider.model,
+          }),
+        });
+        recognitionWire = recognition?.wire || null;
+        recognitionError = recognition?.ok ? null : (recognition?.error || 'recognition_failed');
+        recognitionStatus = recognition?.ok ? 'succeeded' : 'failed';
+        if (recognition?.ok && Array.isArray(recognition.descriptions) && recognition.descriptions.length) {
+          imageDescriptions = recognition.descriptions;
+        }
+      } catch (error) {
+        recognitionStatus = 'failed';
+        recognitionError = error?.code || error?.message || 'recognition_failed';
+      }
+    } else if (fallbackProvider) {
+      recognitionStatus = 'provider_without_vision';
+    }
+
+    const processed = processTrailingUserImages(source, {
+      supportsVision: false,
+      imageDescriptions,
+    });
+    console.info('[llm-chat] fallback_vision', {
+      streamId,
+      primaryProviderId: primary?.id || null,
+      primarySupportsVision: supportsVision,
+      detectedImageCount: probe.imageUrls.length,
+      fallbackProviderId: fallbackId,
+      fallbackProviderFound: Boolean(fallbackProvider),
+      fallbackAuthMethod: fallbackProvider?.authMethod || null,
+      credentialResolved,
+      recognitionStatus,
+      recognitionWire,
+      recognitionError,
+      descriptionCount: imageDescriptions?.length || 0,
+      injected: processed.recognizedImageCount > 0,
+      strippedImageCount: processed.strippedImageCount,
+    });
+    if (processed.changed && !imageDescriptions) {
+      try {
+        webContents?.send?.('chat:stream:notice', {
+          streamId,
+          code: 'vision_images_stripped',
+          message: 'Images were omitted because the current model does not support vision. Configure a fallback vision model in Settings → Models.',
+          imageCount: processed.strippedImageCount,
+        });
+      } catch {
+        // notice is best-effort
+      }
+    }
+    return processed.messages;
+  }
+
   async function sendMessage({
-    messages,
+    messages: rawMessages,
     webContents,
     streamId,
     effort = 'default',
@@ -796,6 +903,9 @@ export function createLlmChatService({
     // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
+    // Request-scoped policy for governed background runs (for example Automation).
+    // It is copied into this turn's Tool Context and never mutates the shared chat access level.
+    permissionPolicy = null,
     // 内部旁路流（Explorer / Verifier）：不写会话正文、不进活跃流投影，避免验收 JSON 泄漏到聊天。
     ephemeral = false,
   }) {
@@ -812,6 +922,12 @@ export function createLlmChatService({
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
       return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };
     }
+    const messages = await prepareMessagesForProviderVision(
+      rawMessages,
+      effectiveModelProviderId,
+      webContents,
+      streamId,
+    );
 
     // 会话 workspace 是本轮的 origin：用户从哪里发起、有哪些知识上下文。Goal 模式下，
     // active Goal 可绑定 targetWorkspacePath；此时工具 cwd / 项目指令切换到 target，
@@ -924,6 +1040,7 @@ export function createLlmChatService({
       toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
       toolContext.readableRoots = goalWorkspaceBinding?.readableRoots ?? null;
       toolContext.writableRoots = goalWorkspaceBinding?.writableRoots ?? null;
+      toolContext.permissionPolicy = permissionPolicy;
       // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
       // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
       toolContext.onToolCall = agentProgress?.onToolCall ?? null;
