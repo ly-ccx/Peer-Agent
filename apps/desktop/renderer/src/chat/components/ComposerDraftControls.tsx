@@ -1,5 +1,5 @@
 import type React from 'react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
 import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
@@ -52,12 +52,15 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onAddFiles,
   onAttachSessionReference,
   onPrimaryAction,
+  homeModelSlot = null,
+  variant = 'conversation',
 }: {
   readonly conversationId: string | null;
   readonly hasProvider: boolean;
   readonly isBusy: boolean;
   readonly isStreaming: boolean;
   readonly isZh: boolean;
+  readonly variant?: 'conversation' | 'home';
   readonly attachments: readonly ChatAttachment[];
   readonly attachmentError: string | null;
   readonly messageQueue: readonly QueuedMessage[];
@@ -68,6 +71,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
+  readonly homeModelSlot?: React.ReactNode;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -92,7 +96,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
 
   return (
     <form
-      className="chat-composer"
+      className={`chat-composer ${variant === 'home' ? 'chat-composer--home' : 'chat-composer--compact'}`}
       onSubmit={(event) => {
         event.preventDefault();
         onPrimaryAction();
@@ -108,6 +112,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         isZh={isZh}
         hasAttachments={attachments.length > 0}
         messageQueue={messageQueue}
+        variant={variant}
+        homeModelSlot={homeModelSlot}
         fileInputRef={fileInputRef}
         onPaste={onPaste}
         onAddFiles={onAddFiles}
@@ -130,6 +136,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   isZh,
   hasAttachments,
   messageQueue,
+  variant,
+  homeModelSlot,
   fileInputRef,
   onPaste,
   onAddFiles,
@@ -143,6 +151,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly isZh: boolean;
   readonly hasAttachments: boolean;
   readonly messageQueue: readonly QueuedMessage[];
+  readonly variant: 'conversation' | 'home';
+  readonly homeModelSlot: React.ReactNode;
   readonly fileInputRef: React.RefObject<HTMLInputElement | null>;
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
@@ -172,6 +182,19 @@ const ComposerDraftField = memo(function ComposerDraftField({
   }, [draft, showSlashCommands]);
   const showSessionMentions = Boolean(atQuery) && !isBusy;
   const hasComposerContent = draft.trim().length > 0 || hasAttachments;
+
+  // Keep textarea height in sync for programmatic draft prefill (e.g. automation create template).
+  // 会话态默认单行（~28px），随输入扩展；首页仍给更宽松的起步高度。
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const minPx = variant === 'home' ? 72 : 28;
+    const maxPx = variant === 'home' ? 160 : 160;
+    const next = Math.min(Math.max(el.scrollHeight, minPx), maxPx);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxPx ? 'auto' : 'hidden';
+  }, [draft, variant]);
 
   // 只在 slash 候选列表变化时重置高亮，避免每个字符 setState 二次渲染。
   useEffect(() => {
@@ -383,7 +406,9 @@ const ComposerDraftField = memo(function ComposerDraftField({
         placeholder={hasProvider
           ? isBusy
             ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
-            : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
+            : variant === 'home'
+              ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
+              : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
           : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
         rows={1}
         onPaste={onPaste}
@@ -465,18 +490,24 @@ const ComposerDraftField = memo(function ComposerDraftField({
           event.currentTarget.value = '';
         }}
       />
-      <button
-        type="button"
-        className="composer-attach-btn"
-        disabled={!hasProvider || isStreaming}
-        title={isZh ? '添加附件' : 'Attach file'}
-        aria-label={isZh ? '添加附件' : 'Attach file'}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-        </svg>
-      </button>
+      <div className="composer-home-action-row">
+        <div className="composer-home-action-left">
+          <button
+            type="button"
+            className="composer-attach-btn"
+            disabled={!hasProvider || isStreaming}
+            title={isZh ? '添加附件' : 'Attach file'}
+            aria-label={isZh ? '添加附件' : 'Attach file'}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          {homeModelSlot ? (
+            <div className="composer-home-model-slot">{homeModelSlot}</div>
+          ) : null}
+        </div>
       <button
         type="submit"
         disabled={!hasProvider || (!isStreaming && !hasComposerContent)}
@@ -494,6 +525,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
           </svg>
         )}
       </button>
+      </div>
     </>
   );
 });

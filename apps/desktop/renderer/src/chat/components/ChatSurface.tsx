@@ -143,6 +143,7 @@ import {
   resolveThreadFollowAfterScroll,
 } from '../state/threadScrollPolicy';
 import {
+  conversationHomeGreeting,
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
@@ -2138,6 +2139,50 @@ export function ChatSurface({
     });
   }, [conversationId, hasProvider, onOpenSettings]);
 
+  const showEmptyHome = shouldShowConversationEmptyHome({
+    loadStatus,
+    messageCount: messages.length,
+  });
+  const emptyHomeGreeting = conversationHomeGreeting(new Date().getHours(), isZh, workspaceLabel);
+  // 框内：模型 + 思考；框下右侧：上下文统计（首页与普通会话统一）。
+  const homeComposerModelControls = (
+    <ComposerTokenUsageDisplay
+      conversationId={conversationId}
+      providers={providers}
+      tokenUsage={tokenUsage}
+      activeUsage={activeUsage}
+      contextWindow={contextAccountingWindow}
+      isStreaming={isStreaming}
+      isZh={isZh}
+      effort={effort}
+      effortLevels={composerEffortLevels}
+      onEffortChange={changeEffort}
+      modelOptions={modelOptions}
+      canSwitchModel={canSwitchModel}
+      onModelChange={handleModelChange}
+      selectedModelProviderId={modelProviderId}
+      showContextUsage={false}
+    />
+  );
+  const homeComposerContextControls = (
+    <ComposerTokenUsageDisplay
+      conversationId={conversationId}
+      providers={providers}
+      tokenUsage={tokenUsage}
+      activeUsage={activeUsage}
+      contextWindow={contextAccountingWindow}
+      isStreaming={isStreaming}
+      isZh={isZh}
+      effort={effort}
+      effortLevels={composerEffortLevels}
+      onEffortChange={changeEffort}
+      modelOptions={modelOptions}
+      canSwitchModel={false}
+      selectedModelProviderId={modelProviderId}
+      showModelControls={false}
+    />
+  );
+
   // 草稿态（conversationId === null）也渲染完整聊天面：可输入，首条发送时再落库。
   return (
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
@@ -2145,7 +2190,7 @@ export function ChatSurface({
     <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
     <div
-      className="chat-surface"
+      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}`}
       onDragEnter={handleSurfaceDragEnter}
       onDragOver={handleSurfaceDragOver}
       onDragLeave={handleSurfaceDragLeave}
@@ -2205,22 +2250,15 @@ export function ChatSurface({
             <div className="chat-thread-loading-mark" aria-hidden="true" />
             <p>{isZh ? '正在加载会话…' : 'Loading conversation…'}</p>
           </div>
-        ) : shouldShowConversationEmptyHome({ loadStatus, messageCount: messages.length }) ? (
-          <div className="chat-empty-state">
-            <div className="chat-empty-mark" aria-hidden="true">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 9h8" />
-                <path d="M8 13h5" />
-                <path d="M5 5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
-              </svg>
+        ) : showEmptyHome ? (
+          <div className="chat-empty-state chat-empty-home">
+            <div className="chat-empty-home-heading">
+              <div className="chat-empty-mark" aria-hidden="true">
+                <img className="chat-empty-logo light" src="./logo-light.png" alt="" />
+                <img className="chat-empty-logo dark" src="./logo-dark.png" alt="" />
+              </div>
+              <h2>{hasProvider ? emptyHomeGreeting : (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')}</h2>
             </div>
-            <h2>
-              {!hasProvider
-                ? (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')
-                : workspaceLabel
-                  ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
-                  : (isZh ? '接下来做什么？' : 'What should we work on?')}
-            </h2>
             {!hasProvider ? (
               <>
                 <p>
@@ -2236,11 +2274,9 @@ export function ChatSurface({
                   </button>
                 </div>
               </>
-            ) : (
-              <p>{isZh ? '描述任务，或从下面选一个开始' : 'Describe a task, or pick a starting point below'}</p>
-            )}
+            ) : null}
             {hasProvider ? (
-              <div className="chat-empty-cards">
+              <div className="chat-empty-cards" aria-label={isZh ? '任务快捷入口' : 'Task starters'}>
                 {emptyStarterCards.map((card) => (
                   <button
                     key={card.id}
@@ -2409,7 +2445,7 @@ export function ChatSurface({
         </button>
       ) : null}
 
-      <div className="chat-composer-wrap">
+      <div className={`chat-composer-wrap${showEmptyHome ? ' chat-composer-wrap--empty-home' : ''}`}>
         <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
@@ -2441,6 +2477,7 @@ export function ChatSurface({
         ) : null}
         <ComposerDraftControls
           conversationId={conversationId}
+          variant={showEmptyHome ? 'home' : 'conversation'}
           hasProvider={hasProvider}
           isBusy={isBusy}
           isStreaming={isStreaming}
@@ -2455,6 +2492,7 @@ export function ChatSurface({
           onAddFiles={addFiles}
           onAttachSessionReference={attachSessionReference}
           onPrimaryAction={stableHandlePrimaryAction}
+          homeModelSlot={homeComposerModelControls}
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
@@ -2477,22 +2515,7 @@ export function ChatSurface({
               menuPlacement="up"
             />
           </div>
-          <ComposerTokenUsageDisplay
-            conversationId={conversationId}
-            providers={providers}
-            tokenUsage={tokenUsage}
-            activeUsage={activeUsage}
-            contextWindow={contextAccountingWindow}
-            isStreaming={isStreaming}
-            isZh={isZh}
-            effort={effort}
-            effortLevels={composerEffortLevels}
-            onEffortChange={changeEffort}
-            modelOptions={modelOptions}
-            canSwitchModel={canSwitchModel}
-            onModelChange={handleModelChange}
-            selectedModelProviderId={modelProviderId}
-          />
+          {homeComposerContextControls}
         </div>
       </div>
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (

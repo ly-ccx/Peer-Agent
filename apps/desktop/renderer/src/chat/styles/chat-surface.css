@@ -801,6 +801,11 @@
 
 /* ── Composer ── */
 .chat-composer-wrap {
+  /* 变量挂在输入框容器：框内模型/思考与框下工具栏都能继承，并跟随外观 fontScale。 */
+  --composer-addon-height: 1.75rem;
+  --composer-addon-font-size: var(--ui-font-control, 0.8125rem);
+  --composer-addon-color: var(--graphite-fade, var(--graphite-mute));
+  --composer-addon-hover-bg: var(--control-composer);
   padding: var(--space-2) var(--space-6) var(--space-5);
   background: var(--chrome-canvas);
 }
@@ -823,6 +828,11 @@
   flex-wrap: wrap;
 }
 
+/* 框下右侧上下文统计贴右；模型/思考已进输入框。 */
+.chat-composer-toolbar > .token-usage-wrap {
+  margin-left: auto;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -839,14 +849,6 @@
   min-width: 0;
 }
 
-.chat-composer-toolbar {
-  --composer-addon-height: 24px;
-  --composer-addon-font-size: 0.68rem;
-  /* 深色下 mute 过暗；工具栏默认用次级文字色，hover 仍升到 soft。 */
-  --composer-addon-color: var(--graphite-fade, var(--graphite-mute));
-  --composer-addon-hover-bg: var(--control-composer);
-}
-
 .composer-dropdown .pa-dropdown-trigger,
 .token-usage-model {
   height: var(--composer-addon-height);
@@ -857,7 +859,7 @@
   color: var(--composer-addon-color);
   font-size: var(--composer-addon-font-size);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.2;
   box-shadow: none;
 }
 
@@ -897,10 +899,10 @@
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
    故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
 .pa-dropdown-menu.composer-dropdown {
-  /* 菜单经 portal 投到 body 后脱离 .chat-composer-toolbar,无法继承其上定义的
-     --composer-addon-font-size,导致菜单项 font-size 回退到全局 .pa-dropdown-item
-     (0.82rem) 偏大。此处在菜单根上重新声明该变量,使菜单项字号恢复设计值,与触发器一致。 */
-  --composer-addon-font-size: 0.68rem;
+  /* 菜单经 portal 投到 body 后脱离 .chat-composer-wrap,无法继承其上定义的
+     --composer-addon-font-size,导致菜单项 font-size 回退到全局 .pa-dropdown-item。
+     此处在菜单根上重新声明该变量,使菜单项字号与触发器一致并跟随外观 fontScale。 */
+  --composer-addon-font-size: var(--ui-font-control, 0.8125rem);
   padding: 4px;
   /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。
      覆盖全局 fixed 菜单的 width:var(--pa-dropdown-menu-width)，改回内容自适应。 */
@@ -968,7 +970,8 @@
 .token-usage {
   font-size: var(--composer-addon-font-size);
   color: var(--composer-addon-color);
-  font-family: var(--font-mono);
+  /* 标签（模型名/思考）用 UI 字体；数字与用量环单独走 mono。 */
+  font-family: var(--font-sans);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -998,12 +1001,14 @@
 }
 .ctx-pct {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--composer-addon-color);
   line-height: 1;
 }
 .token-usage-detail {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   color: var(--graphite-fade);
 }
 .token-usage-model {
@@ -1014,6 +1019,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-sans);
 }
 
 .reasoning-effort-control {
@@ -1030,7 +1036,9 @@
   background: transparent;
   color: var(--composer-addon-color);
   font: inherit;
+  font-family: var(--font-sans);
   font-size: var(--composer-addon-font-size);
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1162,6 +1170,7 @@
 }
 .token-usage-cost {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   color: var(--azure-seal);
   font-weight: 500;
 }
@@ -3157,9 +3166,10 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--composer-addon-color);
+  font-family: var(--font-sans);
   font-size: var(--composer-addon-font-size);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.2;
   box-shadow: none;
   padding: 0 8px;
   cursor: pointer;
@@ -3624,5 +3634,360 @@
 @media (prefers-reduced-motion: reduce) {
   .automation-proposal-card {
     animation: none;
+  }
+}
+
+/* ── Empty conversation home ──
+   The home changes only presentation. Draft, attachment, model, access and send state
+   continue to come from the regular composer and its existing stores. */
+.chat-surface--empty-home .chat-thread {
+  flex: 0 1 45%;
+  min-height: 190px;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding: clamp(48px, 9vh, 108px) clamp(24px, 6vw, 72px) 28px;
+}
+
+.chat-empty-home {
+  width: min(100%, var(--chat-content-max));
+  min-height: 0;
+  margin: 0 auto;
+  padding: 0;
+  align-items: flex-start;
+  justify-content: flex-end;
+  text-align: left;
+}
+
+.chat-empty-home-heading {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.2vw, 24px);
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-empty-home .chat-empty-mark {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.chat-empty-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.chat-empty-logo.dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .chat-empty-logo.light {
+  display: none;
+}
+
+:root[data-theme="dark"] .chat-empty-logo.dark {
+  display: block;
+}
+
+.chat-empty-home h2 {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--ink-strong, var(--ink-base));
+  /* 收紧欢迎语字号，贴近正文节奏，避免首页显得过大。 */
+  font-size: clamp(1.35rem, 2.1vw, 1.75rem);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-empty-home > p,
+.chat-empty-home .chat-empty-cards {
+  display: none;
+}
+
+.chat-empty-home .chat-empty-actions {
+  margin-top: 24px;
+  padding-left: 56px;
+}
+
+.chat-composer-wrap--empty-home {
+  flex: 1 1 55%;
+  min-height: 250px;
+  padding: 0 clamp(24px, 6vw, 72px) clamp(28px, 6vh, 64px);
+  background: var(--chrome-canvas);
+}
+
+.chat-composer-wrap--empty-home > :not(.chat-composer):not(.chat-composer-toolbar) {
+  max-width: var(--chat-content-max);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.chat-composer--home,
+.chat-composer--compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* 显式两行：文本在上，操作栏在下。必须覆盖普通会话里 textarea 的 flex order:2。 */
+  grid-template-areas:
+    "home-text"
+    "home-actions";
+  gap: 10px;
+  max-width: var(--chat-content-max);
+  padding: 14px 16px 12px;
+  border-radius: 22px;
+  border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--ink-base) 22%);
+  background: color-mix(in srgb, var(--chrome-canvas) 92%, var(--chrome-raised) 8%);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink-base) 8%, transparent), 0 1px 4px color-mix(in srgb, var(--ink-base) 4%, transparent);
+}
+
+.chat-composer--home {
+  grid-template-rows: minmax(72px, 1fr) auto;
+  min-height: 154px;
+  padding: 18px 18px 14px;
+  border-radius: 26px;
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
+}
+
+/* 会话态：默认单行文本区，随输入扩展。 */
+.chat-composer--compact {
+  grid-template-rows: auto auto;
+  min-height: 0;
+  align-content: start;
+}
+
+/* 重置普通会话 flex 子项 order，否则 order:2 的 textarea 会掉到操作栏下面。 */
+.chat-composer--home > *,
+.chat-composer--compact > * {
+  order: 0;
+}
+
+.chat-composer--home > .attachment-strip,
+.chat-composer--home > .attachment-error,
+.chat-composer--compact > .attachment-strip,
+.chat-composer--compact > .attachment-error {
+  grid-column: 1;
+  grid-row: 1;
+  order: -1;
+}
+
+.chat-composer--home > textarea,
+.chat-composer--compact > textarea {
+  grid-area: home-text;
+  width: 100%;
+  max-height: 160px;
+  box-sizing: border-box;
+  align-self: stretch;
+  padding: 2px 6px 4px;
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.45;
+}
+
+.chat-composer--home > textarea {
+  min-height: 72px;
+  padding: 2px 6px 12px;
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.5;
+}
+
+.chat-composer--compact > textarea {
+  min-height: 28px;
+  max-height: 160px;
+}
+
+/* 操作栏必须是真实 flex 容器，否则子项会被拆散并受 order 干扰。 */
+.composer-action-row {
+  display: contents;
+}
+
+.composer-home-action-row {
+  grid-area: home-actions;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  align-self: end;
+}
+
+.composer-home-action-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-composer--home .composer-attach-btn,
+.chat-composer--home button[type="submit"],
+.chat-composer--compact .composer-attach-btn,
+.chat-composer--compact button[type="submit"] {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+
+.chat-composer--home .composer-attach-btn,
+.chat-composer--home button[type="submit"] {
+  width: 40px;
+  height: 40px;
+}
+
+.chat-composer--home button[type="submit"],
+.chat-composer--compact button[type="submit"] {
+  margin-left: auto;
+}
+
+.composer-home-model-slot {
+  min-width: 0;
+}
+
+.composer-home-model-slot .token-usage-wrap,
+.composer-home-model-slot .token-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* 框内模型/思考与输入文字同号，并跟随外观 fontScale。 */
+  font-size: var(--ui-font-body, 0.875rem);
+}
+
+/* 框内模型/思考：去描边、去背景；高度用 rem，字号跟正文。 */
+.composer-home-model-slot .pa-cascading-trigger,
+.composer-home-model-slot .pa-cascading-trigger:hover:not(:disabled),
+.composer-home-model-slot .pa-cascading-trigger.open,
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger,
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger.open,
+.composer-home-model-slot .reasoning-effort-trigger,
+.composer-home-model-slot .reasoning-effort-trigger.open {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--ink-base) 78%, transparent);
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.2;
+}
+
+.composer-home-model-slot .pa-cascading-trigger:hover:not(:disabled),
+.composer-home-model-slot .pa-cascading-trigger.open,
+.composer-home-model-slot .reasoning-effort-trigger:hover,
+.composer-home-model-slot .reasoning-effort-trigger.open {
+  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+}
+
+.composer-home-model-slot .token-usage-model {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--ui-font-body, 0.875rem);
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: var(--chat-content-max);
+  margin: 10px auto 0;
+  padding: 0 10px;
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar .token-usage-wrap {
+  margin-left: auto;
+}
+
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--ink-base) 70%, transparent);
+  font-size: var(--composer-addon-font-size);
+}
+
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open {
+  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+}
+
+@media (max-width: 820px) {
+  .chat-surface--empty-home .chat-thread {
+    flex-basis: 42%;
+    min-height: 160px;
+    padding: 36px 22px 22px;
+  }
+
+  .chat-empty-home-heading {
+    align-items: center;
+  }
+
+  .chat-empty-home h2 {
+    font-size: clamp(1.25rem, 2.8vw, 1.55rem);
+  }
+
+  .chat-composer-wrap--empty-home {
+    padding: 0 20px 28px;
+  }
+
+  .chat-composer--home {
+    min-height: 140px;
+    border-radius: 22px;
+  }
+}
+
+@media (max-width: 560px) {
+  .chat-surface--empty-home .chat-thread {
+    flex-basis: 38%;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .chat-empty-home-heading {
+    gap: 13px;
+  }
+
+  .chat-empty-home .chat-empty-mark {
+    width: 38px;
+    height: 38px;
+    margin-top: 2px;
+    border-radius: 10px;
+  }
+
+  .chat-empty-home .chat-empty-actions {
+    padding-left: 0;
+  }
+
+  .chat-composer-wrap--empty-home {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .chat-composer-wrap--empty-home .chat-composer-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

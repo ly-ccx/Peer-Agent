@@ -204,6 +204,8 @@ export function TokenUsageDisplay({
   canSwitchModel = false,
   onModelChange,
   selectedModelProviderId = null,
+  showContextUsage = true,
+  showModelControls = true,
 }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
@@ -226,6 +228,9 @@ export function TokenUsageDisplay({
   readonly onModelChange?: (providerId: string) => void;
   /** 会话级绑定的模型记录 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
   readonly selectedModelProviderId?: string | null;
+  /** 首页框内只保留模型/思考；框下右侧单独放上下文统计。 */
+  readonly showContextUsage?: boolean;
+  readonly showModelControls?: boolean;
 }) {
   // 当前展示的 provider：优先会话绑定的 modelProviderId（随会话切换模型），其次全局默认，
   // 最后取首个已配置 Key 的 provider。这样价格/上下文窗口/模型名都跟随会话选中的模型走。
@@ -431,7 +436,7 @@ export function TokenUsageDisplay({
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
-        {defaultProvider?.model ? (
+        {showModelControls && defaultProvider?.model ? (
           shouldShowModelDropdown ? (
             <CascadingMenu
               className="composer-cascading-menu composer-model-dropdown"
@@ -447,7 +452,7 @@ export function TokenUsageDisplay({
             <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
           )
         ) : null}
-        {effortLevels.length > 0 ? (
+        {showModelControls && effortLevels.length > 0 ? (
           <ReasoningEffortSlider
             effort={effort}
             effortLevels={effortLevels}
@@ -456,7 +461,7 @@ export function TokenUsageDisplay({
             onChange={onEffortChange}
           />
         ) : null}
-        {hasCtxRing ? (
+        {showContextUsage && hasCtxRing ? (
           <Tooltip lines={ctxTooltipLines} placement="top">
             <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
               <span
@@ -470,10 +475,10 @@ export function TokenUsageDisplay({
               </span>
             </span>
           </Tooltip>
-        ) : currentContextTokens != null && currentContextTokens > 0 ? (
+        ) : showContextUsage && currentContextTokens != null && currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
-        {costStr ? (
+        {showContextUsage && costStr ? (
           <span
             className="token-usage-cost"
             title={
