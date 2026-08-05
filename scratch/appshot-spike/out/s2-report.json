@@ -1,0 +1,29 @@
+{
+  "method": "screencapture -l<CGWindowID> + CGWindowListCopyWindowInfo(swift)",
+  "frontmostPid": 26383,
+  "windowListMs": 3695,
+  "windowCount": 8,
+  "frontmostWindows": [
+    {
+      "y": 112,
+      "pid": 26383,
+      "title": "",
+      "width": 723,
+      "height": 625,
+      "owner": "System Settings",
+      "x": -20,
+      "windowId": 45307
+    }
+  ],
+  "target": {
+    "y": 112,
+    "pid": 26383,
+    "title": "",
+    "width": 723,
+    "height": 625,
+    "owner": "System Settings",
+    "x": -20,
+    "windowId": 45307
+  },
+  "error": "Command failed: screencapture -x -o -l45307 scratch/appshot-spike/out/s2-frontmost-45307.png\ncould not create image from window\n"
+}

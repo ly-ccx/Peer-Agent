@@ -1,0 +1,52 @@
+{
+  "method": "osascript System Events",
+  "runs": [
+    {
+      "ms": 445.7,
+      "appName": "ChatGPT",
+      "pid": 78060,
+      "bundleId": "com.openai.codex",
+      "windowTitle": "<no-window:osascript is not allowed assistive access.>",
+      "pos": "",
+      "size": ""
+    },
+    {
+      "ms": 194.2,
+      "appName": "ChatGPT",
+      "pid": 78060,
+      "bundleId": "com.openai.codex",
+      "windowTitle": "<no-window:osascript is not allowed assistive access.>",
+      "pos": "",
+      "size": ""
+    },
+    {
+      "ms": 250.5,
+      "appName": "ChatGPT",
+      "pid": 78060,
+      "bundleId": "com.openai.codex",
+      "windowTitle": "<no-window:osascript is not allowed assistive access.>",
+      "pos": "",
+      "size": ""
+    },
+    {
+      "ms": 249.6,
+      "appName": "ChatGPT",
+      "pid": 78060,
+      "bundleId": "com.openai.codex",
+      "windowTitle": "<no-window:osascript is not allowed assistive access.>",
+      "pos": "",
+      "size": ""
+    },
+    {
+      "ms": 233.4,
+      "appName": "ChatGPT",
+      "pid": 78060,
+      "bundleId": "com.openai.codex",
+      "windowTitle": "<no-window:osascript is not allowed assistive access.>",
+      "pos": "",
+      "size": ""
+    }
+  ],
+  "medianMs": 249.6,
+  "note": "run while another app is frontmost for a meaningful sample"
+}

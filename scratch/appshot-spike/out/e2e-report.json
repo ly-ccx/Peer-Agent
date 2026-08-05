@@ -1,0 +1,38 @@
+{
+  "wallMs": 10385,
+  "logs": [
+    "appshot: captured app=ChatGPT bytes=797694 ms=10384"
+  ],
+  "result": {
+    "ok": true,
+    "payload": {
+      "appshotId": "2b3f052a-3a81-415d-879b-fecf093fec33",
+      "capturedAt": "2026-07-30T11:47:36.685Z",
+      "source": {
+        "appName": "ChatGPT",
+        "bundleId": "com.openai.codex",
+        "pid": 78060,
+        "windowId": 43373,
+        "windowTitle": "ChatGPT",
+        "bounds": {
+          "x": 417,
+          "y": 37,
+          "width": 1341,
+          "height": 949
+        }
+      },
+      "visual": {
+        "artifactRef": "local-appshot-artifact://2b3f052a-3a81-415d-879b-fecf093fec33",
+        "filePath": "scratch/appshot-spike/out/e2e-artifacts/2026-07-30/appshot-2b3f052a-3a81-415d-879b-fecf093fec33.png",
+        "width": 1341,
+        "height": 949,
+        "mimeType": "image/png",
+        "byteSize": 797694
+      },
+      "text": {
+        "mode": "none"
+      },
+      "captureDurationMs": 10384
+    }
+  }
+}
