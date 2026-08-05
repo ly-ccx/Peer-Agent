@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 import { displayShortcut } from './ShortcutsPanel';
 
 type PermissionState = {
@@ -95,17 +96,17 @@ export function AppshotsPanel() {
       </header>
 
       <section className="settings-card">
-        <label className="settings-row">
+        <div className="settings-row">
           <span>
             <strong>{isZh ? '启用 Appshots' : 'Enable Appshots'}</strong>
             <small>{isZh ? '关闭后热键与测试捕获均不工作。' : 'When off, the hotkey and test capture do nothing.'}</small>
           </span>
-          <input
-            type="checkbox"
+          <Switch
             checked={enabled}
-            onChange={(event) => { void toggleEnabled(event.target.checked); }}
+            onCheckedChange={(checked) => { void toggleEnabled(checked); }}
+            aria-label={isZh ? '启用 Appshots' : 'Enable Appshots'}
           />
-        </label>
+        </div>
 
         <div className="settings-row">
           <span>

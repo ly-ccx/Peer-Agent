@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 
 function ScopeBadge({ scope }: { readonly scope: SkillSummary['scope'] }) {
   return (
@@ -66,25 +67,21 @@ export function SkillDetailDialog({
               </div>
               <p>{current.description || '暂无描述'}</p>
             </div>
-            <label className="skill-detail-toggle" onClick={(event) => event.stopPropagation()}>
-              <input
-                type="checkbox"
-                checked={current.enabled}
-                disabled={toggling}
-                onChange={async (event) => {
-                  const enabled = event.target.checked;
-                  setToggling(true);
-                  try {
-                    await onToggle(current.skillId, enabled);
-                    setDetail((previous) => previous ? { ...previous, enabled } : previous);
-                  } finally {
-                    setToggling(false);
-                  }
-                }}
-              />
-              <span aria-hidden="true" />
-              <span className="sr-only">挂载到当前工作空间</span>
-            </label>
+            <Switch
+              checked={current.enabled}
+              disabled={toggling}
+              aria-label="挂载到当前工作空间"
+              onClick={(event) => event.stopPropagation()}
+              onCheckedChange={async (enabled) => {
+                setToggling(true);
+                try {
+                  await onToggle(current.skillId, enabled);
+                  setDetail((previous) => previous ? { ...previous, enabled } : previous);
+                } finally {
+                  setToggling(false);
+                }
+              }}
+            />
             <button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}>×</button>
           </header>
 

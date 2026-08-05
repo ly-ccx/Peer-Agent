@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmModelInfo, LlmModelListResult, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Checkbox } from '../../ui/boolean-controls';
 import { LlmBrandIcon } from './LlmBrandIcon';
 import { Overlay } from './Overlay';
 import {
@@ -272,7 +273,7 @@ export function ModelCatalogDialog({
               const hasMetadata = Boolean(contextSummary || output || model.supportsVision || model.supportsReasoning || creditLabel);
               return (
                 <label key={model.id} className={`llm-catalog-item ${configured ? 'is-configured' : ''} ${checked ? 'is-selected' : ''}`}>
-                  <input type="checkbox" checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} />
+                  <Checkbox checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} aria-label={`${model.label || model.id} ${checked ? (zh ? '已选择' : 'selected') : (zh ? '未选择' : 'not selected')}`} />
                   <LlmBrandIcon className="llm-brand-icon-model" providerName={providerName} modelId={model.id} />
                   <span className="llm-catalog-item-main">
                     <strong>{model.label || model.id}</strong>

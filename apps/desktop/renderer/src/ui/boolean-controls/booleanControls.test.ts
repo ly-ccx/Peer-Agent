@@ -70,7 +70,7 @@ test('all product boolean usages follow the 9 Switch and 2 Checkbox semantic mat
   assert.equal(joined.includes('type="checkbox"'), false);
   assert.equal(joined.includes('role="switch"'), false);
 
-  assert.match(await read('automations/AutomationCenter.tsx'), /<Switch checked=\{draft\.notifySuccess\}/);
+  assert.match(await read('automations/AutomationCenter.tsx'), /<Switch\s+checked=\{draft\.notifySuccess\}/);
   assert.match(await read('app/components/ModelCatalogDialog.tsx'), /<Checkbox checked=\{checked\}/);
   assert.match(await read('workbench/views/SessionImportWizard.tsx'), /<Checkbox\s+checked=\{checked\}/);
 });

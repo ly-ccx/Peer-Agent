@@ -5,6 +5,7 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Overlay } from '../../app/components/Overlay';
+import { Checkbox } from '../../ui/boolean-controls';
 
 const BRAND_LOGO_SRC = './logo.png';
 
@@ -485,10 +486,10 @@ export function SessionImportWizard({
                 return (
                   <li key={s.registrableDomain}>
                     <label className="session-import-check">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={checked}
                         onChange={() => toggleDomain(s.registrableDomain)}
+                        aria-label={`${s.registrableDomain} ${checked ? t.selected : ''}`.trim()}
                       />
                       <span className="session-import-list-main">{s.registrableDomain}</span>
                       <span className="session-import-list-meta">

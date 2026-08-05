@@ -1,28 +1,12 @@
 import type { AvailableSkillSummary, SkillSummary } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 import { SkillDetailDialog } from './SkillDetailDialog';
 
 function SkillAvatar({ name }: { readonly name: string }) {
   const letter = (name || '?').charAt(0).toUpperCase();
   return <span className="skill-avatar" aria-hidden="true">{letter}</span>;
-}
-
-function SkillToggle({ enabled, onChange }: {
-  readonly enabled: boolean;
-  readonly onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      className={`skill-toggle ${enabled ? 'on' : 'off'}`}
-      onClick={(event) => { event.stopPropagation(); onChange(!enabled); }}
-    >
-      <span className="skill-toggle-thumb" />
-    </button>
-  );
 }
 
 function SkillSection({
@@ -70,7 +54,7 @@ function SkillSection({
               <div className="skill-card-title-row">
                 <strong className="skill-card-name">{skill.name}</strong>
                 <span className="skill-card-actions" onClick={(event) => event.stopPropagation()}>
-                  <SkillToggle enabled={skill.enabled} onChange={() => onToggle(skill)} />
+                  <Switch checked={skill.enabled} onCheckedChange={() => onToggle(skill)} aria-label={`${skill.name} ${skill.enabled ? '已启用' : '已停用'}`} />
                 </span>
               </div>
               <span className="skill-card-desc">{skill.description || '暂无描述'}</span>

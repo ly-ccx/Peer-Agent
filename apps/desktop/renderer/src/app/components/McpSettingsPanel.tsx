@@ -1,6 +1,7 @@
 import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 import { useConfirm } from './ConfirmProvider';
 import { Drawer } from './Drawer';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -845,16 +846,13 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                       <strong className="skill-card-name">{labelForServer(server)}</strong>
                       <span className="skill-card-actions">
                         {failed ? <span className="mcp-card-badge">FAILED</span> : null}
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={server.enabled !== false}
-                          className={`skill-toggle ${server.enabled !== false ? 'on' : 'off'}`}
+                        <Switch
+                          checked={server.enabled !== false}
                           disabled={busy}
-                          onClick={(e) => { e.stopPropagation(); void runServerAction(server.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(server), enabled: server.enabled === false })); }}
-                        >
-                          <span className="skill-toggle-thumb" />
-                        </button>
+                          aria-label={`${labelForServer(server)} ${server.enabled !== false ? '已启用' : '已停用'}`}
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={(enabled) => { void runServerAction(enabled ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(server), enabled })); }}
+                        />
                       </span>
                     </div>
                     <span className="skill-card-desc">{endpointForServer(server)}</span>
@@ -953,18 +951,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                             <strong>{toolName}</strong>
                             <p>{tool.description ?? tool.toolDesc ?? 'No description'}</p>
                           </div>
-                          <label className="mcp-toggle">
-                            <input
-                              type="checkbox"
+                          <div className="mcp-toggle">
+                            <span>visible</span>
+                            <Switch
                               checked={tool.visible !== false}
-                              onChange={(event) => void runServerAction('更新工具可见性', () => clientApi.mcpSetToolVisibility({
+                              aria-label={`${toolName} visible`}
+                              onCheckedChange={(visible) => void runServerAction('更新工具可见性', () => clientApi.mcpSetToolVisibility({
                                 serverId: serverIdOf(selected),
                                 toolName,
-                                visible: event.target.checked,
+                                visible,
                               }))}
                             />
-                            visible
-                          </label>
+                          </div>
                         </li>
                       );
                     })}
