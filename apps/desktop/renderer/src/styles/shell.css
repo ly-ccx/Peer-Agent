@@ -44,6 +44,16 @@
     border-radius: 0;
   }
 
+  /* 插件一级页：复用 settings-content 的滚动与内边距，填满 main-panel。 */
+  .main-panel > .tools-page {
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--chrome-canvas, var(--za-app-bg));
+    border-radius: var(--radius-lg);
+  }
+
   .profile-chip {
     @apply flex items-center gap-2;
     -webkit-app-region: no-drag;

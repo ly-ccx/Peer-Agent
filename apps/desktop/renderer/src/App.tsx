@@ -2,6 +2,9 @@ import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
+import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
+import { AutomationCenter } from './automations/AutomationCenter';
+import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { FullDiskAccessStartupGate } from './app/components/FullDiskAccessStartupGate';
 import { QuickChatPopoverHost } from './app/components/QuickChatPopoverHost';
@@ -58,7 +61,7 @@ function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boo
   return true;
 }
 
-type AppPage = 'chat' | 'settings';
+type AppPage = 'chat' | 'automations' | 'tools' | 'settings';
 type ConversationStatus = 'active' | 'archived';
 type ConversationView = 'active' | 'archived';
 
@@ -108,6 +111,11 @@ function MainApp() {
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [automationRunTarget, setAutomationRunTarget] = useState<{ automationId: string; runId: string } | null>(null);
+  useEffect(() => clientApi.onAutomationOpenRun((target) => {
+    setAutomationRunTarget({ automationId: target.automationId, runId: target.runId });
+    setActivePage('automations');
+  }), []);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>('general');
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
@@ -641,6 +649,22 @@ function MainApp() {
     setActivePage('chat');
   }, [activeWorkspace]);
 
+  const handleCreateAutomation = useCallback(async () => {
+    // Jump to the same new-task home as sidebar "新建任务", but prefill a GPT/Codex-style scheduled-task draft.
+    let ws = activeWorkspace;
+    if (!ws) {
+      const ensured = await clientApi.workspaceEnsureDefault();
+      ws = ensured.path;
+      setActiveWorkspace(ws);
+    }
+    const zh = (session?.locale ?? '').toLowerCase().startsWith('zh');
+    const template = getAutomationCopy(zh).chatDraftTemplate;
+    conversationStore.setDraft(null, template);
+    setConversationView('active');
+    setActiveConversationId(null);
+    setActivePage('chat');
+  }, [activeWorkspace, session?.locale]);
+
   useEffect(() => {
     const offNewChat = clientApi.onTrayNewChat?.(() => {
       void handleNewChat();
@@ -786,9 +810,9 @@ function MainApp() {
       {showMainShell ? (
         <>
           <section
-            className={`app-page-layer app-chat-page${activePage === 'chat' ? ' is-active' : ''}`}
-            aria-hidden={activePage !== 'chat'}
-            inert={activePage !== 'chat'}
+            className={`app-page-layer app-chat-page${activePage !== 'settings' ? ' is-active' : ''}`}
+            aria-hidden={activePage === 'settings'}
+            inert={activePage === 'settings'}
           >
             <WorkbenchProvider
               conversationId={activeConversationId}
@@ -822,13 +846,32 @@ function MainApp() {
               onUnpinConversation={handleUnpinConversation}
               onReorderPinnedConversations={handleReorderPinnedConversations}
               onShowActiveConversations={handleShowActiveConversations}
+              onOpenAutomations={() => setActivePage('automations')}
+              onOpenTools={() => setActivePage('tools')}
               onOpenSettings={() => openSettings('general')}
               onWorkspaceChanged={handleWorkspaceChanged}
               startupSnapshot={startupSnapshot}
             />
             <section className="main-panel">
-              <section className="thread thread-has-header">
-                <ChatSurface
+              {activePage === 'automations' ? (
+                <AutomationCenter
+                  isZh={isZh}
+                  defaultWorkspace={activeWorkspace ?? ''}
+                  initialRunTarget={automationRunTarget}
+                  onCreateNew={handleCreateAutomation}
+                  onOpenConversation={(conversationId) => {
+                    setConversationView('active');
+                    setActiveConversationId(String(conversationId));
+                    setActivePage('chat');
+                  }}
+                />
+              ) : activePage === 'tools' ? (
+                <section className="tools-page settings-content" aria-label={isZh ? '插件' : 'Plugins'}>
+                  <CapabilitiesPanel />
+                </section>
+              ) : (
+                <section className="thread thread-has-header">
+                  <ChatSurface
                   i18n={i18n}
                   providers={providers}
                   conversationId={activeConversationId}
@@ -878,10 +921,11 @@ function MainApp() {
                   workspacePath={activeWorkspace}
                   isPageActive={activePage === 'chat'}
                   messageTarget={notificationMessageTarget}
-                />
-              </section>
+                  />
+                </section>
+              )}
             </section>
-                <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
+                {activePage === 'chat' ? <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} /> : null}
               </div>
             </WorkbenchProvider>
           </section>

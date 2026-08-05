@@ -14,7 +14,8 @@
 
   .capability-workbench-main {
     @apply min-h-0 min-w-0 overflow-y-auto;
-    padding: 64px 48px 56px;
+    /* 一级页密度：原先 64px 顶距偏空，收紧到 28px */
+    padding: 28px 48px 48px;
     scrollbar-gutter: stable;
   }
 
@@ -813,31 +814,6 @@
     filter: brightness(1.1);
   }
 
-  /* Toggle switch — iOS style */
-  .skill-toggle {
-    @apply relative inline-flex h-[18px] w-[32px] shrink-0 cursor-pointer items-center rounded-full;
-    background: #ccc;
-    transition: background 0.2s;
-    border: none;
-    padding: 0;
-  }
-
-  .skill-toggle.on {
-    background: #4cd964;
-  }
-
-  .skill-toggle-thumb {
-    @apply block h-[14px] w-[14px] rounded-full;
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    transform: translateX(2px);
-    transition: transform 0.2s;
-  }
-
-  .skill-toggle.on .skill-toggle-thumb {
-    transform: translateX(16px);
-  }
-
   /* Upload dialog —— 遮罩/动效由 Overlay 基座提供；本类只负责面板布局 */
   .skill-upload-dialog {
     @apply grid w-[480px] gap-5 p-7;
@@ -1106,22 +1082,6 @@
   .skill-scope-badge { @apply rounded-full px-2.5 py-1 text-[11px] font-medium; }
   .skill-scope-badge--workspace { color: #60a5fa; background: rgba(59, 130, 246, 0.14); }
   .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
-
-  .skill-detail-toggle { @apply relative mt-1 inline-flex h-7 w-12 cursor-pointer items-center; }
-  .skill-detail-toggle input { @apply sr-only; }
-  .skill-detail-toggle > span[aria-hidden='true'] {
-    @apply h-7 w-12 rounded-full;
-    background: color-mix(in srgb, var(--za-text) 16%, transparent);
-    transition: background 160ms ease;
-  }
-  .skill-detail-toggle > span[aria-hidden='true']::after {
-    content: '';
-    @apply absolute left-1 top-1 h-5 w-5 rounded-full bg-white;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-    transition: transform 160ms ease;
-  }
-  .skill-detail-toggle input:checked + span { background: #3b82f6; }
-  .skill-detail-toggle input:checked + span::after { transform: translateX(20px); }
 
   .skill-detail-close {
     @apply flex h-8 w-8 items-center justify-center rounded-full border-0 bg-transparent text-[26px] leading-none;

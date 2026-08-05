@@ -3,7 +3,6 @@ import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { AppearancePanel } from '../../appearance/AppearancePanel';
 import { ArchivedConversationsPanel } from './ArchivedConversationsPanel';
-import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { GeneralPanel } from './GeneralPanel';
 import { GitPanel } from './GitPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
@@ -12,8 +11,9 @@ import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-export type SettingsSection = 'general' | 'providers' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
+export type SettingsSection = 'general' | 'providers' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
+// 注：skills/插件已提升为主侧栏一级页面，不再作为设置分区。
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
 
 // Appshots is intentionally hidden from Settings for now (not part of public beta surface).
@@ -21,7 +21,6 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'general',
   'providers',
   'model', // legacy alias → providers
-  'skills',
   'instructions',
   'git',
   'shortcuts',
@@ -34,7 +33,9 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
 function resolveSettingsSection(value: string | null | undefined): SettingsSection {
   // Legacy deep-links like ?section=appshots fall back to general.
   // 旧 model 分区统一映射到服务商（以服务商为聚合源头，不设独立模型页）。
+  // 旧 skills 分区已外置为一级页，deep-link 回落到 general。
   if (value === 'model' || value === 'models') return 'providers';
+  if (value === 'skills') return 'general';
   if (value && SETTINGS_SECTIONS.has(value as SettingsSection)) {
     return value as SettingsSection;
   }
@@ -94,7 +95,6 @@ export function SettingsPage({
       label: 'AI',
       items: [
         { key: 'providers', label: isZh ? '服务商' : 'Providers' },
-        { key: 'skills', label: isZh ? '工具与能力' : 'Tools & capabilities' },
         { key: 'usage', label: i18n.t('settings.usage') },
       ],
     },
@@ -173,8 +173,6 @@ export function SettingsPage({
           />
         ) : section === 'providers' || section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
-        ) : section === 'skills' ? (
-          <CapabilitiesPanel />
         ) : section === 'instructions' ? (
           <SystemInstructionsPanel
             i18n={i18n}

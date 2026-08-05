@@ -109,6 +109,60 @@
     background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
   }
 
+  .sidebar-top .sidebar-automation-nav {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    box-sizing: border-box;
+    width: calc(100% - 2px);
+    min-width: 0;
+    min-height: 36px;
+    margin-inline: 1px;
+    padding: 0 var(--space-3);
+    border: 1px solid transparent;
+    border-radius: var(--ui-radius-row, 8px);
+    color: var(--za-text);
+    background: transparent;
+    font: inherit;
+    font-size: var(--ui-font-control, 13px);
+    line-height: 1;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    appearance: none;
+  }
+
+  .sidebar-top .sidebar-automation-nav > svg {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .sidebar-top .sidebar-automation-nav > span {
+    min-width: 0;
+    overflow: hidden;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-top .sidebar-automation-nav:hover {
+    color: var(--za-text);
+    background: var(--ui-surface-hover, var(--za-hover));
+  }
+
+  .sidebar-top .sidebar-automation-nav.active {
+    border-color: var(--ui-selected-border, var(--za-line-strong));
+    background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
+  }
+
+  .sidebar-top .sidebar-automation-nav:focus-visible {
+    border-color: var(--ui-selected-border, var(--za-accent));
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  }
+
   .channel-conversation-list {
     @apply flex flex-col gap-0.5 py-1 pl-0;
     --motion-enter-from: -4px;
