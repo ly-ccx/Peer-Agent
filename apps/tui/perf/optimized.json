@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-04T07:25:58.442Z",
+  "runtime": {
+    "bun": "1.2.17",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "results": [
+    {
+      "scenario": "markdown.parse",
+      "iterations": 250,
+      "p50Ms": 0.07979100000000017,
+      "p95Ms": 0.09654199999999946,
+      "p99Ms": 0.11912499999999682,
+      "maxMs": 1.207209000000006,
+      "totalMs": 22.27479199999999,
+      "metadata": {
+        "chars": 7701
+      }
+    },
+    {
+      "scenario": "markdown.parse.cached",
+      "iterations": 250,
+      "p50Ms": 0.0002909999999900492,
+      "p95Ms": 0.0007919999999899119,
+      "p99Ms": 0.00245800000000429,
+      "maxMs": 0.00533300000000736,
+      "totalMs": 0.11875000000000568,
+      "metadata": {
+        "chars": 7701
+      }
+    },
+    {
+      "scenario": "markdown.stream.revisions",
+      "iterations": 25,
+      "p50Ms": 0.01999999999998181,
+      "p95Ms": 0.02391699999998309,
+      "p99Ms": 0.02908299999998576,
+      "maxMs": 0.02908299999998576,
+      "totalMs": 0.40937499999998295,
+      "metadata": {
+        "revisions": 200,
+        "finalChars": 7701
+      }
+    },
+    {
+      "scenario": "code.highlight",
+      "iterations": 100,
+      "p50Ms": 2.1712079999999787,
+      "p95Ms": 2.5636670000000095,
+      "p99Ms": 2.9256670000000042,
+      "maxMs": 2.959458000000012,
+      "totalMs": 222.75625,
+      "metadata": {
+        "chars": 71779,
+        "lines": 1000
+      }
+    },
+    {
+      "scenario": "code.highlight.cached",
+      "iterations": 100,
+      "p50Ms": 0.05420800000001691,
+      "p95Ms": 0.062083999999970274,
+      "p99Ms": 0.0800830000000019,
+      "maxMs": 0.47066699999999173,
+      "totalMs": 5.984167000000014,
+      "metadata": {
+        "chars": 71779,
+        "lines": 1000
+      }
+    },
+    {
+      "scenario": "conversation.project",
+      "iterations": 1000,
+      "p50Ms": 0.024249999999994998,
+      "p95Ms": 0.045833000000016,
+      "p99Ms": 0.04754200000002129,
+      "maxMs": 0.06333300000000008,
+      "totalMs": 27.979917,
+      "metadata": {
+        "messages": 10000
+      }
+    },
+    {
+      "scenario": "tool.presentation",
+      "iterations": 1000,
+      "p50Ms": 0.005125000000020918,
+      "p95Ms": 0.008958000000006905,
+      "p99Ms": 0.012375000000020009,
+      "maxMs": 0.01650000000000773,
+      "totalMs": 5.633041999999989,
+      "metadata": {
+        "chars": 539999,
+        "lines": 5000
+      }
+    }
+  ]
+}

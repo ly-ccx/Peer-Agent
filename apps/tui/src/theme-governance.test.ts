@@ -106,7 +106,7 @@ describe('TUI theme governance', () => {
     const violations = sourceFiles().flatMap((file) => {
       if (RAW_COLOR_EXCEPTIONS.has(relative(file))) return [];
       const source = readFileSync(file, 'utf8');
-      return [...source.matchAll(/#[0-9a-f]{3,8}\b|rgba?\s*\(/gi)].map((match) => `${relative(file)}:${match.index}:${match[0]}`);
+      return [...source.matchAll(/#[0-9a-f]{3,8}\b|(?<![a-z0-9_])rgba?\s*\(/gi)].map((match) => `${relative(file)}:${match.index}:${match[0]}`);
     });
     expect(violations).toEqual([]);
   });

@@ -4,11 +4,23 @@ import { useTerminalDimensions } from '@opentui/react';
 
 import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
 import { ThemedText } from './themed-primitives.tsx';
-import { highlightCode, type SyntaxTokenKind } from './code-highlighter.ts';
+import { highlightCode, type SyntaxToken, type SyntaxTokenKind } from './code-highlighter.ts';
+import { createBoundedTextCache } from './bounded-text-cache.ts';
+import { measureTuiPerf, recordTuiPerf } from './tui-perf.ts';
 
 type TableAlignment = 'left' | 'center' | 'right';
 
 const MarkdownTextAttributesContext = createContext(0);
+const markdownBlockCache = createBoundedTextCache<MarkdownBlock[]>({
+  maxEntries: 256,
+  maxKeyChars: 64_000,
+  maxTotalKeyChars: 1_000_000,
+});
+const codeHighlightCache = createBoundedTextCache<SyntaxToken[]>({
+  maxEntries: 128,
+  maxKeyChars: 256_000,
+  maxTotalKeyChars: 2_000_000,
+});
 
 function MarkdownText(props: TextProps) {
   const inheritedAttributes = useContext(MarkdownTextAttributesContext);
@@ -45,7 +57,7 @@ function isTableRow(line: string): boolean {
   return line.includes('|') && line.trim().length > 0;
 }
 
-function parseBlocks(markdown: string): MarkdownBlock[] {
+export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   const blocks: MarkdownBlock[] = [];
   let index = 0;
@@ -150,6 +162,18 @@ function parseBlocks(markdown: string): MarkdownBlock[] {
   return blocks;
 }
 
+export function parseMarkdownBlocksCached(markdown: string): MarkdownBlock[] {
+  const cached = markdownBlockCache.get(markdown);
+  if (cached) {
+    recordTuiPerf('markdown.parse.cache_hit', 0, { chars: markdown.length });
+    return cached;
+  }
+  const blocks = parseMarkdownBlocks(markdown);
+  markdownBlockCache.set(markdown, blocks);
+  recordTuiPerf('markdown.parse.cache_miss', 0, { chars: markdown.length });
+  return blocks;
+}
+
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /(\*\*|__)(.+?)\1|(`+)(.+?)\3|(\*|_)(.+?)\5|\[([^\]]+)\]\(([^)]+)\)/g;
@@ -208,8 +232,26 @@ function syntaxTokenColor(kind: SyntaxTokenKind): string {
   }
 }
 
+export function highlightCodeCached(text: string, language: string): SyntaxToken[] {
+  const source = text || ' ';
+  const key = `${language}\u0000${source}`;
+  const cached = codeHighlightCache.get(key);
+  if (cached) {
+    recordTuiPerf('markdown.highlight.cache_hit', 0, { chars: text.length, language });
+    return cached;
+  }
+  const tokens = highlightCode(source, language);
+  codeHighlightCache.set(key, tokens);
+  recordTuiPerf('markdown.highlight.cache_miss', 0, { chars: text.length, language });
+  return tokens;
+}
+
 function HighlightedCodeBlock({ text, language }: { text: string; language: string }) {
-  const tokens = highlightCode(text || ' ', language);
+  const tokens = measureTuiPerf(
+    'markdown.highlight',
+    () => highlightCodeCached(text, language),
+    { chars: text.length, language },
+  );
   return (
     <MarkdownText selectable>
       {tokens.map((token, index) => (
@@ -400,7 +442,11 @@ export function MarkdownView({ content, width, tone = 'default', textAttributes 
   const availableWidth = Math.max(20, width ?? terminal.width);
   const bodyColor = tone === 'muted' ? COLOR.muted : COLOR.text;
   const headingColor = tone === 'muted' ? COLOR.textSoft : COLOR.accent;
-  const blocks = parseBlocks(content || ' ');
+  const blocks = measureTuiPerf(
+    'markdown.parse',
+    () => parseMarkdownBlocksCached(content || ' '),
+    { chars: content.length },
+  );
   return (
     <MarkdownTextAttributesContext.Provider value={textAttributes}>
       <box flexDirection="column">

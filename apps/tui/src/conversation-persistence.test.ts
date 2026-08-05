@@ -176,6 +176,19 @@ describe('TUI conversation persistence', () => {
         outputTokens: 5,
         cacheReadTokens: 10,
         cacheWriteTokens: 0,
+        byModel: {
+          'provider-a': {
+            model: 'model-a',
+            modelProviderId: 'provider-a',
+            requestCount: 1,
+            inputTokens: 70,
+            outputTokens: 5,
+            cacheReadTokens: 10,
+            cacheWriteTokens: 0,
+            totalTokens: 85,
+            estimatedCostUsd: 0,
+          },
+        },
       });
       const ledger = JSON.parse(readFileSync(usageLogFile, 'utf8').trim());
       expect(ledger.usageScope).toBe('runtime_turn');

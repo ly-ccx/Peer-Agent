@@ -19,6 +19,7 @@ import {
   type ConversationRenderWindow,
   type ConversationRenderWindowState,
 } from './conversation-render-window.ts';
+import { measureTuiPerf, recordTuiPerf } from './tui-perf.ts';
 import {
   conversationMessageRenderId,
   latestUserMessage,
@@ -1434,7 +1435,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     ?? snapshot.session?.conversationId
     ?? null;
   const renderProjection = useMemo(
-    () => projectConversationRenderWindow(snapshot.messages, renderWindowState),
+    () => measureTuiPerf(
+      'conversation.project',
+      () => projectConversationRenderWindow(snapshot.messages, renderWindowState),
+      { messages: snapshot.messages.length, mode: renderWindowState.mode },
+    ),
     [snapshot.messages, renderWindowState],
   );
   useEffect(() => {
@@ -1711,6 +1716,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   useEffect(() => controller.subscribe((next) => {
     persistence.syncSnapshot(next);
     setSnapshot(next);
+    recordTuiPerf('app.snapshot', 0, {
+      lane: 'state',
+      messages: next.messages.length,
+      running: next.status === 'running',
+    });
   }), [controller, persistence]);
   useEffect(() => persistence.subscribeExternalChanges(() => {
     setExternalConversationRevision((revision) => revision + 1);

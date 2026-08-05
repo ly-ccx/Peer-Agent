@@ -40,6 +40,7 @@ import {
 import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
+import { flushTuiPerfSync } from './tui-perf.ts';
 import { buildTuiSystemPrompt, createTuiLanguageStore } from './tui-language.ts';
 import { createTuiThemeStore } from './tui-theme.ts';
 import { formatTerminalTitle } from './terminal-title.ts';
@@ -295,7 +296,10 @@ const root = createRoot(renderer);
 const shutdown = createTuiShutdown({
   unmount: () => root.unmount(),
   destroyRenderer: () => renderer.destroy(),
-  exitProcess: (code) => process.exit(code),
+  exitProcess: (code) => {
+    flushTuiPerfSync();
+    process.exit(code);
+  },
 });
 
 root.render(
