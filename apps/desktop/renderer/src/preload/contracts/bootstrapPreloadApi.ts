@@ -446,6 +446,49 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * 在已存在父目录下新建文件。默认写空内容；不覆盖已有文件。
+   * status：ok / already_exists / not_found / not_dir / invalid_path / error。
+   */
+  readonly writeFile: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    content?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'already_exists'
+      | 'not_found'
+      | 'not_dir'
+      | 'invalid_path'
+      | 'error';
+    readonly path?: string;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
+   * 在已存在父目录下新建文件夹。不覆盖已有路径。
+   * status：ok / already_exists / not_found / not_dir / invalid_path / error。
+   */
+  readonly mkdir: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'already_exists'
+      | 'not_found'
+      | 'not_dir'
+      | 'invalid_path'
+      | 'error';
+    readonly path?: string;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
    * 列出指定目录的单层子条目，供 Workbench「文件」视图的文件树懒加载/逐层展开。
    * - absPath 必须是绝对目录路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
    * - status：ok（成功）、not_found（不存在）、not_dir（非目录）、invalid_path / error（异常）。

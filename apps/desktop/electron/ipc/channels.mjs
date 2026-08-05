@@ -110,7 +110,9 @@ const INVOKE_CHANNELS = Object.freeze([
   'developer-settings:reset',
   'developer-settings:update',
   'file:read',
+  'file:write',
   'fs:exists',
+  'fs:mkdir',
   'fs:read-dir',
   'fs:watch-dirs',
   'git:diff',
@@ -320,7 +322,9 @@ const PROVIDER_ACCESS_CHANNELS = new Set([
 ]);
 const FILE_ACCESS_CHANNELS = new Set([
   'file:read',
+  'file:write',
   'fs:exists',
+  'fs:mkdir',
   'fs:read-dir',
   'fs:watch-dirs',
   'git:diff',

@@ -57,6 +57,8 @@ function createHarness(overrides = {}) {
   };
   const gitCalls = [];
   const watchers = [];
+  const written = [];
+  const created = [];
 
   const service = createFileAccessApplicationService({
     getSettings: () => settings,
@@ -83,6 +85,14 @@ function createHarness(overrides = {}) {
       if (!node || node.kind !== 'file') throw new Error('ENOENT');
       return node.buffer;
     },
+    writeFile: (candidate, content) => {
+      written.push([candidate, content]);
+      nodes.set(candidate, file(Buffer.from(String(content ?? ''), 'utf8')));
+    },
+    createDirectory: (candidate) => {
+      created.push(candidate);
+      nodes.set(candidate, directory());
+    },
     watchDirectory: (candidate, options, onChange) => {
       if (overrides.watchErrorPaths?.has(candidate)) throw new Error('watch_failed');
       const watcher = new FakeWatcher(onChange);
@@ -98,7 +108,7 @@ function createHarness(overrides = {}) {
     },
   });
 
-  return { service, nodes, gitCalls, watchers };
+  return { service, nodes, gitCalls, watchers, written, created };
 }
 
 test('exists and read-directory recover by relative path across known workspaces', () => {
@@ -321,4 +331,59 @@ test('watchers are diffed per sender and closed on error, destruction, and servi
   harness.service.dispose();
   harness.service.dispose();
   assert.equal(watchBAgain.closeCount, 1);
+});
+
+test('writeFile creates empty files and refuses existing paths', () => {
+  const harness = createHarness({
+    nodes: [
+      ['/ws-a', directory()],
+      ['/ws-a/existing.txt', file('keep')],
+    ],
+  });
+
+  assert.deepEqual(harness.service.writeFile({ absPath: '/ws-a/new.txt', content: 'hello' }), {
+    ok: true,
+    status: 'ok',
+    path: '/ws-a/new.txt',
+  });
+  assert.deepEqual(harness.written, [['/ws-a/new.txt', 'hello']]);
+  assert.equal(harness.nodes.get('/ws-a/new.txt')?.kind, 'file');
+
+  assert.deepEqual(harness.service.writeFile({ absPath: '/ws-a/existing.txt' }), {
+    ok: false,
+    status: 'already_exists',
+    error: 'path_already_exists',
+    path: '/ws-a/existing.txt',
+    resolvedFrom: undefined,
+  });
+  assert.deepEqual(harness.service.writeFile({ absPath: 'relative.txt' }), {
+    ok: false,
+    status: 'invalid_path',
+    error: 'invalid_path',
+  });
+});
+
+test('mkdir creates directories and refuses existing paths', () => {
+  const harness = createHarness({
+    nodes: [
+      ['/ws-a', directory()],
+      ['/ws-a/docs', directory()],
+    ],
+  });
+
+  assert.deepEqual(harness.service.mkdir({ absPath: '/ws-a/new-folder' }), {
+    ok: true,
+    status: 'ok',
+    path: '/ws-a/new-folder',
+  });
+  assert.deepEqual(harness.created, ['/ws-a/new-folder']);
+  assert.equal(harness.nodes.get('/ws-a/new-folder')?.kind, 'directory');
+
+  assert.deepEqual(harness.service.mkdir({ absPath: '/ws-a/docs' }), {
+    ok: false,
+    status: 'already_exists',
+    error: 'path_already_exists',
+    path: '/ws-a/docs',
+    resolvedFrom: undefined,
+  });
 });

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -1818,6 +1818,8 @@ const fileAccessApplicationService = createFileAccessApplicationService({
   statPath: (candidate) => statSync(candidate),
   readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
   readFile: (candidate) => readFileSync(candidate),
+  writeFile: (candidate, content) => writeFileSync(candidate, content, 'utf8'),
+  createDirectory: (candidate) => mkdirSync(candidate, { recursive: false }),
   watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
   executeGit: (cwd, args, options) =>
     execFileAsync('git', ['-C', cwd, ...args], options),

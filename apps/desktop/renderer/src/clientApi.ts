@@ -36,6 +36,8 @@ const unavailableApi: ClientApi = {
   gitDiff: unavailableMethod('gitDiff'),
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),
+  writeFile: unavailableMethod('writeFile'),
+  mkdir: unavailableMethod('mkdir'),
   readDir: unavailableMethod('readDir'),
   watchDirs: unavailableMethod('watchDirs'),
   onFsDirChanged: () => () => {},

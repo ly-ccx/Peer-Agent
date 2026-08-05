@@ -38,6 +38,8 @@ export function createFileAccessApplicationService(options = {}) {
   const statPath = assertFunction(options.statPath, 'statPath');
   const readDirectoryEntries = assertFunction(options.readDirectory, 'readDirectory');
   const readFileBuffer = assertFunction(options.readFile, 'readFile');
+  const writeFileContent = assertFunction(options.writeFile, 'writeFile');
+  const createDirectory = assertFunction(options.createDirectory, 'createDirectory');
   const watchDirectory = assertFunction(options.watchDirectory, 'watchDirectory');
   const executeGit = assertFunction(options.executeGit, 'executeGit');
   const maxTextFileBytes = options.maxTextFileBytes ?? DEFAULT_MAX_TEXT_FILE_BYTES;
@@ -57,6 +59,36 @@ export function createFileAccessApplicationService(options = {}) {
     for (const workspacePath of candidates) {
       const candidate = path.normalize(path.join(workspacePath, cleanRel));
       if (pathExists(candidate)) {
+        return { target: candidate, resolvedFrom: workspacePath };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 解析「尚未存在」的写入目标路径。
+   * 优先复用已存在路径；否则要求绝对路径，并在 parent 不存在时用 workspace+relPath 回退。
+   */
+  function resolveCreateTarget(absPath, relPath, workspaceRoot) {
+    if (!absPath || typeof absPath !== 'string') return null;
+    const normalized = path.normalize(absPath);
+    if (!path.isAbsolute(normalized)) return null;
+
+    const existing = recoverPath(normalized, relPath, workspaceRoot);
+    if (existing) return existing;
+
+    const parent = path.dirname(normalized);
+    if (pathExists(parent)) {
+      return { target: normalized, resolvedFrom: undefined };
+    }
+
+    const cleanRel = sanitizeRelativePath(relPath);
+    if (!cleanRel) return null;
+    const candidates = workspacePaths(getSettings(), workspaceRoot, true);
+    for (const workspacePath of candidates) {
+      const candidate = path.normalize(path.join(workspacePath, cleanRel));
+      const candidateParent = path.dirname(candidate);
+      if (pathExists(candidateParent) || pathExists(workspacePath)) {
         return { target: candidate, resolvedFrom: workspacePath };
       }
     }
@@ -378,6 +410,129 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
+  /**
+   * 新建空文件。仅允许在已存在父目录下创建；不覆盖已有文件。
+   */
+  function writeFile({ absPath, workspaceRoot, relPath, content = '' } = {}) {
+    try {
+      const resolved = resolveCreateTarget(absPath, relPath, workspaceRoot);
+      if (!resolved) {
+        return { ok: false, status: 'invalid_path', error: 'invalid_path' };
+      }
+      const { target, resolvedFrom } = resolved;
+      if (pathExists(target)) {
+        return {
+          ok: false,
+          status: 'already_exists',
+          error: 'path_already_exists',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      const parent = path.dirname(target);
+      if (!pathExists(parent)) {
+        return {
+          ok: false,
+          status: 'not_found',
+          error: 'parent_not_found',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      try {
+        if (!statPath(parent).isDirectory()) {
+          return {
+            ok: false,
+            status: 'not_dir',
+            error: 'parent_not_dir',
+            path: target,
+            resolvedFrom,
+          };
+        }
+      } catch {
+        return {
+          ok: false,
+          status: 'not_found',
+          error: 'parent_stat_failed',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      const text = typeof content === 'string' ? content : '';
+      writeFileContent(target, text);
+      return resolvedFrom
+        ? { ok: true, status: 'ok', path: target, resolvedFrom }
+        : { ok: true, status: 'ok', path: target };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'error',
+        error: error?.message || String(error),
+      };
+    }
+  }
+
+  /**
+   * 新建文件夹。仅允许在已存在父目录下创建；不覆盖已有路径。
+   */
+  function mkdir({ absPath, workspaceRoot, relPath } = {}) {
+    try {
+      const resolved = resolveCreateTarget(absPath, relPath, workspaceRoot);
+      if (!resolved) {
+        return { ok: false, status: 'invalid_path', error: 'invalid_path' };
+      }
+      const { target, resolvedFrom } = resolved;
+      if (pathExists(target)) {
+        return {
+          ok: false,
+          status: 'already_exists',
+          error: 'path_already_exists',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      const parent = path.dirname(target);
+      if (!pathExists(parent)) {
+        return {
+          ok: false,
+          status: 'not_found',
+          error: 'parent_not_found',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      try {
+        if (!statPath(parent).isDirectory()) {
+          return {
+            ok: false,
+            status: 'not_dir',
+            error: 'parent_not_dir',
+            path: target,
+            resolvedFrom,
+          };
+        }
+      } catch {
+        return {
+          ok: false,
+          status: 'not_found',
+          error: 'parent_stat_failed',
+          path: target,
+          resolvedFrom,
+        };
+      }
+      createDirectory(target);
+      return resolvedFrom
+        ? { ok: true, status: 'ok', path: target, resolvedFrom }
+        : { ok: true, status: 'ok', path: target };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'error',
+        error: error?.message || String(error),
+      };
+    }
+  }
+
   function dispose() {
     for (const senderId of [...watchersBySender.keys()]) stopSenderWatchers(senderId);
   }
@@ -388,6 +543,8 @@ export function createFileAccessApplicationService(options = {}) {
     readDirectory,
     watchDirectories,
     readFile,
+    writeFile,
+    mkdir,
     dispose,
   });
 }

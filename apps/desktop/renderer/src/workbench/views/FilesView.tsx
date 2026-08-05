@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { clientApi } from '../../clientApi';
 import { useWorkbench } from '../WorkbenchContext';
 import {
@@ -9,6 +9,7 @@ import {
   stripTrailingSep,
 } from './filesTreeRefresh';
 import { getFileVisualKind, type FileVisualKind } from './filesTreePresentation';
+import { filterVisibleEntries, sanitizeNewEntryName } from './filesTreeFilter';
 
 interface FilesViewProps {
   readonly isZh: boolean;
@@ -21,6 +22,16 @@ interface DirEntry {
   readonly absPath: string;
 }
 
+type DraftKind = 'file' | 'dir';
+
+interface CreateDraft {
+  readonly parentPath: string;
+  readonly kind: DraftKind;
+  readonly value: string;
+  readonly busy: boolean;
+  readonly error: string | null;
+}
+
 /** 统一为正斜杠，便于做前缀/分段比较（不改变 IPC 调用所用的原始 absPath）。 */
 function toForward(p: string): string {
   return p.replace(/\\/g, '/');
@@ -31,6 +42,13 @@ function baseName(p: string): string {
   const norm = stripTrailingSep(toForward(p));
   const idx = norm.lastIndexOf('/');
   return idx < 0 ? norm : norm.slice(idx + 1);
+}
+
+/** 拼接父子路径，兼容 Windows 分隔符。 */
+function joinPath(parent: string, name: string): string {
+  const sep = parent.includes('\\') && !parent.includes('/') ? '\\' : '/';
+  const trimmed = stripTrailingSep(parent);
+  return `${trimmed}${sep}${name}`;
 }
 
 const ICON_PROPS = {
@@ -78,15 +96,46 @@ function FileTreeIcon({ kind, open = false }: { readonly kind: FileVisualKind; r
       paths = <><path d="M4 2.75h7l4 4v10.5H4z" /><path d="M11 2.75v4h4" /></>;
   }
 
-  return <svg {...ICON_PROPS} className="workbench-tree-file-icon">{paths}</svg>;
+  return (
+    <svg {...ICON_PROPS} className="workbench-tree-icon workbench-tree-file-icon" data-kind={kind}>
+      {paths}
+    </svg>
+  );
 }
 
 function RefreshIcon() {
   return <svg {...ICON_PROPS} viewBox="0 0 20 20"><path d="M15.8 7.1A6.25 6.25 0 1 0 16 12M15.8 7.1V3.8m0 3.3h-3.3" /></svg>;
 }
 
+function NewFileIcon() {
+  return (
+    <svg {...ICON_PROPS} viewBox="0 0 20 20">
+      <path d="M4 2.75h7l4 4v10.5H4z" />
+      <path d="M11 2.75v4h4M10 9.2v5.6M7.2 12h5.6" />
+    </svg>
+  );
+}
+
+function NewFolderIcon() {
+  return (
+    <svg {...ICON_PROPS} viewBox="0 0 20 20">
+      <path d="M2.75 5.8a1.5 1.5 0 0 1 1.5-1.5h3.4l1.55 1.75h6.55a1.5 1.5 0 0 1 1.5 1.5v6.65a1.5 1.5 0 0 1-1.5 1.5H4.25a1.5 1.5 0 0 1-1.5-1.5V5.8Z" />
+      <path d="M10 9.2v5.6M7.2 12h5.6" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg {...ICON_PROPS} viewBox="0 0 20 20" className="workbench-files-filter-icon">
+      <circle cx="8.5" cy="8.5" r="4.25" />
+      <path d="M12.2 12.2 16 16" />
+    </svg>
+  );
+}
+
 /**
- * 计算从根目录到目标目录（含两端）的祖先链：[root, root/a, root/a/b, …, target]。
+ * 从 root 到 target 的目录链路（含两端）。
  * target 不在 root 之下时返回 null（如跨 workspace 引用，当前树无法展示）。
  */
 function buildChain(root: string, target: string): string[] | null {
@@ -111,10 +160,15 @@ interface TreeNodeProps {
   readonly children: ReadonlyMap<string, readonly DirEntry[]>;
   readonly loading: ReadonlySet<string>;
   readonly selected: string | null;
+  readonly filterQuery: string;
   readonly isZh: boolean;
   readonly onToggleDir: (absPath: string) => void;
   readonly onOpenFile: (entry: DirEntry) => void;
-  readonly rootAction?: ReactNode;
+  readonly onSelect: (entry: DirEntry) => void;
+  readonly draft: CreateDraft | null;
+  readonly onDraftChange: (value: string) => void;
+  readonly onDraftCommit: () => void;
+  readonly onDraftCancel: () => void;
 }
 
 function TreeNode({
@@ -124,94 +178,122 @@ function TreeNode({
   children,
   loading,
   selected,
+  filterQuery,
   isZh,
   onToggleDir,
   onOpenFile,
-  rootAction,
+  onSelect,
+  draft,
+  onDraftChange,
+  onDraftCommit,
+  onDraftCancel,
 }: TreeNodeProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
-  const key = toForward(stripTrailingSep(entry.absPath));
-  const isSelected = selected != null && toForward(stripTrailingSep(selected)) === key;
   const isOpen = entry.isDir && expanded.has(entry.absPath);
-  const isLoading = entry.isDir && loading.has(entry.absPath);
+  const isSelected = selected === entry.absPath;
   const kids = entry.isDir ? children.get(entry.absPath) : undefined;
-  const visualKind = getFileVisualKind(entry.name, entry.isDir);
+  const isLoading = entry.isDir && loading.has(entry.absPath);
+  const kind = getFileVisualKind(entry.name, entry.isDir);
+  const showDraftHere = Boolean(draft && draft.parentPath === entry.absPath && isOpen);
+  const visibleKids = useMemo(() => {
+    if (!kids) return undefined;
+    return filterVisibleEntries(kids, filterQuery, (child) =>
+      child.isDir ? children.get(child.absPath) : undefined,
+    );
+  }, [kids, filterQuery, children]);
 
   useEffect(() => {
-    if (isSelected && rowRef.current) {
-      rowRef.current.scrollIntoView({ block: 'nearest' });
-    }
+    if (isSelected) rowRef.current?.scrollIntoView({ block: 'nearest' });
   }, [isSelected]);
 
-  const handleActivate = () => {
-    if (entry.isDir) onToggleDir(entry.absPath);
-    else onOpenFile(entry);
-  };
-
   return (
-    <div className="workbench-tree-node">
+    <div className="workbench-tree-node" role="treeitem" aria-expanded={entry.isDir ? isOpen : undefined}>
       <div
         ref={rowRef}
-        className="workbench-tree-row"
-        data-selected={isSelected}
-        data-dir={entry.isDir}
-        role="treeitem"
-        aria-expanded={entry.isDir ? isOpen : undefined}
+        className={`workbench-tree-row${isSelected ? ' is-selected' : ''}`}
+        style={{ ['--tree-depth' as string]: depth }}
         tabIndex={0}
-        style={{ paddingLeft: `${depth * 14 + 8}px` }}
-        title={entry.absPath}
-        onClick={handleActivate}
+        onClick={() => {
+          onSelect(entry);
+          if (entry.isDir) onToggleDir(entry.absPath);
+          else onOpenFile(entry);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            handleActivate();
+            onSelect(entry);
+            if (entry.isDir) onToggleDir(entry.absPath);
+            else onOpenFile(entry);
           }
         }}
       >
-        <span
-          className={`workbench-tree-twisty${entry.isDir ? ' workbench-tree-twisty--dir' : ''}`}
-          data-open={isOpen}
-          aria-hidden
-        >
+        <span className={`workbench-tree-chevron${entry.isDir ? '' : ' is-leaf'}${isOpen ? ' is-open' : ''}`} aria-hidden>
           {entry.isDir ? '›' : ''}
         </span>
-        <span className="workbench-tree-icon" data-kind={visualKind} data-open={isOpen}>
-          <FileTreeIcon kind={visualKind} open={isOpen} />
-        </span>
+        <FileTreeIcon kind={kind} open={isOpen} />
         <span className="workbench-tree-name">{entry.name}</span>
-        {depth === 0 && rootAction ? <span className="workbench-tree-actions">{rootAction}</span> : null}
       </div>
-      {isOpen ? (
+      {entry.isDir && isOpen ? (
         <div className="workbench-tree-children" role="group">
+          {showDraftHere && draft ? (
+            <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: depth + 1 }}>
+              <span className="workbench-tree-chevron is-leaf" aria-hidden />
+              <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
+              <input
+                className="workbench-tree-draft-input"
+                autoFocus
+                disabled={draft.busy}
+                value={draft.value}
+                placeholder={draft.kind === 'dir' ? (isZh ? '文件夹名' : 'Folder name') : (isZh ? '文件名' : 'File name')}
+                aria-label={draft.kind === 'dir' ? (isZh ? '新建文件夹' : 'New folder') : (isZh ? '新建文件' : 'New file')}
+                onChange={(event) => onDraftChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onDraftCommit();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    onDraftCancel();
+                  }
+                }}
+                onBlur={() => {
+                  if (!draft.busy) onDraftCommit();
+                }}
+              />
+              {draft.error ? <span className="workbench-tree-draft-error">{draft.error}</span> : null}
+            </div>
+          ) : null}
           {isLoading && !kids ? (
-            <div
-              className="workbench-tree-hint"
-              style={{ paddingLeft: `${(depth + 1) * 14 + 8}px` }}
-            >
+            <div className="workbench-tree-hint" style={{ ['--tree-depth' as string]: depth + 1 }}>
               {isZh ? '加载中…' : 'Loading…'}
             </div>
-          ) : kids && kids.length === 0 ? (
-            <div
-              className="workbench-tree-hint"
-              style={{ paddingLeft: `${(depth + 1) * 14 + 8}px` }}
-            >
-              {isZh ? '空目录' : 'Empty'}
+          ) : null}
+          {visibleKids?.map((child) => (
+            <TreeNode
+              key={child.absPath}
+              entry={child}
+              depth={depth + 1}
+              expanded={expanded}
+              children={children}
+              loading={loading}
+              selected={selected}
+              filterQuery={filterQuery}
+              isZh={isZh}
+              onToggleDir={onToggleDir}
+              onOpenFile={onOpenFile}
+              onSelect={onSelect}
+              draft={draft}
+              onDraftChange={onDraftChange}
+              onDraftCommit={onDraftCommit}
+              onDraftCancel={onDraftCancel}
+            />
+          ))}
+          {!isLoading && kids && visibleKids && visibleKids.length === 0 ? (
+            <div className="workbench-tree-hint" style={{ ['--tree-depth' as string]: depth + 1 }}>
+              {filterQuery.trim()
+                ? (isZh ? '无匹配项' : 'No matches')
+                : (isZh ? '空目录' : 'Empty')}
             </div>
-          ) : kids ? (
-            kids.map((child) => (
-              <TreeNode
-                key={child.absPath}
-                entry={child}
-                depth={depth + 1}
-                expanded={expanded}
-                children={children}
-                loading={loading}
-                selected={selected}
-                isZh={isZh}
-                onToggleDir={onToggleDir}
-                onOpenFile={onOpenFile}
-              />
-            ))
           ) : null}
         </div>
       ) : null}
@@ -219,29 +301,38 @@ function TreeNode({
   );
 }
 
-const WATCH_DEBOUNCE_MS = 200;
-
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
-  const { filesTarget, openFile: openWorkbenchFile } = useWorkbench();
+  const { openDocument, filesTarget } = useWorkbench();
   const rootPath = workspacePath ? stripTrailingSep(workspacePath) : null;
 
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const [children, setChildren] = useState<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
-  const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [children, setChildren] = useState<Map<string, readonly DirEntry[]>>(() => new Map());
+  const [loading, setLoading] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedIsDir, setSelectedIsDir] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [draft, setDraft] = useState<CreateDraft | null>(null);
 
-  // 子节点缓存的 ref 镜像：reveal 串行展开链路时读取最新缓存，避免闭包过期。
-  const childrenRef = useRef<Map<string, readonly DirEntry[]>>(new Map());
-  const expandedRef = useRef<ReadonlySet<string>>(new Set());
-  const loadingRef = useRef<ReadonlySet<string>>(new Set());
-  const selectedRef = useRef<string | null>(null);
-  const pendingRefreshRef = useRef<Set<string>>(new Set());
+  // 用 ref 镜像最新树状态，供 watch 回调读取，避免 effect 依赖整棵树。
+  const expandedRef = useRef(expanded);
+  const childrenRef = useRef(children);
+  const loadingRef = useRef(loading);
+  const selectedRef = useRef(selected);
+  const selectedIsDirRef = useRef(selectedIsDir);
+  const draftRef = useRef(draft);
+  useEffect(() => { expandedRef.current = expanded; }, [expanded]);
+  useEffect(() => { childrenRef.current = children; }, [children]);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => { selectedIsDirRef.current = selectedIsDir; }, [selectedIsDir]);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+
+  // 目录变更防抖：同目录 120ms 内合并；刷新进行中的目录先挂起，结束后补刷。
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  expandedRef.current = expanded;
-  loadingRef.current = loading;
-  selectedRef.current = selected;
+  const pendingRefreshRef = useRef<Set<string>>(new Set());
+  const inFlightRefreshRef = useRef<Set<string>>(new Set());
+  const deferredRefreshRef = useRef<Set<string>>(new Set());
 
   const applyReloadResult = useCallback((absPath: string, entries: readonly DirEntry[]) => {
     const pruned = pruneAfterDirReload(absPath, entries, {
@@ -269,94 +360,241 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         next.add(absPath);
         return next;
       });
-      let entries: readonly DirEntry[] = [];
       try {
-        const res = await clientApi.readDir(absPath, workspacePath ?? undefined);
-        entries = res && res.ok ? res.entries.map((e) => ({ ...e })) : [];
+        const result = await clientApi.readDir(absPath, workspacePath ?? undefined);
+        if (!result.ok) {
+          if (options?.force) applyReloadResult(absPath, []);
+          else {
+            setChildren((prev) => {
+              const next = new Map(prev);
+              next.set(absPath, []);
+              childrenRef.current = next;
+              return next;
+            });
+          }
+          return [];
+        }
+        if (options?.force) {
+          applyReloadResult(absPath, result.entries);
+        } else {
+          setChildren((prev) => {
+            const next = new Map(prev);
+            next.set(absPath, result.entries);
+            childrenRef.current = next;
+            return next;
+          });
+        }
+        return result.entries;
       } catch {
-        entries = [];
+        if (options?.force) applyReloadResult(absPath, []);
+        else {
+          setChildren((prev) => {
+            const next = new Map(prev);
+            next.set(absPath, []);
+            childrenRef.current = next;
+            return next;
+          });
+        }
+        return [];
+      } finally {
+        setLoading((prev) => {
+          const next = new Set(prev);
+          next.delete(absPath);
+          return next;
+        });
       }
-      if (options?.force) {
-        applyReloadResult(absPath, entries);
-      } else {
-        childrenRef.current.set(absPath, entries);
-        setChildren(new Map(childrenRef.current));
-      }
-      setLoading((prev) => {
-        const next = new Set(prev);
-        next.delete(absPath);
-        return next;
-      });
-      return entries;
     },
     [workspacePath, applyReloadResult],
   );
 
-  const refreshAllExpanded = useCallback(async () => {
-    if (!rootPath) return;
-    const paths = collectDirPathsToRefresh(rootPath, expandedRef.current);
+  const refreshDirs = useCallback(async (dirPaths: readonly string[]) => {
+    const unique = [...new Set(dirPaths.map(stripTrailingSep).filter(Boolean))];
+    if (unique.length === 0) return;
     setRefreshing(true);
     try {
-      for (const dir of paths) {
-        // eslint-disable-next-line no-await-in-loop
-        await loadDir(dir, { force: true });
+      for (const dirPath of unique) {
+        inFlightRefreshRef.current.add(dirPath);
+        try {
+          await loadDir(dirPath, { force: true });
+        } finally {
+          inFlightRefreshRef.current.delete(dirPath);
+        }
+      }
+      const deferred = [...deferredRefreshRef.current];
+      deferredRefreshRef.current.clear();
+      if (deferred.length > 0) {
+        for (const dirPath of deferred) {
+          await loadDir(dirPath, { force: true });
+        }
       }
     } finally {
       setRefreshing(false);
     }
-  }, [rootPath, loadDir]);
-
-  const flushPendingRefreshes = useCallback(async () => {
-    const batch = [...pendingRefreshRef.current];
-    pendingRefreshRef.current = new Set();
-    for (const dir of batch) {
-      // eslint-disable-next-line no-await-in-loop
-      await loadDir(dir, { force: true });
-    }
   }, [loadDir]);
 
-  const scheduleDirRefresh = useCallback(
-    (dirPath: string) => {
-      pendingRefreshRef.current = mergePendingRefreshPaths(pendingRefreshRef.current, dirPath);
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = setTimeout(() => {
-        debounceTimerRef.current = null;
-        void flushPendingRefreshes();
-      }, WATCH_DEBOUNCE_MS);
-    },
-    [flushPendingRefreshes],
-  );
+  const scheduleDirRefresh = useCallback((dirPath: string) => {
+    const normalized = stripTrailingSep(dirPath);
+    if (!normalized) return;
+    if (inFlightRefreshRef.current.has(normalized)) {
+      deferredRefreshRef.current.add(normalized);
+      return;
+    }
+    pendingRefreshRef.current = mergePendingRefreshPaths(pendingRefreshRef.current, [normalized]);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      const batch = [...pendingRefreshRef.current];
+      pendingRefreshRef.current.clear();
+      debounceTimerRef.current = null;
+      void refreshDirs(batch);
+    }, 120);
+  }, [refreshDirs]);
+
+  const refreshAllExpanded = useCallback(async () => {
+    if (!rootPath) return;
+    const dirs = collectDirPathsToRefresh(rootPath, expandedRef.current, childrenRef.current);
+    await refreshDirs(dirs);
+  }, [rootPath, refreshDirs]);
 
   const toggleDir = useCallback(
     (absPath: string) => {
       setExpanded((prev) => {
         const next = new Set(prev);
-        if (next.has(absPath)) {
-          next.delete(absPath);
-        } else {
+        if (next.has(absPath)) next.delete(absPath);
+        else {
           next.add(absPath);
           void loadDir(absPath);
         }
         return next;
       });
+      setSelected(absPath);
+      setSelectedIsDir(true);
     },
     [loadDir],
   );
 
+  const selectEntry = useCallback((entry: DirEntry) => {
+    setSelected(entry.absPath);
+    setSelectedIsDir(entry.isDir);
+  }, []);
+
   const openFile = useCallback(
     (entry: DirEntry) => {
-      openWorkbenchFile(entry.absPath, workspacePath ?? undefined);
+      setSelected(entry.absPath);
+      setSelectedIsDir(false);
+      openDocument({
+        absPath: entry.absPath,
+        relPath: workspacePath
+          ? toForward(entry.absPath).replace(`${toForward(stripTrailingSep(workspacePath))}/`, '')
+          : entry.name,
+        name: entry.name,
+      });
     },
-    [openWorkbenchFile, workspacePath],
+    [openDocument, workspacePath],
   );
 
-  // 工作目录变化：重置缓存并展开根目录。
+  const resolveCreateParent = useCallback((): string | null => {
+    if (!rootPath) return null;
+    const current = selectedRef.current;
+    if (!current) return rootPath;
+    // 选中文件时，在其父目录创建；选中目录时，在该目录下创建。
+    if (current === rootPath || selectedIsDirRef.current) return current;
+    const parent = current.replace(/[/\\][^/\\]+$/, '');
+    return parent || rootPath;
+  }, [rootPath]);
+
+  const beginCreate = useCallback((kind: DraftKind) => {
+    if (!rootPath) return;
+    const parentPath = resolveCreateParent() ?? rootPath;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.add(parentPath);
+      return next;
+    });
+    void loadDir(parentPath);
+    setSelected(parentPath);
+    setSelectedIsDir(true);
+    setDraft({
+      parentPath,
+      kind,
+      value: kind === 'dir' ? (isZh ? '新建文件夹' : 'New Folder') : (isZh ? '新建文件' : 'untitled.txt'),
+      busy: false,
+      error: null,
+    });
+  }, [rootPath, resolveCreateParent, loadDir, isZh]);
+
+  const cancelDraft = useCallback(() => {
+    setDraft(null);
+  }, []);
+
+  const changeDraft = useCallback((value: string) => {
+    setDraft((prev) => (prev ? { ...prev, value, error: null } : prev));
+  }, []);
+
+  const commitDraft = useCallback(async () => {
+    const current = draftRef.current;
+    if (!current || current.busy) return;
+    const name = sanitizeNewEntryName(current.value);
+    if (!name) {
+      setDraft((prev) => (prev ? {
+        ...prev,
+        error: isZh ? '名称无效' : 'Invalid name',
+      } : prev));
+      return;
+    }
+    const absPath = joinPath(current.parentPath, name);
+    const relPath = workspacePath
+      ? toForward(absPath).replace(`${toForward(stripTrailingSep(workspacePath))}/`, '')
+      : name;
+    setDraft((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
+    try {
+      const result = current.kind === 'dir'
+        ? await clientApi.mkdir(absPath, workspacePath ?? undefined, relPath)
+        : await clientApi.writeFile(absPath, workspacePath ?? undefined, relPath, '');
+      if (!result.ok) {
+        const message = result.status === 'already_exists'
+          ? (isZh ? '已存在同名项' : 'Already exists')
+          : (result.error || (isZh ? '创建失败' : 'Create failed'));
+        setDraft((prev) => (prev ? { ...prev, busy: false, error: message } : prev));
+        return;
+      }
+      setDraft(null);
+      await loadDir(current.parentPath, { force: true });
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.add(current.parentPath);
+        if (current.kind === 'dir') next.add(result.path ?? absPath);
+        return next;
+      });
+      setSelected(result.path ?? absPath);
+      setSelectedIsDir(current.kind === 'dir');
+      if (current.kind === 'file') {
+        openDocument({
+          absPath: result.path ?? absPath,
+          relPath,
+          name,
+        });
+      }
+    } catch (error) {
+      setDraft((prev) => (prev ? {
+        ...prev,
+        busy: false,
+        error: error instanceof Error ? error.message : (isZh ? '创建失败' : 'Create failed'),
+      } : prev));
+    }
+  }, [isZh, workspacePath, loadDir, openDocument]);
+
+  // workspace 切换：重置树，默认展开根并加载第一层。
   useEffect(() => {
-    childrenRef.current = new Map();
     setChildren(new Map());
+    childrenRef.current = new Map();
     setLoading(new Set());
     setSelected(null);
-    pendingRefreshRef.current = new Set();
+    setSelectedIsDir(false);
+    setFilterQuery('');
+    setDraft(null);
+    pendingRefreshRef.current.clear();
+    deferredRefreshRef.current.clear();
+    inFlightRefreshRef.current.clear();
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
@@ -378,6 +616,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     if (!chain) {
       // 目标不在当前树根之下（如跨 workspace），无法在本树展开，仅尝试高亮。
       setSelected(target);
+      setSelectedIsDir(true);
       return;
     }
     void (async () => {
@@ -393,38 +632,32 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         return next;
       });
       setSelected(target);
+      setSelectedIsDir(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [filesTarget?.nonce, rootPath, loadDir]);
+  }, [filesTarget, rootPath, loadDir]);
 
-  // 轻量 watch：只监听根 + 已展开目录；事件 debounce 后只重读受影响目录。
+  // 同步 watch 集合：根 + 已展开目录；main 侧按 diff 增删 fs.watch。
   useEffect(() => {
     if (!rootPath) {
       void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
       return;
     }
-    const paths = collectWatchDirPaths(rootPath, expanded);
+    const paths = collectWatchDirPaths(rootPath, expanded, children);
     void clientApi.watchDirs?.(paths, workspacePath ?? undefined).catch(() => {});
-  }, [rootPath, expanded, workspacePath]);
+  }, [rootPath, workspacePath, expanded, children]);
 
+  // 订阅目录变更事件，防抖后 force 重载。
   useEffect(() => {
-    if (typeof clientApi.onFsDirChanged !== 'function') return undefined;
+    if (!rootPath || !clientApi.onFsDirChanged) return undefined;
     const unsubscribe = clientApi.onFsDirChanged((payload) => {
-      const dir = typeof payload?.dirPath === 'string' ? payload.dirPath : '';
-      if (!dir) return;
-      // 只响应当前树关心的目录（根或已展开）
-      const watched = new Set(
-        collectWatchDirPaths(rootPath, expandedRef.current).map((p) =>
-          toForward(stripTrailingSep(p)),
-        ),
-      );
-      if (!watched.has(toForward(stripTrailingSep(dir)))) return;
-      scheduleDirRefresh(dir);
+      const dirPath = typeof payload?.dirPath === 'string' ? payload.dirPath : rootPath;
+      scheduleDirRefresh(dirPath || rootPath);
     });
     return () => {
-      unsubscribe?.();
+      unsubscribe();
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
@@ -458,35 +691,121 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     absPath: rootPath,
   };
 
+  const rootKids = children.get(rootPath);
+  const visibleRootKids = rootKids
+    ? filterVisibleEntries(rootKids, filterQuery, (child) =>
+      child.isDir ? children.get(child.absPath) : undefined)
+    : undefined;
+
   return (
     <div className="workbench-files">
-      <div className="workbench-tree" role="tree" aria-label={isZh ? '文件树' : 'File tree'}>
-        <TreeNode
-          entry={rootEntry}
-          depth={0}
-          expanded={expanded}
-          children={children}
-          loading={loading}
-          selected={selected}
-          isZh={isZh}
-          onToggleDir={toggleDir}
-          onOpenFile={openFile}
-          rootAction={(
-            <button
-              type="button"
-              className="workbench-tree-action"
-              onClick={(event) => {
-                event.stopPropagation();
-                void refreshAllExpanded();
-              }}
-              disabled={refreshing}
-              aria-label={isZh ? '刷新文件树' : 'Refresh file tree'}
-              title={isZh ? '刷新文件树' : 'Refresh file tree'}
-            >
-              <RefreshIcon />
-            </button>
-          )}
+      <div className="workbench-files-toolbar" role="toolbar" aria-label={isZh ? '文件操作' : 'File actions'}>
+        <button
+          type="button"
+          className="workbench-files-toolbar-btn"
+          onClick={() => beginCreate('file')}
+          aria-label={isZh ? '新建文件' : 'New file'}
+          title={isZh ? '新建文件' : 'New file'}
+        >
+          <NewFileIcon />
+        </button>
+        <button
+          type="button"
+          className="workbench-files-toolbar-btn"
+          onClick={() => beginCreate('dir')}
+          aria-label={isZh ? '新建文件夹' : 'New folder'}
+          title={isZh ? '新建文件夹' : 'New folder'}
+        >
+          <NewFolderIcon />
+        </button>
+        <button
+          type="button"
+          className="workbench-files-toolbar-btn"
+          onClick={() => { void refreshAllExpanded(); }}
+          disabled={refreshing}
+          aria-label={isZh ? '刷新' : 'Refresh'}
+          title={isZh ? '刷新' : 'Refresh'}
+        >
+          <RefreshIcon />
+        </button>
+      </div>
+      <label className="workbench-files-filter">
+        <SearchIcon />
+        <input
+          type="search"
+          className="workbench-files-filter-input"
+          value={filterQuery}
+          onChange={(event) => setFilterQuery(event.target.value)}
+          placeholder={isZh ? '筛选文件…' : 'Filter files…'}
+          aria-label={isZh ? '筛选文件' : 'Filter files'}
         />
+      </label>
+      <div className="workbench-tree" role="tree" aria-label={isZh ? '文件树' : 'File tree'}>
+        {/* 根目录本身不渲染成可折叠行，直接展示工具栏目标下的一层内容，贴近参考图。 */}
+        <div className="workbench-tree-children workbench-tree-children--root" role="group">
+          {draft && draft.parentPath === rootPath ? (
+            <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: 0 }}>
+              <span className="workbench-tree-chevron is-leaf" aria-hidden />
+              <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
+              <input
+                className="workbench-tree-draft-input"
+                autoFocus
+                disabled={draft.busy}
+                value={draft.value}
+                placeholder={draft.kind === 'dir' ? (isZh ? '文件夹名' : 'Folder name') : (isZh ? '文件名' : 'File name')}
+                aria-label={draft.kind === 'dir' ? (isZh ? '新建文件夹' : 'New folder') : (isZh ? '新建文件' : 'New file')}
+                onChange={(event) => changeDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void commitDraft();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelDraft();
+                  }
+                }}
+                onBlur={() => {
+                  if (!draft.busy) void commitDraft();
+                }}
+              />
+              {draft.error ? <span className="workbench-tree-draft-error">{draft.error}</span> : null}
+            </div>
+          ) : null}
+          {loading.has(rootPath) && !rootKids ? (
+            <div className="workbench-tree-hint" style={{ ['--tree-depth' as string]: 0 }}>
+              {isZh ? '加载中…' : 'Loading…'}
+            </div>
+          ) : null}
+          {(visibleRootKids ?? []).map((child) => (
+            <TreeNode
+              key={child.absPath}
+              entry={child}
+              depth={0}
+              expanded={expanded}
+              children={children}
+              loading={loading}
+              selected={selected}
+              filterQuery={filterQuery}
+              isZh={isZh}
+              onToggleDir={toggleDir}
+              onOpenFile={openFile}
+              onSelect={selectEntry}
+              draft={draft}
+              onDraftChange={changeDraft}
+              onDraftCommit={() => { void commitDraft(); }}
+              onDraftCancel={cancelDraft}
+            />
+          ))}
+          {!loading.has(rootPath) && rootKids && visibleRootKids && visibleRootKids.length === 0 ? (
+            <div className="workbench-tree-hint" style={{ ['--tree-depth' as string]: 0 }}>
+              {filterQuery.trim()
+                ? (isZh ? '无匹配项' : 'No matches')
+                : (isZh ? '空目录' : 'Empty')}
+            </div>
+          ) : null}
+        </div>
+        {/* 保留 rootEntry 引用，避免后续扩展时丢失根路径语义 */}
+        <span className="workbench-files-root-meta" hidden data-root={rootEntry.absPath} />
       </div>
     </div>
   );
