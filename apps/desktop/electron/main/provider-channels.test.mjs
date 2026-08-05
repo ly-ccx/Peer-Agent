@@ -302,9 +302,9 @@ describe('service templates', () => {
     assert.equal(moonshot?.accessCategory, 'third_party');
     assert.equal(kimi?.channelId, CHANNEL_IDS.KIMI_CODING_PLAN);
     assert.equal(moonshot?.channelId, CHANNEL_IDS.MOONSHOT);
-    assert.equal(kimi?.defaults.baseUrl, 'https://api.moonshot.cn/v1');
+    assert.equal(kimi?.defaults.baseUrl, 'https://api.kimi.com/coding/v1');
     assert.equal(moonshot?.defaults.baseUrl, 'https://api.moonshot.cn/v1');
-    assert.equal(kimi?.defaults.model, 'kimi-k2.7-code');
+    assert.equal(kimi?.defaults.model, 'k3');
     assert.equal(moonshot?.defaults.model, 'kimi-k3');
     assert.equal(
       resolveServiceTemplateId({ channelId: CHANNEL_IDS.KIMI_CODING_PLAN, authMethod: 'api_key' }),
@@ -319,10 +319,10 @@ describe('service templates', () => {
       channelId: CHANNEL_IDS.KIMI_CODING_PLAN,
       authMethod: 'api_key',
       apiKey: 'kimi-key',
-      model: 'kimi-k2.7-code',
+      model: 'k3',
     });
     assert.equal(resolvedKimi.wire, 'openai-chat');
-    assert.equal(resolvedKimi.endpoint, 'https://api.moonshot.cn/v1/chat/completions');
+    assert.equal(resolvedKimi.endpoint, 'https://api.kimi.com/coding/v1/chat/completions');
     assert.equal(resolvedKimi.headers.Authorization, 'Bearer kimi-key');
 
     const resolvedMoonshot = resolveChannel({

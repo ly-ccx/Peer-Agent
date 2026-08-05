@@ -47,7 +47,9 @@ export const GLM_CODING_PLAN_DEFAULT_MODEL = 'glm-4.7';
 /** Moonshot / Kimi OpenAI-compatible endpoints (CN vs international). */
 export const MOONSHOT_CN_BASE_URL = 'https://api.moonshot.cn/v1';
 export const MOONSHOT_GLOBAL_BASE_URL = 'https://api.moonshot.ai/v1';
-export const KIMI_CODING_PLAN_DEFAULT_MODEL = 'kimi-k2.7-code';
+/** Kimi Coding Plan OpenAI-compatible endpoint (member keys are not interchangeable with Moonshot open platform). */
+export const KIMI_CODING_PLAN_BASE_URL = 'https://api.kimi.com/coding/v1';
+export const KIMI_CODING_PLAN_DEFAULT_MODEL = 'k3';
 export const MOONSHOT_DEFAULT_MODEL = 'kimi-k3';
 
 /** MiniMax Coding / Token Plan Anthropic-compatible endpoints (region-specific). */
@@ -231,7 +233,7 @@ const CHANNEL_DESCRIPTORS = {
     allowedWires: ['openai-chat'],
     authMethods: { api_key: { wire: 'openai-chat' } },
     defaults: {
-      baseUrl: MOONSHOT_CN_BASE_URL,
+      baseUrl: KIMI_CODING_PLAN_BASE_URL,
       model: KIMI_CODING_PLAN_DEFAULT_MODEL,
     },
     capabilities: {
@@ -719,7 +721,7 @@ const SERVICE_TEMPLATES = [
     id: 'kimi-coding-plan',
     brand: 'Kimi',
     title: 'Kimi Coding Plan',
-    description: 'Kimi 编程计划 API · 默认 Coding 模型（国区 moonshot.cn）',
+    description: 'Kimi 编程计划 API · 官方 Coding 端点（api.kimi.com/coding）',
     accessCategory: 'third_party',
     supportTier: 'verified',
     channelId: CHANNEL_IDS.KIMI_CODING_PLAN,
@@ -727,15 +729,16 @@ const SERVICE_TEMPLATES = [
     legacyProvider: 'openai',
     defaultWire: 'openai-chat',
     defaults: {
-      baseUrl: MOONSHOT_CN_BASE_URL,
+      baseUrl: KIMI_CODING_PLAN_BASE_URL,
       model: KIMI_CODING_PLAN_DEFAULT_MODEL,
       hideBaseUrlByDefault: true,
     },
-    searchAliases: ['kimi', 'coding plan', 'moonshot', 'k2.7', '编程计划'],
-    tags: ['Coding Plan', '国区'],
+    searchAliases: ['kimi', 'coding plan', 'moonshot', 'k3', 'kimi code', '编程计划'],
+    tags: ['Coding Plan', '套餐'],
     knownLimitations: [
-      'OpenAI 兼容；国际用户可改 baseUrl 为 https://api.moonshot.ai/v1',
-      '编程场景也可选用 kimi-k2.7-code-highspeed / kimi-k3',
+      '必须使用 Kimi Code / Coding Plan 专属 API Key，与 api.moonshot.cn 开放平台 Key 不可混用',
+      '默认 OpenAI 兼容端点：https://api.kimi.com/coding/v1；Anthropic 兼容可改 https://api.kimi.com/coding/',
+      '可选模型：k3 / k3-256k / k3-turbo / k3-turbo-highspeed 等，以官方文档为准',
     ],
   },
   {
