@@ -710,7 +710,7 @@ export function Sidebar({
             <rect x="3" y="4" width="18" height="17" rx="2" />
             <path d="m9 14 2 2 4-4" />
           </svg>
-          <span>{isZh ? '自动化' : 'Automations'}</span>
+          <span>{isZh ? '自动化任务' : 'Automation tasks'}</span>
         </button>
         <button type="button" className={`sidebar-automation-nav${activePage === 'tools' ? ' active' : ''}`} onClick={onOpenTools}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

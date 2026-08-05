@@ -49,7 +49,7 @@ test('composer auto-sizing stays in CSS and does not force layout on every draft
 
   assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
   assert.match(styles, /field-sizing:\s*content/);
-  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*120px/);
+  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*200px/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
@@ -92,7 +92,7 @@ test('external conversation reload replaces or clears the shared accounting snap
 
   assert.match(
     surface,
-    /contextAccounting: storedContextAccountingSnapshot,\s*\}\s*=\s*await loadConversationMessages/,
+    /loadConversationMessages\(conversationId\)\.then\(\(\{[\s\S]*contextAccounting: storedContextAccountingSnapshot/,
   );
   assert.match(
     surface,

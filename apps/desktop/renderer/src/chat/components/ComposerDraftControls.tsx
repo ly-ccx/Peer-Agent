@@ -1,5 +1,5 @@
 import type React from 'react';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
 import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
@@ -182,19 +182,6 @@ const ComposerDraftField = memo(function ComposerDraftField({
   }, [draft, showSlashCommands]);
   const showSessionMentions = Boolean(atQuery) && !isBusy;
   const hasComposerContent = draft.trim().length > 0 || hasAttachments;
-
-  // Keep textarea height in sync for programmatic draft prefill (e.g. automation create template).
-  // 会话态默认单行（~28px），随输入扩展；首页仍给更宽松的起步高度。
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    const minPx = variant === 'home' ? 72 : 28;
-    const maxPx = variant === 'home' ? 160 : 160;
-    const next = Math.min(Math.max(el.scrollHeight, minPx), maxPx);
-    el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxPx ? 'auto' : 'hidden';
-  }, [draft, variant]);
 
   // 只在 slash 候选列表变化时重置高亮，避免每个字符 setState 二次渲染。
   useEffect(() => {
