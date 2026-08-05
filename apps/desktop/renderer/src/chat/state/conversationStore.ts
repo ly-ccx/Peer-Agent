@@ -24,6 +24,7 @@
 //     执行真值。
 
 import type {
+  AutomationCreateContext,
   ClientToolCall,
   ContextAccountingSnapshot,
 } from '@peer-agent/protocol';
@@ -55,6 +56,8 @@ export interface ConversationRuntimeState {
   readonly activeUsage: TokenUsageState | null;
   /** ADR 56: renderer consumes the provider-backed snapshot verbatim. */
   readonly contextAccounting: ContextAccountingSnapshot | null;
+  /** 结构化 Automation 创建提案的会话级事实；执行与确认真值仍在 Main。 */
+  readonly automationCreateContext: AutomationCreateContext | null;
   readonly providerRecoveryNotice: ProviderRecoveryNotice | null;
   readonly toolProgress: ToolProgress | null;
   readonly pendingPermissionCalls: readonly ClientToolCall[];
@@ -78,6 +81,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   tokenUsage: null,
   activeUsage: null,
   contextAccounting: null,
+  automationCreateContext: null,
   providerRecoveryNotice: null,
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],

@@ -595,7 +595,7 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode } = {}) {
+  function createConversation({ title, workspacePath, mode, automationCreateContext } = {}) {
     const now = new Date().toISOString();
     const meta = {
       id: randomUUID(),
@@ -614,6 +614,7 @@ export function createConversationStore(options = {}) {
       messageCount: 0,
       contentRevision: 0,
       contextSnapshot: null,
+      ...(automationCreateContext ? { automationCreateContext: structuredClone(automationCreateContext) } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -626,6 +627,17 @@ export function createConversationStore(options = {}) {
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.mode = normalizeMode(mode);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function updateAutomationCreateContext(id, context) {
+    const index = readIndex();
+    const meta = index.find((conversation) => conversation.id === id);
+    if (!meta) return null;
+    if (context === null || context === undefined) delete meta.automationCreateContext;
+    else meta.automationCreateContext = structuredClone(context);
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
@@ -1273,6 +1285,7 @@ export function createConversationStore(options = {}) {
     getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
+    updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
     appendMessage: changed(appendMessage, 'messages-updated'),

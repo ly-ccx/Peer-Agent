@@ -672,6 +672,7 @@ export function createLlmChatService({
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
   mcpRegistry = null,
+  automationProposalService = null,
   // main 注入的带 onChange 的 goalPlanStore 单例。AI 工具(goal_create_plan/
   // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
   goalPlanStore = null,
@@ -1136,6 +1137,7 @@ export function createLlmChatService({
           verifierContext,
           continuityContext,
           conversationId,
+          automationCreateContext: storedConversation?.automationCreateContext ?? null,
           effort,
           mode,
           // goal-plan 事实上下文 Source（0006）：goal 模式下注入活动计划权威 taskId。
@@ -1164,6 +1166,9 @@ export function createLlmChatService({
           continuityContext: nextContinuityContext = continuityContext,
           reason = 'post-compact',
         } = {}) => {
+          const rebuiltAutomationCreateContext = conversationId
+            ? conversationStore?.getConversation?.(conversationId)?.automationCreateContext ?? null
+            : null;
           const rebuiltContext = buildSystemContext(runWorkspacePath, {
             contextAttachments,
             runtimeReminders,
@@ -1174,6 +1179,7 @@ export function createLlmChatService({
             verifierContext,
             continuityContext: nextContinuityContext,
             conversationId,
+            automationCreateContext: rebuiltAutomationCreateContext,
             effort,
             mode,
             goalPlanStore,
@@ -1248,6 +1254,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              automationProposalService,
               ensureBrowserReady,
               agentProgress,
               resolvedChannel,
@@ -1290,6 +1297,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              automationProposalService,
               ensureBrowserReady,
               onNativeReasoningFallback,
               resolvedChannel,
@@ -1327,6 +1335,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              automationProposalService,
               ensureBrowserReady,
               resolvedChannel,
               authMethod: credential.authMethod,
@@ -1365,6 +1374,7 @@ export function createLlmChatService({
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
               goalPlanStore,
+              automationProposalService,
               ensureBrowserReady,
               onNativeReasoningFallback,
               authMethod: credential.authMethod,

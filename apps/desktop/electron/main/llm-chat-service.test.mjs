@@ -522,11 +522,13 @@ describe('llm chat service tool materialization', () => {
     const events = [];
     const capturedBodies = [];
     const latestUser = 'please answer the latest request exactly';
+    let automationContextStatus = 'collecting';
 
     globalThis.fetch = async (_url, init) => {
       const body = JSON.parse(init.body);
       capturedBodies.push(body);
       if (capturedBodies.length === 1) {
+        automationContextStatus = 'proposed';
         return new Response(sse([
           { choices: [{ delta: { content: 'summary of older context with enough continuity detail' } }] },
           '[DONE]',
@@ -557,6 +559,19 @@ describe('llm chat service tool materialization', () => {
         conversationStore: {
           getConversation: () => ({
             contentRevision: 0,
+            automationCreateContext: {
+              kind: 'automation_create',
+              source: 'automation_center',
+              status: automationContextStatus,
+              ...(automationContextStatus === 'proposed'
+                ? {
+                    activeProposal: {
+                      proposalId: 'proposal-after-compact',
+                      status: 'proposed',
+                    },
+                  }
+                : {}),
+            },
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
@@ -586,7 +601,15 @@ describe('llm chat service tool materialization', () => {
     assert.equal(capturedBodies.length, 2);
     const summaryBodyText = JSON.stringify(capturedBodies[0]);
     assert.doesNotMatch(summaryBodyText, new RegExp(latestUser));
+    const initialSystemPrompt = capturedBodies[0].messages.find((message) => message.role === 'system')?.content ?? '';
     const finalMessages = capturedBodies[1].messages || [];
+    const rebuiltSystemPrompt = finalMessages.find((message) => message.role === 'system')?.content ?? '';
+    assert.match(initialSystemPrompt, /strong Automation Center entry/);
+    assert.match(initialSystemPrompt, /Status: collecting/);
+    assert.match(rebuiltSystemPrompt, /Status: proposed/);
+    assert.match(rebuiltSystemPrompt, /Active proposal id: proposal-after-compact/);
+    assert.match(rebuiltSystemPrompt, /already awaiting user action/);
+    assert.doesNotMatch(rebuiltSystemPrompt, /Status: collecting/);
     assert.equal(
       finalMessages.some((message) => message.role === 'user' && message.content === latestUser),
       true,

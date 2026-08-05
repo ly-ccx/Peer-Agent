@@ -2,6 +2,7 @@
 @import "./styles/tokens.css";
 @import "./styles/motion.css";
 @import "./styles/base.css";
+@import "./ui/boolean-controls/boolean-controls.css";
 @import "./styles/shell.css";
 @import "./styles/card.css";
 @import "./styles/fallback.css";
@@ -27,3 +28,4 @@
 @import "./styles/sidebar.css";
 @import "./styles/updater.css";
 @import "./styles/workbench.css";
+@import "./automations/automations.css";

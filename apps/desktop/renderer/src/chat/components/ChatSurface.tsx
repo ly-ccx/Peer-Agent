@@ -1,6 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
+  AutomationCreateContext,
+  AutomationProposalAction,
   ClientToolCall,
   ConfigInstructionContextItem,
   ContextAccountingSnapshot,
@@ -96,6 +98,12 @@ import type {
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
 import { ImagePreviewOverlay } from './thread/AttachmentStrip';
+import {
+  applyAutomationProposalActionResult,
+  buildAutomationProposalActionRequest,
+  selectAutomationChatProposal,
+} from '../../automations/automationChatProposal';
+import { AutomationProposalCard } from './AutomationProposalCard';
 import { ComposerDraftControls } from './ComposerDraftControls';
 import {
   buildSessionReferenceAttachment,
@@ -239,6 +247,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
+  automationCreateContext: AutomationCreateContext | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
   if (!conv?.messages) return {
@@ -248,6 +257,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
+    automationCreateContext: null,
   };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
@@ -317,6 +327,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
+      automationCreateContext: conv.automationCreateContext ?? null,
     };
   }
   return {
@@ -328,6 +339,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
+    automationCreateContext: conv.automationCreateContext ?? null,
   };
 }
 
@@ -408,6 +420,7 @@ export function ChatSurface({
     [convActions],
   );
   const messages = convState.messages as ChatMsg[];
+  const automationProposal = selectAutomationChatProposal(convState.automationCreateContext);
   const loadStatus = convState.loadStatus;
   const isStreaming = convState.isStreaming;
   const turnGroupCacheRef = useRef<{
@@ -878,6 +891,18 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
+  const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
+    if (!conversationId || !automationProposal) return;
+    const result = await clientApi.automationProposalAct(
+      buildAutomationProposalActionRequest(conversationId, automationProposal, action),
+    );
+    convActions.set({
+      automationCreateContext: applyAutomationProposalActionResult(
+        convState.automationCreateContext,
+        result,
+      ),
+    });
+  }, [automationProposal, convActions, convState.automationCreateContext, conversationId]);
   const modeOptions = useMemo<readonly DropdownOption[]>(
     () => CHAT_MODES.map((m) => ({ value: m, label: modeLabel(m, isZh) })),
     [isZh],
@@ -1069,6 +1094,7 @@ export function ChatSurface({
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
@@ -1077,6 +1103,7 @@ export function ChatSurface({
         messages: loaded,
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1228,6 +1255,7 @@ export function ChatSurface({
       messages: loaded,
       tokenUsage: usage,
       contextAccounting: storedContextAccountingSnapshot,
+      automationCreateContext,
     }) => {
       if (cancelled) return;
       appliedExternalRevisionRef.current = conversationRevision;
@@ -1235,6 +1263,7 @@ export function ChatSurface({
         messages: loaded,
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       });
     });
     return () => { cancelled = true; };
@@ -2267,6 +2296,13 @@ export function ChatSurface({
             onPreviewImage={setImagePreview}
           />
         )}
+        {automationProposal ? (
+          <AutomationProposalCard
+            proposal={automationProposal}
+            isZh={isZh}
+            onAction={actOnAutomationProposal}
+          />
+        ) : null}
         {providerRecoveryNotice ? (
           <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">

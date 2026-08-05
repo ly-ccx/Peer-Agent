@@ -1,3 +1,4 @@
+import { AUTOMATION_TOOL_DEFINITIONS } from './automation-tool-definitions.mjs';
 import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { INTERACTION_TOOL_DEFINITIONS } from './interaction-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
@@ -52,6 +53,7 @@ export function createRuntimeToolRegistry({ mcpRegistry } = {}) {
       ...SEARCH_TOOL_DEFINITIONS,
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
+      ...AUTOMATION_TOOL_DEFINITIONS,
       ...WEB_TOOL_DEFINITIONS,
       ...BROWSER_TOOL_DEFINITIONS,
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),

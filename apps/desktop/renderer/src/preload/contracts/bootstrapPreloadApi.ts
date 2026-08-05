@@ -13,9 +13,12 @@ import type {
   GoalPlan,
   GoalPlanStatus,
   AutomationBootstrapResult,
+  AutomationCreateContext,
   AutomationCreateInput,
   AutomationDefinition,
   AutomationEvent,
+  AutomationProposalAction,
+  AutomationProposalActionResult,
   AutomationRun,
   AutomationRunListInput,
   AutomationRunNowInput,
@@ -787,7 +790,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
@@ -828,6 +831,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly automationRunsRetry: (params: { runId: string }) => Promise<AutomationRun>;
   readonly automationRunsCancel: (params: { runId: string }) => Promise<AutomationRun>;
   readonly automationsSetRuntimePaused: (params: { paused: boolean }) => Promise<AutomationBootstrapResult['runtime']>;
+  readonly automationProposalAct: (params: {
+    conversationId: string;
+    proposalId: string;
+    fingerprint: string;
+    action: AutomationProposalAction;
+  }) => Promise<AutomationProposalActionResult>;
   readonly onAutomationsChanged: (listener: (event: AutomationEvent) => void) => () => void;
   readonly onAutomationOpenRun: (listener: (event: { automationId: string; runId: string; conversationId?: number | null }) => void) => () => void;
   // Goal 模式计划（见 Goal 模式设计）。

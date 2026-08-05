@@ -141,6 +141,7 @@ import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
 import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
 import { createAutomationApplicationService } from './automation-application-service.mjs';
+import { createAutomationChatProposalService } from './automation-chat-proposal-service.mjs';
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
@@ -362,6 +363,15 @@ const automationApplicationService = createAutomationApplicationService({
   store: automationStore,
   getRunner: () => automationRunner,
   getScheduler: () => automationRuntimeOwner?.scheduler ?? null,
+});
+const automationProposalService = createAutomationChatProposalService({
+  getContext: (conversationId) => (
+    conversationStore.getConversation(conversationId)?.automationCreateContext ?? null
+  ),
+  saveContext: (conversationId, context) => (
+    conversationStore.updateAutomationCreateContext(conversationId, context)
+  ),
+  createAutomation: (definition) => automationApplicationService.create(definition),
 });
 
 const goalPlanStore = createGoalPlanStore({
@@ -997,6 +1007,7 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
+  automationProposalService,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
@@ -1673,6 +1684,8 @@ const conversationApplicationService = createConversationApplicationService({
   },
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
+  updateAutomationCreateContext: (id, context) =>
+    conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
   appendMessage: (id, message) => conversationStore.appendMessage(id, message),
   updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
@@ -1976,7 +1989,10 @@ function registerDesktopIpcHost() {
         day: (params) => collectUsageDay({ ...params, llmConfigStore }),
       },
     }),
-    ...createAutomationIpcRegistrations({ automations: automationApplicationService }),
+    ...createAutomationIpcRegistrations({
+      automations: automationApplicationService,
+      proposals: automationProposalService,
+    }),
     ...createGoalIpcRegistrations({
       goalPlans: goalApplicationService,
       goalRunner: {
@@ -3104,6 +3120,7 @@ function startLocalRuntime() {
     mcpRegistry,
     mcpCredentialResolver,
     shellProvider,
+    automationProposalService,
     // 让 AI 工具路径（goal_create_plan / goal_update_task）与 IPC 路径共享同一个
     // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
     goalProvider: createLocalGoalProvider({ goalPlanStore }),

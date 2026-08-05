@@ -992,3 +992,4 @@ export * from './system-context.ts';
 export * from './goal.ts';
 export * from './updater.ts';
 export * from './appshot.ts';
+export * from './automation.ts';

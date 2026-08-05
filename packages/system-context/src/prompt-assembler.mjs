@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { joinPromptSections } from './rendering.mjs';
 import { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 import { createAttachmentPromptSource } from './sources/attachment-source.mjs';
+import { createAutomationIntentPromptSource } from './sources/automation-intent-source.mjs';
 import { createContinuityPromptSource } from './sources/continuity-source.mjs';
 import { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
 import { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
@@ -85,6 +86,7 @@ export function createDefaultPromptSourceRegistry() {
       createProjectInstructionsPromptSource(),
       createContextExtensionPromptSource(),
       createRuntimeReminderPromptSource(),
+      createAutomationIntentPromptSource(),
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),
       createGoalCheckpointPromptSource(),

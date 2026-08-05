@@ -216,6 +216,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   automationRunsRetry: (params) => ipcRenderer.invoke('automations:runs:retry', params),
   automationRunsCancel: (params) => ipcRenderer.invoke('automations:runs:cancel', params),
   automationsSetRuntimePaused: (params) => ipcRenderer.invoke('automations:runtime:set-paused', params),
+  automationProposalAct: (params) => ipcRenderer.invoke('automations:proposal:act', params),
   onAutomationsChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('automations:changed', handler);

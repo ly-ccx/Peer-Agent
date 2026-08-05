@@ -21,6 +21,7 @@ const unavailableApi: ClientApi = {
   automationRunsRetry: unavailableMethod('automationRunsRetry'),
   automationRunsCancel: unavailableMethod('automationRunsCancel'),
   automationsSetRuntimePaused: unavailableMethod('automationsSetRuntimePaused'),
+  automationProposalAct: unavailableMethod('automationProposalAct'),
   onAutomationsChanged: unavailableMethod('onAutomationsChanged'),
   onAutomationOpenRun: unavailableMethod('onAutomationOpenRun'),
   getClientSession: unavailableMethod('getClientSession'),

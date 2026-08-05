@@ -24,6 +24,7 @@ function createHarness() {
       removeGroup: port('remove-group'),
       setDefault: port('set-default'),
       test: port('test'),
+      complete: port('complete'),
     },
   });
   const handlers = new Map();
@@ -37,7 +38,7 @@ function createHarness() {
   return { calls, handlers, registrations };
 }
 
-test('provider configuration IPC has one owner for the exact 14-channel set', () => {
+test('provider configuration IPC has one owner for the exact 15-channel set', () => {
   const { handlers, registrations } = createHarness();
 
   assert.deepEqual(registrations.map(({ owner }) => owner), ['provider-configuration-ipc']);
@@ -46,6 +47,7 @@ test('provider configuration IPC has one owner for the exact 14-channel set', ()
     'llm:add-model',
     'llm:channels:list',
     'llm:chat:list',
+    'llm:complete',
     'llm:duplicate',
     'llm:duplicate-model',
     'llm:groups:list',

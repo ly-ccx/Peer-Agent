@@ -45,6 +45,7 @@ export function createProviderConfigurationIpcRegistrations({ providers } = {}) 
       ipc.handle('llm:remove-group', (_event, { groupId }) => ports.removeGroup(groupId));
       ipc.handle('llm:set-default', (_event, { id }) => ports.setDefault(id));
       ipc.handle('llm:test', (_event, { id }) => ports.test(id));
+      ipc.handle('llm:complete', (_event, params) => ports.complete(params));
     }),
   ]);
 }

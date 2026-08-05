@@ -56,6 +56,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'automations:create',
   'automations:get',
   'automations:list',
+  'automations:proposal:act',
   'automations:run-now',
   'automations:runs:cancel',
   'automations:runs:get',

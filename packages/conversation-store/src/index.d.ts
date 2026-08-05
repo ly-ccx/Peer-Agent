@@ -1,4 +1,5 @@
 import type {
+  AutomationCreateContext,
   ContextAccountingObserved,
   ContextAccountingSnapshot,
   ConversationLifetimeUsage,
@@ -27,6 +28,7 @@ export interface ConversationMeta {
   readonly contentRevision?: number;
   readonly contextSnapshot?: ConversationContextSnapshot | null;
   readonly effort?: string;
+  readonly automationCreateContext?: AutomationCreateContext | null;
   readonly messageCount?: number;
   readonly [key: string]: unknown;
 }
@@ -79,9 +81,10 @@ export interface ConversationStore {
     id: string,
     options?: { modelKey?: string | null },
   ): ContextAccountingObserved | null;
-  createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
+  createConversation(input?: { title?: string; workspacePath?: string; mode?: string; automationCreateContext?: AutomationCreateContext | null }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
+  updateAutomationCreateContext(id: string, context: AutomationCreateContext | null): ConversationMeta | null;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
   updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;
   addUsage(id: string, usage: ConversationUsage): unknown;

@@ -3,6 +3,7 @@ export {
   createDefaultPromptSourceRegistry,
   createPromptSourceRegistry,
   createAttachmentPromptSource,
+  createAutomationIntentPromptSource,
   createBrainstormingPromptSource,
   createContinuityPromptSource,
   createContextExtensionPromptSource,

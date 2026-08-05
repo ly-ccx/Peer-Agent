@@ -187,6 +187,23 @@ export {
   normalizeGoalTiming,
 } from './goal-plan-store.mjs';
 export {
+  automationRunIsTerminal,
+  createAutomationStore,
+} from './automation-store.mjs';
+export {
+  automationOccurrences,
+  latestAutomationOccurrence,
+  nextAutomationOccurrence,
+  parseAutomationCron,
+  validateAutomationSchedule,
+} from './automation-schedule.mjs';
+export {
+  automationIdempotencyKey,
+  completeOnceAutomationIfNeeded,
+  createAutomationScheduler,
+  reconcileAutomationSchedules,
+} from './automation-scheduler.mjs';
+export {
   computePlanScopeSnapshot,
   computeReanchorInterval,
   createDeterministicExplorePlan,

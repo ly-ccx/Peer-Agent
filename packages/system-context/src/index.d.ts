@@ -28,6 +28,7 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly effort?: string | null;
   readonly goalPlanStore?: unknown;
   readonly mcpRegistry?: unknown;
+  readonly automationCreateContext?: unknown;
   readonly contextAttachments?: readonly unknown[];
   readonly attachmentContext?: readonly unknown[];
   readonly configInstructions?: readonly unknown[];
@@ -121,6 +122,7 @@ export function renderBrainstormingPrompt(): string;
 export function renderRuntimeContext(workspacePath?: string | null): string;
 
 export function createAttachmentPromptSource(): PromptSource;
+export function createAutomationIntentPromptSource(): PromptSource;
 export function createBrainstormingPromptSource(): PromptSource;
 export function createContinuityPromptSource(): PromptSource;
 export function createContextExtensionPromptSource(options?: { readonly maxCharsPerExtension?: number }): PromptSource;
