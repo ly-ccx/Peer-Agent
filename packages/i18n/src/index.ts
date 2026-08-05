@@ -118,6 +118,10 @@ export type TranslationKey =
   | 'settings.git'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
+  | 'settings.fallbackVision'
+  | 'settings.fallbackVision.description'
+  | 'settings.fallbackVision.none'
+  | 'settings.fallbackVision.strippedHint'
   | 'settings.config'
   | 'settings.config.description'
   | 'settings.config.export'
@@ -167,6 +171,14 @@ export type TranslationKey =
   | 'settings.usage.daily.totalTokens'
   | 'settings.usage.daily.requests'
   | 'settings.usage.daily.activeDays'
+  | 'settings.usage.dayDetail'
+  | 'settings.usage.dayDetail.close'
+  | 'settings.usage.dayDetail.hint'
+  | 'settings.usage.dayDetail.models'
+  | 'settings.usage.dayDetail.hours'
+  | 'settings.usage.dayDetail.hour'
+  | 'settings.usage.dayDetail.empty'
+  | 'settings.usage.col.requests'
   | 'auth.login'
   | 'auth.logout'
   | 'auth.not_configured'
@@ -694,6 +706,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
+    'settings.fallbackVision': '兜底多模态模型',
+    'settings.fallbackVision.description': '当主模型不支持图像时，先用此模型识别本轮新图，再把文字结果静默交给主模型。未配置则剥离图片并给出弱提示。',
+    'settings.fallbackVision.none': '不使用（仅剥离图片）',
+    'settings.fallbackVision.strippedHint': '当前模型不支持图像，已剥离本轮图片。可在设置 → 模型中配置兜底多模态模型。',
     'settings.config': '配置管理',
     'settings.config.description': '导出技能、授权规则与界面设置，便于在其它设备恢复；登录态与设备身份不会被导出。',
     'settings.config.export': '导出配置',
@@ -743,6 +759,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.daily.totalTokens': '区间 Token',
     'settings.usage.daily.requests': '请求数',
     'settings.usage.daily.activeDays': '有用量天数',
+    'settings.usage.dayDetail': '当天详情',
+    'settings.usage.dayDetail.close': '关闭详情',
+    'settings.usage.dayDetail.hint': '点击热力图或趋势图中的某一天，查看当天按模型的用量明细与小时分布。',
+    'settings.usage.dayDetail.models': '按模型',
+    'settings.usage.dayDetail.hours': '24 小时分布',
+    'settings.usage.dayDetail.hour': '点',
+    'settings.usage.dayDetail.empty': '这一天没有记录到用量（请求日志自接入后开始记录）。',
+    'settings.usage.col.requests': '请求数',
     'auth.login': '登录',
     'auth.logout': '退出',
     'auth.not_configured': '登录未配置',
@@ -1289,6 +1313,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
+    'settings.fallbackVision': 'Fallback vision model',
+    'settings.fallbackVision.description': 'When the main model cannot read images, use this model to recognize new images in the current turn and silently pass text to the main model. If unset, images are stripped with a light notice.',
+    'settings.fallbackVision.none': 'None (strip images only)',
+    'settings.fallbackVision.strippedHint': 'Current model does not support images; new images were stripped. Configure a fallback vision model in Settings → Models.',
     'settings.config': 'Configuration',
     'settings.config.description': 'Export your skills, permission rules and UI settings to restore on another device. Login state and device identity are not exported.',
     'settings.config.export': 'Export',
@@ -1338,6 +1366,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.daily.totalTokens': 'Range tokens',
     'settings.usage.daily.requests': 'Requests',
     'settings.usage.daily.activeDays': 'Active days',
+    'settings.usage.dayDetail': 'Day detail',
+    'settings.usage.dayDetail.close': 'Close detail',
+    'settings.usage.dayDetail.hint': 'Click a day in the heatmap or trend chart to see that day\'s per-model breakdown and hourly distribution.',
+    'settings.usage.dayDetail.models': 'By model',
+    'settings.usage.dayDetail.hours': '24-hour distribution',
+    'settings.usage.dayDetail.hour': ':00',
+    'settings.usage.dayDetail.empty': 'No usage recorded on this day (request log starts once connected).',
+    'settings.usage.col.requests': 'Requests',
     'auth.login': 'Sign in',
     'auth.logout': 'Sign out',
     'auth.not_configured': 'Auth not configured',

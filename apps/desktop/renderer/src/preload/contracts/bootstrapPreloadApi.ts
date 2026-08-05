@@ -12,6 +12,15 @@ import type {
   GoalManualConfirmation,
   GoalPlan,
   GoalPlanStatus,
+  AutomationBootstrapResult,
+  AutomationCreateInput,
+  AutomationDefinition,
+  AutomationEvent,
+  AutomationRun,
+  AutomationRunListInput,
+  AutomationRunNowInput,
+  AutomationSummary,
+  AutomationUpdateInput,
   LlmModelListResult,
   LlmModelFetchRequest,
   LlmModelInfo,
@@ -239,6 +248,55 @@ export interface UsageDailySnapshot {
   };
   readonly notes: {
     readonly emptyLog: boolean;
+    readonly scope: string;
+  };
+}
+
+/** 请求日志按天详情（点击热力图/日条某一天后的下钻，对应 main `usage:day`）。 */
+export interface UsageDayModelRow {
+  readonly key: string;
+  readonly label: string;
+  readonly modelProviderId: string | null;
+  readonly providerName: string | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+  readonly requestCount: number;
+  readonly estimatedCostUsd: number | null;
+}
+
+export interface UsageDayHourBucket {
+  readonly hour: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+  readonly requestCount: number;
+}
+
+export interface UsageDaySnapshot {
+  readonly date: string | null;
+  readonly source: string;
+  readonly totals: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheWriteTokens: number;
+    readonly totalTokens: number;
+    readonly requestCount: number;
+    readonly pricedRequestCount: number;
+    readonly estimatedCostUsd: number | null;
+    readonly modelCount: number;
+    readonly activeHourCount: number;
+    readonly maxHourTokens: number;
+  };
+  readonly byModel: readonly UsageDayModelRow[];
+  readonly hours: readonly UsageDayHourBucket[];
+  readonly notes: {
+    readonly emptyDay: boolean;
     readonly scope: string;
   };
 }
@@ -694,6 +752,7 @@ export interface BootstrapPreloadApi {
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
   readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;
+  readonly usageGetDay: (params: { date: string }) => Promise<UsageDaySnapshot>;
   readonly conversationsList: (params?: {
     workspacePath?: string | null;
     status?: 'active' | 'archived' | readonly ('active' | 'archived')[];
@@ -758,6 +817,19 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
       cacheReadTokens?: number;
     };
   }) => Promise<LifetimeUsage>;
+  readonly automationsBootstrap: () => Promise<AutomationBootstrapResult>;
+  readonly automationsList: (params?: { workspacePath?: string; statuses?: string[]; query?: string }) => Promise<readonly AutomationSummary[]>;
+  readonly automationsGet: (params: { automationId: string }) => Promise<AutomationDefinition | null>;
+  readonly automationsCreate: (params: AutomationCreateInput) => Promise<AutomationDefinition>;
+  readonly automationsUpdate: (params: AutomationUpdateInput) => Promise<AutomationDefinition>;
+  readonly automationRunsList: (params: AutomationRunListInput) => Promise<readonly AutomationRun[]>;
+  readonly automationRunsGet: (params: { runId: string }) => Promise<AutomationRun | null>;
+  readonly automationsRunNow: (params: AutomationRunNowInput) => Promise<AutomationRun>;
+  readonly automationRunsRetry: (params: { runId: string }) => Promise<AutomationRun>;
+  readonly automationRunsCancel: (params: { runId: string }) => Promise<AutomationRun>;
+  readonly automationsSetRuntimePaused: (params: { paused: boolean }) => Promise<AutomationBootstrapResult['runtime']>;
+  readonly onAutomationsChanged: (listener: (event: AutomationEvent) => void) => () => void;
+  readonly onAutomationOpenRun: (listener: (event: { automationId: string; runId: string; conversationId?: number | null }) => void) => () => void;
   // Goal 模式计划（见 Goal 模式设计）。
   // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
   readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
@@ -893,6 +965,13 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
   }) => void) => () => void;
+  /** 弱提示（如非 vision 模型剥离图片），不中断发送。 */
+  readonly onChatStreamNotice: (listener: (payload: {
+    streamId: string;
+    code?: string;
+    message?: string;
+    imageCount?: number;
+  }) => void) => () => void;
   readonly onChatStreamProviderRecovery: (listener: (payload: {
     streamId: string;
     conversationId: string;
@@ -970,6 +1049,14 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly llmRemoveGroup: (params: { groupId: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;
+  readonly llmComplete: (params: { id: string; prompt: string; maxTokens?: number }) => Promise<{
+    readonly success: boolean;
+    readonly text?: string;
+    readonly error?: string;
+    readonly model?: string;
+    readonly providerId?: string;
+    readonly latencyMs?: number;
+  }>;
   readonly llmGetSubscriptionQuota: (params: { id: string; force?: boolean }) => Promise<LlmSubscriptionQuota>;
   // ADR 28: 启动 ChatGPT 订阅 OAuth 登录(browser 模式)。
   // 链路契约:"先登录、成功后才落盘"。

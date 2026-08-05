@@ -2,10 +2,13 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { clientApi } from '../clientApi';
+import { Overlay } from '../app/components/Overlay';
 import type {
   UsageDailyDay,
   UsageDailyRange,
   UsageDailySnapshot,
+  UsageDayModelRow,
+  UsageDaySnapshot,
   UsageStatsGroupRow,
   UsageStatsSnapshot,
 } from '../preload/contracts/bootstrapPreloadApi';
@@ -130,10 +133,14 @@ function GroupTable({
 function TokenHeatmap({
   days,
   maxTokens,
+  selectedDate,
+  onSelectDay,
   i18n,
 }: {
   readonly days: readonly UsageDailyDay[];
   readonly maxTokens: number;
+  readonly selectedDate: string | null;
+  readonly onSelectDay: (date: string) => void;
   readonly i18n: I18nRuntime;
 }) {
   const weeks = useMemo(() => {
@@ -178,7 +185,15 @@ function TokenHeatmap({
   // 短周期（7 天 / 1 个月）：单行日条，与下方趋势图左右边界对齐；
   // 日历矩阵只在长周期（3 个月及以上）保留。
   if (density === 'short') {
-    return <HeatmapDayStrip days={days} maxTokens={maxTokens} i18n={i18n} />;
+    return (
+      <HeatmapDayStrip
+        days={days}
+        maxTokens={maxTokens}
+        selectedDate={selectedDate}
+        onSelectDay={onSelectDay}
+        i18n={i18n}
+      />
+    );
   }
 
   return (
@@ -216,11 +231,14 @@ function TokenHeatmap({
                   return <span key={`e-${weekIndex}-${dayIndex}`} className="usage-heatmap__cell usage-heatmap__cell--empty" />;
                 }
                 const level = intensityLevel(day.totalTokens, maxTokens);
+                const selected = selectedDate === day.date;
                 return (
-                  <span
+                  <button
+                    type="button"
                     key={day.date}
-                    className={`usage-heatmap__cell usage-heatmap__cell--l${level}`}
+                    className={`usage-heatmap__cell usage-heatmap__cell--l${level}${selected ? ' usage-heatmap__cell--selected' : ''}`}
                     title={`${day.date}: ${formatTokenCount(day.totalTokens)} tokens · ${formatCount(day.requestCount)} req`}
+                    onClick={() => onSelectDay(day.date)}
                   />
                 );
               }),
@@ -249,10 +267,14 @@ function TokenHeatmap({
 function HeatmapDayStrip({
   days,
   maxTokens,
+  selectedDate,
+  onSelectDay,
   i18n,
 }: {
   readonly days: readonly UsageDailyDay[];
   readonly maxTokens: number;
+  readonly selectedDate: string | null;
+  readonly onSelectDay: (date: string) => void;
   readonly i18n: I18nRuntime;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -282,11 +304,14 @@ function HeatmapDayStrip({
       <div className="usage-heatmap-strip__row">
         {days.map((day, index) => {
           const level = intensityLevel(day.totalTokens, maxTokens);
+          const selected = selectedDate === day.date;
           return (
-            <span
+            <button
+              type="button"
               key={day.date}
-              className={`usage-heatmap-strip__cell usage-heatmap__cell--l${level}`}
+              className={`usage-heatmap-strip__cell usage-heatmap__cell--l${level}${selected ? ' usage-heatmap-strip__cell--selected' : ''}`}
               onMouseEnter={() => setHoverIndex(index)}
+              onClick={() => onSelectDay(day.date)}
             />
           );
         })}
@@ -330,10 +355,12 @@ function HeatmapDayStrip({
 function TokenTrendChart({
   days,
   maxTokens,
+  onSelectDay,
   i18n,
 }: {
   readonly days: readonly UsageDailyDay[];
   readonly maxTokens: number;
+  readonly onSelectDay: (date: string) => void;
   readonly i18n: I18nRuntime;
 }) {
   const width = 720;
@@ -406,6 +433,9 @@ function TokenTrendChart({
           aria-label={i18n.t('settings.usage.trend')}
           onMouseMove={(event) => resolveHoverIndex(event.clientX, event.currentTarget)}
           onMouseLeave={() => setHoverIndex(null)}
+          onClick={() => {
+            if (hoverIndex != null && days[hoverIndex]) onSelectDay(days[hoverIndex].date);
+          }}
         >
           <defs>
             <linearGradient id="usageTrendFill" x1="0" y1="0" x2="0" y2="1">
@@ -478,6 +508,163 @@ function TokenTrendChart({
   );
 }
 
+/**
+ * 某一天的详情面板：汇总指标 + 按模型拆分表 + 24 小时分布。
+ * 数据来自 main `usage:day`（usage-day.mjs）。
+ */
+function DayDetailPanel({
+  detail,
+  loading,
+  error,
+  onClose,
+  i18n,
+}: {
+  readonly detail: UsageDaySnapshot | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly onClose: () => void;
+  readonly i18n: I18nRuntime;
+}) {
+  const [hoverHour, setHoverHour] = useState<number | null>(null);
+  const totals = detail?.totals;
+  const maxHourTokens = totals?.maxHourTokens || 1;
+  const hoveredHour = hoverHour != null && detail ? detail.hours[hoverHour] : null;
+
+  return (
+    <div className="usage-day-detail">
+      <div className="usage-day-detail__header">
+        <div>
+          <h3>{i18n.t('settings.usage.dayDetail')}</h3>
+          {detail?.date ? <p className="usage-stats-note">{detail.date}</p> : null}
+        </div>
+        <button
+          type="button"
+          className="usage-day-detail__close"
+          onClick={onClose}
+          aria-label={i18n.t('settings.usage.dayDetail.close')}
+        >
+          ×
+        </button>
+      </div>
+
+      {loading && !detail ? (
+        <p className="settings-status">{i18n.t('settings.usage.loading')}</p>
+      ) : error ? (
+        <p className="settings-status settings-status--error">{error}</p>
+      ) : detail && totals ? (
+        detail.notes.emptyDay ? (
+          <p className="usage-stats-note">{i18n.t('settings.usage.dayDetail.empty')}</p>
+        ) : (
+          <>
+            <div className="usage-stats-summary-grid">
+              <article className="settings-card usage-stats-metric">
+                <span className="usage-stats-metric__label">{i18n.t('settings.usage.totalTokens')}</span>
+                <strong className="usage-stats-metric__value">{formatTokenCount(totals.totalTokens)}</strong>
+                {formatTokenYiApprox(totals.totalTokens) ? (
+                  <span className="usage-stats-metric__yi">{formatTokenYiApprox(totals.totalTokens)}</span>
+                ) : null}
+              </article>
+              <article className="settings-card usage-stats-metric">
+                <span className="usage-stats-metric__label">{i18n.t('settings.usage.estimatedCost')}</span>
+                <strong className="usage-stats-metric__value">{formatUsd(totals.estimatedCostUsd)}</strong>
+              </article>
+              <article className="settings-card usage-stats-metric">
+                <span className="usage-stats-metric__label">{i18n.t('settings.usage.col.requests')}</span>
+                <strong className="usage-stats-metric__value">{formatCount(totals.requestCount)}</strong>
+              </article>
+              <article className="settings-card usage-stats-metric">
+                <span className="usage-stats-metric__label">{i18n.t('settings.usage.byModel')}</span>
+                <strong className="usage-stats-metric__value">{formatCount(totals.modelCount)}</strong>
+              </article>
+            </div>
+
+            <div className="usage-day-detail__section">
+              <h4>{i18n.t('settings.usage.dayDetail.models')}</h4>
+              {detail.byModel.length === 0 ? (
+                <p className="usage-stats-note">{i18n.t('settings.usage.emptyGroup')}</p>
+              ) : (
+                <div className="usage-stats-table-wrap">
+                  <table className="usage-stats-table">
+                    <thead>
+                      <tr>
+                        <th>{i18n.t('settings.usage.col.model')}</th>
+                        <th>{i18n.t('settings.usage.col.requests')}</th>
+                        <th>{i18n.t('settings.usage.col.input')}</th>
+                        <th>{i18n.t('settings.usage.col.output')}</th>
+                        <th>{i18n.t('settings.usage.col.cacheRead')}</th>
+                        <th>{i18n.t('settings.usage.col.cacheWrite')}</th>
+                        <th>{i18n.t('settings.usage.col.total')}</th>
+                        <th>{i18n.t('settings.usage.col.cost')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.byModel.map((model: UsageDayModelRow) => (
+                        <tr key={model.key}>
+                          <td>
+                            <div className="usage-day-detail__model">
+                              <span>{model.label}</span>
+                              {model.providerName ? <small>{model.providerName}</small> : null}
+                            </div>
+                          </td>
+                          <td>{formatCount(model.requestCount)}</td>
+                          <td>{formatTokenCount(model.inputTokens)}</td>
+                          <td>{formatTokenCount(model.outputTokens)}</td>
+                          <td>{formatTokenCount(model.cacheReadTokens)}</td>
+                          <td>{formatTokenCount(model.cacheWriteTokens)}</td>
+                          <td>{formatTokenCount(model.totalTokens)}</td>
+                          <td>{formatUsd(model.estimatedCostUsd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="usage-day-detail__section">
+              <h4>{i18n.t('settings.usage.dayDetail.hours')}</h4>
+              <div className="usage-hours">
+                {hoveredHour ? (
+                  <div className="usage-hours__tooltip">
+                    {hoveredHour.hour}
+                    {i18n.t('settings.usage.dayDetail.hour')} · {formatTokenCount(hoveredHour.totalTokens)} tokens ·{' '}
+                    {formatCount(hoveredHour.requestCount)} req
+                  </div>
+                ) : null}
+                <div className="usage-hours__bars" onMouseLeave={() => setHoverHour(null)}>
+                  {detail.hours.map((hour) => {
+                    const ratio = hour.totalTokens > 0 ? Math.max(0.04, hour.totalTokens / maxHourTokens) : 0;
+                    return (
+                      <button
+                        type="button"
+                        key={hour.hour}
+                        className={`usage-hours__bar${hour.totalTokens === 0 ? ' usage-hours__bar--empty' : ''}${
+                          hoverHour === hour.hour ? ' usage-hours__bar--active' : ''
+                        }`}
+                        style={{ height: `${ratio * 100}%` } as CSSProperties}
+                        onMouseEnter={() => setHoverHour(hour.hour)}
+                        title={`${hour.hour}:00 · ${formatTokenCount(hour.totalTokens)} tokens · ${formatCount(hour.requestCount)} req`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="usage-hours__labels">
+                  {[0, 6, 12, 18, 23].map((h) => (
+                    <span key={h}>
+                      {h}
+                      {i18n.t('settings.usage.dayDetail.hour')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [snapshot, setSnapshot] = useState<UsageStatsSnapshot | null>(null);
   const [daily, setDaily] = useState<UsageDailySnapshot | null>(null);
@@ -486,6 +673,10 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [dailyLoading, setDailyLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dailyError, setDailyError] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [dayDetail, setDayDetail] = useState<UsageDaySnapshot | null>(null);
+  const [dayLoading, setDayLoading] = useState(false);
+  const [dayError, setDayError] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -511,6 +702,31 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
     } finally {
       setDailyLoading(false);
     }
+  }, []);
+
+  const loadDay = useCallback(async (date: string) => {
+    setDayLoading(true);
+    setDayError(null);
+    try {
+      const next = await clientApi.usageGetDay({ date });
+      setDayDetail(next);
+    } catch (err) {
+      setDayDetail(null);
+      setDayError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDayLoading(false);
+    }
+  }, []);
+
+  const handleSelectDay = useCallback((date: string) => {
+    setSelectedDay(date);
+    void loadDay(date);
+  }, [loadDay]);
+
+  const handleCloseDay = useCallback(() => {
+    setSelectedDay(null);
+    setDayDetail(null);
+    setDayError(null);
   }, []);
 
   useEffect(() => {
@@ -625,6 +841,7 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                   {i18n.t('settings.usage.heatmap.note')}
                   {daily ? ` · ${daily.startDate} → ${daily.endDate}` : ''}
                 </p>
+                <p className="usage-stats-note">{i18n.t('settings.usage.dayDetail.hint')}</p>
               </div>
               <div className="usage-range-tabs" role="tablist" aria-label={i18n.t('settings.usage.range')}>
                 {RANGE_OPTIONS.map((option) => (
@@ -662,18 +879,47 @@ export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                 {daily.notes.emptyLog ? (
                   <p className="usage-stats-note usage-stats-note--warn">{i18n.t('settings.usage.heatmap.empty')}</p>
                 ) : null}
-                <TokenHeatmap days={daily.days} maxTokens={daily.totals.maxTokens} i18n={i18n} />
+                <TokenHeatmap
+                  days={daily.days}
+                  maxTokens={daily.totals.maxTokens}
+                  selectedDate={selectedDay}
+                  onSelectDay={handleSelectDay}
+                  i18n={i18n}
+                />
 
                 <div className="usage-trend-block">
                   <div className="usage-trend-block__title">
                     <h3>{i18n.t('settings.usage.trend')}</h3>
                     <span className="usage-stats-note">{rangeLabel(range, i18n)}</span>
                   </div>
-                  <TokenTrendChart days={daily.days} maxTokens={daily.totals.maxTokens} i18n={i18n} />
+                  <TokenTrendChart
+                    days={daily.days}
+                    maxTokens={daily.totals.maxTokens}
+                    onSelectDay={handleSelectDay}
+                    i18n={i18n}
+                  />
                 </div>
               </>
             ) : null}
           </section>
+
+          {selectedDay ? (
+            <Overlay
+              onClose={handleCloseDay}
+              ariaLabel={i18n.t('settings.usage.dayDetail')}
+              panelClassName="usage-day-modal"
+            >
+              {({ requestClose }) => (
+                <DayDetailPanel
+                  detail={dayDetail}
+                  loading={dayLoading}
+                  error={dayError}
+                  onClose={requestClose}
+                  i18n={i18n}
+                />
+              )}
+            </Overlay>
+          ) : null}
 
           <GroupTable
             title={i18n.t('settings.usage.byProvider')}

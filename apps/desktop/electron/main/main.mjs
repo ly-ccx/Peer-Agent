@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
@@ -61,6 +61,7 @@ import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMc
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
 import { collectUsageDaily } from './usage-daily.mjs';
+import { collectUsageDay } from './usage-day.mjs';
 import { listChannelDescriptors, listServiceTemplates, resolveChannel } from './provider-channels.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { createHostRestarter } from './host-restart.mjs';
@@ -74,6 +75,7 @@ import { createTrayController, TRAY_RECENT_EXPANDED_LIMIT, TRAY_RECENT_LIMIT } f
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import {
+  createAutomationStore,
   createGoalPlanStore,
   createGoalRunner,
   decideIntakeConvergence,
@@ -107,6 +109,10 @@ import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
+import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
+import { createAutomationRunner } from './automation-runner.mjs';
+import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
+import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -133,6 +139,8 @@ import { createConversationSessionIpcRegistrations } from './ipc/register-conver
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
+import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
+import { createAutomationApplicationService } from './automation-application-service.mjs';
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
@@ -343,6 +351,19 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
   trayController?.scheduleRefresh?.();
 });
 
+const automationStore = createAutomationStore({
+  onChange: (payload) => {
+    broadcastToAllWindows('automations:changed', payload);
+  },
+});
+let automationRuntimeOwner = null;
+let automationRunner = null;
+const automationApplicationService = createAutomationApplicationService({
+  store: automationStore,
+  getRunner: () => automationRunner,
+  getScheduler: () => automationRuntimeOwner?.scheduler ?? null,
+});
+
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
@@ -529,6 +550,19 @@ function openConversationFromTaskNotification(payload = {}) {
   return false;
 }
 
+function openAutomationRunFromNotification(payload = {}) {
+  showOrCreateMainWindow();
+  const window = getMainWindow();
+  if (!window || window.isDestroyed()) return;
+  const send = () => window.webContents.send('automations:open-run', {
+    automationId: typeof payload.automationId === 'string' ? payload.automationId : '',
+    runId: typeof payload.runId === 'string' ? payload.runId : '',
+    conversationId: payload.conversationId ?? null,
+  });
+  if (window.webContents.isLoadingMainFrame()) window.webContents.once('did-finish-load', send);
+  else send();
+}
+
 function showOrCreateMainWindow() {
   const existing = getPeerAgentMainWindow();
   if (existing && !existing.isDestroyed()) {
@@ -594,6 +628,10 @@ function createAppTrayController() {
     workspaceRoot: workspaceRoot || path.join(__dirname, '../../..'),
     resourcesRoot: process.resourcesPath,
     listRecentConversations: listTrayRecentConversations,
+    getAutomationRuntime: async () => ({
+      globallyPaused: automationStore.getRuntimeState().globallyPaused,
+      activeCount: automationStore.listDefinitions({ statuses: ['active'] }).length,
+    }),
     handlers: {
       onOpenConversation: (payload) => {
         openConversationFromTaskNotification({
@@ -606,6 +644,12 @@ function createAppTrayController() {
       onNewChat: () => openTrayNewChat(),
       onOpenApp: () => {
         showOrCreateMainWindow();
+      },
+      onOpenAutomations: () => openAutomationRunFromNotification({}),
+      onToggleAutomations: (paused) => {
+        const scheduler = automationRuntimeOwner?.scheduler;
+        if (scheduler) scheduler.setGloballyPaused(paused);
+        else automationStore.setRuntimeState({ globallyPaused: paused });
       },
       onQuit: () => {
         app.quit();
@@ -959,6 +1003,8 @@ const llmChatService = createLlmChatService({
   // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
   ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
+  // 全局兜底多模态模型配置（settings.json → fallbackVision）。
+  getSettings: () => settingsStore.getAll(),
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
@@ -1516,6 +1562,7 @@ const providerConfigurationApplicationService = createProviderConfigurationAppli
   removeGroup: (groupId) => llmConfigStore.removeGroup(groupId),
   setDefault: (id) => llmConfigStore.setDefault(id),
   testConnection: (id) => llmConfigStore.testConnection(id),
+  completePrompt: (params) => llmConfigStore.completePrompt(params),
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
   notifyOAuthRefreshed: ({ reason, refreshed }) => {
     console.info(`[llm] silent oauth refresh (${reason}): refreshed ${refreshed} credential(s)`);
@@ -1926,8 +1973,10 @@ function registerDesktopIpcHost() {
       usage: {
         stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
         daily: (params) => collectUsageDaily(params),
+        day: (params) => collectUsageDay({ ...params, llmConfigStore }),
       },
     }),
+    ...createAutomationIpcRegistrations({ automations: automationApplicationService }),
     ...createGoalIpcRegistrations({
       goalPlans: goalApplicationService,
       goalRunner: {
@@ -3190,6 +3239,45 @@ function startBackgroundWork() {
   });
 }
 
+function startAutomationRuntime() {
+  const worktreeAdapter = createAutomationWorktreeAdapter();
+  const outcomeController = createAutomationOutcomeController({
+    store: automationStore,
+    createNotification: (options) => new Notification(options),
+    openRun: openAutomationRunFromNotification,
+    logger: console,
+  });
+  automationRunner = createAutomationRunner({
+    store: automationStore,
+    conversationStore,
+    llmChatService,
+    worktreeAdapter,
+    onBackgroundEvent: ({ channel, payload }) => broadcastToAllWindows(channel, payload),
+    onRunUpdated: (run) => outcomeController.handleRunUpdated(run),
+    logger: console,
+  });
+  automationRuntimeOwner = createAutomationRuntimeOwner({
+    store: automationStore,
+    powerMonitor,
+    onRunReady: (run) => {
+      void automationRunner.run(run).catch((error) => {
+        console.error('[automation-runtime] runner failed:', error);
+      });
+    },
+    scheduleTimer: (callback, delay) => setTimeout(callback, delay),
+    cancelTimer: (timer) => clearTimeout(timer),
+    logger: console,
+  });
+  automationRuntimeOwner.start();
+  return {
+    dispose: () => {
+      automationRuntimeOwner?.dispose();
+      automationRuntimeOwner = null;
+      automationRunner = null;
+    },
+  };
+}
+
 const desktopCompositionRoot = createDesktopCompositionRoot({
   logger: console,
   initialOwners: [
@@ -3217,6 +3305,7 @@ const desktopCompositionRoot = createDesktopCompositionRoot({
       },
     },
     { name: 'desktop-affordances', optional: true, start: startDesktopAffordances },
+    { name: 'automation-runtime', optional: true, start: startAutomationRuntime },
     { name: 'background-work', optional: true, start: startBackgroundWork },
   ],
 });

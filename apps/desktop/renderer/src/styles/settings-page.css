@@ -460,8 +460,7 @@
   gap: var(--space-3);
 }
 
-.settings-grid label,
-.mcp-toggle {
+.settings-grid label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -623,8 +622,11 @@
 }
 
 .mcp-toggle {
-  flex-direction: row;
+  display: flex;
   align-items: center;
+  gap: var(--space-2);
+  color: var(--pa-text-secondary);
+  font-size: 0.78rem;
   white-space: nowrap;
 }
 
@@ -1853,7 +1855,7 @@
   width: 100%;
   height: 180px;
   display: block;
-  cursor: crosshair;
+  cursor: pointer;
 }
 
 .usage-trend__axis {
@@ -1941,4 +1943,208 @@
   .usage-stats-panel .settings-panel__header {
     flex-direction: column;
   }
+}
+
+/* —— 热力图 / 日条点击下钻（格子变为可点击按钮） —— */
+.usage-heatmap__cell,
+.usage-heatmap-strip__cell {
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.usage-heatmap__cell:focus-visible,
+.usage-heatmap-strip__cell:focus-visible {
+  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline-offset: 1px;
+}
+
+.usage-heatmap__cell--selected,
+.usage-heatmap-strip__cell--selected {
+  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline-offset: 1px;
+}
+
+/* —— 当天详情面板（点击某天后下钻） —— */
+.usage-day-detail {
+  margin-top: 0;
+}
+
+.usage-day-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-day-detail__header h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.usage-day-detail__close {
+  border: none;
+  background: transparent;
+  color: var(--pa-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.usage-day-detail__close:hover {
+  background: color-mix(in srgb, var(--pa-border-subtle) 40%, transparent);
+  color: var(--pa-text-primary);
+}
+
+.usage-day-detail__section {
+  margin-top: 16px;
+}
+
+.usage-day-detail__section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-text-secondary);
+}
+
+.usage-day-detail__model {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.usage-day-detail__model small {
+  color: var(--pa-text-secondary);
+  font-size: 11px;
+}
+
+/* —— 24 小时分布条形图 —— */
+.usage-hours {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-hours__tooltip {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--pa-border-subtle);
+  background: var(--pa-surface-elevated, var(--pa-surface));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  color: var(--pa-text-primary);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.usage-hours__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 96px;
+  padding: 14px 2px 0;
+}
+
+.usage-hours__bar {
+  flex: 1 1 0;
+  min-width: 0;
+  border: none;
+  padding: 0;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 55%, var(--pa-surface));
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+
+.usage-hours__bar--empty {
+  background: color-mix(in srgb, var(--pa-border-subtle) 70%, transparent);
+}
+
+.usage-hours__bar--active,
+.usage-hours__bar:hover {
+  background: var(--pa-accent, #3b82f6);
+}
+
+.usage-hours__labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--pa-text-secondary);
+  font-size: 11px;
+}
+
+/* —— 统计面板右上角刷新按钮（settings-btn 此前仅在 UsageStatsPanel 使用、无样式定义，
+      叠加 base.css 的 button 全局重置后退化为纯文本，这里补齐按钮形态） —— */
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: 8px;
+  background: var(--pa-surface);
+  color: var(--pa-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard),
+    color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.settings-btn:hover:not(:disabled) {
+  background: var(--pa-surface-muted);
+  border-color: var(--pa-text-secondary);
+}
+
+.settings-btn:active:not(:disabled) {
+  background: var(--pa-surface-hover);
+}
+
+.settings-btn:focus-visible {
+  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline-offset: 1px;
+}
+
+.settings-btn:disabled {
+  opacity: 0.46;
+  cursor: default;
+}
+
+/* —— 热力图空位（无日期）不可点击：排除可点击格子的 pointer 提示 —— */
+.usage-heatmap__cell--empty {
+  cursor: default;
+}
+
+/* —— 当天详情 modal 面板（复用 Overlay 基座 .pa-overlay-panel） —— */
+.usage-day-modal {
+  width: min(960px, 94vw);
+  max-width: 94vw;
+  max-height: 84vh;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.usage-day-detail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px;
 }

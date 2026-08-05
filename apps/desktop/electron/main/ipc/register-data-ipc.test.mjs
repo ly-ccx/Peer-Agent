@@ -39,6 +39,7 @@ function createHarness() {
     usage: {
       stats: port('usage.stats'),
       daily: port('usage.daily'),
+      day: port('usage.day'),
     },
   });
   const handlers = new Map();
@@ -92,6 +93,7 @@ test('data owners register the exact 25 invoke channels', () => {
     'prompt-snapshots:get',
     'prompt-snapshots:list',
     'usage:daily',
+    'usage:day',
     'usage:stats',
   ].sort());
 });
@@ -140,6 +142,7 @@ test('prompt and usage handlers preserve legacy parameter projection', () => {
   assert.equal(handlers.get('prompt-context-epochs:chain')({}, {}), 'prompt.getContextEpochChain');
   assert.equal(handlers.get('usage:stats')({}), 'usage.stats');
   assert.equal(handlers.get('usage:daily')({}, undefined), 'usage.daily');
+  assert.equal(handlers.get('usage:day')({}, { date: '2026-07-19', ignored: true }), 'usage.day');
 
   assert.deepEqual(calls, [
     ['prompt.list', { limit: 5 }],
@@ -157,5 +160,6 @@ test('prompt and usage handlers preserve legacy parameter projection', () => {
     }],
     ['usage.stats'],
     ['usage.daily', { range: undefined }],
+    ['usage.day', { date: '2026-07-19' }],
   ]);
 });

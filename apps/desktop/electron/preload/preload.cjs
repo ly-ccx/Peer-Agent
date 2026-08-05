@@ -177,6 +177,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsList: (params) => ipcRenderer.invoke('conversations:list', params),
   usageGetStats: () => ipcRenderer.invoke('usage:stats'),
   usageGetDaily: (params) => ipcRenderer.invoke('usage:daily', params),
+  usageGetDay: (params) => ipcRenderer.invoke('usage:day', params),
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
@@ -204,6 +205,27 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsAutoArchive: (params) => ipcRenderer.invoke('conversations:auto-archive', params),
   conversationsDelete: (params) => ipcRenderer.invoke('conversations:delete', params),
   conversationsAddUsage: (params) => ipcRenderer.invoke('conversations:add-usage', params),
+  automationsBootstrap: () => ipcRenderer.invoke('automations:bootstrap'),
+  automationsList: (params) => ipcRenderer.invoke('automations:list', params),
+  automationsGet: (params) => ipcRenderer.invoke('automations:get', params),
+  automationsCreate: (params) => ipcRenderer.invoke('automations:create', params),
+  automationsUpdate: (params) => ipcRenderer.invoke('automations:update', params),
+  automationRunsList: (params) => ipcRenderer.invoke('automations:runs:list', params),
+  automationRunsGet: (params) => ipcRenderer.invoke('automations:runs:get', params),
+  automationsRunNow: (params) => ipcRenderer.invoke('automations:run-now', params),
+  automationRunsRetry: (params) => ipcRenderer.invoke('automations:runs:retry', params),
+  automationRunsCancel: (params) => ipcRenderer.invoke('automations:runs:cancel', params),
+  automationsSetRuntimePaused: (params) => ipcRenderer.invoke('automations:runtime:set-paused', params),
+  onAutomationsChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('automations:changed', handler);
+    return () => ipcRenderer.removeListener('automations:changed', handler);
+  },
+  onAutomationOpenRun: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('automations:open-run', handler);
+    return () => ipcRenderer.removeListener('automations:open-run', handler);
+  },
   goalPlansList: (params) => ipcRenderer.invoke('goalPlans:list', params),
   goalPlansAwaitingCounts: () => ipcRenderer.invoke('goalPlans:awaiting-counts'),
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
@@ -331,6 +353,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmRemoveGroup: (params) => ipcRenderer.invoke('llm:remove-group', params),
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
+  llmComplete: (params) => ipcRenderer.invoke('llm:complete', params),
   llmGetSubscriptionQuota: (params) => ipcRenderer.invoke('llm:quota', params),
   llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
   llmOAuthOpenPending: () => ipcRenderer.invoke('llm:oauth:open-pending'),
