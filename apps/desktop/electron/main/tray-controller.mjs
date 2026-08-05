@@ -31,6 +31,7 @@ export function buildTrayMenuTemplate({
   handlers = {},
   collapsedLimit = TRAY_RECENT_LIMIT,
   expandedLimit = TRAY_RECENT_EXPANDED_LIMIT,
+  automationRuntime = null,
 } = {}) {
   const L = {
     recent: labels.recent ?? '最近会话',
@@ -94,6 +95,16 @@ export function buildTrayMenuTemplate({
   }
 
   items.push({ type: 'separator' });
+  if (automationRuntime) {
+    items.push({ label: `Automations · ${automationRuntime.activeCount ?? 0} active`, enabled: false });
+    items.push({
+      label: automationRuntime.globallyPaused ? 'Resume all automations' : 'Pause all automations',
+      id: 'tray-automations-toggle',
+      click: () => handlers.onToggleAutomations?.(!automationRuntime.globallyPaused),
+    });
+    items.push({ label: 'Open Automations', id: 'tray-automations-open', click: () => handlers.onOpenAutomations?.() });
+    items.push({ type: 'separator' });
+  }
   items.push({
     label: L.newChat,
     id: 'tray-new-chat',
@@ -172,6 +183,7 @@ export function createTrayController({
   workspaceRoot,
   resourcesRoot,
   listRecentConversations,
+  getAutomationRuntime = null,
   handlers = {},
   platform = process.platform,
 } = {}) {
@@ -203,6 +215,8 @@ export function createTrayController({
     onOpenConversation: (payload) => handlers.onOpenConversation?.(payload),
     onNewChat: () => handlers.onNewChat?.(),
     onOpenApp: () => handlers.onOpenApp?.(),
+    onOpenAutomations: () => handlers.onOpenAutomations?.(),
+    onToggleAutomations: (paused) => handlers.onToggleAutomations?.(paused),
     onQuit: () => handlers.onQuit?.(),
   };
 
@@ -221,6 +235,7 @@ export function createTrayController({
       handlers: boundHandlers,
       collapsedLimit: TRAY_RECENT_LIMIT,
       expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
+      automationRuntime: typeof getAutomationRuntime === 'function' ? await getAutomationRuntime() : null,
     });
     return Menu.buildFromTemplate(template);
   }

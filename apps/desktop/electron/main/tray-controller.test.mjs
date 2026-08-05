@@ -58,6 +58,21 @@ describe('buildTrayMenuTemplate', () => {
     assert.deepEqual(calls, ['new', 'open', 'quit']);
   });
 
+  it('shows automation runtime status and pause control', () => {
+    const calls = [];
+    const template = buildTrayMenuTemplate({
+      automationRuntime: { activeCount: 3, globallyPaused: false },
+      handlers: {
+        onToggleAutomations: (paused) => calls.push(paused),
+        onOpenAutomations: () => calls.push('open'),
+      },
+    });
+    assert.ok(template.some((item) => item.label === 'Automations · 3 active'));
+    template.find((item) => item.id === 'tray-automations-toggle').click();
+    template.find((item) => item.id === 'tray-automations-open').click();
+    assert.deepEqual(calls, [true, 'open']);
+  });
+
   it('includes recent conversations with title and workspace subtitle', () => {
     const opened = [];
     const recent = [
