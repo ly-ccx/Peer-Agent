@@ -65,6 +65,7 @@ export async function agentLoopQoder({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
   agentProgress = null,
   maxOutputTokens = 0,
@@ -273,6 +274,7 @@ export async function agentLoopQoder({
           runtimeProjection,
           mcpRegistry,
           goalPlanStore,
+          automationProposalService,
           ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();

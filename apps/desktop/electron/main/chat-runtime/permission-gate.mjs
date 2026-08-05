@@ -183,6 +183,39 @@ function createAutoScopeGrant({ toolCallId, scope }) {
   };
 }
 
+function createPolicyDenial({ toolCallId, reason }) {
+  return {
+    granted: false,
+    grant: {
+      grantId: `policy-${randomUUID()}`,
+      toolCallId,
+      granted: false,
+      duration: 'once',
+      scope: null,
+      decidedAt: new Date().toISOString(),
+    },
+    reason,
+  };
+}
+
+function automationCapabilityDecision(policy, call) {
+  if (policy?.kind !== 'automation') return null;
+  if (policy.blockedCapabilityIds?.includes(call.capabilityId)) {
+    return createPolicyDenial({ toolCallId: call.toolCallId, reason: 'automation_capability_blocked' });
+  }
+  if (policy.allowedCapabilityIds?.includes(call.capabilityId)) {
+    return createAutoAccessGrant({
+      toolCallId: call.toolCallId,
+      scope: call.capabilityId,
+      reason: 'automation_grant_allowed',
+    });
+  }
+  return createPolicyDenial({
+    toolCallId: call.toolCallId,
+    reason: policy.preset === 'observe' ? 'automation_observe_read_only' : 'automation_capability_not_granted',
+  });
+}
+
 export function createChatPermissionGate({ activeStreams, accessLevel: initialAccessLevel = 'ask_before_local' } = {}) {
   const pendingPermissionRequests = new Map();
   const approvedPermissionScopes = new Map();
@@ -207,9 +240,14 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     }
   }
 
-  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null }) {
+  function createFilePermissionRequester({ webContents, streamId, toolCallId, conversationId = null, permissionPolicy = null }) {
     return ({ tool, args, filePath, workspacePath }) => new Promise((resolvePermission) => {
       const call = buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId });
+      const policyDecision = automationCapabilityDecision(permissionPolicy, call);
+      if (policyDecision) {
+        resolvePermission(policyDecision);
+        return;
+      }
       const scopeKey = buildPermissionScopeKey({ conversationId, workspacePath, call });
       const scopedGrant = approvedPermissionScopes.get(scopeKey);
       if (scopedGrant?.granted) {
@@ -236,9 +274,14 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     });
   }
 
-  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null }) {
+  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null }) {
     return (request = {}) => new Promise((resolvePermission) => {
       const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
+      const policyDecision = automationCapabilityDecision(permissionPolicy, call);
+      if (policyDecision) {
+        resolvePermission(policyDecision);
+        return;
+      }
       const scopeKey = buildPermissionScopeKey({ conversationId, workspacePath, call });
       const scopedGrant = approvedPermissionScopes.get(scopeKey);
       if (scopedGrant?.granted) {
@@ -274,9 +317,24 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     toolCallId,
     conversationId = null,
     workspacePath = null,
+    permissionPolicy = null,
   }) {
     return ({ call, classification, ruleDecision }) => new Promise((resolvePermission) => {
       const permissionCall = buildShellPermissionCall({ call, classification, ruleDecision, toolCallId });
+      if (permissionPolicy?.kind === 'automation') {
+        if (compareShellRisk(classification?.riskLevel, 'L4_privileged') >= 0) {
+          resolvePermission(createPolicyDenial({
+            toolCallId: permissionCall.toolCallId,
+            reason: 'automation_high_risk_blocked',
+          }));
+          return;
+        }
+        const policyDecision = automationCapabilityDecision(permissionPolicy, permissionCall);
+        if (policyDecision) {
+          resolvePermission(policyDecision);
+          return;
+        }
+      }
       const scopeKey = buildPermissionScopeKey({
         conversationId,
         workspacePath: workspacePath || classification.cwd,

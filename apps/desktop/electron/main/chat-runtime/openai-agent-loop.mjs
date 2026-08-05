@@ -49,6 +49,7 @@ export async function agentLoopOpenAI({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
   onNativeReasoningFallback = null,
   resolvedChannel = null,
@@ -272,6 +273,7 @@ export async function agentLoopOpenAI({
           runtimeProjection,
           mcpRegistry,
           goalPlanStore,
+          automationProposalService,
           ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();

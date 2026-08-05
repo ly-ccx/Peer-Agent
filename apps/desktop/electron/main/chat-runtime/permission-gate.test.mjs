@@ -291,4 +291,55 @@ describe('chat permission gate', () => {
     assert.equal(fileDecision.reason, 'local_access_level_full');
     assert.equal(events.length, 0);
   });
+
+  it('keeps Automation grants request-scoped and isolated from full chat access', async () => {
+    const activeStreams = new Map([
+      ['observe', { permissionIds: new Set() }],
+      ['writer', { permissionIds: new Set() }],
+    ]);
+    const gate = createChatPermissionGate({ activeStreams, accessLevel: 'full_local' });
+    const webContents = createWebContents([]);
+    const observePolicy = {
+      kind: 'automation',
+      preset: 'observe',
+      allowedCapabilityIds: [],
+      blockedCapabilityIds: ['local.file.write'],
+    };
+    const writerPolicy = {
+      kind: 'automation',
+      preset: 'work_in_workspace',
+      allowedCapabilityIds: ['local.file.write', 'local.shell.exec'],
+      blockedCapabilityIds: [],
+    };
+
+    const observe = await gate.createFilePermissionRequester({
+      webContents,
+      streamId: 'observe',
+      toolCallId: 'observe-write',
+      permissionPolicy: observePolicy,
+    })({ tool: 'write_file', args: {}, filePath: '/workspace/a', workspacePath: '/workspace' });
+    const writer = await gate.createFilePermissionRequester({
+      webContents,
+      streamId: 'writer',
+      toolCallId: 'writer-write',
+      permissionPolicy: writerPolicy,
+    })({ tool: 'write_file', args: {}, filePath: '/workspace/a', workspacePath: '/workspace' });
+    const privileged = await gate.createShellApprovalDecider({
+      webContents,
+      streamId: 'writer',
+      toolCallId: 'writer-sudo',
+      permissionPolicy: writerPolicy,
+    })({
+      call: { command: 'sudo true' },
+      classification: { riskLevel: 'L4_privileged', cwd: '/workspace' },
+      ruleDecision: null,
+    });
+
+    assert.equal(observe.granted, false);
+    assert.equal(observe.reason, 'automation_capability_blocked');
+    assert.equal(writer.granted, true);
+    assert.equal(writer.reason, 'automation_grant_allowed');
+    assert.equal(privileged.granted, false);
+    assert.equal(privileged.reason, 'automation_high_risk_blocked');
+  });
 });
