@@ -1614,6 +1614,32 @@
   gap: 4px;
   flex: 0 0 auto;
 }
+.message-queue-force-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+}
+.message-queue-force-send:hover {
+  border-color: var(--chrome-border);
+  background: var(--azure-soft);
+  color: var(--azure-seal);
+}
+.message-queue-force-send:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
+}
 .message-queue-edit {
   display: inline-flex;
   align-items: center;
@@ -1718,6 +1744,7 @@
 .message-queue-item:focus-within .message-queue-actions {
   opacity: 1;
 }
+.message-queue-force-send,
 .message-queue-edit,
 .message-queue-remove {
   width: 28px;

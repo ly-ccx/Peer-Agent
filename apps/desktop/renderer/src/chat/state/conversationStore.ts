@@ -268,6 +268,22 @@ export class ConversationStore {
     });
   }
 
+  /**
+   * 插队：把指定排队消息提到队首。
+   * 已在队首 / 找不到 id 时为 no-op。配合 ChatSurface 的 abort + 自动出队实现「强送」。
+   */
+  promoteQueuedMessageToFront(conversationId: string | null, id: string): void {
+    this.setState(conversationId, (prev) => {
+      const queue = prev.messageQueue;
+      const index = queue.findIndex((item) => item.id === id);
+      if (index <= 0) return prev;
+      const next = queue.slice();
+      const [item] = next.splice(index, 1);
+      next.unshift(item);
+      return { messageQueue: next };
+    });
+  }
+
   /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
   shiftQueuedMessage(conversationId: string | null): QueuedMessage | null {
     const prev = this.getSnapshot(conversationId);

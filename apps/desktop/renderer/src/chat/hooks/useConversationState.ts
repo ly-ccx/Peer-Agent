@@ -45,6 +45,8 @@ export interface ConversationActions {
   updateQueuedMessage: (id: string, text: string) => void;
   /** 拖动排序：把 fromIndex 处的消息移动到 toIndex。 */
   reorderQueuedMessage: (fromIndex: number, toIndex: number) => void;
+  /** 插队：把指定排队消息提到队首。 */
+  promoteQueuedMessageToFront: (id: string) => void;
   /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
   shiftQueuedMessage: () => QueuedMessage | null;
   /** 登记 streamId 归属当前会话（发送/压缩/reattach 时调用）。 */
@@ -146,6 +148,7 @@ export function useConversationState(
       removeQueuedMessage: (id) => conversationStore.removeQueuedMessage(conversationId, id),
       updateQueuedMessage: (id, text) => conversationStore.updateQueuedMessage(conversationId, id, text),
       reorderQueuedMessage: (fromIndex, toIndex) => conversationStore.reorderQueuedMessage(conversationId, fromIndex, toIndex),
+      promoteQueuedMessageToFront: (id) => conversationStore.promoteQueuedMessageToFront(conversationId, id),
       shiftQueuedMessage: () => conversationStore.shiftQueuedMessage(conversationId),
       routeStream: (streamId) => {
         if (conversationId) conversationStore.routeStream(streamId, conversationId);

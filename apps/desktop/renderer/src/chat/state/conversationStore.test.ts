@@ -201,6 +201,34 @@ describe('conversationStore', () => {
     );
   });
 
+  it('promotes a queued message to the front without reshuffling the rest', () => {
+    const store = new ConversationStore();
+    store.enqueueMessage('A', queued('q1', 'first'));
+    store.enqueueMessage('A', queued('q2', 'second'));
+    store.enqueueMessage('A', queued('q3', 'third'));
+
+    store.promoteQueuedMessageToFront('A', 'q3');
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q3', 'q1', 'q2'],
+    );
+
+    // 已在队首 / 未知 id 为 no-op。
+    store.promoteQueuedMessageToFront('A', 'q3');
+    store.promoteQueuedMessageToFront('A', 'missing');
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q3', 'q1', 'q2'],
+    );
+
+    // 中间项插队后，其余相对顺序不变。
+    store.promoteQueuedMessageToFront('A', 'q2');
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q2', 'q3', 'q1'],
+    );
+  });
+
   it('routes streamId to its owning conversation and clears on finalize', () => {
     const store = new ConversationStore();
     store.routeStream('s-1', 'A');

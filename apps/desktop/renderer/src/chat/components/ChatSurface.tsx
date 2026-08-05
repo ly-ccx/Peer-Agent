@@ -445,6 +445,7 @@ export function ChatSurface({
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
   const reorderQueuedMessage = convActions.reorderQueuedMessage;
+  const promoteQueuedMessageToFront = convActions.promoteQueuedMessageToFront;
   const queuedDispatchInFlightRef = useRef(new Set<string>());
   // useElapsedTimer 只保留本轮起点 ref；回合时长真值由 useConversationStreamRouter
   // 在 done/aborted/error 时读取。实时跳秒在末端 ChatTurn 内更新，避免每秒重渲染整页。
@@ -1814,6 +1815,19 @@ export function ChatSurface({
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
   }, []);
 
+  /**
+   * 排队消息插队发送：
+   * 1) 将目标消息提到队首；
+   * 2) 若当前正在流式回复则 abort；
+   * 3) 空闲后由既有自动出队 effect 强送队首，其余队列顺序保持相对不变。
+   */
+  const handleForceSendQueued = useCallback((id: string) => {
+    promoteQueuedMessageToFront(id);
+    if (streamIdRef.current) {
+      void clientApi.chatAbort({ streamId: streamIdRef.current });
+    }
+  }, [promoteQueuedMessageToFront]);
+
   // 队列自动出队：loadStatus 只有在 reattach 收敛后才会 ready，避免切回运行中会话时
   // 把暂时的 isStreaming=false 当成真正空闲。每个会话同一时间只投递一条；发送路径明确
   // 接受后才移除队首，IPC 失败或前置条件变化时消息仍留在队列中。
@@ -2386,6 +2400,7 @@ export function ChatSurface({
             onRemove={removeQueuedMessage}
             onReorder={reorderQueuedMessage}
             onRefillToComposer={refillQueuedMessageToComposer}
+            onForceSend={handleForceSendQueued}
           />
         ) : null}
         <ComposerDraftControls
