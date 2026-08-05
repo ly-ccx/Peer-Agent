@@ -302,7 +302,7 @@ function TreeNode({
 }
 
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
-  const { openDocument, filesTarget } = useWorkbench();
+  const { openFile: openWorkbenchFile, filesTarget } = useWorkbench();
   const rootPath = workspacePath ? stripTrailingSep(workspacePath) : null;
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -439,7 +439,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       deferredRefreshRef.current.add(normalized);
       return;
     }
-    pendingRefreshRef.current = mergePendingRefreshPaths(pendingRefreshRef.current, [normalized]);
+    pendingRefreshRef.current = mergePendingRefreshPaths(pendingRefreshRef.current, normalized);
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     debounceTimerRef.current = setTimeout(() => {
       const batch = [...pendingRefreshRef.current];
@@ -451,7 +451,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
 
   const refreshAllExpanded = useCallback(async () => {
     if (!rootPath) return;
-    const dirs = collectDirPathsToRefresh(rootPath, expandedRef.current, childrenRef.current);
+    const dirs = collectDirPathsToRefresh(rootPath, expandedRef.current);
     await refreshDirs(dirs);
   }, [rootPath, refreshDirs]);
 
@@ -481,15 +481,15 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     (entry: DirEntry) => {
       setSelected(entry.absPath);
       setSelectedIsDir(false);
-      openDocument({
-        absPath: entry.absPath,
-        relPath: workspacePath
+      openWorkbenchFile(
+        entry.absPath,
+        workspacePath ?? undefined,
+        workspacePath
           ? toForward(entry.absPath).replace(`${toForward(stripTrailingSep(workspacePath))}/`, '')
           : entry.name,
-        name: entry.name,
-      });
+      );
     },
-    [openDocument, workspacePath],
+    [openWorkbenchFile, workspacePath],
   );
 
   const resolveCreateParent = useCallback((): string | null => {
@@ -568,11 +568,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       setSelected(result.path ?? absPath);
       setSelectedIsDir(current.kind === 'dir');
       if (current.kind === 'file') {
-        openDocument({
-          absPath: result.path ?? absPath,
-          relPath,
-          name,
-        });
+        openWorkbenchFile(result.path ?? absPath, workspacePath ?? undefined, relPath);
       }
     } catch (error) {
       setDraft((prev) => (prev ? {
@@ -581,7 +577,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         error: error instanceof Error ? error.message : (isZh ? '创建失败' : 'Create failed'),
       } : prev));
     }
-  }, [isZh, workspacePath, loadDir, openDocument]);
+  }, [isZh, workspacePath, loadDir, openWorkbenchFile]);
 
   // workspace 切换：重置树，默认展开根并加载第一层。
   useEffect(() => {
@@ -645,9 +641,9 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
       return;
     }
-    const paths = collectWatchDirPaths(rootPath, expanded, children);
+    const paths = collectWatchDirPaths(rootPath, expanded);
     void clientApi.watchDirs?.(paths, workspacePath ?? undefined).catch(() => {});
-  }, [rootPath, workspacePath, expanded, children]);
+  }, [rootPath, workspacePath, expanded]);
 
   // 订阅目录变更事件，防抖后 force 重载。
   useEffect(() => {

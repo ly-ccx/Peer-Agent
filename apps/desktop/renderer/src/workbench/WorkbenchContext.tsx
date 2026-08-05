@@ -29,6 +29,7 @@ import {
   type WorkbenchFileMode,
 } from './documentSessionState';
 import { defaultModeForKind, detectFileKind } from './file-preview/fileTypes';
+import { workbenchIsLayoutVisible } from './workbenchLayoutProjection';
 import {
   normalizeWorkbenchOpenMap,
   resolveWorkbenchOpen,
@@ -453,10 +454,10 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     document.documentElement.style.setProperty('--za-sidebar-current-width', `${sidebarWidth}px`);
   }, [sidebarWidth]);
 
-  // 同步 CSS data 属性：是否展开、sidebar 是否收起（统一来源）
+  // 根布局只投影当前可见的 Workbench；离开 Chat 时保留 open 状态但释放第三列。
   useEffect(() => {
-    document.documentElement.dataset.workbenchOpen = open ? 'true' : 'false';
-  }, [open]);
+    document.documentElement.dataset.workbenchOpen = workbenchIsLayoutVisible(open, isPageActive) ? 'true' : 'false';
+  }, [open, isPageActive]);
   useEffect(() => {
     document.documentElement.dataset.sidebarCollapsed = sidebarCollapsed ? 'true' : 'false';
   }, [sidebarCollapsed]);
