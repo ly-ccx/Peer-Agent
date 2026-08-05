@@ -9,7 +9,7 @@ Local-first. Permission-gated. Evidence-backed.
 Peer Agent is a privacy-first local agent platform with three first-class shells — **Desktop**, **TUI**, and **CLI** — on one shared capability runtime. An agent can read files, run commands, drive a browser, call MCP tools, and automate work **on your computer**, under explicit, auditable control.
 
 > [!NOTE]
-> Current series: **`0.0.1`** (stable / latest). The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
+> Current series: **`0.0.2-beta`** (prerelease; `0.0.1` remains stable / latest). The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, Automation, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
 
 ---
 
@@ -249,6 +249,7 @@ When you have the knowledge workspace checked out next to this repo:
 - [x] Agent / Plan modes and Goal runner
 - [x] Quick Chat
 - [x] Workbench + conversation-bound browser control
+- [x] Scheduled Automation + conversational task creation
 - [ ] **Local Agent Runtime** — on-device LLM inference
 - [ ] Expanded plugin & skill ecosystem
 - [ ] Broader multi-platform packaging parity

@@ -61,6 +61,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.provider',
+      'automation.intent-policy',
       'runtime.mode',
     ]);
     assert.equal(context.sections[0].layer, 'L0_CORE');
@@ -76,7 +77,7 @@ describe('System Context assembly', () => {
     assert.equal(context.snapshot.provider, 'openai');
     assert.equal(context.snapshot.model, 'test-model');
     assert.equal(context.snapshot.sectionRefs.length, context.sections.length);
-    assert.equal(context.snapshot.sectionRefs.length, 8);
+    assert.equal(context.snapshot.sectionRefs.length, 9);
     assert.match(renderSystemContext(context), /Evidence discipline/);
     assert.match(renderSystemContext(context), /Never narrate "writing" \/ "正在写入"/);
     assert.match(renderSystemContext(context), /prefer chunked writes/);
@@ -130,6 +131,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.attachments',
+      'automation.intent-policy',
       'runtime.mode',
     ]);
     const rendered = renderSystemContext(context);
@@ -302,6 +304,7 @@ describe('System Context assembly', () => {
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
+      'automation.intent-policy',
       'runtime.mode',
       'runtime.continuity',
     ]);
@@ -451,6 +454,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'project.instructions.agents.md',
+      'automation.intent-policy',
       'runtime.mode',
     ]);
     const agentsSection = context.sections.find((section) => section.id === 'project.instructions.agents.md');

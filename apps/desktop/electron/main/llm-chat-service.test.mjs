@@ -550,9 +550,9 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            // 增大可压缩的旧历史，使压前请求越过 17k 窗口的 80% 软线；
-            // 17k 同时为有效 canonical checkpoint 留出稳定的压后请求预算。
-            contextWindow: 17_000,
+            // 增大可压缩的旧历史，使压前请求越过 19k 窗口的 80% 软线；
+            // 19k 同时为受治理 System Context 和 canonical checkpoint 留出稳定的压后预算。
+            contextWindow: 19_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -575,8 +575,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
-              inputTokens: 16_000,
-              contextWindow: 17_000,
+              inputTokens: 18_000,
+              contextWindow: 19_000,
             }),
           }),
         },
@@ -601,11 +601,12 @@ describe('llm chat service tool materialization', () => {
     assert.equal(capturedBodies.length, 2);
     const summaryBodyText = JSON.stringify(capturedBodies[0]);
     assert.doesNotMatch(summaryBodyText, new RegExp(latestUser));
-    const initialSystemPrompt = capturedBodies[0].messages.find((message) => message.role === 'system')?.content ?? '';
+    const compactionSystemPrompt = capturedBodies[0].messages.find((message) => message.role === 'system')?.content ?? '';
     const finalMessages = capturedBodies[1].messages || [];
     const rebuiltSystemPrompt = finalMessages.find((message) => message.role === 'system')?.content ?? '';
-    assert.match(initialSystemPrompt, /strong Automation Center entry/);
-    assert.match(initialSystemPrompt, /Status: collecting/);
+    assert.match(compactionSystemPrompt, /上下文交接专家/);
+    assert.doesNotMatch(compactionSystemPrompt, /Status: collecting/);
+    assert.match(rebuiltSystemPrompt, /Automation task intent policy/);
     assert.match(rebuiltSystemPrompt, /Status: proposed/);
     assert.match(rebuiltSystemPrompt, /Active proposal id: proposal-after-compact/);
     assert.match(rebuiltSystemPrompt, /already awaiting user action/);
@@ -653,7 +654,7 @@ describe('llm chat service tool materialization', () => {
             isDefault: true,
             apiKeyConfigured: true,
             // 保持与上一个自动压缩集成场景相同的可实现预算。
-            contextWindow: 17_000,
+            contextWindow: 19_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -663,8 +664,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
               modelKey: 'p1::test-model',
-              inputTokens: 16_000,
-              contextWindow: 17_000,
+              inputTokens: 18_000,
+              contextWindow: 19_000,
             }),
           }),
         },

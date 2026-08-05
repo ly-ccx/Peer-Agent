@@ -4,6 +4,37 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2-beta.1 - 2026-08-05
+
+### Notes
+
+- First public beta in the 0.0.2 line, building on the 0.0.1 stable release.
+- Local execution, explicit permission grants, and Evidence remain the governing boundary for all new Automation and Workbench capabilities.
+
+### Added
+
+- Create scheduled Automations from structured proposals in conversations, with explicit confirmation, idempotent identity checks, and authoritative creation receipts.
+- Prompt-first Automation Center creation with model-assisted detection, editable generated plans, confirmation overlays, access presets, and tray runtime status.
+- Workbench file create / folder create, refresh, and filter actions.
+- Configurable model context-window tiers carried into chat runtime budgeting.
+- Automatic update checks and localized release prompts.
+
+### Changed
+
+- Unified settings, capability, Automation, and import toggles on accessible Switch / Checkbox controls with governed theme tokens.
+- Improved Provider connection flows, model catalog handling, refresh-result preservation, service icons, and model settings.
+- Let CSS own chat composer auto-sizing with a higher thread input limit, avoiding synchronous per-character layout measurement.
+- Bounded TUI streaming refresh, Markdown, and syntax-highlight work for more stable long-session rendering.
+- Kept TUI theme state aligned with the palette actually applied after system-theme changes.
+
+### Fixed
+
+- Clear or replace context accounting correctly after external conversation reloads.
+- Release the Workbench layout column outside Chat while preserving the user's open state.
+- Align Workbench file opening, directory refresh, and watcher calls with their canonical interfaces.
+- Prevent stale, repeated, or cross-conversation Automation proposals from creating duplicate tasks.
+- Preserve Provider catalog refresh results and surface Automation runtime status in the tray.
+
 ## 0.0.1 - 2026-08-04
 
 ### Notes
