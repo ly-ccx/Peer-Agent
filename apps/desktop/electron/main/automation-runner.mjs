@@ -27,6 +27,42 @@ function terminalRunStatus(outcome) {
   return 'succeeded';
 }
 
+function normalizeSummary(value, maxLength = 2_000) {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function finalAssistantSummary(conversationStore, conversationId, assistantMessageId) {
+  const conversation = conversationStore.getConversation?.(conversationId);
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const selected = messages.find((message) => message?.id === assistantMessageId)
+    ?? [...messages].reverse().find((message) => message?.role === 'assistant');
+  return normalizeSummary(selected?.content);
+}
+
+function canonicalResult(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function previousCompletedSummary(store, run) {
+  const previous = store.listRuns({ automationId: run.automationId, limit: 20 })
+    .find((candidate) => candidate.runId !== run.runId && candidate.receipt?.summary);
+  return normalizeSummary(previous?.receipt?.summary, 1_000);
+}
+
+function resultComparison(summary, previousSummary) {
+  if (!summary || !previousSummary) return {};
+  const resultChanged = canonicalResult(summary) !== canonicalResult(previousSummary);
+  return {
+    previousSummary,
+    resultChanged,
+    comparisonSummary: resultChanged ? 'Result changed from the previous completed run.' : 'No result change from the previous completed run.',
+  };
+}
+
 export function createAutomationRunner({
   store,
   conversationStore,
@@ -71,6 +107,7 @@ export function createAutomationRunner({
             runId: initial.runId,
             automationName: initial.snapshot.name,
             triggerSource: initial.triggerSource,
+            originWorkspacePath: initial.snapshot.workspacePath,
             createdAt: startedAt,
           },
         });
@@ -116,6 +153,10 @@ export function createAutomationRunner({
           changes = await worktreeAdapter.collect(initial, executionWorkspace);
           changes = await worktreeAdapter.retainOrCleanup(initial, executionWorkspace, changes);
         }
+        const summary = normalizeSummary(outcome?.summary)
+          ?? finalAssistantSummary(conversationStore, conversation.id, assistantMessage.id)
+          ?? (status === 'succeeded' ? 'Run completed. Open the conversation for the full result.' : undefined);
+        const comparison = resultComparison(summary, previousCompletedSummary(store, initial));
         const updatedRun = store.updateRun(initial.runId, {
           status,
           ...(executionWorkspace?.baseline ? {
@@ -125,7 +166,8 @@ export function createAutomationRunner({
           ...(status === 'waiting_user' ? { blockedReason: 'user_input' } : {}),
           ...(status === 'succeeded' || status === 'failed' || status === 'cancelled' ? { finishedAt } : {}),
           receipt: status === 'waiting_user' ? undefined : {
-            summary: outcome?.summary,
+            summary,
+            ...comparison,
             error: status === 'failed' ? outcome?.error || 'Automation agent failed.' : undefined,
             evidence: [],
             evidenceRefs: [

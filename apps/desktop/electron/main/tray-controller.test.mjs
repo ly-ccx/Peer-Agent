@@ -32,6 +32,22 @@ describe('workspaceShortName', () => {
 });
 
 describe('buildTrayMenuTemplate', () => {
+  it('shows recent Automation results and returns to the exact Run', () => {
+    let target = null;
+    const template = buildTrayMenuTemplate({
+      automationRuntime: { activeCount: 1, globallyPaused: false },
+      recentAutomationRuns: [{
+        automationId: 'a1', runId: 'r1', automationName: 'Daily review',
+        status: 'succeeded', summary: 'Two repositories changed.',
+      }],
+      handlers: { onOpenAutomationRun: (value) => { target = value; } },
+    });
+    const item = template.find((entry) => entry.id === 'tray-automation-run-r1');
+    assert.equal(item.label, 'Daily review');
+    assert.match(item.sublabel, /Two repositories changed/);
+    item.click();
+    assert.deepEqual(target, { automationId: 'a1', runId: 'r1' });
+  });
   it('builds empty Recent state with lifecycle actions', () => {
     const calls = [];
     const template = buildTrayMenuTemplate({

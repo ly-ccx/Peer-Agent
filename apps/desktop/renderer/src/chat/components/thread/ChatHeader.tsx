@@ -36,6 +36,7 @@ export function ChatHeader({
   onBranch,
   onFind,
   onOpenSettings,
+  onOpenAutomationRun,
 }: {
   readonly title: string;
   readonly automationOrigin?: {
@@ -44,6 +45,7 @@ export function ChatHeader({
     runId: string;
     automationName?: string;
     triggerSource?: string;
+    originWorkspacePath?: string;
     createdAt?: string;
   } | null;
   readonly isZh: boolean;
@@ -57,6 +59,7 @@ export function ChatHeader({
   readonly onBranch?: () => void;
   readonly onFind?: () => void;
   readonly onOpenSettings?: () => void;
+  readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -160,8 +163,10 @@ export function ChatHeader({
         ) : (
           <>
             {automationOrigin?.kind === 'automation_run' ? (
-              <span
+              <button
+                type="button"
                 className="chat-header-automation-badge"
+                onClick={() => onOpenAutomationRun?.({ automationId: automationOrigin.automationId, runId: automationOrigin.runId })}
                 title={
                   automationOrigin.automationName
                     ? (isZh
@@ -170,8 +175,8 @@ export function ChatHeader({
                     : (isZh ? '自动化会话' : 'Automation conversation')
                 }
               >
-                {isZh ? '自动化' : 'Automation'}
-              </span>
+                {isZh ? '自动化 · 查看运行' : 'Automation · View run'}
+              </button>
             ) : null}
             <span
               className="chat-header-title"

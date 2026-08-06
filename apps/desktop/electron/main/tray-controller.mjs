@@ -32,6 +32,7 @@ export function buildTrayMenuTemplate({
   collapsedLimit = TRAY_RECENT_LIMIT,
   expandedLimit = TRAY_RECENT_EXPANDED_LIMIT,
   automationRuntime = null,
+  recentAutomationRuns = [],
 } = {}) {
   const L = {
     recent: labels.recent ?? '最近会话',
@@ -97,6 +98,16 @@ export function buildTrayMenuTemplate({
   items.push({ type: 'separator' });
   if (automationRuntime) {
     items.push({ label: `Automations · ${automationRuntime.activeCount ?? 0} active`, enabled: false });
+    const recentRuns = Array.isArray(recentAutomationRuns) ? recentAutomationRuns.slice(0, 3) : [];
+    for (const run of recentRuns) {
+      const summary = truncateTrayTitle(run.summary || run.status || 'Result');
+      items.push({
+        label: truncateTrayTitle(run.automationName || 'Automation'),
+        sublabel: `${run.status || 'completed'} · ${summary}`,
+        id: `tray-automation-run-${run.runId}`,
+        click: () => handlers.onOpenAutomationRun?.({ automationId: run.automationId, runId: run.runId }),
+      });
+    }
     items.push({
       label: automationRuntime.globallyPaused ? 'Resume all automations' : 'Pause all automations',
       id: 'tray-automations-toggle',
@@ -183,6 +194,7 @@ export function createTrayController({
   workspaceRoot,
   resourcesRoot,
   listRecentConversations,
+  listRecentAutomationRuns = null,
   getAutomationRuntime = null,
   handlers = {},
   platform = process.platform,
@@ -216,6 +228,7 @@ export function createTrayController({
     onNewChat: () => handlers.onNewChat?.(),
     onOpenApp: () => handlers.onOpenApp?.(),
     onOpenAutomations: () => handlers.onOpenAutomations?.(),
+    onOpenAutomationRun: (target) => handlers.onOpenAutomationRun?.(target),
     onToggleAutomations: (paused) => handlers.onToggleAutomations?.(paused),
     onQuit: () => handlers.onQuit?.(),
   };
@@ -230,8 +243,16 @@ export function createTrayController({
       console.warn('[tray] listRecentConversations failed:', err);
       recent = [];
     }
+    let recentAutomationRuns = [];
+    try {
+      const listed = await listRecentAutomationRuns?.({ limit: 3 });
+      recentAutomationRuns = Array.isArray(listed) ? listed : [];
+    } catch (err) {
+      console.warn('[tray] listRecentAutomationRuns failed:', err);
+    }
     const template = buildTrayMenuTemplate({
       recent,
+      recentAutomationRuns,
       handlers: boundHandlers,
       collapsedLimit: TRAY_RECENT_LIMIT,
       expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,

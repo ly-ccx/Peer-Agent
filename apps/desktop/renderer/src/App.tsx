@@ -121,10 +121,11 @@ function MainApp() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [automationRunTarget, setAutomationRunTarget] = useState<{ automationId: string; runId: string } | null>(null);
-  useEffect(() => clientApi.onAutomationOpenRun((target) => {
-    setAutomationRunTarget({ automationId: target.automationId, runId: target.runId });
+  const openAutomationRun = useCallback((target: { automationId: string; runId: string }) => {
+    setAutomationRunTarget(target);
     setActivePage('automations');
-  }), []);
+  }, []);
+  useEffect(() => clientApi.onAutomationOpenRun(openAutomationRun), [openAutomationRun]);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>('general');
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
@@ -929,6 +930,7 @@ function MainApp() {
                   onEnsureConversation={ensureConversation}
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
+                  onOpenAutomationRun={openAutomationRun}
                   workspacePath={activeWorkspace}
                   isPageActive={activePage === 'chat'}
                   messageTarget={notificationMessageTarget}

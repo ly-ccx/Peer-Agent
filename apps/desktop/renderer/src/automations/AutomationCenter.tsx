@@ -50,6 +50,7 @@ interface Draft {
   cron: string;
   access: AutomationAccessPreset;
   notifySuccess: boolean;
+  notifySuccessOnlyOnChange: boolean;
   timeoutMinutes: number;
 }
 
@@ -60,7 +61,7 @@ function blankDraft(defaultWorkspace: string, promptTemplate = ''): Draft {
     timezone: systemAutomationTimezone(),
     onceAt: next.toISOString().slice(0, 16), hour: 9, minute: 0, everyHours: 1,
     dayOfMonth: 1, cron: '0 9 * * *', access: 'observe', notifySuccess: false,
-    timeoutMinutes: 30,
+    notifySuccessOnlyOnChange: true, timeoutMinutes: 30,
   };
 }
 
@@ -74,6 +75,7 @@ function draftFromDefinition(value: AutomationDefinition): Draft {
     minute: value.schedule.minute ?? 0, everyHours: value.schedule.everyHours ?? 1,
     dayOfMonth: value.schedule.dayOfMonth ?? 1, cron: value.schedule.cron ?? '0 9 * * *',
     access: value.grant.preset, notifySuccess: value.notifications.succeeded,
+    notifySuccessOnlyOnChange: value.notifications.succeededOnlyOnChange ?? true,
     timeoutMinutes: Math.max(1, Math.round(value.budget.timeoutMs / 60_000)),
   };
 }
@@ -100,7 +102,10 @@ function inputFromDraft(draft: Draft): AutomationCreateInput {
       blockedCapabilityIds: writing ? [] : ['local.file.write', 'local.shell.exec'],
       confirmedAt: new Date().toISOString(), version: 1,
     },
-    notifications: { needsAttention: 'system_and_badge', failed: true, succeeded: draft.notifySuccess },
+    notifications: {
+      needsAttention: 'system_and_badge', failed: true, succeeded: draft.notifySuccess,
+      succeededOnlyOnChange: draft.notifySuccessOnlyOnChange,
+    },
     budget: { timeoutMs: draft.timeoutMinutes * 60_000 }, missedRunPolicy: 'run_latest',
     overlapPolicy: 'skip', enable: true,
   };
@@ -153,7 +158,21 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { void refresh(); return clientApi.onAutomationsChanged(() => { void refresh(); }); }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => clientApi.onAutomationsChanged(() => {
+    void refresh();
+    if (selectedId) {
+      void clientApi.automationRunsList({ automationId: selectedId, limit: 100 })
+        .then(setRuns)
+        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    }
+    if (selectedRun?.runId) {
+      void clientApi.automationRunsGet({ runId: selectedRun.runId })
+        .then((run) => { if (run) setSelectedRun(run); })
+        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    }
+  }), [refresh, selectedId, selectedRun?.runId]);
 
   useEffect(() => {
     if (!initialRunTarget?.runId) return;
@@ -656,6 +675,13 @@ function Editor({ copy, locale, draft, setDraft, editing, busy, onCancel, onSave
                   aria-labelledby="automation-notify-success-label"
                 />
               </div>
+              {draft.notifySuccess ? <div className="automation-setting-row" onClick={() => update('notifySuccessOnlyOnChange', !draft.notifySuccessOnlyOnChange)}>
+                <div className="automation-setting-copy">
+                  <strong id="automation-notify-change-label">{copy.notifySuccessOnlyOnChange}</strong>
+                  <small>{copy.notifySuccessOnlyOnChangeDetail}</small>
+                </div>
+                <Switch checked={draft.notifySuccessOnlyOnChange} onCheckedChange={(checked) => update('notifySuccessOnlyOnChange', checked)} onClick={(event) => event.stopPropagation()} aria-labelledby="automation-notify-change-label" />
+              </div> : null}
             </div>
           </div>
         </div>
@@ -714,12 +740,20 @@ function AutomationDetail({ copy, locale, summary, runs, tab, setTab, busy, onBa
   onBack: () => void; onEdit: () => void; onRun: () => void; onStatus: (status: 'active' | 'paused') => void; onOpenRun: (run: AutomationRun) => void;
 }) {
   const definition = summary.definition;
+  const latestRun = summary.activeRun ?? summary.latestRun ?? runs[0];
+  const latestResult = latestRun?.receipt?.summary ?? latestRun?.failureReason ?? latestRun?.blockedReason;
   return <section className="automation-center motion-enter-rise" data-automation-view="detail"><PageBack onClick={onBack} label={copy.automations} />
     <header className="automation-detail-header"><div><div className="automation-detail-title"><span className={`automation-status-dot ${summary.needsAttention ? 'attention' : definition.status}`} /><h1>{definition.name}</h1><span className={`automation-pill ${summary.needsAttention ? 'attention' : definition.status}`}>{definition.status === 'active' ? copy.activeState : copy.pausedState}</span></div><p>{definitionSubtitle(definition, locale)}</p></div>
       <div className="automation-header-actions"><button className="automation-button secondary" onClick={onEdit}>{copy.edit}</button><button className="automation-button secondary" disabled={busy} onClick={() => onStatus(definition.status === 'paused' ? 'active' : 'paused')}>{definition.status === 'paused' ? copy.resume : copy.pause}</button><button className="automation-button primary" disabled={busy} onClick={onRun}><Icon name="run" />{copy.runNow}</button></div>
     </header>
     <div className="automation-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>{copy.overview}</button><button className={tab === 'runs' ? 'active' : ''} onClick={() => setTab('runs')}>{copy.runs} <span>{runs.length}</span></button></div>
-    {tab === 'overview' ? <div className="automation-overview-grid"><div className="automation-panel wide"><h2>{copy.instructions}</h2><pre>{definition.prompt}</pre></div>
+    {tab === 'overview' ? <div className="automation-overview-grid">
+      {latestRun ? <button className="automation-panel wide automation-latest-result" onClick={() => onOpenRun(latestRun)}>
+        <div className="automation-latest-result-heading"><h2>{copy.result}</h2><span className={`automation-pill ${runNeedsAttention(latestRun) ? 'attention' : ''}`}>{runStatusLabel(latestRun.status, locale)}</span></div>
+        <p className="automation-latest-result-summary">{latestResult ?? copy.noSummary}</p>
+        <small>{formatDateTime(latestRun.finishedAt ?? latestRun.startedAt ?? latestRun.scheduledAt, locale)} · {copy.openReceipt}</small>
+      </button> : null}
+      <div className="automation-panel wide"><h2>{copy.instructions}</h2><pre>{definition.prompt}</pre></div>
       <div className="automation-panel"><h2>{copy.schedule}</h2><Review label={copy.rule} value={scheduleLabel(definition.schedule, locale)} /><Review label={copy.timezone} value={definition.schedule.timezone} /><Review label={copy.nextRun} value={formatDateTime(definition.nextRunAt, locale)} /><Review label={copy.missedRuns} value={copy.runLatest} /><Review label={copy.overlap} value={copy.skip} /></div>
       <div className="automation-panel"><h2>{copy.access}</h2><Review label={copy.preset} value={definition.grant.preset === 'observe' ? copy.observe : copy.workInWorkspace} /><Review label={copy.workspace} value={definition.workspacePath} /><Review label={copy.execution} value={definition.grant.preset === 'observe' ? `${copy.currentWorkspace} · ${copy.observeDetail}` : copy.isolatedWorktree} /></div>
       <div className="automation-panel"><h2>{copy.health}</h2><Review label={copy.lastRun} value={formatDateTime(definition.lastRunAt, locale)} /><Review label={copy.failures} value={String(definition.consecutiveFailures)} /><Review label={copy.created} value={formatDateTime(definition.createdAt, locale)} /></div>
@@ -745,6 +779,7 @@ function RunReceipt({ copy, locale, run, busy, onBack, onRetry, onCancel, onConv
     </header>
     {runNeedsAttention(run) ? <div className="automation-alert attention"><strong>{copy.needsAttention}</strong><span>{receipt?.error ?? run.failureReason ?? run.blockedReason ?? copy.openToContinue}</span></div> : null}
     <div className="automation-receipt-grid"><div className="automation-panel wide"><h2>{copy.summary}</h2><p className="automation-receipt-summary">{receipt?.summary ?? receipt?.error ?? run.failureReason ?? copy.noSummary}</p></div>
+      {receipt?.previousSummary ? <div className="automation-panel wide automation-comparison"><div className="automation-latest-result-heading"><h2>{copy.comparison}</h2><span className={`automation-pill ${receipt.resultChanged ? 'attention' : ''}`}>{receipt.resultChanged ? copy.resultChanged : copy.resultUnchanged}</span></div><p>{receipt.comparisonSummary}</p><details><summary>{copy.previousResult}</summary><p className="automation-receipt-summary">{receipt.previousSummary}</p></details></div> : null}
       <div className="automation-panel"><h2>{copy.runFacts}</h2><Review label={copy.trigger} value={run.triggerSource} /><Review label={copy.scheduled} value={formatDateTime(run.scheduledAt, locale)} /><Review label={copy.started} value={formatDateTime(run.startedAt, locale)} /><Review label={copy.finished} value={formatDateTime(run.finishedAt, locale)} /><Review label={copy.definitionVersion} value={String(run.snapshot.definitionVersion)} /></div>
       <div className="automation-panel"><h2>{copy.usage}</h2><Review label={copy.inputTokens} value={String(receipt?.inputTokens ?? '—')} /><Review label={copy.outputTokens} value={String(receipt?.outputTokens ?? '—')} /><Review label={copy.cost} value={receipt?.costUsd == null ? '—' : `${receipt.costUsd.toFixed(4)}`} /><Review label={copy.duration} value={receipt?.durationMs == null ? '—' : copy.seconds(Math.round(receipt.durationMs / 1000))} /></div>
       <div className="automation-panel wide"><h2>{copy.changes}</h2>{receipt?.changes ? <><Review label={copy.branch} value={receipt.changes.branch ?? '—'} /><Review label={copy.worktree} value={receipt.changes.worktreePath ?? '—'} /><Review label={copy.files} value={receipt.changes.changedFiles.length ? receipt.changes.changedFiles.join(', ') : copy.noFilesChanged} /><Review label={copy.diff} value={`+${receipt.changes.additions ?? 0} −${receipt.changes.deletions ?? 0}`} /><Review label={copy.retention} value={receipt.changes.retained ? copy.retainedReview : copy.cleanedUp} /></> : <p>{copy.noWorkspaceChanges}</p>}</div>

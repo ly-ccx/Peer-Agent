@@ -88,6 +88,8 @@ export interface AutomationNotificationPolicy {
   readonly needsAttention: 'system_and_badge' | 'badge_only';
   readonly failed: boolean;
   readonly succeeded: boolean;
+  /** When enabled, successful runs notify only if their result differs from the previous completed run. */
+  readonly succeededOnlyOnChange?: boolean;
 }
 
 export interface AutomationBudget {
@@ -158,6 +160,10 @@ export interface AutomationRunChangeSet {
 export interface AutomationRunReceipt {
   readonly summary?: string;
   readonly error?: string;
+  /** Bounded snapshot of the previous completed result; never used as executable prompt context. */
+  readonly previousSummary?: string;
+  readonly resultChanged?: boolean;
+  readonly comparisonSummary?: string;
   readonly evidence: readonly Evidence[];
   readonly evidenceRefs: readonly string[];
   readonly verifications: readonly AutomationRunVerification[];
@@ -368,5 +374,7 @@ export interface ConversationAutomationOrigin {
   readonly runId: string;
   readonly automationName: string;
   readonly triggerSource: AutomationTriggerSource;
+  /** User-facing workspace that owns the Automation; execution may use a worktree. */
+  readonly originWorkspacePath?: string;
   readonly createdAt: string;
 }

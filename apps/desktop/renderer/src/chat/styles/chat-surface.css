@@ -2760,6 +2760,9 @@
 .chat-header-automation-badge {
   flex: 0 0 auto;
   display: inline-flex;
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
   align-items: center;
   padding: 1px 7px;
   border-radius: 999px;

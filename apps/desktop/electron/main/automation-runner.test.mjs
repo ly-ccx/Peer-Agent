@@ -19,11 +19,24 @@ function fixture() {
   });
   const store = {
     getRun: (id) => structuredClone(runs.get(id)),
+    listRuns: ({ automationId } = {}) => [...runs.values()]
+      .filter((run) => !automationId || run.automationId === automationId)
+      .map((run) => structuredClone(run)),
     updateRun(id, patch) { const next = { ...runs.get(id), ...structuredClone(patch) }; runs.set(id, next); return structuredClone(next); },
   };
   const conversationStore = {
     createConversation(input) { const value = { id: 42, ...input }; conversations.push(value); return value; },
     appendMessage(id, message) { messages.push({ id, message }); },
+    updateMessageById(id, messageId, patch) {
+      const entry = messages.find((item) => item.id === id && item.message.id === messageId);
+      if (entry) entry.message = { ...entry.message, ...patch };
+    },
+    getConversation(id) {
+      return {
+        ...conversations.find((conversation) => conversation.id === id),
+        messages: messages.filter((entry) => entry.id === id).map((entry) => entry.message),
+      };
+    },
   };
   return { runs, store, conversations, messages, conversationStore };
 }
@@ -38,7 +51,15 @@ describe('automation runner', () => {
       ensureWorkspace: async () => {},
       createId: (() => { let id = 0; return () => `id-${++id}`; })(),
       now: (() => { const values = ['2026-08-04T00:00:01.000Z', '2026-08-04T00:00:03.000Z']; return () => values.shift(); })(),
-      llmChatService: { async sendMessage(input) { calls.push(input); return { terminalStatus: 'done', evidenceRefs: ['evidence://1'] }; } },
+      llmChatService: {
+        async sendMessage(input) {
+          calls.push(input);
+          state.conversationStore.updateMessageById(42, input.assistantMessageId, {
+            content: 'Reviewed both repositories.\n\nThe code repository had 12 commits.',
+          });
+          return { terminalStatus: 'done', evidenceRefs: ['evidence://1'] };
+        },
+      },
     });
 
     const result = await runner.run('run-1');
@@ -53,12 +74,45 @@ describe('automation runner', () => {
       runId: 'run-1',
       automationName: 'Review',
       triggerSource: 'scheduled',
+      originWorkspacePath: '/workspace',
       createdAt: '2026-08-04T00:00:01.000Z',
     });
     assert.equal(calls[0].permissionPolicy.kind, 'automation');
     assert.equal(calls[0].permissionPolicy.preset, 'observe');
     assert.equal(calls[0].webContents.isDestroyed(), false);
     assert.deepEqual(result.receipt.evidenceRefs, ['evidence://1']);
+    assert.equal(
+      result.receipt.summary,
+      'Reviewed both repositories.\n\nThe code repository had 12 commits.',
+    );
+  });
+
+  it('records a bounded comparison against the previous completed result', async () => {
+    const state = fixture();
+    state.runs.set('run-previous', {
+      ...state.runs.get('run-1'),
+      runId: 'run-previous',
+      status: 'succeeded',
+      receipt: { summary: 'Reviewed both repositories. The code repository had 12 commits.' },
+    });
+    const runner = createAutomationRunner({
+      store: state.store,
+      conversationStore: state.conversationStore,
+      ensureWorkspace: async () => {},
+      now: (() => { const values = ['2026-08-04T00:00:01.000Z', '2026-08-04T00:00:03.000Z']; return () => values.shift(); })(),
+      llmChatService: {
+        async sendMessage(input) {
+          state.conversationStore.updateMessageById(42, input.assistantMessageId, {
+            content: 'Reviewed both repositories. The code repository had 12 commits.',
+          });
+          return { terminalStatus: 'done' };
+        },
+      },
+    });
+    const result = await runner.run('run-1');
+    assert.equal(result.receipt.resultChanged, false);
+    assert.equal(result.receipt.previousSummary, 'Reviewed both repositories. The code repository had 12 commits.');
+    assert.match(result.receipt.comparisonSummary, /No result change/);
   });
 
   it('runs write grants inside the prepared worktree and persists change evidence', async () => {

@@ -23,7 +23,13 @@ function snapshot(definition) {
   };
 }
 
-export function createAutomationApplicationService({ store, getRunner, getScheduler, now = () => new Date().toISOString() } = {}) {
+export function createAutomationApplicationService({
+  store,
+  getRunner,
+  getScheduler,
+  now = () => new Date().toISOString(),
+  logger = console,
+} = {}) {
   if (!store) throw new TypeError('store is required');
 
   function summaries(input = {}) {
@@ -53,7 +59,39 @@ export function createAutomationApplicationService({ store, getRunner, getSchedu
       scheduledAt: createdAt,
       snapshot: snapshot(definition),
     }, { runId, now: createdAt });
-    void getRunner?.()?.run(run).catch(() => {});
+    const runner = getRunner?.();
+    if (!runner?.run) {
+      const failureReason = 'automation_runner_unavailable';
+      logger?.error?.('[automation-application] run failed to start:', failureReason);
+      return store.updateRun(run.runId, {
+        status: 'failed',
+        finishedAt: now(),
+        failureReason,
+        receipt: {
+          error: 'Automation runner is unavailable.',
+          evidence: [], evidenceRefs: [], verifications: [],
+          completedAt: now(),
+        },
+      });
+    }
+    void runner.run(run).catch((error) => {
+      const failureReason = error instanceof Error ? error.message : String(error || 'automation_runner_failed');
+      logger?.error?.('[automation-application] runner failed:', error);
+      const current = store.getRun(run.runId);
+      if (current && ACTIVE_RUN_STATUSES.has(current.status)) {
+        const finishedAt = now();
+        store.updateRun(run.runId, {
+          status: 'failed',
+          finishedAt,
+          failureReason,
+          receipt: {
+            error: failureReason,
+            evidence: [], evidenceRefs: [], verifications: [],
+            completedAt: finishedAt,
+          },
+        });
+      }
+    });
     return run;
   }
 

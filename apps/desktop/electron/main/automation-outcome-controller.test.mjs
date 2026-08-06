@@ -19,6 +19,37 @@ test('success resets failures and only notifies when configured', () => {
   assert.equal(automationOutcomeDecision(definition(2, true), { status: 'succeeded' }).notify, true);
 });
 
+test('only-on-change success notifications suppress unchanged results', () => {
+  const configured = {
+    ...definition(0, true),
+    notifications: { ...definition(0, true).notifications, succeededOnlyOnChange: true },
+  };
+  assert.equal(automationOutcomeDecision(configured, {
+    status: 'succeeded', receipt: { resultChanged: false },
+  }).notify, false);
+  assert.equal(automationOutcomeDecision(configured, {
+    status: 'succeeded', receipt: { resultChanged: true },
+  }).notify, true);
+});
+
+test('terminal outcomes update lastRunAt with the run completion time', () => {
+  const patches = [];
+  const controller = createAutomationOutcomeController({
+    store: {
+      getDefinition: () => definition(0),
+      updateDefinitionRuntimeFacts: (_id, patch) => patches.push(patch),
+    },
+  });
+  controller.handleRunUpdated({
+    automationId: 'a1', runId: 'r1', status: 'succeeded',
+    finishedAt: '2026-08-06T10:51:10.862Z',
+  });
+  assert.deepEqual(patches, [{
+    consecutiveFailures: 0,
+    lastRunAt: '2026-08-06T10:51:10.862Z',
+  }]);
+});
+
 test('notification click returns to the exact run', () => {
   const patches = [];
   let click = null;

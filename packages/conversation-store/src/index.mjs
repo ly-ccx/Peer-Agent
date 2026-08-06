@@ -238,6 +238,9 @@ function normalizeAutomationOrigin(origin) {
   const triggerSource = AUTOMATION_TRIGGER_SOURCES.has(origin.triggerSource)
     ? origin.triggerSource
     : 'manual';
+  const originWorkspacePath = typeof origin.originWorkspacePath === 'string' && origin.originWorkspacePath.trim()
+    ? origin.originWorkspacePath.trim()
+    : null;
   const createdAt = typeof origin.createdAt === 'string' && origin.createdAt.trim()
     ? origin.createdAt.trim()
     : null;
@@ -247,6 +250,7 @@ function normalizeAutomationOrigin(origin) {
     runId,
     automationName,
     triggerSource,
+    ...(originWorkspacePath ? { originWorkspacePath } : {}),
     ...(createdAt ? { createdAt } : {}),
   };
 }
@@ -554,7 +558,10 @@ export function createConversationStore(options = {}) {
     // 先按 index meta 过滤 workspace / status，再投影 messageCount。
     // 避免「先全量扫 jsonl 再过滤」的历史路径。
     const filtered = readIndex().filter((meta) => {
-      if ((meta.workspacePath || null) !== (workspacePath || null)) return false;
+      const requestedWorkspace = workspacePath || null;
+      const executionWorkspace = meta.workspacePath || null;
+      const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
+      if (executionWorkspace !== requestedWorkspace && automationWorkspace !== requestedWorkspace) return false;
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
       return true;
     });

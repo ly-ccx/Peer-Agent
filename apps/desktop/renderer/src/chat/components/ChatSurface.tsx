@@ -368,6 +368,7 @@ export function ChatSurface({
   workspacePath,
   isPageActive,
   messageTarget,
+  onOpenAutomationRun,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -380,6 +381,7 @@ export function ChatSurface({
     runId: string;
     automationName?: string;
     triggerSource?: string;
+    originWorkspacePath?: string;
     createdAt?: string;
   } | null;
   readonly systemInstructions?: string;
@@ -402,6 +404,7 @@ export function ChatSurface({
   }) => Promise<{ id: string }>;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
+  readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
@@ -2241,6 +2244,7 @@ export function ChatSurface({
       <ChatHeader
         title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
         automationOrigin={automationOrigin}
+        onOpenAutomationRun={onOpenAutomationRun}
         isZh={isZh}
         i18n={i18n}
         isStreaming={isStreaming}

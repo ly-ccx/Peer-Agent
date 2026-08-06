@@ -638,6 +638,15 @@ function createAppTrayController() {
     workspaceRoot: workspaceRoot || path.join(__dirname, '../../..'),
     resourcesRoot: process.resourcesPath,
     listRecentConversations: listTrayRecentConversations,
+    listRecentAutomationRuns: async ({ limit = 3 } = {}) => automationStore.listRuns({ limit })
+      .filter((run) => run.receipt?.summary || run.failureReason || run.blockedReason)
+      .map((run) => ({
+        automationId: run.automationId,
+        runId: run.runId,
+        automationName: run.snapshot?.name,
+        status: run.status,
+        summary: run.receipt?.summary || run.failureReason || run.blockedReason,
+      })),
     getAutomationRuntime: async () => ({
       globallyPaused: automationStore.getRuntimeState().globallyPaused,
       activeCount: automationStore.listDefinitions({ statuses: ['active'] }).length,
@@ -656,6 +665,7 @@ function createAppTrayController() {
         showOrCreateMainWindow();
       },
       onOpenAutomations: () => openAutomationRunFromNotification({}),
+      onOpenAutomationRun: (target) => openAutomationRunFromNotification(target),
       onToggleAutomations: (paused) => {
         const scheduler = automationRuntimeOwner?.scheduler;
         if (scheduler) scheduler.setGloballyPaused(paused);

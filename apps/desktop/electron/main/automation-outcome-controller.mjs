@@ -7,8 +7,11 @@ export function automationOutcomeDecision(definition, run) {
     ? 0
     : failed ? (definition.consecutiveFailures ?? 0) + 1 : (definition.consecutiveFailures ?? 0);
   const autoPause = failed && nextFailures >= 3;
+  const successConfigured = definition.notifications?.succeeded === true;
+  const successChanged = definition.notifications?.succeededOnlyOnChange !== true
+    || run.receipt?.resultChanged !== false;
   const notify = ATTENTION_STATUSES.has(run.status)
-    || (run.status === 'succeeded' && definition.notifications?.succeeded === true);
+    || (run.status === 'succeeded' && successConfigured && successChanged);
   return Object.freeze({ failed, nextFailures, autoPause, notify });
 }
 
@@ -27,6 +30,7 @@ export function createAutomationOutcomeController({
     if (run.status === 'succeeded' || decision.failed) {
       store.updateDefinitionRuntimeFacts(definition.automationId, {
         consecutiveFailures: decision.nextFailures,
+        ...(run.finishedAt ? { lastRunAt: run.finishedAt } : {}),
         ...(decision.autoPause ? { status: 'paused', pauseReason: 'consecutive_failures' } : {}),
       });
     }
