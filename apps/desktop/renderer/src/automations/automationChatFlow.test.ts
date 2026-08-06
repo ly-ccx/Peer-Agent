@@ -26,8 +26,10 @@ test('confirm and cancel use the Automation IPC owner with proposal identity', (
 
 test('authoritative action results replace conversation proposal state and expose real receipts', () => {
   assert.match(surfaceSource, /applyAutomationProposalActionResult\(/);
-  assert.match(projectionSource, /activeProposal: proposal/);
+  // Terminal confirm/cancel clear the footer card; non-terminal still keep activeProposal.
+  assert.match(projectionSource, /activeProposal: terminal \? null : proposal/);
   assert.match(projectionSource, /status: proposal\.status/);
+  assert.match(projectionSource, /proposal\.status === 'created' \|\| proposal\.status === 'cancelled'/);
   assert.match(cardSource, /hasCreationReceipt && proposal\.receipt/);
   assert.match(cardSource, /proposal\.receipt\.automationId/);
 });

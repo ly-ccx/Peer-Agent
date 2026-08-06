@@ -90,6 +90,15 @@ test('selects the active proposal without creating a renderer source of truth', 
   };
   assert.equal(selectAutomationChatProposal(context), active);
   assert.equal(selectAutomationChatProposal(null), null);
+  // Terminal proposals must not pin a footer card after confirm/cancel.
+  assert.equal(
+    selectAutomationChatProposal({ ...context, status: 'created', activeProposal: proposal('created') }),
+    null,
+  );
+  assert.equal(
+    selectAutomationChatProposal({ ...context, status: 'cancelled', activeProposal: proposal('cancelled') }),
+    null,
+  );
 });
 
 test('builds a governed action request and rejects cross-conversation proposals', () => {
@@ -111,7 +120,13 @@ test('applies the authoritative proposal result back to conversation metadata', 
   const result: AutomationProposalActionResult = { proposal: created, replayed: false };
   const next = applyAutomationProposalActionResult(null, result);
   assert.equal(next.status, 'created');
-  assert.equal(next.activeProposal, created);
+  // Confirm/cancel clear the footer card; receipt stays on the action result.
+  assert.equal(next.activeProposal, null);
   assert.equal(next.source, 'chat_intent');
   assert.deepEqual(next.rejectedFingerprints, []);
+
+  const failed = { ...proposal('failed'), updatedAt: '2026-08-05T09:02:00.000Z' };
+  const failedNext = applyAutomationProposalActionResult(next, { proposal: failed, replayed: false });
+  assert.equal(failedNext.status, 'failed');
+  assert.equal(failedNext.activeProposal, failed);
 });

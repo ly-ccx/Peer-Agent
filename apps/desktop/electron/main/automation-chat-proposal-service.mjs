@@ -148,7 +148,7 @@ export function createAutomationChatProposalService({
       saveContext(conversationId, Object.freeze({
         ...current,
         status: 'cancelled',
-        activeProposal: cancelled,
+        activeProposal: null,
         rejectedFingerprints,
         updatedAt: timestamp,
       }));
@@ -186,7 +186,7 @@ export function createAutomationChatProposalService({
       saveContext(conversationId, Object.freeze({
         ...current,
         status: 'created',
-        activeProposal: created,
+        activeProposal: null,
         updatedAt: createdAt,
       }));
       return Object.freeze({ proposal: created, receipt, replayed: false });

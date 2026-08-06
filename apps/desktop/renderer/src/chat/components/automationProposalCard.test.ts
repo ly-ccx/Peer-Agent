@@ -9,7 +9,9 @@ const projectionSource = readFileSync(new URL('../../automations/automationChatP
 
 test('automation proposal stays a conversation-scoped structured card', () => {
   assert.match(surfaceSource, /selectAutomationChatProposal\(convState\.automationCreateContext\)/);
-  assert.match(projectionSource, /return context\?\.activeProposal \?\? null/);
+  // Terminal proposals are filtered out of the footer; open proposals still come from activeProposal.
+  assert.match(projectionSource, /const proposal = context\?\.activeProposal \?\? null/);
+  assert.match(projectionSource, /proposal\.status === 'created' \|\| proposal\.status === 'cancelled'\) return null/);
   assert.match(surfaceSource, /<VirtualChatTurnList[\s\S]*<AutomationProposalCard/);
   assert.doesNotMatch(cardSource, /role=['"]assistant['"]/);
   assert.doesNotMatch(cardSource, /contentEditable|<textarea|<input/);

@@ -24,7 +24,11 @@ export interface AutomationChatProposalViewState {
 export function selectAutomationChatProposal(
   context: AutomationCreateContext | null | undefined,
 ): AutomationChatProposal | null {
-  return context?.activeProposal ?? null;
+  const proposal = context?.activeProposal ?? null;
+  if (!proposal) return null;
+  // Terminal proposals are receipts, not open decisions — do not pin a footer card.
+  if (proposal.status === 'created' || proposal.status === 'cancelled') return null;
+  return proposal;
 }
 
 export function projectAutomationChatProposal(
@@ -63,6 +67,7 @@ export function applyAutomationProposalActionResult(
   result: AutomationProposalActionResult,
 ): AutomationCreateContext {
   const proposal = result.proposal;
+  const terminal = proposal.status === 'created' || proposal.status === 'cancelled';
   return {
     ...(context ?? {
       schemaVersion: 1,
@@ -72,7 +77,8 @@ export function applyAutomationProposalActionResult(
       createdAt: proposal.createdAt,
     }),
     status: proposal.status,
-    activeProposal: proposal,
+    // Clear the footer card after confirm/cancel; receipt remains on the action result.
+    activeProposal: terminal ? null : proposal,
     updatedAt: proposal.updatedAt,
   };
 }

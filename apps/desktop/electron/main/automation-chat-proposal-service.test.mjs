@@ -74,8 +74,8 @@ test('propose persists a structured proposal but does not create automation', ()
   assert.equal(created.length, 0);
 });
 
-test('confirm creates once and a repeated confirmation replays the real receipt', async () => {
-  const { created, service } = harness();
+test('confirm creates once and clears the footer proposal after success', async () => {
+  const { contexts, created, service } = harness();
   const proposed = service.propose({ conversationId: 'conversation-1', definition: definition() }).proposal;
   const request = {
     conversationId: 'conversation-1',
@@ -84,11 +84,14 @@ test('confirm creates once and a repeated confirmation replays the real receipt'
     action: 'confirm',
   };
   const first = await service.act(request);
-  const second = await service.act(request);
   assert.equal(created.length, 1);
   assert.equal(first.receipt.automationId, 'automation-1');
-  assert.equal(second.receipt.automationId, 'automation-1');
-  assert.equal(second.replayed, true);
+  assert.equal(first.proposal.status, 'created');
+  // Footer card is cleared after confirm; receipt remains on the action result.
+  assert.equal(contexts.get('conversation-1').status, 'created');
+  assert.equal(contexts.get('conversation-1').activeProposal, null);
+  await assert.rejects(() => service.act(request), /automation_proposal_not_found/);
+  assert.equal(created.length, 1);
 });
 
 test('stale proposal card cannot create after a newer proposal replaces it', async () => {
@@ -112,7 +115,7 @@ test('stale proposal card cannot create after a newer proposal replaces it', asy
 });
 
 test('cancel stores rejected fingerprint and suppresses the same proposal in this conversation', async () => {
-  const { created, service } = harness();
+  const { contexts, created, service } = harness();
   const input = definition();
   const proposed = service.propose({ conversationId: 'conversation-1', definition: input }).proposal;
   const cancelled = await service.act({
@@ -126,6 +129,8 @@ test('cancel stores rejected fingerprint and suppresses the same proposal in thi
   assert.equal(repeated.suppressed, true);
   assert.equal(repeated.reason, 'rejected_fingerprint');
   assert.equal(created.length, 0);
+  assert.equal(contexts.get('conversation-1').status, 'cancelled');
+  assert.equal(contexts.get('conversation-1').activeProposal, null);
 });
 
 test('creation failure persists failed state and never fabricates a receipt', async () => {
