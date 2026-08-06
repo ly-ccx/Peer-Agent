@@ -78,9 +78,13 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   // 附件条挂在壳层 form 的兄弟节点，绝不进入 ComposerDraftField 子树。
   // 即使 React 协调时 field 重渲，attachment-strip 也不在 draft 叶子 DOM 子树内，
   // 可避免 field-sizing / 文本重排把大图缩略图一起刷掉。
-  const attachmentSlot = useMemo(
-    () => (
-      <>
+  // 必须是单个包裹节点：composer 是 grid，多个裸兄弟节点会被塞进同一网格单元
+  // 并与 textarea 叠放（缩略图压住文字）。包一层后附件条恒为一个 grid item，
+  // 占据独立的 home-attachments 行；无附件且无错误时整行不渲染，不占高度。
+  const attachmentSlot = useMemo(() => {
+    if (!attachments.length && !attachmentError) return null;
+    return (
+      <div className="composer-attachment-row">
         <AttachmentStrip
           attachments={attachments}
           onRemove={onRemoveAttachment}
@@ -89,10 +93,9 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
           isZh={isZh}
         />
         {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
-      </>
-    ),
-    [attachmentError, attachments, isZh, onPreviewImage, onRemoveAttachment, onReorderAttachment],
-  );
+      </div>
+    );
+  }, [attachmentError, attachments, isZh, onPreviewImage, onRemoveAttachment, onReorderAttachment]);
 
   return (
     <form
