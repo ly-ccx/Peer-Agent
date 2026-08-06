@@ -65,6 +65,14 @@ export function createAutomationRunner({
           workspacePath: executionWorkspace.workspacePath,
           mode: 'goal',
           modelProviderId: initial.snapshot.modelProviderId ?? null,
+          automationOrigin: {
+            kind: 'automation_run',
+            automationId: initial.automationId,
+            runId: initial.runId,
+            automationName: initial.snapshot.name,
+            triggerSource: initial.triggerSource,
+            createdAt: startedAt,
+          },
         });
         const userMessage = {
           id: createId(),

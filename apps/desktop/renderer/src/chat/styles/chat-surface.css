@@ -2757,6 +2757,22 @@
   -webkit-app-region: no-drag;
 }
 
+.chat-header-automation-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
+  color: var(--azure-seal, #4f7cff);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .chat-header-title {
   font-size: 0.82rem;
   font-weight: 500;

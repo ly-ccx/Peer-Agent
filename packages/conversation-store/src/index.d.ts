@@ -2,6 +2,7 @@ import type {
   AutomationCreateContext,
   ContextAccountingObserved,
   ContextAccountingSnapshot,
+  ConversationAutomationOrigin,
   ConversationLifetimeUsage,
   RuntimeTurnUsage,
 } from '@peer-agent/protocol';
@@ -29,6 +30,8 @@ export interface ConversationMeta {
   readonly contextSnapshot?: ConversationContextSnapshot | null;
   readonly effort?: string;
   readonly automationCreateContext?: AutomationCreateContext | null;
+  /** Durable source for automation Fresh Conversations; rename-safe badge signal. */
+  readonly automationOrigin?: ConversationAutomationOrigin | null;
   readonly messageCount?: number;
   readonly [key: string]: unknown;
 }
@@ -81,7 +84,13 @@ export interface ConversationStore {
     id: string,
     options?: { modelKey?: string | null },
   ): ContextAccountingObserved | null;
-  createConversation(input?: { title?: string; workspacePath?: string; mode?: string; automationCreateContext?: AutomationCreateContext | null }): ConversationMeta;
+  createConversation(input?: {
+    title?: string;
+    workspacePath?: string;
+    mode?: string;
+    automationCreateContext?: AutomationCreateContext | null;
+    automationOrigin?: ConversationAutomationOrigin | null;
+  }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
   updateAutomationCreateContext(id: string, context: AutomationCreateContext | null): ConversationMeta | null;

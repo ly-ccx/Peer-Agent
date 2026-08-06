@@ -351,6 +351,7 @@ export function ChatSurface({
   conversationId,
   conversationRevision,
   conversationTitle,
+  automationOrigin = null,
   systemInstructions,
   replyLanguage,
   gitBranchPrefix,
@@ -373,6 +374,14 @@ export function ChatSurface({
   readonly conversationId: string | null;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
+  readonly automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    createdAt?: string;
+  } | null;
   readonly systemInstructions?: string;
   readonly replyLanguage?: string;
   readonly gitBranchPrefix?: string;
@@ -2231,6 +2240,7 @@ export function ChatSurface({
       ) : null}
       <ChatHeader
         title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
+        automationOrigin={automationOrigin}
         isZh={isZh}
         i18n={i18n}
         isStreaming={isStreaming}

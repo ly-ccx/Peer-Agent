@@ -24,6 +24,7 @@ export interface ChatHeaderAction {
  */
 export function ChatHeader({
   title,
+  automationOrigin = null,
   isZh,
   i18n,
   isStreaming,
@@ -37,6 +38,14 @@ export function ChatHeader({
   onOpenSettings,
 }: {
   readonly title: string;
+  readonly automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    createdAt?: string;
+  } | null;
   readonly isZh: boolean;
   readonly i18n: I18nRuntime;
   readonly isStreaming: boolean;
@@ -149,13 +158,29 @@ export function ChatHeader({
             }}
           />
         ) : (
-          <span
-            className="chat-header-title"
-            title={isZh ? '双击编辑标题' : 'Double-click to edit'}
-            onDoubleClick={onRename ? beginEdit : undefined}
-          >
-            {displayTitle}
-          </span>
+          <>
+            {automationOrigin?.kind === 'automation_run' ? (
+              <span
+                className="chat-header-automation-badge"
+                title={
+                  automationOrigin.automationName
+                    ? (isZh
+                      ? `自动化：${automationOrigin.automationName}`
+                      : `Automation: ${automationOrigin.automationName}`)
+                    : (isZh ? '自动化会话' : 'Automation conversation')
+                }
+              >
+                {isZh ? '自动化' : 'Automation'}
+              </span>
+            ) : null}
+            <span
+              className="chat-header-title"
+              title={isZh ? '双击编辑标题' : 'Double-click to edit'}
+              onDoubleClick={onRename ? beginEdit : undefined}
+            >
+              {displayTitle}
+            </span>
+          </>
         )}
 
         {/* More actions menu */}

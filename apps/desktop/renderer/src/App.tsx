@@ -74,6 +74,15 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** Durable automation Fresh Run origin; rename-safe badge signal. */
+  automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    createdAt?: string;
+  } | null;
 }
 
 function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
@@ -877,6 +886,7 @@ function MainApp() {
                   conversationId={activeConversationId}
                   conversationRevision={conversationRevision}
                   conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
+                  automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
                   systemInstructions={systemInstructions}
                   replyLanguage={replyLanguage}
                   gitBranchPrefix={gitBranchPrefix}

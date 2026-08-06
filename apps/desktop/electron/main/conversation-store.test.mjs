@@ -565,6 +565,46 @@ test('legacy conversations without effort/modelProviderId load with safe fallbac
   }
 });
 
+test('automationOrigin persists on create and survives rename', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const origin = {
+      kind: 'automation_run',
+      automationId: 'auto-1',
+      runId: 'run-9',
+      automationName: 'Daily review',
+      triggerSource: 'scheduled',
+      createdAt: '2026-08-04T00:00:00.000Z',
+    };
+    const conv = store.createConversation({
+      title: 'Automation: Daily review',
+      automationOrigin: origin,
+    });
+    assert.deepEqual(conv.automationOrigin, origin);
+
+    const loaded = store.getConversation(conv.id);
+    assert.deepEqual(loaded.automationOrigin, origin);
+
+    const renamed = store.updateTitle(conv.id, 'My renamed automation chat');
+    assert.equal(renamed.title, 'My renamed automation chat');
+    assert.deepEqual(renamed.automationOrigin, origin);
+
+    const listed = store.listConversations({ status: 'active' });
+    const row = listed.find((item) => item.id === conv.id);
+    assert.ok(row);
+    assert.deepEqual(row.automationOrigin, origin);
+
+    // Invalid origin shapes are dropped rather than trusted as badge truth.
+    const invalid = store.createConversation({
+      title: 'no origin',
+      automationOrigin: { kind: 'not_a_run', automationId: 'x' },
+    });
+    assert.equal(invalid.automationOrigin, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
 test('addUsage on missing conversation returns null', () => {
   const { store, cleanup } = freshStore();
   try {

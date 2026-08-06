@@ -30,6 +30,15 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** Durable automation Fresh Run origin; rename-safe badge signal. */
+  automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    createdAt?: string;
+  } | null;
 }
 
 interface WorkspaceEntry {
@@ -516,13 +525,29 @@ export function Sidebar({
             }}
           />
         ) : (
-          <span
-            className="sidebar-conv-title"
-            title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
-            onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
-          >
-            {conv.title || (isZh ? '新对话' : 'New Chat')}
-          </span>
+          <>
+            {conv.automationOrigin?.kind === 'automation_run' ? (
+              <span
+                className="sidebar-conv-automation-badge"
+                title={
+                  conv.automationOrigin.automationName
+                    ? (isZh
+                      ? `自动化：${conv.automationOrigin.automationName}`
+                      : `Automation: ${conv.automationOrigin.automationName}`)
+                    : (isZh ? '自动化会话' : 'Automation conversation')
+                }
+              >
+                {isZh ? '自动化' : 'Auto'}
+              </span>
+            ) : null}
+            <span
+              className="sidebar-conv-title"
+              title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
+              onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
+            >
+              {conv.title || (isZh ? '新对话' : 'New Chat')}
+            </span>
+          </>
         )}
         <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
           {isArchivedView ? (

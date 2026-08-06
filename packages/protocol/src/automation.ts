@@ -354,3 +354,19 @@ export interface AutomationProposalActionResult {
   readonly receipt?: AutomationCreationReceipt | null;
   readonly replayed: boolean;
 }
+
+/**
+ * Durable conversation origin for automation Fresh Runs.
+ * Distinct from AutomationCreateContext (chat → create automation draft).
+ * UI badges and audit links must read this field, not title prefixes.
+ */
+export type ConversationAutomationOriginKind = 'automation_run';
+
+export interface ConversationAutomationOrigin {
+  readonly kind: ConversationAutomationOriginKind;
+  readonly automationId: string;
+  readonly runId: string;
+  readonly automationName: string;
+  readonly triggerSource: AutomationTriggerSource;
+  readonly createdAt: string;
+}

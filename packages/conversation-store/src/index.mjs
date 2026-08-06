@@ -226,6 +226,31 @@ function normalizeContextSnapshot(snapshot, meta) {
   };
 }
 
+const AUTOMATION_TRIGGER_SOURCES = new Set(['scheduled', 'manual', 'retry']);
+
+function normalizeAutomationOrigin(origin) {
+  if (!origin || typeof origin !== 'object') return null;
+  if (origin.kind !== 'automation_run') return null;
+  const automationId = typeof origin.automationId === 'string' ? origin.automationId.trim() : '';
+  const runId = typeof origin.runId === 'string' ? origin.runId.trim() : '';
+  if (!automationId || !runId) return null;
+  const automationName = typeof origin.automationName === 'string' ? origin.automationName.trim() : '';
+  const triggerSource = AUTOMATION_TRIGGER_SOURCES.has(origin.triggerSource)
+    ? origin.triggerSource
+    : 'manual';
+  const createdAt = typeof origin.createdAt === 'string' && origin.createdAt.trim()
+    ? origin.createdAt.trim()
+    : null;
+  return {
+    kind: 'automation_run',
+    automationId,
+    runId,
+    automationName,
+    triggerSource,
+    ...(createdAt ? { createdAt } : {}),
+  };
+}
+
 function normalizeMeta(meta) {
   const status = normalizeStatus(meta?.status);
   const pinnedAt = typeof meta?.pinnedAt === 'string' && meta.pinnedAt.trim() ? meta.pinnedAt : null;
@@ -237,10 +262,13 @@ function normalizeMeta(meta) {
   const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
     ? contentRevisionRaw
     : 0;
+  const automationOrigin = normalizeAutomationOrigin(meta?.automationOrigin);
   const normalizedBase = {
     ...meta,
     contentRevision,
   };
+  // Drop untrusted automationOrigin from the spread base; reattach only when valid.
+  if ('automationOrigin' in normalizedBase) delete normalizedBase.automationOrigin;
   return {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
@@ -253,6 +281,7 @@ function normalizeMeta(meta) {
     pinnedAt,
     pinnedOrder,
     ...(messageCount === undefined ? {} : { messageCount }),
+    ...(automationOrigin ? { automationOrigin } : {}),
   };
 }
 
@@ -595,8 +624,9 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode, automationCreateContext } = {}) {
+  function createConversation({ title, workspacePath, mode, automationCreateContext, automationOrigin } = {}) {
     const now = new Date().toISOString();
+    const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
     const meta = {
       id: randomUUID(),
       title: title || '',
@@ -615,6 +645,7 @@ export function createConversationStore(options = {}) {
       contentRevision: 0,
       contextSnapshot: null,
       ...(automationCreateContext ? { automationCreateContext: structuredClone(automationCreateContext) } : {}),
+      ...(normalizedOrigin ? { automationOrigin: structuredClone(normalizedOrigin) } : {}),
       createdAt: now,
       updatedAt: now,
     };

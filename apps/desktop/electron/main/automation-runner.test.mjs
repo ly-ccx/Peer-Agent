@@ -46,6 +46,15 @@ describe('automation runner', () => {
     assert.equal(result.conversationId, 42);
     assert.equal(state.conversations.length, 1);
     assert.equal(state.messages.length, 2);
+    assert.equal(state.conversations[0].title, 'Automation: Review');
+    assert.deepEqual(state.conversations[0].automationOrigin, {
+      kind: 'automation_run',
+      automationId: 'a-1',
+      runId: 'run-1',
+      automationName: 'Review',
+      triggerSource: 'scheduled',
+      createdAt: '2026-08-04T00:00:01.000Z',
+    });
     assert.equal(calls[0].permissionPolicy.kind, 'automation');
     assert.equal(calls[0].permissionPolicy.preset, 'observe');
     assert.equal(calls[0].webContents.isDestroyed(), false);

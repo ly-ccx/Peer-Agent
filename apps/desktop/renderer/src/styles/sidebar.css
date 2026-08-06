@@ -683,6 +683,23 @@
     box-shadow: inset 2px 0 0 var(--azure-trace);
   }
 }
+.sidebar-conv-automation-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 4.5rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
+  color: var(--azure-seal, #4f7cff);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .sidebar-conv-title {
   flex: 1 1 auto;
   min-width: 0;
