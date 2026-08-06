@@ -145,39 +145,73 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
             <span>思考强度</span>
             <strong>{effortLabel(previewEffort, true)}</strong>
           </div>
-          <input
-            ref={sliderRef}
-            type="range"
-            className="quick-chat-effort-slider"
-            min="0"
-            max="100"
-            step="0.01"
-            defaultValue={initialEffortValue}
-            style={{ '--effort-progress': `${initialEffortValue}%` } as CSSProperties}
-            aria-label="思考强度"
-            aria-valuetext={effortLabel(previewEffort, true)}
-            onChange={(event) => updateEffortPreview(event.currentTarget)}
-            onPointerUp={(event) => {
-              const snapped = snapEffortValue(Number(event.currentTarget.value), effortLevels.length);
-              event.currentTarget.value = String(snapped);
-              event.currentTarget.style.setProperty('--effort-progress', `${snapped}%`);
-              selectEffortIndex(effortIndexFromValue(snapped, effortLevels.length));
-            }}
-            onKeyDown={(event) => {
-              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              event.preventDefault();
-              const currentIndex = effortIndexFromValue(Number(event.currentTarget.value), effortLevels.length);
-              const nextIndex = event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? Math.max(0, effortLevels.length - 1)
-                  : Math.min(
-                    Math.max(0, effortLevels.length - 1),
-                    Math.max(0, currentIndex + (event.key === 'ArrowRight' ? 1 : -1)),
-                  );
-              selectEffortIndex(nextIndex);
-            }}
-          />
+          <div className="quick-chat-effort-slider-shell">
+            {/*
+              与主聊天相同：centerX = thumb/2 + (100% - thumb) * t，
+              刻度/填充与 range 拇指圆心同一坐标系。
+            */}
+            <div className="quick-chat-effort-slider-track" aria-hidden="true">
+              <div
+                className="quick-chat-effort-slider-fill"
+                style={{
+                  width: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${
+                    effortLevels.length > 1
+                      ? previewIndex / (effortLevels.length - 1)
+                      : 0
+                  })`,
+                }}
+              />
+            </div>
+            {effortLevels.map((level, index) => {
+              const t = effortLevels.length > 1
+                ? index / (effortLevels.length - 1)
+                : 0;
+              const active = index <= previewIndex;
+              return (
+                <span
+                  key={level}
+                  className={`quick-chat-effort-slider-tick${active ? ' is-active' : ''}`}
+                  style={{
+                    left: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${t})`,
+                  }}
+                  aria-hidden="true"
+                />
+              );
+            })}
+            <input
+              ref={sliderRef}
+              type="range"
+              className="quick-chat-effort-slider"
+              min="0"
+              max="100"
+              step="0.01"
+              defaultValue={initialEffortValue}
+              style={{ '--effort-progress': `${initialEffortValue}%` } as CSSProperties}
+              aria-label="思考强度"
+              aria-valuetext={effortLabel(previewEffort, true)}
+              onChange={(event) => updateEffortPreview(event.currentTarget)}
+              onPointerUp={(event) => {
+                const snapped = snapEffortValue(Number(event.currentTarget.value), effortLevels.length);
+                event.currentTarget.value = String(snapped);
+                event.currentTarget.style.setProperty('--effort-progress', `${snapped}%`);
+                selectEffortIndex(effortIndexFromValue(snapped, effortLevels.length));
+              }}
+              onKeyDown={(event) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const currentIndex = effortIndexFromValue(Number(event.currentTarget.value), effortLevels.length);
+                const nextIndex = event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? Math.max(0, effortLevels.length - 1)
+                    : Math.min(
+                      Math.max(0, effortLevels.length - 1),
+                      Math.max(0, currentIndex + (event.key === 'ArrowRight' ? 1 : -1)),
+                    );
+                selectEffortIndex(nextIndex);
+              }}
+            />
+          </div>
         </section>
       ) : state.kind === 'model' && modelGroups.length > 0 ? (
         <section className="quick-chat-model-cascade" aria-label="选择模型">

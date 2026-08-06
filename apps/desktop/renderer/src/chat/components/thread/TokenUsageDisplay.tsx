@@ -159,32 +159,66 @@ function ReasoningEffortSlider({
             <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
             <strong>{effortLabel(displayedLevel, isZh)}</strong>
           </div>
-          <input
-            className="reasoning-effort-slider"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={effectiveValue}
-            aria-label={isZh ? '思考强度' : 'Reasoning effort'}
-            aria-valuetext={effortLabel(displayedLevel, isZh)}
-            style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
-            onInput={(event) => {
-              setDirty(true);
-              setDragValue(Number(event.currentTarget.value));
-            }}
-            onChange={(event) => {
-              setDirty(true);
-              setDragValue(Number(event.currentTarget.value));
-            }}
-            onPointerUp={(event) => commit(Number(event.currentTarget.value))}
-            onKeyUp={(event) => {
-              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-                commit(Number(event.currentTarget.value));
-              }
-            }}
-            onBlur={(event) => commit(Number(event.currentTarget.value))}
-          />
+          <div className="reasoning-effort-slider-shell">
+            {/*
+              几何契约（与 WebKit/Firefox range 拇指圆心一致）：
+              centerX = thumb/2 + (100% - thumb) * t
+              轨道/刻度/填充必须共用此坐标系，不能再用 track 局部 0–100%。
+            */}
+            <div className="reasoning-effort-slider-track" aria-hidden="true">
+              <div
+                className="reasoning-effort-slider-fill"
+                style={{
+                  width: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${effectiveValue} / 100)`,
+                }}
+              />
+            </div>
+            {effortLevels.map((level, index) => {
+              const t = effortLevels.length > 1
+                ? index / (effortLevels.length - 1)
+                : 0;
+              const previewIndex = dirty
+                ? effortIndexFromValue(effectiveValue, effortLevels.length)
+                : selectedIndex;
+              const active = index <= previewIndex;
+              return (
+                <span
+                  key={level}
+                  className={`reasoning-effort-slider-tick${active ? ' is-active' : ''}`}
+                  style={{
+                    left: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${t})`,
+                  }}
+                  aria-hidden="true"
+                />
+              );
+            })}
+            <input
+              className="reasoning-effort-slider"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={effectiveValue}
+              aria-label={isZh ? '思考强度' : 'Reasoning effort'}
+              aria-valuetext={effortLabel(displayedLevel, isZh)}
+              style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
+              onInput={(event) => {
+                setDirty(true);
+                setDragValue(Number(event.currentTarget.value));
+              }}
+              onChange={(event) => {
+                setDirty(true);
+                setDragValue(Number(event.currentTarget.value));
+              }}
+              onPointerUp={(event) => commit(Number(event.currentTarget.value))}
+              onKeyUp={(event) => {
+                if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                  commit(Number(event.currentTarget.value));
+                }
+              }}
+              onBlur={(event) => commit(Number(event.currentTarget.value))}
+            />
+          </div>
         </div>,
         document.body,
       )

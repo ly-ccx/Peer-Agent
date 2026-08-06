@@ -328,6 +328,50 @@ test('legacy provider entries migrate to channel fields without losing stored se
   assert.equal(store.getDecryptedApiKey('p1'), 'secret-key');
 }));
 
+test('Kimi Coding Plan models migrate off/default effort levels to K3 multi-level effort', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'kimi-group',
+      groupId: 'kimi-group',
+      provider: 'openai',
+      channelId: 'kimi-coding-plan',
+      authMethod: 'api_key',
+      name: 'Kimi Coding Plan',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      apiKeyConfigured: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'kimi-model',
+      groupId: 'kimi-group',
+      model: 'k3-256k',
+      enabled: true,
+      isDefault: true,
+      supportsReasoning: true,
+      reasoningEffortLevels: ['off', 'default'],
+      reasoningDefaultEffort: 'default',
+      reasoningParamStyle: 'none',
+      metadataSource: 'manual',
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.channelId, 'kimi-coding-plan');
+  assert.deepEqual(provider.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+  assert.equal(provider.reasoningDefaultEffort, 'default');
+  assert.equal(provider.reasoningParamStyle, 'openai-effort');
+  assert.equal(provider.supportsReasoning, true);
+  assert.equal(provider.reasoningEffortMap?.default, 'high');
+  assert.equal(provider.reasoningEffortMap?.max, 'max');
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.deepEqual(persisted.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+  assert.equal(persisted.reasoningDefaultEffort, 'default');
+  assert.equal(persisted.reasoningParamStyle, 'openai-effort');
+}));
+
 test('DeepSeek models migrate off/default effort levels to Anthropic low/high/max', () => withStore(({ configFile }) => {
   writeFileSync(configFile, JSON.stringify({
     version: 2,

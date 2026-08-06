@@ -5,14 +5,17 @@ import {
 } from './message-normalizer.mjs';
 
 // OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
-// Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
+// Peer Agent 默认 off 不发 reasoning_effort；渠道 effortMap 若把 off 映射为
+// 显式值（如 Kimi 的 none）则照常下发。其余档位按 provider wire 契约透传。
 // medium 是 Grok 4.5 等渠道的原生档位，必须直通，不能被 default→medium 逻辑吞掉。
+// max 为 Kimi/部分 OpenAI 兼容渠道的原生顶档。
 const OPENAI_REASONING_EFFORT = {
   low: 'low',
   medium: 'medium',
   default: 'medium',
   high: 'high',
   xhigh: 'xhigh',
+  max: 'max',
 };
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
@@ -98,8 +101,16 @@ export function encodeOpenAIChatRequest({
   void promptCaching;
   // 思考档位: off(关闭) / low / default / high / xhigh。
   // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
-  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
-    body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort) {
+    if (effort === 'off') {
+      // 默认省略；渠道 effortMap 显式给出 off 时（如 Kimi → none）才下发。
+      const offMapped = mappedEffortValue(effort, reasoningEffortMap, null);
+      if (offMapped !== undefined && offMapped !== null && offMapped !== '') {
+        body.reasoning_effort = offMapped;
+      }
+    } else {
+      body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+    }
   } else if (supportsReasoning && reasoningParamStyle === 'qwen-enable' && effort && effort !== 'off') {
     body.enable_thinking = true;
     body.thinking_budget = mappedNumericEffort(effort, reasoningEffortMap, QWEN_THINKING_BUDGET) ?? QWEN_THINKING_BUDGET.default;

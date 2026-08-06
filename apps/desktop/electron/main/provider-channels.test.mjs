@@ -333,6 +333,17 @@ describe('service templates', () => {
     });
     assert.equal(resolvedMoonshot.wire, 'openai-chat');
     assert.equal(resolvedMoonshot.endpoint, 'https://api.moonshot.cn/v1/chat/completions');
+
+    // K3 官方多档：off/low/default/max，default 映射 high，max 映射 max。
+    for (const resolved of [resolvedKimi, resolvedMoonshot]) {
+      assert.equal(resolved.reasoningParamStyle, 'openai-effort');
+      assert.deepEqual(resolved.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+      assert.equal(resolved.reasoningDefaultEffort, 'default');
+      assert.equal(resolved.reasoningEffortMap?.off, 'none');
+      assert.equal(resolved.reasoningEffortMap?.low, 'low');
+      assert.equal(resolved.reasoningEffortMap?.default, 'high');
+      assert.equal(resolved.reasoningEffortMap?.max, 'max');
+    }
   });
 
   it('exposes MiniMax CN and Global coding templates with distinct endpoints', () => {

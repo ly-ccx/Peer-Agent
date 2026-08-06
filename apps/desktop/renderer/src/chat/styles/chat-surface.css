@@ -1089,12 +1089,73 @@
   font-weight: 600;
 }
 
-.reasoning-effort-slider {
-  --effort-progress: 0%;
+/* 分档刻度滑条：轨道 / 刻度 / 拇指共用圆心几何
+   centerX = thumb/2 + (100% - thumb) * t ；垂直中线 = shell 50%。 */
+.reasoning-effort-slider-shell {
+  --effort-track-h: 12px;
+  --effort-thumb: 20px;
+  --effort-tick: 4px;
+  --effort-fill: #6ea8ff;
+  --effort-rest: color-mix(in srgb, #9aa4b2 28%, transparent);
+  position: relative;
   display: block;
   width: 100%;
-  height: 22px;
+  height: 28px;
+}
+
+.reasoning-effort-slider-track {
+  position: absolute;
+  /* 全宽：与 range input 同一盒模型，端点圆心落在 thumb/2 与 100%-thumb/2 */
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--effort-track-h);
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--effort-rest);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.reasoning-effort-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--effort-fill);
+}
+
+/* 刻度在 shell 坐标系定位（与拇指圆心一致），固定浅色 */
+.reasoning-effort-slider-tick {
+  position: absolute;
+  top: 50%;
+  width: var(--effort-tick);
+  height: var(--effort-tick);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: none;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.reasoning-effort-slider-tick.is-active {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.reasoning-effort-slider {
+  --effort-progress: 0%;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
   margin: 0;
+  padding: 0;
   appearance: none;
   background: transparent;
   cursor: grab;
@@ -1106,55 +1167,58 @@
 }
 
 .reasoning-effort-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: linear-gradient(
-    90deg,
-    var(--ui-accent, var(--azure-seal)) 0 var(--effort-progress),
-    var(--ui-border-subtle, var(--za-line)) var(--effort-progress) 100%
-  );
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-webkit-slider-thumb {
-  width: 8px;
-  height: 18px;
-  margin-top: -7px;
+  width: var(--effort-thumb);
+  height: var(--effort-thumb);
+  /* 拇指圆心落在 runnable-track 垂直中线 */
+  margin-top: calc((var(--effort-track-h) - var(--effort-thumb)) / 2);
   border: 0;
-  border-radius: 3px;
+  border-radius: 50%;
   appearance: none;
-  background: var(--ui-accent, var(--azure-seal));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 15%, transparent);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 1px 3px rgba(15, 23, 42, 0.18);
   transition: transform 100ms ease, box-shadow 100ms ease;
 }
 
 .reasoning-effort-slider:active::-webkit-slider-thumb {
-  transform: scaleX(1.3);
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 18%, transparent);
+  transform: scale(1.06);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.1),
+    0 2px 8px rgba(15, 23, 42, 0.22);
 }
 
 .reasoning-effort-slider::-moz-range-track {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: var(--ui-border-subtle, var(--za-line));
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-moz-range-progress {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: var(--ui-accent, var(--azure-seal));
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-moz-range-thumb {
-  width: 8px;
-  height: 18px;
+  width: var(--effort-thumb);
+  height: var(--effort-thumb);
   border: 0;
-  border-radius: 3px;
-  background: var(--ui-accent, var(--azure-seal));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 15%, transparent);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 1px 3px rgba(15, 23, 42, 0.18);
 }
 
 .reasoning-effort-slider:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 42%, transparent);
+  outline: 2px solid color-mix(in srgb, #6ea8ff 50%, transparent);
   outline-offset: 2px;
   border-radius: var(--ui-radius-round);
 }
@@ -4157,4 +4221,15 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+.image-preview-pending {
+  min-width: min(60vw, 480px);
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--graphite-soft, #9aa0a6);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
 }

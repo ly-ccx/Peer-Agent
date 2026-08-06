@@ -103,6 +103,42 @@ describe('Provider message encoders', () => {
     assert.equal(body.reasoning_effort, 'medium');
   });
 
+  it('maps Kimi K3 effort levels through OpenAI-compatible reasoning_effort', () => {
+    const kimiMap = {
+      off: 'none',
+      low: 'low',
+      medium: 'high',
+      default: 'high',
+      high: 'high',
+      xhigh: 'max',
+      max: 'max',
+    };
+    const make = (effort) => encodeOpenAIChatRequest({
+      model: 'k3',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort,
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+      reasoningEffortMap: kimiMap,
+    });
+
+    assert.equal(make('off').reasoning_effort, 'none');
+    assert.equal(make('low').reasoning_effort, 'low');
+    assert.equal(make('default').reasoning_effort, 'high');
+    assert.equal(make('max').reasoning_effort, 'max');
+    // 无 effortMap 时 off 仍省略字段（保持 OpenAI 默认语义）。
+    const plainOff = encodeOpenAIChatRequest({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort: 'off',
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+    });
+    assert.equal(plainOff.reasoning_effort, undefined);
+  });
+
   it('maps max output tokens to the OpenAI Responses request field', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'gpt-test',

@@ -239,9 +239,22 @@ const CHANNEL_DESCRIPTORS = {
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
+        // 官方 K3 reasoning_effort：low / high / max（默认 high）；off 对应 none。
+        // UI 用 default 表示官方 high（标准思考），max 表示顶档。
+        // 文档：https://www.kimi.com/code/docs/kimi-code/models.html
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'max'],
         defaultEffort: 'default',
+        // UI default/medium/high 对齐官方 high；xhigh 升到 max。
+        effortMap: {
+          off: 'none',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'max',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: false,
@@ -263,9 +276,19 @@ const CHANNEL_DESCRIPTORS = {
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
+        // 与 Kimi Coding Plan 同一套 K3 reasoning_effort 契约。
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'max'],
         defaultEffort: 'default',
+        effortMap: {
+          off: 'none',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'max',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: true,

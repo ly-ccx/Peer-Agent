@@ -584,6 +584,33 @@ export function createLlmConfigStore({
         changed = true;
       }
     }
+    // Kimi Coding Plan / Moonshot：旧配置可能仍是 off/default + paramStyle none，
+    // UI 优先读模型持久化字段会导致滑条只有“标准思考”。强制对齐官方 K3 多档。
+    if (item.channelId === 'kimi-coding-plan' || item.channelId === 'moonshot') {
+      const targetLevels = ['off', 'low', 'default', 'max'];
+      const currentLevels = Array.isArray(item.reasoningEffortLevels)
+        ? item.reasoningEffortLevels
+        : null;
+      const levelsStale = !currentLevels
+        || currentLevels.length !== targetLevels.length
+        || currentLevels.some((level, index) => level !== targetLevels[index]);
+      if (levelsStale) {
+        item.reasoningEffortLevels = [...targetLevels];
+        changed = true;
+      }
+      if (item.reasoningDefaultEffort !== 'default') {
+        item.reasoningDefaultEffort = 'default';
+        changed = true;
+      }
+      if (item.supportsReasoning !== true) {
+        item.supportsReasoning = true;
+        changed = true;
+      }
+      if (item.reasoningParamStyle !== 'openai-effort') {
+        item.reasoningParamStyle = 'openai-effort';
+        changed = true;
+      }
+    }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
         validateCustomHeaders(item.customHeaders);
@@ -865,19 +892,31 @@ export function createLlmConfigStore({
       supportsPromptCaching: item.supportsPromptCaching ?? undefined,
       // DeepSeek：渠道级思考契约优先于模型历史缓存，避免 off/default / 空 paramStyle 盖住新能力。
       // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
-      reasoningParamStyle: item.channelId === 'deepseek'
+      reasoningParamStyle: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+      )
         ? (resolved?.reasoningParamStyle ?? item.reasoningParamStyle ?? undefined)
         : (item.reasoningParamStyle ?? undefined),
-      reasoningEffortMap: item.channelId === 'deepseek'
+      reasoningEffortMap: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+      )
         ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
         : (item.reasoningEffortMap ?? undefined),
       reasoningEffortLevels: (
         item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
           ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
           : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
       ) ?? undefined,
       reasoningDefaultEffort: (
         item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
           ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
           : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
       ) ?? undefined,
