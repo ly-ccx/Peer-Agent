@@ -41,3 +41,10 @@ test('proposal card has token-based responsive and reduced-motion styles', () =>
   assert.match(styles, /@media \(max-width: 680px\)[\s\S]*\.automation-proposal-card-facts/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/);
 });
+
+test('proposal card refuses flex-shrink so the thread cannot crush it into a hairline', () => {
+  // .chat-thread is a column flex container; the proposal card sits after
+  // VirtualChatTurnList (flex:1). overflow:hidden would auto min-height:0 and
+  // default flex-shrink:1 would collapse the card to a border-only hairline.
+  assert.match(styles, /\.automation-proposal-card \{[\s\S]*?flex-shrink:\s*0/);
+});

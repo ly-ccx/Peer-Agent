@@ -3448,6 +3448,10 @@
 
 /* ── Conversation-scoped Automation proposal ── */
 .automation-proposal-card {
+  /* Sit below the virtual turn list inside .chat-thread (column flex).
+     overflow:hidden would auto min-height:0 and let flex-shrink crush the card
+     into a hairline border when the thread is height-constrained. */
+  flex-shrink: 0;
   width: min(720px, calc(100% - 40px));
   margin: 10px auto 22px;
   overflow: hidden;
