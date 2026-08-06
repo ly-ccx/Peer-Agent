@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/tui",
-  "version": "0.0.2-beta.1",
+  "version": "0.0.2-beta.2",
   "private": true,
   "type": "module",
   "bin": {

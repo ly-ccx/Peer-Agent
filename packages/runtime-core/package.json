@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-core",
-  "version": "0.0.2-beta.1",
+  "version": "0.0.2-beta.2",
   "description": "Host-neutral capability, permission, projection, and Evidence primitives for Peer Agent runtimes.",
   "type": "module",
   "license": "MIT",

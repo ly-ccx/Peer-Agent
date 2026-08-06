@@ -4,6 +4,19 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2-beta.2 - 2026-08-06
+
+### Notes
+
+- Desktop polish release after 0.0.2-beta.1, focused on composer attachment layout, action-bar spacing, and cascading model-menu placement.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Fixed
+
+- Keep pasted image thumbnails on a dedicated composer row so they no longer cover draft text.
+- Tighten home/session composer padding around the bottom action bar.
+- Align cascading model submenus to the current provider row instead of stacking from the first item.
+
 ## 0.0.2-beta.1 - 2026-08-05
 
 ### Notes
