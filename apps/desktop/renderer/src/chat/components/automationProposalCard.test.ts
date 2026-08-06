@@ -48,3 +48,18 @@ test('proposal card refuses flex-shrink so the thread cannot crush it into a hai
   // default flex-shrink:1 would collapse the card to a border-only hairline.
   assert.match(styles, /\.automation-proposal-card \{[\s\S]*?flex-shrink:\s*0/);
 });
+
+test('terminal automation proposals default to compact collapse path', () => {
+  // Created / cancelled must not keep the full decision body permanently open.
+  assert.match(projectionSource, /prefersCompact:\s*isTerminal/);
+  assert.match(cardSource, /prefersCompact/);
+  assert.match(cardSource, /const compact = prefersCompact && !expanded/);
+  assert.match(cardSource, /is-compact/);
+  assert.match(cardSource, /is-terminal/);
+  assert.match(cardSource, /automation-proposal-card-toggle/);
+  assert.match(cardSource, /automation-proposal-card-compact-summary/);
+  assert.match(cardSource, /data-compact=\{compact \? 'true' : 'false'\}/);
+  assert.match(styles, /\.automation-proposal-card\.is-compact/);
+  assert.match(styles, /\.automation-proposal-card-compact-body/);
+  assert.match(styles, /\.automation-proposal-card-toggle/);
+});

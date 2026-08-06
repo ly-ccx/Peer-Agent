@@ -50,11 +50,13 @@ test('projects canonical AutomationChatProposal lifecycle into card state', () =
     canAct: true,
     isCreating: false,
     isTerminal: false,
+    prefersCompact: false,
     hasCreationReceipt: false,
   });
   assert.equal(projectAutomationChatProposal(proposal('creating')).canAct, false);
   assert.equal(projectAutomationChatProposal(proposal('failed')).canAct, true);
   assert.equal(projectAutomationChatProposal(proposal('cancelled')).isTerminal, true);
+  assert.equal(projectAutomationChatProposal(proposal('cancelled')).prefersCompact, true);
 
   const created = {
     ...proposal('created'),
@@ -71,6 +73,7 @@ test('projects canonical AutomationChatProposal lifecycle into card state', () =
     },
   };
   assert.equal(projectAutomationChatProposal(created).hasCreationReceipt, true);
+  assert.equal(projectAutomationChatProposal(created).prefersCompact, true);
 });
 
 test('selects the active proposal without creating a renderer source of truth', () => {

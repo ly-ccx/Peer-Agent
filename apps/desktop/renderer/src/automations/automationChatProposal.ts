@@ -16,6 +16,8 @@ export interface AutomationChatProposalViewState {
   readonly canAct: boolean;
   readonly isCreating: boolean;
   readonly isTerminal: boolean;
+  /** Terminal proposals should default to a compact strip, not the full decision card. */
+  readonly prefersCompact: boolean;
   readonly hasCreationReceipt: boolean;
 }
 
@@ -28,11 +30,14 @@ export function selectAutomationChatProposal(
 export function projectAutomationChatProposal(
   proposal: AutomationChatProposal,
 ): AutomationChatProposalViewState {
+  const isTerminal = proposal.status === 'created' || proposal.status === 'cancelled';
   return {
     proposal,
     canAct: proposal.status === 'proposed' || proposal.status === 'failed',
     isCreating: proposal.status === 'creating',
-    isTerminal: proposal.status === 'created' || proposal.status === 'cancelled',
+    isTerminal,
+    // Created / cancelled are receipts, not open decisions — collapse by default.
+    prefersCompact: isTerminal,
     hasCreationReceipt: proposal.status === 'created' && Boolean(proposal.receipt),
   };
 }
