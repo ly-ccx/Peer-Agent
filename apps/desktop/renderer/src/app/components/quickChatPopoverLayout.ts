@@ -3,7 +3,7 @@ import type {
   QuickChatPopoverState,
 } from '../../preload/contracts/bootstrapPreloadApi.ts';
 
-export const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 360 });
+export const POPOVER_MAX_SIZE = Object.freeze({ width: 680, height: 640 });
 /** Flush under the Quick bar bottom (no floating air gap / double seam). */
 export const POPOVER_GAP = 0;
 const VIEWPORT_INSET = 8;
@@ -11,6 +11,12 @@ const VIEWPORT_INSET = 8;
 const POPOVER_CHROME_HEIGHT = 14;
 /** Model / effort hang from the right edge of their trigger. */
 export const RIGHT_ALIGNED_KINDS = new Set(['model', 'effort'] as const);
+export const MODEL_PROVIDER_ROW_HEIGHT = 44;
+
+/** The submenu begins at the hovered provider row, not at the first row. */
+export function resolveModelSubmenuTop(providerIndex: number) {
+  return Math.max(0, Math.round(providerIndex)) * MODEL_PROVIDER_ROW_HEIGHT;
+}
 
 /**
  * Compact popover size from menu content (not the full input bar width).
@@ -37,19 +43,41 @@ export function resolveQuickChatPopoverVisualSize(state: QuickChatPopoverState &
       : state.kind === 'access'
         ? 280
         : 190;
+  const groupedModelItems = state.kind === 'model' && state.items.some((item) => item.group);
+  const groupLabels = groupedModelItems
+    ? [...new Set(state.items.map((item) => item.group).filter((group): group is string => Boolean(group)))]
+    : [];
+  const longestGroup = groupLabels.reduce((length, label) => Math.max(length, label.length), 0);
+  const primaryWidth = groupedModelItems ? Math.max(220, 74 + longestGroup * 7.2) : 0;
+  const secondaryWidth = groupedModelItems
+    ? Math.max(260, 80 + longestText * (hasDetails ? 6.2 : 7.2))
+    : 0;
   const width = state.kind === 'effort'
     ? 240
-    : Math.min(
-      POPOVER_MAX_SIZE.width,
-      Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
-    );
+    : groupedModelItems
+      ? Math.min(POPOVER_MAX_SIZE.width, primaryWidth + secondaryWidth + 8)
+      : Math.min(
+        POPOVER_MAX_SIZE.width,
+        Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
+      );
   // Keep in sync with main resolveQuickChatPopoverSize — tight, not airy.
   const height = state.kind === 'effort'
     ? 84
-    : Math.min(
-      POPOVER_MAX_SIZE.height,
-      POPOVER_CHROME_HEIGHT + Math.max(1, state.items.length) * rowHeight,
-    );
+    : groupedModelItems
+      ? Math.min(
+        POPOVER_MAX_SIZE.height,
+        Math.max(
+          POPOVER_CHROME_HEIGHT + Math.max(1, groupLabels.length) * 44,
+          POPOVER_CHROME_HEIGHT + Math.max(
+            1,
+            ...groupLabels.map((group) => state.items.filter((item) => item.group === group).length),
+          ) * rowHeight,
+        ),
+      )
+      : Math.min(
+        POPOVER_MAX_SIZE.height,
+        POPOVER_CHROME_HEIGHT + Math.max(1, state.items.length) * rowHeight,
+      );
   return { width: Math.round(width), height: Math.round(height) };
 }
 

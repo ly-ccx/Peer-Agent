@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import {
   firstEnabledIndex,
+  resolveCascadingSubmenuAnchor,
   resolveKeyboardActiveScrollTarget,
   resolveOpenGroupScrollTarget,
   stepEnabledIndex,
@@ -144,9 +145,9 @@ export function CascadingMenu({
   }, [menuPlacement]);
 
   // 依据当前展开的 group 行位置，计算二级子菜单坐标与可用高度：
-  // 默认贴一级面板右侧并与当前 group 行顶对齐；贴右边界时翻向左侧；
-  // 垂直方向优先与 group 行顶对齐，必要时再贴视口底边；
-  // maxHeight 跟随视口可用空间，避免长列表被固定高度裁切成“像没加上”。
+  // 默认贴一级面板右侧并与当前 group 行顶对齐（不是一级面板顶）；
+  // 贴右边界时翻向左侧；底部溢出时再整体上移；
+  // maxHeight 跟随视口可用空间，避免长列表被固定高度裁切。
   const updateSubmenuPosition = useCallback(() => {
     const panel = menuRef.current;
     const row = groupRowRefs.current[activeGroupIndex];
@@ -156,29 +157,17 @@ export function CascadingMenu({
     }
     const panelRect = panel.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
-    const gap = 0;
-    const margin = 8;
-    const subW = submenuRef.current?.offsetWidth ?? 220;
-    const preferredTop = Math.max(margin, Math.min(rowRect.top, panelRect.top));
-    const maxHeight = Math.max(160, window.innerHeight - preferredTop - margin);
-    const measuredH = submenuRef.current?.scrollHeight ?? 0;
-    const subH = measuredH > 0 ? Math.min(measuredH, maxHeight) : maxHeight;
-    let left = panelRect.right + gap;
-    let side: SubmenuCoords['side'] = 'right';
-    if (left + subW > window.innerWidth - margin) {
-      left = Math.max(margin, panelRect.left - subW - gap);
-      side = 'left';
-    }
-    // 与一级当前行顶对齐；若底部溢出则整体上移，但不高于一级面板顶。
-    let top = preferredTop;
-    if (top + subH > window.innerHeight - margin) {
-      top = Math.max(margin, window.innerHeight - subH - margin);
-    }
-    if (top < panelRect.top) {
-      top = Math.max(margin, panelRect.top);
-    }
-    const finalMaxHeight = Math.max(160, window.innerHeight - top - margin);
-    setSubmenuCoords({ left, top, side, maxHeight: finalMaxHeight });
+    const next = resolveCascadingSubmenuAnchor({
+      panelRect,
+      rowRect,
+      submenuWidth: submenuRef.current?.offsetWidth ?? 220,
+      submenuHeight: submenuRef.current?.scrollHeight ?? 0,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin: 8,
+      gap: 0,
+    });
+    setSubmenuCoords(next);
   }, [activeGroupIndex]);
 
   useLayoutEffect(() => {

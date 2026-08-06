@@ -6,6 +6,7 @@ import type {
   QuickChatPopoverState,
 } from '../../preload/contracts/bootstrapPreloadApi';
 import {
+  resolveModelSubmenuTop,
   resolveQuickChatPopoverPosition,
   resolveQuickChatPopoverVisualSize,
 } from './quickChatPopoverLayout.ts';
@@ -35,6 +36,22 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   const selectedIndex = Math.max(0, state.items.findIndex((item) => item.value === state.selectedValue));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
   const [previewIndex, setPreviewIndex] = useState(selectedIndex);
+  const modelGroups = useMemo(() => (
+    state.kind === 'model'
+      ? [...new Set(state.items.map((item) => item.group).filter((group): group is string => Boolean(group)))]
+      : []
+  ), [state.items, state.kind]);
+  const selectedModelGroupIndex = Math.max(
+    0,
+    modelGroups.findIndex((group) => state.items.some(
+      (item) => item.group === group && item.value === state.selectedValue,
+    )),
+  );
+  const [activeModelGroupIndex, setActiveModelGroupIndex] = useState(selectedModelGroupIndex);
+  const activeModelGroup = modelGroups[activeModelGroupIndex];
+  const activeModelItems = activeModelGroup
+    ? state.items.filter((item) => item.group === activeModelGroup)
+    : [];
 
   const effortLevels = useMemo(
     () => state.items.map((item) => item.value).filter(isEffortLevel),
@@ -57,6 +74,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   useEffect(() => {
     setActiveIndex(selectedIndex);
     setPreviewIndex(selectedIndex);
+    setActiveModelGroupIndex(selectedModelGroupIndex);
     pendingEffortValueRef.current = initialEffortValue;
     if (sliderRef.current) {
       sliderRef.current.value = String(initialEffortValue);
@@ -66,7 +84,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
       (state.kind === 'effort' ? sliderRef.current : shellRef.current)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(focusFrame);
-  }, [initialEffortValue, selectedIndex, state.kind]);
+  }, [initialEffortValue, selectedIndex, selectedModelGroupIndex, state.kind]);
 
   useEffect(() => () => {
     if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
@@ -160,6 +178,55 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
               selectEffortIndex(nextIndex);
             }}
           />
+        </section>
+      ) : state.kind === 'model' && modelGroups.length > 0 ? (
+        <section className="quick-chat-model-cascade" aria-label="选择模型">
+          <div className="quick-chat-model-providers" role="menu" aria-label="模型供应商">
+            {modelGroups.map((group, index) => {
+              const selected = state.items.some(
+                (item) => item.group === group && item.value === state.selectedValue,
+              );
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  className={`quick-chat-model-provider${index === activeModelGroupIndex ? ' is-active' : ''}${selected ? ' is-selected' : ''}`}
+                  onMouseEnter={() => setActiveModelGroupIndex(index)}
+                  onFocus={() => setActiveModelGroupIndex(index)}
+                >
+                  <span>{group}</span>
+                  <span className="quick-chat-model-arrow" aria-hidden="true">›</span>
+                </button>
+              );
+            })}
+          </div>
+          <div
+            className="quick-chat-model-submenu"
+            role="menu"
+            aria-label={`${activeModelGroup ?? ''} 模型`}
+            style={{
+              top: resolveModelSubmenuTop(activeModelGroupIndex),
+              maxHeight: `calc(100% - ${resolveModelSubmenuTop(activeModelGroupIndex)}px)`,
+            }}
+          >
+            {activeModelItems.map((item) => {
+              const selected = item.value === state.selectedValue;
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`quick-chat-popover-option${selected ? ' is-selected' : ''}`}
+                  onClick={() => onSelect(item.value)}
+                >
+                  <span className="quick-chat-popover-copy">
+                    <strong>{item.label}</strong>
+                    {item.detail ? <span>{item.detail}</span> : null}
+                  </span>
+                  {selected ? <span className="quick-chat-popover-check" aria-hidden="true">✓</span> : null}
+                </button>
+              );
+            })}
+          </div>
         </section>
       ) : (
         <section className="quick-chat-popover-panel" role="listbox" aria-label="快速选择">

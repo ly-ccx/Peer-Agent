@@ -2,7 +2,7 @@
 const DEFAULT_SIZE = Object.freeze({ width: 720, height: 64 });
 const TASK_SIZE = Object.freeze({ width: 720, height: 334 });
 const MAX_CONTENT_HEIGHT = 480;
-const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 360 });
+const POPOVER_MAX_SIZE = Object.freeze({ width: 680, height: 640 });
 /** Keep in sync with renderer QuickChatPopover gap (flush to bar bottom). */
 const POPOVER_GAP = 0;
 const POPOVER_VIEWPORT_INSET = 8;
@@ -13,11 +13,11 @@ const POPOVER_KINDS = new Set(['workspace', 'model', 'effort', 'mode', 'access']
 /**
  * Enums / option lists → Electron native Menu.popup (no BrowserWindow chrome).
  * effort is a discrete option list (not a slider) and belongs here too.
- * model uses optional item.group for provider submenus.
+ * model is a controlled window popover so provider-row submenus can align.
  */
-const MENU_KINDS = new Set(['workspace', 'model', 'mode', 'access', 'effort']);
-/** Reserved for future rich window popovers; currently empty. */
-const WINDOW_POPOVER_KINDS = new Set();
+const MENU_KINDS = new Set(['workspace', 'mode', 'access', 'effort']);
+/** Rich / cascading content that needs row-level geometry control. */
+const WINDOW_POPOVER_KINDS = new Set(['model']);
 
 export function clampQuickChatContentHeight(height, { hasTaskCard = false } = {}) {
   const fallback = hasTaskCard ? TASK_SIZE.height : DEFAULT_SIZE.height;
@@ -49,19 +49,43 @@ export function resolveQuickChatPopoverSize(state = {}) {
       : state.kind === 'access'
         ? 280
         : 190;
+  const groupedModelItems = state.kind === 'model' && items.some((item) => item?.group);
+  const groupLabels = groupedModelItems
+    ? [...new Set(items.map((item) => item?.group).filter(Boolean))]
+    : [];
+  const longestGroup = groupLabels.reduce((length, label) => Math.max(length, String(label).length), 0);
+  const primaryWidth = groupedModelItems
+    ? Math.max(220, 74 + longestGroup * 7.2)
+    : 0;
+  const secondaryWidth = groupedModelItems
+    ? Math.max(260, 80 + longestText * (hasDetails ? 6.2 : 7.2))
+    : 0;
   const width = state.kind === 'effort'
     ? 240
-    : Math.min(
-      POPOVER_MAX_SIZE.width,
-      Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
-    );
+    : groupedModelItems
+      ? Math.min(POPOVER_MAX_SIZE.width, primaryWidth + secondaryWidth + 8)
+      : Math.min(
+        POPOVER_MAX_SIZE.width,
+        Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
+      );
   // Effort panel: heading + slider + tight padding (112 left too much empty air).
   const height = state.kind === 'effort'
     ? 84
-    : Math.min(
-      POPOVER_MAX_SIZE.height,
-      POPOVER_CHROME_HEIGHT + Math.max(1, items.length) * rowHeight,
-    );
+    : groupedModelItems
+      ? Math.min(
+        POPOVER_MAX_SIZE.height,
+        Math.max(
+          POPOVER_CHROME_HEIGHT + Math.max(1, groupLabels.length) * 44,
+          POPOVER_CHROME_HEIGHT + Math.max(
+            1,
+            ...groupLabels.map((group) => items.filter((item) => item?.group === group).length),
+          ) * rowHeight,
+        ),
+      )
+      : Math.min(
+        POPOVER_MAX_SIZE.height,
+        POPOVER_CHROME_HEIGHT + Math.max(1, items.length) * rowHeight,
+      );
   return { width: Math.round(width), height: Math.round(height) };
 }
 
@@ -482,15 +506,16 @@ export function createQuickChatWindowController({
     const win = ensureWindow();
     if (!win || win.isDestroyed()) return false;
 
+    // Cascading / rich content first — needs row-level geometry control.
+    if (WINDOW_POPOVER_KINDS.has(nextState.kind)) {
+      return showWindowPopover(nextState, win);
+    }
     // Simple enums → native Menu (zero clip, platform chrome).
     if (MENU_KINDS.has(nextState.kind)) {
       return showNativeMenu(nextState, win);
     }
-    // Rich content (effort slider, etc.) → independent Electron window.
-    if (WINDOW_POPOVER_KINDS.has(nextState.kind) || !MENU_KINDS.has(nextState.kind)) {
-      return showWindowPopover(nextState, win);
-    }
-    return false;
+    // Unknown kinds still use the independent Electron window path.
+    return showWindowPopover(nextState, win);
   }
 
   function selectPopoverValue(value) {

@@ -537,6 +537,75 @@ body:has(.quick-chat-shell) {
   font-size: 14px;
 }
 
+.quick-chat-model-cascade {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+}
+
+.quick-chat-model-providers,
+.quick-chat-model-submenu {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--za-line, #c9cdd4) 74%, transparent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--chrome-canvas, #fff) 94%, transparent);
+  box-shadow: var(--shadow-card, 0 12px 30px rgb(0 0 0 / 16%));
+}
+
+.quick-chat-model-providers {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(44% - 4px);
+}
+
+.quick-chat-model-submenu {
+  position: absolute;
+  right: 0;
+  width: calc(56% - 4px);
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.quick-chat-model-provider {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 14px;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: default;
+}
+
+.quick-chat-model-provider:hover,
+.quick-chat-model-provider.is-active {
+  background: color-mix(in srgb, var(--accent-main, #1677ff) 10%, transparent);
+}
+
+.quick-chat-model-provider.is-selected {
+  color: var(--accent-main, #1677ff);
+}
+
+.quick-chat-model-arrow {
+  color: var(--graphite-fade, #7b8494);
+  font-size: 24px;
+  font-weight: 300;
+  line-height: 1;
+}
+
 .quick-chat-effort-panel {
   box-sizing: border-box;
   display: flex;
