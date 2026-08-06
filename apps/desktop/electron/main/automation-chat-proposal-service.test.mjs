@@ -87,10 +87,13 @@ test('confirm creates once and clears the footer proposal after success', async 
   assert.equal(created.length, 1);
   assert.equal(first.receipt.automationId, 'automation-1');
   assert.equal(first.proposal.status, 'created');
-  // Footer card is cleared after confirm; receipt remains on the action result.
+  // Footer card is cleared after confirm while the terminal proposal remains durable for replay.
   assert.equal(contexts.get('conversation-1').status, 'created');
   assert.equal(contexts.get('conversation-1').activeProposal, null);
-  await assert.rejects(() => service.act(request), /automation_proposal_not_found/);
+  assert.deepEqual(contexts.get('conversation-1').lastSettledProposal, first.proposal);
+  const replay = await service.act(request);
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.receipt, first.receipt);
   assert.equal(created.length, 1);
 });
 

@@ -31,6 +31,7 @@ export function createAutomationCreateContext({
     source,
     status: 'collecting',
     activeProposal: null,
+    lastSettledProposal: null,
     rejectedFingerprints: [],
     createdAt: now,
     updatedAt: now,
@@ -133,7 +134,12 @@ export function createAutomationChatProposalService({
   async function act(request) {
     const { conversationId, proposalId, fingerprint, action } = validateActionRequest(request);
     const current = getContext(conversationId);
-    const proposal = current?.activeProposal;
+    const activeProposal = current?.activeProposal;
+    const settledProposal = current?.lastSettledProposal;
+    const proposal = activeProposal
+      ?? (settledProposal?.proposalId === proposalId && settledProposal.fingerprint === fingerprint
+        ? settledProposal
+        : null);
     if (!proposal) throw new Error('automation_proposal_not_found');
     if (proposal.proposalId !== proposalId || proposal.fingerprint !== fingerprint) {
       throw new Error('automation_proposal_stale');
@@ -149,6 +155,7 @@ export function createAutomationChatProposalService({
         ...current,
         status: 'cancelled',
         activeProposal: null,
+        lastSettledProposal: cancelled,
         rejectedFingerprints,
         updatedAt: timestamp,
       }));
@@ -187,6 +194,7 @@ export function createAutomationChatProposalService({
         ...current,
         status: 'created',
         activeProposal: null,
+        lastSettledProposal: created,
         updatedAt: createdAt,
       }));
       return Object.freeze({ proposal: created, receipt, replayed: false });

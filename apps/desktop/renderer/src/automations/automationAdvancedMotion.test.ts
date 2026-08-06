@@ -11,9 +11,9 @@ test('Automation advanced settings animate open/close with motion tokens', async
     readFile(cssUrl, 'utf8'),
   ]);
 
-  // Controlled disclosure, not native details instantaneous toggle.
-  assert.equal(center.includes('<details'), false);
-  assert.equal(center.includes('<summary'), false);
+  // The advanced-settings disclosure is controlled rather than a native details toggle.
+  // Other Automation surfaces may use details for static content such as result history.
+  assert.equal(/<details[^>]*className=["'{]?automation-advanced/.test(center), false);
   assert.match(center, /className=\{`automation-advanced\$\{advancedOpen \? ' is-open' : ''\}`\}/);
   assert.match(center, /aria-expanded=\{advancedOpen\}/);
   assert.match(center, /setAdvancedOpen\(\(value\) => !value\)/);

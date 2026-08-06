@@ -4,6 +4,32 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2-beta.3 - 2026-08-06
+
+### Notes
+
+- Make Automation run results easier to find, trace, compare, and control while preserving Fresh Run, isolated-worktree, immutable Receipt, permission, and Evidence boundaries.
+- Continue polishing Automation proposals and the Desktop composer experience.
+
+### Added
+
+- Persist final Automation summaries in immutable Run Receipts, with a final-assistant-message fallback and an explicit successful-run fallback.
+- Show recent Automation results in Overview and the system tray, with direct navigation to the exact Run.
+- Compare the current result with the previous completed result and optionally notify only when a successful result changes.
+- Project Automation conversations back to their origin workspace and expose a clickable Automation origin badge in Fresh Run chats.
+
+### Changed
+
+- Refresh Automation Runs and the selected Receipt when runtime state changes.
+- Collapse terminal Automation proposals by default, clear proposal cards after confirm or cancel, and use clearer green active-status pills.
+- Tighten home composer controls and keep Automation proposal cards from flex-collapse.
+
+### Fixed
+
+- Convert missing-runner and asynchronous startup failures into visible failed Runs with failure Receipts.
+- Preserve idempotent Automation proposal confirmation after the proposal card is cleared, returning the original Receipt without creating a duplicate.
+- Update `lastRunAt` on terminal Automation states and skip intake-contract handling for system-task notifications.
+
 ## 0.0.2-beta.2 - 2026-08-06
 
 ### Notes

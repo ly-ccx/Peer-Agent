@@ -327,6 +327,8 @@ export interface AutomationCreateContext {
   readonly source: AutomationCreateContextSource;
   readonly status: AutomationCreateContextStatus;
   readonly activeProposal?: AutomationChatProposal | null;
+  /** Most recent terminal proposal retained for durable idempotent action replay. */
+  readonly lastSettledProposal?: AutomationChatProposal | null;
   readonly rejectedFingerprints: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;

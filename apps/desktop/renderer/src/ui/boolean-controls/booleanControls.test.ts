@@ -61,11 +61,11 @@ test('boolean control CSS uses only declared Peer Frost tokens and all required 
   }
 });
 
-test('all product boolean usages follow the 9 Switch and 2 Checkbox semantic matrix', async () => {
+test('all product boolean usages follow the 10 Switch and 2 Checkbox semantic matrix', async () => {
   const sources = await Promise.all(businessFiles.map(read));
   const joined = sources.join('\n');
 
-  assert.equal((joined.match(/<Switch\b/g) ?? []).length, 9);
+  assert.equal((joined.match(/<Switch\b/g) ?? []).length, 10);
   assert.equal((joined.match(/<Checkbox\b/g) ?? []).length, 2);
   assert.equal(joined.includes('type="checkbox"'), false);
   assert.equal(joined.includes('role="switch"'), false);
