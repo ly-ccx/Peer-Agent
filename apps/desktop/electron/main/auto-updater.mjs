@@ -32,6 +32,10 @@ import path from 'node:path';
 import { app, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+import {
+  createUpdateCheckSchedule,
+  registerActivationUpdateChecks,
+} from './update-check-schedule.mjs';
 import { isNewerVersion } from './update-version.mjs';
 
 export { buildDmgUrl, buildReleaseUrl, mapArch };
@@ -56,6 +60,8 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000;
  * 拖入「应用程序」覆盖安装（旧版仍在运行时 macOS 无法覆盖）。
  */
 const QUIT_AFTER_OPEN_DELAY_MS = 1000;
+
+const checkSchedule = createUpdateCheckSchedule();
 
 /** 模块级单例状态。渲染层通过 getUpdaterStatus() 读取快照。 */
 const state = {
@@ -88,6 +94,8 @@ const state = {
   probing: false,
   /** 周期检测定时器 id（setInterval 返回值），应用退出时清理 */
   checkTimer: undefined,
+  /** 应用激活/窗口聚焦监听清理器。 */
+  disposeActivationChecks: undefined,
 };
 
 /**
@@ -146,6 +154,13 @@ export function initAutoUpdater(options = {}) {
 
   wireEvents();
 
+  state.disposeActivationChecks?.();
+  state.disposeActivationChecks = registerActivationUpdateChecks({
+    app,
+    schedule: checkSchedule,
+    checkForUpdates,
+  });
+
   log(`updater init. version=${state.currentVersion} channel=${state.channel} preference=${state.preference}`);
 
   // 启动时静默检查一次（不下载）；失败不抛出，避免影响启动。
@@ -174,6 +189,8 @@ export function stopAutoUpdater() {
     state.checkTimer = undefined;
     log('periodic update check stopped.');
   }
+  state.disposeActivationChecks?.();
+  state.disposeActivationChecks = undefined;
 }
 
 function normalizePreference(pref) {
@@ -255,6 +272,7 @@ export async function checkForUpdates() {
     log('checkForUpdates skipped (disabled).');
     return getUpdaterStatus();
   }
+  checkSchedule.markChecked();
   try {
     setPhase('checking');
 

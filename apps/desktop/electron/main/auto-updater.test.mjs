@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
@@ -100,5 +101,16 @@ describe('auto channel graduation decision (ADR-61)', () => {
     it('does not graduate on identical versions', () => {
       assert.equal(isNewerVersion('1.0.0-beta.5', '1.0.0-beta.5'), false);
     });
+  });
+});
+
+describe('auto-updater activation integration contract', () => {
+  it('registers, shares, and disposes the activation check schedule', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+
+    assert.match(source, /const checkSchedule = createUpdateCheckSchedule\(\)/);
+    assert.match(source, /state\.disposeActivationChecks = registerActivationUpdateChecks\(\{[\s\S]*?app,[\s\S]*?schedule: checkSchedule,[\s\S]*?checkForUpdates,/);
+    assert.match(source, /export async function checkForUpdates\(\) \{[\s\S]*?checkSchedule\.markChecked\(\)/);
+    assert.match(source, /export function stopAutoUpdater\(\) \{[\s\S]*?state\.disposeActivationChecks\?\.\(\);[\s\S]*?state\.disposeActivationChecks = undefined/);
   });
 });
