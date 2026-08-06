@@ -260,7 +260,7 @@ export function AutomationCenter({ isZh, defaultWorkspace, initialRunTarget, onO
         <span className="automation-list-main"><strong>{summary.definition.name}</strong><small>{definitionSubtitle(summary.definition, locale)}</small></span>
         <span className="automation-workspace">{summary.definition.workspacePath}</span>
         <span className="automation-next"><small>{copy.nextRun}</small>{formatDateTime(summary.definition.nextRunAt, locale)}</span>
-        <span className={`automation-pill ${summary.needsAttention ? 'attention' : ''}`}>{summary.activeRun ? runStatusLabel(summary.activeRun.status, locale) : (summary.definition.status === 'active' ? copy.activeState : copy.pausedState)}</span>
+        <span className={`automation-pill ${summary.needsAttention ? 'attention' : summary.activeRun ? summary.activeRun.status : summary.definition.status}`}>{summary.activeRun ? runStatusLabel(summary.activeRun.status, locale) : (summary.definition.status === 'active' ? copy.activeState : copy.pausedState)}</span>
         <span className="automation-chevron" aria-hidden="true"><Icon name="chevronRight" /></span>
       </button>)}</div>}
     </div>
@@ -715,7 +715,7 @@ function AutomationDetail({ copy, locale, summary, runs, tab, setTab, busy, onBa
 }) {
   const definition = summary.definition;
   return <section className="automation-center motion-enter-rise" data-automation-view="detail"><PageBack onClick={onBack} label={copy.automations} />
-    <header className="automation-detail-header"><div><div className="automation-detail-title"><span className={`automation-status-dot ${summary.needsAttention ? 'attention' : definition.status}`} /><h1>{definition.name}</h1><span className="automation-pill">{definition.status === 'active' ? copy.activeState : copy.pausedState}</span></div><p>{definitionSubtitle(definition, locale)}</p></div>
+    <header className="automation-detail-header"><div><div className="automation-detail-title"><span className={`automation-status-dot ${summary.needsAttention ? 'attention' : definition.status}`} /><h1>{definition.name}</h1><span className={`automation-pill ${summary.needsAttention ? 'attention' : definition.status}`}>{definition.status === 'active' ? copy.activeState : copy.pausedState}</span></div><p>{definitionSubtitle(definition, locale)}</p></div>
       <div className="automation-header-actions"><button className="automation-button secondary" onClick={onEdit}>{copy.edit}</button><button className="automation-button secondary" disabled={busy} onClick={() => onStatus(definition.status === 'paused' ? 'active' : 'paused')}>{definition.status === 'paused' ? copy.resume : copy.pause}</button><button className="automation-button primary" disabled={busy} onClick={onRun}><Icon name="run" />{copy.runNow}</button></div>
     </header>
     <div className="automation-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>{copy.overview}</button><button className={tab === 'runs' ? 'active' : ''} onClick={() => setTab('runs')}>{copy.runs} <span>{runs.length}</span></button></div>
