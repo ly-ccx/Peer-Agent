@@ -145,6 +145,7 @@ export function createTaskNotificationBroker(deps) {
       shortError: task.shortError,
       waitingReason: task.waitingReason,
       conversationId: task.conversationId,
+      activationKind: task.activationKind,
       activeConversationId:
         typeof deps.getActiveConversationId === 'function' ? deps.getActiveConversationId() : null,
       isAppForeground: typeof deps.isAppForeground === 'function' ? deps.isAppForeground() : false,
