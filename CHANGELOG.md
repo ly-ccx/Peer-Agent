@@ -4,6 +4,34 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2-beta.4 - 2026-08-07
+
+### Notes
+
+- Bring the full Tencent SkillHub skill marketplace to Desktop, with remote metadata sync, verified install-time ZIP download, global/workspace install scope, and uninstall.
+- Preview local chat attachment images inline, and polish Kimi multi-level reasoning effort plus several Desktop detail interactions.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Added
+
+- Sync SkillHub marketplace metadata into a local paginated index with search, category filters, sorting, background resume, and last-complete-snapshot fallback.
+- Install SkillHub skills after Ed25519 platform signature, ZIP MD5, hash v1 content fingerprint, and archive safety checks into the existing Skill Store.
+- Choose install scope in the marketplace detail panel: global (`userData/skills`) or current workspace (`workspace/skills`).
+- Uninstall user-installed skills from the installed list; project-level workspace skills stay protected.
+- Render local chat attachment images inline through a dedicated file data-url IPC path.
+
+### Changed
+
+- Prefer SkillHub `iconUrl` for marketplace avatars, with letter fallback.
+- Use the shared Dropdown for marketplace category filtering and flatten nested detail chrome around install actions.
+- Map Kimi Coding Plan / Moonshot to official off/low/high/max effort and align the discrete effort slider geometry.
+- Clarify Automation detail header hierarchy and check for updates when the app is reactivated.
+
+### Fixed
+
+- Close the skill detail overlay with the shared exit animation after uninstall instead of hard-unmounting it.
+- Keep marketplace card footers bottom-aligned across equal-height grid cards.
+
 ## 0.0.2-beta.3 - 2026-08-06
 
 ### Notes
