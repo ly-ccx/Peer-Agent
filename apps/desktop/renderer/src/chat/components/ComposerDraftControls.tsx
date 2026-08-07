@@ -523,7 +523,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
             aria-label={isZh ? '添加附件' : 'Attach file'}
             onClick={() => fileInputRef.current?.click()}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
@@ -547,8 +547,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
             : (isZh ? '发送' : 'Send')}
       >
         {isStreaming ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="5" y="5" width="14" height="14" rx="2.5" />
           </svg>
         ) : (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
