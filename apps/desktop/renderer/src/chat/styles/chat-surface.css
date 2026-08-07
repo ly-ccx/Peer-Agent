@@ -1383,7 +1383,8 @@
   max-width: 140px;
 }
 
-/* 底部输入框上方的「正在编辑」引用条 */
+/* 底部输入框上方的「正在编辑」条
+ * 只保留文字层：无边框 / 无底色 / 无阴影 / 无指示条。 */
 .composer-edit-banner {
   display: flex;
   align-items: center;
@@ -1393,10 +1394,11 @@
   flex: 1 1 100%;
   width: 100%;
   margin: 0 0 2px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, var(--chrome-hairline));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, var(--control-composer, var(--paper-sheet)));
+  padding: 2px 2px 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--graphite-soft);
   font-size: 12px;
   line-height: 1.35;
@@ -1416,28 +1418,35 @@
 .composer-edit-banner-label {
   flex: 0 0 auto;
   font-weight: 600;
-  color: var(--accent, #3b82f6);
+  letter-spacing: 0.01em;
+  color: var(--graphite-soft);
 }
 .composer-edit-banner-preview {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.85;
+  color: var(--graphite-mute);
+  opacity: 0.92;
 }
 .composer-edit-banner-cancel {
   flex: 0 0 auto;
   border: 0;
   background: transparent;
-  color: var(--graphite-soft);
+  color: var(--graphite-mute);
   font-size: 12px;
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 .composer-edit-banner-cancel:hover {
-  background: color-mix(in srgb, var(--graphite-soft) 12%, transparent);
-  color: var(--graphite);
+  background: color-mix(in srgb, var(--graphite-soft) 10%, transparent);
+  color: var(--graphite-soft);
+}
+.composer-edit-banner-cancel:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
 }
 
 .chat-composer {
