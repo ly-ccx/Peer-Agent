@@ -111,12 +111,14 @@ export interface AvailableSkillSummary {
   readonly linked: boolean;
 }
 
-/** linkSkill / unlinkSkill 的返回结果。 */
+/** linkSkill / unlinkSkill / uninstallSkill 的返回结果。 */
 export interface SkillLinkResult {
   readonly ok: boolean;
   readonly error?: string;
   readonly detail?: string;
   readonly alreadyLinked?: boolean;
+  /** uninstallSkill 成功时：deleted=删除用户安装目录；unlinked=仅取消借用软链。 */
+  readonly mode?: 'deleted' | 'unlinked';
 }
 
 export interface RuntimeProjection {
@@ -993,3 +995,4 @@ export * from './goal.ts';
 export * from './updater.ts';
 export * from './appshot.ts';
 export * from './automation.ts';
+export * from './skill-marketplace.ts';

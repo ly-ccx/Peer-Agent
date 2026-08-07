@@ -387,3 +387,37 @@ test('mkdir creates directories and refuses existing paths', () => {
     resolvedFrom: undefined,
   });
 });
+
+test('readImageDataUrl returns base64 dataUrl for image files', () => {
+  const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+  const harness = createHarness({
+    nodes: [
+      ['/ws-a', directory()],
+      ['/ws-a/shot.png', file(pngMagic)],
+      ['/ws-a/notes.txt', file(Buffer.from('hello'))],
+    ],
+  });
+
+  const ok = harness.service.readImageDataUrl({ absPath: '/ws-a/shot.png' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.status, 'ok');
+  assert.equal(ok.mimeType, 'image/png');
+  assert.ok(ok.dataUrl.startsWith('data:image/png;base64,'));
+  assert.equal(ok.size, pngMagic.length);
+
+  assert.deepEqual(harness.service.readImageDataUrl({ absPath: '/ws-a/notes.txt' }), {
+    ok: false,
+    status: 'unsupported_type',
+    dataUrl: '',
+    error: 'not_an_image',
+    resolvedFrom: undefined,
+  });
+
+  assert.deepEqual(harness.service.readImageDataUrl({ absPath: '/ws-a/missing.png' }), {
+    ok: false,
+    status: 'not_found',
+    dataUrl: '',
+    error: 'file_not_found',
+  });
+});
+

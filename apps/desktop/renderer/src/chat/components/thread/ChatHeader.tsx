@@ -35,7 +35,7 @@ export function ChatHeader({
   onArchive,
   onBranch,
   onFind,
-  onOpenSettings,
+  onOpenTools,
   onOpenAutomationRun,
 }: {
   readonly title: string;
@@ -58,7 +58,7 @@ export function ChatHeader({
   readonly onArchive?: () => void;
   readonly onBranch?: () => void;
   readonly onFind?: () => void;
-  readonly onOpenSettings?: () => void;
+  readonly onOpenTools?: () => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -230,7 +230,7 @@ export function ChatHeader({
         <ChatHeaderCapabilities
           i18n={i18n}
           localAccessLevel={localAccessLevel}
-          onOpenSettings={onOpenSettings}
+          onOpenTools={onOpenTools}
         />
         {onFind ? (
           <button

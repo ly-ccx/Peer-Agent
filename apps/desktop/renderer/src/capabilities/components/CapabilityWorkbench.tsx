@@ -52,7 +52,7 @@ export function CapabilityWorkbench({
   };
 
   return (
-    <section className={`capability-workbench ${activeTab === 'skills' || activeTab === 'mcp' ? 'skills-active' : ''}`}>
+    <section className={`capability-workbench ${activeTab === 'skills' || activeTab === 'mcp' ? 'skills-active' : ''} ${activeTab === 'skills' ? 'marketplace' : ''}`}>
       <main className="capability-workbench-main">
         <div className="capability-tabs-row">
           <CapabilityTabs activeTab={activeTab} counts={counts} onChange={changeTab} />

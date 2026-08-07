@@ -15,6 +15,7 @@ function createHarness() {
       readDirectory: port('read-directory'),
       watchDirectories: port('watch-directories'),
       readFile: port('read-file'),
+      readImageDataUrl: port('read-image-data-url'),
       writeFile: port('write-file'),
       mkdir: port('mkdir'),
       dispose: port('dispose'),
@@ -38,6 +39,7 @@ test('file-access-ipc owns the exact governed file channel set', () => {
     'fs:read-dir',
     'fs:watch-dirs',
     'file:read',
+    'file:read-image-data-url',
     'file:write',
     'fs:mkdir',
   ]);

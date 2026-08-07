@@ -44,6 +44,10 @@ import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
+import { createSkillHubApiClient } from './skillhub-api-client.mjs';
+import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
+import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
+import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
 import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
@@ -153,6 +157,7 @@ import { createRuntimeHostIpcRegistrations } from './ipc/register-runtime-host-i
 import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mjs';
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
+import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
@@ -270,6 +275,8 @@ const sessionStore = createSessionStore({
 });
 
 let skillStore;
+let skillMarketplaceService;
+let skillHubMarketplaceService;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
@@ -2069,6 +2076,37 @@ function registerDesktopIpcHost() {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.unlinkSkill(skillId);
         },
+        uninstall: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.uninstallSkill(skillId);
+        },
+        marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
+        marketplaceGetDetail: (catalogId) => skillMarketplaceService?.getDetail(catalogId) ?? null,
+        marketplaceInstall: (catalogId) => {
+          if (!skillMarketplaceService) return { ok: false, error: 'skill_marketplace_not_available' };
+          return skillMarketplaceService.install(catalogId);
+        },
+        skillHubQuery: (query) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.query(query);
+        },
+        skillHubGetDetail: (identity) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.getDetail(identity);
+        },
+        skillHubGetStatus: () => skillHubMarketplaceService?.getStatus() ?? { status: 'idle', nextPage: 1, total: 0, indexed: 0, updatedAt: null, error: null },
+        skillHubSync: (options) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.sync(options);
+        },
+        skillHubInstall: (identity) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.install(identity);
+        },
+        skillHubListCategories: () => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.listCategories();
+        },
       },
     }),
     ...createPendingTaskIpcRegistrations({
@@ -3119,6 +3157,33 @@ function startLocalRuntime() {
         sourceRoots,
         workspacePath: settingsStore.getAll().activeWorkspace || null,
       });
+  skillMarketplaceService = createSkillMarketplaceService({
+    catalogRoot: isPackaged ? path.join(process.resourcesPath, 'marketplace') : path.join(workspaceRoot, 'marketplace', 'dist'),
+    installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),
+  });
+  const skillHubApiClient = createSkillHubApiClient();
+  const skillHubStore = createSkillHubMarketplaceStore({
+    filePath: path.join(userDataPath, 'marketplace', 'skillhub-index.json'),
+    apiClient: skillHubApiClient,
+  });
+  const skillHubInstaller = createSkillHubVerifiedInstaller({
+    apiClient: skillHubApiClient,
+    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+  });
+  skillHubMarketplaceService = createSkillHubMarketplaceService({
+    store: skillHubStore,
+    installer: skillHubInstaller,
+    apiClient: skillHubApiClient,
+  });
+  // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
+  // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
+  const skillHubSyncStatus = skillHubMarketplaceService.getStatus();
+  const skillHubIndexStale = !skillHubSyncStatus.updatedAt || Date.now() - skillHubSyncStatus.updatedAt > 24 * 60 * 60 * 1_000;
+  if (skillHubSyncStatus.status === 'error' || skillHubSyncStatus.nextPage > 1 || skillHubIndexStale) {
+    void skillHubMarketplaceService.sync().catch((error) => {
+      console.warn('[skillhub] Background marketplace sync paused:', error instanceof Error ? error.message : error);
+    });
+  }
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,

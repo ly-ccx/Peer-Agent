@@ -1,6 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { clientApi } from '../../../clientApi';
 import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
+import {
+  isLocalImagePath,
+  loadLocalImageDataUrl,
+} from '../../state/localImagePreview';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -102,32 +106,24 @@ function FilePathCode({ raw }: { raw: string }) {
   // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
   // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
   const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
-  // 路径以 / 或 \ 结尾时先按「目录」预判（如 archive/deprecated-architecture/），
-  // 但这只是初始 hint；最终以磁盘真实类型为准（见下方 fileExists 返回的 isDir），
-  // 避免不带结尾斜杠的文件夹路径被误判为文件而走 Diff 视图并报 access 错误。
-  const hintDir = !!parsed && /[/\\]$/.test(parsed.path);
+  // 路径以「看起来像路径」为前提；最终是否可点取决于 fileExists 结果。
+  // 绝对路径即使当前 workspace 未绑定也允许探测（主进程会直接 stat）。
+  const canProbe = Boolean(absPath && (parsed?.isAbsolute || workspacePath));
+  const [exists, setExists] = useState<boolean | null>(canProbe ? null : false);
+  const [isDir, setIsDir] = useState(false);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const looksLikeImage = Boolean(parsed && isLocalImagePath(parsed.path));
 
-  // 存在性校验：候选路径只有在磁盘上真实存在时才升级为可点链接。
-  // git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）因磁盘上没有对应文件
-  // 而保持普通文本——以「是不是真文件」为权威判据，而非去识别「它是不是 git」。
-  const [exists, setExists] = useState(false);
-  // isDir 以主进程 fs.stat 的真实类型为权威；未返回时回退到结尾斜杠预判 hintDir。
-  const [isDir, setIsDir] = useState(hintDir);
   useEffect(() => {
-    if (!absPath) {
-      setExists(false);
-      setIsDir(hintDir);
-      return;
-    }
+    if (!canProbe || !absPath) return;
     let cancelled = false;
-    setExists(false);
-    setIsDir(hintDir);
-    Promise.resolve()
-      .then(() => clientApi.fileExists(absPath, workspacePath ?? undefined, relPath))
+    clientApi
+      .fileExists(absPath, workspacePath ?? undefined, relPath)
       .then((result) => {
         if (cancelled) return;
         setExists(Boolean(result?.exists));
-        setIsDir(typeof result?.isDir === 'boolean' ? result.isDir : hintDir);
+        setIsDir(Boolean(result?.isDir));
       })
       .catch(() => {
         if (!cancelled) setExists(false);
@@ -135,10 +131,34 @@ function FilePathCode({ raw }: { raw: string }) {
     return () => {
       cancelled = true;
     };
-  }, [absPath, workspacePath, relPath, hintDir]);
+  }, [absPath, canProbe, relPath, workspacePath]);
 
-  if (!parsed || !absPath || !exists) {
-    // 不是路径 / 无 workspacePath 解析基准 / 磁盘上不存在 → 保持普通 inline code 行为
+  // 本地图片路径：存在后按需加载缩略图（ADR 59：不写回会话存储）。
+  useEffect(() => {
+    if (!looksLikeImage || !absPath || exists !== true || isDir) {
+      setPreviewDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    loadLocalImageDataUrl(absPath, workspacePath, relPath).then((dataUrl) => {
+      if (!cancelled) setPreviewDataUrl(dataUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [absPath, exists, isDir, looksLikeImage, relPath, workspacePath]);
+
+  if (!parsed || !absPath) {
+    return <code>{raw}</code>;
+  }
+
+  // 探测中：先以普通 code 呈现，避免闪烁可点样式
+  if (exists === null) {
+    return <code>{raw}</code>;
+  }
+
+  // 磁盘上不存在 → 保持普通 inline code 行为
+  if (!exists) {
     return <code>{raw}</code>;
   }
 
@@ -148,18 +168,56 @@ function FilePathCode({ raw }: { raw: string }) {
         // 目录：打开右侧 Workbench 的「文件」视图并定位/展开到该目录。
         workbench.revealInFiles(absPath, workspacePath ?? undefined, relPath);
       } else {
-        // 文件：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
+        // 文件：打开 Diff 视图。
         workbench.openDiff(absPath, workspacePath ?? undefined, relPath);
       }
-      return;
+    } else {
+      void clientApi.openPath(absPath);
     }
-    // 回退：无 Workbench 上下文时，用系统默认程序打开文件/目录。
-    void clientApi.openPath(absPath, workspacePath ?? undefined);
   };
 
-  const title = workbench
-    ? (isDir ? `在文件视图中打开 ${absPath}` : `查看 ${absPath} 的改动`)
-    : `打开 ${absPath}`;
+  const title = isDir
+    ? `在文件树中定位：${absPath}`
+    : looksLikeImage && previewDataUrl
+      ? `预览图片：${absPath}`
+      : `在 Diff 中打开：${absPath}`;
+
+  if (looksLikeImage && previewDataUrl) {
+    return (
+      <span className="markdown-local-image">
+        <button
+          type="button"
+          className="markdown-local-image-thumb"
+          title={title}
+          onClick={() => setPreviewOpen(true)}
+        >
+          <img src={previewDataUrl} alt={raw} loading="lazy" />
+        </button>
+        <code
+          className="markdown-file-path"
+          role="link"
+          tabIndex={0}
+          title={isDir ? title : `在 Diff 中打开：${absPath}`}
+          onClick={handleOpen}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleOpen();
+            }
+          }}
+        >
+          {raw}
+        </code>
+        {previewOpen ? (
+          <LocalImageLightbox
+            dataUrl={previewDataUrl}
+            name={raw}
+            onClose={() => setPreviewOpen(false)}
+          />
+        ) : null}
+      </span>
+    );
+  }
 
   return (
     <code
@@ -180,6 +238,75 @@ function FilePathCode({ raw }: { raw: string }) {
   );
 }
 
+function LocalImageLightbox({
+  dataUrl,
+  name,
+  onClose,
+}: {
+  dataUrl: string;
+  name: string;
+  onClose: () => void;
+}) {
+  // 轻量实现：复用 body portal 风格的 fixed overlay，避免 markdown 内依赖 Overlay 重模块。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="markdown-local-image-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={name}
+      onClick={onClose}
+    >
+      <figure className="markdown-local-image-lightbox-figure" onClick={(event) => event.stopPropagation()}>
+        <img src={dataUrl} alt={name} />
+        <figcaption>
+          <span className="markdown-local-image-lightbox-name">{name}</span>
+          <button type="button" className="markdown-local-image-lightbox-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </figcaption>
+      </figure>
+    </div>
+  );
+}
+
+/**
+ * 将纯文本切片中的「绝对本地图片路径」提升为可预览节点；非图片路径保持原样。
+ * 仅匹配绝对路径（/… 或 C:\…），避免误伤普通单词。
+ */
+function pushTextWithBareImagePaths(nodes: ReactNode[], text: string, keyPrefix: string, tokenIndex: number): number {
+  // POSIX abs + Windows abs image paths
+  const re = /(?:^|[\s(])((?:\/[\w.@+\-]+(?:\/[\w.@+\-]+)*\.(?:png|jpe?g|gif|webp|bmp|svg))|(?:[A-Za-z]:[\\/][\w.@+\-\\/]+\.(?:png|jpe?g|gif|webp|bmp|svg)))(?=$|[\s),.;:!?\]])/gi;
+  let last = 0;
+  let localIndex = tokenIndex;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const full = match[0];
+    const pathToken = match[1];
+    const pathStartInFull = full.indexOf(pathToken);
+    const absoluteStart = match.index + pathStartInFull;
+    if (absoluteStart > last) {
+      nodes.push(text.slice(last, absoluteStart));
+    }
+    nodes.push(<FilePathCode key={`${keyPrefix}-imgpath-${localIndex}`} raw={pathToken} />);
+    localIndex += 1;
+    last = absoluteStart + pathToken.length;
+  }
+  if (last < text.length) {
+    nodes.push(text.slice(last));
+  } else if (last === 0 && text.length === 0) {
+    // nothing
+  }
+  return localIndex;
+}
+
 function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let cursor = 0;
@@ -196,11 +323,13 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
     candidates.sort((a, b) => a.start - b.start);
     const next = candidates[0];
     if (!next) {
-      nodes.push(text.slice(cursor));
+      tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor), keyPrefix, tokenIndex);
       break;
     }
 
-    if (next.start > cursor) nodes.push(text.slice(cursor, next.start));
+    if (next.start > cursor) {
+      tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor, next.start), keyPrefix, tokenIndex);
+    }
     if (next.type === 'font') {
       const contentStart = next.start + next.openingTag.length;
       const contentEnd = text.toLowerCase().indexOf('</font>', contentStart);

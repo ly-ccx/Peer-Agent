@@ -358,6 +358,7 @@ export function ChatSurface({
   resumeTask,
   onResumeConsumed,
   onOpenSettings,
+  onOpenTools,
   onConversationUpdated,
   onStreamingChange,
   onBranch,
@@ -390,6 +391,7 @@ export function ChatSurface({
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
+  readonly onOpenTools?: () => void;
   readonly onProvidersRefresh?: () => void | Promise<void>;
   readonly onConversationUpdated?: () => void;
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
@@ -532,6 +534,16 @@ export function ChatSurface({
   >;
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  /** 会话级编辑态：目标用户消息进入底部输入框，而不是气泡内联编辑。 */
+  const [editingMessage, setEditingMessage] = useState<{
+    messageId: string;
+    preview: string;
+  } | null>(null);
+
+  // 切换会话时退出编辑态，避免把 A 会话的编辑目标带到 B。
+  useEffect(() => {
+    setEditingMessage(null);
+  }, [conversationId]);
   // 弱提示：非 vision 模型剥离本轮图片等（chat:stream:notice），不阻断发送。
   // 草稿态首条消息：create 完成后等会话 ready 再走 submitMessage，避免与加载竞态。
   const pendingFirstSendRef = useRef<{
@@ -1762,6 +1774,58 @@ export function ChatSurface({
     workspacePath,
   ]);
 
+  const cancelComposerEdit = useCallback(() => {
+    setEditingMessage(null);
+  }, []);
+
+  const beginComposerEdit = useCallback((
+    messageId: string,
+    text: string,
+    messageAttachments: readonly ChatAttachment[],
+  ) => {
+    const preview = text.trim().replace(/\s+/g, ' ');
+    setEditingMessage({
+      messageId,
+      preview: preview.length > 80 ? `${preview.slice(0, 80)}…` : preview,
+    });
+    conversationStore.setDraft(conversationId, text);
+    setAttachments(messageAttachments.map((item) => ({ ...item })));
+    setAttachmentError(null);
+    // 聚焦底部输入框，让编辑立即进入主输入流。
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector('.chat-composer textarea') as HTMLTextAreaElement | null;
+      if (!el) return;
+      el.focus();
+      const end = el.value.length;
+      try { el.setSelectionRange(end, end); } catch { /* ignore */ }
+    });
+  }, [conversationId]);
+
+  const stableBeginComposerEdit = useStableCallback(beginComposerEdit);
+  const stableCancelComposerEdit = useStableCallback(cancelComposerEdit);
+
+  const handleEditMessage = useCallback(async (
+    messageId: string,
+    editedText: string,
+    editedAttachments: readonly ChatAttachment[],
+  ) => {
+    if (isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
+    const text = editedText.trim();
+    if (!text && editedAttachments.length === 0) return false;
+    const retainedMessages = historyBeforeEditedUserMessage(messages, messageId);
+    if (!retainedMessages) return false;
+
+    // 先把目标原消息及后续旧分支从持久化中清掉，再沿现有发送链路创建唯一的新消息。
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(retainedMessages),
+      allowEmpty: true,
+    });
+    await submitMessage(text, [...editedAttachments], undefined, retainedMessages);
+    setEditingMessage(null);
+    return true;
+  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, submitMessage]);
+
   const handleSend = useCallback(async () => {
     // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
     // 随后的流收尾再以短列表 replaceMessages，覆盖仍在磁盘上的完整历史。
@@ -1770,6 +1834,17 @@ export function ChatSurface({
     const text = conversationStore.getSnapshot(conversationId).draft.trim();
     if ((!text && attachments.length === 0) || !hasProvider) return;
     const sentAttachments = attachments;
+
+    // 编辑态：复用截断历史后重发语义，不走普通发送/排队。
+    if (editingMessage) {
+      const ok = await handleEditMessage(editingMessage.messageId, text, sentAttachments);
+      if (ok) {
+        conversationStore.setDraft(conversationId, '');
+        setAttachments([]);
+        setAttachmentError(null);
+      }
+      return;
+    }
 
     // 草稿态：先创建会话进入左侧列表，再等 ready 后发出首条消息。
     if (!conversationId) {
@@ -1823,6 +1898,8 @@ export function ChatSurface({
     mode,
     modelProviderId,
     isZh,
+    editingMessage,
+    handleEditMessage,
   ]);
 
   // 草稿首条：会话 create 后 activeConversationId 切换并 load ready 时，自动发出挂起消息。
@@ -1994,27 +2071,6 @@ export function ChatSurface({
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
 
-  const handleEditMessage = useCallback(async (
-    messageId: string,
-    editedText: string,
-    editedAttachments: readonly ChatAttachment[],
-  ) => {
-    if (isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
-    const text = editedText.trim();
-    if (!text && editedAttachments.length === 0) return false;
-    const retainedMessages = historyBeforeEditedUserMessage(messages, messageId);
-    if (!retainedMessages) return false;
-
-    // 先把目标原消息及后续旧分支从持久化中清掉，再沿现有发送链路创建唯一的新消息。
-    await clientApi.conversationsReplaceMessages({
-      id: conversationId,
-      messages: serializeConversationMessages(retainedMessages),
-      allowEmpty: true,
-    });
-    await submitMessage(text, [...editedAttachments], undefined, retainedMessages);
-    return true;
-  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, submitMessage]);
-  const stableHandleEditMessage = useStableCallback(handleEditMessage);
 
   const handleMessageAction = useCallback((msgIndex: number, action: MessageActionId) => {
     if (action === 'regenerate') void handleRegenerate(msgIndex);
@@ -2251,7 +2307,7 @@ export function ChatSurface({
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
         editTriggerRef={headerEditTriggerRef}
-        onOpenSettings={onOpenSettings}
+        onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
           ? (newTitle) => onRenameConversation(conversationId, newTitle)
           : undefined}
@@ -2365,7 +2421,7 @@ export function ChatSurface({
             enabled={virtualizeChatTurns}
             scrollRef={threadRef}
             onMessageAction={stableHandleMessageAction}
-            onEditMessage={stableHandleEditMessage}
+            onBeginEdit={stableBeginComposerEdit}
             onRegenerate={stableHandleRegenerate}
             onPreviewImage={setImagePreview}
           />
@@ -2530,6 +2586,8 @@ export function ChatSurface({
           onAddFiles={addFiles}
           onAttachSessionReference={attachSessionReference}
           onPrimaryAction={stableHandlePrimaryAction}
+          editingMessage={editingMessage}
+          onCancelEdit={stableCancelComposerEdit}
           homeModelSlot={homeComposerModelControls}
         />
         <div className="chat-composer-toolbar">

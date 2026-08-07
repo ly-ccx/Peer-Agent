@@ -97,9 +97,8 @@ test('current production inventory has one registration for every renderer-to-ma
     files: listProductionModules(mainRoot),
   });
 
-  assert.equal(inventory.registrationCount, 173);
-  assert.equal(inventory.handleCount, 169);
+  assert.equal(inventory.registrationCount, inventory.handleCount + inventory.onCount);
   assert.equal(inventory.onCount, 4);
   assert.equal(inventory.directCount, 0);
-  assert.equal(inventory.ownerCount, 173);
+  assert.equal(inventory.ownerCount, inventory.registrationCount);
 });

@@ -115,17 +115,17 @@ function healthToTone(health: CapabilityHealth, accessLevel: LocalAccessLevel): 
  * ChatHeaderCapabilities — 头部「已挂载能力」指示器。
  *
  * 以一个能力 pill 展示已挂载能力总数，点击弹出按 技能(Skill)/MCP/插件(Plugin)/内置
- * 分组的浮层，每项显示名称与状态点，底部提供「管理」入口跳转设置。
+ * 分组的浮层，每项显示名称与状态点，底部提供「管理」入口跳转插件页。
  * 数据取自 listCapabilities() + listSkills() 实时接口；加载失败静默兜底为空态。
  */
 export function ChatHeaderCapabilities({
   i18n,
   localAccessLevel,
-  onOpenSettings,
+  onOpenTools,
 }: {
   readonly i18n: I18nRuntime;
   readonly localAccessLevel: LocalAccessLevel;
-  readonly onOpenSettings?: () => void;
+  readonly onOpenTools?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
@@ -281,8 +281,8 @@ export function ChatHeaderCapabilities({
 
   const handleManage = useCallback(() => {
     setOpen(false);
-    onOpenSettings?.();
-  }, [onOpenSettings]);
+    onOpenTools?.();
+  }, [onOpenTools]);
 
   return (
     <div className="chat-header-cap-anchor" ref={anchorRef}>
@@ -444,7 +444,7 @@ export function ChatHeaderCapabilities({
               </div>
             ))
           )}
-          {onOpenSettings ? (
+          {onOpenTools ? (
             <button type="button" className="chat-header-cap-manage" onClick={handleManage}>
               <span>{i18n.t('header.capabilities.manage')}</span>
               <svg

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import AdmZip from 'adm-zip';
@@ -494,6 +494,67 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return { ok: true };
   }
 
+  function clearSkillEnablement(skillId) {
+    globalDisabledSet.delete(skillId);
+    for (const set of workspaceEnabledMap.values()) set.delete(skillId);
+    for (const set of workspaceDisabledMap.values()) set.delete(skillId);
+    saveSettings();
+  }
+
+  /**
+   * 卸载用户安装的 Skill：
+   * - userData/skills 下的软链：仅取消借用（不删除来源）
+   * - userData/skills 下的真实目录：递归删除
+   * - workspace Skill：拒绝删除源文件
+   * - 路径逃逸 / 非 userData 安装：拒绝
+   */
+  function uninstallSkill(skillId) {
+    const dirName = safeSkillDirName(skillId);
+    if (!dirName) return { ok: false, error: 'invalid-skill-id' };
+
+    const skill = findSkill(skillId);
+    if (!skill) return { ok: false, error: 'not-found' };
+    if (skill.scope === 'workspace') {
+      return { ok: false, error: 'workspace-skill-not-uninstallable' };
+    }
+
+    const target = path.join(skillsRoot, dirName);
+    if (!existsSync(target) && !isLinkedEntry(dirName)) {
+      return { ok: false, error: 'not-found' };
+    }
+
+    let mode = 'deleted';
+    try {
+      if (isLinkedEntry(dirName)) {
+        unlinkSync(target);
+        mode = 'unlinked';
+      } else {
+        const skillsRootReal = realpathSync(skillsRoot);
+        const targetReal = realpathSync(target);
+        const relative = path.relative(skillsRootReal, targetReal);
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+          return { ok: false, error: 'path-escape' };
+        }
+        // 只允许删除 userData/skills 下的一级安装目录。
+        if (path.dirname(targetReal) !== skillsRootReal) {
+          return { ok: false, error: 'path-escape' };
+        }
+        rmSync(target, { recursive: true, force: false });
+        mode = 'deleted';
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error: mode === 'unlinked' ? 'unlink-failed' : 'delete-failed',
+        detail: String(err && err.message ? err.message : err),
+      };
+    }
+
+    clearSkillEnablement(skillId);
+    refresh();
+    return { ok: true, mode };
+  }
+
   function findSkill(skillId) {
     return skills.find((s) => s.skillId === skillId) ?? null;
   }
@@ -541,7 +602,22 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     };
   }
 
-  function installSkillFromZip(zipBuffer) {
+  /**
+   * 安装 ZIP Skill。
+   * @param {Buffer} zipBuffer
+   * @param {{ scope?: 'global' | 'workspace' }} [options]
+   * - global（默认）：写入 userData/skills
+   * - workspace：写入当前工作区 skills/；无工作区时抛 workspace_required
+   */
+  function installSkillFromZip(zipBuffer, { scope = 'global' } = {}) {
+    const installScope = scope === 'workspace' ? 'workspace' : 'global';
+    let targetRoot = skillsRoot;
+    if (installScope === 'workspace') {
+      const ws = getWorkspacePath();
+      if (!ws) throw new Error('workspace_required');
+      targetRoot = path.join(ws, 'skills');
+    }
+
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
@@ -560,21 +636,27 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     const { frontmatter } = parseFrontmatter(content);
     const skillId = frontmatter.skillId || prefix.replace(/\/$/, '') || `skill-${Date.now()}`;
 
-    const destDir = path.join(skillsRoot, skillId);
+    const destDir = path.join(targetRoot, skillId);
     if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
 
     for (const entry of entries) {
       if (entry.isDirectory) continue;
       const relative = prefix ? entry.entryName.slice(prefix.length) : entry.entryName;
       if (!relative) continue;
-      const target = path.join(destDir, relative);
+      const target = path.resolve(destDir, relative);
+      const relativeToRoot = path.relative(destDir, target);
+      if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+        throw new Error('zip_path_escape');
+      }
       const targetDir = path.dirname(target);
       if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
       writeFileSync(target, entry.getData());
     }
 
     refresh();
-    return listSkills().find((s) => s.skillId === skillId) ?? null;
+    const installed = listSkills().find((s) => s.skillId === skillId) ?? null;
+    if (installed) return { ...installed, installScope };
+    return { skillId, id: skillId, installScope, scope: installScope };
   }
 
   function installSkillFromTgz(tgzBuffer) {
@@ -637,5 +719,6 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     listAvailableSkills,
     linkSkill,
     unlinkSkill,
+    uninstallSkill,
   };
 }

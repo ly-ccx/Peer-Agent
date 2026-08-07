@@ -52,6 +52,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onAddFiles,
   onAttachSessionReference,
   onPrimaryAction,
+  editingMessage = null,
+  onCancelEdit,
   homeModelSlot = null,
   variant = 'conversation',
 }: {
@@ -71,6 +73,9 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
+  /** 正在编辑的用户消息引用（底部输入框上方展示）。 */
+  readonly editingMessage?: { messageId: string; preview: string } | null;
+  readonly onCancelEdit?: () => void;
   readonly homeModelSlot?: React.ReactNode;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -105,7 +110,24 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onPrimaryAction();
       }}
     >
-      {/* 顺序靠 CSS order：菜单(0) → 附件(1) → textarea/按钮(2/3) */}
+      {/* 顺序靠 CSS order：编辑引用(-1) → 菜单(0) → 附件(1) → textarea/按钮(2/3) */}
+      {editingMessage ? (
+        <div className="composer-edit-banner" role="status">
+          <div className="composer-edit-banner-main">
+            <span className="composer-edit-banner-label">{isZh ? '正在编辑' : 'Editing'}</span>
+            <span className="composer-edit-banner-preview">
+              {editingMessage.preview || (isZh ? '（空消息）' : '(empty message)')}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="composer-edit-banner-cancel"
+            onClick={() => onCancelEdit?.()}
+          >
+            {isZh ? '取消' : 'Cancel'}
+          </button>
+        </div>
+      ) : null}
       {attachmentSlot}
       <ComposerDraftField
         conversationId={conversationId}
@@ -122,6 +144,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onAddFiles={onAddFiles}
         onAttachSessionReference={onAttachSessionReference}
         onPrimaryAction={onPrimaryAction}
+        editingMessage={editingMessage}
+        onCancelEdit={onCancelEdit}
       />
     </form>
   );
@@ -146,6 +170,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   onAddFiles,
   onAttachSessionReference,
   onPrimaryAction,
+  editingMessage = null,
+  onCancelEdit,
 }: {
   readonly conversationId: string | null;
   readonly hasProvider: boolean;
@@ -161,6 +187,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
+  readonly editingMessage?: { messageId: string; preview: string } | null;
+  readonly onCancelEdit?: () => void;
 }) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -458,6 +486,11 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
           }
+          if (event.key === 'Escape' && editingMessage) {
+            event.preventDefault();
+            onCancelEdit?.();
+            return;
+          }
           // IME composition (Chinese/Japanese/etc.): Enter confirms candidate, must not send.
           if (
             event.key === 'Enter'
@@ -502,8 +535,16 @@ const ComposerDraftField = memo(function ComposerDraftField({
         type="submit"
         disabled={!hasProvider || (!isStreaming && !hasComposerContent)}
         className={isStreaming ? 'streaming' : undefined}
-        title={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
-        aria-label={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
+        title={isStreaming
+          ? (isZh ? '停止生成' : 'Stop')
+          : editingMessage
+            ? (isZh ? '保存并发送' : 'Save and send')
+            : (isZh ? '发送' : 'Send')}
+        aria-label={isStreaming
+          ? (isZh ? '停止生成' : 'Stop')
+          : editingMessage
+            ? (isZh ? '保存并发送' : 'Save and send')
+            : (isZh ? '发送' : 'Send')}
       >
         {isStreaming ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">

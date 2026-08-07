@@ -1264,6 +1264,63 @@
   max-width: 140px;
 }
 
+/* 底部输入框上方的「正在编辑」引用条 */
+.composer-edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  order: -1;
+  flex: 1 1 100%;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, var(--chrome-hairline));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, var(--control-composer, var(--paper-sheet)));
+  color: var(--graphite-soft);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.chat-composer > .composer-edit-banner {
+  order: -1;
+  flex: 1 1 100%;
+  box-sizing: border-box;
+}
+.composer-edit-banner-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.composer-edit-banner-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--accent, #3b82f6);
+}
+.composer-edit-banner-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.composer-edit-banner-cancel {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.composer-edit-banner-cancel:hover {
+  background: color-mix(in srgb, var(--graphite-soft) 12%, transparent);
+  color: var(--graphite);
+}
+
 .chat-composer {
   position: relative;
   display: flex;
@@ -3971,6 +4028,40 @@
   grid-template-rows: auto auto auto;
 }
 
+/* 编辑引用条：独占顶部一行，可与附件条叠加。 */
+.chat-composer--home:has(> .composer-edit-banner),
+.chat-composer--compact:has(> .composer-edit-banner) {
+  grid-template-areas:
+    "home-edit"
+    "home-text"
+    "home-actions";
+}
+
+.chat-composer--home:has(> .composer-edit-banner):has(> .composer-attachment-row),
+.chat-composer--compact:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-areas:
+    "home-edit"
+    "home-attachments"
+    "home-text"
+    "home-actions";
+}
+
+.chat-composer--home:has(> .composer-edit-banner) {
+  grid-template-rows: auto minmax(72px, 1fr) auto;
+}
+
+.chat-composer--compact:has(> .composer-edit-banner) {
+  grid-template-rows: auto auto auto;
+}
+
+.chat-composer--home:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-rows: auto auto minmax(72px, 1fr) auto;
+}
+
+.chat-composer--compact:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-rows: auto auto auto auto;
+}
+
 .chat-composer--home {
   grid-template-rows: minmax(72px, 1fr) auto;
   min-height: 154px;
@@ -3989,6 +4080,15 @@
 /* 重置普通会话 flex 子项 order，否则 order:2 的 textarea 会掉到操作栏下面。 */
 .chat-composer--home > *,
 .chat-composer--compact > * {
+  order: 0;
+}
+
+/* 编辑引用条独占 home-edit 行。 */
+.chat-composer--home > .composer-edit-banner,
+.chat-composer--compact > .composer-edit-banner {
+  grid-area: home-edit;
+  width: 100%;
+  margin: 0;
   order: 0;
 }
 

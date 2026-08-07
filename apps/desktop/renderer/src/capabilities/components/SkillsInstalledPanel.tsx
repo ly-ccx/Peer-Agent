@@ -137,6 +137,22 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
     setSelectedSkill((current) => current?.skillId === skillId ? { ...current, enabled } : current);
   }, []);
 
+  const uninstallSkill = useCallback(async (skillId: string) => {
+    const result = await clientApi.uninstallSkill(skillId);
+    if (!result.ok) {
+      const reason = result.error === 'workspace-skill-not-uninstallable'
+        ? '项目级 Skill 不能从这里删除源文件'
+        : result.error === 'path-escape'
+          ? '拒绝删除：路径不在用户安装目录内'
+          : result.error === 'not-found'
+            ? '未找到可卸载的安装'
+            : result.error ?? '未知错误';
+      throw new Error(reason);
+    }
+    // 刷新列表，但不要在这里硬卸载详情弹窗；由 SkillDetailDialog 走 Overlay requestClose 退场。
+    await Promise.all([loadSkills(), loadAvailable()]);
+  }, [loadAvailable, loadSkills]);
+
   const handleLink = useCallback(async (skill: AvailableSkillSummary) => {
     setBusyId(skill.skillId);
     setLinkError(null);
@@ -219,6 +235,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           skill={selectedSkill}
           onClose={() => setSelectedSkill(null)}
           onToggle={setSkillEnabled}
+          onUninstall={uninstallSkill}
         />
       ) : null}
     </div>

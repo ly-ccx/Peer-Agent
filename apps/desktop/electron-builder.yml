@@ -47,6 +47,12 @@ extraResources:
     to: "capabilities/"
     filter:
       - "**/*.json"
+  # Peer Agent 自有 Skill Catalog 与经过审核的安装包。
+  - from: "../../marketplace/dist/"
+    to: "marketplace/"
+    filter:
+      - "catalog.json"
+      - "artifacts/**/*.zip"
 
 # ── macOS ──
 mac:

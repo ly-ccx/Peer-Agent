@@ -1,6 +1,23 @@
 import path from 'node:path';
 
 const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
+/** Chat image preview: same ceiling as renderer attachment intake (8 MiB). */
+const DEFAULT_MAX_IMAGE_FILE_BYTES = 8 * 1024 * 1024;
+
+const IMAGE_EXT_TO_MIME = Object.freeze({
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+});
+
+function imageMimeFromPath(filePath) {
+  const ext = path.extname(filePath || '').toLowerCase();
+  return IMAGE_EXT_TO_MIME[ext] || null;
+}
 
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
@@ -533,6 +550,85 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
+  function readImageDataUrl({ absPath, workspaceRoot, relPath } = {}) {
+    try {
+      if (!absPath || typeof absPath !== 'string') {
+        return { ok: false, status: 'invalid_path', dataUrl: '', error: 'invalid_path' };
+      }
+      const normalized = path.normalize(absPath);
+      if (!path.isAbsolute(normalized)) {
+        return { ok: false, status: 'invalid_path', dataUrl: '', error: 'not_absolute' };
+      }
+      const resolved = recoverPath(normalized, relPath, workspaceRoot);
+      if (!resolved) {
+        return { ok: false, status: 'not_found', dataUrl: '', error: 'file_not_found' };
+      }
+      const { target, resolvedFrom } = resolved;
+      let stat;
+      try {
+        stat = statPath(target);
+      } catch {
+        return { ok: false, status: 'not_found', dataUrl: '', error: 'stat_failed' };
+      }
+      if (!stat.isFile()) {
+        return {
+          ok: false,
+          status: 'not_file',
+          dataUrl: '',
+          error: 'not_a_file',
+          resolvedFrom,
+        };
+      }
+      const mimeType = imageMimeFromPath(target);
+      if (!mimeType) {
+        return {
+          ok: false,
+          status: 'unsupported_type',
+          dataUrl: '',
+          error: 'not_an_image',
+          resolvedFrom,
+        };
+      }
+      if (stat.size > DEFAULT_MAX_IMAGE_FILE_BYTES) {
+        return {
+          ok: false,
+          status: 'too_large',
+          dataUrl: '',
+          error: 'file_too_large',
+          size: stat.size,
+          resolvedFrom,
+        };
+      }
+      const buffer = readFileBuffer(target);
+      const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+      return resolvedFrom
+        ? {
+            ok: true,
+            status: 'ok',
+            dataUrl,
+            mimeType,
+            size: buffer.length,
+            path: target,
+            resolvedFrom,
+          }
+        : {
+            ok: true,
+            status: 'ok',
+            dataUrl,
+            mimeType,
+            size: buffer.length,
+            path: target,
+          };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'error',
+        dataUrl: '',
+        error: error?.message || String(error),
+      };
+    }
+  }
+
   function dispose() {
     for (const senderId of [...watchersBySender.keys()]) stopSenderWatchers(senderId);
   }
@@ -543,6 +639,7 @@ export function createFileAccessApplicationService(options = {}) {
     readDirectory,
     watchDirectories,
     readFile,
+    readImageDataUrl,
     writeFile,
     mkdir,
     dispose,

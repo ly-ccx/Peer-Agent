@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { Overlay } from '../../../app/components/Overlay';
 import { formatBytes } from '../../state/format';
+import { loadLocalImageDataUrl } from '../../state/localImagePreview';
 import type { ChatAttachment } from '../../state/types';
 
 export const PEER_ATTACHMENT_DND_TYPE = 'application/x-peer-attachment-id';
@@ -129,21 +130,15 @@ export const AttachmentStrip = memo(function AttachmentStrip({
               onReorder(fromIndex, index);
             }}
           >
-            {attachment.kind === 'image' && attachment.dataUrl ? (
+            {attachment.kind === 'image' ? (
               // Codex-style: image chips are thumb-only; no filename/size chrome.
-              <button
-                type="button"
-                className="attachment-thumb-btn"
-                onClick={() => onPreviewImage?.(attachment)}
-                title={attachment.name}
-                aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
-              >
-                <AttachmentThumb
-                  attachmentId={attachment.id}
-                  dataUrl={attachment.dataUrl}
-                  loading={readOnly ? 'lazy' : 'eager'}
-                />
-              </button>
+              // dataUrl 优先；缺失时按 filePath 按需加载（ADR 59 不落盘整图到会话）。
+              <ResolvedImageChip
+                attachment={attachment}
+                isZh={isZh}
+                loading={readOnly ? 'lazy' : 'eager'}
+                onPreviewImage={onPreviewImage}
+              />
             ) : attachment.appshot ? (
               // Appshot 缺缩略图（artifact 未接线或文件丢失）：损坏/占位态，
               // 不伪装成正常图片成功卡片（产品 §12.1「不出现空白成功卡片」）。
@@ -203,6 +198,98 @@ export const AttachmentStrip = memo(function AttachmentStrip({
 /**
  * 缩略图叶子：只对单个附件做小图缓存，预览仍用原 dataUrl。
  */
+const ResolvedImageChip = memo(function ResolvedImageChip({
+  attachment,
+  isZh,
+  loading,
+  onPreviewImage,
+}: {
+  readonly attachment: ChatAttachment;
+  readonly isZh: boolean;
+  readonly loading: 'lazy' | 'eager';
+  readonly onPreviewImage?: (attachment: ChatAttachment) => void;
+}) {
+  const [resolvedDataUrl, setResolvedDataUrl] = useState<string | null>(
+    () => (typeof attachment.dataUrl === 'string' && attachment.dataUrl ? attachment.dataUrl : null),
+  );
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (typeof attachment.dataUrl === 'string' && attachment.dataUrl) {
+      setResolvedDataUrl(attachment.dataUrl);
+      setLoadFailed(false);
+      return;
+    }
+    const filePath = typeof attachment.filePath === 'string' ? attachment.filePath.trim() : '';
+    if (!filePath) {
+      setResolvedDataUrl(null);
+      setLoadFailed(true);
+      return;
+    }
+    let cancelled = false;
+    setLoadFailed(false);
+    void loadLocalImageDataUrl(filePath).then((dataUrl) => {
+      if (cancelled) return;
+      if (dataUrl) {
+        setResolvedDataUrl(dataUrl);
+        setLoadFailed(false);
+      } else {
+        setResolvedDataUrl(null);
+        setLoadFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.dataUrl, attachment.filePath, attachment.id]);
+
+  if (resolvedDataUrl) {
+    const previewAttachment: ChatAttachment = {
+      ...attachment,
+      dataUrl: resolvedDataUrl,
+    };
+    return (
+      <button
+        type="button"
+        className="attachment-thumb-btn"
+        onClick={() => onPreviewImage?.(previewAttachment)}
+        title={attachment.name}
+        aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
+      >
+        <AttachmentThumb
+          attachmentId={attachment.id}
+          dataUrl={resolvedDataUrl}
+          loading={loading}
+        />
+      </button>
+    );
+  }
+
+  if (attachment.appshot || loadFailed) {
+    return (
+      <span
+        className="attachment-file-icon attachment-appshot-missing"
+        title={
+          isZh
+            ? `截图不可用：${attachment.name}${attachment.artifactRef ? `（${attachment.artifactRef}）` : ''}`
+            : `Screenshot unavailable: ${attachment.name}${attachment.artifactRef ? ` (${attachment.artifactRef})` : ''}`
+        }
+        aria-label={isZh ? `截图不可用 ${attachment.name}` : `Screenshot unavailable ${attachment.name}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <circle cx="8.5" cy="10" r="1.5" />
+          <path d="M21 16l-5-5-4 4-2-2-5 5" />
+          <path d="M4 4l16 16" />
+        </svg>
+        <span className="attachment-name">{isZh ? '截图不可用' : 'Unavailable'}</span>
+      </span>
+    );
+  }
+
+  return <span className="attachment-thumb attachment-thumb-pending" aria-hidden="true" />;
+});
+
 const AttachmentThumb = memo(function AttachmentThumb({
   attachmentId,
   dataUrl,
@@ -256,10 +343,37 @@ export function ImagePreviewOverlay({
   readonly isZh: boolean;
   readonly onClose: () => void;
 }) {
+  const [src, setSrc] = useState<string>(() =>
+    typeof attachment.dataUrl === 'string' && attachment.dataUrl ? attachment.dataUrl : '',
+  );
+
+  useEffect(() => {
+    if (typeof attachment.dataUrl === 'string' && attachment.dataUrl) {
+      setSrc(attachment.dataUrl);
+      return;
+    }
+    const filePath = typeof attachment.filePath === 'string' ? attachment.filePath.trim() : '';
+    if (!filePath) {
+      setSrc('');
+      return;
+    }
+    let cancelled = false;
+    void loadLocalImageDataUrl(filePath).then((dataUrl) => {
+      if (!cancelled && dataUrl) setSrc(dataUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.dataUrl, attachment.filePath]);
+
   return (
     <Overlay onClose={onClose} backdropClassName="image-preview-overlay" ariaLabel={isZh ? '图片预览' : 'Image preview'}>
       <figure className="image-preview-dialog" role="dialog" aria-modal="true" aria-label={isZh ? '图片预览' : 'Image preview'}>
-        <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
+        {src ? (
+          <img src={src} alt={attachment.name} className="image-preview-img" />
+        ) : (
+          <div className="image-preview-pending">{isZh ? '加载中…' : 'Loading…'}</div>
+        )}
         <figcaption className="image-preview-meta">
           <span className="image-preview-name">{attachment.name}</span>
           <span className="image-preview-size">{formatBytes(attachment.size)}</span>

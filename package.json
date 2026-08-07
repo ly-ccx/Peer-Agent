@@ -10,6 +10,8 @@
     "typecheck": "pnpm -r typecheck",
     "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs",
+    "marketplace:build": "node marketplace/build-catalog.mjs",
+    "marketplace:test": "node --test marketplace/*.test.mjs",
     "version:check": "node scripts/check-version.mjs",
     "build:changelog": "node scripts/build-changelog.mjs",
     "check:changelog": "node scripts/build-changelog.mjs --check",

@@ -49,6 +49,13 @@ import type {
   SkillSummary,
   AvailableSkillSummary,
   SkillLinkResult,
+  SkillMarketplaceCatalog,
+  SkillMarketplaceEntry,
+  SkillMarketplaceInstallResult,
+  SkillHubInstallRequest,
+  SkillHubMarketplacePage,
+  SkillHubMarketplaceQuery,
+  SkillHubSyncStatus,
   UpdateChannelPreference,
   UpdaterEvent,
   UpdaterStatus,
@@ -446,6 +453,31 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * 按需读取本地图片为 dataUrl，供聊天气泡缩略图/放大预览。
+   * ADR 59：会话存储不内联整图；仅在用户可见预览时临时加载。
+   */
+  readonly readImageDataUrl: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'not_found'
+      | 'not_file'
+      | 'too_large'
+      | 'unsupported_type'
+      | 'invalid_path'
+      | 'error';
+    readonly dataUrl: string;
+    readonly mimeType?: string;
+    readonly size?: number;
+    readonly path?: string;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
    * 在已存在父目录下新建文件。默认写空内容；不覆盖已有文件。
    * status：ok / already_exists / not_found / not_dir / invalid_path / error。
    */
@@ -762,6 +794,22 @@ export interface BootstrapPreloadApi {
   readonly linkSkill: (skillId: string) => Promise<SkillLinkResult>;
   /** 解除借用：仅删除本地软链，不影响来源目录。 */
   readonly unlinkSkill: (skillId: string) => Promise<SkillLinkResult>;
+  /**
+   * 卸载用户安装的 Skill：
+   * - userData/skills 实装目录：删除
+   * - 借用软链：仅取消链接
+   * - workspace Skill：拒绝删除源文件
+   */
+  readonly uninstallSkill: (skillId: string) => Promise<SkillLinkResult>;
+  readonly listMarketplaceSkills: () => Promise<SkillMarketplaceCatalog>;
+  readonly getMarketplaceSkillDetail: (catalogId: string) => Promise<SkillMarketplaceEntry | null>;
+  readonly installMarketplaceSkill: (catalogId: string) => Promise<SkillMarketplaceInstallResult>;
+  readonly querySkillHubSkills: (query?: SkillHubMarketplaceQuery) => Promise<SkillHubMarketplacePage>;
+  readonly getSkillHubSkillDetail: (identity: Omit<SkillHubInstallRequest, 'version'>) => Promise<Record<string, unknown>>;
+  readonly getSkillHubSyncStatus: () => Promise<SkillHubSyncStatus>;
+  readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
+  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
+  readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;
