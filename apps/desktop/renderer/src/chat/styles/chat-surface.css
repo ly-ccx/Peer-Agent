@@ -725,7 +725,7 @@
 .skill-capsule-card {
   margin: var(--space-1) 0;
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-  border-radius: var(--ui-radius-control, var(--radius-sm));
+  border-radius: var(--ui-radius-panel, var(--radius-md));
   background: color-mix(in srgb, var(--azure-soft, #5b8def) 8%, var(--ui-surface-raised, var(--paper-sheet)));
   overflow: hidden;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
