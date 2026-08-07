@@ -4151,7 +4151,7 @@ button.chat-header-cap-item:focus-visible {
     "home-actions";
   gap: 10px;
   max-width: var(--chat-content-max);
-  padding: 10px 10px 6px;
+  padding: 10px;
   border-radius: 22px;
   border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--ink-base) 22%);
   background: color-mix(in srgb, var(--chrome-canvas) 92%, var(--chrome-raised) 8%);
@@ -4260,14 +4260,14 @@ button.chat-header-cap-item:focus-visible {
   max-height: 160px;
   box-sizing: border-box;
   align-self: stretch;
-  padding: 2px 6px 4px;
+  /* 左 padding 对齐 + 图标左缘：附件按钮 28px, 图标 14px → (28-14)/2 = 7px。 */
+  padding: 0 7px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.45;
 }
 
 .chat-composer--home > textarea {
   min-height: 72px;
-  padding: 2px 6px 12px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.5;
 }
@@ -4295,7 +4295,7 @@ button.chat-header-cap-item:focus-visible {
 .composer-home-action-left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -4309,15 +4309,23 @@ button.chat-header-cap-item:focus-visible {
   border-radius: 999px;
 }
 
-.chat-composer--home .composer-attach-btn,
 .chat-composer--home button[type="submit"] {
   width: 40px;
   height: 40px;
 }
 
+/* 附件按钮降级为与旁侧文字控件同级的紧凑 chip：去掉大圆 hitbox，图标 14px。 */
+.chat-composer--home .composer-attach-btn,
+.chat-composer--compact .composer-attach-btn {
+  width: var(--composer-addon-height);
+  height: var(--composer-addon-height);
+  border-radius: 8px;
+}
+
+/* 去掉基础规则的 margin-left:auto，让 space-between 独占左右对称。 */
 .chat-composer--home button[type="submit"],
 .chat-composer--compact button[type="submit"] {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .composer-home-model-slot {
@@ -4346,12 +4354,12 @@ button.chat-header-cap-item:focus-visible {
 .composer-home-model-slot .reasoning-effort-trigger.open {
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
-  padding: 0 4px;
+  padding: 0 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   box-shadow: none;
-  color: color-mix(in srgb, var(--ink-base) 78%, transparent);
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
   line-height: 1.2;
 }
@@ -4367,12 +4375,14 @@ button.chat-header-cap-item:focus-visible {
   border: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0 4px;
+  padding: 0 8px;
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
 .composer-home-model-slot .token-usage-context-window {
-  padding: 0 4px;
+  padding: 0 8px;
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
