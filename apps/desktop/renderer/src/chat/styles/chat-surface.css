@@ -4193,7 +4193,7 @@
 .chat-composer--home {
   grid-template-rows: minmax(72px, 1fr) auto;
   min-height: 154px;
-  padding: 12px 10px 6px;
+  padding: 10px;
   border-radius: 26px;
   box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
 }
