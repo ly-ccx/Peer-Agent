@@ -14,11 +14,47 @@ const TOKEN_ENV_NAMES = ['QODER_ACCESS_TOKEN', 'QODER_PERSONAL_ACCESS_TOKEN', 'Q
 
 let authWasmPromise = null;
 
+/** Stable business codes → user-facing text (bubble shows error.message). */
+const QODER_AUTH_ERROR_MESSAGES = {
+  qoder_auth_not_found:
+    'Qoder local login state not found. Open Qoder, sign in, then retry.',
+  qoder_auth_token_missing:
+    'Qoder local login state has no access token. Re-login in Qoder, then retry.',
+  qoder_auth_expired:
+    'Qoder local login has expired. Re-login in Qoder, then retry.',
+  qoder_auth_permission_denied:
+    'Cannot read Qoder local login state (permission denied). Check ~/.qoder/.auth permissions or re-login in Qoder.',
+  qoder_auth_unavailable:
+    'Unable to load Qoder local login state. Re-login in Qoder or set QODER_ACCESS_TOKEN.',
+  qoder_auth_wasm_missing:
+    'Qoder auth wasm is missing from the CLI binary. Reinstall or update qodercli.',
+  qoder_auth_wasm_not_found:
+    'Qoder CLI binary not found; cannot decrypt local login state. Install qodercli or set QODER_ACCESS_TOKEN.',
+  qoder_cli_not_found:
+    'Qoder CLI binary not found. Install qodercli or set QODER_CLI_PATH.',
+};
+
 function createQoderAuthError(code, cause = null) {
-  const error = new Error(code);
+  const message = QODER_AUTH_ERROR_MESSAGES[code] || code;
+  const error = new Error(message);
   error.code = code;
   if (cause) error.cause = cause;
   return error;
+}
+
+/** Map Node system errno (EPERM/EACCES/…) to stable qoder_auth_* codes; keep existing qoder codes. */
+function mapQoderAuthCaughtError(error) {
+  const code = typeof error?.code === 'string' ? error.code : '';
+  if (code.startsWith('qoder_auth_') || code === 'qoder_cli_not_found') {
+    return error;
+  }
+  if (code === 'EPERM' || code === 'EACCES') {
+    return createQoderAuthError('qoder_auth_permission_denied', error);
+  }
+  if (code === 'ENOENT') {
+    return createQoderAuthError('qoder_auth_not_found', error);
+  }
+  return createQoderAuthError('qoder_auth_unavailable', error);
 }
 
 function nonEmpty(value) {
@@ -495,8 +531,8 @@ export async function loadQoderLocalAuth(options = {}) {
     if (expireTime > 0 && expireTime <= nowSeconds + 60) throw createQoderAuthError('qoder_auth_expired');
     return { token, source: 'qoder_local_auth', userInfo };
   } catch (error) {
-    if (error?.code) throw error;
-    throw createQoderAuthError('qoder_auth_unavailable', error);
+    // Do not rethrow bare Node errno codes (e.g. EPERM) — they surface as opaque bubbles.
+    throw mapQoderAuthCaughtError(error);
   }
 }
 

@@ -107,4 +107,24 @@ describe('qoder local auth', () => {
     assert.equal(extractEmbeddedAuthWasmBytes('var MsC="not-wasm-payload";'), null);
     assert.equal(extractEmbeddedAuthWasmBytes(''), null);
   });
+
+  it('maps missing local auth files to qoder_auth_not_found instead of bare ENOENT', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-auth-missing-'));
+    try {
+      await assert.rejects(
+        () => loadQoderLocalAuth({
+          env: {},
+          homeDir: dir,
+        }),
+        (error) => {
+          assert.equal(error.code, 'qoder_auth_not_found');
+          assert.notEqual(error.message, 'ENOENT');
+          assert.match(error.message, /not found|sign in|login/i);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
