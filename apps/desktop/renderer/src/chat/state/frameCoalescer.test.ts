@@ -40,4 +40,24 @@ describe('frame coalescer', () => {
 
     assert.equal(callbacks.size, 0);
   });
+
+  it('flush runs the queued callback synchronously and cancels the scheduled frame', () => {
+    const { coalescer, callbacks } = harness();
+    const flushed: number[] = [];
+
+    coalescer.request(() => flushed.push(1));
+    assert.equal(callbacks.size, 1);
+    assert.deepEqual(flushed, []);
+
+    coalescer.flush();
+
+    assert.deepEqual(flushed, [1]);
+    // 帧已被取消，不应再触发第二次。
+    assert.equal(callbacks.size, 0);
+  });
+
+  it('flush is a no-op when nothing is queued', () => {
+    const { coalescer } = harness();
+    assert.doesNotThrow(() => coalescer.flush());
+  });
 });
