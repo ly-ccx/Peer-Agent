@@ -7,6 +7,7 @@ import type {
 } from '@peer-agent/protocol';
 import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SkillDetailDialog } from '../../../capabilities/components/SkillDetailDialog';
 import { clientApi } from '../../../clientApi';
 
 type StatusTone = 'available' | 'needsAuth' | 'disabled' | 'unavailable';
@@ -130,6 +131,7 @@ export function ChatHeaderCapabilities({
   const [open, setOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
   const [skills, setSkills] = useState<readonly SkillSummary[]>([]);
+  const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   // 默认折叠二级入口，仅在用户选择服务或内置分组后展示具体能力。
   const [expandedServices, setExpandedServices] = useState<ReadonlySet<string>>(() => new Set());
   const [expandedBuiltinGroups, setExpandedBuiltinGroups] = useState<ReadonlySet<string>>(
@@ -284,6 +286,48 @@ export function ChatHeaderCapabilities({
     onOpenTools?.();
   }, [onOpenTools]);
 
+  const openSkillDetail = useCallback(
+    (skillId: string) => {
+      const skill = skills.find((item) => item.skillId === skillId) ?? null;
+      if (!skill) return;
+      setSelectedSkill(skill);
+      // 打开详情时收起浮层，避免与详情 Overlay 抢焦点。
+      setOpen(false);
+    },
+    [skills],
+  );
+
+  const setSkillEnabled = useCallback(async (skillId: string, enabled: boolean) => {
+    const updated = enabled
+      ? await clientApi.enableSkill(skillId)
+      : await clientApi.disableSkill(skillId);
+    setSkills(updated);
+    setSelectedSkill((current) =>
+      current?.skillId === skillId ? { ...current, enabled } : current,
+    );
+  }, []);
+
+  const uninstallSkill = useCallback(async (skillId: string) => {
+    const result = await clientApi.uninstallSkill(skillId);
+    if (!result.ok) {
+      const reason =
+        result.error === 'workspace-skill-not-uninstallable'
+          ? '项目级 Skill 不能从这里删除源文件'
+          : result.error === 'path-escape'
+            ? '拒绝删除：路径不在用户安装目录内'
+            : result.error === 'not-found'
+              ? '未找到可卸载的安装'
+              : (result.error ?? '未知错误');
+      throw new Error(reason);
+    }
+    // 刷新列表；详情弹窗由 SkillDetailDialog 自行 requestClose 退场。
+    try {
+      setSkills(await clientApi.listSkills());
+    } catch {
+      // 卸载成功后列表刷新失败时保留当前态，避免误报卸载失败。
+    }
+  }, []);
+
   return (
     <div className="chat-header-cap-anchor" ref={anchorRef}>
       <button
@@ -430,17 +474,34 @@ export function ChatHeaderCapabilities({
                           </div>
                         );
                       })
-                    : group.rows.map((row) => (
-                        <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
-                          <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
-                          <span className="chat-header-cap-item-name" title={row.name}>
-                            {row.name}
-                          </span>
-                          <span className="chat-header-cap-item-status">
-                            {i18n.t(STATUS_KEY[row.tone])}
-                          </span>
-                        </div>
-                      ))}
+                    : group.rows.map((row) =>
+                        group.key === 'skill' ? (
+                          <button
+                            type="button"
+                            className="chat-header-cap-item chat-header-cap-item-clickable"
+                            key={`${group.key}:${row.id}`}
+                            onClick={() => openSkillDetail(row.id)}
+                          >
+                            <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                            <span className="chat-header-cap-item-name" title={row.name}>
+                              {row.name}
+                            </span>
+                            <span className="chat-header-cap-item-status">
+                              {i18n.t(STATUS_KEY[row.tone])}
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
+                            <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                            <span className="chat-header-cap-item-name" title={row.name}>
+                              {row.name}
+                            </span>
+                            <span className="chat-header-cap-item-status">
+                              {i18n.t(STATUS_KEY[row.tone])}
+                            </span>
+                          </div>
+                        ),
+                      )}
               </div>
             ))
           )}
@@ -463,6 +524,14 @@ export function ChatHeaderCapabilities({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {selectedSkill ? (
+        <SkillDetailDialog
+          skill={selectedSkill}
+          onClose={() => setSelectedSkill(null)}
+          onToggle={setSkillEnabled}
+          onUninstall={uninstallSkill}
+        />
       ) : null}
     </div>
   );
