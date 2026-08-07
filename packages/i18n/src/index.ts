@@ -314,6 +314,8 @@ export type TranslationKey =
   | 'chat.timeline.hydrating'
   | 'chat.tool.localShellExec'
   | 'chat.tool.localShellStop'
+  | 'chat.skill.using'
+  | 'chat.skill.used'
   | 'chat.context.title'
   | 'chat.context.refresh'
   | 'chat.context.memory'
@@ -923,6 +925,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.timeline.hydrating': '加载思维链…',
     'chat.tool.localShellExec': '本地 Bash 执行',
     'chat.tool.localShellStop': '停止本地 Bash 任务',
+    'chat.skill.using': '正在使用 Skill',
+    'chat.skill.used': '已使用 Skill',
     'chat.context.title': '当前会话上下文',
     'chat.context.refresh': '刷新上下文',
     'chat.context.memory': 'Working Memory',
@@ -1530,6 +1534,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.timeline.hydrating': 'Loading thinking process…',
     'chat.tool.localShellExec': 'Local Bash',
     'chat.tool.localShellStop': 'Stop Local Bash',
+    'chat.skill.using': 'Using Skill',
+    'chat.skill.used': 'Used Skill',
     'chat.context.title': 'Current Context',
     'chat.context.refresh': 'Refresh context',
     'chat.context.memory': 'Working Memory',

@@ -1285,6 +1285,14 @@
   .skill-marketplace-install-scope button:disabled {
     @apply cursor-not-allowed opacity-45;
   }
+  /* 安装失败提示：在弹窗安装区单独占满一行，避免再被 Overlay 挡住 */
+  .skill-marketplace-install-error {
+    @apply m-0 rounded-xl px-3 py-2 text-[12px] leading-5;
+    flex: 1 0 100%;
+    color: var(--za-danger);
+    background: color-mix(in srgb, var(--za-danger) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--za-danger) 22%, transparent);
+  }
   /* 市场统计：纯展示，无边框/背景，避免像可点按钮 */
   .skill-marketplace-metrics {
     @apply mt-5 flex flex-wrap items-center gap-x-3 gap-y-1;

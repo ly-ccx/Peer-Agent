@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
+import { formatSkillHubInstallError } from '../skillHubInstallError';
 
 const PAGE_SIZE = 24;
 const EMPTY_PAGE: SkillHubMarketplacePage = {
@@ -89,6 +90,8 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 安装失败提示必须落在弹窗内；页面级 error 会被 Overlay 挡住。
+  const [installError, setInstallError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [installScope, setInstallScope] = useState<SkillHubInstallScope>('global');
   const [hasWorkspace, setHasWorkspace] = useState(false);
@@ -198,12 +201,28 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     } finally { setSyncing(false); }
   };
 
+  const openEntry = (entry: SkillHubMarketplaceEntry) => {
+    setInstallError(null);
+    setSelected(entry);
+  };
+
+  const closeSelected = () => {
+    setInstallError(null);
+    setSelected(null);
+  };
+
+  const chooseInstallScope = (scope: SkillHubInstallScope) => {
+    setInstallError(null);
+    setInstallScope(scope);
+  };
+
   const install = async (entry: SkillHubMarketplaceEntry) => {
     if (installScope === 'workspace' && !hasWorkspace) {
-      setError('当前没有打开工作区，请先选择工作区或改装到全局');
+      setInstallError(formatSkillHubInstallError('workspace_required'));
       return;
     }
-    setInstalling(entry.catalogId); setError(null);
+    setInstalling(entry.catalogId);
+    setInstallError(null);
     try {
       const value = await clientApi.installSkillHubSkill({
         namespace: entry.namespace,
@@ -212,14 +231,11 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         scope: installScope,
       });
       if (!value.ok) throw new Error(value.error || 'install_failed');
-      onInstalled?.(); setSelected(null);
+      onInstalled?.();
+      closeSelected();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('workspace_required')) {
-        setError('当前没有打开工作区，无法安装到工作区');
-      } else {
-        setError('安装失败：签名、内容哈希或安装包校验未通过');
-      }
+      setInstallError(formatSkillHubInstallError(message));
     } finally { setInstalling(null); }
   };
 
@@ -274,7 +290,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         {result.items.map((entry) => (
           <article className="skill-marketplace-card" key={entry.catalogId}>
             {/* 标题+描述合并为一个可点击区域，避免描述区单独 button 产生焦点条 */}
-            <button type="button" className="skill-marketplace-card-body" onClick={() => setSelected(entry)}>
+            <button type="button" className="skill-marketplace-card-body" onClick={() => openEntry(entry)}>
               <span className="skill-marketplace-card-heading">
                 <SkillIcon name={entry.name} iconUrl={entry.iconUrl} />
                 <span>
@@ -293,7 +309,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                 </em>
                 {entry.verified ? <em>已认证</em> : null}
               </span>
-              <button type="button" className="skill-marketplace-install" onClick={() => setSelected(entry)}>安装</button>
+              <button type="button" className="skill-marketplace-install" onClick={() => openEntry(entry)}>安装</button>
             </div>
           </article>
         ))}
@@ -304,7 +320,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
       </nav>
       {selected ? (
-        <Overlay onClose={() => setSelected(null)} ariaLabel={selected.name} panelClassName="skill-marketplace-detail">
+        <Overlay onClose={closeSelected} ariaLabel={selected.name} panelClassName="skill-marketplace-detail">
           {({ requestClose }) => (<>
             <header className="skill-detail-header"><SkillIcon name={selected.name} iconUrl={selected.iconUrl} className="skill-avatar skill-detail-avatar" /><div className="skill-detail-heading"><div className="skill-detail-title-row"><h2>{selected.name}</h2><span className="skill-scope-badge">SkillHub</span></div><p>{selected.description || selected.descriptionOriginal}</p></div><button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}>×</button></header>
             <div className="skill-detail-meta"><span>{categoryLabel(selected.category)}</span><span>v{selected.version}</span><code>{selected.namespace}/{selected.slug}</code></div>
@@ -349,7 +365,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                       role="radio"
                       aria-checked={installScope === 'global'}
                       className={installScope === 'global' ? 'is-active' : undefined}
-                      onClick={() => setInstallScope('global')}
+                      onClick={() => chooseInstallScope('global')}
                     >
                       全局
                     </button>
@@ -360,7 +376,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                       className={installScope === 'workspace' ? 'is-active' : undefined}
                       disabled={!hasWorkspace}
                       title={hasWorkspace ? '安装到当前工作区 skills/' : '当前没有打开工作区'}
-                      onClick={() => setInstallScope('workspace')}
+                      onClick={() => chooseInstallScope('workspace')}
                     >
                       当前工作区
                     </button>
@@ -378,6 +394,11 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                       ? '验证并安装到工作区'
                       : '验证并安装到全局'}
                 </button>
+                {installError ? (
+                  <p className="skill-marketplace-install-error" role="alert">
+                    {installError}
+                  </p>
+                ) : null}
               </div>
             </div>
           </>)}

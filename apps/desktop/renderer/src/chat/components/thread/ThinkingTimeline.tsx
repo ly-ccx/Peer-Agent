@@ -1,7 +1,9 @@
 import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
 import type { ThinkingProcess, ToolCard } from '@peer-agent/protocol';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
+import { parseSkillToolView } from '../../state/skillToolView';
 import { InteractionToolCard } from './InteractionToolCard';
+import { SkillCapsuleCard } from './SkillCapsuleCard';
 
 function parseToolCardInteractionView(tool: ToolCard) {
   return parseInteractionToolViewFromCandidates(
@@ -171,6 +173,28 @@ export function ThinkingTimeline({
               const steps = Array.isArray(tool.steps) ? tool.steps : [];
               const toolId = tool.toolCallId ?? tool.toolId ?? `tool_${displayNumber}_${toolIndex}`;
               const toolStatus = tool.status ?? 'completed';
+              const skillView = parseSkillToolView({
+                tool: tool.toolId,
+                capabilityId: tool.capabilityId,
+                displayName: tool.displayName,
+              });
+              if (skillView) {
+                const isRunning = toolStatus === 'running';
+                const isDone = !isRunning;
+                const isZh = i18n.locale.startsWith('zh');
+                return (
+                  <div key={toolId} className={`timeline-tool timeline-skill ${toolStatus}`}>
+                    <SkillCapsuleCard
+                      skill={skillView}
+                      isZh={isZh}
+                      isDone={isDone}
+                      isRunning={isRunning}
+                      durationMs={tool.durationMs}
+                      result={tool.resultSummary || tool.resultContent || null}
+                    />
+                  </div>
+                );
+              }
               return (
                 <details key={toolId} className={`timeline-tool ${toolStatus}`}>
                   <summary className="timeline-tool-summary">

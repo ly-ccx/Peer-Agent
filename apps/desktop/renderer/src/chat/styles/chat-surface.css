@@ -721,6 +721,125 @@
   background: var(--chrome-sunken);
 }
 
+/* Skill 胶囊：运行时「正在使用 Skill」+ 技能名 pill，区别于通用 tool-call-card。 */
+.skill-capsule-card {
+  margin: var(--space-1) 0;
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  border-radius: var(--ui-radius-control, var(--radius-sm));
+  background: color-mix(in srgb, var(--azure-soft, #5b8def) 8%, var(--ui-surface-raised, var(--paper-sheet)));
+  overflow: hidden;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+.skill-capsule-card.running {
+  border-color: color-mix(in srgb, var(--azure-soft, #5b8def) 45%, var(--ui-border-subtle, var(--chrome-hairline)));
+}
+.skill-capsule-card.done {
+  background: var(--ui-surface-raised, var(--paper-sheet));
+}
+.skill-capsule-card.expanded {
+  border-color: var(--ui-selected-border, var(--azure-soft));
+}
+.skill-capsule-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  cursor: default;
+}
+.skill-capsule-card:has(.skill-capsule-expand) .skill-capsule-header {
+  cursor: pointer;
+}
+.skill-capsule-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--azure-seal, #3b6fd8);
+}
+.skill-capsule-card.running .skill-capsule-icon {
+  color: var(--azure-soft, #5b8def);
+}
+.skill-capsule-card.done .skill-capsule-icon {
+  color: var(--state-success, #2f9d63);
+}
+.skill-capsule-spinner-svg {
+  animation: spin 0.9s linear infinite;
+}
+.skill-capsule-status {
+  flex-shrink: 0;
+  font-size: var(--ui-font-meta, 12px);
+  font-weight: 600;
+  color: var(--graphite-base);
+  white-space: nowrap;
+}
+.skill-capsule-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 360px);
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-soft, #5b8def) 35%, transparent);
+  background: color-mix(in srgb, var(--azure-soft, #5b8def) 14%, transparent);
+  color: var(--graphite-base);
+}
+.skill-capsule-pill-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--azure-seal, #3b6fd8);
+}
+.skill-capsule-pill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-meta, 12px);
+  color: var(--graphite-soft);
+}
+.skill-capsule-duration {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-mute);
+}
+.skill-capsule-expand {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--graphite-mute);
+  transition: transform var(--za-motion-fast) var(--za-ease-out);
+}
+.skill-capsule-duration + .skill-capsule-expand {
+  margin-left: 0;
+}
+.skill-capsule-output {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-soft);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--chrome-sunken);
+}
+.timeline-skill {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
 /* request_user_input 交互卡：问题 + 可点击选项 + 等待你输入。
    见 docs/proposals/0004-goal-mode-runtime-gate.md。 */
 .tool-call-card.interaction-card {
