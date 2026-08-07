@@ -314,9 +314,105 @@
 
 .goal-panel-toggle-active-progress {
   flex: none;
+  /* 扩大可 hover 命中区，避免 7/7 数字过小导致难触发 */
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
   color: var(--za-text-faint);
   font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
+}
+
+/* 折叠灯条 hover：显示该 goal 全部步骤（每行左状态图标 + 右标题） */
+.goal-panel-toggle-progress-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  min-width: 0;
+}
+
+.goal-panel-toggle-progress-tooltip--list {
+  display: block;
+  max-width: 320px;
+  min-width: 160px;
+}
+
+.goal-panel-toggle-progress-tooltip__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.goal-panel-toggle-progress-tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.goal-panel-toggle-progress-tooltip__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--za-text-soft);
+}
+
+.goal-panel-toggle-progress-tooltip__icon--running {
+  color: var(--za-accent, #5b8cff);
+}
+
+.goal-panel-toggle-progress-tooltip__icon--completed {
+  color: var(--state-success, #3fbf7f);
+}
+
+.goal-panel-toggle-progress-tooltip__icon--failed {
+  color: var(--za-danger, #e35d5d);
+}
+
+.goal-panel-toggle-progress-tooltip__icon--waiting_user {
+  color: var(--za-warn, #d4a017);
+}
+
+.goal-panel-toggle-progress-tooltip__icon--cancelled,
+.goal-panel-toggle-progress-tooltip__icon--pending {
+  color: var(--za-text-faint, #8b93a7);
+}
+
+.goal-panel-toggle-progress-tooltip__icon-svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.goal-panel-toggle-progress-tooltip__icon-svg--spin {
+  animation: goal-panel-progress-tooltip-spin 0.9s linear infinite;
+}
+
+@keyframes goal-panel-progress-tooltip-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.goal-panel-toggle-progress-tooltip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--za-text, #e8ecf5);
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 500;
 }
 
 .goal-panel-body {
