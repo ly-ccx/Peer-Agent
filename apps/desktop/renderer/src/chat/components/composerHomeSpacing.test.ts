@@ -27,3 +27,23 @@ test('home model slot packs model/thinking/context tightly', () => {
     /\.composer-home-model-slot \.token-usage-context-window \{[\s\S]*?padding:\s*0 4px;/,
   );
 });
+
+test('home model slot uses control-level font size, not body', () => {
+  // Auxiliary model/thinking/context labels should read as controls, not body copy.
+  assert.match(
+    styles,
+    /\.composer-home-model-slot \.token-usage-wrap,[\s\S]*?\.composer-home-model-slot \.token-usage \{[\s\S]*?font-size:\s*var\(--composer-addon-font-size/,
+  );
+  assert.match(
+    styles,
+    /\.composer-home-model-slot \.pa-cascading-trigger,[\s\S]*?font-size:\s*var\(--composer-addon-font-size/,
+  );
+  assert.match(
+    styles,
+    /\.composer-home-model-slot \.token-usage-context-window \{[\s\S]*?font-size:\s*var\(--composer-addon-font-size/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.composer-home-model-slot[\s\S]{0,800}?font-size:\s*var\(--ui-font-body/,
+  );
+});

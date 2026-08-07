@@ -4303,11 +4303,11 @@
   /* Compact chip cluster: 8px read as loose between short labels. */
   gap: 2px;
   min-width: 0;
-  /* 框内模型/思考与输入文字同号，并跟随外观 fontScale。 */
-  font-size: var(--ui-font-body, 0.875rem);
+  /* 框内模型/思考/上下文用控制级字号，比正文更精致。 */
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
-/* 框内模型/思考：去描边、去背景；高度用 rem，字号跟正文。 */
+/* 框内模型/思考：去描边、去背景；高度用 rem，字号跟控制级。 */
 .composer-home-model-slot .pa-cascading-trigger,
 .composer-home-model-slot .pa-cascading-trigger:hover:not(:disabled),
 .composer-home-model-slot .pa-cascading-trigger.open,
@@ -4324,7 +4324,7 @@
   background: transparent;
   box-shadow: none;
   color: color-mix(in srgb, var(--ink-base) 78%, transparent);
-  font-size: var(--ui-font-body, 0.875rem);
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
   line-height: 1.2;
 }
 
@@ -4340,11 +4340,12 @@
   background: transparent;
   box-shadow: none;
   padding: 0 4px;
-  font-size: var(--ui-font-body, 0.875rem);
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
 .composer-home-model-slot .token-usage-context-window {
   padding: 0 4px;
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar {
