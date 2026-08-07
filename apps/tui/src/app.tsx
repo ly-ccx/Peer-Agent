@@ -11,6 +11,7 @@ import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections, resolveTuiCommandInput } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
+import { formatPeerVersionLine, resolvePeerCliVersion } from './cli-version.ts';
 import { resolveLeaderKey } from './leader-key.ts';
 import {
   createConversationRenderWindowState,
@@ -1897,6 +1898,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       return `Goal is ${runnerStatus}; ${control} is unavailable`;
     },
     quit: onQuit,
+    showVersion: () => formatPeerVersionLine(resolvePeerCliVersion()),
     setNotice: setCommandNotice,
     updateExperience: setExperience,
   });

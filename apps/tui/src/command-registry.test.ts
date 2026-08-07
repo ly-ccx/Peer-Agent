@@ -29,8 +29,14 @@ describe('TUI command registry', () => {
       'goals',
       'help',
       'quit',
+      'version',
     ]);
     expect(TUI_COMMAND_REGISTRY.some((command) => command.id.includes('explorer'))).toBe(false);
+  });
+
+  test('resolves /version to the show-version action', () => {
+    expect(resolveTuiCommandInput('/version', idle)?.id).toBe('version');
+    expect(resolveTuiCommandInput('/version', idle)?.action).toEqual({ type: 'show-version' });
   });
 
   test('filters by id, label, description, and keywords', () => {
