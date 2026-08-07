@@ -90,10 +90,11 @@ function sleepWithSignal(ms, signal) {
   });
 }
 
-function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
+function buildRuntimeTools({ mcpRegistry, skillStore, providerType, mode }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
   const { registry, projection, modelProjection } = createRuntimeToolProjection({
     mcpRegistry,
+    skillStore,
     projectionOptions: { mode },
   });
   const tools = providerType === 'anthropic'
@@ -672,6 +673,7 @@ export function createLlmChatService({
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
   mcpRegistry = null,
+  skillStore = null,
   automationProposalService = null,
   // main 注入的带 onChange 的 goalPlanStore 单例。AI 工具(goal_create_plan/
   // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
@@ -1225,6 +1227,7 @@ export function createLlmChatService({
         const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
         const runtimeTools = buildRuntimeTools({
           mcpRegistry,
+          skillStore,
           providerType: resolvedChannel.legacyProvider,
           mode,
         });
@@ -1253,6 +1256,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              skillStore,
               goalPlanStore,
               automationProposalService,
               ensureBrowserReady,
@@ -1296,6 +1300,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              skillStore,
               goalPlanStore,
               automationProposalService,
               ensureBrowserReady,
@@ -1334,6 +1339,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              skillStore,
               goalPlanStore,
               automationProposalService,
               ensureBrowserReady,
@@ -1373,6 +1379,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              skillStore,
               goalPlanStore,
               automationProposalService,
               ensureBrowserReady,

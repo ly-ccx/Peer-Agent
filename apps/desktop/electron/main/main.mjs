@@ -274,7 +274,17 @@ const sessionStore = createSessionStore({
   preferredAccessLevel: initialSettings.localAccessLevel,
 });
 
-let skillStore;
+// SkillStore must exist before createLlmChatService so chat-time tool projection
+// can read enabled skills. Marketplace services remain lazy in startLocalRuntime.
+const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
+const skillSourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
+let skillStore = disableLocalSkill
+  ? null
+  : createSkillStore({
+      userDataPath: dataHome,
+      sourceRoots: skillSourceRoots,
+      workspacePath: initialSettings.activeWorkspace || null,
+    });
 let skillMarketplaceService;
 let skillHubMarketplaceService;
 
@@ -1024,6 +1034,7 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
+  skillStore,
   automationProposalService,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
@@ -3146,17 +3157,9 @@ async function startRecoveryAndAppearance() {
 
 function startLocalRuntime() {
   const userDataPath = dataHome;
-  const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
-  // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
-  // listAvailableSkills 列举候选，用户显式 link 后才在 userData/skills 下建软链。
-  const sourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
-  skillStore = disableLocalSkill
-    ? null
-    : createSkillStore({
-        userDataPath,
-        sourceRoots,
-        workspacePath: settingsStore.getAll().activeWorkspace || null,
-      });
+  // skillStore 已在模块初始化阶段创建（供 chat tool projection 使用）。
+  // 这里只挂 marketplace，并把当前 workspace 再同步一次。
+  skillStore?.setWorkspacePath?.(settingsStore.getAll().activeWorkspace || null);
   skillMarketplaceService = createSkillMarketplaceService({
     catalogRoot: isPackaged ? path.join(process.resourcesPath, 'marketplace') : path.join(workspaceRoot, 'marketplace', 'dist'),
     installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),

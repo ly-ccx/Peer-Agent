@@ -42,15 +42,43 @@ function parseTar(buffer) {
   return files;
 }
 
+/**
+ * YAML 失败时的宽松 frontmatter 回退。
+ * SkillHub 等来源常把 description 写成未加引号的单行文本，内部又含 "Use when:" 这类冒号，
+ * 严格 YAML 会报 Nested mappings 并导致整份 frontmatter 被清空。
+ * 这里只按「首个冒号」拆键值，足够恢复 name / description / version 等标量字段。
+ */
+function parseLooseFrontmatter(yamlText) {
+  const frontmatter = {};
+  for (const rawLine of String(yamlText || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const sep = line.indexOf(':');
+    if (sep <= 0) continue;
+    const key = line.slice(0, sep).trim();
+    if (!/^[A-Za-z0-9_.-]+$/.test(key)) continue;
+    let value = line.slice(sep + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    frontmatter[key] = value;
+  }
+  return frontmatter;
+}
+
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return { frontmatter: {}, body: content };
+  const body = content.slice(match[0].length).replace(/^[\r\n]+/, '');
   try {
     const frontmatter = parseYaml(match[1]) ?? {};
-    const body = content.slice(match[0].length).replace(/^[\r\n]+/, '');
     return { frontmatter, body };
   } catch {
-    return { frontmatter: {}, body: content };
+    // 严格 YAML 失败时回退宽松键值，避免 description 含冒号的 Skill 被静默丢弃。
+    return { frontmatter: parseLooseFrontmatter(match[1]), body };
   }
 }
 
@@ -78,6 +106,51 @@ function listAttachments(skillDir) {
   } catch {
     return [];
   }
+}
+
+function readSkillMeta(skillDir) {
+  const metaPath = path.join(skillDir, '_meta.json');
+  if (!existsSync(metaPath)) return null;
+  try {
+    const raw = readFileSync(metaPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSkillMeta(skillDir, patch = {}) {
+  const metaPath = path.join(skillDir, '_meta.json');
+  const existing = readSkillMeta(skillDir) || {};
+  const next = { ...existing };
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (value === undefined) continue;
+    next[key] = value;
+  }
+  writeFileSync(metaPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  return next;
+}
+
+function resolveSkillPresentation(frontmatter, skillDir) {
+  const meta = readSkillMeta(skillDir) || {};
+  const sourceFromFm =
+    typeof frontmatter['x-source'] === 'string'
+      ? frontmatter['x-source']
+      : typeof frontmatter.source === 'string'
+        ? frontmatter.source
+        : '';
+  const sourceFromMeta = typeof meta.source === 'string' ? meta.source : '';
+  const iconFromFm =
+    typeof frontmatter['x-icon-url'] === 'string'
+      ? frontmatter['x-icon-url']
+      : typeof frontmatter.iconUrl === 'string'
+        ? frontmatter.iconUrl
+        : '';
+  const iconFromMeta = typeof meta.iconUrl === 'string' ? meta.iconUrl : '';
+  const source = (sourceFromFm || sourceFromMeta || '').trim() || null;
+  const iconUrl = (iconFromFm || iconFromMeta || '').trim() || null;
+  return { source, iconUrl };
 }
 
 function loadSingleSkill(skillDir, dirName) {
@@ -113,6 +186,7 @@ function loadSingleSkill(skillDir, dirName) {
     : [];
   // 对齐 Claude Code SKILL.md frontmatter。license 可能是字符串、文件路径引用、或不写。
   const license = typeof frontmatter.license === 'string' ? frontmatter.license : null;
+  const { source, iconUrl } = resolveSkillPresentation(frontmatter, skillDir);
 
   // 通用过滤规则：description 为空（缺失/纯空白）的 skill 视为无效噪音，直接丢弃。
   // 该判定只看 description，不针对任何特定前缀；由于 loadSingleSkill 是唯一解析入口，
@@ -131,6 +205,8 @@ function loadSingleSkill(skillDir, dirName) {
     declaredAttachments,
     instructions: body,
     skillDir,
+    source,
+    iconUrl,
   };
 }
 
@@ -317,7 +393,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
   }
 
   function listSkills() {
-    return skills.map(({ skillId, name, description, whenToUse, version, dataLevel, scope, workspacePath: skillWorkspacePath }) => ({
+    return skills.map(({ skillId, name, description, whenToUse, version, dataLevel, scope, workspacePath: skillWorkspacePath, iconUrl, source }) => ({
       skillId,
       name,
       description,
@@ -329,6 +405,8 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       enabled: isSkillMounted(skillId),
       scope,
       workspacePath: skillWorkspacePath,
+      iconUrl: iconUrl ?? null,
+      source: source ?? null,
     }));
   }
 
@@ -597,6 +675,8 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       enabled: isSkillMounted(skill.skillId),
       scope: skill.scope,
       workspacePath: skill.workspacePath,
+      iconUrl: skill.iconUrl ?? null,
+      source: skill.source ?? null,
       instructions: skill.instructions,
       sourcePath: path.join(skill.skillDir, SKILL_FILENAME),
     };
@@ -605,11 +685,17 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
   /**
    * 安装 ZIP Skill。
    * @param {Buffer} zipBuffer
-   * @param {{ scope?: 'global' | 'workspace' }} [options]
+   * @param {{
+   *   scope?: 'global' | 'workspace',
+   *   source?: string | null,
+   *   iconUrl?: string | null,
+   *   meta?: Record<string, unknown>,
+   * }} [options]
    * - global（默认）：写入 userData/skills
    * - workspace：写入当前工作区 skills/；无工作区时抛 workspace_required
+   * - source / iconUrl / meta：安装后合并写入 _meta.json（市场图标与来源）
    */
-  function installSkillFromZip(zipBuffer, { scope = 'global' } = {}) {
+  function installSkillFromZip(zipBuffer, { scope = 'global', source = null, iconUrl = null, meta = null } = {}) {
     const installScope = scope === 'workspace' ? 'workspace' : 'global';
     let targetRoot = skillsRoot;
     if (installScope === 'workspace') {
@@ -630,11 +716,16 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       prefix = nested.entryName.split('/')[0] + '/';
     }
 
-    // Parse frontmatter to get skillId
+    // Parse frontmatter to get skillId — prefer name > skillId > prefix（与 tgz 安装对齐）
     const skillMdEntry = rootSkill || entries.find((e) => e.entryName === `${prefix}${SKILL_FILENAME}`);
     const content = skillMdEntry.getData().toString('utf8');
     const { frontmatter } = parseFrontmatter(content);
-    const skillId = frontmatter.skillId || prefix.replace(/\/$/, '') || `skill-${Date.now()}`;
+    const rawPrefix = prefix.replace(/\/$/, '');
+    const skillId =
+      frontmatter.name ||
+      frontmatter.skillId ||
+      (rawPrefix && rawPrefix !== 'package' ? rawPrefix : '') ||
+      `skill-${Date.now()}`;
 
     const destDir = path.join(targetRoot, skillId);
     if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
@@ -653,10 +744,23 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       writeFileSync(target, entry.getData());
     }
 
+    // 市场安装元数据：在 zip 自带 _meta.json 之上合并 source / iconUrl。
+    const metaPatch = {
+      ...(meta && typeof meta === 'object' ? meta : {}),
+    };
+    if (typeof source === 'string' && source.trim()) metaPatch.source = source.trim();
+    if (typeof iconUrl === 'string' && iconUrl.trim()) metaPatch.iconUrl = iconUrl.trim();
+    if (Object.keys(metaPatch).length > 0) {
+      writeSkillMeta(destDir, metaPatch);
+    }
+
     refresh();
     const installed = listSkills().find((s) => s.skillId === skillId) ?? null;
-    if (installed) return { ...installed, installScope };
-    return { skillId, id: skillId, installScope, scope: installScope };
+    if (!installed) {
+      // 文件已落盘但无法加载（如 description 为空）时明确失败，避免 UI 假成功。
+      throw new Error('skill_install_unreadable');
+    }
+    return { ...installed, installScope };
   }
 
   function installSkillFromTgz(tgzBuffer) {
@@ -692,7 +796,11 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     }
 
     refresh();
-    return listSkills().find((s) => s.skillId === skillId) ?? null;
+    const installed = listSkills().find((s) => s.skillId === skillId) ?? null;
+    if (!installed) {
+      throw new Error('skill_install_unreadable');
+    }
+    return installed;
   }
 
   function refresh() {

@@ -46,7 +46,17 @@ test('verifies Ed25519, MD5 and content hash before entering the existing Skill 
   assert.equal(result.skillId, 'demo');
   assert.equal(result.scope, 'global');
   assert.equal(installed, value.zipBuffer);
-  assert.deepEqual(installOptions, { scope: 'global' });
+  assert.deepEqual(installOptions, {
+    scope: 'global',
+    source: 'skillhub',
+    iconUrl: null,
+    meta: {
+      source: 'skillhub',
+      namespace: 'owner',
+      slug: 'demo',
+      version: '1.0.0',
+    },
+  });
 });
 
 test('forwards install scope to Skill Store and echoes it in the result', async () => {
@@ -59,10 +69,24 @@ test('forwards install scope to Skill Store and echoes it in the result', async 
       return { id: 'demo' };
     },
   });
-  const result = await installer.install({ ...identity, scope: 'workspace' });
+  const result = await installer.install({
+    ...identity,
+    scope: 'workspace',
+    iconUrl: 'https://example.com/icon.png',
+  });
   assert.equal(result.ok, true);
   assert.equal(result.scope, 'workspace');
-  assert.deepEqual(installOptions, { scope: 'workspace' });
+  assert.deepEqual(installOptions, {
+    scope: 'workspace',
+    source: 'skillhub',
+    iconUrl: 'https://example.com/icon.png',
+    meta: {
+      source: 'skillhub',
+      namespace: 'owner',
+      slug: 'demo',
+      version: '1.0.0',
+    },
+  });
 });
 
 test('rejects an invalid signature, unknown key id, and untrusted key issuer before installation', async () => {

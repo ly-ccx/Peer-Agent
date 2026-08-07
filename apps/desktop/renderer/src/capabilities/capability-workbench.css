@@ -638,9 +638,19 @@
     @apply flex min-w-0 items-center gap-2;
   }
 
+  .skill-card-title-main {
+    @apply flex min-w-0 flex-1 items-center gap-1.5;
+  }
+
   .skill-card-name {
-    @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold;
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold;
     color: var(--za-text);
+  }
+
+  .skill-source-badge {
+    @apply shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium;
+    color: var(--za-text-muted);
+    background: color-mix(in srgb, var(--za-text) 8%, transparent);
   }
 
   .skill-card-actions {
@@ -1411,7 +1421,18 @@
     @apply self-end;
   }
   .skill-marketplace-pagination { @apply mt-5 flex items-center justify-center gap-4 text-[12px]; color: var(--za-text-muted); }
-  .skill-marketplace-pagination button { @apply rounded-lg px-3 py-2; color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line); }
+  .skill-marketplace-pagination button {
+    @apply rounded-lg px-3 py-2;
+    color: var(--za-text);
+    background: var(--za-surface);
+    border: 1px solid var(--za-line);
+    cursor: pointer;
+    transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+  }
+  .skill-marketplace-pagination button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--za-text) 6%, transparent);
+    border-color: color-mix(in srgb, var(--za-text) 18%, var(--za-line));
+  }
   .skill-marketplace-pagination button:disabled { @apply cursor-not-allowed opacity-40; }
 
   @media (max-width: 720px) {

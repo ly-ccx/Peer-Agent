@@ -4,9 +4,32 @@ import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
 import { SkillDetailDialog } from './SkillDetailDialog';
 
-function SkillAvatar({ name }: { readonly name: string }) {
+/** 优先展示 skill.iconUrl，失败时回退到字母头像。 */
+function SkillIcon({
+  name,
+  iconUrl,
+}: {
+  readonly name: string;
+  readonly iconUrl?: string | null;
+}) {
+  const [failed, setFailed] = useState(false);
   const letter = (name || '?').charAt(0).toUpperCase();
-  return <span className="skill-avatar" aria-hidden="true">{letter}</span>;
+  const src = typeof iconUrl === 'string' ? iconUrl.trim() : '';
+  if (!src || failed) {
+    return <span className="skill-avatar" aria-hidden="true">{letter}</span>;
+  }
+  return (
+    <span className="skill-avatar skill-avatar--image" aria-hidden="true">
+      <img src={src} alt="" onError={() => setFailed(true)} />
+    </span>
+  );
+}
+
+function sourceBadgeLabel(source?: string | null): string | null {
+  const value = typeof source === 'string' ? source.trim() : '';
+  if (!value) return null;
+  if (value === 'skillhub') return 'SkillHub';
+  return value;
 }
 
 function SkillSection({
@@ -49,10 +72,15 @@ function SkillSection({
               }
             }}
           >
-            <SkillAvatar name={skill.name} />
+            <SkillIcon name={skill.name} iconUrl={skill.iconUrl} />
             <div className="skill-card-body">
               <div className="skill-card-title-row">
-                <strong className="skill-card-name">{skill.name}</strong>
+                <div className="skill-card-title-main">
+                  <strong className="skill-card-name">{skill.name}</strong>
+                  {sourceBadgeLabel(skill.source) ? (
+                    <span className="skill-source-badge">{sourceBadgeLabel(skill.source)}</span>
+                  ) : null}
+                </div>
                 <span className="skill-card-actions" onClick={(event) => event.stopPropagation()}>
                   <Switch checked={skill.enabled} onCheckedChange={() => onToggle(skill)} aria-label={`${skill.name} ${skill.enabled ? '已启用' : '已停用'}`} />
                 </span>
@@ -212,7 +240,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           <div className="skill-grid">
             {borrowable.map((skill) => (
               <div key={`${skill.sourceRoot}:${skill.skillId}`} className="skill-card borrowable">
-                <SkillAvatar name={skill.name} />
+                <SkillIcon name={skill.name} />
                 <div className="skill-card-body">
                   <div className="skill-card-title-row">
                     <strong className="skill-card-name">{skill.name}</strong>

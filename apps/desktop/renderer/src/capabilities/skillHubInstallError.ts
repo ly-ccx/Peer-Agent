@@ -30,6 +30,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   skillhub_zip_expansion_limit: '安装包解压体积或文件数超过安全上限',
   skillhub_zip_missing_skill: '安装包根目录缺少 SKILL.md',
   skillhub_install_failed: '校验通过后写入本地 Skill 失败',
+  skill_install_unreadable: '安装包已写入，但 SKILL.md 无法解析（如 description 含未加引号冒号），未加入已安装列表',
   install_failed: '安装失败，请稍后重试',
   zip_path_escape: '安装包路径越界，已拒绝写入',
 };

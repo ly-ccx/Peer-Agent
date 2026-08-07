@@ -47,6 +47,7 @@ describe('LLM brand icon resolution', () => {
     assert.equal(resolveLlmBrand({ brand: 'Xiaomi MiMo', channelId: 'xiaomi-mimo' }), 'xiaomi');
     assert.equal(resolveLlmBrand({ channelId: 'xiaomi-mimo-token-plan' }), 'xiaomi');
     assert.equal(resolveLlmBrand({ brand: 'Aliyun Bailian', channelId: 'aliyun-bailian' }), 'bailian');
+    assert.equal(resolveLlmBrand({ brand: 'OpenCode', channelId: 'opencode-go' }), 'opencode');
     assert.equal(resolveLlmBrand({ brand: 'OpenCode', channelId: 'opencode-go-openai' }), 'opencode');
     assert.equal(resolveLlmBrand({ channelId: 'opencode-go-anthropic' }), 'opencode');
   });

@@ -69,7 +69,7 @@ export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip
   if (!apiClient || typeof installSkillFromZip !== 'function') throw new TypeError('installer dependencies are required');
   return Object.freeze({
     async install(identity) {
-      const { namespace, slug, version, scope = 'global' } = identity;
+      const { namespace, slug, version, scope = 'global', iconUrl = null } = identity;
       const installScope = scope === 'workspace' ? 'workspace' : 'global';
       const [signatureResponse, keyResponse, zipBuffer] = await Promise.all([
         apiClient.getVersionSignature(identity), apiClient.getPlatformKeys(), apiClient.downloadSkill(identity),
@@ -90,7 +90,17 @@ export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip
       const calculated = computeSkillHubContentHash(entries);
       if (calculated.fileCount !== payload.file_count) throw new Error('skillhub_file_count_mismatch');
       if (calculated.contentHash !== payload.content_hash) throw new Error('skillhub_content_hash_mismatch');
-      const installed = await installSkillFromZip(zipBuffer, { scope: installScope });
+      const installed = await installSkillFromZip(zipBuffer, {
+        scope: installScope,
+        source: 'skillhub',
+        iconUrl: typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl.trim() : null,
+        meta: {
+          source: 'skillhub',
+          namespace,
+          slug,
+          version,
+        },
+      });
       if (!installed?.id && !installed?.skillId) throw new Error('skillhub_install_failed');
       return { ok: true, skillId: installed.skillId ?? installed.id, source: 'skillhub', namespace, slug, version, keyId: signature.key_id, scope: installScope };
     },

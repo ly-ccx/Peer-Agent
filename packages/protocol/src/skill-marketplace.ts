@@ -127,6 +127,8 @@ export interface SkillHubInstallRequest {
   readonly version: string;
   /** 默认 global；workspace 需已打开工作区。 */
   readonly scope?: SkillHubInstallScope;
+  /** 市场图标 URL；安装时写入本地 _meta.json，供已安装列表展示。 */
+  readonly iconUrl?: string | null;
 }
 
 export interface SkillHubCategory {

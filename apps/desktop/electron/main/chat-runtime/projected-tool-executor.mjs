@@ -14,6 +14,7 @@ import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { createConfiguredHookRunner } from '../runtime-gateway/hook-config.mjs';
 import { createLocalGoalProvider } from '../runtime-gateway/local-goal-provider.mjs';
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
+import { createLocalSkillProvider } from '../runtime-gateway/local-skill-provider.mjs';
 import { createShellArtifactStore } from '../runtime-gateway/shell-artifacts.mjs';
 import { nowIso } from '../runtime-gateway/tool-result-factory.mjs';
 import {
@@ -161,6 +162,7 @@ export async function executeProjectedModelTool({
   shellApprovalDecider,
   signal,
   mcpRegistry = null,
+  skillStore = null,
   registry = DEFAULT_TOOL_REGISTRY,
   runtimeProjection = DEFAULT_RUNTIME_PROJECTION,
   locale = 'zh-CN',
@@ -286,6 +288,8 @@ export async function executeProjectedModelTool({
     // goalPlanStore 实例（带 onChange → 广播）；否则用默认无 onChange 实例落库，
     // 计划变更不会推送到渲染端，浮条只能靠切会话重挂载才更新。
     ...(goalPlanStore ? { goalProvider: createLocalGoalProvider({ goalPlanStore }) } : {}),
+    // 与 skill 工具投影一致：模型可见的 skill__* 必须在执行路径路由到 LocalSkillProvider。
+    extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
     automationProposalService,
     // 与 main 全局 localToolHost 一致：Agent 工具路径也必须持有 reveal 桥，
     // 否则 browser_open_panel / browser_navigate 在 ensureBrowserReady 入口被硬拒绝。

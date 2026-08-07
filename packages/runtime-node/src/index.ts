@@ -245,6 +245,11 @@ export { createLocalMcpProvider } from './local-mcp-provider.mjs';
 export { createLocalSkillProvider } from './local-skill-provider.mjs';
 export { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 export {
+  createSkillToolDefinition,
+  createSkillToolDefinitionsFromStore,
+  SKILL_PREFIX,
+} from './skill-tool-definitions.mjs';
+export {
   createFailedClientToolResult,
   createPermissionGrant,
   nowIso,

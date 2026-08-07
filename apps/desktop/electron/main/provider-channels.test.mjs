@@ -476,37 +476,100 @@ describe('service templates', () => {
     assert.equal(resolved.headers.Authorization, 'Bearer sk-sp-demo');
   });
 
-  it('exposes OpenCode Go OpenAI and Anthropic templates', () => {
+  it('exposes a single OpenCode Go subscription template with model-based wire routing', () => {
     const templates = listServiceTemplates();
-    const openai = templates.find((item) => item.id === 'opencode-go-openai');
-    const anthropic = templates.find((item) => item.id === 'opencode-go-anthropic');
-    assert.ok(openai);
-    assert.ok(anthropic);
-    assert.equal(openai?.accessCategory, 'third_party');
-    assert.equal(anthropic?.accessCategory, 'third_party');
-    assert.equal(openai?.channelId, CHANNEL_IDS.OPENCODE_GO_OPENAI);
-    assert.equal(anthropic?.channelId, CHANNEL_IDS.OPENCODE_GO_ANTHROPIC);
-    assert.equal(openai?.defaults.baseUrl, 'https://opencode.ai/zen/v1');
-    assert.equal(anthropic?.defaults.baseUrl, 'https://opencode.ai/zen');
-    assert.equal(openai?.defaults.model, 'gpt-5.5');
-    assert.equal(anthropic?.defaults.model, 'claude-sonnet-4-5');
+    const go = templates.find((item) => item.id === 'opencode-go');
+    assert.ok(go);
+    assert.equal(templates.filter((item) => String(item.id).startsWith('opencode-go')).length, 1);
+    assert.equal(go?.accessCategory, 'third_party');
+    assert.equal(go?.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(go?.defaults.baseUrl, 'https://opencode.ai/zen/go/v1');
+    assert.equal(go?.defaults.model, 'gpt-5.6-luna');
 
-    const resolvedOpenAi = resolveChannel({
-      channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+    const resolvedDefault = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
-      apiKey: 'zen-key',
-      model: 'gpt-5.5',
+      apiKey: 'go-key',
+      model: 'gpt-5.6-luna',
     });
-    assert.equal(resolvedOpenAi.wire, 'openai-responses');
-    assert.equal(resolvedOpenAi.endpoint, 'https://opencode.ai/zen/v1/responses');
-    assert.equal(resolvedOpenAi.headers.Authorization, 'Bearer zen-key');
+    assert.equal(resolvedDefault.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(resolvedDefault.wire, 'openai-responses');
+    assert.equal(resolvedDefault.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+    assert.equal(resolvedDefault.headers.Authorization, 'Bearer go-key');
+    assert.equal(resolvedDefault.capabilities.reasoning.paramStyle, 'openai-effort');
 
-    const resolvedAnthropic = resolveChannel({
-      channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+    const resolvedClaude = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
+      apiKey: 'go-key',
       model: 'claude-sonnet-4-5',
     });
-    assert.equal(resolvedAnthropic.wire, 'anthropic-messages');
-    assert.equal(resolvedAnthropic.endpoint, 'https://opencode.ai/zen/v1/messages');
+    assert.equal(resolvedClaude.wire, 'anthropic-messages');
+    assert.equal(resolvedClaude.endpoint, 'https://opencode.ai/zen/go/v1/messages');
+    assert.equal(resolvedClaude.legacyProvider, 'anthropic');
+    assert.equal(resolvedClaude.capabilities.reasoning.paramStyle, 'anthropic-enabled-budget');
+
+    // Official docs: glm / kimi / deepseek / grok use chat/completions, not responses.
+    const resolvedGlm = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+    });
+    assert.equal(resolvedGlm.wire, 'openai-chat');
+    assert.equal(resolvedGlm.endpoint, 'https://opencode.ai/zen/go/v1/chat/completions');
+    assert.equal(resolvedGlm.headers.Authorization, 'Bearer go-key');
+    assert.equal(resolvedGlm.capabilities.reasoning.paramStyle, 'openai-effort');
+
+    for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
+      const resolved = resolveChannel({
+        channelId: CHANNEL_IDS.OPENCODE_GO,
+        authMethod: 'api_key',
+        apiKey: 'go-key',
+        model,
+      });
+      assert.equal(resolved.wire, 'openai-chat', model);
+      assert.equal(resolved.endpoint, 'https://opencode.ai/zen/go/v1/chat/completions', model);
+    }
+
+    // MiniMax / Qwen on Go use Anthropic Messages.
+    for (const model of ['minimax-m2.5', 'qwen3.5-plus']) {
+      const resolved = resolveChannel({
+        channelId: CHANNEL_IDS.OPENCODE_GO,
+        authMethod: 'api_key',
+        apiKey: 'go-key',
+        model,
+      });
+      assert.equal(resolved.wire, 'anthropic-messages', model);
+      assert.equal(resolved.endpoint, 'https://opencode.ai/zen/go/v1/messages', model);
+    }
+
+    // Legacy dual-entry channel ids still resolve to the single Go channel.
+    const legacyOpenAi = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+      authMethod: 'api_key',
+      model: 'gpt-5.6-luna',
+    });
+    assert.equal(legacyOpenAi.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(legacyOpenAi.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+
+    const legacyAnthropic = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+      authMethod: 'api_key',
+      model: 'claude-opus-4-6',
+    });
+    assert.equal(legacyAnthropic.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(legacyAnthropic.wire, 'anthropic-messages');
+    assert.equal(legacyAnthropic.endpoint, 'https://opencode.ai/zen/go/v1/messages');
+
+    // Explicit wireOverride still wins over model auto-routing.
+    const forced = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      model: 'claude-sonnet-4-5',
+      wireOverride: 'openai-responses',
+    });
+    assert.equal(forced.wire, 'openai-responses');
+    assert.equal(forced.endpoint, 'https://opencode.ai/zen/go/v1/responses');
   });
 });

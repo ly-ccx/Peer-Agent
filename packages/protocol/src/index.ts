@@ -89,6 +89,13 @@ export interface SkillSummary {
   readonly scope: SkillScope;
   /** scope=workspace 时对应的工作空间绝对路径。 */
   readonly workspacePath?: string | null;
+  /** 市场/来源图标 URL；本地 skill 可为空。 */
+  readonly iconUrl?: string | null;
+  /**
+   * 安装来源标识。
+   * 例：skillhub、aone-open；本地手工 skill 可为空。
+   */
+  readonly source?: string | null;
 }
 
 export interface SkillDetail extends SkillSummary {

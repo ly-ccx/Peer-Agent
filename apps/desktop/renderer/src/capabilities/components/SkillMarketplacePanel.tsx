@@ -229,6 +229,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         slug: entry.slug,
         version: entry.version,
         scope: installScope,
+        iconUrl: entry.iconUrl ?? null,
       });
       if (!value.ok) throw new Error(value.error || 'install_failed');
       onInstalled?.();
