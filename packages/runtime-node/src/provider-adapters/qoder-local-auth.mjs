@@ -3,7 +3,11 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
+
+const execFileAsync = promisify(execFile);
 
 const require = createRequire(import.meta.url);
 // qodercli 内嵌 auth wasm 的变量名会被 minify 改写（历史为 MsC，新版如 G9_）。
@@ -23,7 +27,7 @@ const QODER_AUTH_ERROR_MESSAGES = {
   qoder_auth_expired:
     'Qoder local login has expired. Re-login in Qoder, then retry.',
   qoder_auth_permission_denied:
-    'Cannot read Qoder local login state (permission denied). Check ~/.qoder/.auth permissions or re-login in Qoder.',
+    'Cannot read Qoder local login state (permission denied). macOS may block Electron from reading ~/.qoder/.auth — grant Full Disk Access to Peer Agent / Electron, re-login in Qoder, or set QODER_ACCESS_TOKEN.',
   qoder_auth_unavailable:
     'Unable to load Qoder local login state. Re-login in Qoder or set QODER_ACCESS_TOKEN.',
   qoder_auth_wasm_missing:
@@ -68,6 +72,60 @@ function tokenFromEnv(env = process.env) {
     if (value) return { token: value, source: name };
   }
   return null;
+}
+
+/**
+ * Resolve a system Node binary that is not the Electron binary.
+ * Electron main can hit EPERM on ~/.qoder/.auth while host node can still read it.
+ */
+function resolveHostNodeBinary(env = process.env) {
+  const explicit = nonEmpty(env.PEER_AGENT_HOST_NODE) || nonEmpty(env.QODER_HOST_NODE);
+  if (explicit && fsSync.existsSync(explicit) && !/electron/i.test(explicit)) {
+    return explicit;
+  }
+  const candidates = [
+    '/usr/local/bin/node',
+    '/opt/homebrew/bin/node',
+    '/usr/bin/node',
+  ];
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) return candidate;
+  }
+  // Last resort: process.execPath when not Electron (e.g. plain node tests).
+  if (process.execPath && !/electron/i.test(process.execPath)) {
+    return process.execPath;
+  }
+  return null;
+}
+
+/**
+ * Read a file as Buffer. On EPERM/EACCES (common under Electron TCC), fall back to
+ * host node subprocess so macOS grants still apply via the non-Electron binary.
+ */
+async function readFileWithHostFallback(filePath, { env = process.env } = {}) {
+  try {
+    return await fs.readFile(filePath);
+  } catch (error) {
+    if (error?.code !== 'EPERM' && error?.code !== 'EACCES') throw error;
+    const nodeBin = resolveHostNodeBinary(env);
+    if (!nodeBin) throw error;
+    try {
+      const script = [
+        'const fs=require("fs");',
+        `const p=${JSON.stringify(filePath)};`,
+        'process.stdout.write(fs.readFileSync(p).toString("base64"));',
+      ].join('');
+      const { stdout } = await execFileAsync(nodeBin, ['-e', script], {
+        timeout: 10_000,
+        maxBuffer: 8 * 1024 * 1024,
+        env: { ...process.env, ...env },
+      });
+      return Buffer.from(String(stdout || ''), 'base64');
+    } catch {
+      // Preserve original Electron/TCC error for mapping.
+      throw error;
+    }
+  }
 }
 
 export function resolveQoderConfigDir({ env = process.env, homeDir = os.homedir() } = {}) {
@@ -480,7 +538,7 @@ export async function prepareQoderInferRequest({
   const machinePath = path.join(configDir, '.auth/machine_id');
   const auth = await loadQoderLocalAuth(options);
   if (!auth.userInfo) throw createQoderAuthError('qoder_local_user_info_required');
-  const machineId = (await fs.readFile(machinePath, 'utf8')).trim();
+  const machineId = Buffer.from(await readFileWithHostFallback(machinePath, options)).toString('utf8').trim();
   const authWasm = await getAuthWasm(options);
   const userInfo = { ...auth.userInfo };
   if (!userInfo.encrypt_user_info || !userInfo.key) {
@@ -517,10 +575,12 @@ export async function loadQoderLocalAuth(options = {}) {
   }
 
   try {
-    const [cipherText, machineId] = await Promise.all([
-      fs.readFile(userPath, 'utf8'),
-      fs.readFile(machinePath, 'utf8'),
+    const [cipherBytes, machineBytes] = await Promise.all([
+      readFileWithHostFallback(userPath, options),
+      readFileWithHostFallback(machinePath, options),
     ]);
+    const cipherText = Buffer.from(cipherBytes).toString('utf8');
+    const machineId = Buffer.from(machineBytes).toString('utf8');
     const authWasm = await getAuthWasm(options);
     const raw = authWasm.credentialStorageDecrypt(cipherText.trim(), machineId.trim().slice(0, 16));
     const userInfo = JSON.parse(raw);

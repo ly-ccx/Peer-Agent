@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   createProviderCredentialError,
   getProviderCredentialErrorCode,
+  getProviderCredentialErrorMessage,
   mapQoderLocalAuthCredentialError,
   refreshExpiredOAuthProviders,
   resolveProviderCredential,
@@ -269,5 +270,19 @@ describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
     const oauth = createProviderCredentialError('oauth_not_logged_in');
     assert.equal(oauth.code, 'oauth_not_logged_in');
     assert.notEqual(oauth.message, 'oauth_not_logged_in');
+  });
+
+  it('getProviderCredentialErrorMessage prefers readable message over bare code for chat bubbles', () => {
+    const readable = createProviderCredentialError('qoder_auth_permission_denied');
+    assert.equal(getProviderCredentialErrorCode(readable), 'qoder_auth_permission_denied');
+    assert.notEqual(getProviderCredentialErrorMessage(readable), 'qoder_auth_permission_denied');
+    assert.match(getProviderCredentialErrorMessage(readable), /permission denied|Full Disk Access|QODER_ACCESS_TOKEN/i);
+
+    // If only a bare code-like message is present, still expand via the message map.
+    const bare = Object.assign(new Error('qoder_auth_permission_denied'), {
+      code: 'qoder_auth_permission_denied',
+    });
+    assert.notEqual(getProviderCredentialErrorMessage(bare), 'qoder_auth_permission_denied');
+    assert.match(getProviderCredentialErrorMessage(bare), /permission denied|Full Disk Access|login state/i);
   });
 });

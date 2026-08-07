@@ -33,7 +33,7 @@ import { hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createDesktopRuntimeSessionAdapter } from './chat-runtime/runtime-session-adapter.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import {
-  getProviderCredentialErrorCode,
+  getProviderCredentialErrorMessage,
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
@@ -1067,7 +1067,8 @@ export function createLlmChatService({
         } catch (credentialError) {
           accumulatingWebContents.send('chat:stream:error', {
             streamId,
-            error: getProviderCredentialErrorCode(credentialError),
+            // Prefer readable message; previous code-only payload made bubbles show qoder_auth_*.
+            error: getProviderCredentialErrorMessage(credentialError),
           });
           return;
         }
@@ -1391,6 +1392,7 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              channelId: resolvedChannel?.channelId,
               accountingIdentity,
               initialContextAccounting,
             });

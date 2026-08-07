@@ -16,7 +16,7 @@ const PROVIDER_CREDENTIAL_ERROR_MESSAGES = {
   qoder_auth_expired:
     'Qoder local login has expired. Re-login in Qoder, then retry.',
   qoder_auth_permission_denied:
-    'Cannot read Qoder local login state (permission denied). Check ~/.qoder/.auth permissions or re-login in Qoder.',
+    'Cannot read Qoder local login state (permission denied). macOS may block Electron from reading ~/.qoder/.auth — grant Full Disk Access to Peer Agent / Electron, re-login in Qoder, or set QODER_ACCESS_TOKEN.',
   qoder_auth_unavailable:
     'Unable to load Qoder local login state. Re-login in Qoder or set QODER_ACCESS_TOKEN.',
   qoder_auth_wasm_missing:
@@ -38,6 +38,14 @@ export function createProviderCredentialError(code, cause = null) {
 
 export function getProviderCredentialErrorCode(error) {
   return typeof error?.code === 'string' ? error.code : 'provider_credential_error';
+}
+
+/** Prefer readable Error.message for chat bubbles; never fall back to silent empty text. */
+export function getProviderCredentialErrorMessage(error) {
+  const code = getProviderCredentialErrorCode(error);
+  const message = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (message && message !== code) return message;
+  return PROVIDER_CREDENTIAL_ERROR_MESSAGES[code] || message || code;
 }
 
 /**
