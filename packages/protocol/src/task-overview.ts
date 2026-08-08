@@ -85,8 +85,29 @@ export type TaskNextAction =
  * 单个任务的行动权投影（首页卡片 / 任务行 / 历史行的数据契约）。
  *
  * 字段命名对齐原型：title / workspaceLabel / statusLabel / planProgress /
- * lastActiveAt / actionLabel 直接对应 UI 元素，renderer 不再二次推导。
+ * planSteps / lastActiveAt / actionLabel 直接对应 UI 元素，renderer 不再二次推导。
  */
+
+/**
+ * GoalPlan 投影步骤（叶子任务）。
+ * status 与 GoalTask.status / ExecutionStatus 字面量对齐。
+ */
+export type TaskOverviewPlanStepStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'waiting_user';
+
+export interface TaskOverviewPlanStep {
+  readonly taskId: string;
+  readonly title: string;
+  readonly status: TaskOverviewPlanStepStatus;
+  /** 当前 Runner 正在推进的步骤。 */
+  readonly current?: boolean;
+}
+
 export interface TaskOverviewItem {
   /** 稳定任务身份（planId 或 automationId+runId）。 */
   readonly taskId: string;
@@ -106,6 +127,11 @@ export interface TaskOverviewItem {
   readonly statusLabel: string;
   /** Plan 进度「x / y」；无 Plan 概念的任务为 undefined。 */
   readonly planProgress?: { readonly completed: number; readonly total: number };
+  /**
+   * GoalPlan 叶子步骤列表（标题 + 状态 + 当前标记）。
+   * 供「Peer 正在推进」等卡片展示具体步骤，而不仅是 x/y 计数。
+   */
+  readonly planSteps?: readonly TaskOverviewPlanStep[];
   /** 最近活跃时间（ISO 字符串）。 */
   readonly lastActiveAt?: string;
   /** 动作按钮标签（原型「处理 →」「验收 →」「继续 →」）。 */
@@ -127,6 +153,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly title: string;
   readonly workspaceLabel?: string;
   readonly progress?: { readonly completed: number; readonly total: number };
+  /** 叶子步骤投影；无任务树时省略。 */
+  readonly planSteps?: readonly TaskOverviewPlanStep[];
   readonly updatedAt?: string;
   readonly conversationId?: string;
   /**
@@ -197,6 +225,9 @@ export function projectGoalPlan(
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     statusLabel: decision.statusLabel,
     ...(snapshot.progress ? { planProgress: snapshot.progress } : {}),
+    ...(snapshot.planSteps && snapshot.planSteps.length > 0
+      ? { planSteps: snapshot.planSteps }
+      : {}),
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
     actionLabel: decision.actionLabel,
     ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),

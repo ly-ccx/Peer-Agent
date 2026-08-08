@@ -243,13 +243,7 @@
     @apply inline-block h-3.5 w-3.5 rounded-full border-2;
     border-color: color-mix(in srgb, var(--za-accent) 35%, transparent);
     border-top-color: var(--za-accent);
-    animation: task-overview-spin 0.9s linear infinite;
-  }
-
-  @keyframes task-overview-spin {
-    to {
-      transform: rotate(360deg);
-    }
+    animation: motion-spin 0.9s linear infinite;
   }
 
   .task-overview-work-top time {
@@ -265,6 +259,61 @@
   .task-overview-work-item p {
     @apply mt-1 text-xs;
     color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-steps {
+    @apply m-0 mt-3 flex list-none flex-col gap-1.5 p-0;
+  }
+
+  .task-overview-plan-step {
+    @apply grid items-center gap-2 text-[12px] leading-snug;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-step.is-current {
+    color: var(--za-text);
+    font-weight: 550;
+  }
+
+  .task-overview-plan-step.is-completed {
+    opacity: 0.78;
+  }
+
+  .task-overview-plan-step.is-failed {
+    color: var(--za-danger, #ef4444);
+  }
+
+  .task-overview-plan-step-marker {
+    @apply block h-2 w-2 rounded-full;
+    background: color-mix(in srgb, var(--za-text-muted) 55%, transparent);
+  }
+
+  .task-overview-plan-step.is-running .task-overview-plan-step-marker,
+  .task-overview-plan-step.is-current .task-overview-plan-step-marker {
+    background: var(--za-accent, #3b82f6);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent, #3b82f6) 22%, transparent);
+  }
+
+  .task-overview-plan-step.is-completed .task-overview-plan-step-marker {
+    background: color-mix(in srgb, var(--za-success, #22c55e) 85%, transparent);
+  }
+
+  .task-overview-plan-step.is-failed .task-overview-plan-step-marker {
+    background: var(--za-danger, #ef4444);
+  }
+
+  .task-overview-plan-step-title {
+    @apply min-w-0 truncate;
+  }
+
+  .task-overview-plan-step-status {
+    @apply shrink-0 text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-step.is-current .task-overview-plan-step-status {
+    color: var(--za-accent, #3b82f6);
   }
 
   .task-overview-progress {
@@ -864,9 +913,17 @@
 
 .conversation-result-view__footer {
   /* 去掉 sticky 深色底条，避免与按钮/内容区错位 */
-  @apply flex justify-end pt-3;
+  @apply flex items-end justify-between gap-3 pt-3;
 }
 
+.conversation-result-view__continue {
+  @apply flex min-w-0 flex-col items-start gap-1;
+}
+
+.conversation-result-view__continue-hint {
+  @apply text-xs leading-relaxed;
+  color: var(--za-text-muted);
+}
 
 .conversation-result-view__msg.is-task-target {
   border-color: color-mix(in srgb, #3f9a6f 45%, var(--za-line));

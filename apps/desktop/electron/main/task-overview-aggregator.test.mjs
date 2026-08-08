@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   createTaskOverviewAggregator,
+  extractPlanSteps,
   sortTaskOverview,
   toAutomationSnapshot,
   toGoalPlanSnapshot,
@@ -41,6 +42,47 @@ test('toGoalPlanSnapshot 缺 planId/status 返回 null', () => {
   assert.equal(toGoalPlanSnapshot({ status: 'executing' }), null);
   assert.equal(toGoalPlanSnapshot({ planId: 'p1' }), null);
   assert.equal(toGoalPlanSnapshot(null), null);
+});
+
+test('extractPlanSteps 抽取叶子步骤并标记 current', () => {
+  const steps = extractPlanSteps({
+    runner: { currentTaskId: 'leaf-2' },
+    tasks: [
+      {
+        taskId: 'group',
+        title: '分组',
+        status: 'running',
+        subtasks: [
+          { taskId: 'leaf-1', title: '扩展契约', status: 'completed' },
+          { taskId: 'leaf-2', title: '渲染步骤', status: 'running' },
+        ],
+      },
+      { taskId: 'leaf-3', title: '补齐单测', status: 'pending' },
+    ],
+  });
+  assert.deepEqual(steps, [
+    { taskId: 'leaf-1', title: '扩展契约', status: 'completed' },
+    { taskId: 'leaf-2', title: '渲染步骤', status: 'running', current: true },
+    { taskId: 'leaf-3', title: '补齐单测', status: 'pending' },
+  ]);
+});
+
+test('toGoalPlanSnapshot 写入 planSteps', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-steps',
+    status: 'executing',
+    title: '推进卡片',
+    runner: { status: 'running', currentTaskId: 's2' },
+    tasks: [
+      { taskId: 's1', title: '协议字段', status: 'completed' },
+      { taskId: 's2', title: 'UI 列表', status: 'running' },
+    ],
+    progress: { completed: 1, total: 2 },
+  });
+  assert.deepEqual(snapshot.planSteps, [
+    { taskId: 's1', title: '协议字段', status: 'completed' },
+    { taskId: 's2', title: 'UI 列表', status: 'running', current: true },
+  ]);
 });
 
 test('toAutomationSnapshot 联合 Definition 与最新 Run', () => {

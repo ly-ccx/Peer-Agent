@@ -5,6 +5,7 @@ import { SettingsPage, type SettingsSection } from './app/components/SettingsPag
 import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
+import { continueTaskInConversation } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
@@ -836,6 +837,21 @@ function MainApp() {
     setActivePage('chat');
   }, []);
 
+  const handleContinueTask = useCallback((conversationId: string) => {
+    continueTaskInConversation(conversationId, {
+      showActiveConversations: () => setConversationView('active'),
+      selectConversation: setActiveConversationId,
+      closeResult: () => setResultDrawerItem(null),
+      closeCollection: () => setCollectionDrawer(null),
+      showChat: () => setActivePage('chat'),
+      focusComposer: () => {
+        window.requestAnimationFrame(() => {
+          document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.focus();
+        });
+      },
+    });
+  }, []);
+
   const handleShowActiveConversations = useCallback(async () => {
     setConversationView('active');
     setActiveConversationId(null);
@@ -1181,7 +1197,9 @@ function MainApp() {
                         <div className="conversation-result-drawer__body">
                           <ConversationResultView
                             item={resultDrawerItem}
+                            isZh={isZh}
                             onAcceptResult={(item) => acceptResultFromWorkbench(item)}
+                            onContinueTask={handleContinueTask}
                           />
                         </div>
                       </>

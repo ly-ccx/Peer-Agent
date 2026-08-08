@@ -90,6 +90,23 @@ function reasonMeta(item: TaskOverviewItem): string {
   return item.statusLabel;
 }
 
+function planStepStatusLabel(status: string): string {
+  switch (status) {
+    case 'completed':
+      return '已完成';
+    case 'running':
+      return '进行中';
+    case 'failed':
+      return '失败';
+    case 'cancelled':
+      return '已取消';
+    case 'waiting_user':
+      return '等待你';
+    default:
+      return '待开始';
+  }
+}
+
 function advancingStateLabel(item: TaskOverviewItem): string {
   const s = item.statusLabel;
   if (s.includes('验证')) return '正在验证';
@@ -423,6 +440,22 @@ function WorkItem({
       </div>
       <h3>{item.title}</h3>
       <p>{reasonMeta(item)}</p>
+      {item.planSteps && item.planSteps.length > 0 ? (
+        <ol className="task-overview-plan-steps" aria-label="计划步骤">
+          {item.planSteps.map((step) => (
+            <li
+              key={step.taskId}
+              className={`task-overview-plan-step is-${step.status}${step.current ? ' is-current' : ''}`}
+            >
+              <span className="task-overview-plan-step-marker" aria-hidden="true" />
+              <span className="task-overview-plan-step-title">{step.title}</span>
+              <span className="task-overview-plan-step-status">
+                {step.current && step.status !== 'completed' ? '当前' : planStepStatusLabel(step.status)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {item.planProgress ? (
         <div className="task-overview-progress" aria-hidden="true">
           <i style={{ width: `${pct}%` }} />

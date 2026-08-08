@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { clientApi } from '../../../clientApi';
+import { Overlay } from '../../../app/components/Overlay';
 import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import {
   isLocalImagePath,
@@ -247,33 +248,30 @@ function LocalImageLightbox({
   name: string;
   onClose: () => void;
 }) {
-  // 轻量实现：复用 body portal 风格的 fixed overlay，避免 markdown 内依赖 Overlay 重模块。
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div
-      className="markdown-local-image-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label={name}
-      onClick={onClose}
+    <Overlay
+      ariaLabel={name}
+      backdropClassName="markdown-local-image-lightbox"
+      panelClassName="markdown-local-image-lightbox-figure"
+      onClose={onClose}
     >
-      <figure className="markdown-local-image-lightbox-figure" onClick={(event) => event.stopPropagation()}>
-        <img src={dataUrl} alt={name} />
-        <figcaption>
-          <span className="markdown-local-image-lightbox-name">{name}</span>
-          <button type="button" className="markdown-local-image-lightbox-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </figcaption>
-      </figure>
-    </div>
+      {({ requestClose }) => (
+        <figure>
+          <img src={dataUrl} alt={name} />
+          <figcaption>
+            <span className="markdown-local-image-lightbox-name">{name}</span>
+            <button
+              type="button"
+              className="markdown-local-image-lightbox-close"
+              onClick={requestClose}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </figcaption>
+        </figure>
+      )}
+    </Overlay>
   );
 }
 

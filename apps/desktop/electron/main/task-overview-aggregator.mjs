@@ -88,6 +88,53 @@ function planWorkspacePath(plan) {
   return plan?.originWorkspacePath ?? plan?.targetWorkspacePath ?? null;
 }
 
+const PLAN_STEP_STATUSES = new Set([
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'waiting_user',
+]);
+
+/**
+ * 从 GoalPlan 任务树抽取叶子步骤（与 progress 叶子计数对齐）。
+ * 供「Peer 正在推进」卡片展示具体步骤标题与状态。
+ */
+export function extractPlanSteps(plan) {
+  if (!plan || typeof plan !== 'object') return undefined;
+  const currentTaskId =
+    typeof plan.runner?.currentTaskId === 'string'
+      ? plan.runner.currentTaskId
+      : typeof plan.currentTaskId === 'string'
+        ? plan.currentTaskId
+        : undefined;
+  const steps = [];
+  const walk = (list) => {
+    for (const task of Array.isArray(list) ? list : []) {
+      if (!task || typeof task !== 'object') continue;
+      const children = Array.isArray(task.subtasks) ? task.subtasks : [];
+      if (children.length > 0) {
+        walk(children);
+        continue;
+      }
+      const taskId = typeof task.taskId === 'string' ? task.taskId : null;
+      const title =
+        typeof task.title === 'string' && task.title.trim() !== ''
+          ? task.title.trim()
+          : taskId;
+      if (!taskId || !title) continue;
+      const rawStatus = typeof task.status === 'string' ? task.status : 'pending';
+      const status = PLAN_STEP_STATUSES.has(rawStatus) ? rawStatus : 'pending';
+      const step = { taskId, title, status };
+      if (currentTaskId && taskId === currentTaskId) step.current = true;
+      steps.push(step);
+    }
+  };
+  walk(plan.tasks);
+  return steps.length > 0 ? steps : undefined;
+}
+
 /** 组装 GoalPlan 投影快照。plan 为 goal-plan-store.listPlanDetails() 的水合形态。 */
 export function toGoalPlanSnapshot(plan) {
   if (!plan || typeof plan !== 'object') return null;
@@ -99,6 +146,7 @@ export function toGoalPlanSnapshot(plan) {
     plan.progress && Number.isFinite(plan.progress.completed) && Number.isFinite(plan.progress.total)
       ? { completed: plan.progress.completed, total: plan.progress.total }
       : undefined;
+  const planSteps = extractPlanSteps(plan);
   return {
     planId,
     status,
@@ -107,6 +155,7 @@ export function toGoalPlanSnapshot(plan) {
     title: typeof plan.title === 'string' && plan.title.trim() !== '' ? plan.title.trim() : planId,
     workspaceLabel: workspaceLabelFromPath(workspacePath),
     progress,
+    ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
     conversationId: typeof plan.conversationId === 'string' ? plan.conversationId : undefined,
     // USER ACCEPTANCE：一键确认写 resultAcceptance；存量 completed 按上线截止祖父化。

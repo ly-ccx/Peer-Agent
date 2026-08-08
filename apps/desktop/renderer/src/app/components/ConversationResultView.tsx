@@ -5,6 +5,7 @@ import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage'
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
 import { contentFromSegments } from '../../chat/state/streamSegments';
 import type { ChatMsg } from '../../chat/state/types';
+import { getTaskContinuationAction } from '../taskContinuation';
 
 /**
  * 工作台「查看结果」用的只读会话/执行内容展示。
@@ -15,9 +16,13 @@ import type { ChatMsg } from '../../chat/state/types';
 export function ConversationResultView({
   item,
   onAcceptResult,
+  onContinueTask,
+  isZh = true,
 }: {
   readonly item: TaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly onContinueTask?: (conversationId: string) => void;
+  readonly isZh?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +77,7 @@ export function ConversationResultView({
   const summaryProgress = progress ?? item.planProgress ?? null;
   const tasks = plan?.tasks ?? [];
   const canAccept = item.source === 'goal_plan' && typeof onAcceptResult === 'function';
+  const continuation = getTaskContinuationAction(item, isZh);
 
   const targetMessageId = useMemo(
     () => findTaskRelatedMessageId(messages, item, plan),
@@ -173,9 +179,24 @@ export function ConversationResultView({
         )}
       </section>
 
-      {canAccept ? (
+      {continuation || canAccept ? (
         <footer className="conversation-result-view__footer">
-          <button
+          {continuation ? (
+            <div className="conversation-result-view__continue">
+              <button
+                type="button"
+                className="task-overview-btn task-overview-btn-secondary"
+                onClick={() => onContinueTask?.(continuation.conversationId)}
+              >
+                {continuation.label}
+              </button>
+              <span className="conversation-result-view__continue-hint">
+                {continuation.description}
+              </span>
+            </div>
+          ) : null}
+          {canAccept ? (
+            <button
             type="button"
             className="task-overview-btn task-overview-btn--primary"
             disabled={accepting}
@@ -184,8 +205,9 @@ export function ConversationResultView({
               void Promise.resolve(onAcceptResult?.(item)).finally(() => setAccepting(false));
             }}
           >
-            {accepting ? '确认中…' : '确认验收'}
+            {accepting ? (isZh ? '确认中…' : 'Accepting…') : isZh ? '确认验收' : 'Accept result'}
           </button>
+          ) : null}
         </footer>
       ) : null}
     </div>

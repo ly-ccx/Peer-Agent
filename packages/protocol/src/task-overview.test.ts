@@ -253,3 +253,18 @@ test('Automation 投影 taskId 优先 runId', () => {
   assert.equal(noRun.taskId, 'auto-1');
   assert.equal(noRun.source, 'automation');
 });
+
+test('projectGoalPlan 透传 planSteps；空列表不写字段', () => {
+  const steps = [
+    { taskId: 's1', title: '扩展契约', status: 'completed' as const },
+    { taskId: 's2', title: '渲染步骤', status: 'running' as const, current: true },
+  ];
+  const withSteps = projectGoalPlan(goalSnapshot({ planSteps: steps }));
+  assert.deepEqual(withSteps.planSteps, steps);
+
+  const empty = projectGoalPlan(goalSnapshot({ planSteps: [] }));
+  assert.equal(empty.planSteps, undefined);
+
+  const absent = projectGoalPlan(goalSnapshot());
+  assert.equal(absent.planSteps, undefined);
+});
