@@ -63,6 +63,7 @@ export async function agentLoopOpenAI({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  channelId = null,
   accountingIdentity = null,
   initialContextAccounting = null,
 }) {
@@ -170,6 +171,9 @@ export async function agentLoopOpenAI({
             webContents: loop.providerWebContents,
             streamId,
             usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
+            wire: resolvedChannel?.wire,
+            channelId,
+            modelProviderId: providerId,
           }),
         });
         apiMessages = execution.messages;

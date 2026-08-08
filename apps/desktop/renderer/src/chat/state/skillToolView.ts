@@ -35,12 +35,12 @@ export function isSkillModelName(value: unknown): value is string {
 }
 
 export function extractSkillIdFromCapabilityId(capabilityId: string): string {
-  if (!isSkillCapabilityId(capabilityId)) return capabilityId.trim();
+  if (!capabilityId.trim().startsWith(SKILL_CAPABILITY_PREFIX)) return capabilityId.trim();
   return capabilityId.slice(SKILL_CAPABILITY_PREFIX.length).trim() || capabilityId.trim();
 }
 
 export function extractSkillIdFromModelName(modelName: string): string {
-  if (!isSkillModelName(modelName)) return modelName.trim();
+  if (!modelName.trim().startsWith(SKILL_MODEL_NAME_PREFIX)) return modelName.trim();
   return modelName.slice(SKILL_MODEL_NAME_PREFIX.length).trim() || modelName.trim();
 }
 

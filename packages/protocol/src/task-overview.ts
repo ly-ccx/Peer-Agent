@@ -420,9 +420,8 @@ function decideAutomation(snapshot: AutomationProjectionSnapshot): ProjectionDec
       actionLabel: '查看 →',
     };
   }
-  // rule 17: Run 终态
+  // rule 17: Run 终态（succeeded 已在 rule 7 提前 return）
   if (
-    runStatus === 'succeeded' ||
     runStatus === 'failed' ||
     runStatus === 'cancelled' ||
     runStatus === 'skipped' ||
