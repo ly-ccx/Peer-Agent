@@ -323,7 +323,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
       {selected ? (
         <Overlay onClose={closeSelected} ariaLabel={selected.name} panelClassName="skill-marketplace-detail">
           {({ requestClose }) => (<>
-            <header className="skill-detail-header"><SkillIcon name={selected.name} iconUrl={selected.iconUrl} className="skill-avatar skill-detail-avatar" /><div className="skill-detail-heading"><div className="skill-detail-title-row"><h2>{selected.name}</h2><span className="skill-scope-badge">SkillHub</span></div><p>{selected.description || selected.descriptionOriginal}</p></div><button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}>×</button></header>
+            <header className="skill-detail-header"><SkillIcon name={selected.name} iconUrl={selected.iconUrl} className="skill-avatar skill-detail-avatar" /><div className="skill-detail-heading"><div className="skill-detail-title-row"><h2>{selected.name}</h2><span className="skill-scope-badge">SkillHub</span></div><p>{selected.description || selected.descriptionOriginal}</p></div><button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></button></header>
             <div className="skill-detail-meta"><span>{categoryLabel(selected.category)}</span><span>v{selected.version}</span><code>{selected.namespace}/{selected.slug}</code></div>
             <div className="skill-detail-content">
               <section className="skill-detail-when">

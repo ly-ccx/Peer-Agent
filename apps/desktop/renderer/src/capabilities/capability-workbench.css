@@ -1107,9 +1107,14 @@
   .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
 
   .skill-detail-close {
-    @apply flex h-8 w-8 items-center justify-center rounded-full border-0 bg-transparent text-[26px] leading-none;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-0 bg-transparent p-0;
     color: var(--za-text-muted);
     cursor: pointer;
+  }
+  .skill-detail-close svg {
+    display: block;
+    width: 14px;
+    height: 14px;
   }
   .skill-detail-close:hover { color: var(--za-text); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
 
