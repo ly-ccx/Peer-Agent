@@ -1015,14 +1015,17 @@ export function ChatSurface({
     });
     if (!requiresRestore || isBusy) return;
     if (typeof clientApi.chatContextRestored !== 'function') return;
-    contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey(restoreInput));
+    const restoreKey = contextAccountingRestoreKey(restoreInput);
     let cancelled = false;
     void clientApi.chatContextRestored({
       conversationId,
       modelProviderId: activeProvider?.id ?? modelProviderId,
     })
       .then((snap) => {
-        if (cancelled || !snap) return;
+        if (cancelled) return;
+        // 仅在请求真正结算后锁定 key：effect cleanup / 快速切会话不再把 restore 锁死。
+        contextRestoreAttemptedKeysRef.current.add(restoreKey);
+        if (!snap) return;
         contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey({
           ...restoreInput,
           snapshot: snap,
@@ -1030,7 +1033,9 @@ export function ChatSurface({
         setContextAccountingSnapshot(snap);
       })
       .catch(() => {
-        // 重投影失败保持未知；内容修订或模型变化会生成新 key，并允许再次恢复。
+        if (cancelled) return;
+        // 失败也锁定同一 key，避免接口异常时重投影死循环。
+        contextRestoreAttemptedKeysRef.current.add(restoreKey);
       });
     return () => { cancelled = true; };
   }, [

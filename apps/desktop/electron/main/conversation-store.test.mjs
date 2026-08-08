@@ -260,6 +260,53 @@ test('shared store restores only provider-request observations, never runtime-tu
   }
 });
 
+test('shared store projects lastObserved baseline after contentRevision advances', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'restore baseline' });
+    store.updateModelEffort(conv.id, {
+      modelProviderId: 'provider-1',
+      model: 'model-1',
+    });
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
+      conversationId: conv.id,
+      modelKey: 'provider-1::model-1',
+      contextWindow: 100_000,
+      inputBudget: 100_000,
+      compactionThresholdTokens: 80_000,
+      authoritativeInputTokens: 45_000,
+      percent: 45,
+      lastObserved: {
+        inputTokens: 45_000,
+        requestFingerprint: 'request-final',
+        compactionEpoch: 0,
+        source: 'provider_usage',
+        observedAt: 123,
+      },
+    }));
+    assert.equal(store.getConversation(conv.id).contextSnapshot.percent, 45);
+
+    // Mid-turn / post-turn append advances contentRevision and clears the exact
+    // match, but session switch should still surface the last provider observation.
+    store.appendMessage(conv.id, {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'done',
+    });
+    const restored = store.getConversation(conv.id).contextSnapshot;
+    assert.ok(restored);
+    assert.equal(restored.phase, 'restored');
+    assert.equal(restored.pressureSource, 'provider_usage');
+    assert.equal(restored.authoritativeInputTokens, 45_000);
+    assert.equal(restored.percent, 45);
+    assert.equal(restored.pendingUncountedChanges, true);
+    assert.equal(restored.contentRevision, store.getConversation(conv.id).contentRevision);
+    assert.equal(restored.lastObserved.inputTokens, 45_000);
+  } finally {
+    cleanup();
+  }
+});
+
 test('message, compaction, and model changes invalidate the shared context snapshot', () => {
   const { store, cleanup } = freshStore();
   try {
@@ -275,6 +322,7 @@ test('message, compaction, and model changes invalidate the shared context snaps
     assert.ok(store.getConversation(conv.id).contextSnapshot);
 
     store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'changed' });
+    // Without lastObserved, content changes still invalidate the live snapshot.
     assert.equal(store.getConversation(conv.id).contextSnapshot, null);
 
     store.updateContextSnapshot(conv.id, accountingSnapshot({

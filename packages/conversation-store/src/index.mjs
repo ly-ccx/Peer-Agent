@@ -226,6 +226,94 @@ function normalizeContextSnapshot(snapshot, meta) {
   };
 }
 
+function projectDurableContextSnapshot(snapshot, meta) {
+  const exact = normalizeContextSnapshot(snapshot, meta);
+  if (exact) return exact;
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  if (snapshot.version !== 1) return null;
+  const conversationId = typeof snapshot.conversationId === 'string'
+    ? snapshot.conversationId.trim()
+    : '';
+  if (!conversationId || conversationId !== String(meta?.id ?? '')) return null;
+  const observation = snapshot.lastObserved;
+  if (!observation || typeof observation !== 'object') return null;
+  if (observation.source !== 'provider_usage') return null;
+  const inputTokens = Number(observation.inputTokens);
+  if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
+  if (!modelKey) return null;
+  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
+  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
+    ? meta.model.trim()
+    : null;
+  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
+  const legacyModelKey = providerBinding ?? storedModel;
+  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
+  const contentRevisionRaw = Number(meta?.contentRevision);
+  const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
+    ? contentRevisionRaw
+    : 0;
+  const revisionRaw = Number(snapshot.revision);
+  const revision = Number.isSafeInteger(revisionRaw) && revisionRaw >= 0 ? revisionRaw : 0;
+  const compactionEpochRaw = Number(
+    observation.compactionEpoch ?? snapshot.compactionEpoch ?? 0,
+  );
+  const compactionEpoch = Number.isSafeInteger(compactionEpochRaw) && compactionEpochRaw >= 0
+    ? compactionEpochRaw
+    : 0;
+  const normalizeNullablePositive = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+  };
+  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
+  const inputBudget = normalizeNullablePositive(snapshot.inputBudget) ?? contextWindow;
+  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens)
+    ?? (contextWindow == null ? null : Math.floor(contextWindow * 0.8));
+  const observedAtRaw = Number(observation.observedAt ?? snapshot.updatedAt);
+  const updatedAt = Number.isFinite(observedAtRaw) && observedAtRaw >= 0
+    ? observedAtRaw
+    : Date.now();
+  const requestFingerprint = typeof observation.requestFingerprint === 'string'
+    ? observation.requestFingerprint.trim()
+    : '';
+  const countCapability = snapshot.countCapability && typeof snapshot.countCapability === 'object'
+    ? snapshot.countCapability
+    : { kind: 'observed_usage_only' };
+  const counterStatus = snapshot.counterStatus === 'degraded' ? 'degraded' : 'active';
+  return {
+    version: 1,
+    conversationId,
+    contentRevision,
+    modelKey,
+    revision,
+    phase: 'restored',
+    compactionEpoch,
+    contextWindow,
+    inputBudget,
+    compactionThresholdTokens,
+    authoritativeInputTokens: inputTokens,
+    percent: contextWindow == null
+      ? null
+      : Math.min(100, Math.round((inputTokens / contextWindow) * 100)),
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: true,
+    pendingContentChars: 0,
+    countCapability,
+    counterStatus,
+    updatedAt,
+    lastObserved: {
+      inputTokens,
+      requestFingerprint: requestFingerprint
+        || `restored_observation_${conversationId}_${compactionEpoch}`,
+      compactionEpoch,
+      source: 'provider_usage',
+      observedAt: updatedAt,
+    },
+  };
+}
+
+
 const AUTOMATION_TRIGGER_SOURCES = new Set(['scheduled', 'manual', 'retry']);
 
 function normalizeAutomationOrigin(origin) {
@@ -392,10 +480,20 @@ export function createConversationStore(options = {}) {
   function contextSnapshotFile(id) {
     return path.join(contextSnapshotDir, `${encodeURIComponent(id)}.json`);
   }
+  /**
+   * Read the durable context snapshot for a conversation.
+   *
+   * Exact contentRevision matches return the live snapshot as-is. When messages
+   * advanced the revision after an observed provider_usage baseline was stored,
+   * project that lastObserved baseline into a pending restored snapshot so session
+   * switches can show the last measured occupancy without waiting for another turn.
+   * Unknown / non-observed sidecars still resolve to null.
+   */
   function durableContextSnapshot(meta) {
-    return normalizeContextSnapshot(readJson(contextSnapshotFile(meta.id)), meta)
+    const rawSnapshot = readJson(contextSnapshotFile(meta.id))
       ?? meta.contextSnapshot
       ?? null;
+    return projectDurableContextSnapshot(rawSnapshot, meta);
   }
   function publishChange(meta, changeType) {
     if (!meta?.id) return;
