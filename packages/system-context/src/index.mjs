@@ -2,6 +2,7 @@ export {
   assembleSystemContext,
   createDefaultPromptSourceRegistry,
   renderSystemContext,
+  renderStableSystemContext,
 } from './prompt-assembler.mjs';
 export {
   buildConfigInstructionContext,

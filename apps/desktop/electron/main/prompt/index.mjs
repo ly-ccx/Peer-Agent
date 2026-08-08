@@ -15,5 +15,6 @@ export {
   renderBrainstormingPrompt,
   renderRuntimeContext,
   renderSystemContext,
+  renderStableSystemContext,
   renderSystemCorePrompt,
 } from '@peer-agent/system-context';

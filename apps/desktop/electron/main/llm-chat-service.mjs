@@ -7,6 +7,7 @@ import {
   buildSystemPrompt,
   createRuntimeToolProjection,
   renderSystemContext,
+  renderStableSystemContext,
 } from './llm-prompts.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
@@ -1151,6 +1152,7 @@ export function createLlmChatService({
           model: provider.model,
         });
         const systemPrompt = renderSystemContext(systemContext);
+        const stableSystemPrompt = renderStableSystemContext(systemContext);
         recordPromptSnapshot(promptSnapshotStore, systemContext, {
           streamId,
           conversationId,
@@ -1280,6 +1282,7 @@ export function createLlmChatService({
               apiKey: credential.apiKey,
               model: provider.model,
               systemPrompt,
+              stableSystemPrompt,
               messages,
               tools: runtimeTools.tools,
               webContents: attemptStream.webContents,

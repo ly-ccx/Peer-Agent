@@ -100,6 +100,7 @@ export function assembleSystemContext(
   options?: { readonly registry?: PromptSourceRegistry },
 ): AssembledSystemContext;
 export function renderSystemContext(context?: Pick<AssembledSystemContext, 'sections'>): string;
+export function renderStableSystemContext(context?: Pick<AssembledSystemContext, 'sections'>): string;
 
 export const DEFAULT_GIT_BRANCH_PREFIX: 'PeerAgent/';
 export const REPLY_LANGUAGE_OPTIONS: readonly string[];

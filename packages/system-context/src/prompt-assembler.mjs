@@ -102,6 +102,18 @@ export function renderSystemContext(context) {
   return joinPromptSections((context?.sections ?? []).map((section) => section.content));
 }
 
+/**
+ * 渲染仅含稳定层（L0-L5）的 system 前缀。
+ * 动态层（L6_MODE_REMINDER / L7_CONTINUITY）每轮变化，会毒化整块 system 的
+ * 前缀缓存；分离后，稳定块可独立命中缓存（Anthropic 断点 / OpenAI 前缀匹配）。
+ */
+export function renderStableSystemContext(context) {
+  const DYNAMIC_LAYERS = new Set(['L6_MODE_REMINDER', 'L7_CONTINUITY']);
+  return joinPromptSections((context?.sections ?? [])
+    .filter((section) => !DYNAMIC_LAYERS.has(section.layer))
+    .map((section) => section.content));
+}
+
 export function assembleSystemContext(input = {}, options = {}) {
   const registry = options.registry ?? createDefaultPromptSourceRegistry();
   const sections = [];

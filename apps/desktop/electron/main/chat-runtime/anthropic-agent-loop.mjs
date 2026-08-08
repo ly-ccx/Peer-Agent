@@ -28,6 +28,7 @@ export async function agentLoopAnthropic({
   apiKey,
   model,
   systemPrompt,
+  stableSystemPrompt,
   messages,
   tools,
   webContents,
@@ -156,6 +157,7 @@ export async function agentLoopAnthropic({
           buildCanonicalRequest: ({ messages: projectedMessages, systemPrompt: projectedSystem }) => ({
             model,
             system: projectedSystem,
+            stableSystem: stableSystemPrompt,
             messages: sanitizeApiMessages(
               projectedMessages.filter((message) => message.role !== 'system'),
             ),

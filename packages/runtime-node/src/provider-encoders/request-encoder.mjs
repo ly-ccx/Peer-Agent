@@ -290,6 +290,7 @@ export function normalizeOpenAIToolHistoryForAnthropic(messages = []) {
 export function encodeAnthropicMessagesRequest({
   model,
   system,
+  stableSystem,
   messages,
   tools,
   effort = 'default',
@@ -304,7 +305,15 @@ export function encodeAnthropicMessagesRequest({
   const anthropicMessages = normalizeOpenAIToolHistoryForAnthropic(messages);
   const body = {
     model,
-    system,
+    // system 前缀稳定化：传 stableSystem 时拆为 [稳定块, 动态块] 两段，
+    // 稳定块带 cache_control 断点，动态块不带——L6/L7 动态内容不毒化缓存前缀。
+    // 不传 stableSystem 时保持单块行为。
+    system: stableSystem && typeof system === 'string' && system.trim()
+      ? [
+          { type: 'text', text: stableSystem },
+          { type: 'text', text: system },
+        ]
+      : system,
     messages: normalizeAnthropicMessages(anthropicMessages),
     max_tokens: replyTokenLimit,
     stream: true,

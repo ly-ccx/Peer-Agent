@@ -2,6 +2,7 @@ import {
   assembleSystemContext,
   renderRuntimeContext,
   renderSystemContext,
+  renderStableSystemContext,
   renderSystemCorePrompt,
 } from './prompt/index.mjs';
 export {
@@ -42,4 +43,4 @@ export function buildSystemPrompt(workspacePath, options = {}) {
   return renderSystemContext(buildSystemContext(workspacePath, options));
 }
 
-export { renderSystemContext };
+export { renderSystemContext, renderStableSystemContext };
