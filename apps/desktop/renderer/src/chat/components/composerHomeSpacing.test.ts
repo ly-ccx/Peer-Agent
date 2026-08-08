@@ -8,23 +8,23 @@ test('home control strip keeps a compact left-group gap', () => {
   // + button sits beside the model/thinking/context cluster.
   assert.match(
     styles,
-    /\.composer-home-action-left \{[\s\S]*?gap:\s*4px;/,
+    /\.composer-home-action-left \{[\s\S]*?gap:\s*2px;/,
   );
 });
 
 test('home model slot packs model/thinking/context tightly', () => {
-  // 8px between short labels reads loose; keep the chip cluster dense.
+  // Short labels stay dense; the current home treatment uses a 2px internal gap and 8px horizontal padding.
   assert.match(
     styles,
     /\.composer-home-model-slot \.token-usage-wrap,[\s\S]*?\.composer-home-model-slot \.token-usage \{[\s\S]*?gap:\s*2px;/,
   );
   assert.match(
     styles,
-    /\.composer-home-model-slot \.pa-cascading-trigger,[\s\S]*?padding:\s*0 4px;/,
+    /\.composer-home-model-slot \.pa-cascading-trigger,[\s\S]*?padding:\s*0 8px;/,
   );
   assert.match(
     styles,
-    /\.composer-home-model-slot \.token-usage-context-window \{[\s\S]*?padding:\s*0 4px;/,
+    /\.composer-home-model-slot \.token-usage-context-window \{[\s\S]*?padding:\s*0 8px;/,
   );
 });
 

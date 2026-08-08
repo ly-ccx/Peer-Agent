@@ -392,16 +392,7 @@
 }
 
 .goal-panel-toggle-progress-tooltip__icon-svg--spin {
-  animation: goal-panel-progress-tooltip-spin 0.9s linear infinite;
-}
-
-@keyframes goal-panel-progress-tooltip-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  animation: motion-spin 0.9s linear infinite;
 }
 
 .goal-panel-toggle-progress-tooltip__title {

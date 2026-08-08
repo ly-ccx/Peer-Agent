@@ -16,7 +16,10 @@ test('settings overlays the mounted application shell instead of remounting it',
   assert.match(app, /inert=\{activePage === 'settings'\}/);
   assert.match(app, /<Sidebar[\s\S]*?<section className="main-panel">[\s\S]*?activePage === 'automations'[\s\S]*?<AutomationCenter/);
   assert.match(app, /activePage === 'tools'[\s\S]*?<CapabilitiesPanel/);
-  assert.match(app, /onOpenTools=\{\(\) => setActivePage\('tools'\)\}/);
+  assert.match(
+    app,
+    /onOpenTools=\{\(\) => \{[\s\S]*?setCollectionDrawer\(null\);[\s\S]*?setActivePage\('tools'\);[\s\S]*?\}\}/,
+  );
   assert.doesNotMatch(app, /activePage === 'automations' \? \(\s*<section className="app-page-layer/);
   assert.match(app, /\{activePage === 'settings' \? \([\s\S]*?<SettingsPage/);
   assert.doesNotMatch(app, /session && activePage === 'settings' \? \(/);

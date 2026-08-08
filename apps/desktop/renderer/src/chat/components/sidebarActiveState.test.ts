@@ -46,6 +46,7 @@ test('returning to Chat restores the retained conversation active state', () => 
 test('Chat has no active conversation when the retained id does not match', () => {
   assert.deepEqual(sidebarActiveState('chat', retainedConversationId, 'conversation-2'), {
     conversation: false,
+    home: false,
     automations: false,
     tools: false,
     settings: false,

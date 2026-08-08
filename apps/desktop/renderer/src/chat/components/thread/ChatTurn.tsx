@@ -106,6 +106,7 @@ function ChatTurnImpl({
                     {msg.attachments && msg.attachments.length > 0 ? (
                       <AttachmentStrip
                         attachments={msg.attachments}
+                        readOnly
                         isZh={isZh}
                         onPreviewImage={onPreviewImage}
                       />
