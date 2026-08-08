@@ -1963,7 +1963,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         if (action === 'start') {
           await clientApi.goalRunnerStart({ planId: plan.planId, options: { intent: 'execute' } });
         } else {
-          await clientApi.goalPlansSetStatus({ planId: plan.planId, status: 'cancelled' });
+          // 与工作台一致：clear 才会真正停 runner / 后续流式，不能只写 cancelled 状态。
+          await clientApi.goalRunnerClear({ planId: plan.planId });
         }
         await reload({ mode: 'silent' });
       } catch (err) {

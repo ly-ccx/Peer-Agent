@@ -4,6 +4,7 @@
 @import "./styles/base.css";
 @import "./ui/boolean-controls/boolean-controls.css";
 @import "./styles/shell.css";
+@import "./styles/task-overview.css";
 @import "./styles/card.css";
 @import "./styles/fallback.css";
 @import "./styles/composer.css";

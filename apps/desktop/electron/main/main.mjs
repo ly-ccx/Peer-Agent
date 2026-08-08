@@ -64,6 +64,7 @@ import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-cre
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
+import { collectCacheHitRateMetrics } from './cache-hit-rate.mjs';
 import { collectUsageDaily } from './usage-daily.mjs';
 import { collectUsageDay } from './usage-day.mjs';
 import { listChannelDescriptors, listServiceTemplates, resolveChannel } from './provider-channels.mjs';
@@ -144,6 +145,8 @@ import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
 import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
+import { createTaskOverviewIpcRegistrations } from './ipc/register-task-overview-ipc.mjs';
+import { createTaskOverviewAggregator } from './task-overview-aggregator.mjs';
 import { createAutomationApplicationService } from './automation-application-service.mjs';
 import { createAutomationChatProposalService } from './automation-chat-proposal-service.mjs';
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
@@ -372,6 +375,7 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
 const automationStore = createAutomationStore({
   onChange: (payload) => {
     broadcastToAllWindows('automations:changed', payload);
+    broadcastToAllWindows('taskOverview:changed', { reason: 'automations:changed' });
   },
 });
 let automationRuntimeOwner = null;
@@ -397,6 +401,7 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
+    broadcastToAllWindows('taskOverview:changed', { reason: 'goalPlans:changed' });
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
@@ -415,6 +420,12 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let localToolHost = null;
+// TaskOverview 聚合器：组装 goal-plan-store 与 automation-store 的投影快照，
+// 供 taskOverview:list IPC 使用（阶段 1，见 peer-2-0-gap-analysis §11）。
+const taskOverviewAggregator = createTaskOverviewAggregator({
+  goalPlanStore,
+  automationStore,
+});
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
   isBrowserReady: (conversationId) => {
@@ -2017,11 +2028,15 @@ function registerDesktopIpcHost() {
         stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
         daily: (params) => collectUsageDaily(params),
         day: (params) => collectUsageDay({ ...params, llmConfigStore }),
+        cacheHitRate: () => collectCacheHitRateMetrics(),
       },
     }),
     ...createAutomationIpcRegistrations({
       automations: automationApplicationService,
       proposals: automationProposalService,
+    }),
+    ...createTaskOverviewIpcRegistrations({
+      taskOverview: taskOverviewAggregator,
     }),
     ...createGoalIpcRegistrations({
       goalPlans: goalApplicationService,
@@ -2171,6 +2186,9 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
+          // 相对 hiddenInset 默认原点下移，使三点在约 40px 标题栏内垂直居中
+          //（对照 Codex 观感；仅 macOS 生效）。
+          trafficLightPosition: { x: 16, y: 18 },
         }
       : {}),
     titleBarStyle: 'hiddenInset',

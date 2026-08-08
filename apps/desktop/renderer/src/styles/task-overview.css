@@ -1,0 +1,903 @@
+/* TaskOverview 三页面 —— 对齐 peer-2-0 高保真首页结构。
+ *
+ * 首页：topline + hero(说明|统计) + 交接四列 + 双列推进 + 结果待验收。
+ * 颜色只走 --za-* token，由 [data-theme] 切换，无硬编码 fallback。
+ */
+@layer components {
+  .task-overview-page-layer {
+    @apply h-full min-h-0 min-w-0 overflow-y-auto;
+    background: var(--za-app-bg);
+    border-radius: var(--radius-lg);
+  }
+
+  .task-overview-page {
+    @apply mx-auto w-full max-w-5xl px-7 py-6;
+  }
+
+  .task-overview-page--home {
+    @apply max-w-6xl;
+  }
+
+  /* ---------- topline：面包屑 + Workspace 徽标 ---------- */
+  .task-overview-topline {
+    @apply mb-5 flex items-center justify-between gap-4;
+  }
+
+  .task-overview-crumb {
+    @apply flex items-center gap-2 text-sm;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-crumb b {
+    @apply font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-scope {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-scope-dot {
+    @apply inline-block h-1.5 w-1.5 rounded-full;
+    background: var(--za-accent);
+  }
+
+  /* ---------- hero ---------- */
+  .task-overview-hero {
+    @apply mb-8 flex flex-wrap items-end justify-between gap-6 border-b pb-6;
+    border-color: var(--za-line);
+  }
+
+  .task-overview-hero-copy {
+    @apply min-w-0 max-w-2xl flex-1;
+  }
+
+  .task-overview-kicker {
+    @apply mb-2 text-xs font-medium uppercase tracking-[0.14em];
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-kicker::before {
+    content: '— ';
+    color: var(--za-accent);
+  }
+
+  .task-overview-hero h1,
+  .task-overview-header h1 {
+    @apply text-3xl font-semibold leading-tight tracking-tight;
+    color: var(--za-text);
+  }
+
+  .task-overview-hero-copy p,
+  .task-overview-subtitle {
+    @apply mt-2 max-w-xl text-sm leading-relaxed;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-hero-stats {
+    @apply flex shrink-0 items-stretch gap-0;
+  }
+
+  .task-overview-stat {
+    @apply flex min-w-[4.5rem] flex-col items-start px-4 first:pl-0;
+  }
+
+  .task-overview-stat + .task-overview-stat {
+    border-left: 1px solid var(--za-line);
+  }
+
+  .task-overview-stat b {
+    @apply text-2xl font-semibold tabular-nums leading-none;
+    color: var(--za-text);
+  }
+
+  .task-overview-stat span {
+    @apply mt-1.5 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-header {
+    @apply mb-6;
+  }
+
+  /* ---------- section ---------- */
+  .task-overview-section {
+    @apply mb-8;
+  }
+
+  .task-overview-section-head {
+    @apply mb-3 flex items-center justify-between gap-3;
+  }
+
+  .task-overview-section-title {
+    @apply flex items-center gap-2;
+  }
+
+  .task-overview-section-title h2 {
+    @apply text-base font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-section-title small {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-section-meta {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  /* ---------- 交接列表（连体容器 + 四列） ---------- */
+  .task-overview-handoff-list {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-handoff-row {
+    @apply grid items-center gap-4 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: minmax(0, 1.4fr) minmax(7rem, 0.7fr) minmax(0, 1.1fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .task-overview-handoff-row:first-child {
+    background: color-mix(in srgb, var(--za-accent) 6%, var(--za-surface-0));
+  }
+
+  .task-overview-task-copy {
+    @apply min-w-0;
+  }
+
+  .task-overview-task-copy strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-task-copy span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-owner {
+    @apply flex items-center gap-2 text-xs;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-owner i {
+    @apply inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold not-italic;
+    background: color-mix(in srgb, var(--za-accent) 16%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .task-overview-handoff-reason strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-handoff-reason span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-btn {
+    @apply shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-semibold transition-opacity;
+  }
+
+  .task-overview-btn--primary {
+    background: var(--za-text);
+    color: var(--za-surface-0);
+  }
+
+  .task-overview-btn--secondary {
+    background: var(--za-surface-0);
+    color: var(--za-text);
+    border: 1px solid var(--za-line);
+  }
+
+  .task-overview-btn:hover:not(:disabled) {
+    opacity: 0.86;
+  }
+
+  .task-overview-btn:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* ---------- 推进双列网格 ---------- */
+  .task-overview-work-stream {
+    @apply grid grid-cols-1 gap-3 md:grid-cols-2;
+  }
+
+  .task-overview-list {
+    @apply grid gap-3;
+  }
+
+  .task-overview-work-item {
+    @apply flex flex-col rounded-2xl border p-4;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-work-item.is-clickable {
+    @apply cursor-pointer transition-shadow;
+  }
+
+  .task-overview-work-item.is-clickable:hover {
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--za-text) 8%, transparent);
+  }
+
+  .task-overview-work-top {
+    @apply mb-2 flex items-center justify-between gap-3 text-xs;
+  }
+
+  .task-overview-work-state {
+    @apply inline-flex items-center gap-1.5 font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-spinner {
+    @apply inline-block h-3.5 w-3.5 rounded-full border-2;
+    border-color: color-mix(in srgb, var(--za-accent) 35%, transparent);
+    border-top-color: var(--za-accent);
+    animation: task-overview-spin 0.9s linear infinite;
+  }
+
+  @keyframes task-overview-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .task-overview-work-top time {
+    @apply tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-work-item h3 {
+    @apply text-sm font-semibold leading-snug;
+    color: var(--za-text);
+  }
+
+  .task-overview-work-item p {
+    @apply mt-1 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-progress {
+    @apply mt-3 h-1 overflow-hidden rounded-full;
+    background: var(--za-surface-1);
+  }
+
+  .task-overview-progress i {
+    @apply block h-full rounded-full;
+    background: var(--za-text);
+  }
+
+  /* ---------- 结果待验收（与推进中同款双列卡片网格） ---------- */
+  .result-section {
+    @apply mb-8;
+  }
+
+  .result-card-stack {
+    /* 兼容旧类名：等同 work-grid */
+    @apply grid grid-cols-1 gap-3 md:grid-cols-2;
+  }
+
+  .result-card-state {
+    color: #2f7a57;
+  }
+
+  .result-card-seal {
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold not-italic;
+    background: color-mix(in srgb, #3f9a6f 18%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  /* 结果卡：按钮贴右下 */
+  .task-overview-work-item.result-card {
+    @apply flex flex-col;
+  }
+
+  .result-card-actions {
+    @apply mt-auto flex flex-wrap items-center justify-end gap-2 pt-3;
+  }
+
+  .result-card-actions .task-overview-btn {
+    @apply text-xs;
+  }
+
+  .work-item-actions {
+    @apply mt-auto flex flex-wrap items-center justify-end gap-2 pt-3;
+  }
+
+  .task-overview-work-item {
+    /* ensure cancel row can sit at bottom when card stretches in grid */
+  }
+
+  /* 兼容旧类名，避免残留引用 */
+  .task-overview-result-list {
+    @apply grid gap-3;
+  }
+  .task-overview-result-row {
+    @apply flex items-center gap-4 rounded-2xl border px-4 py-3.5;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+  .task-overview-result-seal {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold;
+    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  /* ---------- 空态 ---------- */
+  .task-overview-empty {
+    @apply flex items-center justify-center rounded-2xl border border-dashed py-16 text-sm;
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+  }
+
+  /* ---------- 任务页 collection-shell / task-table ---------- */
+  .task-overview-page--collection {
+    @apply max-w-6xl;
+  }
+
+  .task-collection-head {
+    @apply mb-5 flex flex-wrap items-end justify-between gap-4;
+  }
+
+  .task-collection-head h1 {
+    @apply text-3xl font-semibold leading-tight tracking-tight;
+    color: var(--za-text);
+  }
+
+  .task-collection-head p {
+    @apply mt-2 max-w-2xl text-sm leading-relaxed;
+    color: var(--za-text-soft);
+  }
+
+  .task-collection-count {
+    @apply flex min-w-[7rem] flex-col items-start rounded-2xl border px-4 py-3;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-collection-count b {
+    @apply text-3xl font-semibold tabular-nums leading-none;
+    color: var(--za-text);
+  }
+
+  .task-collection-count span {
+    @apply mt-1 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-collection-tools {
+    @apply mb-4 flex flex-wrap items-center justify-between gap-3;
+  }
+
+  .task-filter-group {
+    @apply inline-flex flex-wrap items-center gap-1 rounded-full border p-1;
+    background: color-mix(in srgb, var(--za-surface-1) 70%, var(--za-surface-0));
+    border-color: var(--za-line);
+  }
+
+  .task-filter-group button {
+    @apply rounded-full px-3 py-1.5 text-xs font-medium transition-colors;
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .task-filter-group button em {
+    @apply ml-1 not-italic tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-filter-group button.is-active {
+    background: var(--za-surface-0);
+    color: var(--za-text);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 8%, transparent);
+  }
+
+  .task-filter-group button.is-active em {
+    color: var(--za-text-soft);
+  }
+
+  .task-search-box {
+    @apply inline-flex min-w-[14rem] items-center gap-2 rounded-full border px-3 py-2 text-xs;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+  }
+
+  .task-search-box input {
+    @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-xs outline-none;
+    color: var(--za-text);
+  }
+
+  .task-search-box input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .task-table {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-table-head {
+    @apply grid items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em];
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+    background: color-mix(in srgb, var(--za-surface-1) 55%, var(--za-surface-0));
+  }
+
+  .task-record {
+    @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    border-color: var(--za-line);
+  }
+
+  .task-record-title {
+    @apply flex min-w-0 items-start gap-2.5;
+  }
+
+  .task-status-dot {
+    @apply mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full;
+    background: var(--za-text-faint);
+  }
+
+  .task-status-dot--user {
+    background: #c48a3a;
+  }
+
+  .task-status-dot--peer {
+    background: var(--za-accent);
+  }
+
+  .task-status-dot--review {
+    background: #3f9a6f;
+  }
+
+  .task-status-dot--paused {
+    background: var(--za-text-faint);
+  }
+
+  .task-record-title strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-record-title span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-action-owner {
+    @apply inline-flex w-fit max-w-full truncate rounded-full px-2.5 py-1 text-[11px] font-medium;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .task-action-owner--user {
+    background: color-mix(in srgb, #c48a3a 16%, var(--za-surface-0));
+    color: #9a6a2a;
+  }
+
+  .task-action-owner--peer {
+    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .task-action-owner--review {
+    background: color-mix(in srgb, #3f9a6f 14%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  .task-action-owner--paused {
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .task-goal-progress {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .task-goal-progress b {
+    @apply shrink-0 text-xs font-semibold tabular-nums;
+    color: var(--za-text);
+  }
+
+  .task-goal-progress > div {
+    @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
+    background: var(--za-surface-1);
+  }
+
+  .task-goal-progress > div > i {
+    @apply block h-full rounded-full;
+    background: var(--za-accent);
+  }
+
+  .task-record time {
+    @apply text-xs tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-row-open {
+    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .task-row-open:hover {
+    background: var(--za-surface-1);
+  }
+
+  .task-table-empty {
+    @apply m-0 rounded-none border-0 border-t;
+    border-color: var(--za-line);
+  }
+
+  /* ---------- 历史页 history-list ---------- */
+  .history-list {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .history-record {
+    @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: auto minmax(0, 1.5fr) minmax(4.5rem, 0.6fr) minmax(6rem, 0.8fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .history-state {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm font-semibold;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .history-state--accepted {
+    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  .history-state--archived {
+    background: color-mix(in srgb, var(--za-accent) 12%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .history-state--cancelled {
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .history-state--failed {
+    background: color-mix(in srgb, #c45b5b 14%, var(--za-surface-0));
+    color: #a53f3f;
+  }
+
+  .history-record-title {
+    @apply min-w-0;
+  }
+
+  .history-record-title strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .history-record-title span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .history-badge {
+    @apply text-xs font-semibold;
+  }
+
+  .history-badge--accepted {
+    color: #2f7a57;
+  }
+
+  .history-badge--archived {
+    color: var(--za-accent);
+  }
+
+  .history-badge--cancelled {
+    color: var(--za-text-muted);
+  }
+
+  .history-badge--failed {
+    color: #a53f3f;
+  }
+
+  .history-evidence-count {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .history-row-open {
+    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .history-row-open:hover {
+    background: var(--za-surface-1);
+  }
+
+  .history-list-empty {
+    @apply m-0 rounded-none border-0;
+  }
+
+  @media (max-width: 900px) {
+    .task-overview-handoff-row {
+      grid-template-columns: 1fr;
+      @apply gap-2;
+    }
+
+    .task-overview-hero {
+      @apply flex-col items-start;
+    }
+
+    .task-overview-btn {
+      @apply w-full;
+    }
+
+    .task-table-head {
+      display: none;
+    }
+
+    .task-record {
+      grid-template-columns: 1fr;
+      @apply gap-2;
+    }
+
+    .task-row-open {
+      @apply justify-self-start;
+    }
+
+    .task-collection-tools {
+      @apply flex-col items-stretch;
+    }
+
+    .task-search-box {
+      @apply w-full;
+    }
+
+    .history-record {
+      grid-template-columns: auto 1fr;
+      @apply gap-2;
+    }
+
+    .history-badge,
+    .history-evidence-count,
+    .history-row-open {
+      grid-column: 2;
+      @apply justify-self-start;
+    }
+  }
+}
+
+/* ---------- 工作台：任务/历史 Drawer ---------- */
+@layer components {
+  .workbench-collection-drawer {
+    --pa-drawer-width: min(920px, 92vw);
+  }
+
+  .workbench-collection-drawer-shell {
+    @apply flex h-full min-h-0 flex-col;
+    background: var(--za-app-bg);
+  }
+
+  .workbench-collection-drawer-header {
+    @apply flex items-center justify-between gap-4 border-b px-5 py-4;
+    border-color: var(--za-line);
+  }
+
+  .workbench-collection-drawer-kicker {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em];
+    color: var(--za-text-muted);
+  }
+
+  .workbench-collection-drawer-header h2 {
+    @apply m-0 text-base font-semibold;
+    color: var(--za-text);
+  }
+
+  .workbench-collection-drawer-header p {
+    @apply m-0 mt-1 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .workbench-collection-drawer-close {
+    @apply rounded-full border px-3 py-1.5 text-xs font-semibold;
+    border-color: var(--za-line);
+    background: var(--za-surface-0);
+    color: var(--za-text);
+  }
+
+  .workbench-collection-drawer-body {
+    @apply min-h-0 flex-1 overflow-y-auto;
+  }
+
+  .task-overview-section-link {
+    @apply cursor-pointer border-0 bg-transparent p-0;
+  }
+
+  .task-overview-section-link:hover {
+    color: var(--za-text);
+  }
+}
+
+
+/* ---------- 查看结果 Drawer / 只读会话结果 ---------- */
+/* 只设宽度 token，不要写 w-full：否则 unlayered 的 width:100% 会压过 Overlay 的 70% 抽屉宽 */
+.conversation-result-drawer {
+  --pa-drawer-width: 70vw;
+  @apply flex h-full min-h-0 flex-col;
+  background: var(--za-surface-0);
+}
+
+.conversation-result-drawer__head {
+  @apply flex items-start justify-between gap-3 border-b px-5 py-4;
+  border-color: var(--za-line);
+}
+
+.conversation-result-drawer__head h2 {
+  @apply m-0 text-base font-semibold;
+  color: var(--za-text);
+}
+
+.conversation-result-drawer__head p {
+  @apply m-0 mt-1 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-drawer__close {
+  @apply rounded-full border px-3 py-1 text-xs;
+  border-color: var(--za-line);
+  color: var(--za-text-muted);
+  background: transparent;
+}
+
+.conversation-result-drawer__body {
+  @apply min-h-0 flex-1 overflow-y-auto px-5 py-4;
+}
+
+.conversation-result-view {
+  @apply flex h-full min-h-0 flex-col gap-4;
+}
+
+.conversation-result-view__kicker {
+  @apply text-[11px] font-medium uppercase tracking-wide;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__title {
+  @apply m-0 mt-1 text-lg font-semibold leading-snug;
+  color: var(--za-text);
+}
+
+.conversation-result-view__meta {
+  @apply m-0 mt-1 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__section {
+  @apply rounded-2xl border p-3;
+  border-color: var(--za-line);
+  background: color-mix(in srgb, var(--za-surface-0) 92%, var(--za-text) 4%);
+}
+
+.conversation-result-view__section--grow {
+  @apply flex min-h-0 flex-1 flex-col;
+}
+
+.conversation-result-view__section-title {
+  @apply mb-2 text-xs font-semibold;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__progress {
+  @apply h-1.5 overflow-hidden rounded-full;
+  background: color-mix(in srgb, var(--za-line) 80%, transparent);
+}
+
+.conversation-result-view__progress > i {
+  @apply block h-full rounded-full;
+  background: #3f9a6f;
+}
+
+.conversation-result-view__hint {
+  @apply m-0 mt-2 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__error {
+  @apply m-0 text-xs;
+  color: #c4554d;
+}
+
+.conversation-result-view__task-list {
+  @apply m-0 list-none space-y-2 p-0;
+}
+
+.conversation-result-view__task-list li {
+  @apply flex items-start gap-2 text-sm;
+  color: var(--za-text);
+}
+
+.conversation-result-view__task-status {
+  @apply shrink-0 rounded-full px-2 py-0.5 text-[11px];
+  background: color-mix(in srgb, var(--za-line) 70%, transparent);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__messages {
+  @apply flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1;
+}
+
+.conversation-result-view__msg {
+  @apply rounded-xl border px-3 py-2;
+  border-color: var(--za-line);
+  background: var(--za-surface-0);
+}
+
+.conversation-result-view__msg-role {
+  @apply mb-1 text-[11px] font-semibold;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__msg-body {
+  @apply whitespace-pre-wrap break-words text-sm leading-relaxed;
+  color: var(--za-text);
+}
+
+.conversation-result-view__msg.is-assistant {
+  border-color: color-mix(in srgb, #3f9a6f 28%, var(--za-line));
+}
+
+.conversation-result-view__footer {
+  /* 去掉 sticky 深色底条，避免与按钮/内容区错位 */
+  @apply flex justify-end pt-3;
+}
+
+
+.conversation-result-view__msg.is-task-target {
+  border-color: color-mix(in srgb, #3f9a6f 45%, var(--za-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #3f9a6f 25%, transparent);
+}
+
+.conversation-result-view__target-tag {
+  @apply ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium;
+  background: color-mix(in srgb, #3f9a6f 18%, transparent);
+  color: #2f7a57;
+}
+
+.conversation-result-view__msg-body .markdown-content {
+  @apply text-sm leading-relaxed;
+  color: var(--za-text);
+}
+
+.conversation-result-view__msg-body .markdown-content pre {
+  @apply overflow-x-auto rounded-lg p-2 text-xs;
+  background: color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0));
+}
+
+.conversation-result-view__msg-body .markdown-content code {
+  @apply text-[0.85em];
+}
+
+.conversation-result-view__msg-body .markdown-content p {
+  @apply m-0 mb-2 last:mb-0;
+}
+
+.conversation-result-view__msg-body .markdown-content ul,
+.conversation-result-view__msg-body .markdown-content ol {
+  @apply my-2 pl-5;
+}

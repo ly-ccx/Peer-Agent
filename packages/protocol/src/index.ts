@@ -1002,4 +1002,5 @@ export * from './goal.ts';
 export * from './updater.ts';
 export * from './appshot.ts';
 export * from './automation.ts';
+export * from './task-overview.ts';
 export * from './skill-marketplace.ts';

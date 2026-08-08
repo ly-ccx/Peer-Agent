@@ -56,6 +56,7 @@ import type {
   SkillHubMarketplacePage,
   SkillHubMarketplaceQuery,
   SkillHubSyncStatus,
+  TaskOverviewItem,
   UpdateChannelPreference,
   UpdaterEvent,
   UpdaterStatus,
@@ -933,6 +934,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   // Goal 模式计划（见 Goal 模式设计）。
   // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
   readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
+  readonly taskOverviewList: (params?: {
+    workspacePath?: string | null;
+    includeTerminal?: boolean;
+    activeWithinMs?: number;
+    limit?: number;
+  }) => Promise<readonly TaskOverviewItem[]>;
   readonly goalPlansAwaitingCounts: () => Promise<Record<string, number>>;
   readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansCreate: (params: { draft: Partial<GoalPlan> }) => Promise<GoalPlan>;
@@ -971,6 +978,9 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
       /** runner-progress 时附带最新 runner，便于 UI 本地 patch */
       runner?: GoalPlan['runner'] | null;
     }) => void,
+  ) => () => void;
+  readonly onTaskOverviewChanged: (
+    listener: (payload: { reason?: string }) => void,
   ) => () => void;
   readonly onGoalRunnerChanged: (
     listener: (payload: {

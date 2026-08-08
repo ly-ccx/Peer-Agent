@@ -242,6 +242,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('automations:open-run', handler);
   },
   goalPlansList: (params) => ipcRenderer.invoke('goalPlans:list', params),
+  taskOverviewList: (params) => ipcRenderer.invoke('taskOverview:list', params),
   goalPlansAwaitingCounts: () => ipcRenderer.invoke('goalPlans:awaiting-counts'),
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
@@ -260,6 +261,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('goalPlans:changed', handler);
     return () => ipcRenderer.removeListener('goalPlans:changed', handler);
+  },
+  onTaskOverviewChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('taskOverview:changed', handler);
+    return () => ipcRenderer.removeListener('taskOverview:changed', handler);
   },
   onGoalRunnerChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);

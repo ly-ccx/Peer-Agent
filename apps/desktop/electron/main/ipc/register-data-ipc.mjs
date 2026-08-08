@@ -57,6 +57,7 @@ export function createDataIpcRegistrations({ conversations, promptSnapshots, usa
     stats: assertFunction(usage?.stats, 'usage.stats'),
     daily: assertFunction(usage?.daily, 'usage.daily'),
     day: assertFunction(usage?.day, 'usage.day'),
+    cacheHitRate: assertFunction(usage?.cacheHitRate, 'usage.cacheHitRate'),
   };
 
   return Object.freeze([
@@ -111,6 +112,7 @@ export function createDataIpcRegistrations({ conversations, promptSnapshots, usa
       ipc.handle('usage:stats', () => usagePorts.stats());
       ipc.handle('usage:daily', (_event, params) => usagePorts.daily({ range: params?.range }));
       ipc.handle('usage:day', (_event, params) => usagePorts.day({ date: params?.date }));
+      ipc.handle('usage:cache-hit-rate', () => usagePorts.cacheHitRate());
     }),
   ]);
 }
