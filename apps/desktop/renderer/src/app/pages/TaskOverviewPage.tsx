@@ -225,11 +225,9 @@ function HeroLayout({
 
       <header className="task-overview-hero">
         <div className="task-overview-hero-copy">
-          <div className="task-overview-kicker">Delegation OS</div>
-          <h1>只处理真正需要你的事</h1>
+          <h1>只在需要时介入</h1>
           <p>
-            {subtitle ??
-              '工作台不是任务仓库，而是所有任务按下一步行动权形成的动态投影。Peer 推进其余工作，只在决策、权限与验收时交还给你。'}
+            {subtitle ?? 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。'}
           </p>
         </div>
         <div className="task-overview-hero-stats">
@@ -377,7 +375,6 @@ function ListLayout({
     <div className="task-overview-page">
       <TopLine pageTitle={title} crumbExtra={crumbExtra} scopeLabel={scopeLabel} />
       <header className="task-overview-header">
-        <div className="task-overview-kicker">Delegation OS</div>
         <h1>{title}</h1>
         {subtitle ? <p className="task-overview-subtitle">{subtitle}</p> : null}
       </header>

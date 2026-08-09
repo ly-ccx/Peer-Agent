@@ -22,7 +22,7 @@ export function HomePage({
   return (
     <TaskOverviewPage
       title="工作台"
-      subtitle="工作台不是任务仓库，而是所有任务按下一步行动权形成的动态投影。Peer 推进其余工作，只在决策、权限与验收时交还给你。"
+      subtitle="Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。"
       filter={(item) => item.actionRight !== 'terminal'}
       emptyLabel="当前没有需要处理的任务"
       hero
