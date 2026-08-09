@@ -361,6 +361,7 @@ function waitForMcpOAuthCallback(expectedState) {
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
+  broadcastToAllWindows('taskOverview:changed', { reason: 'conversations:changed' });
   if (event.writerPid === process.pid) return;
 
   const workspacePath = typeof event.workspacePath === 'string' ? event.workspacePath : null;
@@ -425,6 +426,7 @@ let localToolHost = null;
 const taskOverviewAggregator = createTaskOverviewAggregator({
   goalPlanStore,
   automationStore,
+  listConversations: (params) => conversationStore.listConversations(params),
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,

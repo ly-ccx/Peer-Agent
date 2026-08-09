@@ -5,6 +5,7 @@ import { SettingsPage, type SettingsSection } from './app/components/SettingsPag
 import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
+import { TaskDetailsView } from './app/components/TaskDetailsView';
 import { continueTaskInConversation } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
 import { TasksPage } from './app/pages/TasksPage';
@@ -70,7 +71,7 @@ function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boo
 
 type AppPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
 /** 任务/历史不再作为一级全屏页，改为 Drawer 承载。 */
-type CollectionDrawer = 'tasks' | 'history' | 'result' | null;
+type CollectionDrawer = 'tasks' | 'history' | 'task_details' | 'result' | null;
 type ConversationStatus = 'active' | 'archived';
 type ConversationView = 'active' | 'archived';
 
@@ -1078,6 +1079,7 @@ function MainApp() {
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
                   onOpenAutomationRun={openAutomationRun}
+                  onOpenTaskDetails={() => openCollectionDrawer('task_details')}
                   workspacePath={activeWorkspace}
                   isPageActive={activePage === 'chat'}
                   messageTarget={notificationMessageTarget}
@@ -1142,9 +1144,13 @@ function MainApp() {
                         ? isZh
                           ? '任务历史'
                           : 'Task history'
-                        : isZh
-                          ? '执行结果'
-                          : 'Execution result'
+                        : collectionDrawer === 'task_details'
+                          ? isZh
+                            ? '任务详情'
+                            : 'Task details'
+                          : isZh
+                            ? '执行结果'
+                            : 'Execution result'
                   }
                   panelClassName={
                     collectionDrawer === 'result'
@@ -1181,6 +1187,25 @@ function MainApp() {
                         </div>
                         <div className="workbench-collection-drawer-body">
                           <HistoryPage workspacePath={activeWorkspace} />
+                        </div>
+                      </div>
+                    ) : collectionDrawer === 'task_details' && activeConversationId ? (
+                      <div className="workbench-collection-drawer-shell">
+                        <div className="workbench-collection-drawer-header">
+                          <div>
+                            <h2>{isZh ? '任务详情' : 'Task details'}</h2>
+                            <p>{isZh ? '当前会话下的讨论与 GoalPlan' : 'Discussion and GoalPlans in this conversation'}</p>
+                          </div>
+                          <button type="button" className="workbench-collection-drawer-close" onClick={requestClose}>
+                            {isZh ? '关闭' : 'Close'}
+                          </button>
+                        </div>
+                        <div className="workbench-collection-drawer-body">
+                          <TaskDetailsView
+                            conversationId={activeConversationId}
+                            taskTitle={conversations.find((conversation) => conversation.id === activeConversationId)?.title ?? (isZh ? '新对话' : 'New conversation')}
+                            isZh={isZh}
+                          />
                         </div>
                       </div>
                     ) : resultDrawerItem ? (

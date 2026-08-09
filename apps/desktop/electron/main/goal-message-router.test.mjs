@@ -21,6 +21,18 @@ test('routeGoalMessage starts intake (not a Goal) when no active Goal exists', (
   assert.equal(route.objective, '把右侧目标面板拆成 Goal Plan Run');
 });
 
+test('discussion and evaluation prompts enter intake instead of becoming accepted GoalPlans', () => {
+  for (const messageText of [
+    '这是一个讨论问题，那我怎么在界面上看到 Task-Plan 的格式？',
+    '你觉得当前模式合理吗？',
+    '那界面怎么设计好？',
+  ]) {
+    const route = routeGoalMessage({ messageText, activeGoalPlan: null });
+    assert.equal(route.type, 'start_intake');
+    assert.equal(route.intent, 'new_goal_implicit');
+  }
+});
+
 test('routeGoalMessage routes 继续 to the current Goal instead of creating a new Goal', () => {
   const route = routeGoalMessage({
     messageText: '继续',

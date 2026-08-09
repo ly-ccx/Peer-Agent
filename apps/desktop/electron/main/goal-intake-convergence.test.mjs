@@ -27,6 +27,20 @@ test('纯问答/咨询：intake 契约 + 正常结束 + 未提问 → remove', (
   assert.equal(decision, 'remove');
 });
 
+test('讨论、评估和界面咨询正常答复后不会留下 GoalPlan', () => {
+  for (const messageText of [
+    '这是一个讨论问题，那我怎么在界面上看到 Task-Plan 的格式？',
+    '你觉得当前模式合理吗？',
+    '那界面怎么设计好？',
+  ]) {
+    const discussionIntake = { ...intakePlan, goal: messageText };
+    assert.equal(decideIntakeConvergence(discussionIntake, {
+      terminalStatus: 'done',
+      requestedUserInput: false,
+    }), 'remove');
+  }
+});
+
 test('模糊澄清：模型调用 request_user_input → keep（保留等待）', () => {
   const decision = decideIntakeConvergence(intakePlan, {
     terminalStatus: 'done',

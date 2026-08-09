@@ -17,6 +17,79 @@ import {
 } from './task-overview-aggregator.mjs';
 
 // ---------------------------------------------------------------------------
+// Conversation 讨论态与 GoalPlan 去重
+// ---------------------------------------------------------------------------
+
+test('aggregator projects conversations without GoalPlans as discussion tasks', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-1',
+        title: '讨论 Task 与 Plan 的界面关系',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T01:00:00.000Z',
+      },
+    ],
+  });
+
+  assert.deepEqual(agg.listTaskOverview({ activeWithinMs: 0 }), [
+    {
+      taskId: 'conversation-1',
+      source: 'conversation',
+      actionRight: 'paused',
+      nextAction: 'continue_task',
+      title: '讨论 Task 与 Plan 的界面关系',
+      workspaceLabel: 'peer_agent',
+      statusLabel: '讨论中',
+      lastActiveAt: '2026-08-09T01:00:00.000Z',
+      actionLabel: '继续讨论 →',
+      conversationId: 'conversation-1',
+    },
+  ]);
+});
+
+test('aggregator keeps one Task per conversation and separates Task title from current Goal title', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-old',
+          conversationId: 'conversation-1',
+          status: 'completed',
+          title: '旧 Goal',
+          updatedAt: '2026-08-09T01:30:00.000Z',
+        },
+        {
+          planId: 'plan-1',
+          conversationId: 'conversation-1',
+          status: 'executing',
+          title: '实现 Task 上下文界面',
+          updatedAt: '2026-08-09T02:00:00.000Z',
+        },
+      ],
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-1',
+        title: '讨论 Task 与 Plan 的界面关系',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T01:00:00.000Z',
+      },
+    ],
+  });
+
+  const items = agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].source, 'goal_plan');
+  assert.equal(items[0].conversationId, 'conversation-1');
+  assert.equal(items[0].title, '讨论 Task 与 Plan 的界面关系');
+  assert.equal(items[0].currentGoalTitle, '实现 Task 上下文界面');
+});
+
+// ---------------------------------------------------------------------------
 // 快照组装
 // ---------------------------------------------------------------------------
 

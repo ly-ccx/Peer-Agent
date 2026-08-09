@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
+import { ChatTaskContext } from './ChatTaskContext';
+import type { ChatTaskContextView } from './taskContext';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -30,6 +32,7 @@ export function ChatHeader({
   isStreaming,
   hasScroll,
   localAccessLevel,
+  taskContext,
   editTriggerRef,
   onRename,
   onArchive,
@@ -37,6 +40,7 @@ export function ChatHeader({
   onFind,
   onOpenTools,
   onOpenAutomationRun,
+  onOpenTaskDetails,
 }: {
   readonly title: string;
   readonly automationOrigin?: {
@@ -53,6 +57,7 @@ export function ChatHeader({
   readonly isStreaming: boolean;
   readonly hasScroll?: boolean;
   readonly localAccessLevel: LocalAccessLevel;
+  readonly taskContext?: ChatTaskContextView | null;
   readonly editTriggerRef?: MutableRefObject<(() => void) | null>;
   readonly onRename?: (newTitle: string) => void;
   readonly onArchive?: () => void;
@@ -60,6 +65,7 @@ export function ChatHeader({
   readonly onFind?: () => void;
   readonly onOpenTools?: () => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
+  readonly onOpenTaskDetails?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -185,6 +191,9 @@ export function ChatHeader({
             >
               {displayTitle}
             </span>
+            {taskContext ? (
+              <ChatTaskContext context={taskContext} onOpenDetails={onOpenTaskDetails} />
+            ) : null}
           </>
         )}
 

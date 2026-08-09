@@ -114,6 +114,8 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
+import { projectChatTaskContext } from './thread/taskContext';
+import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import {
   VirtualChatTurnList,
   type VirtualChatTurnListHandle,
@@ -370,6 +372,7 @@ export function ChatSurface({
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
+  onOpenTaskDetails,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -407,6 +410,7 @@ export function ChatSurface({
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
+  readonly onOpenTaskDetails?: (conversationId: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
@@ -919,6 +923,20 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
+  const taskOverviewItems = useTaskOverview({
+    enabled: Boolean(conversationId),
+    workspacePath,
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+  const currentTaskItem = useMemo(
+    () => taskOverviewItems.find((item) => item.conversationId === conversationId),
+    [conversationId, taskOverviewItems],
+  );
+  const taskContext = useMemo(
+    () => projectChatTaskContext(currentTaskItem, isZh),
+    [currentTaskItem, isZh],
+  );
   const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
     if (!conversationId || !automationProposal) return;
     const result = await clientApi.automationProposalAct(
@@ -2311,6 +2329,10 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
+        taskContext={taskContext}
+        onOpenTaskDetails={conversationId && onOpenTaskDetails
+          ? () => onOpenTaskDetails(conversationId)
+          : undefined}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId

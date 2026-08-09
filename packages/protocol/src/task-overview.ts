@@ -58,8 +58,8 @@ export type TaskNeedsYouReason =
   | 'user_input'
   | 'decision';
 
-/** 投影来源类别：标记该任务投影来自哪套状态机。 */
-export type TaskOverviewSourceKind = 'goal_plan' | 'automation';
+/** 投影来源类别：标记该任务投影来自哪套事实来源。 */
+export type TaskOverviewSourceKind = 'conversation' | 'goal_plan' | 'automation';
 
 /**
  * 用户在任务上可执行的下一步动作（§11.3「下一步行动」列）。
@@ -75,6 +75,7 @@ export type TaskNextAction =
   | 'resume' // 继续（paused → 恢复）
   | 'enable' // 启用（Automation definition paused/disabled）
   | 'inspect' // 查看（异常态诊断）
+  | 'continue_task' // 回到原 Conversation 继续讨论
   | 'none'; // 无需动作
 
 // ---------------------------------------------------------------------------
@@ -109,7 +110,7 @@ export interface TaskOverviewPlanStep {
 }
 
 export interface TaskOverviewItem {
-  /** 稳定任务身份（planId 或 automationId+runId）。 */
+  /** 稳定投影身份（conversationId、planId 或 automationId+runId）。 */
   readonly taskId: string;
   /** 投影来源。 */
   readonly source: TaskOverviewSourceKind;
@@ -119,8 +120,10 @@ export interface TaskOverviewItem {
   readonly needsYouReason?: TaskNeedsYouReason;
   /** 下一步动作标识。 */
   readonly nextAction: TaskNextAction;
-  /** 任务标题（GoalPlan.title 或 AutomationDefinition.name）。 */
+  /** Task 稳定标题；有 Conversation 时由 Conversation.title 提供。 */
   readonly title: string;
+  /** Task 内当前 GoalPlan 标题；讨论态和 Automation 为 undefined。 */
+  readonly currentGoalTitle?: string;
   /** Workspace 标签（原型卡片右上角）。 */
   readonly workspaceLabel?: string;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
@@ -145,6 +148,13 @@ export interface TaskOverviewItem {
 // ---------------------------------------------------------------------------
 
 /** GoalPlan 投影所需的最小字段快照。 */
+export interface ConversationProjectionSnapshot {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly workspaceLabel?: string;
+  readonly updatedAt?: string;
+}
+
 export interface GoalPlanProjectionSnapshot {
   readonly planId: string;
   readonly status: GoalPlanStatus;
@@ -190,6 +200,24 @@ interface ProjectionDecision {
   readonly nextAction: TaskNextAction;
   readonly statusLabel: string;
   readonly actionLabel: string;
+}
+
+/** Conversation → 无计划讨论态（工作台动线 §15）。 */
+export function projectConversation(
+  snapshot: ConversationProjectionSnapshot,
+): TaskOverviewItem {
+  return {
+    taskId: snapshot.conversationId,
+    source: 'conversation',
+    actionRight: 'paused',
+    nextAction: 'continue_task',
+    title: snapshot.title,
+    ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
+    statusLabel: '讨论中',
+    ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
+    actionLabel: '继续讨论 →',
+    conversationId: snapshot.conversationId,
+  };
 }
 
 /**

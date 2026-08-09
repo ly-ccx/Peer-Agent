@@ -21,6 +21,7 @@
 
 import {
   projectAutomationRun,
+  projectConversation,
   projectGoalPlan,
 } from '@peer-agent/protocol';
 
@@ -59,6 +60,10 @@ const AUTOMATION_RUN_TERMINAL_STATUSES = new Set([
   'timed_out',
   'blocked',
 ]);
+
+function normalizedTitle(value, fallback) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
+}
 
 /** 从 workspace 绝对路径提取卡片右上角标签（取末段目录名）。 */
 function workspaceLabelFromPath(workspacePath) {
@@ -344,8 +349,13 @@ export function isAutomationInScope(definition, latestRun, options = {}) {
  * @param {object} deps
  * @param {{ listPlanDetails: () => Array }} deps.goalPlanStore
  * @param {{ listDefinitions: (opts?: object) => Array, listRuns: (opts?: object) => Array }} deps.automationStore
+ * @param {(() => Array)|undefined} deps.listConversations
  */
-export function createTaskOverviewAggregator({ goalPlanStore, automationStore } = {}) {
+export function createTaskOverviewAggregator({
+  goalPlanStore,
+  automationStore,
+  listConversations,
+} = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
   }
@@ -386,17 +396,84 @@ export function createTaskOverviewAggregator({ goalPlanStore, automationStore } 
     /** @type {Array<import('@peer-agent/protocol').TaskOverviewItem>} */
     const items = [];
 
+    let conversations = [];
+    if (typeof listConversations === 'function') {
+      try {
+        conversations = listConversations({ status: 'active' }) ?? [];
+      } catch {
+        conversations = [];
+      }
+    }
+    const conversationById = new Map(
+      conversations
+        .filter((conversation) => typeof conversation?.id === 'string' && conversation.id.trim() !== '')
+        .map((conversation) => [conversation.id, conversation]),
+    );
+    const projectedPlanConversationIds = new Set();
+
     let plans = [];
     try {
       plans = goalPlanStore.listPlanDetails() ?? [];
     } catch {
       plans = [];
     }
+    const latestPlanByConversationId = new Map();
+    const unlinkedPlans = [];
     for (const plan of plans) {
       if (!isGoalPlanInScope(plan, scope)) continue;
+      const conversationId = typeof plan?.conversationId === 'string' ? plan.conversationId : '';
+      if (!conversationId) {
+        unlinkedPlans.push(plan);
+        continue;
+      }
+      const current = latestPlanByConversationId.get(conversationId);
+      const currentUpdatedAt = Date.parse(current?.updatedAt ?? current?.createdAt ?? '');
+      const nextUpdatedAt = Date.parse(plan?.updatedAt ?? plan?.createdAt ?? '');
+      if (!current || !Number.isFinite(currentUpdatedAt) || nextUpdatedAt >= currentUpdatedAt) {
+        latestPlanByConversationId.set(conversationId, plan);
+      }
+    }
+    for (const plan of [...latestPlanByConversationId.values(), ...unlinkedPlans]) {
       const snapshot = toGoalPlanSnapshot(plan);
       if (!snapshot) continue;
-      items.push(projectGoalPlan(snapshot));
+      const projected = projectGoalPlan(snapshot);
+      const conversation = snapshot.conversationId
+        ? conversationById.get(snapshot.conversationId)
+        : undefined;
+      if (conversation) {
+        projectedPlanConversationIds.add(snapshot.conversationId);
+        items.push({
+          ...projected,
+          title: normalizedTitle(conversation.title, projected.title),
+          currentGoalTitle: projected.title,
+        });
+      } else {
+        items.push(projected);
+      }
+    }
+
+    for (const conversation of conversations) {
+      const conversationId =
+        typeof conversation?.id === 'string' ? conversation.id.trim() : '';
+      if (!conversationId || projectedPlanConversationIds.has(conversationId)) continue;
+      if (
+        workspacePath &&
+        normalizeWorkspacePath(conversation.workspacePath) !== normalizeWorkspacePath(workspacePath)
+      ) {
+        continue;
+      }
+      if (
+        activeWithinMs > 0 &&
+        !isWithinActiveWindow(conversation.updatedAt, activeWithinMs, nowMs)
+      ) {
+        continue;
+      }
+      items.push(projectConversation({
+        conversationId,
+        title: normalizedTitle(conversation.title, '新对话'),
+        workspaceLabel: workspaceLabelFromPath(conversation.workspacePath),
+        updatedAt: conversation.updatedAt,
+      }));
     }
 
     let definitions = [];

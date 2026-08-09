@@ -132,6 +132,77 @@
     color: var(--za-text-muted);
   }
 
+  .task-overview-section-link--button {
+    @apply cursor-pointer border-0 bg-transparent p-0 transition-colors;
+  }
+
+  .task-overview-section-link--button:hover,
+  .task-overview-section-link--button:focus-visible {
+    color: var(--za-accent);
+  }
+
+  /* ---------- 最近讨论（紧凑卡片，不复用执行态） ---------- */
+  .task-overview-discussion-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .task-overview-discussion-card {
+    @apply flex min-h-32 min-w-0 flex-col rounded-2xl border p-4 transition-colors;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-discussion-card.is-clickable {
+    @apply cursor-pointer;
+  }
+
+  .task-overview-discussion-card.is-clickable:hover {
+    background: var(--za-surface-1);
+    border-color: color-mix(in srgb, var(--za-accent) 42%, var(--za-line));
+  }
+
+  .task-overview-discussion-card__meta,
+  .task-overview-discussion-card__footer {
+    @apply flex min-w-0 items-center justify-between gap-3 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-discussion-card__status {
+    @apply inline-flex min-w-0 items-center gap-1.5 font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-discussion-card__status i {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full;
+    background: var(--za-accent);
+  }
+
+  .task-overview-discussion-card__meta time {
+    @apply shrink-0 tabular-nums;
+  }
+
+  .task-overview-discussion-card h3 {
+    @apply my-3 min-w-0 overflow-hidden text-sm font-semibold leading-5;
+    color: var(--za-text);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .task-overview-discussion-card__footer {
+    @apply mt-auto;
+  }
+
+  .task-overview-discussion-card__footer span {
+    @apply min-w-0 truncate;
+  }
+
+  .task-overview-discussion-card__footer strong {
+    @apply shrink-0 font-semibold;
+    color: var(--za-accent);
+  }
+
   /* ---------- 交接列表（连体容器 + 四列） ---------- */
   .task-overview-handoff-list {
     @apply overflow-hidden rounded-2xl border;
@@ -683,6 +754,12 @@
     @apply m-0 rounded-none border-0;
   }
 
+  @media (max-width: 1100px) {
+    .task-overview-discussion-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
   @media (max-width: 900px) {
     .task-overview-handoff-row {
       grid-template-columns: 1fr;
@@ -728,6 +805,16 @@
     .history-row-open {
       grid-column: 2;
       @apply justify-self-start;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .task-overview-discussion-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .task-overview-section-head {
+      @apply items-start;
     }
   }
 }
@@ -957,4 +1044,76 @@
 .conversation-result-view__msg-body .markdown-content ul,
 .conversation-result-view__msg-body .markdown-content ol {
   @apply my-2 pl-5;
+}
+
+.task-details-view {
+  @apply flex flex-col gap-6 p-5;
+}
+
+.task-details-view__header {
+  @apply border-b pb-5;
+  border-color: var(--za-line);
+}
+
+.task-details-view__header > span {
+  @apply text-[11px] font-semibold uppercase tracking-[0.14em];
+  color: var(--za-accent);
+}
+
+.task-details-view__header h2 {
+  @apply mt-1 text-xl font-semibold;
+  color: var(--za-text);
+}
+
+.task-details-view__header p,
+.task-details-view__muted,
+.task-details-view__empty p,
+.task-details-plan p {
+  @apply mt-1 text-sm leading-relaxed;
+  color: var(--za-text-soft);
+}
+
+.task-details-view__section {
+  @apply flex flex-col gap-3;
+}
+
+.task-details-view__section h3 {
+  @apply text-xs font-semibold uppercase tracking-[0.12em];
+  color: var(--za-text-muted);
+}
+
+.task-details-view__empty,
+.task-details-plan {
+  @apply rounded-xl border p-4;
+  border-color: var(--za-line);
+  background: var(--za-surface-0);
+}
+
+.task-details-view__empty strong,
+.task-details-plan__heading strong {
+  color: var(--za-text);
+}
+
+.task-details-view__history {
+  @apply flex flex-col gap-3;
+}
+
+.task-details-plan__heading {
+  @apply flex items-start justify-between gap-3;
+}
+
+.task-details-plan__heading span {
+  @apply rounded-full px-2 py-0.5 text-[10px] font-medium uppercase;
+  background: color-mix(in srgb, var(--za-accent) 10%, transparent);
+  color: var(--za-accent);
+}
+
+.task-details-plan__progress {
+  @apply mt-3 flex items-center gap-3 text-xs;
+  color: var(--za-text-muted);
+}
+
+.task-details-plan__progress progress {
+  @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
+  accent-color: var(--za-accent);
 }

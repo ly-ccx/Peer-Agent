@@ -107,6 +107,8 @@ function planStepStatusLabel(status: string): string {
   }
 }
 
+const DISCUSSION_PREVIEW_LIMIT = 6;
+
 function advancingStateLabel(item: TaskOverviewItem): string {
   const s = item.statusLabel;
   if (s.includes('验证')) return '正在验证';
@@ -209,10 +211,13 @@ function HeroLayout({
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
-  const needsYou = items.filter((i) => i.actionRight === 'needs_you');
-  const advancing = items.filter((i) => i.actionRight === 'peer_advancing');
-  const resultReady = items.filter((i) => i.actionRight === 'result_ready');
-  const hasAny = needsYou.length + advancing.length + resultReady.length > 0;
+  const discussions = items.filter((i) => i.source === 'conversation');
+  const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
+  const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
+  const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
+  const advancing = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing');
+  const resultReady = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready');
+  const hasAny = discussions.length + needsYou.length + advancing.length + resultReady.length > 0;
 
   return (
     <div className="task-overview-page task-overview-page--home">
@@ -247,6 +252,33 @@ function HeroLayout({
         <div className="task-overview-empty">
           <p>{emptyLabel}</p>
         </div>
+      ) : null}
+
+      {discussions.length > 0 ? (
+        <section className="task-overview-section">
+          <div className="task-overview-section-head">
+            <div className="task-overview-section-title">
+              <h2>最近讨论</h2>
+              <small>{discussions.length}</small>
+            </div>
+            {onOpenTasks ? (
+              <button
+                type="button"
+                className="task-overview-section-link task-overview-section-link--button"
+                onClick={onOpenTasks}
+              >
+                {hiddenDiscussionCount > 0 ? `查看全部讨论 · 还有 ${hiddenDiscussionCount} 条 →` : '查看全部讨论 →'}
+              </button>
+            ) : (
+              <span className="task-overview-section-link">尚无执行计划</span>
+            )}
+          </div>
+          <div className="task-overview-discussion-grid">
+            {visibleDiscussions.map((item) => (
+              <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {needsYou.length > 0 ? (
@@ -405,6 +437,35 @@ function HandoffRow({
   );
 }
 
+/** 无计划讨论卡：只表达讨论上下文，不复用执行状态或进度。 */
+function DiscussionCard({
+  item,
+  onOpenItem,
+}: {
+  readonly item: TaskOverviewItem;
+  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+}) {
+  return (
+    <article
+      className={`task-overview-discussion-card${onOpenItem ? ' is-clickable' : ''}`}
+      onClick={() => onOpenItem?.(item)}
+    >
+      <div className="task-overview-discussion-card__meta">
+        <span className="task-overview-discussion-card__status">
+          <i aria-hidden="true" />
+          {item.statusLabel || '讨论中'}
+        </span>
+        <time>{formatRelativeTime(item.lastActiveAt)}</time>
+      </div>
+      <h3>{item.title}</h3>
+      <div className="task-overview-discussion-card__footer">
+        <span>{item.workspaceLabel ?? '当前 Workspace'}</span>
+        <strong>{item.actionLabel || '继续讨论 →'}</strong>
+      </div>
+    </article>
+  );
+}
+
 /** 推进中工作卡：状态 + 标题 + 进度条 + 取消 */
 function WorkItem({
   item,
@@ -433,13 +494,18 @@ function WorkItem({
     >
       <div className="task-overview-work-top">
         <span className="task-overview-work-state">
-          <i className="task-overview-spinner" aria-hidden="true" />
+          {item.source !== 'conversation' ? (
+            <i className="task-overview-spinner" aria-hidden="true" />
+          ) : null}
           {advancingStateLabel(item)}
         </span>
         <time>{item.lastActiveAt ? formatRelativeTime(item.lastActiveAt) : 'LIVE'}</time>
       </div>
       <h3>{item.title}</h3>
-      <p>{reasonMeta(item)}</p>
+      {item.currentGoalTitle ? (
+        <p className="task-overview-current-goal">当前目标 · {item.currentGoalTitle}</p>
+      ) : null}
+      <p>{item.source === 'conversation' ? '继续讨论，或在明确实施时创建 GoalPlan' : reasonMeta(item)}</p>
       {item.planSteps && item.planSteps.length > 0 ? (
         <ol className="task-overview-plan-steps" aria-label="计划步骤">
           {item.planSteps.map((step) => (

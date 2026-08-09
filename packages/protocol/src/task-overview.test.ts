@@ -3,10 +3,49 @@ import test from 'node:test';
 
 import {
   projectAutomationRun,
+  projectConversation,
   projectGoalPlan,
   type AutomationProjectionSnapshot,
+  type ConversationProjectionSnapshot,
   type GoalPlanProjectionSnapshot,
 } from './task-overview.ts';
+
+// ---------------------------------------------------------------------------
+// Conversation 讨论态投影（工作台动线 §15）
+// ---------------------------------------------------------------------------
+
+function conversationSnapshot(
+  overrides: Partial<ConversationProjectionSnapshot> = {},
+): ConversationProjectionSnapshot {
+  return {
+    conversationId: 'conversation-1',
+    title: '讨论 Task 与 Plan 的界面关系',
+    workspaceLabel: 'peer_agent',
+    updatedAt: '2026-08-09T01:00:00.000Z',
+    ...overrides,
+  };
+}
+
+test('projects a conversation without a GoalPlan as a discussion task', () => {
+  assert.deepEqual(projectConversation(conversationSnapshot()), {
+    taskId: 'conversation-1',
+    source: 'conversation',
+    actionRight: 'paused',
+    nextAction: 'continue_task',
+    title: '讨论 Task 与 Plan 的界面关系',
+    workspaceLabel: 'peer_agent',
+    statusLabel: '讨论中',
+    lastActiveAt: '2026-08-09T01:00:00.000Z',
+    actionLabel: '继续讨论 →',
+    conversationId: 'conversation-1',
+  });
+});
+
+test('conversation discussion projection never invents plan progress or steps', () => {
+  const item = projectConversation(conversationSnapshot());
+  assert.equal(item.planProgress, undefined);
+  assert.equal(item.planSteps, undefined);
+});
 
 // ---------------------------------------------------------------------------
 // GoalPlan 投影分支（§11.3 rule 1/2/5/6/8/9/11/12/13/14/16）
