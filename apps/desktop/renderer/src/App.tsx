@@ -661,6 +661,7 @@ function MainApp() {
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
     setActiveWorkspace(r.activeWorkspace);
+    setActivePage('home');
     setConversationView('active');
     // 切换工作区后自动选激活会话:优先第一个"进行中"的会话,否则第一个会话,
     // 空工作区(无任何会话)则保持空态。需 list 返回值当场计算,故内联拉取而非走
