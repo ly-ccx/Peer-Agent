@@ -201,7 +201,8 @@ function planStepStatusLabel(status: string): string {
   }
 }
 
-const DISCUSSION_PREVIEW_LIMIT = 6;
+/** 「正在讨论」首页预览条数：克制，避免盖过行动权三桶。 */
+const DISCUSSION_PREVIEW_LIMIT = 4;
 
 /**
  * 板块头部的次级入口。
@@ -571,21 +572,21 @@ function HeroLayout({
       ) : null}
 
       {discussions.length > 0 ? (
-        <section className="task-overview-section">
+        <section className="task-overview-section task-overview-section--discussion">
           <div className="task-overview-section-head">
             <div className="task-overview-section-title">
-              <h2>最近讨论</h2>
+              <h2>正在讨论</h2>
               <small>{discussions.length}</small>
             </div>
             {onOpenTasks ? (
               <SectionLink
-                label="查看全部讨论"
+                label="查看全部"
                 count={hiddenDiscussionCount}
                 countHint={`还有 ${hiddenDiscussionCount} 条`}
                 onClick={onOpenTasks}
               />
             ) : (
-              <span className="task-overview-section-meta">尚无执行计划</span>
+              <span className="task-overview-section-meta">未读沟通</span>
             )}
           </div>
           <div className="task-overview-discussion-grid">
@@ -721,14 +722,14 @@ function DiscussionCard({
       <div className="task-overview-discussion-card__meta">
         <span className="task-overview-discussion-card__status">
           <i aria-hidden="true" />
-          {item.statusLabel || '讨论中'}
+          {item.statusLabel || '有未读'}
         </span>
         <time>{formatRelativeTime(item.lastActiveAt)}</time>
       </div>
       <h3>{item.title}</h3>
       <div className="task-overview-discussion-card__footer">
         <span>{item.workspaceLabel ?? '当前 Workspace'}</span>
-        <strong>{item.actionLabel || '继续讨论 →'}</strong>
+        <strong>{item.actionLabel || '打开'}</strong>
       </div>
     </article>
   );

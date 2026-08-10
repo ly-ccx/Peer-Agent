@@ -44,8 +44,36 @@ test('aggregator projects conversations without GoalPlans as discussion tasks', 
   assert.equal(items.length, 1);
   assert.equal(items[0].source, 'conversation');
   assert.equal(items[0].title, '讨论 Task 与 Plan 的…');
-  assert.equal(items[0].statusLabel, '讨论中');
-  assert.equal(items[0].actionLabel, '继续讨论 →');
+  assert.equal(items[0].statusLabel, '有未读');
+  assert.equal(items[0].actionLabel, '打开');
+});
+
+test('aggregator omits read conversations from 正在讨论 projection', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-read',
+        title: '已经看过的沟通',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T01:00:00.000Z',
+        lastReadAt: '2026-08-09T01:30:00.000Z',
+      },
+      {
+        id: 'conversation-unread',
+        title: '有新消息未读',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T02:00:00.000Z',
+        lastReadAt: '2026-08-09T01:00:00.000Z',
+      },
+    ],
+  });
+
+  const items = agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].conversationId, 'conversation-unread');
+  assert.equal(items[0].statusLabel, '有未读');
 });
 
 test('displayConversationTitle truncates long user text and rejects command-like titles', () => {

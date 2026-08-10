@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  isConversationUnreadForDiscussion,
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
@@ -35,9 +36,9 @@ test('projects a conversation without a GoalPlan as a discussion task', () => {
     nextAction: 'continue_task',
     title: '讨论 Task 与 Plan 的界面关系',
     workspaceLabel: 'peer_agent',
-    statusLabel: '讨论中',
+    statusLabel: '有未读',
     lastActiveAt: '2026-08-09T01:00:00.000Z',
-    actionLabel: '继续讨论 →',
+    actionLabel: '打开',
     conversationId: 'conversation-1',
   });
 });
@@ -46,6 +47,29 @@ test('conversation discussion projection never invents plan progress or steps', 
   const item = projectConversation(conversationSnapshot());
   assert.equal(item.planProgress, undefined);
   assert.equal(item.planSteps, undefined);
+});
+
+test('isConversationUnreadForDiscussion compares updatedAt and lastReadAt', () => {
+  assert.equal(
+    isConversationUnreadForDiscussion({
+      updatedAt: '2026-08-09T02:00:00.000Z',
+      lastReadAt: '2026-08-09T01:00:00.000Z',
+    }),
+    true,
+  );
+  assert.equal(
+    isConversationUnreadForDiscussion({
+      updatedAt: '2026-08-09T01:00:00.000Z',
+      lastReadAt: '2026-08-09T01:30:00.000Z',
+    }),
+    false,
+  );
+  // 无 lastReadAt 视为未读（兼容旧数据）
+  assert.equal(
+    isConversationUnreadForDiscussion({ updatedAt: '2026-08-09T01:00:00.000Z' }),
+    true,
+  );
+  assert.equal(isConversationUnreadForDiscussion({}), false);
 });
 
 // ---------------------------------------------------------------------------

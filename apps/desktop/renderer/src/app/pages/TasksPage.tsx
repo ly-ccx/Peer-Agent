@@ -58,7 +58,7 @@ function filterKeyOf(item: TaskOverviewItem): Exclude<TasksFilter, 'all'> {
 }
 
 function sourceKindLabel(item: TaskOverviewItem): string {
-  if (item.source === 'conversation') return '最近讨论';
+  if (item.source === 'conversation') return '正在讨论';
   if (item.source === 'automation') return 'Automation';
   if (item.actionRight === 'result_ready') return 'Result ready';
   if (item.nextAction === 'approve_plan' || item.nextAction === 'confirm_scope') return 'Conversation';
@@ -68,7 +68,7 @@ function sourceKindLabel(item: TaskOverviewItem): string {
 }
 
 function actionOwnerLabel(item: TaskOverviewItem): string {
-  if (item.source === 'conversation') return '讨论中';
+  if (item.source === 'conversation') return '有未读';
   if (item.actionRight === 'needs_you') {
     if (item.needsYouReason === 'plan_approval') return '等待你的决策';
     if (item.needsYouReason === 'user_input') {
@@ -88,7 +88,7 @@ function actionOwnerLabel(item: TaskOverviewItem): string {
 }
 
 function rowOpenLabel(item: TaskOverviewItem): string {
-  if (item.source === 'conversation') return '继续讨论 →';
+  if (item.source === 'conversation') return item.actionLabel || '打开';
   if (item.actionRight === 'needs_you') {
     if (item.nextAction === 'grant_permission') return '处理 →';
     if (item.nextAction === 'decide_blocked' || item.nextAction === 'approve_plan') return '进入 →';

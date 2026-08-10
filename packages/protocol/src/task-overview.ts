@@ -176,6 +176,11 @@ export interface ConversationProjectionSnapshot {
   readonly title: string;
   readonly workspaceLabel?: string;
   readonly updatedAt?: string;
+  /**
+   * 用户已读水位（ISO）。首页「正在讨论」只投影未读沟通：
+   * 无 lastReadAt，或 updatedAt > lastReadAt。
+   */
+  readonly lastReadAt?: string | null;
   /** 会话绑定模型标签；无绑定时省略。 */
   readonly modelLabel?: string;
   /** 提供商标签；无绑定时省略。 */
@@ -261,6 +266,32 @@ interface ProjectionDecision {
 }
 
 /** Conversation → 无计划讨论态（工作台动线 §15）。 */
+/**
+ * 会话是否对首页「正在讨论」可见（未读）。
+ * - 无 updatedAt：不可见
+ * - 无 lastReadAt：视为未读（兼容旧数据；打开后写入水位）
+ * - updatedAt > lastReadAt：未读
+ */
+export function isConversationUnreadForDiscussion(
+  snapshot: Pick<ConversationProjectionSnapshot, 'updatedAt' | 'lastReadAt'>,
+): boolean {
+  const updatedAt =
+    typeof snapshot.updatedAt === 'string' && snapshot.updatedAt.trim()
+      ? snapshot.updatedAt.trim()
+      : '';
+  if (!updatedAt) return false;
+  const updatedMs = Date.parse(updatedAt);
+  if (!Number.isFinite(updatedMs)) return false;
+  const lastReadAt =
+    typeof snapshot.lastReadAt === 'string' && snapshot.lastReadAt.trim()
+      ? snapshot.lastReadAt.trim()
+      : '';
+  if (!lastReadAt) return true;
+  const readMs = Date.parse(lastReadAt);
+  if (!Number.isFinite(readMs)) return true;
+  return updatedMs > readMs;
+}
+
 export function projectConversation(
   snapshot: ConversationProjectionSnapshot,
 ): TaskOverviewItem {
@@ -279,11 +310,12 @@ export function projectConversation(
     nextAction: 'continue_task',
     title: snapshot.title,
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
-    statusLabel: '讨论中',
+    // 「正在讨论」是未读入口，不是任务态；状态文案用「有未读」。
+    statusLabel: '有未读',
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),
-    actionLabel: '继续讨论 →',
+    actionLabel: '打开',
     conversationId: snapshot.conversationId,
   };
 }

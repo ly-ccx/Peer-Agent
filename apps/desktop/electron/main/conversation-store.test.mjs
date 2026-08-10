@@ -1248,3 +1248,28 @@ test('listConversations can skip messageCount for workspace discovery', () => {
     cleanup();
   }
 });
+
+test('markRead advances lastReadAt without changing updatedAt', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'read-watermark', workspacePath: '/ws/read' });
+    assert.ok(conv.lastReadAt);
+    assert.equal(conv.lastReadAt, conv.createdAt);
+
+    const beforeUpdatedAt = conv.updatedAt;
+    const later = '2099-01-01T00:00:00.000Z';
+    const marked = store.markRead(conv.id, { at: later });
+    assert.ok(marked);
+    assert.equal(marked.lastReadAt, later);
+    assert.equal(marked.updatedAt, beforeUpdatedAt);
+
+    // 水位只前进，不回退
+    const earlier = '2000-01-01T00:00:00.000Z';
+    const again = store.markRead(conv.id, { at: earlier });
+    assert.equal(again.lastReadAt, later);
+
+    assert.equal(store.markRead('missing-id'), null);
+  } finally {
+    cleanup();
+  }
+});

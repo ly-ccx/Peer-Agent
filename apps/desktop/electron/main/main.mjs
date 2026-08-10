@@ -1829,6 +1829,7 @@ const conversationSessionApplicationService = createConversationSessionApplicati
   scheduleRecovery: (task) => queueMicrotask(task),
   startGoalRunner: (planId) => goalRunner?.start(planId) ?? null,
   markTaskRead: (planId) => taskNotificationBroker?.markTaskRead(planId),
+  markConversationRead: (conversationId) => conversationStore?.markRead?.(conversationId),
   reportRecoveryFailure: (error) => {
     console.error('[main] recover active goal runner failed:', error?.message || error);
   },

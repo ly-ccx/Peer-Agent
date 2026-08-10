@@ -20,6 +20,7 @@
  */
 
 import {
+  isConversationUnreadForDiscussion,
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
@@ -676,12 +677,23 @@ export function createTaskOverviewAggregator({
       ) {
         continue;
       }
+      // 首页「正在讨论」只收未读沟通；已读会话不占位。
+      // 活跃任务 conversation 已在 projectedPlanConversationIds 排除（一会话一投影）。
+      if (
+        !isConversationUnreadForDiscussion({
+          updatedAt: conversation.updatedAt,
+          lastReadAt: conversation.lastReadAt,
+        })
+      ) {
+        continue;
+      }
       const labels = resolveConversationModelLabels(conversation, providerIndex);
       items.push(projectConversation({
         conversationId,
         title: displayConversationTitle(conversation.title, '未命名沟通'),
         workspaceLabel: workspaceLabelFromPath(conversation.workspacePath),
         updatedAt: conversation.updatedAt,
+        lastReadAt: conversation.lastReadAt ?? null,
         ...(labels.modelLabel ? { modelLabel: labels.modelLabel } : {}),
         ...(labels.providerLabel ? { providerLabel: labels.providerLabel } : {}),
       }));
