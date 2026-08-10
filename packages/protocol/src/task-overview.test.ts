@@ -81,6 +81,16 @@ test('rule 2: drafting → needs_you / plan_approval', () => {
   assert.equal(item.nextAction, 'confirm_scope');
 });
 
+test('rule 4: runner waiting_user → needs_you / user_input / answer_question', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({ status: 'executing', runnerStatus: 'waiting_user' }),
+  );
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
 test('rule 5: runner blocked → needs_you / decision', () => {
   const item = projectGoalPlan(
     goalSnapshot({ status: 'executing', runnerStatus: 'blocked' }),

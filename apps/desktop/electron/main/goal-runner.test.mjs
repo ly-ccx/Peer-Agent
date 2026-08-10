@@ -718,7 +718,7 @@ test('stream failed: 若无 running 叶子，会把首个 pending 标 failed 避
 });
 
 
-test('AgentRunOutcome: requestedUserInput 会阻塞 Runner 且不继续自驱', async () => {
+test('AgentRunOutcome: requestedUserInput 会进入 waiting_user 且不继续自驱', async () => {
   const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
@@ -734,7 +734,8 @@ test('AgentRunOutcome: requestedUserInput 会阻塞 Runner 且不继续自驱', 
 
   const got = store.getPlan(plan.planId);
   assert.equal(calls, 1);
-  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.status, 'waiting_user');
+  assert.equal(got.runner.phase, 'waiting_user');
   assert.equal(got.runner.blockedReason, 'requested_user_input');
   assert.ok(events.some((event) => event.type === 'goalRunner:blocked' && event.requestedUserInput));
 });
@@ -1262,7 +1263,7 @@ test('intake·纯问答：回合只答文字（未升级/未提问）→ 静默�
   );
 });
 
-test('intake·模糊澄清：回合调 request_user_input → 保留 intake 契约并 blocked 等待用户', async () => {
+test('intake·模糊澄清：回合调 request_user_input → 保留 intake 契约并 waiting_user 等待用户', async () => {
   const intake = store.createIntakeContract({
     conversationId: 'conv-intake-clarify',
     goal: '帮我优化一下',
@@ -1281,7 +1282,8 @@ test('intake·模糊澄清：回合调 request_user_input → 保留 intake 契�
   const got = store.getPlan(intake.planId);
   assert.notEqual(got, null, '模糊澄清阶段不得删除 intake 契约');
   assert.equal(got.activation.kind, 'intake', '仍停留在 intake 判别阶段');
-  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.status, 'waiting_user');
+  assert.equal(got.runner.phase, 'waiting_user');
   assert.ok(events.some((event) => event.type === 'goalRunner:blocked'));
 });
 

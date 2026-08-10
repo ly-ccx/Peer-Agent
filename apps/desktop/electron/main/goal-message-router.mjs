@@ -117,24 +117,25 @@ export function classifyGoalMessage(messageText) {
   };
 }
 
+const CONTINUATION_INTENTS = new Set([
+  'resume',
+  'follow_up',
+  'correction',
+  'requirement_override',
+]);
+
+export function consumesRequestedUserInput({ route, activeGoalPlan } = {}) {
+  return route?.type === 'append_goal_event'
+    && CONTINUATION_INTENTS.has(route.intent)
+    && activeGoalPlan?.status === 'executing'
+    && ['waiting_user', 'blocked'].includes(activeGoalPlan?.runner?.status)
+    && activeGoalPlan?.runner?.blockedReason === 'requested_user_input';
+}
+
 export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, source = 'chat:send' } = {}) {
   if (route?.type !== 'append_goal_event' || !route.goalPlanId) return null;
 
-  // A user message starts a fresh chat stream directly; it does not pass through
-  // goalRunner.resume. Stream/runtime failures may leave plan.status='failed' even
-  // when the user continues the same goal (follow-up / correction / resume). Restore
-  // before recording the new turn so UI and active-plan lookup leave the sticky failed state.
-  if (
-    activeGoalPlan?.status === 'failed'
-    && (route.intent === 'resume' || route.intent === 'follow_up' || route.intent === 'correction')
-  ) {
-    goalPlanStore?.resumeRunner?.(route.goalPlanId, {
-      intent: 'execute',
-      phase: activeGoalPlan.runner?.phase ?? 'orient',
-    });
-  }
-
-  return goalPlanStore?.appendRunEvent?.(route.goalPlanId, {
+  const event = {
     type: route.eventType,
     summary: route.summary,
     payload: {
@@ -143,7 +144,33 @@ export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, so
       intent: route.intent,
       messageText: route.messageText,
     },
-  }) ?? null;
+  };
+
+  // request_user_input is a precise governed blocker. Consume the answer and
+  // clear that blocker in one store transition; unrelated blockers must remain.
+  // The foreground chat turn still owns execution until its promise settles.
+  if (
+    consumesRequestedUserInput({ route, activeGoalPlan })
+    && typeof goalPlanStore?.consumeRequestedUserInput === 'function'
+  ) {
+    return goalPlanStore.consumeRequestedUserInput(route.goalPlanId, event);
+  }
+
+  // A user message starts a fresh chat stream directly; it does not pass through
+  // goalRunner.resume. Restore failed continuations before recording the new turn.
+  if (
+    activeGoalPlan?.status === 'failed'
+    && CONTINUATION_INTENTS.has(route.intent)
+  ) {
+    goalPlanStore?.resumeRunner?.(route.goalPlanId, {
+      intent: 'execute',
+      phase: activeGoalPlan.runner?.phase === 'blocked'
+        ? 'orient'
+        : (activeGoalPlan.runner?.phase ?? 'orient'),
+    });
+  }
+
+  return goalPlanStore?.appendRunEvent?.(route.goalPlanId, event) ?? null;
 }
 
 export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {

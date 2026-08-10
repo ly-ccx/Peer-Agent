@@ -1836,11 +1836,11 @@ export function createGoalRunner({
         const reason = result.blockedReason || 'requested_user_input';
         goalPlanStore.setRunnerState(planId, {
           enabled: true,
-          status: 'blocked',
+          status: 'waiting_user',
           intent: 'block',
-          phase: 'blocked',
+          phase: 'waiting_user',
           blockedReason: reason,
-          ...blockerPatch(latest, reason, { phase: 'blocked' }),
+          ...blockerPatch(latest, reason, { phase: 'waiting_user' }),
           updatedAt: now(),
         });
         appendRunEvent(planId, {

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { applyGoalMessageRoute, classifyGoalMessage, routeGoalMessage } from './goal-message-router.mjs';
+import {
+  applyGoalMessageRoute,
+  classifyGoalMessage,
+  consumesRequestedUserInput,
+  routeGoalMessage,
+} from './goal-message-router.mjs';
 
 const activeGoalPlan = Object.freeze({
   planId: 'goal-1',
@@ -69,6 +74,63 @@ test('applyGoalMessageRoute restores a failed Goal before recording the user res
   assert.deepEqual(calls[0], ['resume', 'goal-1', { intent: 'execute', phase: 'act' }]);
   assert.equal(calls[1][2].type, 'goal_resumed');
   assert.equal(calls[1][2].payload.source, 'chat:send');
+});
+
+test('applyGoalMessageRoute atomically consumes a reply to requested_user_input', () => {
+  const blockedPlan = {
+    ...activeGoalPlan,
+    runner: { status: 'waiting_user', phase: 'waiting_user', blockedReason: 'requested_user_input' },
+  };
+  const route = routeGoalMessage({ messageText: '继续修复全部测试失败', activeGoalPlan: blockedPlan });
+  const calls = [];
+  const goalPlanStore = {
+    consumeRequestedUserInput(planId, event) {
+      calls.push(['consume', planId, event]);
+      return { ...blockedPlan, runner: { status: 'running', phase: 'orient' } };
+    },
+    appendRunEvent() {
+      calls.push(['event']);
+    },
+  };
+
+  assert.equal(consumesRequestedUserInput({ route, activeGoalPlan: blockedPlan }), true);
+  const result = applyGoalMessageRoute({ route, activeGoalPlan: blockedPlan, goalPlanStore });
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['consume']);
+  assert.equal(calls[0][2].payload.messageText, '继续修复全部测试失败');
+  assert.equal(result.runner.status, 'running');
+});
+
+test('applyGoalMessageRoute keeps unrelated Runner blockers intact', () => {
+  const blockedPlan = {
+    ...activeGoalPlan,
+    runner: { status: 'blocked', phase: 'blocked', blockedReason: 'permission_required' },
+  };
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan: blockedPlan });
+  const calls = [];
+  const goalPlanStore = {
+    consumeRequestedUserInput() {
+      calls.push(['consume']);
+    },
+    appendRunEvent(planId, event) {
+      calls.push(['event', planId, event]);
+      return event;
+    },
+  };
+
+  assert.equal(consumesRequestedUserInput({ route, activeGoalPlan: blockedPlan }), false);
+  applyGoalMessageRoute({ route, activeGoalPlan: blockedPlan, goalPlanStore });
+  assert.deepEqual(calls.map(([kind]) => kind), ['event']);
+});
+
+test('applyGoalMessageRoute does not treat pause as a requested_user_input answer', () => {
+  const blockedPlan = {
+    ...activeGoalPlan,
+    runner: { status: 'blocked', phase: 'blocked', blockedReason: 'requested_user_input' },
+  };
+  const route = routeGoalMessage({ messageText: '暂停', activeGoalPlan: blockedPlan });
+  assert.equal(route.intent, 'pause');
+  assert.equal(consumesRequestedUserInput({ route, activeGoalPlan: blockedPlan }), false);
 });
 
 test('applyGoalMessageRoute does not reset a non-failed Goal', () => {

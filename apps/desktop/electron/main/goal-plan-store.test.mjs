@@ -1806,6 +1806,42 @@ test('setPlanStatus timing ledger: executing → paused → resume → completed
   assert.equal(reloaded.timing.wallClockMs, completed.timing.wallClockMs);
 });
 
+test('consumeRequestedUserInput atomically records the decision and clears only that blocker', () => {
+  const plan = approvedPlanWithTasks();
+  store.setPlanStatus(plan.planId, 'executing');
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'blocked',
+    intent: 'block',
+    phase: 'blocked',
+    blockedReason: 'requested_user_input',
+  });
+
+  const consumed = store.consumeRequestedUserInput(plan.planId, {
+    type: 'message_routed',
+    summary: '用户已决策',
+    payload: { intent: 'follow_up', messageText: '继续执行' },
+  });
+
+  assert.equal(consumed.status, 'executing');
+  assert.equal(consumed.runner.status, 'running');
+  assert.equal(consumed.runner.intent, 'execute');
+  assert.equal(consumed.runner.phase, 'orient');
+  assert.equal(consumed.runner.blockedReason, undefined);
+  assert.equal(consumed.runTrace.events.at(-1).payload.messageText, '继续执行');
+
+  store.setRunnerState(plan.planId, {
+    status: 'blocked',
+    phase: 'blocked',
+    blockedReason: 'permission_required',
+  });
+  assert.equal(store.consumeRequestedUserInput(plan.planId, {
+    type: 'message_routed',
+    summary: '不应消费',
+  }), null);
+  assert.equal(store.getPlan(plan.planId).runner.blockedReason, 'permission_required');
+});
+
 test('setRunnerState blocked pauses active segment while plan stays executing', async () => {
   const plan = approvedPlanWithTasks();
   store.setPlanStatus(plan.planId, 'executing');

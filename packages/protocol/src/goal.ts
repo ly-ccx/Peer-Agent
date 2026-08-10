@@ -281,6 +281,7 @@ export type GoalRunnerStatus =
   | 'resuming_after_compaction'
   | 'paused'
   | 'exploring'
+  | 'waiting_user'
   | 'blocked'
   | 'budget_exhausted'
   | 'completed'

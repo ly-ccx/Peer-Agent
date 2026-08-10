@@ -154,6 +154,16 @@ test('toGoalPlanSnapshot 写入 planSteps', () => {
   });
   assert.deepEqual(snapshot.planSteps, [
     { taskId: 's1', title: '协议字段', status: 'completed' },
+test('toGoalPlanSnapshot preserves waiting_user for action-owner projection', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-waiting',
+    status: 'executing',
+    title: '等待选择',
+    runner: { status: 'waiting_user', blockedReason: 'requested_user_input' },
+  });
+  assert.equal(snapshot.runnerStatus, 'waiting_user');
+});
+
     { taskId: 's2', title: 'UI 列表', status: 'running', current: true },
   ]);
 });
@@ -619,6 +629,28 @@ test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活
       title: '存量完成不进待验收',
       updatedAt: STALE,
       targetWorkspacePath: '/x/peer_agent',
+test('listTaskOverview moves waiting_user GoalPlans out of Peer advancing', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [{
+        planId: 'waiting-choice',
+        status: 'executing',
+        title: '请选择工作区样式',
+        updatedAt: RECENT,
+        targetWorkspacePath: '/x/peer_agent',
+        conversationId: 'c-waiting',
+        runner: { status: 'waiting_user', blockedReason: 'requested_user_input' },
+      }],
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const [item] = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
     },
     {
       planId: 'live',
