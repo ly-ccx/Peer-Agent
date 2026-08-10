@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Local-first · Permission-gated · Evidence-backed · Task-flow by default
+  Local-first · Permission-gated · Evidence-backed · Task flow by default
 </p>
 
 <p align="center">
@@ -56,50 +56,32 @@ Three first-class shells share one runtime:
 | 🧾 **Evidence-backed** | Every capability call returns structured Evidence (artifacts, logs, metadata) you can inspect after the fact. |
 | 🧩 **One governed runtime** | Shell, files, web/browser, MCP, plugins, and skills all flow through a single chain. No hidden side doors. |
 | 🖥️ **Multi-surface** | Desktop GUI, terminal TUI, and `peer` CLI share `~/.peer-agent` data and the same local runtime. |
-| 🎯 **Task-flow by default** | Goals are **accepted**, ambiguity is **clarified**, work is **auto-planned**, and completion is **evidence-backed**. |
+| 🎯 **Task flow by default** | Accept the goal, clarify when needed, plan by complexity, finish with Evidence. |
 
 ---
 
 ## 🧠 Task Flow
 
-Peer Agent is a **Task Flow Agent** — not a chat bot that freelances on your disk.
+Peer Agent treats multi-step work as a **task**, not a free-form chat turn.
+
+Before acting, it turns your request into an objective, boundaries, and success criteria you can review. If something material is missing — a product choice, a risky trade-off, or a permission — it asks instead of guessing. Planning depth scales with complexity:
+
+| Depth | When | Behavior |
+| --- | --- | --- |
+| **L0** | Simple Q&A | Answer directly |
+| **L1** | Small scoped change | Short plan, then act |
+| **L2** | Multi-step work | Self-driven GoalPlan with trackable subtasks |
+| **L3** | High-risk / irreversible | Explicit **Plan** review before side effects |
+
+**Agent** is the default. **Plan** is the brake when you want review first. Subtasks and success criteria close only with real tool results and Evidence — not “done” prose.
+
+Local execution still goes through one chain:
 
 ```text
-任务先签收，再开工。
-模糊就追问，不猜着做。
-按复杂度自动规划。
-卡住才打断，完成靠证据。
+Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence
 ```
 
-```text
-Goals are accepted before work starts.
-Ambiguity triggers follow-up questions — no silent guessing.
-Work is auto-planned by complexity (L0–L3).
-Interrupt only when blocked; finish only with evidence.
-```
-
-### How it shows up
-
-| Step | What happens |
-| --- | --- |
-| **1. Task acceptance / 任务签收** | A goal is rewritten into a clear objective, boundaries, and success criteria *before* side effects land. You can see what the agent took on. |
-| **2. Follow-up questions / 追问澄清** | Missing decisions, risky trade-offs, or permission gaps surface as structured asks — not silent mid-run assumptions. |
-| **3. Auto-planning / 自动规划** | **Agent** (default) picks depth: direct answers, micro-plans, self-driven GoalPlans, or gated Plan review. **Plan** is the explicit human brake for high-risk work. |
-| **4. Evidence-backed completion** | Subtasks and success criteria close only with real tool/Evidence results — not “done” prose. |
-
-Local power stays governed either way:
-
-```text
-Capability Provider
-  → Manifest
-    → Runtime Projection
-      → Tool Call
-        → PermissionGrant
-          → Evidence
-```
-
-**Task flow** owns *how work is accepted and finished*.  
-**The capability chain** owns *how local power is authorized and proven*.
+Task flow decides *what* work is accepted and when it is finished. The capability chain decides *how* local power is authorized and proven.
 
 ---
 
@@ -111,7 +93,7 @@ Capability Provider
 - ⌨️ **TUI / CLI (`peer`)** — Full terminal agent; install via `@peer-agent/cli` or build from source
 - ⚡ **Quick Chat** — Lightweight global chat without opening a full task thread
 - 🎯 **Agent & Plan modes** — Agent auto-plans and executes (L0–L3); Plan requires review before side effects
-- 📋 **Goal runner / task flow** — Accept the goal, clarify when stuck, track subtasks, close only with evidence
+- 📋 **Goal runner** — Trackable subtasks, clarification when blocked, evidence-backed completion
 
 ### Connect tools and knowledge
 
