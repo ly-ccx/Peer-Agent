@@ -11,7 +11,8 @@ test('result acceptance waits for success before celebrating and preserves a rem
   assert.match(source, /type AcceptancePhase/);
   assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
   assert.match(source, /Object\.values\(acceptanceTransitions\)/);
-  assert.match(source, /result-card--\$\{phase\}/);
+  assert.match(source, /ParticleShatterOverlay/);
+  assert.match(source, /is-shattering/);
   assert.match(source, /正在验收…/);
   assert.match(source, /验收完成，任务已圆满结束/);
 });

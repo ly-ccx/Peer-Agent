@@ -277,12 +277,13 @@
     background: color-mix(in srgb, var(--za-surface-0) 80%, transparent);
   }
 
+  /* 横向 padding 放在 row 上，让 hover/分隔线铺满卡片全宽。 */
   .gwb-pulse-body {
-    @apply px-4 pb-2;
+    @apply pb-2;
   }
 
   .gwb-pulse-row {
-    @apply grid w-full items-center gap-2 border-t py-2 text-left text-xs;
+    @apply grid w-full items-center gap-2 border-t px-4 py-2 text-left text-xs;
     grid-template-columns: 1.2fr repeat(3, 0.7fr);
     border-color: color-mix(in srgb, var(--za-line) 80%, transparent);
     background: transparent;

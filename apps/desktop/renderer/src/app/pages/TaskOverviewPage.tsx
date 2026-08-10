@@ -7,6 +7,7 @@ import {
   mergeAcceptanceTransitionItems,
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
+import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 
 /**
@@ -824,28 +825,20 @@ function ResultCard({
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
+  const cardRef = useRef<HTMLElement | null>(null);
   const summary = item.planProgress
     ? `${item.planProgress.total} 项标准通过 · ${item.planProgress.completed} 项完成 · 无已知风险`
     : 'Peer 已完成并带回 Evidence · 无已知风险';
   const canAccept = item.source === 'goal_plan' && typeof onAcceptResult === 'function';
   const pct = progressPercent(item);
   const celebrating = phase === 'celebrating' || phase === 'exiting';
+  const shattering = celebrating;
   return (
+    <div className="particle-shatter-host">
     <article
-      className={`task-overview-work-item task-overview-work-item--result_ready result-card${
-        phase ? ` result-card--${phase}` : ''
-      }`}
+      ref={cardRef}
+      className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}
     >
-      {celebrating ? (
-        <span className="result-card-celebration" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-      ) : null}
       <div className="task-overview-work-top">
         <span className="task-overview-work-state result-card-state">
           <i className="result-card-seal" aria-hidden="true">
@@ -893,5 +886,7 @@ function ResultCard({
         </button>
       </div>
     </article>
+      <ParticleShatterOverlay active={shattering} targetRef={cardRef} />
+    </div>
   );
 }

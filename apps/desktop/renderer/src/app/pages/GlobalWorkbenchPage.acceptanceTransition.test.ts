@@ -14,7 +14,8 @@ test('global workbench acceptance waits for success before celebrating and freez
   assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
   assert.match(source, /setAcceptanceOrderSnapshot\(resultReady\.map\(\(candidate\) => candidate\.taskId\)\)/);
   assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
-  assert.match(source, /gwb-item--\$\{phase\}/);
+  assert.match(source, /ParticleShatterOverlay/);
+  assert.match(source, /is-shattering/);
   assert.match(source, /className="gwb-type"/);
   assert.match(source, /className="gwb-body"/);
   assert.match(source, /className="gwb-chips"/);
@@ -34,12 +35,18 @@ test('global workbench acceptance failure returns the card to a retryable idle s
   assert.match(source, /disabled=\{acceptBusy\}/);
 });
 
-test('global workbench acceptance celebration styles cover three phases and reduced motion', async () => {
+test('global workbench acceptance uses particle shatter overlay styles', async () => {
+  const source = await readPage();
+  assert.match(source, /ParticleShatterOverlay/);
+  assert.match(source, /particle-shatter-source/);
+  const shatterStyles = await readFile(
+    new URL('../../styles/particle-shatter.css', import.meta.url),
+    'utf8',
+  );
+  assert.match(shatterStyles, /particle-shatter-canvas/);
+  assert.match(shatterStyles, /is-shattering/);
+  assert.match(shatterStyles, /@media \(prefers-reduced-motion: reduce\)/);
   const styles = await readStyles();
   assert.match(styles, /\.gwb-item--submitting/);
-  assert.match(styles, /\.gwb-item--celebrating/);
-  assert.match(styles, /\.gwb-item--exiting/);
-  assert.match(styles, /gwb-item-celebrate-pop/);
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(styles, /\.gwb-accept-spinner/);
 });

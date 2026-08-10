@@ -10,6 +10,7 @@ import {
   mergeAcceptanceTransitionItems,
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
+import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 
 function workspaceBasename(workspacePath: string): string {
   const normalized = workspacePath.replace(/[/\\]+$/, '');
@@ -431,46 +432,48 @@ function InboxRow({
   onAccept,
 }: {
   readonly item: TaskOverviewItem;
-  readonly kind: "need" | "accept";
+  readonly kind: 'need' | 'accept';
   readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
   readonly onAccept?: () => void;
 }) {
-  const submitting = phase === "submitting";
-  const celebrating = phase === "celebrating" || phase === "exiting";
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const submitting = phase === 'submitting';
+  const celebrating = phase === 'celebrating' || phase === 'exiting';
+  const shattering = kind === 'accept' && celebrating;
   const acceptBusy = submitting || celebrating;
 
   const tag =
-    kind === "accept"
+    kind === 'accept'
       ? celebrating
-        ? "已验收"
-        : "验收"
-      : item.nextAction === "grant_permission"
-        ? "权限"
-        : item.needsYouReason === "decision" || item.nextAction === "approve_plan"
-          ? "决策"
-          : "需要你";
+        ? '已验收'
+        : '验收'
+      : item.nextAction === 'grant_permission'
+        ? '权限'
+        : item.needsYouReason === 'decision' || item.nextAction === 'approve_plan'
+          ? '决策'
+          : '需要你';
 
   const typeNote =
-    kind === "accept"
+    kind === 'accept'
       ? celebrating
-        ? "验收完成"
+        ? '验收完成'
         : submitting
-          ? "提交中"
-          : item.statusLabel || "等待验收"
+          ? '提交中'
+          : item.statusLabel || '等待验收'
       : item.statusLabel;
 
   const cta =
-    kind === "accept"
+    kind === 'accept'
       ? phase == null
-        ? "确认验收"
+        ? '确认验收'
         : submitting
-          ? "正在验收…"
-          : "已验收 ✓"
-      : item.actionLabel || "去处理";
+          ? '正在验收…'
+          : '已验收 ✓'
+      : item.actionLabel || '去处理';
 
   const durationLabel =
-    typeof item.durationMs === "number" &&
+    typeof item.durationMs === 'number' &&
     Number.isFinite(item.durationMs) &&
     item.durationMs >= 0
       ? formatDuration(item.durationMs)
@@ -480,68 +483,68 @@ function InboxRow({
     : formatRelativeTime(item.lastActiveAt);
 
   return (
-    <div className={`gwb-item${kind === "accept" && phase ? ` gwb-item--${phase}` : ""}`}>
-      {kind === "accept" && celebrating ? (
-        <span className="gwb-item-celebration" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-      ) : null}
-      <div className="gwb-type">
-        <span className={`gwb-tag gwb-tag-${kind === "accept" ? "accept" : "need"}`}>{tag}</span>
-        <span className="gwb-type-note">{typeNote}</span>
-      </div>
-      <div className="gwb-body">
-        <div className="gwb-title">{item.title}</div>
-        {item.currentGoalTitle ? (
-          <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
-        ) : null}
-        <div className="gwb-chips">
-          {item.workspaceLabel ? (
-            <span className="gwb-chip gwb-chip-ws">{item.workspaceLabel}</span>
-          ) : null}
-          {item.planProgress ? (
-            <span className="gwb-chip">
-              {item.planProgress.completed} / {item.planProgress.total}
-            </span>
-          ) : null}
-          {durationLabel ? (
-            <span className="gwb-chip gwb-chip-duration">耗时 {durationLabel}</span>
-          ) : null}
-          <span className="gwb-chip">{timeLabel}</span>
+    <div className={`particle-shatter-host${kind === 'accept' && phase ? ` gwb-item-host--${phase}` : ''}`}>
+      <div
+        ref={cardRef}
+        className={`gwb-item particle-shatter-source${shattering ? ' is-shattering' : ''}${
+          kind === 'accept' && phase === 'submitting' ? ' gwb-item--submitting' : ''
+        }`}
+      >
+        <div className="gwb-type">
+          <span className={`gwb-tag gwb-tag-${kind === 'accept' ? 'accept' : 'need'}`}>{tag}</span>
+          <span className="gwb-type-note">{typeNote}</span>
         </div>
-      </div>
-      <div className="gwb-actions">
-        {kind === "accept" && onAccept ? (
-          <>
-            <button
-              type="button"
-              className="gwb-btn gwb-btn-ghost"
-              onClick={onOpen}
-              disabled={acceptBusy}
-            >
-              查看
-            </button>
-            <button
-              type="button"
-              className={`gwb-btn gwb-btn-primary${celebrating ? " gwb-btn-primary--success" : ""}`}
-              onClick={onAccept}
-              disabled={acceptBusy}
-            >
-              {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+        <div className="gwb-body">
+          <div className="gwb-title">{item.title}</div>
+          {item.currentGoalTitle ? (
+            <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
+          ) : null}
+          <div className="gwb-chips">
+            {item.workspaceLabel ? (
+              <span className="gwb-chip gwb-chip-ws">{item.workspaceLabel}</span>
+            ) : null}
+            {item.planProgress ? (
+              <span className="gwb-chip">
+                {item.planProgress.completed} / {item.planProgress.total}
+              </span>
+            ) : null}
+            {durationLabel ? (
+              <span className="gwb-chip gwb-chip-duration">耗时 {durationLabel}</span>
+            ) : null}
+            <span className="gwb-chip">{timeLabel}</span>
+          </div>
+        </div>
+        <div className="gwb-actions">
+          {kind === 'accept' && onAccept ? (
+            <>
+              <button
+                type="button"
+                className="gwb-btn gwb-btn-ghost"
+                onClick={onOpen}
+                disabled={acceptBusy}
+              >
+                查看
+              </button>
+              <button
+                type="button"
+                className="gwb-btn gwb-btn-primary"
+                onClick={onAccept}
+                disabled={acceptBusy}
+              >
+                {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+                {cta}
+              </button>
+            </>
+          ) : (
+            <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
               {cta}
             </button>
-          </>
-        ) : (
-          <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
-            {cta}
-          </button>
-        )}
+          )}
+        </div>
       </div>
+      {kind === 'accept' ? (
+        <ParticleShatterOverlay active={shattering} targetRef={cardRef} />
+      ) : null}
     </div>
   );
 }

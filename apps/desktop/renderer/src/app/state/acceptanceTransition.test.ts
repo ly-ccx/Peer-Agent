@@ -82,8 +82,8 @@ describe('runAcceptanceTransition', () => {
   });
 
   it('keeps the workbench durations aligned between home cards and the result drawer', () => {
-    assert.equal(ACCEPTANCE_CELEBRATION_MS, 980);
-    assert.equal(ACCEPTANCE_EXIT_MS, 420);
+    assert.equal(ACCEPTANCE_CELEBRATION_MS, 1500);
+    assert.equal(ACCEPTANCE_EXIT_MS, 280);
   });
 
   it('awaits the submit promise before celebrating', async () => {

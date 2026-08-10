@@ -13,10 +13,10 @@
 export type AcceptancePhase = 'submitting' | 'celebrating' | 'exiting';
 
 /** 庆祝态停留时长（ms）。首页结果卡与结果抽屉必须一致。 */
-export const ACCEPTANCE_CELEBRATION_MS = 980;
+export const ACCEPTANCE_CELEBRATION_MS = 1500;
 
 /** 退场动画时长（ms）。首页结果卡与结果抽屉必须一致。 */
-export const ACCEPTANCE_EXIT_MS = 420;
+export const ACCEPTANCE_EXIT_MS = 280;
 
 export type AcceptanceScheduler = (callback: () => void, delayMs: number) => void;
 
@@ -98,7 +98,7 @@ const defaultScheduler: AcceptanceScheduler = (callback, delayMs) => {
 /**
  * 执行一次完整的三段式验收编排。
  *
- * 成功路径：submitting -> await submit -> celebrating -> (980ms) exiting -> (420ms) settled。
+ * 成功路径：submitting -> await submit -> celebrating/粉碎 -> (1500ms) exiting -> (280ms) settled。
  * 失败路径：submitting -> null（回滚到可重试状态），不进入庆祝与退场。
  */
 export async function runAcceptanceTransition(options: RunAcceptanceTransitionOptions): Promise<void> {

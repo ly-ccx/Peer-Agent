@@ -1,0 +1,33 @@
+/* 整卡从右向左粒子粉碎叠加层 */
+.particle-shatter-host {
+  position: relative;
+}
+
+.particle-shatter-canvas {
+  position: absolute;
+  inset: -80px -72px -96px -72px;
+  width: calc(100% + 144px);
+  height: calc(100% + 176px);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.particle-shatter-source {
+  /* 采样后隐藏真卡，仅保留 canvas 粒子 */
+}
+
+.particle-shatter-source.is-shattering {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particle-shatter-canvas {
+    display: none !important;
+  }
+
+  .particle-shatter-source.is-shattering {
+    opacity: 0;
+    transition: opacity 180ms ease;
+  }
+}
