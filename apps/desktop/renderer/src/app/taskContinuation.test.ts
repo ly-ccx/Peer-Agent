@@ -55,7 +55,7 @@ describe('getTaskContinuationAction', () => {
 
   it('does not reopen non-result_ready cards as acceptance failure', () => {
     const action = getTaskContinuationAction(
-      item({ actionRight: 'agent_working', nextAction: 'wait', actionLabel: '推进中', statusLabel: '推进中' }),
+      item({ actionRight: 'peer_advancing', nextAction: 'none', actionLabel: '推进中', statusLabel: '推进中' }),
       true,
     );
     assert.equal(action?.reopenUnacceptedResult, false);

@@ -715,23 +715,6 @@
   .result-card-celebration i:nth-child(5) { --spark-x: -33px; --spark-y: -9px; animation-delay: 100ms; }
   .result-card-celebration i:nth-child(6) { --spark-x: 4px; --spark-y: -30px; animation-delay: 25ms; }
 
-  @keyframes result-card-spin { to { transform: rotate(360deg); } }
-  @keyframes result-card-celebrate-lift {
-    0% { transform: translateY(0) scale(1); }
-    28% { transform: translateY(-3px) scale(1.012); }
-    100% { transform: translateY(0) scale(1); }
-  }
-  @keyframes result-card-seal-pop {
-    0% { transform: scale(0.78); opacity: 0.72; }
-    55% { transform: scale(1.16); opacity: 1; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-  @keyframes result-card-spark {
-    0% { opacity: 0; transform: translate(0, 0) scale(0.35); }
-    18% { opacity: 1; }
-    100% { opacity: 0; transform: translate(var(--spark-x, -18px), var(--spark-y, -24px)) scale(0.85); }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .result-card,
     .result-card-spinner,

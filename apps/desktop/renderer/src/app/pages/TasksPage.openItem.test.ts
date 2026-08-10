@@ -18,6 +18,6 @@ test('task row view button opens the matching task details', async () => {
   );
   assert.match(
     appSource,
-    /<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?setActiveConversationId\(String\(item\.conversationId\)\);[\s\S]*?setCollectionDrawer\('task_details'\);/,
+    /<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?if \(!item\.conversationId\) return;[\s\S]*?handleContinueTask\(String\(item\.conversationId\), planId\);/,
   );
 });

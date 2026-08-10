@@ -46,7 +46,7 @@ test('running plan-step dot ring is disabled under prefers-reduced-motion', asyn
   assert.notEqual(reduceStart, -1, 'missing prefers-reduced-motion block');
   const reduceBlock = css.slice(reduceStart);
 
-  const markerRule = reduceBlock.indexOf('.task-overview-plan-step.is-current .task-overview-plan-step-marker::after');
+  const markerRule = reduceBlock.lastIndexOf('.task-overview-plan-step.is-current .task-overview-plan-step-marker::after');
   assert.notEqual(markerRule, -1, 'reduced-motion block must silence the plan-step ring');
 
   const bodyStart = reduceBlock.indexOf('{', markerRule) + 1;

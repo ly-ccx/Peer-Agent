@@ -50,7 +50,7 @@ Three first-class shells share one unified core runtime:
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current series: **`0.0.2-beta`** (prerelease; `0.0.1` remains stable / latest). Desktop, TUI/CLI, Agent/Plan workflows, Automation, and MCP are usable today — see [Roadmap](#-roadmap).
+> Current release: **`0.0.2`** (`latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 

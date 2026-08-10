@@ -1,12 +1,13 @@
 {
   "name": "peer-agent",
-  "version": "0.0.2-beta.5",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
   "scripts": {
     "dev": "pnpm --filter @peer-agent/desktop dev",
     "build": "pnpm -r build",
+    "test": "pnpm -r --if-present test && pnpm marketplace:test",
     "typecheck": "pnpm -r typecheck",
     "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs",

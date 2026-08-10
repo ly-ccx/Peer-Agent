@@ -4,6 +4,42 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2 - 2026-08-10
+
+### Notes
+
+- Graduate the full `0.0.2-beta.1` → `0.0.2-beta.5` line to the stable `latest` channel.
+- Move Peer from tool-capable chat toward a Task Flow Agent: structured intake and follow-up questions, complexity-aware planning, persisted goals, and Evidence-backed completion.
+- Preserve the governed local chain: Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence.
+
+### Added
+
+- Add Agent / Plan / Goal workflows with persisted plan graphs, subtasks, pause/resume, `waiting_user`, and read-only Explorer investigations.
+- Add executable success criteria (command, test, file-exists, file-contains) with `criterionResults` and `evidenceRefs` as the completion gate.
+- Add the global Workbench for advancing tasks, results awaiting acceptance, history, background shell threads, and continue-task flows.
+- Add conversation-driven Automation proposals, isolated Git worktree runs, commit/diff artifact refs, run receipts, history, and tray status.
+- Add an embedded Browser with visible navigation, click, type, DOM, and screenshot tools under PermissionGrant + Evidence.
+- Publish the host-neutral Open Runtime packages: `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`.
+- Add SkillHub, MCP/tool controls, skill details/capsules, tool definitions, provider channel wiring, and uninstall paths.
+- Add npm-installed CLI/TUI binaries, `/version`, shared conversations/settings, and clearer runtime feedback.
+
+### Changed
+
+- Share runtime, System Context, conversation data, and `~/.peer-agent` configuration across Desktop, TUI, and CLI.
+- Stabilize prompt prefixes and add cache metrics, including ChatGPT Responses cache-hit token accounting.
+- Refine the workspace tree, composer, model strip, task cards, usage charts, and result-acceptance motion.
+
+### Fixed
+
+- Fix streaming scroll, context-usage restoration, provider stream metadata, Qoder local-auth errors, Kimi reasoning, Automation idempotency, and stale result-acceptance state.
+- Harden long-task continuity with compaction, continuity sources, prompt checksums, and Evidence-preserving resume behavior.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.2` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.2`.
+- Memory, self-evolution, full multi-agent collaboration, Agent swarm, and Canvas remain planned and are not shipped in 0.0.2.
+
 ## 0.0.2-beta.5 - 2026-08-10
 
 ### Notes

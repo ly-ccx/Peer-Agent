@@ -432,38 +432,6 @@
     vertical-align: -1px;
   }
 
-  @keyframes gwb-accept-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  @keyframes gwb-item-celebrate-pop {
-    0% {
-      transform: scale(0.985);
-    }
-    55% {
-      transform: scale(1.012);
-    }
-    100% {
-      transform: scale(1);
-    }
-  }
-
-  @keyframes gwb-item-confetti {
-    0% {
-      opacity: 0;
-      transform: translate3d(0, 0, 0) scale(0.6);
-    }
-    20% {
-      opacity: 1;
-    }
-    100% {
-      opacity: 0;
-      transform: translate3d(0, 42px, 0) scale(1);
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .gwb-item--celebrating,
     .gwb-item--exiting,
