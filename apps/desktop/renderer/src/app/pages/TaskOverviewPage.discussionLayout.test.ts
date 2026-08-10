@@ -16,7 +16,7 @@ test('discussion preview uses compact cards instead of execution WorkItem cards'
   assert.match(discussionSection, /<DiscussionCard/);
   assert.doesNotMatch(discussionSection, /<WorkItem/);
   assert.match(source, /const DISCUSSION_PREVIEW_LIMIT = 6;/);
-  assert.match(source, /item\.statusLabel \|\| '讨论中'/);
+  assert.match(source, /item\.statusLabel \|\| '有未读'/);
   assert.doesNotMatch(discussionSection, /advancingStateLabel/);
 });
 
