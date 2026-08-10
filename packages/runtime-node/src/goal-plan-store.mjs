@@ -104,7 +104,7 @@ const PLAN_ACTIVE_STATUSES = new Set(['executing']);
  * Runner 人在回路 / 暂停态：即使 plan 仍为 executing 也停表。
  * exploring / compacting_context 等系统侧工作不停表。
  */
-const RUNNER_PAUSE_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted']);
+const RUNNER_PAUSE_STATUSES = new Set(['paused', 'waiting_user', 'blocked', 'budget_exhausted']);
 const RUNNER_ACTIVE_STATUSES = new Set([
   'running',
   'compacting_context',
@@ -474,6 +474,7 @@ const RUNNER_STATUSES = new Set([
   'resuming_after_compaction',
   'paused',
   'exploring',
+  'waiting_user',
   'blocked',
   'budget_exhausted',
   'completed',
@@ -534,6 +535,7 @@ const GOAL_RUNNER_PHASES = new Set([
   'verify',
   'repair',
   'synthesize',
+  'waiting_user',
   'blocked',
 ]);
 const ASK_USER_REASONS = new Set([
@@ -2359,6 +2361,74 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     });
   }
 
+  /**
+   * Consume a user reply to request_user_input as one persisted transition.
+   * The Runner state and decision event must not diverge because Task Overview
+   * projects its action owner directly from the persisted Runner.
+   */
+  function consumeRequestedUserInput(planId, event = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    if (
+      plan.status !== 'executing'
+      || !['waiting_user', 'blocked'].includes(plan.runner?.status)
+      || plan.runner?.blockedReason !== 'requested_user_input'
+    ) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const currentTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: planId });
+    const normalizedEvent = normalizeRunEvent({
+      ...event,
+      goalPlanId: planId,
+      createdAt: event.createdAt || now,
+    }, { goalPlanId: planId });
+    if (!normalizedEvent) {
+      throw new Error(`[goal-plan-store] invalid requested user input event for plan ${planId}`);
+    }
+
+    const currentRunner = normalizeRunnerState(plan.runner, planId) || {};
+    const nextRunner = normalizeRunnerState({
+      ...currentRunner,
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: ['waiting_user', 'blocked'].includes(currentRunner.phase) ? 'orient' : (currentRunner.phase || 'orient'),
+      blockerAudit: null,
+      blockedReason: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    }, planId);
+    const timing = applyGoalTimingTransition(
+      plan.timing,
+      plan.status,
+      plan.status,
+      currentRunner.status,
+      nextRunner?.status,
+      now,
+    );
+    const nextTrace = {
+      ...currentTrace,
+      events: [...currentTrace.events, normalizedEvent],
+    };
+    const activeNodeId = normalizeOptionalString(event.activeNodeId) || normalizedEvent.nodeId;
+    if (activeNodeId) nextTrace.activeNodeId = activeNodeId;
+
+    return persist({
+      ...plan,
+      runner: nextRunner,
+      runTrace: nextTrace,
+      updatedAt: now,
+      ...(timing ? { timing } : {}),
+    }, {
+      changeKind: 'runner-state',
+      runner: nextRunner,
+      prevStatus: plan.status,
+      prevTiming: timing ?? plan.timing,
+    });
+  }
+
   /** Append a structured Goal / Plan / Run execution event without changing task Evidence. */
   function appendRunEvent(planId, event = {}) {
     const plan = getPlan(planId);
@@ -3231,6 +3301,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordApproval,
     setPlanStatus,
     resumeRunner,
+    consumeRequestedUserInput,
     setRunnerState,
     prepareContextCheckpoint,
     commitContextCheckpoint,

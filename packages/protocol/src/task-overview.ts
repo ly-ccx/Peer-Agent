@@ -226,6 +226,7 @@ export function projectConversation(
  * 判定顺序（首个命中生效），Plan 态优先于 Runner 态（§11.4 决策 1）：
  *  1. plan awaiting_approval → needs_you/plan_approval
  *  2. plan drafting → needs_you/plan_approval
+ *  4. runner waiting_user → needs_you/user_input
  *  5. runner blocked | budget_exhausted → needs_you/decision
  *  6. plan completed 且未验收 → result_ready
  *  8. plan executing → peer_advancing
@@ -305,10 +306,20 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
       actionLabel: '确认 →',
     };
   }
-  // rule 5: 仅活跃计划上的 Runner 实时求助才进 needs_you
-  // （plan 必须仍在推进：executing/accepted/approved；历史僵尸 blocked 不进）
   const planStillActive =
     status === 'executing' || status === 'accepted' || status === 'approved';
+  // rule 4: Runner 已明确把行动权交给用户，不再展示为“Peer 正在推进”。
+  if (planStillActive && runnerStatus === 'waiting_user') {
+    return {
+      actionRight: 'needs_you',
+      needsYouReason: 'user_input',
+      nextAction: 'answer_question',
+      statusLabel: '等待你的选择',
+      actionLabel: '回答 →',
+    };
+  }
+  // rule 5: 仅活跃计划上的 Runner 实时求助才进 needs_you
+  // （plan 必须仍在推进：executing/accepted/approved；历史僵尸 blocked 不进）
   if (
     planStillActive &&
     (runnerStatus === 'blocked' || runnerStatus === 'budget_exhausted')
