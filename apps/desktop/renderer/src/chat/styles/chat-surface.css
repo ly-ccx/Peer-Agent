@@ -1015,6 +1015,10 @@
   max-width: 140px;
 }
 
+.composer-workspace-dropdown {
+  max-width: 180px;
+}
+
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
    故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
 .pa-dropdown-menu.composer-dropdown {

@@ -262,6 +262,9 @@ function MainApp() {
   // reading a stale closure of the authoritative set.
   const runningWorkspacePathsRef = useRef<ReadonlySet<string>>(new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
+  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>(
+    () => startupSnapshot?.workspaces ?? [],
+  );
   // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
   // 切到 task.sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
   const [resumeTask, setResumeTask] = useState<{ sessionId: string; task: string; effort?: string } | null>(null);
@@ -440,6 +443,7 @@ function MainApp() {
     void refreshSettings();
     if (startupSnapshot) return;
     void clientApi.workspaceList().then(async (r) => {
+      setWorkspaces(r.workspaces);
       setActiveWorkspace(r.activeWorkspace);
       try {
         const page = await clientApi.conversationsList({
@@ -660,6 +664,7 @@ function MainApp() {
 
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
+    setWorkspaces(r.workspaces);
     setActiveWorkspace(r.activeWorkspace);
     setActivePage('home');
     setConversationView('active');
@@ -1082,6 +1087,12 @@ function MainApp() {
                   onOpenAutomationRun={openAutomationRun}
                   onOpenTaskDetails={() => openCollectionDrawer('task_details')}
                   workspacePath={activeWorkspace}
+                  workspaces={workspaces}
+                  onWorkspaceChange={async (nextWorkspacePath) => {
+                    if (nextWorkspacePath === activeWorkspace) return;
+                    await clientApi.workspaceSetActive({ path: nextWorkspacePath });
+                    await handleWorkspaceChanged();
+                  }}
                   isPageActive={activePage === 'chat'}
                   messageTarget={notificationMessageTarget}
                   />

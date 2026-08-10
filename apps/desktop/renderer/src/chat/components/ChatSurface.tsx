@@ -369,6 +369,8 @@ export function ChatSurface({
   onArchiveConversation,
   onProvidersRefresh,
   workspacePath,
+  workspaces = [],
+  onWorkspaceChange,
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
@@ -413,6 +415,8 @@ export function ChatSurface({
   readonly onOpenTaskDetails?: (conversationId: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
+  readonly workspaces?: readonly { path: string; name: string }[];
+  readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
@@ -960,6 +964,13 @@ export function ChatSurface({
       tone: level === 'full_local' ? 'danger' : undefined,
     })),
     [isZh],
+  );
+  const workspaceOptions = useMemo<readonly DropdownOption[]>(
+    () => workspaces.map((workspace) => ({
+      value: workspace.path,
+      label: workspace.name,
+    })),
+    [workspaces],
   );
   const handleModeDropdownChange = useCallback((next: string) => {
     if (isChatMode(next)) changeMode(next);
@@ -2619,6 +2630,17 @@ export function ChatSurface({
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
+            {isDraftConversation && workspacePath && workspaceOptions.length > 0 ? (
+              <Dropdown
+                className="composer-dropdown composer-workspace-dropdown"
+                value={workspacePath}
+                options={workspaceOptions}
+                onChange={(nextWorkspacePath) => { void onWorkspaceChange?.(nextWorkspacePath); }}
+                ariaLabel={isZh ? '工作区' : 'Workspace'}
+                title={isZh ? '切换工作区' : 'Switch workspace'}
+                menuPlacement="up"
+              />
+            ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
