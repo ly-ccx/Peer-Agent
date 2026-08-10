@@ -16,6 +16,7 @@ test('global workbench acceptance waits for success before celebrating and freez
   assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
   assert.match(source, /ParticleShatterOverlay/);
   assert.match(source, /is-shattering/);
+  assert.match(source, /is-exiting/);
   assert.match(source, /className="gwb-type"/);
   assert.match(source, /className="gwb-body"/);
   assert.match(source, /className="gwb-chips"/);
@@ -45,6 +46,8 @@ test('global workbench acceptance uses particle shatter overlay styles', async (
   );
   assert.match(shatterStyles, /particle-shatter-canvas/);
   assert.match(shatterStyles, /is-shattering/);
+  assert.match(shatterStyles, /is-exiting/);
+  assert.match(shatterStyles, /max-height/);
   assert.match(shatterStyles, /@media \(prefers-reduced-motion: reduce\)/);
   const styles = await readStyles();
   assert.match(styles, /\.gwb-item--submitting/);

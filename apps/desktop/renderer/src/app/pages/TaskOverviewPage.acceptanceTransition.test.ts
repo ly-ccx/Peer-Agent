@@ -13,6 +13,7 @@ test('result acceptance waits for success before celebrating and preserves a rem
   assert.match(source, /Object\.values\(acceptanceTransitions\)/);
   assert.match(source, /ParticleShatterOverlay/);
   assert.match(source, /is-shattering/);
+  assert.match(source, /is-exiting/);
   assert.match(source, /正在验收…/);
   assert.match(source, /验收完成，任务已圆满结束/);
 });

@@ -834,7 +834,7 @@ function ResultCard({
   const celebrating = phase === 'celebrating' || phase === 'exiting';
   const shattering = celebrating;
   return (
-    <div className="particle-shatter-host">
+    <div className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}>
     <article
       ref={cardRef}
       className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}

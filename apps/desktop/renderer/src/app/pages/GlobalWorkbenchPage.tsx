@@ -483,7 +483,11 @@ function InboxRow({
     : formatRelativeTime(item.lastActiveAt);
 
   return (
-    <div className={`particle-shatter-host${kind === 'accept' && phase ? ` gwb-item-host--${phase}` : ''}`}>
+    <div
+      className={`particle-shatter-host${kind === 'accept' && phase ? ` gwb-item-host--${phase}` : ''}${
+        kind === 'accept' && phase === 'exiting' ? ' is-exiting' : ''
+      }`}
+    >
       <div
         ref={cardRef}
         className={`gwb-item particle-shatter-source${shattering ? ' is-shattering' : ''}${

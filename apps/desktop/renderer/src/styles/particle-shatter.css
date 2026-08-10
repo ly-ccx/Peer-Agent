@@ -1,6 +1,14 @@
-/* 整卡从右向左粒子粉碎叠加层 */
+/* 整卡从右向左粒子粉碎叠加层 + 列表塌缩上移 */
 .particle-shatter-host {
   position: relative;
+  overflow: hidden;
+  /* 足够容纳验收卡高度；exiting 时塌到 0，让下方卡片平滑顶上 */
+  max-height: 320px;
+  transition:
+    max-height 280ms cubic-bezier(0.33, 0, 0.2, 1),
+    margin 280ms cubic-bezier(0.33, 0, 0.2, 1),
+    padding 280ms cubic-bezier(0.33, 0, 0.2, 1),
+    opacity 220ms cubic-bezier(0.33, 0, 0.2, 1);
 }
 
 .particle-shatter-canvas {
@@ -13,7 +21,7 @@
 }
 
 .particle-shatter-source {
-  /* 采样后隐藏真卡，仅保留 canvas 粒子 */
+  /* 采样后隐藏真卡，仅保留 canvas 粒子；visibility:hidden 仍占位，避免粉碎中列表跳动 */
 }
 
 .particle-shatter-source.is-shattering {
@@ -21,7 +29,28 @@
   pointer-events: none;
 }
 
+/* 粉碎主体结束后：宿主高度塌缩，列表其余卡片平滑上移 */
+.particle-shatter-host.is-exiting {
+  max-height: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  border-color: transparent;
+}
+
+.particle-shatter-host.is-exiting .particle-shatter-canvas {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .particle-shatter-host {
+    transition: none;
+  }
+
   .particle-shatter-canvas {
     display: none !important;
   }
@@ -29,5 +58,10 @@
   .particle-shatter-source.is-shattering {
     opacity: 0;
     transition: opacity 180ms ease;
+  }
+
+  .particle-shatter-host.is-exiting {
+    max-height: 0;
+    opacity: 0;
   }
 }
