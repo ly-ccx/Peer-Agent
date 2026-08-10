@@ -50,7 +50,7 @@ Three first-class shells share one unified core runtime:
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current series: **`0.0.2-beta`** (prerelease; `0.0.1` remains stable / latest). Desktop, TUI/CLI, Agent/Plan workflows, Automation, and MCP are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
+> Current series: **`0.0.2-beta`** (prerelease; `0.0.1` remains stable / latest). Desktop, TUI/CLI, Agent/Plan workflows, Automation, and MCP are usable today — see [Roadmap](#-roadmap).
 
 ---
 
@@ -58,7 +58,7 @@ Three first-class shells share one unified core runtime:
 
 | | |
 | --- | --- |
-| 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Model cognition may be cloud or on-device later — capability power stays local and auditable. |
+| 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
 | ✅ **Permission-gated** | No tool runs without a `PermissionGrant`. Authorization is enforced by the runtime — not by a polite prompt. |
 | 🧾 **Evidence-backed** | Every capability call returns structured Evidence (artifacts, logs, metadata) you can inspect after the fact. |
 | 🧩 **One governed runtime** | Shell, files, web/browser, MCP, plugins, and skills all flow through a single chain. No hidden side doors. |
@@ -73,7 +73,7 @@ Peer Agent is built around a simple split of responsibility:
 
 | Role | Owns |
 | --- | --- |
-| **Model** | Cognition — understanding, planning, deciding what to try next. A *role*, not a location: cloud today, on-device later. |
+| **Model** | Cognition — understanding, planning, deciding what to try next. A *role* supplied by your chosen model provider. |
 | **Local runtime** | Capability — discovery, permission, execution, and Evidence on your machine. |
 | **Interface** | Expression — Desktop / TUI / CLI present work; they do not hold permission truth. |
 | **Contract** | Boundaries — protocol types, Runtime Projection, and hard bans between layers. |
@@ -194,10 +194,10 @@ Workspace packages live under `apps/` (product shells) and `packages/` (runtime,
 │  · Agent / Plan / Goal runner (task flow)                   │
 │  · MCP · Plugins · Skills · Automation                      │
 └────────────────────────────┬────────────────────────────────┘
-                             │ model API (cloud or future local)
+                             │ model API
 ┌────────────────────────────▼────────────────────────────────┐
-│  Cognition (role, not location)                             │
-│  Cloud provider today · on-device Local Agent Runtime later  │
+│  Cognition (model provider)                                 │
+│  Your chosen cloud / API provider                           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -235,7 +235,7 @@ The long-term product spine:
 | **Canvas creation system** | A spatial surface for plans, diagrams, and intermediate artifacts — thinking and creation you can see and edit next to the conversation. |
 | **Memory system** | Durable, permission-aware memory beyond a single thread: preferences, project facts, and retrieval that stay local. |
 
-Philosophy stays fixed while the surface grows: **cognition can move; authorization and Evidence stay local.**
+Philosophy stays fixed while the surface grows: **cognition is pluggable; authorization and Evidence stay local.**
 
 ---
 
@@ -256,7 +256,6 @@ Philosophy stays fixed while the surface grows: **cognition can move; authorizat
 
 | Area | Status |
 | --- | --- |
-| On-device LLM (Local Agent Runtime) | 🚧 In progress |
 | Broader marketplace ecosystem | 🚧 Growing |
 | Cross-platform hardening / packaging | 🚧 Ongoing |
 
