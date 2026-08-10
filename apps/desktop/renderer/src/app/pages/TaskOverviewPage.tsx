@@ -52,16 +52,28 @@ function scopeDisplayLabel(workspacePath: string | null | undefined): string {
   return `Workspace · ${workspaceLabelFromPath(workspacePath)}`;
 }
 
-function formatRelativeTime(iso?: string): string {
-  if (!iso) return '刚刚更新';
+/** 相对时间；completed 模式用于结果待验收卡片「何时完成」。 */
+function formatRelativeTime(iso?: string, options?: { readonly completed?: boolean }): string {
+  const completed = options?.completed === true;
+  if (!iso) return completed ? '刚刚完成' : '刚刚更新';
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
   const diffMs = Date.now() - t;
-  if (diffMs < 60_000) return '刚刚更新';
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} 分钟前`;
-  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)} 小时前`;
-  if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)} 天前`;
-  return new Date(t).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  if (diffMs < 60_000) return completed ? '刚刚完成' : '刚刚更新';
+  if (diffMs < 3_600_000) {
+    const minutes = Math.floor(diffMs / 60_000);
+    return completed ? `${minutes} 分钟前完成` : `${minutes} 分钟前`;
+  }
+  if (diffMs < 86_400_000) {
+    const hours = Math.floor(diffMs / 3_600_000);
+    return completed ? `${hours} 小时前完成` : `${hours} 小时前`;
+  }
+  if (diffMs < 7 * 86_400_000) {
+    const days = Math.floor(diffMs / 86_400_000);
+    return completed ? `${days} 天前完成` : `${days} 天前`;
+  }
+  const dateLabel = new Date(t).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  return completed ? `${dateLabel}完成` : dateLabel;
 }
 
 /** UUID / 长十六进制配置 id：绝不展示到卡片右上角。 */
@@ -82,7 +94,7 @@ function safeDisplayLabel(value: string | undefined): string | undefined {
   return raw;
 }
 
-/** 卡片右上角：提供商 · 模型 · 时长 · 相对更新时间（缺字段则省略）。 */
+/** 卡片右上角：提供商 · 模型 · 时长 · 相对时间（完成时间优先于最近活跃）。 */
 function workItemMetaParts(item: TaskOverviewItem, fallbackWhenEmpty = 'LIVE'): string[] {
   const parts: string[] = [];
   const providerLabel = safeDisplayLabel(item.providerLabel);
@@ -92,7 +104,10 @@ function workItemMetaParts(item: TaskOverviewItem, fallbackWhenEmpty = 'LIVE'): 
   if (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0) {
     parts.push(formatDuration(item.durationMs));
   }
-  if (item.lastActiveAt) {
+  // 结果待验收：优先 completedAt，文案为「N 分钟前完成」；其它卡片仍用 lastActiveAt。
+  if (item.completedAt) {
+    parts.push(formatRelativeTime(item.completedAt, { completed: true }));
+  } else if (item.lastActiveAt) {
     parts.push(formatRelativeTime(item.lastActiveAt));
   } else if (parts.length === 0) {
     parts.push(fallbackWhenEmpty);

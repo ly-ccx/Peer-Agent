@@ -45,3 +45,11 @@ test('acceptance celebration has smoother timing and a reduced-motion fallback',
   assert.match(styles, /\.result-card-celebration \{ display: none; \}/);
   assert.match(styles, /\.result-card--exiting/);
 });
+
+test('result card prefers completedAt with completion-relative copy', async () => {
+  const source = await readPage();
+  assert.match(source, /item\.completedAt/);
+  assert.match(source, /formatRelativeTime\(item\.completedAt, \{ completed: true \}\)/);
+  assert.match(source, /分钟前完成/);
+  assert.match(source, /刚刚完成/);
+});

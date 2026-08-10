@@ -145,6 +145,12 @@ export interface TaskOverviewItem {
   /** 最近活跃时间（ISO 字符串）。 */
   readonly lastActiveAt?: string;
   /**
+   * 任务完成时间（ISO 字符串）。
+   * GoalPlan：优先 GoalTiming.completedAt；终态缺省时回落 updatedAt。
+   * 结果待验收卡片用它展示「何时完成」，与 lastActiveAt（最近活跃）语义分离。
+   */
+  readonly completedAt?: string;
+  /**
    * 有效运行时长（毫秒）。
    * GoalPlan 来自 timing 投影（activeMs）；缺 timing 时省略。
    * UI 负责格式化为「3m12s」等，不在协议层落展示字符串。
@@ -358,6 +364,22 @@ export function projectGoalPlan(
     typeof snapshot.providerLabel === 'string' && snapshot.providerLabel.trim()
       ? snapshot.providerLabel.trim()
       : undefined;
+  // 完成时间：优先 timing.completedAt；终态计划缺省时回落 updatedAt，供待验收卡片展示。
+  const completedAtFromTiming =
+    typeof projectedTiming?.completedAt === 'string' && projectedTiming.completedAt
+      ? projectedTiming.completedAt
+      : typeof snapshot.timing?.completedAt === 'string' && snapshot.timing.completedAt.trim()
+        ? snapshot.timing.completedAt.trim()
+        : undefined;
+  const isTerminalPlan =
+    snapshot.status === 'completed'
+    || snapshot.status === 'failed'
+    || snapshot.status === 'cancelled';
+  const completedAt =
+    completedAtFromTiming
+    ?? (isTerminalPlan && typeof snapshot.updatedAt === 'string' && snapshot.updatedAt.trim()
+      ? snapshot.updatedAt.trim()
+      : undefined);
   return {
     taskId: snapshot.planId,
     source: 'goal_plan',
@@ -372,6 +394,7 @@ export function projectGoalPlan(
       ? { planSteps: snapshot.planSteps }
       : {}),
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),

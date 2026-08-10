@@ -397,6 +397,50 @@ test('projectGoalPlan 从 timing 投影 durationMs，并透传 modelLabel / prov
   assert.equal(without.providerLabel, undefined);
 });
 
+test('projectGoalPlan 透传 timing.completedAt 为 completedAt', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'completed',
+      accepted: false,
+      updatedAt: '2026-08-10T00:05:00.000Z',
+      timing: {
+        startedAt: '2026-08-10T00:00:00.000Z',
+        completedAt: '2026-08-10T00:03:00.000Z',
+        activeAccumulatedMs: 180_000,
+      },
+    }),
+  );
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.completedAt, '2026-08-10T00:03:00.000Z');
+  assert.equal(item.lastActiveAt, '2026-08-10T00:05:00.000Z');
+});
+
+test('projectGoalPlan 终态缺 timing.completedAt 时回落 updatedAt', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'completed',
+      accepted: false,
+      updatedAt: '2026-08-10T00:05:00.000Z',
+    }),
+  );
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.completedAt, '2026-08-10T00:05:00.000Z');
+});
+
+test('projectGoalPlan 非终态不写 completedAt', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      updatedAt: '2026-08-10T00:05:00.000Z',
+      timing: {
+        startedAt: '2026-08-10T00:00:00.000Z',
+        activeAccumulatedMs: 10_000,
+      },
+    }),
+  );
+  assert.equal(item.completedAt, undefined);
+});
+
 test('projectConversation 透传 modelLabel / providerLabel', () => {
   const item = projectConversation(
     conversationSnapshot({ modelLabel: 'gpt-5.6', providerLabel: 'openai' }),
