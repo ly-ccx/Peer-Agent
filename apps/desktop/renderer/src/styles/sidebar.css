@@ -178,7 +178,7 @@
   color: var(--graphite-ink, var(--graphite-base));
 }
 .sidebar-search-icon-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--azure-seal, #3b82f6) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
   outline-offset: 1px;
 }
 .brand-wordmark {
@@ -360,9 +360,9 @@
   height: 8px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: var(--state-info, #3b82f6);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-info, #3b82f6) 22%, transparent);
-  --motion-ripple-color: var(--state-info, #3b82f6);
+  background: var(--state-info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-info) 22%, transparent);
+  --motion-ripple-color: var(--state-info);
   --motion-ripple-strength: 45%;
   --motion-ripple-scale: 2.4;
   --motion-ripple-duration: 1.6s;
