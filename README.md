@@ -5,7 +5,7 @@
 <h1 align="center">Peer Agent</h1>
 
 <p align="center">
-  <strong>The AI agent that lives on your machine — not in someone else's cloud.</strong>
+  <strong>A local-first Task Flow Agent — authorized, planned, and proven on your machine.</strong>
 </p>
 
 <p align="center">
@@ -31,16 +31,17 @@
   <a href="#-task-flow">Task Flow</a> ·
   <a href="#-what-you-can-do">Features</a> ·
   <a href="#-architecture-at-a-glance">Architecture</a> ·
+  <a href="#-product-vision">Vision</a> ·
   <a href="#-roadmap">Roadmap</a>
 </p>
 
 ---
 
-Most AI assistants run their “tools” on a server you can’t see, with access you can’t audit.
+Many coding agents already run tools on your machine. That alone is no longer a differentiator.
 
-**Peer Agent flips that.** Every capability runs **locally**, every action needs your **authorization**, and every result leaves a **verifiable trace**. Your AI gets hands — you keep the keys.
+**Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
 
-Three first-class shells share one runtime:
+Three first-class shells share one unified core runtime:
 
 | Surface | What it is |
 | --- | --- |
@@ -57,7 +58,7 @@ Three first-class shells share one runtime:
 
 | | |
 | --- | --- |
-| 🔒 **Privacy-first** | Capabilities execute on *your* machine. Files, commands, and local state are not shipped to a third-party tool server. |
+| 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Model cognition may be cloud or on-device later — capability power stays local and auditable. |
 | ✅ **Permission-gated** | No tool runs without a `PermissionGrant`. Authorization is enforced by the runtime — not by a polite prompt. |
 | 🧾 **Evidence-backed** | Every capability call returns structured Evidence (artifacts, logs, metadata) you can inspect after the fact. |
 | 🧩 **One governed runtime** | Shell, files, web/browser, MCP, plugins, and skills all flow through a single chain. No hidden side doors. |
@@ -216,6 +217,28 @@ peer_agent/
 
 ---
 
+## 🔭 Product Vision
+
+Peer Agent aims to be a **cross-platform agent OS for real work** — not another chat window that can shell out.
+
+The long-term product spine:
+
+| Pillar | Meaning |
+| --- | --- |
+| **Cross-platform** | Same product truth on macOS first, then broader desktop / environment coverage without forking the core model. |
+| **Unified core flow** | Desktop, TUI, CLI, Automation, MCP, plugins, and skills share one runtime chain: projection → permission → execution → Evidence. |
+| **Task flow** | Work is accepted, clarified, planned, executed, and closed as a governed task — not freelanced chat. |
+| **Self-closed loop** | Explore → plan → act → verify → adjust, with success criteria and Evidence as the completion gate. |
+| **Self-evolution** | Improve playbooks, skills, and workflows from prior Evidence — reviewable iteration, never silent rewrite of trust boundaries. |
+| **Multi-agent collaboration** | Specialist roles under one task (explore / implement / review) with explicit handoffs and shared Evidence. |
+| **Agent swarm** | Optional larger parallel fan-out for exploration and verification — still budgeted, owned by a lead task flow, not an unconstrained crowd. |
+| **Canvas creation system** | A spatial surface for plans, diagrams, and intermediate artifacts — thinking and creation you can see and edit next to the conversation. |
+| **Memory system** | Durable, permission-aware memory beyond a single thread: preferences, project facts, and retrieval that stay local. |
+
+Philosophy stays fixed while the surface grows: **cognition can move; authorization and Evidence stay local.**
+
+---
+
 ## 🗺️ Roadmap
 
 ### Available now
@@ -225,6 +248,7 @@ peer_agent/
 | Local capability runtime + Evidence | ✅ Available |
 | Desktop · TUI · CLI shells | ✅ Available |
 | Agent / Plan / Goal task flow | ✅ Available |
+| Unified core capability chain | ✅ Available |
 | MCP · Plugins · Skills | ✅ Available |
 | Automation (scheduled agents) | ✅ Available |
 
@@ -234,17 +258,20 @@ peer_agent/
 | --- | --- |
 | On-device LLM (Local Agent Runtime) | 🚧 In progress |
 | Broader marketplace ecosystem | 🚧 Growing |
+| Cross-platform hardening / packaging | 🚧 Ongoing |
 
 ### Planned — not implemented yet
 
-These are **direction, not shipping claims**. They are not available in the current beta.
+These are **direction, not shipping claims**. They are **not** available in the current beta.
 
 | Area | Intent |
 | --- | --- |
 | **Memory system** | Durable, governed memory beyond a single thread — preferences, project facts, and retrieval that stays local and permission-aware. |
-| **Multi-agent collaboration** | Coordinated specialist agents under one task flow (explore / implement / review), with shared Evidence and clear handoffs — not unconstrained agent swarms. |
-| **Canvas** | A spatial surface for plans, diagrams, and intermediate artifacts alongside the conversation — thinking you can see and edit. |
-| **Self-evolution / self-iteration** | Safe loops where the agent improves workflows, skills, and playbooks from Evidence — always reviewable, never silent self-modification of trust boundaries. |
+| **Stronger self-closed loops** | Tighter verify/adjust cycles, richer success criteria, and resume continuity across longer goals. |
+| **Self-evolution / self-iteration** | Safe loops where the agent improves workflows, skills, and playbooks from Evidence — always reviewable. |
+| **Multi-agent collaboration** | Coordinated specialist agents under one task flow (explore / implement / review), with shared Evidence and clear handoffs. |
+| **Agent swarm** | Budgeted parallel exploration / verification workers under a lead task — not unconstrained swarms. |
+| **Canvas creation system** | Spatial canvas for plans, diagrams, and intermediate artifacts alongside the conversation. |
 
 ---
 
@@ -268,5 +295,5 @@ Please do **not** expand renderer direct `fs` / `child_process` access, bypass R
 ---
 
 <p align="center">
-  <sub>Built for people who want AI that can act — without giving up the machine.</sub>
+  <sub>Built for people who want AI that can act — with authorization, task flow, and Evidence.</sub>
 </p>
