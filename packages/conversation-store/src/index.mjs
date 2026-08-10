@@ -361,6 +361,9 @@ function normalizeMeta(meta) {
   };
   // Drop untrusted automationOrigin from the spread base; reattach only when valid.
   if ('automationOrigin' in normalizedBase) delete normalizedBase.automationOrigin;
+  const lastReadAt = typeof meta?.lastReadAt === 'string' && meta.lastReadAt.trim()
+    ? meta.lastReadAt.trim()
+    : null;
   return {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
@@ -370,6 +373,7 @@ function normalizeMeta(meta) {
     contextSnapshot: normalizeContextSnapshot(meta?.contextSnapshot, normalizedBase),
     status,
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
+    lastReadAt,
     pinnedAt,
     pinnedOrder,
     ...(messageCount === undefined ? {} : { messageCount }),
@@ -744,6 +748,7 @@ export function createConversationStore(options = {}) {
       modelProviderId: null,
       status: 'active',
       archivedAt: null,
+      lastReadAt: now,
       pinnedAt: null,
       pinnedOrder: null,
       messageCount: 0,
@@ -948,6 +953,29 @@ export function createConversationStore(options = {}) {
       meta.titleSource = 'manual';
     }
     meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  /**
+   * 标记会话已读水位。只推进 lastReadAt，不改 updatedAt，
+   * 避免「打开阅读」被当成内容更新，把已读会话重新顶到时间序前面。
+   */
+  function markRead(id, options = {}) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    const candidate = typeof options?.at === 'string' && options.at.trim()
+      ? options.at.trim()
+      : new Date().toISOString();
+    const previous = typeof meta.lastReadAt === 'string' && meta.lastReadAt.trim()
+      ? meta.lastReadAt.trim()
+      : null;
+    // 水位只前进，不回退。
+    if (previous && Date.parse(candidate) <= Date.parse(previous)) {
+      return withMessageCount(meta);
+    }
+    meta.lastReadAt = candidate;
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
   }
@@ -1438,6 +1466,7 @@ export function createConversationStore(options = {}) {
     getConversation,
     getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
+    markRead: changed(markRead, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),

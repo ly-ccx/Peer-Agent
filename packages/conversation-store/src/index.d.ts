@@ -24,6 +24,12 @@ export interface ConversationMeta {
   readonly workspacePath?: string | null;
   readonly mode?: string;
   readonly updatedAt?: string;
+  /**
+   * 用户上次打开/阅读该会话的水位时间（ISO）。
+   * 用于首页「正在讨论」：updatedAt > lastReadAt 视为未读。
+   * 新建会话默认等于 createdAt（创建即已读）。
+   */
+  readonly lastReadAt?: string | null;
   readonly model?: string;
   readonly modelProviderId?: string | null;
   readonly contentRevision?: number;
@@ -92,6 +98,11 @@ export interface ConversationStore {
     automationOrigin?: ConversationAutomationOrigin | null;
   }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
+  /**
+   * 标记会话已读。只推进 lastReadAt，不修改 updatedAt。
+   * options.at 可显式传入水位时间；默认 now。水位只前进不回退。
+   */
+  markRead(id: string, options?: { at?: string }): ConversationMeta | null;
   updateMode(id: string, mode: string): unknown;
   updateAutomationCreateContext(id: string, context: AutomationCreateContext | null): ConversationMeta | null;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
