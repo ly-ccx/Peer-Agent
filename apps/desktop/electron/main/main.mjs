@@ -1887,6 +1887,8 @@ const goalApplicationService = createGoalApplicationService({
   revisePlan: (planId, patch, options) => goalPlanStore.revisePlan(planId, patch, options),
   recordApproval: (planId, approval) => goalPlanStore.recordApproval(planId, approval),
   setPlanStatus: (planId, status) => goalPlanStore.setPlanStatus(planId, status),
+  markRequestedUserInput: (planId, runnerPatch) =>
+    goalPlanStore.markRequestedUserInput(planId, runnerPatch),
   recordManualConfirmation: (planId, confirmation) =>
     goalPlanStore.recordManualConfirmation(planId, confirmation),
   recordTaskEvidence: (planId, taskId, change) =>

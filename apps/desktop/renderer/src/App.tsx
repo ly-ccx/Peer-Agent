@@ -839,8 +839,15 @@ function MainApp() {
     setActivePage('chat');
   }, []);
 
-  const handleContinueTask = useCallback((conversationId: string) => {
+  const handleContinueTask = useCallback((conversationId: string, planId?: string) => {
     // §14 继续讨论：打开会话 Drawer，不跳主 Chat。
+    // 若来自 result_ready（带 planId），语义=验收未通过：重开同一 plan，离开待验收队列。
+    const id = planId?.trim();
+    if (id) {
+      void clientApi.goalPlansMarkRequestedUserInput({ planId: id }).catch((error) => {
+        console.error('[workbench] failed to reopen unaccepted result for continuation', error);
+      });
+    }
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
       selectConversation: setActiveConversationId,
@@ -1244,8 +1251,13 @@ function MainApp() {
                             workspacePath={activeWorkspace}
                             onOpenItem={(item) => {
                               // 任务列表点击：打开会话 Drawer 继续讨论（§14）
+                              // result_ready 时带 planId，验收未通过则同卡重开。
                               if (!item.conversationId) return;
-                              handleContinueTask(String(item.conversationId));
+                              const planId =
+                                item.source === 'goal_plan' && item.actionRight === 'result_ready'
+                                  ? item.taskId
+                                  : undefined;
+                              handleContinueTask(String(item.conversationId), planId);
                             }}
                           />
                         </div>

@@ -953,6 +953,13 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   }) => Promise<GoalPlan>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
+  /**
+   * 待验收点「继续讨论」：验收未通过，重开同一 plan（completed → executing + waiting_user）。
+   */
+  readonly goalPlansMarkRequestedUserInput: (params: {
+    planId: string;
+    runnerPatch?: Record<string, unknown>;
+  }) => Promise<GoalPlan | null>;
   readonly goalPlansRecordManualConfirmation: (params: {
     planId: string;
     confirmation: GoalManualConfirmation;

@@ -828,7 +828,7 @@ test('单活跃计划: executing 旧计划仍有未完成叶子时，新建计�
   assert.equal(lastRev.changedBy, 'system:supersede');
 });
 
-test('单活跃计划: executing 旧计划全叶子终态时，新建计划令其如实收尾为 completed', () => {
+test('单活跃计划: 未验收 completed 旧结果在新建计划时离开待验收队列（cancelled supersede）', () => {
   const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   store.setPlanStatus(executingOld.planId, 'executing');
   // 把全部叶子（t1/t2a/t2b）置为终态 completed
@@ -839,12 +839,42 @@ test('单活跃计划: executing 旧计划全叶子终态时，新建计划令�
       evidenceRefs: [`local-file://done-${taskId}`],
     });
   }
-  // 全叶子终态后，persist 的 derivePlanStatus 已把它收尾为 completed
+  // 全叶子终态后，persist 的 derivePlanStatus 已把它收尾为 completed（待验收）
   assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
+  assert.equal(store.getPlan(executingOld.planId)?.resultAcceptance, undefined);
 
-  // 即便已是 completed（终态），新建计划也不应回退或误伤它
+  // 同会话再开新计划：未验收 completed 必须离开 result_ready 队列，避免叠卡
   store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const after = store.getPlan(executingOld.planId);
+  assert.equal(after?.status, 'cancelled');
+  assert.equal(after?.resultAcceptance, undefined);
+  const lastRev = after.revisionHistory[after.revisionHistory.length - 1];
+  assert.equal(lastRev.changedBy, 'system:supersede');
+  assert.match(lastRev.reason, /accepted|验收|superseded before user accepted/i);
+});
+
+test('单活跃计划: 已验收 completed 旧结果在新建计划时保持 completed 不被误伤', () => {
+  const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  store.setPlanStatus(executingOld.planId, 'executing');
+  registerEvidenceRefs(executingOld.planId, ['local-file://done-t1', 'local-file://done-t2a', 'local-file://done-t2b']);
+  for (const taskId of ['t1', 't2a', 't2b']) {
+    store.recordTaskEvidence(executingOld.planId, taskId, {
+      status: 'completed',
+      evidenceRefs: [`local-file://done-${taskId}`],
+    });
+  }
   assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
+  store.revisePlan(
+    executingOld.planId,
+    { resultAcceptance: { acceptedAt: '2026-08-08T00:00:00.000Z', acceptedBy: 'user' } },
+    { reason: 'user accepted result', changedBy: 'user' },
+  );
+  assert.equal(store.getPlan(executingOld.planId)?.resultAcceptance?.acceptedAt, '2026-08-08T00:00:00.000Z');
+
+  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const after = store.getPlan(executingOld.planId);
+  assert.equal(after?.status, 'completed');
+  assert.equal(after?.resultAcceptance?.acceptedAt, '2026-08-08T00:00:00.000Z');
 });
 
 test('单活跃计划: drafting 旧计划（无活跃叶子）被新建计划作废为 cancelled', () => {
@@ -1825,6 +1855,7 @@ test('markRequestedUserInput reopens a completed intake as waiting_user', () => 
   assert.equal(waiting.progress.percent, 100);
   assert.equal(waiting.runner.status, 'waiting_user');
   assert.equal(waiting.runner.blockedReason, 'requested_user_input');
+  assert.equal(waiting.resultAcceptance, undefined);
 
   const persisted = store.getPlan(plan.planId);
   assert.equal(persisted.status, 'executing');

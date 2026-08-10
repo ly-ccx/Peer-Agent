@@ -43,18 +43,32 @@ describe('continueTaskInConversation', () => {
 });
 
 describe('getTaskContinuationAction', () => {
-  it('returns the original Conversation identity without creating an execution action', () => {
+  it('marks result_ready goal plans as reopen-unaccepted (same card continuation)', () => {
     assert.deepEqual(getTaskContinuationAction(item(), true), {
       conversationId: 'conversation-1',
+      planId: 'plan-1',
+      reopenUnacceptedResult: true,
       label: '继续讨论',
-      description: '打开原会话继续追问或发起下一步',
+      description: '验收未通过，回到原任务继续改（同一张卡）',
     });
   });
 
-  it('uses stable English copy', () => {
+  it('does not reopen non-result_ready cards as acceptance failure', () => {
+    const action = getTaskContinuationAction(
+      item({ actionRight: 'agent_working', nextAction: 'wait', actionLabel: '推进中', statusLabel: '推进中' }),
+      true,
+    );
+    assert.equal(action?.reopenUnacceptedResult, false);
+    assert.equal(action?.planId, undefined);
+    assert.equal(action?.description, '打开原会话继续追问或发起下一步');
+  });
+
+  it('uses stable English copy for unaccepted result continuation', () => {
     const action = getTaskContinuationAction(item(), false);
     assert.equal(action?.label, 'Continue discussion');
-    assert.match(action?.description ?? '', /original conversation/);
+    assert.match(action?.description ?? '', /same task|no new card/i);
+    assert.equal(action?.reopenUnacceptedResult, true);
+    assert.equal(action?.planId, 'plan-1');
   });
 
   it('does not offer continuation for sources without a Conversation', () => {

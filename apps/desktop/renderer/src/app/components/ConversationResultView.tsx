@@ -26,7 +26,7 @@ export function ConversationResultView({
 }: {
   readonly item: TaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
-  readonly onContinueTask?: (conversationId: string) => void;
+  readonly onContinueTask?: (conversationId: string, planId?: string) => void;
   /** 验收三段式动画走完后的收尾（关闭结果视图，回到工作台）。 */
   readonly onAccepted?: (item: TaskOverviewItem) => void;
   readonly isZh?: boolean;
@@ -206,7 +206,7 @@ export function ConversationResultView({
               <button
                 type="button"
                 className="task-overview-btn task-overview-btn-secondary"
-                onClick={() => onContinueTask?.(continuation.conversationId)}
+                onClick={() => onContinueTask?.(continuation.conversationId, continuation.planId)}
               >
                 {continuation.label}
               </button>

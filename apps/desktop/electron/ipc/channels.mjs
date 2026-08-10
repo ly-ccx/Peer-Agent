@@ -125,6 +125,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'goalPlans:delete',
   'goalPlans:get',
   'goalPlans:list',
+  'goalPlans:mark-requested-user-input',
   'goalPlans:record-manual-confirmation',
   'goalPlans:record-task-evidence',
   'goalPlans:revise',

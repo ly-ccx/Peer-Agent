@@ -149,6 +149,7 @@ const unavailableApi: ClientApi = {
   goalPlansRevise: unavailableMethod('goalPlansRevise'),
   goalPlansApprove: unavailableMethod('goalPlansApprove'),
   goalPlansSetStatus: unavailableMethod('goalPlansSetStatus'),
+  goalPlansMarkRequestedUserInput: unavailableMethod('goalPlansMarkRequestedUserInput'),
   goalPlansRecordManualConfirmation: unavailableMethod('goalPlansRecordManualConfirmation'),
   goalRunnerGetState: unavailableMethod('goalRunnerGetState'),
   goalRunnerStart: unavailableMethod('goalRunnerStart'),
