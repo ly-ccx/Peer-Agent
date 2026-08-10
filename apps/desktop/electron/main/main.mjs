@@ -93,6 +93,7 @@ import {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from '@peer-agent/runtime-node';
 import {
@@ -123,7 +124,11 @@ import {
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
 import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
-import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
+import {
+  applyGoalMessageRoute,
+  consumesRequestedUserInput,
+  routeGoalMessage,
+} from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import {
   buildPersistedCompactedMessages,
@@ -429,6 +434,8 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listConversations: (params) => conversationStore.listConversations(params),
   // localToolHost 在 startLocalRuntime 后才赋值；list 时惰性读取，避免启动环依赖。
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
+  // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
+  listProviders: () => llmConfigStore.listProviders(),
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
@@ -2008,6 +2015,7 @@ function registerDesktopIpcHost() {
     ...createChatIpcRegistrations({
       chat: {
         send: handleChatSend,
+        startTask: handleChatStartTask,
         abort: (payload) => chatStreamApplicationService.abort(payload),
         reattach: (payload) => chatStreamApplicationService.reattach(payload),
         listActive: () => chatStreamApplicationService.listActive(),
@@ -2548,15 +2556,87 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
 
 function convergeIntakeAfterGoalTurn(conversationId, outcome) {
   try {
-    if (typeof goalPlanStore.getActivePlanByConversation !== 'function') return;
-    const active = goalPlanStore.getActivePlanByConversation(conversationId);
-    // 三分支决策抽到纯函数 decideIntakeConvergence（可单测）；main 只负责执行副作用。
-    if (decideIntakeConvergence(active, outcome) === 'remove') {
-      goalPlanStore.deletePlan(active.planId);
+    if (
+      typeof goalPlanStore.listPlansByConversation !== 'function'
+      || typeof goalPlanStore.getPlan !== 'function'
+    ) return;
+    const intake = goalPlanStore.listPlansByConversation(conversationId)
+      .map((meta) => goalPlanStore.getPlan(meta.planId))
+      .filter(Boolean)
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+      .find((plan) => plan?.activation?.kind === 'intake') ?? null;
+    const decision = decideIntakeConvergence(intake, outcome);
+    // request_user_input is the final action-owner fact of the turn. It must
+    // override a goal_update_task(completed) that happened earlier in the same
+    // turn, otherwise Task Overview sees only completed → result_ready.
+    if (decision === 'keep' && typeof goalPlanStore.markRequestedUserInput === 'function') {
+      goalPlanStore.markRequestedUserInput(intake.planId);
+    } else if (decision === 'remove') {
+      goalPlanStore.deletePlan(intake.planId);
     }
   } catch (error) {
     console.warn('[main] intake convergence failed:', error?.message || error);
   }
+}
+
+async function handleChatStartTask({
+  text,
+  title,
+  workspacePath,
+  mode = 'goal',
+  effort,
+  modelProviderId,
+  attachments = [],
+} = {}, sender) {
+  const normalizedText = String(text ?? '').trim();
+  if (!normalizedText && (!Array.isArray(attachments) || attachments.length === 0)) {
+    throw new Error('task_text_or_attachment_required');
+  }
+  const conversation = conversationStore.createConversation({
+    title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+    workspacePath: workspacePath ?? settingsStore.getAll().activeWorkspace ?? null,
+    mode,
+  });
+  if (effort !== undefined || modelProviderId !== undefined) {
+    conversationStore.updateModelEffort(conversation.id, {
+      effort,
+      modelProviderId,
+    });
+  }
+  const now = new Date().toISOString();
+  const userMessageId = randomUUID();
+  const assistantMessageId = randomUUID();
+  const streamId = randomUUID();
+  conversationStore.appendMessage(conversation.id, {
+    id: userMessageId,
+    role: 'user',
+    content: normalizedText,
+    timestamp: now,
+    ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
+  });
+  conversationStore.appendMessage(conversation.id, {
+    id: assistantMessageId,
+    role: 'assistant',
+    content: '',
+    timestamp: now,
+    segments: [],
+  });
+  void Promise.resolve(handleChatSend({
+    streamId,
+    assistantMessageId,
+    effort,
+    mode,
+    conversationId: conversation.id,
+    modelProviderId,
+    workspacePath: conversation.workspacePath ?? workspacePath ?? null,
+  }, sender)).catch((error) => {
+    console.error('[main] background task failed:', error);
+  });
+  return {
+    conversationId: conversation.id,
+    streamId,
+    assistantMessageId,
+  };
 }
 
 function handleChatSend({
@@ -2589,6 +2669,7 @@ function handleChatSend({
   const resolvedContinuityContext = persistedConversation?.messages
     ? desktopContinuityContextFromProjection(persistedProjection)
     : continuityContext;
+  let answeredRequestedUserInputPlanId = null;
   // Agent 默认（chat）与 legacy goal 共享 intake / 路由契约。
   if ((mode === 'goal' || mode === 'chat') && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
     const goal = latestUserTextFromProviderMessages(messages);
@@ -2598,11 +2679,18 @@ function handleChatSend({
         const activeGoal = activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null;
         const route = routeGoalMessage({ messageText: goal, activeGoalPlan: activeGoal });
         if (route.type === 'append_goal_event') {
+          const answersRequestedUserInput = consumesRequestedUserInput({
+            route,
+            activeGoalPlan: activeGoal,
+          });
           applyGoalMessageRoute({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
           });
+          if (answersRequestedUserInput) {
+            answeredRequestedUserInputPlanId = activeGoal.planId;
+          }
         } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =
             conversationStore.getConversation(conversationId)?.workspacePath ||
@@ -2674,12 +2762,25 @@ function handleChatSend({
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
-      // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
-      // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
-      // auto-start 判定抽到 shouldAutoStartAcceptedGoalRunner，accepted/executing 都要启动。
-      if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
-        // 双保险：outcome resolve 时再幂等 kick 一次。不能在这里按 conversation
-        // force-complete；goal-accepted 回调可能已经启动 Runner，再按会话收口会误杀 Runner 流。
+      if (answeredRequestedUserInputPlanId) {
+        // The user's answer ran in the foreground chat turn. Hand ownership back
+        // only after that turn has released the conversation runtime, and re-read
+        // persisted state before starting so a new block/completion wins the race.
+        void serializeAcceptedGoalRunnerHandoff({
+          forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+            conversationId,
+            { reason: 'goal_user_decision_handoff' },
+          ) ?? { released: Promise.resolve() },
+          isStillAccepted: () => shouldResumeGoalRunnerAfterUserDecision(
+            goalPlanStore.getPlan?.(answeredRequestedUserInputPlanId),
+          ),
+          startRunner: () => goalRunner?.start(answeredRequestedUserInputPlanId),
+        }).catch((error) => {
+          console.error('[main] resume goal runner after user decision failed:', error?.message || error);
+        });
+      } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
+        // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
+        // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
         queueMicrotask(() => {
           void goalRunner?.start(acceptedGoal.planId).catch((error) => {
             console.error('[main] auto-start goal runner failed:', error?.message || error);

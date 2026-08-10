@@ -3,7 +3,9 @@
     @apply grid h-full min-h-0 min-w-0 overflow-hidden;
     grid-template-columns: minmax(0, 1fr) minmax(340px, 30vw);
     color: var(--za-text);
-    background: var(--za-thread-bg);
+    /* 一级页面实色只由 .primary-page-shell 提供；这里再铺 --za-thread-bg
+       会在壳层圆角抗锯齿处叠出第二层，造成右上角色差。 */
+    background: transparent;
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
@@ -211,8 +213,9 @@
     @apply grid min-h-0 overflow-y-auto px-6 py-16;
     align-content: start;
     gap: 22px;
+    /* 两列只用发丝线分隔；背景透明，继承一级壳层 --za-app-bg。 */
     border-left: 1px solid var(--za-line);
-    background: var(--za-sidebar-bg);
+    background: transparent;
     --motion-enter-from: 10px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
@@ -1198,8 +1201,14 @@
     @apply absolute right-0 top-0 z-10 flex items-center justify-end gap-3;
     margin-bottom: 0;
   }
+  /* 工具栏搜索 / 分类 / 同步：同一圆角 token，避免 pill / xl / lg 混用 */
+  .skill-marketplace-toolbar input,
+  .skill-marketplace-category-select .pa-dropdown-trigger,
+  .skill-marketplace-toolbar .skill-marketplace-install {
+    border-radius: var(--ui-radius-round);
+  }
   .skill-marketplace-toolbar input {
-    @apply min-w-[240px] rounded-xl px-3 py-2 text-[13px] outline-none;
+    @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
     color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
   }
   .skill-marketplace {
@@ -1252,7 +1261,8 @@
   .skill-marketplace-card-copy small { @apply text-[11px]; color: var(--za-text-muted); }
   .skill-marketplace-card-copy > span { @apply line-clamp-2 text-[12px] leading-5; color: var(--za-text-muted); }
   .skill-marketplace-install {
-    @apply shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold;
+    @apply shrink-0 px-3 py-1.5 text-[12px] font-semibold;
+    border-radius: var(--ui-radius-round);
     color: #fff; background: var(--za-accent); border: 0; cursor: pointer;
     transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
   }
@@ -1373,7 +1383,8 @@
     min-width: 148px;
   }
   .skill-marketplace-category-select .pa-dropdown-trigger {
-    @apply rounded-xl px-3 py-2 text-[12px];
+    @apply px-3 py-2 text-[12px];
+    border-radius: var(--ui-radius-round);
     min-height: 34px;
     color: var(--za-text);
     background: var(--za-surface);

@@ -102,6 +102,22 @@ export interface ChatProviderMessage {
   readonly content: unknown;
 }
 
+export interface ChatStartTaskRequest {
+  readonly text: string;
+  readonly title?: string;
+  readonly workspacePath?: string | null;
+  readonly mode?: string;
+  readonly effort?: string;
+  readonly modelProviderId?: string | null;
+  readonly attachments?: readonly unknown[];
+}
+
+export interface ChatStartTaskResult {
+  readonly conversationId: string;
+  readonly streamId: string;
+  readonly assistantMessageId: string;
+}
+
 export interface ChatSendRequest {
   /**
    * @deprecated Desktop Main projects canonical history from conversationId.

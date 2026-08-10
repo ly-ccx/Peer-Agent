@@ -19,7 +19,8 @@
  * 且测试无需构造巨型 fixture。
  */
 
-import type { GoalPlanStatus, GoalRunnerStatus } from './goal.ts';
+import type { GoalPlanStatus, GoalRunnerStatus, GoalTiming } from './goal.ts';
+import { projectGoalTiming } from './goal.ts';
 import type {
   AutomationLifecycleStatus,
   AutomationRunStatus,
@@ -126,9 +127,9 @@ export interface TaskOverviewItem {
   readonly needsYouReason?: TaskNeedsYouReason;
   /** 下一步动作标识。 */
   readonly nextAction: TaskNextAction;
-  /** Task 稳定标题；有 Conversation 时由 Conversation.title 提供。 */
+  /** 用户可见任务名。有活跃 GoalPlan 时必须是 plan.title，不得用用户原话。 */
   readonly title: string;
-  /** Task 内当前 GoalPlan 标题；讨论态和 Automation 为 undefined。 */
+  /** 当前步骤标题（非 plan 名）；无步骤时省略。UI 渲染为「当前：…」，禁止「当前目标 · 确认语」。 */
   readonly currentGoalTitle?: string;
   /** Workspace 标签（原型卡片右上角）。 */
   readonly workspaceLabel?: string;
@@ -143,6 +144,22 @@ export interface TaskOverviewItem {
   readonly planSteps?: readonly TaskOverviewPlanStep[];
   /** 最近活跃时间（ISO 字符串）。 */
   readonly lastActiveAt?: string;
+  /**
+   * 有效运行时长（毫秒）。
+   * GoalPlan 来自 timing 投影（activeMs）；缺 timing 时省略。
+   * UI 负责格式化为「3m12s」等，不在协议层落展示字符串。
+   */
+  readonly durationMs?: number;
+  /**
+   * 任务所用模型的用户可见标签（如 grok-4.5）。
+   * 来源：会话级 model / modelProviderId 绑定；无绑定时省略。
+   */
+  readonly modelLabel?: string;
+  /**
+   * 提供商展示标签（如 xai / openai）。
+   * 来源：modelProviderId 的 group 段；无绑定时省略。
+   */
+  readonly providerLabel?: string;
   /** 动作按钮标签（原型「处理 →」「验收 →」「继续 →」）。 */
   readonly actionLabel: string;
   /** 关联的 conversationId，用于深链跳转。 */
@@ -159,6 +176,10 @@ export interface ConversationProjectionSnapshot {
   readonly title: string;
   readonly workspaceLabel?: string;
   readonly updatedAt?: string;
+  /** 会话绑定模型标签；无绑定时省略。 */
+  readonly modelLabel?: string;
+  /** 提供商标签；无绑定时省略。 */
+  readonly providerLabel?: string;
 }
 
 export interface GoalPlanProjectionSnapshot {
@@ -173,6 +194,21 @@ export interface GoalPlanProjectionSnapshot {
   readonly planSteps?: readonly TaskOverviewPlanStep[];
   readonly updatedAt?: string;
   readonly conversationId?: string;
+  /**
+   * GoalPlan.timing 原样透传；投影层用 projectGoalTiming 计算 durationMs。
+   * 调用方不预计算，避免 main 与 protocol 各算一遍。
+   */
+  readonly timing?: GoalTiming;
+  /**
+   * 会话模型绑定投影出的展示标签（如 grok-4.5）。
+   * 由聚合层从 conversation.model / modelProviderId 解析后写入。
+   */
+  readonly modelLabel?: string;
+  /**
+   * 提供商展示标签（如 xai）。
+   * 由聚合层从 modelProviderId 的 group 段解析后写入。
+   */
+  readonly providerLabel?: string;
   /**
    * 是否已完成 USER ACCEPTANCE 验收（§11.3 rule 6/16 的分界）。
    * Result Package 落地前可恒传 false（过渡期：completed 一律进
@@ -228,6 +264,14 @@ interface ProjectionDecision {
 export function projectConversation(
   snapshot: ConversationProjectionSnapshot,
 ): TaskOverviewItem {
+  const modelLabel =
+    typeof snapshot.modelLabel === 'string' && snapshot.modelLabel.trim()
+      ? snapshot.modelLabel.trim()
+      : undefined;
+  const providerLabel =
+    typeof snapshot.providerLabel === 'string' && snapshot.providerLabel.trim()
+      ? snapshot.providerLabel.trim()
+      : undefined;
   return {
     taskId: snapshot.conversationId,
     source: 'conversation',
@@ -237,6 +281,8 @@ export function projectConversation(
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     statusLabel: '讨论中',
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
+    ...(modelLabel ? { modelLabel } : {}),
+    ...(providerLabel ? { providerLabel } : {}),
     actionLabel: '继续讨论 →',
     conversationId: snapshot.conversationId,
   };
@@ -264,8 +310,22 @@ export function projectConversation(
  */
 export function projectGoalPlan(
   snapshot: GoalPlanProjectionSnapshot,
+  options?: { readonly nowMs?: number },
 ): TaskOverviewItem {
   const decision = decideGoalPlan(snapshot);
+  const projectedTiming = projectGoalTiming(snapshot.timing, options?.nowMs);
+  const durationMs =
+    typeof projectedTiming?.activeMs === 'number' && Number.isFinite(projectedTiming.activeMs)
+      ? Math.max(0, Math.floor(projectedTiming.activeMs))
+      : undefined;
+  const modelLabel =
+    typeof snapshot.modelLabel === 'string' && snapshot.modelLabel.trim()
+      ? snapshot.modelLabel.trim()
+      : undefined;
+  const providerLabel =
+    typeof snapshot.providerLabel === 'string' && snapshot.providerLabel.trim()
+      ? snapshot.providerLabel.trim()
+      : undefined;
   return {
     taskId: snapshot.planId,
     source: 'goal_plan',
@@ -280,6 +340,9 @@ export function projectGoalPlan(
       ? { planSteps: snapshot.planSteps }
       : {}),
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(modelLabel ? { modelLabel } : {}),
+    ...(providerLabel ? { providerLabel } : {}),
     actionLabel: decision.actionLabel,
     ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),
   };
@@ -288,7 +351,20 @@ export function projectGoalPlan(
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
   const { status, runnerStatus, accepted } = snapshot;
 
-  // rule 16 first: 终态计划优先于任何 runner 残留态
+  // request_user_input 是明确的当前行动权事实。即使旧记录或竞态窗口里
+  // plan 已先写成 completed，只要 Runner 仍在 waiting_user，就必须先让用户回答，
+  // 不能把尚未消费的问题误投影成结果待验收。
+  if (status === 'completed' && runnerStatus === 'waiting_user') {
+    return {
+      actionRight: 'needs_you',
+      needsYouReason: 'user_input',
+      nextAction: 'answer_question',
+      statusLabel: '等待你的选择',
+      actionLabel: '回答 →',
+    };
+  }
+
+  // rule 16 first: 其他终态计划优先于 runner 残留态
   // （历史 failed/cancelled/completed 上的 runner.blocked 不得再进 needs_you）
   if (status === 'completed' && accepted !== true) {
     // rule 6: 完成且未验收 → 结果就绪
@@ -455,7 +531,6 @@ export function projectAutomationRun(
     ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),
   };
 }
-
 
 /**
  * 后台 shell 线程 → 工作台「Peer 正在推进」卡片。

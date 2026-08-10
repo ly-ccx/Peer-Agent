@@ -273,6 +273,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('goalRunner:changed', handler);
   },
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
+  chatStartTask: (params) => ipcRenderer.invoke('chat:start-task', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),
   chatStreamListActive: () => ipcRenderer.invoke('chat:stream:list-active'),

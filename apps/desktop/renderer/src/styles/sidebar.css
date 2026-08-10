@@ -277,6 +277,7 @@
 }
 
 .sidebar-workspace-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -284,7 +285,9 @@
   padding: 8px 10px;
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   cursor: pointer;
-  transition: background var(--za-motion-fast);
+  transition:
+    background var(--za-motion-fast),
+    padding-right var(--za-motion-fast);
   outline: none;
 }
 
@@ -292,8 +295,16 @@
   background: var(--za-sidebar-active-bg, var(--chrome-sunken));
 }
 
+/* hover / 键盘 focus-visible 时为绝对定位的 × 让出右侧空间，避免与状态点重叠。
+   不用 :focus-within：行可聚焦(tabIndex=0)，鼠标点击后焦点常驻会让 × 一直显示。 */
+.sidebar-workspace-row:hover,
+.sidebar-workspace-row:focus-visible,
+.sidebar-workspace-row:has(.sidebar-workspace-remove:focus-visible) {
+  padding-right: 30px;
+}
+
 .sidebar-workspace-node.is-active > .sidebar-workspace-row,
-.sidebar-workspace-node.is-expanded > .sidebar-workspace-row {
+.sidebar-workspace-node.is-home > .sidebar-workspace-row {
   background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.04));
   box-shadow: 0 0 0 1px var(--chrome-hairline);
 }
@@ -358,8 +369,15 @@
   --motion-ripple-peak: 1;
 }
 
+/* 关闭按钮默认不占布局空间，仅 hover / 键盘 focus-visible 时叠在行右侧出现，避免常驻空白。
+   不用 :focus-within：行可聚焦(tabIndex=0)，鼠标点击后焦点常驻会让 × 一直显示。 */
 .sidebar-workspace-remove {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
   border: none;
   background: transparent;
   color: var(--graphite-mute);
@@ -367,15 +385,16 @@
   height: 22px;
   border-radius: 6px;
   cursor: pointer;
-  flex-shrink: 0;
   font-size: 14px;
   line-height: 1;
   transition: opacity var(--za-motion-fast), color var(--za-motion-fast), background var(--za-motion-fast);
 }
 
 .sidebar-workspace-row:hover .sidebar-workspace-remove,
-.sidebar-workspace-row:focus-within .sidebar-workspace-remove {
+.sidebar-workspace-row:focus-visible .sidebar-workspace-remove,
+.sidebar-workspace-remove:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar-workspace-remove:hover {
@@ -383,58 +402,8 @@
   background: color-mix(in srgb, var(--state-danger) 10%, transparent);
 }
 
-.sidebar-workspace-children {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 2px 0 8px 12px;
-  margin-left: 14px;
-  border-left: 1px solid var(--chrome-hairline);
-}
-
-.sidebar-workspace-home {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border: none;
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
-  background: transparent;
-  color: var(--graphite-base);
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--za-motion-fast);
-}
-
-.sidebar-workspace-home:hover {
-  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
-}
-
-.sidebar-workspace-home.active {
-  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.05));
-  color: var(--graphite-base);
-}
-
-.sidebar-workspace-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: min(48vh, 420px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  /* The active-row shadow expands horizontally; reserve equal room before clipping. */
-  padding-inline: var(--space-1);
-}
-
-.sidebar-workspace-sessions-empty,
-.sidebar-workspace-sessions .sidebar-empty-state {
-  padding: 8px 10px;
-  font-size: 0.72rem;
-  color: var(--graphite-mute);
-}
+/* Nested workbench / conversation list under a workspace is intentionally removed.
+   Clicking the workspace row itself activates the workspace and opens the workbench. */
 
 .sidebar-workspace-add {
   display: flex;
@@ -458,8 +427,6 @@
   border-color: var(--graphite-mute);
   background: var(--chrome-sunken);
 }
-
-/* Nested sessions still reuse conversation-row styles via .channel-conversation-list */
 
 /* ── New chat / top nav (must stay no-drag so Electron titlebar drag does not steal clicks) ── */
 .sidebar-top {

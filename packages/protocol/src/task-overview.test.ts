@@ -92,6 +92,35 @@ test('rule 4: runner waiting_user → needs_you / user_input / answer_question',
   assert.equal(item.statusLabel, '等待你的选择');
 });
 
+test('request_user_input stays needs_you even after the current leaf reached 100%', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'waiting_user',
+      progress: { total: 1, completed: 1 },
+    }),
+  );
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
+test('request_user_input outranks stale completed until the answer is consumed', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'completed',
+      runnerStatus: 'waiting_user',
+      progress: { total: 1, completed: 1 },
+      accepted: false,
+    }),
+  );
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
 test('rule 5: runner blocked → needs_you / decision', () => {
   const item = projectGoalPlan(
     goalSnapshot({ status: 'executing', runnerStatus: 'blocked' }),
@@ -317,6 +346,39 @@ test('projectGoalPlan 透传 planSteps；空列表不写字段', () => {
 
   const absent = projectGoalPlan(goalSnapshot());
   assert.equal(absent.planSteps, undefined);
+});
+
+test('projectGoalPlan 从 timing 投影 durationMs，并透传 modelLabel / providerLabel', () => {
+  const nowMs = Date.parse('2026-08-10T00:01:00.000Z');
+  const item = projectGoalPlan(
+    goalSnapshot({
+      modelLabel: ' grok-4.5 ',
+      providerLabel: ' xai ',
+      timing: {
+        startedAt: '2026-08-10T00:00:00.000Z',
+        activeAccumulatedMs: 15_000,
+        activeSegmentStartedAt: '2026-08-10T00:00:45.000Z',
+      },
+    }),
+    { nowMs },
+  );
+  // 15s 累计 + 15s open segment = 30s
+  assert.equal(item.durationMs, 30_000);
+  assert.equal(item.modelLabel, 'grok-4.5');
+  assert.equal(item.providerLabel, 'xai');
+
+  const without = projectGoalPlan(goalSnapshot());
+  assert.equal(without.durationMs, undefined);
+  assert.equal(without.modelLabel, undefined);
+  assert.equal(without.providerLabel, undefined);
+});
+
+test('projectConversation 透传 modelLabel / providerLabel', () => {
+  const item = projectConversation(
+    conversationSnapshot({ modelLabel: 'gpt-5.6', providerLabel: 'openai' }),
+  );
+  assert.equal(item.modelLabel, 'gpt-5.6');
+  assert.equal(item.providerLabel, 'openai');
 });
 
 test('shell_background running → peer_advancing and open_background_thread', () => {

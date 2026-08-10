@@ -838,7 +838,9 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
         </span>
       </div>
       {plan.goal ? (
-        <p className="goal-contract-text">{plan.goal}</p>
+        <div className="goal-plan-goal goal-contract-current">
+          <p className="goal-contract-text goal-contract-text--current">{plan.goal}</p>
+        </div>
       ) : (
         <p className="goal-contract-text goal-contract-text--empty">
           {isZh ? '尚未写入目标描述' : 'No goal description recorded yet'}

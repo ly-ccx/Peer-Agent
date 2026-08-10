@@ -1907,6 +1907,24 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * approved / executing / paused）的旧计划做收尾或作废（见 supersedeAwaitingDrafts）——
    * 全叶子终态的如实收尾为 completed/failed，否则作废为 cancelled，杜绝「僵尸 executing 计划」累积。
    */
+
+  function sanitizePlanTitle(rawTitle, goalText) {
+    const raw = typeof rawTitle === 'string' ? rawTitle.replace(/\s+/g, ' ').trim() : '';
+    const goal = typeof goalText === 'string' ? goalText.replace(/\s+/g, ' ').trim() : '';
+    const isAck = (value) => /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(value || '');
+    const isCmd = (value) => /^[>$]\s/.test(value || '') || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(value || '') && (value || '').includes('/'));
+    let title = raw;
+    if (!title || isAck(title) || isCmd(title) || title.length > 40) {
+      // Prefer a short slice of goal when title is bad; never keep pure ack/cmd.
+      if (goal && !isAck(goal) && !isCmd(goal)) {
+        title = goal.length <= 24 ? goal : `${goal.slice(0, 24)}…`;
+      } else {
+        title = '未命名任务';
+      }
+    }
+    return title;
+  }
+
   function createPlan(draft = {}, { changeKind = 'persist' } = {}) {
     const now = new Date().toISOString();
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
@@ -1947,7 +1965,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       rootPlanId: parentPlan ? (parentPlan.rootPlanId || parentPlan.planId) : undefined,
       relationType: parentPlan ? 'derived' : undefined,
       depth: parentPlan ? (Number.isInteger(parentPlan.depth) ? parentPlan.depth + 1 : 1) : undefined,
-      title: draft.title || '',
+      title: sanitizePlanTitle(draft.title, draft.goal),
       goal: draft.goal || '',
       // 成功标准规范化为结构化 SuccessCriterion[]（字符串向后兼容归一为 manual）。
       successCriteria: normalizeSuccessCriteria(draft.successCriteria),
@@ -2358,6 +2376,67 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       runner: nextRunner,
       prevStatus: plan.status,
       prevTiming: timing ?? plan.timing,
+    });
+  }
+
+  /**
+   * Persist request_user_input as the final action-owner transition of a turn.
+   *
+   * A model may complete the current leaf task and then ask the user to choose
+   * the next direction in the same turn. In that sequence the question is the
+   * final fact: reopen a just-completed plan and persist waiting_user so Task
+   * Overview does not misclassify the turn as a result awaiting acceptance.
+   */
+  function markRequestedUserInput(planId, runnerPatch = {}) {
+    const plan = getPlan(planId);
+    if (!plan || ['failed', 'cancelled'].includes(plan.status)) return null;
+
+    const now = new Date().toISOString();
+    const currentRunner = normalizeRunnerState(plan.runner, planId) || {
+      enabled: false,
+      status: 'idle',
+      turnCount: 0,
+      roundCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
+      updatedAt: now,
+    };
+    const nextRunner = normalizeRunnerState({
+      ...currentRunner,
+      ...runnerPatch,
+      enabled: true,
+      status: 'waiting_user',
+      intent: 'block',
+      phase: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      lastError: undefined,
+      updatedAt: now,
+    }, planId);
+    const timing = applyGoalTimingTransition(
+      plan.timing,
+      plan.status,
+      'executing',
+      currentRunner.status,
+      nextRunner?.status,
+      now,
+    );
+
+    return persist({
+      ...plan,
+      status: 'executing',
+      runner: nextRunner,
+      updatedAt: now,
+      ...(timing ? { timing } : {}),
+    }, {
+      preserveStatus: true,
+      changeKind: 'runner-state',
+      runner: nextRunner,
+      prevStatus: plan.status,
+      prevTiming: plan.timing,
     });
   }
 
@@ -3301,6 +3380,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordApproval,
     setPlanStatus,
     resumeRunner,
+    markRequestedUserInput,
     consumeRequestedUserInput,
     setRunnerState,
     prepareContextCheckpoint,

@@ -12,6 +12,14 @@ test('home control strip keeps a compact left-group gap', () => {
   );
 });
 
+test('home action row bottom-aligns left controls with the send button', () => {
+  // Shorter model/thinking/context chips should sit on the same baseline edge as the taller submit button.
+  assert.match(
+    styles,
+    /\.composer-home-action-row \{[\s\S]*?align-items:\s*flex-end;/,
+  );
+});
+
 test('home model slot packs model/thinking/context tightly', () => {
   // Short labels stay dense; the current home treatment uses a 2px internal gap and 8px horizontal padding.
   assert.match(

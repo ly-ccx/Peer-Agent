@@ -653,6 +653,15 @@
   overflow-wrap: anywhere;
 }
 
+.goal-contract-current {
+  position: relative;
+  padding: 10px 12px 11px;
+  border: 1px solid color-mix(in srgb, var(--za-accent) 22%, var(--ui-border-subtle, var(--za-line)));
+  border-radius: var(--ui-radius-panel, 10px);
+  background: color-mix(in srgb, var(--za-accent) 7%, var(--ui-surface-raised, transparent));
+  overflow: hidden;
+}
+
 .goal-contract-text {
   margin: 0;
   font-size: var(--ui-font-control, 13px);
@@ -660,6 +669,13 @@
   color: var(--za-text-soft);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.goal-contract-text--current {
+  color: var(--za-text);
+  font-size: var(--ui-font-body, 14px);
+  line-height: 1.6;
+  font-weight: 600;
 }
 
 .goal-contract-text--empty {

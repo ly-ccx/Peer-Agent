@@ -6,6 +6,10 @@ import { loadConversationMessages } from '../../chat/state/conversationLoad';
 import { contentFromSegments } from '../../chat/state/streamSegments';
 import type { ChatMsg } from '../../chat/state/types';
 import { getTaskContinuationAction } from '../taskContinuation';
+import {
+  runAcceptanceTransition,
+  type AcceptancePhase,
+} from '../state/acceptanceTransition';
 
 /**
  * 工作台「查看结果」用的只读会话/执行内容展示。
@@ -17,19 +21,31 @@ export function ConversationResultView({
   item,
   onAcceptResult,
   onContinueTask,
+  onAccepted,
   isZh = true,
 }: {
   readonly item: TaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly onContinueTask?: (conversationId: string) => void;
+  /** 验收三段式动画走完后的收尾（关闭结果视图，回到工作台）。 */
+  readonly onAccepted?: (item: TaskOverviewItem) => void;
   readonly isZh?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly ChatMsg[]>([]);
   const [plan, setPlan] = useState<GoalPlan | null>(null);
-  const [accepting, setAccepting] = useState(false);
+  const [acceptancePhase, setAcceptancePhase] = useState<AcceptancePhase | null>(null);
   const targetMsgRef = useRef<HTMLElement | null>(null);
+  const acceptanceTimers = useRef<Set<number>>(new Set());
+
+  useEffect(
+    () => () => {
+      for (const timer of acceptanceTimers.current) window.clearTimeout(timer);
+      acceptanceTimers.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +111,11 @@ export function ConversationResultView({
   }, [loading, targetMessageId, messages.length]);
 
   return (
-    <div className="conversation-result-view">
+    <div
+      className={`conversation-result-view${
+        acceptancePhase ? ` conversation-result-view--${acceptancePhase}` : ''
+      }`}
+    >
       <header className="conversation-result-view__header">
         <div className="conversation-result-view__kicker">执行结果</div>
         <h3 className="conversation-result-view__title">{item.title}</h3>
@@ -199,13 +219,35 @@ export function ConversationResultView({
             <button
             type="button"
             className="task-overview-btn task-overview-btn--primary"
-            disabled={accepting}
+            disabled={acceptancePhase !== null}
             onClick={() => {
-              setAccepting(true);
-              void Promise.resolve(onAcceptResult?.(item)).finally(() => setAccepting(false));
+              if (acceptancePhase !== null) return;
+              void runAcceptanceTransition({
+                submit: () => onAcceptResult?.(item),
+                onPhase: setAcceptancePhase,
+                schedule: (callback, delayMs) => {
+                  const timer = window.setTimeout(() => {
+                    acceptanceTimers.current.delete(timer);
+                    callback();
+                  }, delayMs);
+                  acceptanceTimers.current.add(timer);
+                },
+                onSettled: () => onAccepted?.(item),
+              });
             }}
           >
-            {accepting ? (isZh ? '确认中…' : 'Accepting…') : isZh ? '确认验收' : 'Accept result'}
+            {acceptancePhase === 'submitting' ? (
+              <>
+                <span className="result-card-spinner" aria-hidden="true" />
+                {isZh ? '正在验收…' : 'Accepting…'}
+              </>
+            ) : null}
+            {acceptancePhase === 'celebrating' || acceptancePhase === 'exiting'
+              ? isZh
+                ? '已验收 ✓'
+                : 'Accepted ✓'
+              : null}
+            {acceptancePhase === null ? (isZh ? '确认验收' : 'Accept result') : null}
           </button>
           ) : null}
         </footer>

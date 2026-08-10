@@ -66,6 +66,172 @@ function normalizedTitle(value, fallback) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
 }
 
+/** UUID / 长十六进制配置 id：不可直接当用户可见标签。 */
+const OPAQUE_ID_RE =
+  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{24,})$/i;
+
+/**
+ * 是否像内部配置 id（UUID 等）。这类字符串不能出现在任务卡片右上角。
+ */
+export function looksLikeOpaqueId(value) {
+  if (typeof value !== 'string') return false;
+  const raw = value.trim();
+  if (!raw) return false;
+  return OPAQUE_ID_RE.test(raw);
+}
+
+/**
+ * 仅返回用户可读标签；空串 / UUID / 纯内部 id 一律视为无效。
+ */
+export function humanReadableLabel(value) {
+  if (typeof value !== 'string') return undefined;
+  const raw = value.trim();
+  if (!raw || looksLikeOpaqueId(raw)) return undefined;
+  return raw;
+}
+
+/**
+ * 拆分 modelProviderId（groupId::modelId 或 provider/model）。
+ * 注意：会话级 modelProviderId 常见形态是 llmConfigStore 配置项 UUID，
+ * 不是 groupId；此时 provider/model 都会是 null（需目录解析）。
+ * @returns {{ provider: string | null, model: string | null }}
+ */
+export function splitModelProviderId(modelProviderId) {
+  const raw =
+    typeof modelProviderId === 'string' && modelProviderId.trim()
+      ? modelProviderId.trim()
+      : '';
+  if (!raw) return { provider: null, model: null };
+  // 单独 UUID：没有可读段，勿把整串当 provider。
+  if (looksLikeOpaqueId(raw)) return { provider: null, model: null };
+  const parts = raw.split(/::|\//).map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return { provider: null, model: null };
+  if (parts.length === 1) {
+    // 单段若是可读名（如 anthropic）可作 provider；UUID 已在上面拦截。
+    return { provider: humanReadableLabel(parts[0]) || null, model: null };
+  }
+  return {
+    provider: humanReadableLabel(parts[0]) || null,
+    model: humanReadableLabel(parts[parts.length - 1]) || null,
+  };
+}
+
+/**
+ * 从 listProviders() 视图构建 id → provider 索引。
+ * 支持 id / groupId 命中（会话绑定通常是配置项 id）。
+ */
+export function buildProviderIndex(providers) {
+  /** @type {Map<string, object>} */
+  const byId = new Map();
+  if (!Array.isArray(providers)) return byId;
+  for (const entry of providers) {
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    if (id) byId.set(id, entry);
+    const groupId = typeof entry.groupId === 'string' ? entry.groupId.trim() : '';
+    if (groupId && !byId.has(groupId)) byId.set(groupId, entry);
+  }
+  return byId;
+}
+
+/**
+ * 从会话绑定 + 可选提供商目录，解析卡片可用的可读 model/provider 标签。
+ * - 优先 llmConfigStore 目录命中（modelProviderId = 配置项 id）
+ * - 其次 conversation.model（若可读）
+ * - 再次 modelProviderId 的 group::model 可读段
+ * - 解析失败 / 仅有 UUID 时字段省略
+ *
+ * @param {object|null|undefined} conversation
+ * @param {Map<string, object>|Iterable|undefined} providerIndexOrList
+ * @returns {{ modelLabel?: string, providerLabel?: string }}
+ */
+export function resolveConversationModelLabels(conversation, providerIndexOrList) {
+  if (!conversation || typeof conversation !== 'object') return {};
+  const index =
+    providerIndexOrList instanceof Map
+      ? providerIndexOrList
+      : buildProviderIndex(providerIndexOrList);
+
+  const bindingId =
+    typeof conversation.modelProviderId === 'string' && conversation.modelProviderId.trim()
+      ? conversation.modelProviderId.trim()
+      : '';
+  const catalog = bindingId ? index.get(bindingId) : undefined;
+
+  let modelLabel =
+    humanReadableLabel(catalog?.modelLabel) ||
+    humanReadableLabel(catalog?.model) ||
+    humanReadableLabel(conversation.model) ||
+    undefined;
+  let providerLabel =
+    humanReadableLabel(catalog?.name) ||
+    humanReadableLabel(catalog?.provider) ||
+    undefined;
+
+  if (!modelLabel || !providerLabel) {
+    const split = splitModelProviderId(bindingId);
+    if (!modelLabel) modelLabel = split.model || undefined;
+    if (!providerLabel) providerLabel = split.provider || undefined;
+  }
+
+  // 提供商名与模型名相同时只保留模型，避免「Grok · Grok」。
+  if (
+    modelLabel &&
+    providerLabel &&
+    modelLabel.toLowerCase() === providerLabel.toLowerCase()
+  ) {
+    providerLabel = undefined;
+  }
+
+  return {
+    ...(modelLabel ? { modelLabel } : {}),
+    ...(providerLabel ? { providerLabel } : {}),
+  };
+}
+
+/**
+ * 从会话绑定解析任务卡片可用的模型展示标签。
+ * 无目录时仅回退可读 model / modelProviderId 段；UUID 不展示。
+ */
+export function modelLabelFromConversation(conversation, providerIndexOrList) {
+  return resolveConversationModelLabels(conversation, providerIndexOrList).modelLabel;
+}
+
+/**
+ * 从会话绑定解析提供商展示标签。
+ * 无目录且 modelProviderId 为 UUID 时返回 undefined（禁止直接展示 id）。
+ */
+export function providerLabelFromConversation(conversation, providerIndexOrList) {
+  return resolveConversationModelLabels(conversation, providerIndexOrList).providerLabel;
+}
+
+/** 讨论/弱意图展示标题：截断原话，禁止命令/日志全文当永久名。 */
+export function displayConversationTitle(value, fallback = '未命名沟通') {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return fallback;
+  // 命令输出 / 路径碎片：不直接展示
+  if (/^[>$]\s/.test(raw) || /\b(tsc|npm|pnpm|yarn|node)\b/i.test(raw) && raw.includes('/')) {
+    return fallback;
+  }
+  // 确认语不配做讨论名
+  if (/^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(raw)) {
+    return fallback;
+  }
+  const compact = raw.replace(/\s+/g, ' ');
+  if (compact.length <= 16) return compact;
+  return `${compact.slice(0, 16)}…`;
+}
+
+/** 当前步骤标题：优先 planSteps 中 current，否则首个非终态步骤。 */
+export function currentStepTitleFromItem(item) {
+  const steps = Array.isArray(item?.planSteps) ? item.planSteps : [];
+  const current = steps.find((step) => step?.current);
+  if (current?.title) return String(current.title).trim();
+  const next = steps.find((step) => step?.status && !['completed', 'cancelled', 'failed'].includes(step.status));
+  if (next?.title) return String(next.title).trim();
+  return undefined;
+}
+
 /** 从 workspace 绝对路径提取卡片右上角标签（取末段目录名）。 */
 function workspaceLabelFromPath(workspacePath) {
   if (typeof workspacePath !== 'string' || workspacePath.trim() === '') return undefined;
@@ -142,7 +308,7 @@ export function extractPlanSteps(plan) {
 }
 
 /** 组装 GoalPlan 投影快照。plan 为 goal-plan-store.listPlanDetails() 的水合形态。 */
-export function toGoalPlanSnapshot(plan) {
+export function toGoalPlanSnapshot(plan, options = {}) {
   if (!plan || typeof plan !== 'object') return null;
   const planId = typeof plan.planId === 'string' ? plan.planId : null;
   const status = typeof plan.status === 'string' ? plan.status : null;
@@ -153,6 +319,16 @@ export function toGoalPlanSnapshot(plan) {
       ? { completed: plan.progress.completed, total: plan.progress.total }
       : undefined;
   const planSteps = extractPlanSteps(plan);
+  const timing =
+    plan.timing && typeof plan.timing === 'object' ? plan.timing : undefined;
+  const resolved = resolveConversationModelLabels(
+    options.conversation,
+    options.providerIndex,
+  );
+  const modelLabel =
+    humanReadableLabel(options.modelLabel) || resolved.modelLabel;
+  const providerLabel =
+    humanReadableLabel(options.providerLabel) || resolved.providerLabel;
   return {
     planId,
     status,
@@ -164,6 +340,9 @@ export function toGoalPlanSnapshot(plan) {
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
     conversationId: typeof plan.conversationId === 'string' ? plan.conversationId : undefined,
+    ...(timing ? { timing } : {}),
+    ...(modelLabel ? { modelLabel } : {}),
+    ...(providerLabel ? { providerLabel } : {}),
     // USER ACCEPTANCE：一键确认写 resultAcceptance；存量 completed 按上线截止祖父化。
     accepted: isPlanResultAccepted(plan),
   };
@@ -357,6 +536,7 @@ export function createTaskOverviewAggregator({
   automationStore,
   listConversations,
   listShellTasks,
+  listProviders,
 } = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
@@ -368,7 +548,7 @@ export function createTaskOverviewAggregator({
   ) {
     throw new TypeError('automationStore.listDefinitions/listRuns must be functions');
   }
-  // listShellTasks 可选：localToolHost 尚未就绪时静默跳过后台线程投影。
+  // listShellTasks / listProviders 可选：localToolHost 或 llmConfig 尚未就绪时静默跳过。
 
   /**
    * 聚合并投影任务，按行动权排序后截断。
@@ -393,6 +573,11 @@ export function createTaskOverviewAggregator({
       ? Math.floor(query.limit)
       : DEFAULT_HOME_LIMIT;
     const nowMs = Date.now();
+    // 每轮列表重建一次目录索引，避免把 UUID 直接甩到卡片上。
+    const providerIndex =
+      typeof listProviders === 'function'
+        ? buildProviderIndex(listProviders())
+        : buildProviderIndex([]);
     // result_ready 不限流：不再传 resultReadyWithinMs / resultReadyLimit
     const scope = { workspacePath, includeTerminal, activeWithinMs, nowMs };
 
@@ -421,9 +606,18 @@ export function createTaskOverviewAggregator({
       plans = [];
     }
     const latestPlanByConversationId = new Map();
+    const independentlyProjectedResults = [];
     const unlinkedPlans = [];
     for (const plan of plans) {
       if (!isGoalPlanInScope(plan, scope)) continue;
+      const snapshot = toGoalPlanSnapshot(plan);
+      const projected = snapshot ? projectGoalPlan(snapshot) : null;
+      // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，
+      // 不能混入 conversation 级去重后形成用户看不见的验收队列。
+      if (projected?.actionRight === 'result_ready') {
+        independentlyProjectedResults.push(plan);
+        continue;
+      }
       const conversationId = typeof plan?.conversationId === 'string' ? plan.conversationId : '';
       if (!conversationId) {
         unlinkedPlans.push(plan);
@@ -436,22 +630,33 @@ export function createTaskOverviewAggregator({
         latestPlanByConversationId.set(conversationId, plan);
       }
     }
-    for (const plan of [...latestPlanByConversationId.values(), ...unlinkedPlans]) {
-      const snapshot = toGoalPlanSnapshot(plan);
+    for (const plan of [
+      ...independentlyProjectedResults,
+      ...latestPlanByConversationId.values(),
+      ...unlinkedPlans,
+    ]) {
+      const conversationId =
+        typeof plan?.conversationId === 'string' ? plan.conversationId : undefined;
+      const conversation = conversationId ? conversationById.get(conversationId) : undefined;
+      const snapshot = toGoalPlanSnapshot(plan, { conversation, providerIndex });
       if (!snapshot) continue;
-      const projected = projectGoalPlan(snapshot);
-      const conversation = snapshot.conversationId
-        ? conversationById.get(snapshot.conversationId)
-        : undefined;
+      // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。
+      const projected = projectGoalPlan(snapshot, { nowMs });
+      // 行动权任务流：有 GoalPlan 时主标题 = plan.title（projected.title）。
+      // conversation.title 不得压过任务名；currentGoalTitle 改为当前步骤（若有）。
+      const stepTitle = currentStepTitleFromItem(projected);
       if (conversation) {
         projectedPlanConversationIds.add(snapshot.conversationId);
         items.push({
           ...projected,
-          title: normalizedTitle(conversation.title, projected.title),
-          currentGoalTitle: projected.title,
+          title: projected.title,
+          ...(stepTitle ? { currentGoalTitle: stepTitle } : {}),
         });
       } else {
-        items.push(projected);
+        items.push({
+          ...projected,
+          ...(stepTitle ? { currentGoalTitle: stepTitle } : {}),
+        });
       }
     }
 
@@ -471,11 +676,14 @@ export function createTaskOverviewAggregator({
       ) {
         continue;
       }
+      const labels = resolveConversationModelLabels(conversation, providerIndex);
       items.push(projectConversation({
         conversationId,
-        title: normalizedTitle(conversation.title, '新对话'),
+        title: displayConversationTitle(conversation.title, '未命名沟通'),
         workspaceLabel: workspaceLabelFromPath(conversation.workspacePath),
         updatedAt: conversation.updatedAt,
+        ...(labels.modelLabel ? { modelLabel: labels.modelLabel } : {}),
+        ...(labels.providerLabel ? { providerLabel: labels.providerLabel } : {}),
       }));
     }
 

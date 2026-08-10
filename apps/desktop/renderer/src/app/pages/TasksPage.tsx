@@ -7,7 +7,7 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  *
  * collection-shell：
  * - topline（面包屑 + Workspace）
- * - collection-head（标题 + 未结束计数）
+ * - collection-head（单行标题）
  * - collection-tools（状态筛选 chips + 搜索）
  * - task-table（任务 / 下一步行动 / GoalPlan / 更新 / 操作）
  *
@@ -99,7 +99,13 @@ function rowOpenLabel(item: TaskOverviewItem): string {
   return '查看 →';
 }
 
-export function TasksPage({ workspacePath = null }: { readonly workspacePath?: string | null }) {
+export function TasksPage({
+  workspacePath = null,
+  onOpenItem,
+}: {
+  readonly workspacePath?: string | null;
+  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+}) {
   const items = useTaskOverview({ workspacePath, includeTerminal: false });
   const activeItems = useMemo(
     () => items.filter((item) => item.actionRight !== 'terminal'),
@@ -145,15 +151,7 @@ export function TasksPage({ workspacePath = null }: { readonly workspacePath?: s
       </div>
 
       <header className="task-collection-head">
-        <div>
-          <div className="task-overview-kicker">Active Tasks</div>
-          <h1>所有仍在进行的任务</h1>
-          <p>任务是事实对象；按状态筛选、查看 GoalPlan 进度，再进入具体任务现场。</p>
-        </div>
-        <div className="task-collection-count">
-          <b>{counts.all}</b>
-          <span>未结束任务</span>
-        </div>
+        <h1>未结束的任务</h1>
       </header>
 
       <div className="task-collection-tools">
@@ -232,7 +230,11 @@ export function TasksPage({ workspacePath = null }: { readonly workspacePath?: s
                   </div>
                 </div>
                 <time>{formatRelativeTime(item.lastActiveAt)}</time>
-                <button type="button" className="task-row-open">
+                <button
+                  type="button"
+                  className="task-row-open"
+                  onClick={() => onOpenItem?.(item)}
+                >
                   {rowOpenLabel(item)}
                 </button>
               </article>

@@ -1806,6 +1806,31 @@ test('setPlanStatus timing ledger: executing → paused → resume → completed
   assert.equal(reloaded.timing.wallClockMs, completed.timing.wallClockMs);
 });
 
+test('markRequestedUserInput reopens a completed intake as waiting_user', () => {
+  const plan = store.createIntakeContract('conv-finished-question', {
+    title: '确认隐藏范围',
+    goal: '确认隐藏范围',
+  });
+  registerEvidenceRefs(plan.planId, ['tool-result://intake-readonly-check']);
+  store.recordTaskEvidence(plan.planId, 'orient', {
+    status: 'completed',
+    evidenceRefs: ['tool-result://intake-readonly-check'],
+  });
+  const completed = store.getPlan(plan.planId);
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.progress.percent, 100);
+
+  const waiting = store.markRequestedUserInput(plan.planId);
+  assert.equal(waiting.status, 'executing');
+  assert.equal(waiting.progress.percent, 100);
+  assert.equal(waiting.runner.status, 'waiting_user');
+  assert.equal(waiting.runner.blockedReason, 'requested_user_input');
+
+  const persisted = store.getPlan(plan.planId);
+  assert.equal(persisted.status, 'executing');
+  assert.equal(persisted.runner.status, 'waiting_user');
+});
+
 test('consumeRequestedUserInput atomically records the decision and clears only that blocker', () => {
   const plan = approvedPlanWithTasks();
   store.setPlanStatus(plan.planId, 'executing');

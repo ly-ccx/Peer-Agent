@@ -2,6 +2,8 @@ import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 import type {
   CapabilityManifest,
   ChatSendRequest,
+  ChatStartTaskRequest,
+  ChatStartTaskResult,
   ClientBootstrap,
   ClientSessionState,
   ClientToolCall,
@@ -993,6 +995,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     }) => void,
   ) => () => void;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
+  readonly chatStartTask: (params: ChatStartTaskRequest) => Promise<ChatStartTaskResult>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
   // 全局活跃流查询:挂载时拉取当前正在运行的会话 id 列表(不依赖切入某个会话)。

@@ -11,6 +11,7 @@ const ALL_APP_WINDOW_ROLES = Object.freeze([
 ]);
 const QUICK_CHAT_CHANNELS = new Set([
   'chat:send',
+  'chat:start-task',
   'conversations:append-message',
   'conversations:create',
   'conversations:update-mode',
@@ -83,6 +84,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'chat:compaction:get',
   'chat:context:restored',
   'chat:send',
+  'chat:start-task',
   'chat:stream:list-active',
   'chat:stream:reattach',
   'client-tool:execute',

@@ -740,6 +740,34 @@ test('AgentRunOutcome: requestedUserInput 会进入 waiting_user 且不继续自
   assert.ok(events.some((event) => event.type === 'goalRunner:blocked' && event.requestedUserInput));
 });
 
+test('request_user_input overrides completed progress from earlier in the same turn', async () => {
+  const plan = store.createGoalContract(draftWithTasks({
+    tasks: [{ taskId: 'orient', order: 0, title: '理清范围', status: 'pending', evidenceRefs: [] }],
+  }));
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      registerEvidenceRefs(plan.planId, ['tool-result://readonly-scope-check']);
+      store.recordTaskEvidence(plan.planId, 'orient', {
+        status: 'completed',
+        evidenceRefs: ['tool-result://readonly-scope-check'],
+      });
+      return { requestedUserInput: true, blockedReason: 'requested_user_input' };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { maxTurns: 3, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(calls, 1);
+  assert.equal(got.status, 'executing');
+  assert.equal(got.progress.percent, 100);
+  assert.equal(got.runner.status, 'waiting_user');
+  assert.equal(got.runner.blockedReason, 'requested_user_input');
+});
+
 test('blocker audit: 同一 blocker 连续 3 次才进入 blocked', async () => {
   const plan = createApprovedPlan();
   let calls = 0;

@@ -937,11 +937,16 @@ export function createConversationStore(options = {}) {
     };
   }
 
-  function updateTitle(id, title) {
+  function updateTitle(id, title, options = {}) {
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.title = title;
+    if (options && typeof options === 'object' && typeof options.source === 'string' && options.source.trim()) {
+      meta.titleSource = options.source.trim();
+    } else {
+      meta.titleSource = 'manual';
+    }
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
@@ -971,8 +976,21 @@ export function createConversationStore(options = {}) {
         return withMessageCount(meta);
       }
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
-      if (!meta.title && message.role === 'user') {
-        meta.title = message.content.slice(0, 50);
+      // 首条用户消息只写短草稿标题，禁止原话全文当永久名。
+      // plan/manual 覆盖后不再被消息回填。
+      if (!meta.title && message.role === 'user' && typeof message.content === 'string') {
+        const compact = message.content.replace(/\s+/g, ' ').trim();
+        if (compact) {
+          const isAck = /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(compact);
+          const isCmd = /^[>$]\s/.test(compact) || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(compact) && compact.includes('/'));
+          if (!isAck && !isCmd) {
+            meta.title = compact.length <= 16 ? compact : `${compact.slice(0, 16)}…`;
+            meta.titleSource = 'user_snippet';
+          } else {
+            meta.title = '未命名沟通';
+            meta.titleSource = 'fallback';
+          }
+        }
       }
       // index 维护 messageCount，listConversations 不再扫全文 jsonl。
       const prevCount = Number.isFinite(Number(meta.messageCount)) ? Number(meta.messageCount) : null;

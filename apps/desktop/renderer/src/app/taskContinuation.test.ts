@@ -20,14 +20,13 @@ function item(overrides: Partial<TaskOverviewItem> = {}): TaskOverviewItem {
 }
 
 describe('continueTaskInConversation', () => {
-  it('restores the original Task scene without sending a message or creating a Goal', () => {
+  it('opens a conversation drawer for the original Task without jumping main Chat', () => {
     const effects: string[] = [];
     continueTaskInConversation('conversation-1', {
       showActiveConversations: () => effects.push('active'),
       selectConversation: (id) => effects.push(`conversation:${id}`),
       closeResult: () => effects.push('close-result'),
-      closeCollection: () => effects.push('close-collection'),
-      showChat: () => effects.push('chat'),
+      openConversationDrawer: () => effects.push('conversation-drawer'),
       focusComposer: () => effects.push('focus'),
     });
 
@@ -35,10 +34,11 @@ describe('continueTaskInConversation', () => {
       'active',
       'conversation:conversation-1',
       'close-result',
-      'close-collection',
-      'chat',
+      'conversation-drawer',
       'focus',
     ]);
+    assert.ok(!effects.includes('chat'), 'must not hard-switch main page to Chat');
+    assert.ok(!effects.includes('close-collection'), 'collection close is owned by openConversationDrawer mutual exclusion');
   });
 });
 
@@ -46,15 +46,15 @@ describe('getTaskContinuationAction', () => {
   it('returns the original Conversation identity without creating an execution action', () => {
     assert.deepEqual(getTaskContinuationAction(item(), true), {
       conversationId: 'conversation-1',
-      label: '继续任务',
-      description: '回到原任务，继续追问或发起下一步',
+      label: '继续讨论',
+      description: '打开原会话继续追问或发起下一步',
     });
   });
 
   it('uses stable English copy', () => {
     const action = getTaskContinuationAction(item(), false);
-    assert.equal(action?.label, 'Continue task');
-    assert.match(action?.description ?? '', /original task/);
+    assert.equal(action?.label, 'Continue discussion');
+    assert.match(action?.description ?? '', /original conversation/);
   });
 
   it('does not offer continuation for sources without a Conversation', () => {

@@ -161,6 +161,7 @@ const unavailableApi: ClientApi = {
   onTaskOverviewChanged: unavailableMethod('onTaskOverviewChanged'),
   onGoalRunnerChanged: unavailableMethod('onGoalRunnerChanged'),
   chatSend: unavailableMethod('chatSend'),
+  chatStartTask: unavailableMethod('chatStartTask'),
   chatAbort: unavailableMethod('chatAbort'),
   chatStreamReattach: unavailableMethod('chatStreamReattach'),
   chatStreamListActive: unavailableMethod('chatStreamListActive'),

@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
@@ -41,6 +42,7 @@ export function ChatHeader({
   onOpenTools,
   onOpenAutomationRun,
   onOpenTaskDetails,
+  onClose,
 }: {
   readonly title: string;
   readonly automationOrigin?: {
@@ -66,7 +68,10 @@ export function ChatHeader({
   readonly onOpenTools?: () => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   readonly onOpenTaskDetails?: () => void;
+  /** When set (e.g. conversation Drawer), render a close control in the main header row. */
+  readonly onClose?: () => void;
 }) {
+  const workbench = useWorkbenchOptional();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(title);
@@ -151,7 +156,7 @@ export function ChatHeader({
   return (
     <header className={`chat-header${hasScroll ? ' has-scroll' : ''}`} aria-label={isZh ? '对话标题栏' : 'Conversation header'}>
       <div className="chat-header-left">
-        <SidebarToggle isZh={isZh} />
+        {workbench ? <SidebarToggle isZh={isZh} /> : null}
         {editing ? (
           <input
             ref={inputRef}
@@ -255,7 +260,21 @@ export function ChatHeader({
             </svg>
           </button>
         ) : null}
-        <WorkbenchToggle isZh={isZh} />
+        {workbench ? <WorkbenchToggle isZh={isZh} /> : null}
+        {onClose ? (
+          <button
+            type="button"
+            className="chat-header-action-btn chat-header-close-btn"
+            aria-label={isZh ? '关闭' : 'Close'}
+            title={isZh ? '关闭抽屉' : 'Close drawer'}
+            onClick={onClose}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </header>
   );

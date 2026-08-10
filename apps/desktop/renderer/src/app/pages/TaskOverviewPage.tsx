@@ -1,10 +1,12 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import { useEffect, useRef, useState } from 'react';
+import { formatDuration } from '../../chat/state/format';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 
 /**
  * TaskOverview 页面 —— 对齐 peer-2-0 高保真原型工作台结构。
  *
- * 工作台：topline（面包屑 + Workspace）+ hero（说明 + 统计）
+ * 工作台：topline（面包屑 + 范围标签）+ hero（说明 + 统计）
  * + 需要你处理（四列交接卡）+ Peer 正在推进（双列 + 进度条）
  * + 结果待验收。
  *
@@ -13,6 +15,9 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  *
  * 结果待验收：卡片叠放展示全部未验收 completed（不限条数）；
  * 主按钮「确认验收」一键落库，次按钮「查看结果」可选进会话。
+ *
+ * 侧栏语义：工作台固定全局（workspacePath=null）；
+ * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
  */
 
 interface TaskOverviewPageProps {
@@ -21,10 +26,13 @@ interface TaskOverviewPageProps {
   readonly filter: (item: TaskOverviewItem) => boolean;
   readonly emptyLabel?: string;
   readonly hero?: boolean;
+  /** 传给聚合层的过滤 path；null/undefined = 全局。 */
   readonly workspacePath?: string | null;
   readonly includeTerminal?: boolean;
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
+  /** 空态「发起新任务」：跳到新建任务页。 */
+  readonly onNewTask?: () => void;
   /** 打开对应会话（决策 / 查看结果）。 */
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   /** 工作台一键确认验收（仅 goal_plan）。 */
@@ -34,9 +42,14 @@ interface TaskOverviewPageProps {
 }
 
 function workspaceLabelFromPath(workspacePath: string | null | undefined): string {
-  if (!workspacePath) return '未绑定 Workspace';
+  if (!workspacePath) return '全部工作区';
   const seg = workspacePath.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop();
   return seg || workspacePath;
+}
+
+function scopeDisplayLabel(workspacePath: string | null | undefined): string {
+  if (!workspacePath) return '全部工作区';
+  return `Workspace · ${workspaceLabelFromPath(workspacePath)}`;
 }
 
 function formatRelativeTime(iso?: string): string {
@@ -49,6 +62,87 @@ function formatRelativeTime(iso?: string): string {
   if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)} 小时前`;
   if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)} 天前`;
   return new Date(t).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+/** UUID / 长十六进制配置 id：绝不展示到卡片右上角。 */
+const OPAQUE_ID_RE =
+  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{24,})$/i;
+
+function looksLikeOpaqueId(value: string | undefined): boolean {
+  if (typeof value !== 'string') return false;
+  const raw = value.trim();
+  return raw.length > 0 && OPAQUE_ID_RE.test(raw);
+}
+
+/** 只保留用户可读标签；脏 UUID 直接丢掉。 */
+function safeDisplayLabel(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const raw = value.trim();
+  if (!raw || looksLikeOpaqueId(raw)) return undefined;
+  return raw;
+}
+
+/** 卡片右上角：提供商 · 模型 · 时长 · 相对更新时间（缺字段则省略）。 */
+function workItemMetaParts(item: TaskOverviewItem, fallbackWhenEmpty = 'LIVE'): string[] {
+  const parts: string[] = [];
+  const providerLabel = safeDisplayLabel(item.providerLabel);
+  const modelLabel = safeDisplayLabel(item.modelLabel);
+  if (providerLabel) parts.push(providerLabel);
+  if (modelLabel) parts.push(modelLabel);
+  if (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0) {
+    parts.push(formatDuration(item.durationMs));
+  }
+  if (item.lastActiveAt) {
+    parts.push(formatRelativeTime(item.lastActiveAt));
+  } else if (parts.length === 0) {
+    parts.push(fallbackWhenEmpty);
+  }
+  return parts;
+}
+
+/** 推进中 / 等待验收卡片共用的右上角元信息（提供商 · 模型 · 时长 · 相对时间）。 */
+function WorkItemMeta({
+  item,
+  fallbackWhenEmpty = 'LIVE',
+}: {
+  readonly item: TaskOverviewItem;
+  readonly fallbackWhenEmpty?: string;
+}) {
+  const providerLabel = safeDisplayLabel(item.providerLabel);
+  const modelLabel = safeDisplayLabel(item.modelLabel);
+  return (
+    <div className="task-overview-work-meta" aria-label="任务元信息">
+      {workItemMetaParts(item, fallbackWhenEmpty).map((part, index) => {
+        const isProvider = Boolean(providerLabel && part === providerLabel);
+        const isModel = Boolean(modelLabel && part === modelLabel);
+        const isDuration =
+          typeof item.durationMs === 'number' && formatDuration(item.durationMs) === part;
+        return (
+          <span key={`${part}-${index}`} className="task-overview-work-meta-part">
+            {index > 0 ? (
+              <span className="task-overview-work-meta-sep" aria-hidden="true">
+                ·
+              </span>
+            ) : null}
+            {isProvider ? (
+              <span className="task-overview-work-provider">{part}</span>
+            ) : isModel ? (
+              <span className="task-overview-work-model">{part}</span>
+            ) : isDuration ? (
+              <time
+                className="task-overview-work-duration"
+                dateTime={`PT${Math.floor((item.durationMs ?? 0) / 1000)}S`}
+              >
+                {part}
+              </time>
+            ) : (
+              <time>{part}</time>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function formatTodayCrumb(): string {
@@ -109,6 +203,55 @@ function planStepStatusLabel(status: string): string {
 
 const DISCUSSION_PREVIEW_LIMIT = 6;
 
+/**
+ * 板块头部的次级入口。
+ *
+ * 文案 / 数量徽标 / 箭头拆成独立元素：文案承载语义，徽标承载数字，
+ * 箭头用规范 chevron 图标（不再用裸「→」字符与「·」拼接），hover 时轻微右移。
+ */
+function SectionLink({
+  label,
+  count,
+  countHint,
+  onClick,
+}: {
+  readonly label: string;
+  readonly count?: number;
+  readonly countHint?: string;
+  readonly onClick: () => void;
+}) {
+  const hasCount = typeof count === 'number' && count > 0;
+  return (
+    <button
+      type="button"
+      className="task-overview-section-link"
+      onClick={onClick}
+      aria-label={hasCount && countHint ? `${label}，${countHint}` : label}
+    >
+      <span className="task-overview-section-link__label">{label}</span>
+      {hasCount ? (
+        <span className="task-overview-section-link__count" aria-hidden="true">
+          {count}
+        </span>
+      ) : null}
+      <span className="task-overview-section-link__arrow" aria-hidden="true">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
 function advancingStateLabel(item: TaskOverviewItem): string {
   const s = item.statusLabel;
   if (s.includes('验证')) return '正在验证';
@@ -127,13 +270,14 @@ export function TaskOverviewPage({
   includeTerminal = false,
   onOpenTasks,
   onOpenHistory,
+  onNewTask,
   onOpenItem,
   onAcceptResult,
   onCancelItem,
 }: TaskOverviewPageProps) {
   const items = useTaskOverview({ workspacePath, includeTerminal });
   const filtered = items.filter(filter);
-  const scopeLabel = workspaceLabelFromPath(workspacePath);
+  const scopeLabel = scopeDisplayLabel(workspacePath);
 
   if (hero) {
     return (
@@ -145,6 +289,7 @@ export function TaskOverviewPage({
         scopeLabel={scopeLabel}
         onOpenTasks={onOpenTasks}
         onOpenHistory={onOpenHistory}
+        onNewTask={onNewTask}
         onOpenItem={onOpenItem}
         onAcceptResult={onAcceptResult}
         onCancelItem={onCancelItem}
@@ -182,11 +327,23 @@ function TopLine({
       </div>
       <div className="task-overview-scope">
         <i className="task-overview-scope-dot" aria-hidden="true" />
-        当前 Workspace · {scopeLabel}
+        {scopeLabel}
       </div>
     </div>
   );
 }
+
+type AcceptancePhase = 'submitting' | 'celebrating' | 'exiting';
+
+type AcceptanceTransition = {
+  readonly item: TaskOverviewItem;
+  readonly phase: AcceptancePhase;
+  /** Original index in the result list when acceptance started; keeps the card from jumping. */
+  readonly orderIndex: number;
+};
+
+const ACCEPTANCE_CELEBRATION_MS = 980;
+const ACCEPTANCE_EXIT_MS = 420;
 
 function HeroLayout({
   title: _title,
@@ -196,6 +353,7 @@ function HeroLayout({
   scopeLabel,
   onOpenTasks,
   onOpenHistory,
+  onNewTask,
   onOpenItem,
   onAcceptResult,
   onCancelItem,
@@ -207,6 +365,7 @@ function HeroLayout({
   readonly scopeLabel: string;
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
+  readonly onNewTask?: () => void;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
@@ -217,11 +376,118 @@ function HeroLayout({
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
   const advancing = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing');
   const resultReady = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready');
+  const [acceptanceTransitions, setAcceptanceTransitions] = useState<
+    Record<string, AcceptanceTransition>
+  >({});
+  const transitionTimers = useRef<Set<number>>(new Set());
+
+  useEffect(
+    () => () => {
+      for (const timer of transitionTimers.current) window.clearTimeout(timer);
+      transitionTimers.current.clear();
+    },
+    [],
+  );
+
+  const scheduleTransition = (callback: () => void, delayMs: number) => {
+    const timer = window.setTimeout(() => {
+      transitionTimers.current.delete(timer);
+      callback();
+    }, delayMs);
+    transitionTimers.current.add(timer);
+  };
+
+  const handleAccept = async (item: TaskOverviewItem) => {
+    if (!onAcceptResult || item.source !== 'goal_plan' || !item.taskId) return;
+    if (acceptanceTransitions[item.taskId]) return;
+
+    const orderIndex = resultReady.findIndex((candidate) => candidate.taskId === item.taskId);
+    setAcceptanceTransitions((prev) => ({
+      ...prev,
+      [item.taskId]: {
+        item,
+        phase: 'submitting',
+        orderIndex: orderIndex < 0 ? resultReady.length : orderIndex,
+      },
+    }));
+
+    try {
+      await onAcceptResult(item);
+      setAcceptanceTransitions((prev) => {
+        const current = prev[item.taskId];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [item.taskId]: { ...current, phase: 'celebrating' },
+        };
+      });
+      scheduleTransition(() => {
+        setAcceptanceTransitions((prev) => {
+          const current = prev[item.taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [item.taskId]: { ...current, phase: 'exiting' },
+          };
+        });
+        scheduleTransition(() => {
+          setAcceptanceTransitions((prev) => {
+            if (!(item.taskId in prev)) return prev;
+            const next = { ...prev };
+            delete next[item.taskId];
+            return next;
+          });
+        }, ACCEPTANCE_EXIT_MS);
+      }, ACCEPTANCE_CELEBRATION_MS);
+    } catch {
+      setAcceptanceTransitions((prev) => {
+        if (!(item.taskId in prev)) return prev;
+        const next = { ...prev };
+        delete next[item.taskId];
+        return next;
+      });
+    }
+  };
+
+  // Idle cards + in-flight acceptance cards, reinserted at snapshotted orderIndex.
+  // Not `[...resultReady, ...Object.values(acceptanceTransitions)]` — that appends and jumps.
+  // Idle cards + in-flight acceptance cards, reinserted at snapshotted orderIndex.
+  // Not `[...resultReady, ...Object.values(acceptanceTransitions)]` — that appends and jumps.
+  const displayedResults = (() => {
+    // `working` is the item list used for order reinsertion (unit-test contract).
+    const working: TaskOverviewItem[] = resultReady.filter(
+      (item) => !acceptanceTransitions[item.taskId],
+    );
+    const idleOrder = new Map(
+      resultReady
+        .filter((item) => !acceptanceTransitions[item.taskId])
+        .map((item) => [item.taskId, resultReady.findIndex((c) => c.taskId === item.taskId)] as const),
+    );
+    const orderOf = (item: TaskOverviewItem): number =>
+      acceptanceTransitions[item.taskId]?.orderIndex ?? idleOrder.get(item.taskId) ?? 0;
+
+    for (const transition of Object.values(acceptanceTransitions).sort((a, b) => a.orderIndex - b.orderIndex)) {
+      const insertAt = working.findIndex((entry) => orderOf(entry) > transition.orderIndex);
+      if (insertAt === -1) working.push(transition.item);
+      else working.splice(insertAt, 0, transition.item);
+    }
+
+    return working.map((item) => ({
+      item,
+      phase: acceptanceTransitions[item.taskId]?.phase ?? null,
+      orderIndex: orderOf(item),
+    }));
+  })();
+
   const hasAny = discussions.length + needsYou.length + advancing.length + resultReady.length > 0;
 
   return (
     <div className="task-overview-page task-overview-page--home">
-      <TopLine pageTitle="工作台" crumbExtra={formatTodayCrumb()} scopeLabel={scopeLabel} />
+      <TopLine
+        pageTitle="工作台"
+        crumbExtra={formatTodayCrumb()}
+        scopeLabel={scopeLabel}
+      />
 
       <header className="task-overview-hero">
         <div className="task-overview-hero-copy">
@@ -249,34 +515,16 @@ function HeroLayout({
       {!hasAny ? (
         <div className="task-overview-empty">
           <p>{emptyLabel}</p>
+          {onNewTask ? (
+            <button
+              type="button"
+              className="task-overview-btn task-overview-btn--primary task-overview-empty-action"
+              onClick={onNewTask}
+            >
+              发起新任务
+            </button>
+          ) : null}
         </div>
-      ) : null}
-
-      {discussions.length > 0 ? (
-        <section className="task-overview-section">
-          <div className="task-overview-section-head">
-            <div className="task-overview-section-title">
-              <h2>最近讨论</h2>
-              <small>{discussions.length}</small>
-            </div>
-            {onOpenTasks ? (
-              <button
-                type="button"
-                className="task-overview-section-link task-overview-section-link--button"
-                onClick={onOpenTasks}
-              >
-                {hiddenDiscussionCount > 0 ? `查看全部讨论 · 还有 ${hiddenDiscussionCount} 条 →` : '查看全部讨论 →'}
-              </button>
-            ) : (
-              <span className="task-overview-section-link">尚无执行计划</span>
-            )}
-          </div>
-          <div className="task-overview-discussion-grid">
-            {visibleDiscussions.map((item) => (
-              <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
-            ))}
-          </div>
-        </section>
       ) : null}
 
       {needsYou.length > 0 ? (
@@ -304,11 +552,9 @@ function HeroLayout({
               <small>{advancing.length}</small>
             </div>
             {onOpenTasks ? (
-              <button type="button" className="task-overview-section-meta task-overview-section-link" onClick={onOpenTasks}>
-                查看全部任务 →
-              </button>
+              <SectionLink label="查看全部任务" onClick={onOpenTasks} />
             ) : (
-              <span className="task-overview-section-meta">查看全部任务 →</span>
+              <span className="task-overview-section-meta">Peer 会在完成后带回结果</span>
             )}
           </div>
           <div className="task-overview-work-stream">
@@ -324,29 +570,54 @@ function HeroLayout({
         </section>
       ) : null}
 
-      {resultReady.length > 0 ? (
+      {discussions.length > 0 ? (
+        <section className="task-overview-section">
+          <div className="task-overview-section-head">
+            <div className="task-overview-section-title">
+              <h2>最近讨论</h2>
+              <small>{discussions.length}</small>
+            </div>
+            {onOpenTasks ? (
+              <SectionLink
+                label="查看全部讨论"
+                count={hiddenDiscussionCount}
+                countHint={`还有 ${hiddenDiscussionCount} 条`}
+                onClick={onOpenTasks}
+              />
+            ) : (
+              <span className="task-overview-section-meta">尚无执行计划</span>
+            )}
+          </div>
+          <div className="task-overview-discussion-grid">
+            {visibleDiscussions.map((item) => (
+              <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {displayedResults.length > 0 ? (
         <section className="task-overview-section result-section">
           <div className="task-overview-section-head">
             <div className="task-overview-section-title">
               <h2>结果待验收</h2>
-              <small>{resultReady.length}</small>
+              <small>{displayedResults.length}</small>
             </div>
             {onOpenHistory ? (
-              <button type="button" className="task-overview-section-meta task-overview-section-link" onClick={onOpenHistory}>
-                查看历史 →
-              </button>
+              <SectionLink label="查看历史" onClick={onOpenHistory} />
             ) : (
               <span className="task-overview-section-meta">Peer 已完成并带回 Evidence</span>
             )}
           </div>
           {/* 与「Peer 正在推进」同款双列卡片网格，不再一排一条 */}
           <div className="task-overview-work-stream">
-            {resultReady.map((item) => (
+            {displayedResults.map(({ item, phase }) => (
               <ResultCard
                 key={item.taskId}
                 item={item}
+                phase={phase}
                 onOpenItem={onOpenItem}
-                onAcceptResult={onAcceptResult}
+                onAcceptResult={handleAccept}
               />
             ))}
           </div>
@@ -496,7 +767,7 @@ function WorkItem({
           ) : null}
           {advancingStateLabel(item)}
         </span>
-        <time>{item.lastActiveAt ? formatRelativeTime(item.lastActiveAt) : 'LIVE'}</time>
+        <WorkItemMeta item={item} />
       </div>
       <h3>{item.title}</h3>
       {item.currentGoalTitle ? (
@@ -546,10 +817,12 @@ function WorkItem({
 /** 结果待验收卡片 —— 与推进中同款双列卡片：顶栏状态 + 标题 + 摘要 + 操作 */
 function ResultCard({
   item,
+  phase,
   onOpenItem,
   onAcceptResult,
 }: {
   readonly item: TaskOverviewItem;
+  readonly phase: AcceptancePhase | null;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
@@ -558,16 +831,31 @@ function ResultCard({
     : 'Peer 已完成并带回 Evidence · 无已知风险';
   const canAccept = item.source === 'goal_plan' && typeof onAcceptResult === 'function';
   const pct = progressPercent(item);
+  const celebrating = phase === 'celebrating' || phase === 'exiting';
   return (
-    <article className="task-overview-work-item task-overview-work-item--result_ready result-card">
+    <article
+      className={`task-overview-work-item task-overview-work-item--result_ready result-card${
+        phase ? ` result-card--${phase}` : ''
+      }`}
+    >
+      {celebrating ? (
+        <span className="result-card-celebration" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null}
       <div className="task-overview-work-top">
         <span className="task-overview-work-state result-card-state">
           <i className="result-card-seal" aria-hidden="true">
             ✓
           </i>
-          等待验收
+          {celebrating ? '验收完成，任务已圆满结束' : '等待验收'}
         </span>
-        <time>{item.lastActiveAt ? formatRelativeTime(item.lastActiveAt) : 'READY'}</time>
+        <WorkItemMeta item={item} fallbackWhenEmpty="READY" />
       </div>
       <h3>{item.title}</h3>
       <p>{summary}</p>
@@ -581,6 +869,7 @@ function ResultCard({
           <button
             type="button"
             className="task-overview-btn task-overview-btn--secondary"
+            disabled={Boolean(phase)}
             onClick={() => onOpenItem(item)}
           >
             查看结果
@@ -588,14 +877,21 @@ function ResultCard({
         ) : null}
         <button
           type="button"
-          className="task-overview-btn task-overview-btn--primary"
-          disabled={!canAccept}
+          className="task-overview-btn task-overview-btn--primary result-card-accept"
+          disabled={!canAccept || Boolean(phase)}
           onClick={() => {
             if (canAccept) void onAcceptResult?.(item);
             else onOpenItem?.(item);
           }}
         >
-          确认验收
+          {phase === 'submitting' ? (
+            <>
+              <span className="result-card-spinner" aria-hidden="true" />
+              正在验收…
+            </>
+          ) : null}
+          {celebrating ? '已验收 ✓' : null}
+          {phase === null ? '确认验收' : null}
         </button>
       </div>
     </article>

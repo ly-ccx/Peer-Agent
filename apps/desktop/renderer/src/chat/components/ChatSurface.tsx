@@ -158,11 +158,13 @@ import {
   shouldVirtualizeChatTurns,
   type ChatTurnGroupCache,
 } from '../state/chatTurns';
-import { useWorkbench } from '../../workbench/WorkbenchContext';
+import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 const EMPTY_EFFORT_LEVELS: readonly EffortLevel[] = [];
+/** 无 WorkbenchProvider 时的降级空操作（会话抽屉等 Provider 之外场景）。 */
+const NOOP = () => {};
 
 function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
   const callbackRef = useRef(callback);
@@ -364,7 +366,7 @@ export function ChatSurface({
   onConversationUpdated,
   onStreamingChange,
   onBranch,
-  onEnsureConversation,
+  onTaskStarted,
   onRenameConversation,
   onArchiveConversation,
   onProvidersRefresh,
@@ -375,6 +377,7 @@ export function ChatSurface({
   messageTarget,
   onOpenAutomationRun,
   onOpenTaskDetails,
+  onClose,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -402,17 +405,14 @@ export function ChatSurface({
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
-  // 草稿态发首条消息时创建会话（落库并进入左侧列表）。
-  readonly onEnsureConversation?: (seed?: {
-    title?: string;
-    mode?: string;
-    effort?: string;
-    modelProviderId?: string | null;
-  }) => Promise<{ id: string }>;
+  // 草稿态任务由 main 后台启动后，通知 App 选中任务并进入工作台。
+  readonly onTaskStarted?: (conversationId: string) => void;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   readonly onOpenTaskDetails?: (conversationId: string) => void;
+  /** Drawer host close action; surfaces as a close control in ChatHeader. */
+  readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   readonly workspaces?: readonly { path: string; name: string }[];
@@ -553,12 +553,6 @@ export function ChatSurface({
     setEditingMessage(null);
   }, [conversationId]);
   // 弱提示：非 vision 模型剥离本轮图片等（chat:stream:notice），不阻断发送。
-  // 草稿态首条消息：create 完成后等会话 ready 再走 submitMessage，避免与加载竞态。
-  const pendingFirstSendRef = useRef<{
-    text: string;
-    attachments: ChatAttachment[];
-    effort?: string;
-  } | null>(null);
   const creatingConversationRef = useRef(false);
   const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
   const pendingPermissionCalls = convState.pendingPermissionCalls as ClientToolCall[];
@@ -1402,14 +1396,16 @@ export function ChatSurface({
   }, [conversationId, onConversationUpdated, setTurnStartedAt]);
 
   // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
-  const {
-    goalSlot,
-    setHasGoalPlan,
-    open: workbenchOpen,
-    activeTab: workbenchActiveTab,
-    setOpen: setWorkbenchOpen,
-    setActiveTab: setWorkbenchTab,
-  } = useWorkbench();
+  // 会话抽屉等渲染在 WorkbenchProvider 之外的场景也复用本组件：用可选版，
+  // 无 Provider 时 goalSlot=null（GoalPlanPanel 独立渲染）、开关动作降级为
+  // noop，避免抛 "useWorkbench must be used within a WorkbenchProvider"。
+  const workbench = useWorkbenchOptional();
+  const goalSlot = workbench?.goalSlot ?? null;
+  const setHasGoalPlan = workbench?.setHasGoalPlan ?? NOOP;
+  const workbenchOpen = workbench?.open ?? false;
+  const workbenchActiveTab = workbench?.activeTab ?? 'plan';
+  const setWorkbenchOpen = workbench?.setOpen ?? NOOP;
+  const setWorkbenchTab = workbench?.setActiveTab ?? NOOP;
   // Agent 调用内置浏览器工具（browser_*）时自动展开工作台并切到 Browser Tab，
   // 复用 Goal 计划创建时的自动切 Tab 先例，避免 webview 隐藏导致用户看不到 Agent 操作。
   const handleBrowserToolActivity = useCallback(() => {
@@ -1880,25 +1876,28 @@ export function ChatSurface({
       return;
     }
 
-    // 草稿态：先创建会话进入左侧列表，再等 ready 后发出首条消息。
+    // 草稿态：由 main 原子创建会话、持久化首条消息并启动后台 turn。
+    // ChatSurface 不再是执行中转页，命令返回后即可直接进入工作台。
     if (!conversationId) {
-      if (!onEnsureConversation || creatingConversationRef.current) return;
+      if (creatingConversationRef.current) return;
       creatingConversationRef.current = true;
       conversationStore.setDraft(conversationId, '');
       setAttachments([]);
       setAttachmentError(null);
       try {
         const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
-        pendingFirstSendRef.current = { text, attachments: sentAttachments, effort };
-        await onEnsureConversation({
+        const started = await clientApi.chatStartTask({
+          text,
           title,
+          workspacePath,
           mode,
           effort,
           modelProviderId,
+          attachments: sentAttachments,
         });
+        onTaskStarted?.(started.conversationId);
       } catch (error) {
-        pendingFirstSendRef.current = null;
-        // 创建失败：恢复草稿与附件，用户可重试。
+        // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
         setAttachments(sentAttachments);
         setAttachmentError(error instanceof Error ? error.message : String(error));
@@ -1928,22 +1927,14 @@ export function ChatSurface({
     submitMessage,
     effort,
     enqueueMessage,
-    onEnsureConversation,
+    onTaskStarted,
+    workspacePath,
     mode,
     modelProviderId,
     isZh,
     editingMessage,
     handleEditMessage,
   ]);
-
-  // 草稿首条：会话 create 后 activeConversationId 切换并 load ready 时，自动发出挂起消息。
-  useEffect(() => {
-    if (!conversationId || loadStatus !== 'ready') return;
-    const pending = pendingFirstSendRef.current;
-    if (!pending) return;
-    pendingFirstSendRef.current = null;
-    void submitMessage(pending.text, pending.attachments, pending.effort);
-  }, [conversationId, loadStatus, submitMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -2354,6 +2345,7 @@ export function ChatSurface({
           : undefined}
         onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
         onFind={() => setFindOpen(true)}
+        onClose={onClose}
       />
       {findOpen ? (
         <ChatFindBar

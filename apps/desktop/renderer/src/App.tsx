@@ -70,8 +70,8 @@ function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boo
 }
 
 type AppPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
-/** 任务/历史不再作为一级全屏页，改为 Drawer 承载。 */
-type CollectionDrawer = 'tasks' | 'history' | 'task_details' | 'result' | null;
+/** 任务/历史/会话不再作为一级全屏页，改为 Drawer 承载。 */
+type CollectionDrawer = 'tasks' | 'history' | 'task_details' | 'result' | 'conversation' | null;
 type ConversationStatus = 'active' | 'archived';
 type ConversationView = 'active' | 'archived';
 
@@ -129,7 +129,9 @@ function MainApp() {
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [activePage, setActivePage] = useState<AppPage>('home');
+  /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
+  const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
@@ -141,26 +143,33 @@ function MainApp() {
     setCollectionDrawer('result');
   }, []);
 
-  const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
-    if (item.source !== 'goal_plan' || !item.taskId) return;
-    try {
-      await clientApi.goalPlansRevise({
-        planId: item.taskId,
-        patch: {
-          resultAcceptance: {
-            acceptedAt: new Date().toISOString(),
-            acceptedBy: 'user',
+  const acceptResultFromWorkbench = useCallback(
+    async (item: TaskOverviewItem, options?: { readonly keepResultDrawer?: boolean }) => {
+      if (item.source !== 'goal_plan' || !item.taskId) return;
+      try {
+        await clientApi.goalPlansRevise({
+          planId: item.taskId,
+          patch: {
+            resultAcceptance: {
+              acceptedAt: new Date().toISOString(),
+              acceptedBy: 'user',
+            },
           },
-        },
-        reason: 'workbench_one_click_accept',
-        changedBy: 'user',
-      });
-      setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
-      setCollectionDrawer((current) => (current === 'result' ? null : current));
-    } catch (error) {
-      console.error('[workbench] accept result failed', error);
-    }
-  }, []);
+          reason: 'workbench_one_click_accept',
+          changedBy: 'user',
+        });
+        // 结果抽屉自带三段式验收动画，关闭时机交给动画收尾，避免动画被立刻卸载。
+        if (!options?.keepResultDrawer) {
+          setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
+        }
+        setCollectionDrawer((current) => (current === 'result' ? null : current));
+      } catch (error) {
+        console.error('[workbench] accept result failed', error);
+        throw error;
+      }
+    },
+    [],
+  );
 
   const cancelPlanFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
     if (item.source !== 'goal_plan' || !item.taskId) return;
@@ -566,6 +575,25 @@ function MainApp() {
     });
   }, []);
 
+  const handleDrawerStreamingChange = useCallback((conversationId: string | null, isStreaming: boolean) => {
+    if (!conversationId) return;
+    const nextIds = new Set(runningConversationIdsRef.current);
+    if (isStreaming) nextIds.add(conversationId);
+    else nextIds.delete(conversationId);
+    applyRunningConversationIds(nextIds);
+
+    const nextWorkspacePaths = applyLocalStreamingWorkspaceChange({
+      prev: runningWorkspacePathsRef.current,
+      workspacePath: activeWorkspace,
+      isStreaming,
+      remainingRunningConversationCount: nextIds.size,
+    });
+    if (!sameStringSet(runningWorkspacePathsRef.current, nextWorkspacePaths)) {
+      runningWorkspacePathsRef.current = nextWorkspacePaths;
+      setRunningWorkspacePaths(nextWorkspacePaths);
+    }
+  }, [activeWorkspace, applyRunningConversationIds]);
+
   // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
   // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
   useEffect(() => {
@@ -804,40 +832,6 @@ function MainApp() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleNewChat, newTaskShortcut]);
 
-  // 草稿态发首条消息时由 ChatSurface 调用：此时才创建会话并进入左侧列表。
-  const ensureConversation = useCallback(async (seed?: {
-    title?: string;
-    mode?: string;
-    effort?: string;
-    modelProviderId?: string | null;
-  }): Promise<{ id: string }> => {
-    let ws = activeWorkspace;
-    if (!ws) {
-      const ensured = await clientApi.workspaceEnsureDefault();
-      ws = ensured.path;
-      setActiveWorkspace(ws);
-    }
-    const conv = await clientApi.conversationsCreate({
-      workspacePath: ws,
-      title: seed?.title,
-      mode: seed?.mode,
-    }) as ConversationMeta;
-    // 在切到新会话前写回草稿态选中的模型/思考强度，避免 load 读到默认值。
-    if (seed?.effort !== undefined || seed?.modelProviderId !== undefined) {
-      await clientApi.conversationsUpdateModelEffort({
-        id: conv.id,
-        effort: seed?.effort,
-        modelProviderId: seed?.modelProviderId,
-      });
-    }
-    setConversationView('active');
-    await refreshConversations(ws, 'active');
-    setActiveConversationId(conv.id);
-    setCollectionDrawer(null);
-    setActivePage('chat');
-    return { id: conv.id };
-  }, [activeWorkspace, refreshConversations]);
-
   const handleSelectConversation = useCallback((id: string) => {
     setActiveConversationId(id);
     setCollectionDrawer(null);
@@ -845,16 +839,24 @@ function MainApp() {
   }, []);
 
   const handleContinueTask = useCallback((conversationId: string) => {
+    // §14 继续讨论：打开会话 Drawer，不跳主 Chat。
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
       selectConversation: setActiveConversationId,
       closeResult: () => setResultDrawerItem(null),
-      closeCollection: () => setCollectionDrawer(null),
-      showChat: () => setActivePage('chat'),
+      openConversationDrawer: () => {
+        setResultDrawerItem(null);
+        setCollectionDrawer('conversation');
+      },
       focusComposer: () => {
-        window.requestAnimationFrame(() => {
-          document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.focus();
-        });
+        const focus = () => {
+          document
+            .querySelector<HTMLTextAreaElement>('.conversation-chat-drawer .chat-composer textarea')
+            ?.focus();
+        };
+        window.requestAnimationFrame(focus);
+        // Drawer + ChatSurface mount may lag one frame; retry once.
+        window.setTimeout(focus, 80);
       },
     });
   }, []);
@@ -977,46 +979,57 @@ function MainApp() {
               }}
               onOpenSettings={() => openSettings('general')}
               onOpenHome={() => {
+                // 顶部「工作台」：跨工作区全部行动权
                 setCollectionDrawer(null);
+                setHomeScope('all');
                 setActivePage('home');
               }}
+              onOpenWorkspaceHome={(workspacePath: string) => {
+                // 下方工作区：立即带上 path，避免等 workspaceSetActive 回写前仍显示全局/旧区
+                setCollectionDrawer(null);
+                setActiveWorkspace(workspacePath);
+                setHomeScope('workspace');
+                setActivePage('home');
+              }}
+              homeScope={homeScope}
               onWorkspaceChanged={handleWorkspaceChanged}
               startupSnapshot={startupSnapshot}
             />
             <section className="main-panel">
               {activePage === 'automations' ? (
-                <AutomationCenter
-                  isZh={isZh}
-                  defaultWorkspace={activeWorkspace ?? ''}
-                  initialRunTarget={automationRunTarget}
-                  onCreateNew={handleCreateAutomation}
-                  onOpenConversation={(conversationId) => {
-                    setConversationView('active');
-                    setActiveConversationId(String(conversationId));
-                    setCollectionDrawer(null);
-                    setActivePage('chat');
-                  }}
-                />
+                <section className="primary-page-shell" aria-label={isZh ? '自动化' : 'Automations'}>
+                  <AutomationCenter
+                    isZh={isZh}
+                    defaultWorkspace={activeWorkspace ?? ''}
+                    initialRunTarget={automationRunTarget}
+                    onCreateNew={handleCreateAutomation}
+                    onOpenConversation={(conversationId) => {
+                      setConversationView('active');
+                      setActiveConversationId(String(conversationId));
+                      setCollectionDrawer(null);
+                      setActivePage('chat');
+                    }}
+                  />
+                </section>
               ) : activePage === 'home' ? (
-                <section className="task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
+                <section className="primary-page-shell task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
                   <HomePage
-                    workspacePath={activeWorkspace}
+                    workspacePath={homeScope === 'workspace' ? (activeWorkspace ?? null) : null}
                     onOpenTasks={() => openCollectionDrawer('tasks')}
                     onOpenHistory={() => openCollectionDrawer('history')}
+                    onNewTask={() => {
+                      void handleNewChat();
+                    }}
                     onOpenItem={(item: TaskOverviewItem) => {
                       // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
                       if (item.actionRight === 'result_ready') {
                         openResultDrawer(item);
                         return;
                       }
-                      // 决策 / 推进：仍可进对应会话。
+                      // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
                       const conversationId = item.conversationId;
                       if (conversationId) {
-                        setCollectionDrawer(null);
-                        setResultDrawerItem(null);
-                        setConversationView('active');
-                        setActiveConversationId(String(conversationId));
-                        setActivePage('chat');
+                        handleContinueTask(String(conversationId));
                         return;
                       }
                       openCollectionDrawer('tasks');
@@ -1026,7 +1039,7 @@ function MainApp() {
                   />
                 </section>
               ) : activePage === 'tools' ? (
-                <section className="tools-page settings-content" aria-label={isZh ? '插件' : 'Plugins'}>
+                <section className="primary-page-shell" aria-label={isZh ? '插件' : 'Plugins'}>
                   <CapabilitiesPanel />
                 </section>
               ) : (
@@ -1081,7 +1094,13 @@ function MainApp() {
                     }
                   }}
                   onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
-                  onEnsureConversation={ensureConversation}
+                  onTaskStarted={(conversationId) => {
+                    setConversationView('active');
+                    setActiveConversationId(conversationId);
+                    setCollectionDrawer(null);
+                    setActivePage('home');
+                    void refreshConversations(activeWorkspace, 'active');
+                  }}
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
                   onOpenAutomationRun={openAutomationRun}
@@ -1093,7 +1112,7 @@ function MainApp() {
                     await clientApi.workspaceSetActive({ path: nextWorkspacePath });
                     await handleWorkspaceChanged();
                   }}
-                  isPageActive={activePage === 'chat'}
+                  isPageActive={activePage === 'chat' && collectionDrawer !== 'conversation'}
                   messageTarget={notificationMessageTarget}
                   />
                 </section>
@@ -1160,14 +1179,20 @@ function MainApp() {
                           ? isZh
                             ? '任务详情'
                             : 'Task details'
-                          : isZh
-                            ? '执行结果'
-                            : 'Execution result'
+                          : collectionDrawer === 'conversation'
+                            ? isZh
+                              ? '继续讨论'
+                              : 'Continue discussion'
+                            : isZh
+                              ? '执行结果'
+                              : 'Execution result'
                   }
                   panelClassName={
-                    collectionDrawer === 'result'
+                    collectionDrawer === 'result' || collectionDrawer === 'task_details'
                       ? 'conversation-result-drawer'
-                      : 'workbench-collection-drawer'
+                      : collectionDrawer === 'conversation'
+                        ? 'conversation-result-drawer conversation-chat-drawer'
+                        : 'workbench-collection-drawer'
                   }
                 >
                   {({ requestClose }) =>
@@ -1183,7 +1208,14 @@ function MainApp() {
                           </button>
                         </div>
                         <div className="workbench-collection-drawer-body">
-                          <TasksPage workspacePath={activeWorkspace} />
+                          <TasksPage
+                            workspacePath={activeWorkspace}
+                            onOpenItem={(item) => {
+                              // 任务列表点击：打开会话 Drawer 继续讨论（§14）
+                              if (!item.conversationId) return;
+                              handleContinueTask(String(item.conversationId));
+                            }}
+                          />
                         </div>
                       </div>
                     ) : collectionDrawer === 'history' ? (
@@ -1220,6 +1252,38 @@ function MainApp() {
                           />
                         </div>
                       </div>
+                    ) : collectionDrawer === 'conversation' && activeConversationId ? (
+                      <div className="conversation-chat-drawer-shell">
+                        <div className="conversation-chat-drawer__body">
+                          <ChatSurface
+                            i18n={i18n}
+                            providers={providers}
+                            conversationId={activeConversationId}
+                            conversationRevision={conversationRevision}
+                            conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
+                            automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
+                            onConversationUpdated={() => {
+                              void refreshConversations(activeWorkspace, conversationView);
+                            }}
+                            onStreamingChange={handleDrawerStreamingChange}
+                            onOpenSettings={() => {
+                              setSettingsInitialSection('providers');
+                              setActivePage('settings');
+                            }}
+                            onOpenTaskDetails={() => openCollectionDrawer('task_details')}
+                            onClose={requestClose}
+                            workspacePath={activeWorkspace}
+                            workspaces={workspaces}
+                            onWorkspaceChange={async (nextWorkspacePath) => {
+                              if (nextWorkspacePath === activeWorkspace) return;
+                              await clientApi.workspaceSetActive({ path: nextWorkspacePath });
+                              await handleWorkspaceChanged();
+                            }}
+                            isPageActive={collectionDrawer === 'conversation'}
+                            messageTarget={notificationMessageTarget}
+                          />
+                        </div>
+                      </div>
                     ) : resultDrawerItem ? (
                       <>
                         <div className="conversation-result-drawer__head">
@@ -1235,7 +1299,13 @@ function MainApp() {
                           <ConversationResultView
                             item={resultDrawerItem}
                             isZh={isZh}
-                            onAcceptResult={(item) => acceptResultFromWorkbench(item)}
+                            onAcceptResult={(item) =>
+                              acceptResultFromWorkbench(item, { keepResultDrawer: true })
+                            }
+                            onAccepted={() => {
+                              setResultDrawerItem(null);
+                              setCollectionDrawer(null);
+                            }}
                             onContinueTask={handleContinueTask}
                           />
                         </div>

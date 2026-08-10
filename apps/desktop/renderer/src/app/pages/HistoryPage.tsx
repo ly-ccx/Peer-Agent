@@ -7,7 +7,7 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  *
  * collection-shell：
  * - topline（面包屑 + scope）
- * - collection-head（标题 + 终态计数）
+ * - collection-head（单行标题）
  * - collection-tools（状态筛选 chips + 搜索）
  * - history-list / history-record（状态图标 / 标题 / 徽章 / Evidence 计数 / 操作）
  *
@@ -97,7 +97,7 @@ function rowOpenLabel(kind: Exclude<HistoryFilter, 'all'>): string {
     case 'accepted':
       return '查看结果 →';
     case 'archived':
-      return '继续任务';
+      return '继续讨论';
     case 'cancelled':
       return '查看记录 →';
     case 'failed':
@@ -149,15 +149,7 @@ export function HistoryPage({ workspacePath = null }: { readonly workspacePath?:
       </div>
 
       <header className="task-collection-head">
-        <div>
-          <div className="task-overview-kicker">Task History</div>
-          <h1>已经结束的任务</h1>
-          <p>验收、归档、取消与失败都在这里保留事实记录；结果包仍可随时复核。</p>
-        </div>
-        <div className="task-collection-count">
-          <b>{counts.all}</b>
-          <span>终态任务</span>
-        </div>
+        <h1>已经结束的任务</h1>
       </header>
 
       <div className="task-collection-tools">

@@ -87,6 +87,19 @@ test('send path does not seed or estimate context occupancy', async () => {
   assert.doesNotMatch(surface, /contextReady=/);
 });
 
+test('new task starts in main and navigates directly to the workbench', async () => {
+  const [surface, app] = await Promise.all([
+    readSource('./ChatSurface.tsx'),
+    readSource('../../App.tsx'),
+  ]);
+
+  assert.match(surface, /await clientApi\.chatStartTask\(\{[\s\S]*text,[\s\S]*attachments: sentAttachments/);
+  assert.match(surface, /onTaskStarted\?\.\(started\.conversationId\)/);
+  assert.match(app, /onTaskStarted=\{\(conversationId\) => \{[\s\S]*setActivePage\('home'\)/);
+  assert.doesNotMatch(surface, /pendingFirstSendRef|onInitialMessageSubmitted|onEnsureConversation/);
+  assert.doesNotMatch(app, /const ensureConversation/);
+});
+
 test('external conversation reload replaces or clears the shared accounting snapshot', async () => {
   const surface = await readSource('./ChatSurface.tsx');
 

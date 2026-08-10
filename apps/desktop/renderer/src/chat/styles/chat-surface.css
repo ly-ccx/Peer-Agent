@@ -3140,6 +3140,10 @@
   -webkit-app-region: no-drag;
 }
 
+.chat-header-close-btn {
+  margin-left: var(--space-1);
+}
+
 .chat-header-action-btn,
 .chat-header-menu-btn {
   display: inline-flex;
@@ -4355,7 +4359,8 @@ button.chat-header-cap-item:focus-visible {
 .composer-home-action-row {
   grid-area: home-actions;
   display: flex;
-  align-items: center;
+  /* Bottom-align the shorter left controls with the taller send button. */
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
