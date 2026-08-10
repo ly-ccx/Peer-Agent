@@ -22,6 +22,7 @@
 <p align="center">
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-why-peer-agent">Why</a> ·
+  <a href="#-design-philosophy">Philosophy</a> ·
   <a href="#-task-flow">Task Flow</a> ·
   <a href="#-what-you-can-do">Features</a> ·
   <a href="#-architecture-at-a-glance">Architecture</a> ·
@@ -57,6 +58,30 @@ Three first-class shells share one runtime:
 | 🧩 **One governed runtime** | Shell, files, web/browser, MCP, plugins, and skills all flow through a single chain. No hidden side doors. |
 | 🖥️ **Multi-surface** | Desktop GUI, terminal TUI, and `peer` CLI share `~/.peer-agent` data and the same local runtime. |
 | 🎯 **Task flow by default** | Accept the goal, clarify when needed, plan by complexity, finish with Evidence. |
+
+---
+
+## 🧭 Design Philosophy
+
+Peer Agent is built around a simple split of responsibility:
+
+| Role | Owns |
+| --- | --- |
+| **Model** | Cognition — understanding, planning, deciding what to try next. A *role*, not a location: cloud today, on-device later. |
+| **Local runtime** | Capability — discovery, permission, execution, and Evidence on your machine. |
+| **Interface** | Expression — Desktop / TUI / CLI present work; they do not hold permission truth. |
+| **Contract** | Boundaries — protocol types, Runtime Projection, and hard bans between layers. |
+| **Evidence** | Governance — what actually happened, inspectable after the fact. |
+
+Product principles we try not to violate:
+
+- **Elegance first** — Prefer one clear concept over two overlapping ones; refuse “good enough” seams that will rot.
+- **Task over chat** — Multi-step work is accepted as a goal with boundaries and success criteria, not freelanced mid-conversation.
+- **Ask when blocked** — Material ambiguity and high-risk trade-offs interrupt; silent guessing does not.
+- **Prove completion** — Done means tool results and Evidence, not assertive prose.
+- **One capability chain** — Shell, files, browser, MCP, plugins, and skills all pass through the same permission + Evidence path.
+
+These ideas shape both the product surface (Agent / Plan / Goal) and the engineering baseline in the companion knowledge base.
 
 ---
 
@@ -188,6 +213,8 @@ peer_agent/
 
 ## 🗺️ Roadmap
 
+### Available now
+
 | Area | Status |
 | --- | --- |
 | Local capability runtime + Evidence | ✅ Available |
@@ -195,8 +222,24 @@ peer_agent/
 | Agent / Plan / Goal task flow | ✅ Available |
 | MCP · Plugins · Skills | ✅ Available |
 | Automation (scheduled agents) | ✅ Available |
+
+### In progress
+
+| Area | Status |
+| --- | --- |
 | On-device LLM (Local Agent Runtime) | 🚧 In progress |
 | Broader marketplace ecosystem | 🚧 Growing |
+
+### Planned — not implemented yet
+
+These are **direction, not shipping claims**. They are not available in the current beta.
+
+| Area | Intent |
+| --- | --- |
+| **Memory system** | Durable, governed memory beyond a single thread — preferences, project facts, and retrieval that stays local and permission-aware. |
+| **Multi-agent collaboration** | Coordinated specialist agents under one task flow (explore / implement / review), with shared Evidence and clear handoffs — not unconstrained agent swarms. |
+| **Canvas** | A spatial surface for plans, diagrams, and intermediate artifacts alongside the conversation — thinking you can see and edit. |
+| **Self-evolution / self-iteration** | Safe loops where the agent improves workflows, skills, and playbooks from Evidence — always reviewable, never silent self-modification of trust boundaries. |
 
 ---
 
