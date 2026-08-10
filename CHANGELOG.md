@@ -4,6 +4,48 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2-beta.5 - 2026-08-10
+
+### Notes
+
+- Turn the Desktop workbench into a real task hub: global workbench separate from workspace views, task overview/history drawers, result-acceptance animations, continue-task flows, a flattened workspace sidebar tree, skill capsules, and chat/usage polish.
+- Skills gain tool definitions, uninstall paths, header capability-list detail entry, and more readable SkillHub install errors.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Added
+
+- Separate the global workbench from workspace views to centralize in-progress tasks, results awaiting acceptance, and history, with task overview and history drawers.
+- Show plan steps on advancing cards, continue the same task for unaccepted results, and animate accept cards with right-to-left shatter transitions.
+- Show completion time on result-ready cards and drop stale unaccepted results from the acceptance queue.
+- Surface Peer background shell threads in the workbench.
+- Flatten the sidebar into a workspace tree; pick a draft workspace for new chats and lock the workspace for existing chats.
+- Track lastReadAt / markRead watermarks so recent discussions become unread-only “discussing”.
+- Surface conversation task context in chat; show the full goal step list on dock hover.
+- Open skill detail from the header capability list, show skill capsules, and make SkillHub install errors readable.
+- Add skill tool definitions, provider channel wiring, and skill uninstall.
+- Add cache metrics engine and prompt-prefix stabilization; report prompt cache hit tokens for ChatGPT Responses usage.
+- Add TUI `/version` slash command to show the CLI version.
+
+### Changed
+
+- Unify chat composer padding, enlarge the stop glyph, refine action-row/attach-chip spacing, use a text-only editing banner, and apply a control-level model-strip font.
+- Restore last context-usage display when switching sessions.
+- Collapse accept cards so the list slides up; restore dual-column workbench result cards.
+- Smooth usage-trend chart corners; shorten task-overview copy.
+- Keep open tooltips during stream auto-scroll; wire the running dot to the status token.
+
+### Fixed
+
+- Reopen the same task when continuing unaccepted results instead of starting another.
+- Surface waiting-for-user tasks correctly in the workbench.
+- Fix `durationLabel is not defined` crash in GlobalWorkbenchPage.
+- Open the workbench correctly after workspace switches; stop sidebar rows from clipping.
+- Stop streaming scroll bounce from an out-of-sync virtual spacer.
+- Show six recent discussions on the task overview; align discussion-status fallback assertions.
+- Map Qoder local-auth errno codes to readable errors and fall back to the host node for auth reads.
+- Fix provider stream metadata, skill id extraction, and task-overview rules.
+- Center the skill-detail close icon geometrically; align skill card radius.
+
 ## 0.0.2-beta.4 - 2026-08-07
 
 ### Notes
