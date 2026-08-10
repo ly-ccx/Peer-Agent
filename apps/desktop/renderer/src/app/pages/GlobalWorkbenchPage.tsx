@@ -1,8 +1,21 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { formatDuration } from '../../chat/state/format';
+import { clientApi } from '../../clientApi';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import {
+  ACCEPTANCE_CELEBRATION_MS,
+  ACCEPTANCE_EXIT_MS,
+  mergeAcceptanceTransitionItems,
+  type AcceptancePhase,
+} from '../state/acceptanceTransition';
+
+function workspaceBasename(workspacePath: string): string {
+  const normalized = workspacePath.replace(/[/\\]+$/, '');
+  const parts = normalized.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
 
 /**
  * 总工作台（跨工作区 Action Inbox）—— 与区级 TaskOverviewPage 完全独立。
@@ -10,6 +23,11 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  * 只在侧栏顶部「工作台」入口（workspacePath = null）挂载。
  * 区级工作台仍走 HomePage → TaskOverviewPage，互不污染。
  */
+type AcceptanceTransition = {
+  readonly item: TaskOverviewItem;
+  readonly phase: AcceptancePhase;
+};
+
 export function GlobalWorkbenchPage({
   onOpenTasks,
   onOpenHistory,
@@ -17,6 +35,7 @@ export function GlobalWorkbenchPage({
   onOpenItem,
   onAcceptResult,
   onCancelItem,
+  onOpenWorkspace,
 }: {
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
@@ -24,6 +43,8 @@ export function GlobalWorkbenchPage({
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  /** 点击「工作区脉搏」行：切到对应区级工作台。 */
+  readonly onOpenWorkspace?: (workspacePath: string) => void;
 }) {
   const workbench = useWorkbenchOptional();
   // 全局拉数：不传 workspacePath。
@@ -40,6 +61,28 @@ export function GlobalWorkbenchPage({
     onOpenItem?.(item);
   }, [onOpenItem, workbench]);
 
+  // 脉搏行只暴露 workspaceLabel（basename）。点击时用 workspaceList 反查 path，
+  // 并先 workspaceSetActive，行为对齐侧栏点击工作区。
+  const handleOpenPulseWorkspace = useCallback(async (workspaceLabel: string) => {
+    if (!onOpenWorkspace) return;
+    const label = workspaceLabel.trim();
+    if (!label) return;
+    try {
+      const result = await clientApi.workspaceList();
+      const match = result.workspaces.find((ws) => {
+        if (ws.name === label) return true;
+        return workspaceBasename(ws.path) === label;
+      });
+      if (!match) return;
+      if (result.activeWorkspace !== match.path) {
+        await clientApi.workspaceSetActive({ path: match.path });
+      }
+      onOpenWorkspace(match.path);
+    } catch {
+      // 工作区列表不可用时静默失败，避免打断总工作台浏览。
+    }
+  }, [onOpenWorkspace]);
+
   const needsYou = useMemo(
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you'),
     [items],
@@ -48,6 +91,101 @@ export function GlobalWorkbenchPage({
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready'),
     [items],
   );
+
+  // 与区级 TaskOverviewPage 共用三段式验收编排：
+  // submitting -> celebrating -> exiting，避免 IPC 刷新后卡片瞬间消失。
+  const [acceptanceTransitions, setAcceptanceTransitions] = useState<
+    Record<string, AcceptanceTransition>
+  >({});
+  const [acceptanceOrderSnapshot, setAcceptanceOrderSnapshot] = useState<readonly string[]>([]);
+  const transitionTimers = useRef<Set<number>>(new Set());
+
+  useEffect(
+    () => () => {
+      for (const timer of transitionTimers.current) window.clearTimeout(timer);
+      transitionTimers.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (Object.keys(acceptanceTransitions).length === 0 && acceptanceOrderSnapshot.length > 0) {
+      setAcceptanceOrderSnapshot([]);
+    }
+  }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
+
+  const scheduleTransition = useCallback((callback: () => void, delayMs: number) => {
+    const timer = window.setTimeout(() => {
+      transitionTimers.current.delete(timer);
+      callback();
+    }, delayMs);
+    transitionTimers.current.add(timer);
+  }, []);
+
+  const handleAccept = useCallback(
+    async (item: TaskOverviewItem) => {
+      if (!onAcceptResult || item.source !== 'goal_plan' || !item.taskId) return;
+      if (acceptanceTransitions[item.taskId]) return;
+
+      // Freeze visual order before awaited IPC refresh removes the accepted item.
+      if (Object.keys(acceptanceTransitions).length === 0) {
+        setAcceptanceOrderSnapshot(resultReady.map((candidate) => candidate.taskId));
+      }
+      setAcceptanceTransitions((prev) => ({
+        ...prev,
+        [item.taskId]: { item, phase: 'submitting' },
+      }));
+
+      try {
+        await onAcceptResult(item);
+        setAcceptanceTransitions((prev) => {
+          const current = prev[item.taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [item.taskId]: { ...current, phase: 'celebrating' },
+          };
+        });
+        scheduleTransition(() => {
+          setAcceptanceTransitions((prev) => {
+            const current = prev[item.taskId];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [item.taskId]: { ...current, phase: 'exiting' },
+            };
+          });
+          scheduleTransition(() => {
+            setAcceptanceTransitions((prev) => {
+              if (!(item.taskId in prev)) return prev;
+              const next = { ...prev };
+              delete next[item.taskId];
+              return next;
+            });
+          }, ACCEPTANCE_EXIT_MS);
+        }, ACCEPTANCE_CELEBRATION_MS);
+      } catch {
+        setAcceptanceTransitions((prev) => {
+          if (!(item.taskId in prev)) return prev;
+          const next = { ...prev };
+          delete next[item.taskId];
+          return next;
+        });
+      }
+    },
+    [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition],
+  );
+
+  const displayedResults = useMemo(
+    () =>
+      mergeAcceptanceTransitionItems({
+        currentItems: resultReady,
+        transitions: Object.values(acceptanceTransitions),
+        orderSnapshot: acceptanceOrderSnapshot,
+      }),
+    [acceptanceOrderSnapshot, acceptanceTransitions, resultReady],
+  );
+
   const advancing = useMemo(
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing'),
     [items],
@@ -117,10 +255,10 @@ export function GlobalWorkbenchPage({
 
             {needsYou.length > 0 ? (
               <section className="gwb-panel">
-                <div className="gwb-panel-head">
-                  <div>
-                    <h2>需要你</h2>
-                    <div className="gwb-sub">{needsYou.length} 项 · 决策 / 权限</div>
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">需要你</span>
+                    <span className="gwb-side-count">{needsYou.length} 项 · 决策 / 权限</span>
                   </div>
                 </div>
                 <div className="gwb-list">
@@ -136,12 +274,12 @@ export function GlobalWorkbenchPage({
               </section>
             ) : null}
 
-            {resultReady.length > 0 ? (
+            {displayedResults.length > 0 ? (
               <section className="gwb-panel">
-                <div className="gwb-panel-head">
-                  <div>
-                    <h2>待验收</h2>
-                    <div className="gwb-sub">{resultReady.length} 项</div>
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">待验收</span>
+                    <span className="gwb-side-count">{displayedResults.length} 项</span>
                   </div>
                   {onOpenHistory ? (
                     <button type="button" className="gwb-link" onClick={onOpenHistory}>
@@ -150,16 +288,17 @@ export function GlobalWorkbenchPage({
                   ) : null}
                 </div>
                 <div className="gwb-list">
-                  {resultReady.map((item) => (
+                  {displayedResults.map(({ item, phase }) => (
                     <InboxRow
                       key={item.taskId}
                       item={item}
                       kind="accept"
+                      phase={phase}
                       onOpen={() => handleOpenItem(item)}
                       onAccept={
-                        onAcceptResult
+                        onAcceptResult && item.source === 'goal_plan'
                           ? () => {
-                              void onAcceptResult(item);
+                              void handleAccept(item);
                             }
                           : undefined
                       }
@@ -172,10 +311,10 @@ export function GlobalWorkbenchPage({
 
           <aside className="gwb-side">
             <section className="gwb-panel">
-              <div className="gwb-panel-head">
-                <div>
-                  <div className="gwb-side-label">PEER 推进</div>
-                  <div className="gwb-side-count">{advancing.length} 个任务</div>
+              <div className="gwb-panel-head gwb-side-head">
+                <div className="gwb-side-head-left">
+                  <span className="gwb-side-label">PEER 推进</span>
+                  <span className="gwb-side-count">{advancing.length} 个任务</span>
                 </div>
                 {onOpenTasks ? (
                   <button type="button" className="gwb-link" onClick={onOpenTasks}>
@@ -213,30 +352,44 @@ export function GlobalWorkbenchPage({
             </section>
 
             {pulse.length > 0 ? (
-              <section className="gwb-pulse">
-                <div className="gwb-pulse-head">
-                  <b>工作区脉搏</b>
-                  <span>按来源工作区汇总</span>
-                </div>
-                {pulse.map((row) => (
-                  <div key={row.name} className="gwb-pulse-row">
-                    <span className="gwb-pulse-name">{row.name}</span>
-                    <span className={row.need > 0 ? 'gwb-num gwb-num-alert' : 'gwb-num'}>
-                      {row.need} 需你
-                    </span>
-                    <span className="gwb-num">{row.run} 推进</span>
-                    <span className={row.accept > 0 ? 'gwb-num gwb-num-ok' : 'gwb-num'}>
-                      {row.accept} 验收
-                    </span>
+              <section className="gwb-panel gwb-pulse">
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">工作区脉搏</span>
                   </div>
-                ))}
+                  <span className="gwb-side-meta">按来源工作区汇总</span>
+                </div>
+                <div className="gwb-pulse-body">
+                  {pulse.map((row) => (
+                    <button
+                      key={row.name}
+                      type="button"
+                      className="gwb-pulse-row"
+                      onClick={() => {
+                        void handleOpenPulseWorkspace(row.name);
+                      }}
+                      title={`打开 ${row.name} 工作台`}
+                    >
+                      <span className="gwb-pulse-name">{row.name}</span>
+                      <span className={row.need > 0 ? 'gwb-num gwb-num-alert' : 'gwb-num'}>
+                        {row.need} 需你
+                      </span>
+                      <span className="gwb-num">{row.run} 推进</span>
+                      <span className={row.accept > 0 ? 'gwb-num gwb-num-ok' : 'gwb-num'}>
+                        {row.accept} 验收
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </section>
             ) : null}
 
             {discussions.length > 0 ? (
               <section className="gwb-panel gwb-soft">
-                <div className="gwb-panel-head">
-                  <div className="gwb-side-label">最近讨论</div>
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">最近讨论</span>
+                  </div>
                   <div className="gwb-side-meta">
                     预览 {discussions.length}
                     {discussionTotal > discussions.length ? ` / ${discussionTotal}` : ''}
@@ -273,28 +426,51 @@ export function GlobalWorkbenchPage({
 function InboxRow({
   item,
   kind,
+  phase = null,
   onOpen,
   onAccept,
 }: {
   readonly item: TaskOverviewItem;
-  readonly kind: 'need' | 'accept';
+  readonly kind: "need" | "accept";
+  readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
   readonly onAccept?: () => void;
 }) {
+  const submitting = phase === "submitting";
+  const celebrating = phase === "celebrating" || phase === "exiting";
+  const acceptBusy = submitting || celebrating;
+
   const tag =
-    kind === 'accept'
-      ? '验收'
-      : item.nextAction === 'grant_permission'
-        ? '权限'
-        : item.needsYouReason === 'decision' || item.nextAction === 'approve_plan'
-          ? '决策'
-          : '需要你';
+    kind === "accept"
+      ? celebrating
+        ? "已验收"
+        : "验收"
+      : item.nextAction === "grant_permission"
+        ? "权限"
+        : item.needsYouReason === "decision" || item.nextAction === "approve_plan"
+          ? "决策"
+          : "需要你";
+
+  const typeNote =
+    kind === "accept"
+      ? celebrating
+        ? "验收完成"
+        : submitting
+          ? "提交中"
+          : item.statusLabel || "等待验收"
+      : item.statusLabel;
+
   const cta =
-    kind === 'accept'
-      ? '验收结果'
-      : item.actionLabel || '去处理';
+    kind === "accept"
+      ? phase == null
+        ? "确认验收"
+        : submitting
+          ? "正在验收…"
+          : "已验收 ✓"
+      : item.actionLabel || "去处理";
+
   const durationLabel =
-    typeof item.durationMs === 'number' &&
+    typeof item.durationMs === "number" &&
     Number.isFinite(item.durationMs) &&
     item.durationMs >= 0
       ? formatDuration(item.durationMs)
@@ -304,10 +480,20 @@ function InboxRow({
     : formatRelativeTime(item.lastActiveAt);
 
   return (
-    <div className="gwb-item">
+    <div className={`gwb-item${kind === "accept" && phase ? ` gwb-item--${phase}` : ""}`}>
+      {kind === "accept" && celebrating ? (
+        <span className="gwb-item-celebration" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null}
       <div className="gwb-type">
-        <span className={`gwb-tag gwb-tag-${kind === 'accept' ? 'accept' : 'need'}`}>{tag}</span>
-        <span className="gwb-type-note">{item.statusLabel}</span>
+        <span className={`gwb-tag gwb-tag-${kind === "accept" ? "accept" : "need"}`}>{tag}</span>
+        <span className="gwb-type-note">{typeNote}</span>
       </div>
       <div className="gwb-body">
         <div className="gwb-title">{item.title}</div>
@@ -330,13 +516,24 @@ function InboxRow({
         </div>
       </div>
       <div className="gwb-actions">
-        {kind === 'accept' && onAccept ? (
+        {kind === "accept" && onAccept ? (
           <>
-            <button type="button" className="gwb-btn gwb-btn-ghost" onClick={onOpen}>
+            <button
+              type="button"
+              className="gwb-btn gwb-btn-ghost"
+              onClick={onOpen}
+              disabled={acceptBusy}
+            >
               查看
             </button>
-            <button type="button" className="gwb-btn gwb-btn-primary" onClick={onAccept}>
-              确认验收
+            <button
+              type="button"
+              className={`gwb-btn gwb-btn-primary${celebrating ? " gwb-btn-primary--success" : ""}`}
+              onClick={onAccept}
+              disabled={acceptBusy}
+            >
+              {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+              {cta}
             </button>
           </>
         ) : (
@@ -348,7 +545,6 @@ function InboxRow({
     </div>
   );
 }
-
 function formatRelativeTime(iso?: string): string {
   if (!iso) return '刚刚';
   const t = Date.parse(iso);

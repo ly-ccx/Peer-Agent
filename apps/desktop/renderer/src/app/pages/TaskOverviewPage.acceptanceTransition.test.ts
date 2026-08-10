@@ -8,7 +8,7 @@ const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8'
 
 test('result acceptance waits for success before celebrating and preserves a removal snapshot', async () => {
   const source = await readPage();
-  assert.match(source, /type AcceptancePhase = 'submitting' \| 'celebrating' \| 'exiting'/);
+  assert.match(source, /type AcceptancePhase/);
   assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
   assert.match(source, /Object\.values\(acceptanceTransitions\)/);
   assert.match(source, /result-card--\$\{phase\}/);
@@ -16,16 +16,12 @@ test('result acceptance waits for success before celebrating and preserves a rem
   assert.match(source, /验收完成，任务已圆满结束/);
 });
 
-test('acceptance transitions reinsert cards at their original orderIndex instead of appending', async () => {
+test('acceptance transitions freeze the complete taskId order instead of colliding single indexes', async () => {
   const source = await readPage();
-  assert.match(source, /readonly orderIndex: number/);
-  assert.match(source, /resultReady\.findIndex\(\(candidate\) => candidate\.taskId === item\.taskId\)/);
-  assert.match(source, /\.sort\(\(a, b\) => a\.orderIndex - b\.orderIndex\)/);
-  assert.match(source, /working\.splice\(insertAt, 0, transition\.item\)/);
-  assert.doesNotMatch(
-    source,
-    /const displayedResults = \[\s*\.\.\.resultReady,\s*\.\.\.Object\.values\(acceptanceTransitions\)/,
-  );
+  assert.match(source, /setAcceptanceOrderSnapshot\(resultReady\.map\(\(candidate\) => candidate\.taskId\)\)/);
+  assert.match(source, /mergeAcceptanceTransitionItems\(\{/);
+  assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
+  assert.doesNotMatch(source, /readonly orderIndex: number/);
 });
 
 test('a failed acceptance returns the card to a retryable idle state', async () => {
@@ -37,8 +33,8 @@ test('a failed acceptance returns the card to a retryable idle state', async () 
 
 test('acceptance celebration has smoother timing and a reduced-motion fallback', async () => {
   const [source, styles] = await Promise.all([readPage(), readStyles()]);
-  assert.match(source, /const ACCEPTANCE_CELEBRATION_MS = 980/);
-  assert.match(source, /const ACCEPTANCE_EXIT_MS = 420/);
+  assert.match(source, /ACCEPTANCE_CELEBRATION_MS/);
+  assert.match(source, /ACCEPTANCE_EXIT_MS/);
   assert.match(styles, /result-card-celebrate-lift/);
   assert.match(styles, /opacity 420ms cubic-bezier\(0\.33, 0, 0\.2, 1\)/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);

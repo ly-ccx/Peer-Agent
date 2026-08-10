@@ -1,6 +1,12 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { formatDuration } from '../../chat/state/format';
+import {
+  ACCEPTANCE_CELEBRATION_MS,
+  ACCEPTANCE_EXIT_MS,
+  mergeAcceptanceTransitionItems,
+  type AcceptancePhase,
+} from '../state/acceptanceTransition';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 
 /**
@@ -349,17 +355,10 @@ function TopLine({
   );
 }
 
-type AcceptancePhase = 'submitting' | 'celebrating' | 'exiting';
-
 type AcceptanceTransition = {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase;
-  /** Original index in the result list when acceptance started; keeps the card from jumping. */
-  readonly orderIndex: number;
 };
-
-const ACCEPTANCE_CELEBRATION_MS = 980;
-const ACCEPTANCE_EXIT_MS = 420;
 
 function HeroLayout({
   title: _title,
@@ -395,6 +394,7 @@ function HeroLayout({
   const [acceptanceTransitions, setAcceptanceTransitions] = useState<
     Record<string, AcceptanceTransition>
   >({});
+  const [acceptanceOrderSnapshot, setAcceptanceOrderSnapshot] = useState<readonly string[]>([]);
   const transitionTimers = useRef<Set<number>>(new Set());
 
   useEffect(
@@ -404,6 +404,12 @@ function HeroLayout({
     },
     [],
   );
+
+  useEffect(() => {
+    if (Object.keys(acceptanceTransitions).length === 0 && acceptanceOrderSnapshot.length > 0) {
+      setAcceptanceOrderSnapshot([]);
+    }
+  }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
 
   const scheduleTransition = (callback: () => void, delayMs: number) => {
     const timer = window.setTimeout(() => {
@@ -417,14 +423,14 @@ function HeroLayout({
     if (!onAcceptResult || item.source !== 'goal_plan' || !item.taskId) return;
     if (acceptanceTransitions[item.taskId]) return;
 
-    const orderIndex = resultReady.findIndex((candidate) => candidate.taskId === item.taskId);
+    // Freeze the complete visual order before awaited IPC refresh removes the accepted item.
+    // A single old index is insufficient because every following card shifts forward after removal.
+    if (Object.keys(acceptanceTransitions).length === 0) {
+      setAcceptanceOrderSnapshot(resultReady.map((candidate) => candidate.taskId));
+    }
     setAcceptanceTransitions((prev) => ({
       ...prev,
-      [item.taskId]: {
-        item,
-        phase: 'submitting',
-        orderIndex: orderIndex < 0 ? resultReady.length : orderIndex,
-      },
+      [item.taskId]: { item, phase: 'submitting' },
     }));
 
     try {
@@ -465,35 +471,11 @@ function HeroLayout({
     }
   };
 
-  // Idle cards + in-flight acceptance cards, reinserted at snapshotted orderIndex.
-  // Not `[...resultReady, ...Object.values(acceptanceTransitions)]` — that appends and jumps.
-  // Idle cards + in-flight acceptance cards, reinserted at snapshotted orderIndex.
-  // Not `[...resultReady, ...Object.values(acceptanceTransitions)]` — that appends and jumps.
-  const displayedResults = (() => {
-    // `working` is the item list used for order reinsertion (unit-test contract).
-    const working: TaskOverviewItem[] = resultReady.filter(
-      (item) => !acceptanceTransitions[item.taskId],
-    );
-    const idleOrder = new Map(
-      resultReady
-        .filter((item) => !acceptanceTransitions[item.taskId])
-        .map((item) => [item.taskId, resultReady.findIndex((c) => c.taskId === item.taskId)] as const),
-    );
-    const orderOf = (item: TaskOverviewItem): number =>
-      acceptanceTransitions[item.taskId]?.orderIndex ?? idleOrder.get(item.taskId) ?? 0;
-
-    for (const transition of Object.values(acceptanceTransitions).sort((a, b) => a.orderIndex - b.orderIndex)) {
-      const insertAt = working.findIndex((entry) => orderOf(entry) > transition.orderIndex);
-      if (insertAt === -1) working.push(transition.item);
-      else working.splice(insertAt, 0, transition.item);
-    }
-
-    return working.map((item) => ({
-      item,
-      phase: acceptanceTransitions[item.taskId]?.phase ?? null,
-      orderIndex: orderOf(item),
-    }));
-  })();
+  const displayedResults = mergeAcceptanceTransitionItems({
+    currentItems: resultReady,
+    transitions: Object.values(acceptanceTransitions),
+    orderSnapshot: acceptanceOrderSnapshot,
+  });
 
   const hasAny = discussions.length + needsYou.length + advancing.length + resultReady.length > 0;
 
@@ -631,7 +613,7 @@ function HeroLayout({
               <ResultCard
                 key={item.taskId}
                 item={item}
-                phase={phase}
+                phase={phase ?? null}
                 onOpenItem={onOpenItem}
                 onAcceptResult={handleAccept}
               />

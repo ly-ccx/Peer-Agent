@@ -8,6 +8,7 @@ import { ConversationResultView } from './app/components/ConversationResultView'
 import { TaskDetailsView } from './app/components/TaskDetailsView';
 import { continueTaskInConversation } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
+import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
@@ -1013,30 +1014,61 @@ function MainApp() {
                 </section>
               ) : activePage === 'home' ? (
                 <section className="primary-page-shell task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
-                  <HomePage
-                    workspacePath={homeScope === 'workspace' ? (activeWorkspace ?? null) : null}
-                    onOpenTasks={() => openCollectionDrawer('tasks')}
-                    onOpenHistory={() => openCollectionDrawer('history')}
-                    onNewTask={() => {
-                      void handleNewChat();
-                    }}
-                    onOpenItem={(item: TaskOverviewItem) => {
-                      // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
-                      if (item.actionRight === 'result_ready') {
-                        openResultDrawer(item);
-                        return;
-                      }
-                      // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
-                      const conversationId = item.conversationId;
-                      if (conversationId) {
-                        handleContinueTask(String(conversationId));
-                        return;
-                      }
-                      openCollectionDrawer('tasks');
-                    }}
-                    onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
-                    onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
-                  />
+                  {homeScope === 'all' ? (
+                    <GlobalWorkbenchPage
+                      onOpenTasks={() => openCollectionDrawer('tasks')}
+                      onOpenHistory={() => openCollectionDrawer('history')}
+                      onNewTask={() => {
+                        void handleNewChat();
+                      }}
+                      onOpenItem={(item: TaskOverviewItem) => {
+                        if (item.actionRight === 'result_ready') {
+                          openResultDrawer(item);
+                          return;
+                        }
+                        const conversationId = item.conversationId;
+                        if (conversationId) {
+                          handleContinueTask(String(conversationId));
+                          return;
+                        }
+                        openCollectionDrawer('tasks');
+                      }}
+                      onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
+                      onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
+                      onOpenWorkspace={(workspacePath: string) => {
+                        // 与侧栏 onOpenWorkspaceHome 一致：先本地切区，再打开区级工作台。
+                        setCollectionDrawer(null);
+                        setActiveWorkspace(workspacePath);
+                        setHomeScope('workspace');
+                        setActivePage('home');
+                      }}
+                    />
+                  ) : (
+                    <HomePage
+                      workspacePath={activeWorkspace ?? null}
+                      onOpenTasks={() => openCollectionDrawer('tasks')}
+                      onOpenHistory={() => openCollectionDrawer('history')}
+                      onNewTask={() => {
+                        void handleNewChat();
+                      }}
+                      onOpenItem={(item: TaskOverviewItem) => {
+                        // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
+                        if (item.actionRight === 'result_ready') {
+                          openResultDrawer(item);
+                          return;
+                        }
+                        // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
+                        const conversationId = item.conversationId;
+                        if (conversationId) {
+                          handleContinueTask(String(conversationId));
+                          return;
+                        }
+                        openCollectionDrawer('tasks');
+                      }}
+                      onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
+                      onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
+                    />
+                  )}
                 </section>
               ) : activePage === 'tools' ? (
                 <section className="primary-page-shell" aria-label={isZh ? '插件' : 'Plugins'}>

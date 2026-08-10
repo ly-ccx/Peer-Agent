@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
+  mergeAcceptanceTransitionItems,
   runAcceptanceTransition,
   type AcceptancePhase,
 } from './acceptanceTransition.ts';
@@ -26,6 +27,30 @@ function createManualScheduler() {
     },
   };
 }
+
+describe('mergeAcceptanceTransitionItems', () => {
+  it('keeps the accepted third card in its original visual slot after the refreshed list removes it', () => {
+    const item = (taskId: string) => ({ taskId });
+    const first = item('first');
+    const second = item('second');
+    const third = item('third');
+
+    const displayed = mergeAcceptanceTransitionItems({
+      currentItems: [first, second],
+      transitions: [{ item: third, phase: 'celebrating' }],
+      orderSnapshot: ['first', 'second', 'third'],
+    });
+
+    assert.deepEqual(
+      displayed.map((entry) => [entry.item.taskId, entry.phase]),
+      [
+        ['first', undefined],
+        ['second', undefined],
+        ['third', 'celebrating'],
+      ],
+    );
+  });
+});
 
 describe('runAcceptanceTransition', () => {
   it('runs submitting -> celebrating -> exiting -> settled with the shared durations', async () => {

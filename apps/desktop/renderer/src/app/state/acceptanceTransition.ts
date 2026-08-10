@@ -20,6 +20,64 @@ export const ACCEPTANCE_EXIT_MS = 420;
 
 export type AcceptanceScheduler = (callback: () => void, delayMs: number) => void;
 
+type AcceptanceItem = { readonly taskId: string };
+
+type AcceptanceTransitionItem<T extends AcceptanceItem> = {
+  readonly item: T;
+  readonly phase: AcceptancePhase;
+};
+
+export type DisplayedAcceptanceItem<T extends AcceptanceItem> = {
+  readonly item: T;
+  readonly phase?: AcceptancePhase;
+};
+
+/**
+ * 验收刷新期间按点击前的完整视觉顺序合并卡片。
+ *
+ * 只保存被点卡片的旧下标会与刷新后前移的兄弟卡片产生下标碰撞，
+ * 最终把过渡卡片追加到末尾。完整 taskId 快照是过渡窗口内唯一的排序真源。
+ */
+export function mergeAcceptanceTransitionItems<T extends AcceptanceItem>(options: {
+  readonly currentItems: readonly T[];
+  readonly transitions: readonly AcceptanceTransitionItem<T>[];
+  readonly orderSnapshot: readonly string[];
+}): DisplayedAcceptanceItem<T>[] {
+  const transitionByTaskId = new Map(options.transitions.map((transition) => [transition.item.taskId, transition]));
+  const currentByTaskId = new Map(options.currentItems.map((item) => [item.taskId, item]));
+  const displayed: DisplayedAcceptanceItem<T>[] = [];
+  const includedTaskIds = new Set<string>();
+
+  for (const taskId of options.orderSnapshot) {
+    const transition = transitionByTaskId.get(taskId);
+    const current = currentByTaskId.get(taskId);
+    if (transition) {
+      displayed.push(transition);
+      includedTaskIds.add(taskId);
+    } else if (current) {
+      displayed.push({ item: current });
+      includedTaskIds.add(taskId);
+    }
+  }
+
+  // 新进入待验收列表、但不在冻结快照中的卡片沿用后端顺序并追加显示。
+  for (const item of options.currentItems) {
+    if (!includedTaskIds.has(item.taskId)) {
+      displayed.push({ item });
+      includedTaskIds.add(item.taskId);
+    }
+  }
+
+  // 防御并发过渡：即使某个过渡开始前不在首份快照中，也不能丢卡。
+  for (const transition of options.transitions) {
+    if (!includedTaskIds.has(transition.item.taskId)) {
+      displayed.push(transition);
+    }
+  }
+
+  return displayed;
+}
+
 export type RunAcceptanceTransitionOptions = {
   /** 真正的验收提交动作（落库 / 走主进程）。 */
   readonly submit: () => void | Promise<void>;

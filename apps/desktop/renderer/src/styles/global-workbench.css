@@ -1,0 +1,475 @@
+/* 总工作台 Action Inbox —— 仅 GlobalWorkbenchPage 使用，不污染区级 task-overview。 */
+@layer components {
+  .gwb-page {
+    @apply h-full min-h-0 min-w-0 overflow-y-auto;
+    background: var(--za-app-bg);
+  }
+
+  .gwb-shell {
+    @apply mx-auto w-full max-w-6xl px-7 py-7;
+  }
+
+  .gwb-hero {
+    @apply mb-6 flex flex-wrap items-start justify-between gap-5;
+  }
+
+  .gwb-eyebrow {
+    @apply mb-2 text-xs font-semibold;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-hero-copy h1 {
+    @apply font-semibold leading-tight tracking-tight;
+    font-size: var(--ui-font-heading-lg, 26px);
+    color: var(--za-text);
+  }
+
+  .gwb-hero-copy p {
+    @apply mt-2 max-w-xl text-sm leading-relaxed;
+    color: var(--za-text-soft);
+  }
+
+  .gwb-calm-card {
+    @apply min-w-[220px] rounded-2xl border px-4 py-4;
+    background: color-mix(in srgb, var(--za-surface-0) 88%, transparent);
+    border-color: var(--za-line);
+  }
+
+  .gwb-calm-dot {
+    @apply mb-2 h-3 w-3 rounded-full;
+    background: var(--za-success, #3e7a6b);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-success, #3e7a6b) 16%, transparent);
+  }
+
+  .gwb-calm-card b {
+    @apply block text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .gwb-calm-card span {
+    @apply mt-1 block text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-layout {
+    @apply grid items-start gap-4;
+    grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.85fr);
+  }
+
+  @media (max-width: 980px) {
+    .gwb-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .gwb-main,
+  .gwb-side {
+    @apply flex min-w-0 flex-col gap-4;
+  }
+
+  .gwb-panel {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .gwb-panel-head {
+    @apply flex items-center justify-between gap-3 border-b px-5 py-4;
+    border-color: var(--za-line);
+  }
+
+  .gwb-panel-head h2 {
+    @apply font-semibold tracking-tight;
+    font-size: var(--ui-font-body-lg, 15px);
+    color: var(--za-text);
+  }
+
+  .gwb-sub {
+    @apply mt-0.5 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  /* 侧栏卡片头：单行紧凑（标签 + 数量 + 动作），避免双行堆叠占空。 */
+  .gwb-side-head {
+    @apply px-4 py-2.5;
+  }
+
+  .gwb-side-head-left {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  /* 侧栏主标题：与 control 字号对齐，不再用 11px caption 当标题。 */
+  .gwb-side-label {
+    @apply shrink-0 font-semibold tracking-tight;
+    font-size: var(--ui-font-control, 13px);
+    color: var(--za-text);
+  }
+
+  .gwb-side-count {
+    @apply min-w-0 truncate text-xs font-semibold tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  /* 与标题同一行、靠右显示的次要计数（如「预览 3 / 146」）。 */
+  .gwb-side-meta {
+    @apply shrink-0 whitespace-nowrap text-xs font-medium tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-link {
+    @apply text-xs font-semibold;
+    color: var(--za-accent);
+  }
+
+  .gwb-list {
+    @apply flex flex-col;
+  }
+
+  .gwb-item {
+    @apply grid items-center gap-3 border-b px-5 py-3;
+    grid-template-columns: 88px minmax(0, 1fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .gwb-item:last-child {
+    @apply border-b-0;
+  }
+
+  .gwb-type {
+    @apply flex flex-col items-start gap-1;
+  }
+
+  .gwb-tag {
+    @apply inline-flex h-6 items-center rounded-full px-2.5 text-xs font-semibold;
+  }
+
+  .gwb-tag-need {
+    background: color-mix(in srgb, #9a7340 14%, transparent);
+    color: #9a7340;
+  }
+
+  .gwb-tag-accept {
+    background: color-mix(in srgb, #3e7a6b 14%, transparent);
+    color: #3e7a6b;
+  }
+
+  .gwb-type-note {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-body {
+    @apply min-w-0;
+  }
+
+  .gwb-title {
+    @apply font-semibold tracking-tight;
+    font-size: var(--ui-font-body-lg, 15px);
+    color: var(--za-text);
+  }
+
+  .gwb-desc {
+    @apply mt-1 text-sm;
+    color: var(--za-text-soft);
+  }
+
+  .gwb-chips {
+    @apply mt-1.5 flex flex-wrap gap-1.5;
+  }
+
+  .gwb-chip {
+    @apply inline-flex h-6 items-center rounded-full px-2 font-semibold;
+    font-size: var(--ui-font-caption, 11px);
+    background: color-mix(in srgb, var(--za-text) 6%, transparent);
+    color: var(--za-text-soft);
+  }
+
+  .gwb-chip-ws {
+    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+    color: var(--za-accent);
+  }
+
+  .gwb-actions {
+    @apply flex flex-row items-center justify-end gap-2;
+  }
+
+  .gwb-btn {
+    @apply inline-flex h-9 items-center justify-center rounded-full px-3.5 text-xs font-semibold;
+  }
+
+  .gwb-btn-primary {
+    background: var(--za-text);
+    color: var(--za-surface-0);
+  }
+
+  .gwb-btn-ghost {
+    @apply border;
+    border-color: var(--za-line);
+    background: transparent;
+    color: var(--za-text);
+  }
+
+  .gwb-empty {
+    @apply rounded-2xl border px-6 py-10 text-center;
+    border-color: var(--za-line);
+    background: var(--za-surface-0);
+  }
+
+  .gwb-empty p {
+    color: var(--za-text-soft);
+  }
+
+  .gwb-empty-hint {
+    @apply mt-2 text-sm;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-empty .gwb-btn {
+    @apply mt-4;
+  }
+
+  .gwb-side-empty {
+    @apply px-5 py-6 text-sm;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-run-list {
+    @apply flex flex-col;
+  }
+
+  .gwb-run-row {
+    @apply grid w-full items-center gap-2.5 border-t px-4 py-3 text-left;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .gwb-soft .gwb-run-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gwb-run-row:hover {
+    background: color-mix(in srgb, var(--za-text) 3%, transparent);
+  }
+
+  .gwb-run-dot {
+    @apply h-2.5 w-2.5 rounded-full border-2;
+    border-color: var(--za-accent);
+  }
+
+  .gwb-run-title {
+    @apply block truncate font-semibold;
+    font-size: var(--ui-font-control, 13px);
+    color: var(--za-text);
+  }
+
+  .gwb-run-sub {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .gwb-run-pct {
+    @apply text-xs font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  /* 脉搏卡复用 panel 外壳；body 负责内容区 padding。 */
+  .gwb-pulse {
+    background: color-mix(in srgb, var(--za-surface-0) 80%, transparent);
+  }
+
+  .gwb-pulse-body {
+    @apply px-4 pb-2;
+  }
+
+  .gwb-pulse-row {
+    @apply grid w-full items-center gap-2 border-t py-2 text-left text-xs;
+    grid-template-columns: 1.2fr repeat(3, 0.7fr);
+    border-color: color-mix(in srgb, var(--za-line) 80%, transparent);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .gwb-pulse-row:first-child {
+    @apply border-t-0;
+  }
+
+  .gwb-pulse-row:hover {
+    background: color-mix(in srgb, var(--za-text) 3%, transparent);
+  }
+
+  .gwb-pulse-name {
+    @apply truncate font-semibold;
+    color: var(--za-text);
+  }
+
+  .gwb-num {
+    @apply text-center;
+    color: var(--za-text-soft);
+  }
+
+  .gwb-num-alert {
+    @apply font-semibold;
+    color: #8a4b55;
+  }
+
+  .gwb-num-ok {
+    @apply font-semibold;
+    color: #3e7a6b;
+  }
+
+  /* 验收三段式动效：只叠加 phase 修饰，不改写默认 gwb-item 网格布局 */
+  .gwb-item--submitting,
+  .gwb-item--celebrating,
+  .gwb-item--exiting {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+  }
+
+  .gwb-item--submitting {
+    border-color: color-mix(in srgb, var(--za-accent) 34%, var(--za-line));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--za-accent) 18%, transparent);
+    transition:
+      border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .gwb-item--celebrating {
+    border-color: color-mix(in srgb, var(--za-success, #3e7a6b) 42%, var(--za-line));
+    background:
+      radial-gradient(circle at 12% 20%, color-mix(in srgb, #7dcea0 22%, transparent), transparent 42%),
+      radial-gradient(circle at 88% 18%, color-mix(in srgb, #f4d35e 18%, transparent), transparent 36%),
+      color-mix(in srgb, var(--za-success, #3e7a6b) 8%, var(--za-surface-0));
+    box-shadow:
+      0 10px 28px color-mix(in srgb, var(--za-success, #3e7a6b) 14%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--za-success, #3e7a6b) 20%, transparent);
+    animation: gwb-item-celebrate-pop 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .gwb-item--exiting {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-color: transparent;
+    pointer-events: none;
+    transition:
+      opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      max-height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      margin 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      padding 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .gwb-item-celebration {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  .gwb-item-celebration i {
+    position: absolute;
+    top: 18%;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    opacity: 0;
+    animation: gwb-item-confetti 900ms ease-out forwards;
+  }
+
+  .gwb-item-celebration i:nth-child(1) {
+    left: 18%;
+    background: #7dcea0;
+    animation-delay: 40ms;
+  }
+  .gwb-item-celebration i:nth-child(2) {
+    left: 32%;
+    background: #f4d35e;
+    animation-delay: 90ms;
+  }
+  .gwb-item-celebration i:nth-child(3) {
+    left: 46%;
+    background: #6cb4ee;
+    animation-delay: 130ms;
+  }
+  .gwb-item-celebration i:nth-child(4) {
+    left: 58%;
+    background: #f28482;
+    animation-delay: 70ms;
+  }
+  .gwb-item-celebration i:nth-child(5) {
+    left: 72%;
+    background: #b8b8ff;
+    animation-delay: 110ms;
+  }
+  .gwb-item-celebration i:nth-child(6) {
+    left: 84%;
+    background: #84dcc6;
+    animation-delay: 150ms;
+  }
+
+  .gwb-btn-primary--success {
+    background: color-mix(in srgb, var(--za-success, #3e7a6b) 88%, #000);
+    color: #fff;
+  }
+
+  .gwb-accept-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    border: 1.5px solid color-mix(in srgb, #fff 35%, transparent);
+    border-top-color: #fff;
+    border-radius: 999px;
+    animation: gwb-accept-spin 700ms linear infinite;
+    vertical-align: -1px;
+  }
+
+  @keyframes gwb-accept-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes gwb-item-celebrate-pop {
+    0% {
+      transform: scale(0.985);
+    }
+    55% {
+      transform: scale(1.012);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  @keyframes gwb-item-confetti {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 0, 0) scale(0.6);
+    }
+    20% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(0, 42px, 0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gwb-item--celebrating,
+    .gwb-item--exiting,
+    .gwb-item-celebration i,
+    .gwb-accept-spinner {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
