@@ -1,11 +1,12 @@
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents';
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'threads';
 
 function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
   return (
     value === 'plan' ||
     value === 'browser' ||
     value === 'files' ||
-    value === 'documents'
+    value === 'documents' ||
+    value === 'threads'
   );
 }
 
@@ -13,6 +14,8 @@ function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
 export function normalizeWorkbenchTab(value: unknown): WorkbenchTabId | null {
   if (value === 'goal' || value === 'terminal') return 'plan';
   if (value === 'diff') return 'documents';
+  // 兼容旧命名：后台线程曾规划为 background / shell。
+  if (value === 'background' || value === 'shell') return 'threads';
   return isWorkbenchTab(value) ? value : null;
 }
 

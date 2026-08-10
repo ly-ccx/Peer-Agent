@@ -427,6 +427,8 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   goalPlanStore,
   automationStore,
   listConversations: (params) => conversationStore.listConversations(params),
+  // localToolHost 在 startLocalRuntime 后才赋值；list 时惰性读取，避免启动环依赖。
+  listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,

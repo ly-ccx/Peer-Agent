@@ -5,6 +5,7 @@ import {
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
+  projectShellBackgroundTask,
   type AutomationProjectionSnapshot,
   type ConversationProjectionSnapshot,
   type GoalPlanProjectionSnapshot,
@@ -316,4 +317,31 @@ test('projectGoalPlan 透传 planSteps；空列表不写字段', () => {
 
   const absent = projectGoalPlan(goalSnapshot());
   assert.equal(absent.planSteps, undefined);
+});
+
+test('shell_background running → peer_advancing and open_background_thread', () => {
+  const item = projectShellBackgroundTask({
+    taskId: 'task-bg-1',
+    command: 'npm test -- --watch',
+    status: 'running',
+    workspaceLabel: 'peer_agent',
+    startedAt: '2026-08-10T00:00:00.000Z',
+  });
+  assert.equal(item.source, 'shell_background');
+  assert.equal(item.taskId, 'shell:task-bg-1');
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.nextAction, 'open_background_thread');
+  assert.equal(item.statusLabel, '后台线程运行中');
+  assert.equal(item.actionLabel, '查看线程 →');
+});
+
+test('shell_background cancelled → terminal', () => {
+  const item = projectShellBackgroundTask({
+    taskId: 'task-bg-2',
+    command: 'sleep 30',
+    status: 'cancelled',
+    completedAt: '2026-08-10T00:01:00.000Z',
+  });
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '后台线程已停止');
 });

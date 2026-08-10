@@ -23,6 +23,7 @@ import {
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
+  projectShellBackgroundTask,
 } from '@peer-agent/protocol';
 
 /** 工作台默认只看近 7 天活跃任务（推进中 / 待你处理）。 */
@@ -355,6 +356,7 @@ export function createTaskOverviewAggregator({
   goalPlanStore,
   automationStore,
   listConversations,
+  listShellTasks,
 } = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
@@ -366,6 +368,7 @@ export function createTaskOverviewAggregator({
   ) {
     throw new TypeError('automationStore.listDefinitions/listRuns must be functions');
   }
+  // listShellTasks 可选：localToolHost 尚未就绪时静默跳过后台线程投影。
 
   /**
    * 聚合并投影任务，按行动权排序后截断。
@@ -498,12 +501,74 @@ export function createTaskOverviewAggregator({
       items.push(projectAutomationRun(snapshot));
     }
 
+    // Peer 开启的后台 shell 线程：工作台「Peer 正在推进」桶。
+    let shellTasks = [];
+    if (typeof listShellTasks === 'function') {
+      try {
+        const listed = listShellTasks();
+        shellTasks = Array.isArray(listed) ? listed : [];
+      } catch {
+        shellTasks = [];
+      }
+    }
+    for (const task of shellTasks) {
+      const projected = projectShellTaskIfInScope(task, scope);
+      if (projected) items.push(projected);
+    }
+
     const sorted = sortTaskOverview(items);
     // result_ready 不单独限流；仅受首页合计 limit 约束（默认放宽到 200）。
     return sorted.slice(0, limit);
   }
 
   return Object.freeze({ listTaskOverview });
+}
+
+/**
+ * 将 runtime shell task 快照投影为 TaskOverviewItem；不在当前 workspace / 不在活跃窗时返回 null。
+ * 工作台默认只展示 running；includeTerminal 时也展示已结束任务。
+ */
+export function projectShellTaskIfInScope(task, scope = {}) {
+  if (!task || typeof task !== 'object') return null;
+  const taskId = typeof task.taskId === 'string' ? task.taskId.trim() : '';
+  if (!taskId) return null;
+  const status = String(task.status ?? '').trim().toLowerCase();
+  const running = status === 'running' || status === '';
+  if (!running && scope.includeTerminal !== true) return null;
+
+  const cwd = typeof task.cwd === 'string' ? task.cwd : '';
+  const wanted = normalizeWorkspacePath(scope.workspacePath);
+  if (wanted) {
+    const taskWs = normalizeWorkspacePath(cwd);
+    // cwd 通常是 workspace 内路径；用前缀匹配覆盖子目录 cwd。
+    if (taskWs && taskWs !== wanted && !taskWs.startsWith(`${wanted}/`) && !wanted.startsWith(`${taskWs}/`)) {
+      return null;
+    }
+  }
+
+  const startedAt = typeof task.startedAt === 'string' ? task.startedAt : undefined;
+  const completedAt =
+    typeof task.completedAt === 'string' && task.completedAt.trim() !== ''
+      ? task.completedAt
+      : null;
+  const activeIso = completedAt || startedAt;
+  if (
+    !running &&
+    !isWithinActiveWindow(activeIso, scope.activeWithinMs, scope.nowMs ?? Date.now())
+  ) {
+    return null;
+  }
+
+  return projectShellBackgroundTask({
+    taskId,
+    command: typeof task.command === 'string' ? task.command : '',
+    status: running ? 'running' : status,
+    workspaceLabel: workspaceLabelFromPath(cwd),
+    cwd: cwd || undefined,
+    startedAt,
+    completedAt,
+    toolCallId: typeof task.toolCallId === 'string' ? task.toolCallId : undefined,
+  });
 }
 
 const ACTION_RIGHT_ORDER = {

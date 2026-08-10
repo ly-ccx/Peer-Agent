@@ -95,5 +95,14 @@ export function useTaskOverview(
     return unsubscribe;
   }, [enabled, reload]);
 
+  // 后台 shell 线程目前没有 changed 广播；轻量轮询保证工作台「Peer 正在推进」及时出现/消失。
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const timer = window.setInterval(() => {
+      void reload();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [enabled, reload]);
+
   return items;
 }

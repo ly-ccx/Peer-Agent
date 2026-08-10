@@ -1,4 +1,6 @@
+import { useCallback } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /** 工作台：跨任务行动中心，只回答「现在需要关注什么」。 */
@@ -19,6 +21,20 @@ export function HomePage({
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
+  const workbench = useWorkbenchOptional();
+
+  const handleOpenItem = useCallback((item: TaskOverviewItem) => {
+    // 后台 shell 线程：打开右侧「后台线程」Tab，不跳会话。
+    if (
+      item.source === 'shell_background' ||
+      item.nextAction === 'open_background_thread'
+    ) {
+      workbench?.openBackgroundThread(item.taskId);
+      return;
+    }
+    onOpenItem?.(item);
+  }, [onOpenItem, workbench]);
+
   return (
     <TaskOverviewPage
       title="工作台"
@@ -29,7 +45,7 @@ export function HomePage({
       workspacePath={workspacePath}
       onOpenTasks={onOpenTasks}
       onOpenHistory={onOpenHistory}
-      onOpenItem={onOpenItem}
+      onOpenItem={handleOpenItem}
       onAcceptResult={onAcceptResult}
       onCancelItem={onCancelItem}
     />

@@ -59,7 +59,12 @@ export type TaskNeedsYouReason =
   | 'decision';
 
 /** 投影来源类别：标记该任务投影来自哪套事实来源。 */
-export type TaskOverviewSourceKind = 'conversation' | 'goal_plan' | 'automation';
+export type TaskOverviewSourceKind =
+  | 'conversation'
+  | 'goal_plan'
+  | 'automation'
+  /** Peer 开启并仍可观察的后台 shell 线程。 */
+  | 'shell_background';
 
 /**
  * 用户在任务上可执行的下一步动作（§11.3「下一步行动」列）。
@@ -76,6 +81,7 @@ export type TaskNextAction =
   | 'enable' // 启用（Automation definition paused/disabled）
   | 'inspect' // 查看（异常态诊断）
   | 'continue_task' // 回到原 Conversation 继续讨论
+  | 'open_background_thread' // 打开右侧后台线程面板
   | 'none'; // 无需动作
 
 // ---------------------------------------------------------------------------
@@ -188,6 +194,22 @@ export interface AutomationProjectionSnapshot {
   readonly conversationId?: string;
   /** 同 GoalPlanProjectionSnapshot.accepted。 */
   readonly accepted?: boolean;
+}
+
+/**
+ * 后台 shell 线程投影所需的最小字段快照。
+ * 来源：runtime shell task manager（listShellTasks）。
+ */
+export interface ShellBackgroundProjectionSnapshot {
+  readonly taskId: string;
+  readonly command: string;
+  readonly status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | string;
+  readonly workspaceLabel?: string;
+  readonly cwd?: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string | null;
+  readonly toolCallId?: string;
+  readonly conversationId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +454,52 @@ export function projectAutomationRun(
     actionLabel: decision.actionLabel,
     ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),
   };
+}
+
+
+/**
+ * 后台 shell 线程 → 工作台「Peer 正在推进」卡片。
+ * 运行中进 peer_advancing；已结束但短暂可观察时仍投影为 terminal，供右侧面板回看。
+ */
+export function projectShellBackgroundTask(
+  snapshot: ShellBackgroundProjectionSnapshot,
+): TaskOverviewItem {
+  const command = String(snapshot.command ?? '').trim() || '后台 shell 任务';
+  const title = command.length > 72 ? `${command.slice(0, 71)}…` : command;
+  const status = String(snapshot.status ?? '').trim().toLowerCase();
+  const running = status === 'running' || status === '';
+  const lastActiveAt =
+    (typeof snapshot.completedAt === 'string' && snapshot.completedAt) ||
+    (typeof snapshot.startedAt === 'string' && snapshot.startedAt) ||
+    undefined;
+
+  return {
+    taskId: `shell:${snapshot.taskId}`,
+    source: 'shell_background',
+    actionRight: running ? 'peer_advancing' : 'terminal',
+    nextAction: 'open_background_thread',
+    title,
+    ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
+    statusLabel: running ? '后台线程运行中' : shellBackgroundTerminalLabel(status),
+    ...(lastActiveAt ? { lastActiveAt } : {}),
+    actionLabel: running ? '查看线程 →' : '查看 →',
+    ...(snapshot.conversationId ? { conversationId: snapshot.conversationId } : {}),
+  };
+}
+
+function shellBackgroundTerminalLabel(status: string): string {
+  switch (status) {
+    case 'completed':
+      return '后台线程已完成';
+    case 'failed':
+      return '后台线程失败';
+    case 'cancelled':
+      return '后台线程已停止';
+    case 'timed_out':
+      return '后台线程超时';
+    default:
+      return '后台线程';
+  }
 }
 
 function decideAutomation(snapshot: AutomationProjectionSnapshot): ProjectionDecision {
