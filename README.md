@@ -58,12 +58,14 @@ Three first-class shells share one unified core runtime:
 
 | | |
 | --- | --- |
+| 🎯 **Task flow, not tool chat** | Goals are accepted with boundaries, clarified when needed, planned by complexity, and closed against explicit success criteria. |
+| ✅ **Definition of Done as code** | `successCriteria`, `criterionResults`, and `evidenceRefs` turn “done” into a verifiable gate — not an assistant claim. |
 | 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
-| ✅ **Permission-gated** | No tool runs without a `PermissionGrant`. Authorization is enforced by the runtime — not by a polite prompt. |
-| 🧾 **Evidence-backed** | Every capability call returns structured Evidence (artifacts, logs, metadata) you can inspect after the fact. |
-| 🧩 **One governed runtime** | Shell, files, web/browser, MCP, plugins, and skills all flow through a single chain. No hidden side doors. |
-| 🖥️ **Multi-surface** | Desktop GUI, terminal TUI, and `peer` CLI share `~/.peer-agent` data and the same local runtime. |
-| 🎯 **Task flow by default** | Accept the goal, clarify when needed, plan by complexity, finish with Evidence. |
+| 🧾 **Evidence is a first-class result** | Artifacts, logs, metadata, denial, timeout, and failure remain structured facts that UI and automation can inspect. |
+| 🧩 **One governed capability chain** | Shell, files, browser, MCP, plugins, and skills all flow through Manifest → Projection → Permission → Evidence. No hidden side doors. |
+| 🔌 **Embeddable Open Runtime** | Public, host-neutral `protocol`, `runtime-core`, and `runtime-sdk` packages let another Node host embed the same governed runtime without Electron. |
+| 🔁 **Long-task continuity** | Goal state, pause/resume, `waiting_user`, compact summaries, context checksums, and continuity sources let work survive interruptions without treating a summary as proof. |
+| 🖥️ **One core, multiple surfaces** | Desktop, TUI, and the `peer` CLI share runtime, System Context, and data under `~/.peer-agent`; the interfaces do not fork the execution truth. |
 
 ---
 
@@ -106,6 +108,8 @@ Before acting, it turns your request into an objective, boundaries, and success 
 
 **Agent** is the default. **Plan** is the brake when you want review first. Subtasks and success criteria close only with real tool results and Evidence — not “done” prose.
 
+For longer work, the Goal runner persists the plan graph and supports pause, resume, and `waiting_user`. Auto-verifiable criteria can run as commands, tests, or file checks; their results must be attached before the goal can close. Read-only Explorer workers may investigate in parallel, while the lead task flow retains scope, budget, and completion ownership.
+
 Local execution still goes through one chain:
 
 ```text
@@ -133,6 +137,14 @@ Task flow decides *what* work is accepted and when it is finished. The capabilit
 - 📎 **Attachments & context** — Files and other context admitted through governed paths (not free-form prompt injection)
 - 🌐 **Web & browser** — Fetch, navigate, and interact under the same permission + Evidence model
 - ⏰ **Automation** — Scheduled / recurring agent runs with run-result viewing
+- 🌿 **Isolated automation runs** — Repository jobs can run in a dedicated Git worktree, then return commit/diff artifact refs and a receipt instead of mutating your active checkout invisibly
+- 🧭 **Workbench + embedded Browser** — Keep task status, artifacts, diffs, terminal output, and visible browser actions beside the conversation
+
+### Build on the runtime
+
+- 🔌 **Open Runtime SDK** — Embed the governed capability pipeline in another Node host via `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`
+- 🧱 **Host-neutral by construction** — Public contracts and orchestration do not depend on Electron, renderer state, concrete Shell/file adapters, or secret storage
+- 🧠 **Canonical System Context** — Desktop and TUI share source registration, layering, checksums, prompt snapshots, and continuity rules so provider formatting and product instructions do not drift
 
 ### Control the machine (safely)
 

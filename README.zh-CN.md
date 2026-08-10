@@ -58,12 +58,14 @@
 
 | | |
 | --- | --- |
+| 🎯 **任务流，而不是工具聊天** | 目标带着边界被签收，需要时澄清，按复杂度规划，并对照明确成功标准关闭。 |
+| ✅ **可执行成功标准（DoD-as-Code）** | `successCriteria`、`criterionResults` 与 `evidenceRefs` 把「完成」变成可验证闸门，而不是助手自称做完。 |
 | 🔒 **本地执行，信任显式** | 工具在*你的*机器上经 `PermissionGrant` 执行。认知可来自你选择的模型服务商 —— 能力权力仍留在本地且可审计。 |
-| ✅ **权限门控** | 没有 `PermissionGrant` 就不跑工具。授权由运行时强制执行，而不是靠一句礼貌提示。 |
-| 🧾 **证据可追溯** | 每次能力调用都返回结构化 Evidence（产物、日志、元数据），事后可查。 |
-| 🧩 **统一受治理运行时** | Shell、文件、网页/浏览器、MCP、插件、技能都走同一条链。没有暗门。 |
-| 🖥️ **多端一体** | Desktop GUI、终端 TUI 与 `peer` CLI 共享 `~/.peer-agent` 数据与同一本地运行时。 |
-| 🎯 **默认任务流** | 先签收目标，需要时澄清，按复杂度规划，用 Evidence 收尾。 |
+| 🧾 **Evidence 是一等结果** | 产物、日志、元数据、拒绝、超时与失败都保留为结构化事实，供界面与自动化检查。 |
+| 🧩 **一条受治理能力链** | Shell、文件、浏览器、MCP、插件、技能都走 Manifest → Projection → Permission → Evidence，没有暗门。 |
+| 🔌 **可嵌入 Open Runtime** | 公开、宿主中立的 `protocol`、`runtime-core`、`runtime-sdk` 让其他 Node 宿主复用同一受治理运行时，不依赖 Electron。 |
+| 🔁 **长任务连续性** | Goal 状态、暂停/恢复、`waiting_user`、压缩摘要、上下文 checksum 与 continuity source，让任务跨中断续跑，同时不把摘要当证据。 |
+| 🖥️ **一个核心，多种表面** | Desktop、TUI 与 `peer` CLI 共享运行时、System Context 和 `~/.peer-agent` 数据；界面不会分叉执行真值。 |
 
 ---
 
@@ -106,6 +108,8 @@ Peer Agent 把多步工作当成**任务**，而不是一次自由发挥的聊�
 
 **Agent** 是默认模式。**Plan** 是你希望先审再做时的刹车。子任务与成功标准只在有真实工具结果与 Evidence 时关闭 —— 而不是靠「done」话术。
 
+面对更长的工作，Goal runner 会持久化计划图，并支持暂停、恢复与 `waiting_user`。可自动验证的标准可以是命令、测试或文件检查；结果必须附着到任务上，目标才能关闭。只读 Explorer 可以并行调查，但范围、预算与完成责任仍由主任务流统一持有。
+
 本地执行仍走同一条链：
 
 ```text
@@ -133,6 +137,14 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 - 📎 **附件与上下文** —— 文件等内容经受治理的准入路径进入（不是随意拼进 prompt）
 - 🌐 **网页与浏览器** —— 在同一套权限 + Evidence 模型下抓取、导航、交互
 - ⏰ **Automation** —— 定时 / 周期 Agent 运行，并可查看运行结果
+- 🌿 **隔离的自动化运行** —— 仓库任务可在独立 Git worktree 中执行，最后返回 commit/diff artifact refs 与回执，而不是静默污染当前工作区
+- 🧭 **Workbench + 内嵌 Browser** —— 把任务状态、产物、diff、终端输出与可见浏览器操作放在对话旁边
+
+### 基于运行时构建
+
+- 🔌 **Open Runtime SDK** —— 通过 `@peer-agent/protocol`、`@peer-agent/runtime-core` 与 `@peer-agent/runtime-sdk`，在其他 Node 宿主中嵌入同一受治理能力管线
+- 🧱 **宿主中立** —— 公开契约与编排不依赖 Electron、renderer 状态、具体 Shell/文件适配器或密钥存储
+- 🧠 **统一 System Context** —— Desktop 与 TUI 共享 source 注册、分层、checksum、prompt snapshot 与连续性规则，避免模型格式和产品指令漂移
 
 ### 安全地控制本机
 
