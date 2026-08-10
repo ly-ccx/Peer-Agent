@@ -224,7 +224,7 @@ function planStepStatusLabel(status: string): string {
 }
 
 /** 「正在讨论」首页预览条数：克制，避免盖过行动权三桶。 */
-const DISCUSSION_PREVIEW_LIMIT = 4;
+const DISCUSSION_PREVIEW_LIMIT = 6;
 
 /**
  * 板块头部的次级入口。
