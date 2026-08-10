@@ -1839,7 +1839,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * - exceptPlanId 排除新计划自身。
    * - 走 persist 正规写盘 + onChange 广播（不旁路），并向 revisionHistory 追加一条
    *   supersede 审计，保留可追溯事实。
-   * - 只对活跃态计划生效；已是 completed/failed/cancelled 等终态的旧计划不再触碰。
+   * - 活跃态计划照旧收尾/作废。
+   * - 额外：同会话「completed 但未验收」也要离开待验收队列，避免续接纠偏后再开新计划时
+   *   工作台叠出「旧待验收卡 + 新执行卡」。
    *
    * @param {string|null|undefined} conversationId
    * @param {string|null|undefined} exceptPlanId
@@ -1852,15 +1854,28 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const superseded = [];
     for (const meta of listPlansByConversation(normalizedConversationId)) {
       if (meta.planId === exceptPlanId) continue;
-      // 仅处理仍处于活跃态的旧计划；终态计划不再触碰。
-      if (!isActivePlan(meta)) continue;
       const plan = getPlan(meta.planId);
-      // 二次校验全量计划状态，避免 index 与计划文件偶发不一致时误作废。
-      if (!plan || !isActivePlan(plan)) continue;
+      if (!plan) continue;
+
+      const isUnacceptedCompleted =
+        plan.status === 'completed'
+        && !(
+          plan.resultAcceptance
+          && typeof plan.resultAcceptance.acceptedAt === 'string'
+          && plan.resultAcceptance.acceptedAt.trim()
+        );
+
+      // 活跃态 + 未验收 completed 都要处理；已验收 / failed / cancelled 不触碰。
+      if (!isActivePlan(plan) && !isUnacceptedCompleted) continue;
 
       let nextStatus;
       let reasonText;
-      if (plan.status === 'awaiting_approval') {
+      if (isUnacceptedCompleted) {
+        // 未验收结果被同会话新计划取代：归档出待验收队列，不谎报用户已验收。
+        nextStatus = 'cancelled';
+        reasonText =
+          reason || 'superseded before user accepted the previous result in the same conversation';
+      } else if (plan.status === 'awaiting_approval') {
         // 未批准草稿：保持既有行为，直接作废。
         nextStatus = 'cancelled';
         reasonText = reason || 'superseded by a newer plan in the same conversation';
@@ -1880,7 +1895,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       }
 
       const nextVersion = (plan.version || 1) + 1;
-      persist({
+      const nextPlan = {
         ...plan,
         status: nextStatus,
         version: nextVersion,
@@ -1894,7 +1909,12 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
           },
         ],
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (isUnacceptedCompleted) {
+        // 清掉验收字段，避免 cancelled 仍被当成 result_ready 数据残留。
+        delete nextPlan.resultAcceptance;
+      }
+      persist(nextPlan);
       superseded.push(meta.planId);
     }
     return superseded;
@@ -2386,6 +2406,11 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * the next direction in the same turn. In that sequence the question is the
    * final fact: reopen a just-completed plan and persist waiting_user so Task
    * Overview does not misclassify the turn as a result awaiting acceptance.
+   *
+   * Also used when the user clicks「继续讨论 / 继续追问」on a result_ready card:
+   * that means acceptance failed and the same GoalPlan must leave the acceptance
+   * queue (same card continues), instead of staying result_ready while a new
+   * plan stacks on top.
    */
   function markRequestedUserInput(planId, runnerPatch = {}) {
     const plan = getPlan(planId);
@@ -2425,13 +2450,18 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       now,
     );
 
-    return persist({
+    const nextPlan = {
       ...plan,
       status: 'executing',
       runner: nextRunner,
       updatedAt: now,
       ...(timing ? { timing } : {}),
-    }, {
+    };
+    // 从待验收续接时清掉验收戳，避免同卡再被投影成已验收终态。
+    if (plan.status === 'completed') {
+      delete nextPlan.resultAcceptance;
+    }
+    return persist(nextPlan, {
       preserveStatus: true,
       changeKind: 'runner-state',
       runner: nextRunner,
