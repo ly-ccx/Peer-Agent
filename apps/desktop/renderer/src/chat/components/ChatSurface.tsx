@@ -2630,14 +2630,19 @@ export function ChatSurface({
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
-            {isDraftConversation && workspacePath && workspaceOptions.length > 0 ? (
+            {workspacePath && workspaceOptions.length > 0 ? (
               <Dropdown
                 className="composer-dropdown composer-workspace-dropdown"
                 value={workspacePath}
                 options={workspaceOptions}
-                onChange={(nextWorkspacePath) => { void onWorkspaceChange?.(nextWorkspacePath); }}
+                onChange={(nextWorkspacePath) => {
+                  if (isDraftConversation) void onWorkspaceChange?.(nextWorkspacePath);
+                }}
+                disabled={!isDraftConversation}
                 ariaLabel={isZh ? '工作区' : 'Workspace'}
-                title={isZh ? '切换工作区' : 'Switch workspace'}
+                title={isDraftConversation
+                  ? (isZh ? '切换工作区' : 'Switch workspace')
+                  : (isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created')}
                 menuPlacement="up"
               />
             ) : null}
