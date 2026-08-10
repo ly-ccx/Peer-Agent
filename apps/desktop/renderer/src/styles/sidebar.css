@@ -264,8 +264,10 @@
   gap: var(--space-1);
   min-height: 0;
   flex: 1;
-  overflow: auto;
-  padding-bottom: var(--space-2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Keep selected rows and their outlines inside the scrollport on both sides. */
+  padding: 0 var(--space-1) var(--space-2);
 }
 
 .sidebar-workspace-node {
@@ -421,8 +423,10 @@
   flex-direction: column;
   gap: 1px;
   max-height: min(48vh, 420px);
-  overflow: auto;
-  padding-right: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* The active-row shadow expands horizontally; reserve equal room before clipping. */
+  padding-inline: var(--space-1);
 }
 
 .sidebar-workspace-sessions-empty,
