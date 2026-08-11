@@ -63,6 +63,8 @@ export interface ConversationRuntimeState {
   readonly pendingPermissionCalls: readonly ClientToolCall[];
   /** 对话模式（按会话持久化在 meta 上）；初值 chat，由会话加载 effect 覆盖。 */
   readonly mode: ChatMode;
+  /** GPT 订阅本轮请求是否使用 Fast mode；按 renderer 会话桶隔离，不进入 Provider 配置。 */
+  readonly fastMode: boolean;
   /** 本轮 wall-clock 起点（供流事件计算 turnDurationMs）；null = 未在跑。 */
   readonly turnStartedAt: number | null;
   /** 当前会话正在进行的流 id（取代旧的组件内 streamIdRef.current）。 */
@@ -86,6 +88,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],
   mode: 'chat',
+  fastMode: false,
   turnStartedAt: null,
   streamId: null,
 });

@@ -393,6 +393,7 @@ async function sendOpenAIResponsesStreamOnce({
   reasoningParamStyle = 'openai-effort',
   maxOutputTokens,
   reasoningEffortMap,
+  fastMode = false,
   omitMaxOutputTokens = false,
   signal,
   webContents,
@@ -401,7 +402,7 @@ async function sendOpenAIResponsesStreamOnce({
   streamIdleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS,
 }) {
   const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/responses`;
-  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning, reasoningParamStyle, maxOutputTokens, reasoningEffortMap, omitMaxOutputTokens });
+  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning, reasoningParamStyle, maxOutputTokens, reasoningEffortMap, fastMode, omitMaxOutputTokens });
 
   const trace = createProviderStreamTrace({
     provider: 'openai-responses',

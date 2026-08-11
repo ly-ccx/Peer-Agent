@@ -1170,7 +1170,34 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 160ms ease, color 160ms ease, max-width 200ms ease;
+}
+
+.reasoning-effort-trigger-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 16px;
+  animation: reasoning-effort-content-in 180ms cubic-bezier(0.2, 1, 0.4, 1);
+}
+
+.reasoning-effort-channel-badge {
+  width: 10px;
+  height: 10px;
+  margin-left: 1px;
+  color: color-mix(in srgb, var(--azure-seal) 88%, var(--composer-addon-color));
+  opacity: 0.88;
+}
+
+@keyframes reasoning-effort-content-in {
+  from {
+    opacity: 0;
+    transform: translateX(-2px) scale(0.82) rotate(-5deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1) rotate(0);
+  }
 }
 
 .reasoning-effort-trigger:hover:not(:disabled),
@@ -1195,20 +1222,23 @@
   visibility: hidden;
   box-sizing: border-box;
   width: 240px;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
-  border-radius: var(--radius-md);
-  background: var(--paper-sheet);
-  box-shadow: var(--shadow-popover);
+  padding: 12px 14px 10px;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
+  border-radius: calc(var(--radius-md) + 1px);
+  background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--graphite-deep) 12%, transparent), 0 2px 8px color-mix(in srgb, var(--graphite-deep) 5%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .reasoning-effort-panel-heading {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
-  color: var(--graphite-mute);
-  font-size: 0.68rem;
+  margin-bottom: 7px;
+  color: color-mix(in srgb, var(--graphite-mute) 82%, transparent);
+  font-size: 0.67rem;
+  letter-spacing: 0.01em;
 }
 
 .reasoning-effort-panel-heading strong {
@@ -1271,6 +1301,78 @@
 
 .reasoning-effort-slider-tick.is-active {
   background: rgba(255, 255, 255, 0.78);
+}
+
+.reasoning-request-channel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--graphite-mute) 10%, transparent);
+}
+
+.reasoning-request-channel-label {
+  color: color-mix(in srgb, var(--graphite-mute) 82%, transparent);
+  font-size: 0.67rem;
+  letter-spacing: 0.01em;
+}
+
+.reasoning-request-channel-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.reasoning-request-channel-options button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--graphite-mute) 84%, transparent);
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.reasoning-request-channel-options button:hover:not(:disabled):not(.is-active) {
+  color: var(--graphite-base);
+  background: color-mix(in srgb, var(--graphite-mute) 6%, transparent);
+}
+
+.reasoning-request-channel-options button svg {
+  width: 11px;
+  height: 11px;
+}
+
+.reasoning-request-channel-options button.is-active {
+  color: var(--graphite-base);
+  background: color-mix(in srgb, var(--graphite-mute) 8%, transparent);
+  border-color: color-mix(in srgb, var(--graphite-mute) 8%, transparent);
+}
+
+.reasoning-request-channel-options button.is-fast.is-active {
+  color: var(--azure-seal);
+  background: color-mix(in srgb, var(--azure-seal) 9%, transparent);
+  border-color: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+}
+
+.reasoning-request-channel-options button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.reasoning-request-channel-options button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
 }
 
 .reasoning-effort-slider {
@@ -4553,6 +4655,17 @@ button.chat-header-cap-item:focus-visible {
   .chat-composer-wrap--empty-home .chat-composer-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-effort-trigger,
+  .reasoning-effort-trigger-content,
+  .reasoning-effort-slider,
+  .reasoning-effort-slider::-webkit-slider-thumb,
+  .reasoning-effort-slider::-moz-range-thumb {
+    animation: none;
+    transition-duration: 1ms;
   }
 }
 

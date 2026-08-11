@@ -108,6 +108,8 @@ export interface ChatStartTaskRequest {
   readonly workspacePath?: string | null;
   readonly mode?: string;
   readonly effort?: string;
+  /** Request-scoped OpenAI Fast mode; only the ChatGPT subscription adapter consumes it. */
+  readonly fastMode?: boolean;
   readonly modelProviderId?: string | null;
   readonly attachments?: readonly unknown[];
 }
@@ -132,6 +134,8 @@ export interface ChatSendRequest {
    */
   readonly assistantMessageId?: string;
   readonly effort?: string;
+  /** Request-scoped OpenAI Fast mode; defaults to false when omitted. */
+  readonly fastMode?: boolean;
   readonly mode?: string;
   readonly conversationId?: string;
   /**

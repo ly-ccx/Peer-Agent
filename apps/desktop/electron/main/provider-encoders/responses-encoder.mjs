@@ -125,6 +125,7 @@ export function encodeOpenAIResponsesRequest({
   reasoningParamStyle = 'openai-effort',
   maxOutputTokens,
   reasoningEffortMap,
+  fastMode = false,
   omitMaxOutputTokens = false,
 }) {
   const normalized = normalizeOpenAIMessages(messages);
@@ -152,6 +153,7 @@ export function encodeOpenAIResponsesRequest({
   };
   const outputLimit = positiveTokenLimit(maxOutputTokens);
   if (!omitMaxOutputTokens && outputLimit) body.max_output_tokens = outputLimit;
+  if (fastMode) body.service_tier = 'fast';
 
   // Keep effort only. Do NOT request reasoning.summary by default:
   // OpenAI docs say summary is optional and off unless explicitly set.

@@ -19,10 +19,15 @@ import {
 } from '../../../app/components/llmModelConfiguration';
 import { Tooltip } from '../../../app/components/Tooltip';
 import { clientApi } from '../../../clientApi';
-import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
+import { effortLabel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
-import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
+import {
+  effortIndexForLevel,
+  effortIndexFromValue,
+  effortLevelForDisplay,
+  snapEffortValue,
+} from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
 import { resolveStickyContextDisplay } from './stickyContextDisplay';
 
@@ -47,15 +52,21 @@ function formatContextWindowLabel(tokens: number | undefined): string {
 function ReasoningEffortSlider({
   effort,
   effortLevels,
+  fastAvailable,
+  fastMode,
   isZh,
   disabled,
-  onChange,
+  onEffortChange,
+  onFastModeChange,
 }: {
   readonly effort: EffortLevel;
   readonly effortLevels: readonly EffortLevel[];
+  readonly fastAvailable: boolean;
+  readonly fastMode: boolean;
   readonly isZh: boolean;
   readonly disabled: boolean;
-  readonly onChange: (level: EffortLevel) => void;
+  readonly onEffortChange: (level: EffortLevel) => void;
+  readonly onFastModeChange: (enabled: boolean) => void;
 }) {
   const selectedIndex = effortIndexForLevel(effort, effortLevels);
   const selectedValue = effortLevels.length > 1 ? (selectedIndex / (effortLevels.length - 1)) * 100 : 0;
@@ -141,11 +152,12 @@ function ReasoningEffortSlider({
     const next = effortLevels[effortIndexFromValue(snapped, effortLevels.length)];
     setDragValue(snapped);
     setDirty(false);
-    if (next && isEffortLevel(next)) onChange(next);
+    if (next) onEffortChange(next);
   };
 
   const effectiveValue = dirty ? dragValue : selectedValue;
   const displayedLevel = effortLevelForDisplay(effort, effortLevels, effectiveValue, dirty);
+  const displayLabel = effortLabel(displayedLevel, isZh);
   const label = effortLabel(effort, isZh);
   const panel = open
     ? createPortal(
@@ -157,7 +169,7 @@ function ReasoningEffortSlider({
         >
           <div className="reasoning-effort-panel-heading">
             <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
-            <strong>{effortLabel(displayedLevel, isZh)}</strong>
+            <strong>{displayLabel}</strong>
           </div>
           <div className="reasoning-effort-slider-shell">
             {/*
@@ -200,7 +212,7 @@ function ReasoningEffortSlider({
               step="1"
               value={effectiveValue}
               aria-label={isZh ? '思考强度' : 'Reasoning effort'}
-              aria-valuetext={effortLabel(displayedLevel, isZh)}
+              aria-valuetext={displayLabel}
               style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
               onInput={(event) => {
                 setDirty(true);
@@ -219,6 +231,46 @@ function ReasoningEffortSlider({
               onBlur={(event) => commit(Number(event.currentTarget.value))}
             />
           </div>
+          {fastAvailable ? (
+            <div className="reasoning-request-channel">
+              <span className="reasoning-request-channel-label">
+                {isZh ? '请求通道' : 'Request channel'}
+              </span>
+              <div
+                className="reasoning-request-channel-options"
+                role="group"
+                aria-label={isZh ? '请求通道' : 'Request channel'}
+              >
+                <button
+                  type="button"
+                  className={!fastMode ? 'is-active' : ''}
+                  aria-pressed={!fastMode}
+                  disabled={disabled}
+                  onClick={() => onFastModeChange(false)}
+                >
+                  {isZh ? '正常' : 'Normal'}
+                </button>
+                <button
+                  type="button"
+                  className={fastMode ? 'is-active is-fast' : 'is-fast'}
+                  aria-pressed={fastMode}
+                  disabled={disabled}
+                  onClick={() => onFastModeChange(true)}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M9.15 1.75 3.9 8.3h3.65L6.9 14.25l5.2-7.05H8.55l.6-5.45Z"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      strokeWidth="0.7"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {isZh ? '快速' : 'Fast'}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>,
         document.body,
       )
@@ -237,7 +289,20 @@ function ReasoningEffortSlider({
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
       >
-        {label}
+        <span className="reasoning-effort-trigger-content" aria-hidden="true">
+          {label}
+          {fastAvailable && fastMode ? (
+            <svg className="reasoning-effort-channel-badge" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M9.15 1.75 3.9 8.3h3.65L6.9 14.25l5.2-7.05H8.55l.6-5.45Z"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="0.7"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : null}
+        </span>
       </button>
       {panel}
     </div>
@@ -256,6 +321,8 @@ export function TokenUsageDisplay({
   effort,
   effortLevels,
   onEffortChange,
+  fastMode = false,
+  onFastModeChange,
   modelOptions = [],
   modelLoading = false,
   canSwitchModel = false,
@@ -279,6 +346,8 @@ export function TokenUsageDisplay({
   readonly effort: EffortLevel;
   readonly effortLevels: readonly EffortLevel[];
   readonly onEffortChange: (level: EffortLevel) => void;
+  readonly fastMode?: boolean;
+  readonly onFastModeChange?: (enabled: boolean) => void;
   readonly modelOptions?: readonly DropdownOption[];
   readonly modelLoading?: boolean;
   readonly canSwitchModel?: boolean;
@@ -552,9 +621,12 @@ export function TokenUsageDisplay({
           <ReasoningEffortSlider
             effort={effort}
             effortLevels={effortLevels}
+            fastAvailable={defaultProvider?.authMethod === 'oauth_chatgpt' && Boolean(onFastModeChange)}
+            fastMode={fastMode}
             isZh={isZh}
             disabled={Boolean(isStreaming)}
-            onChange={onEffortChange}
+            onEffortChange={onEffortChange}
+            onFastModeChange={onFastModeChange ?? (() => undefined)}
           />
         ) : null}
         {showModelControls && canSwitchContextWindow && contextOptionDefinition && defaultProvider ? (

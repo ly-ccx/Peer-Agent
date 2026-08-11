@@ -57,6 +57,7 @@ export async function agentLoopOpenAI({
   // ADR 28: ChatGPT 订阅链路走 Responses 传输,需附带 accountId。
   authMethod = 'api_key',
   accountId = null,
+  fastMode = false,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
   emitRuntimeEvent = null,
@@ -71,7 +72,12 @@ export async function agentLoopOpenAI({
   // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
   const useResponses = resolvedChannel?.wire === 'openai-responses' || authMethod === 'oauth_chatgpt';
   const sendStream = useResponses
-    ? (args) => sendOpenAIResponsesStream({ ...args, accountId, omitMaxOutputTokens: authMethod === 'oauth_chatgpt' })
+    ? (args) => sendOpenAIResponsesStream({
+        ...args,
+        accountId,
+        fastMode: authMethod === 'oauth_chatgpt' && fastMode,
+        omitMaxOutputTokens: authMethod === 'oauth_chatgpt',
+      })
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({

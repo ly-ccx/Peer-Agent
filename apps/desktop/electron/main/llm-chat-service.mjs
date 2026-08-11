@@ -887,6 +887,7 @@ export function createLlmChatService({
     webContents,
     streamId,
     effort = 'default',
+    fastMode = false,
     mode = 'chat',
     conversationId = null,
     // 会话级首选 provider（会话 meta.modelProviderId 透传）。指定时排为本轮主 provider；
@@ -1390,6 +1391,7 @@ export function createLlmChatService({
               onNativeReasoningFallback,
               authMethod: credential.authMethod,
               accountId: credential.accountId,
+              fastMode: fastMode === true,
               resolvedChannel,
               emitRuntimeEvent: emitRuntimeEventPersistingAccounting,
               runtimeEventState: streamRecord.runtimeEventState,

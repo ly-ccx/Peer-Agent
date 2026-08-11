@@ -100,6 +100,22 @@ test('new task starts in main and navigates directly to the workbench', async ()
   assert.doesNotMatch(app, /const ensureConversation/);
 });
 
+test('Fast mode is a ChatGPT subscription composer control and follows both send paths', async () => {
+  const [surface, display, composer, settings] = await Promise.all([
+    readSource('./ChatSurface.tsx'),
+    readSource('./thread/TokenUsageDisplay.tsx'),
+    readSource('./Composer.tsx'),
+    readSource('../../app/components/LlmSettingsPanel.tsx'),
+  ]);
+
+  assert.match(display, /defaultProvider\?\.authMethod === 'oauth_chatgpt'/);
+  assert.match(composer, /Fast mode/);
+  assert.match(composer, /aria-pressed=\{enabled\}/);
+  assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
+  assert.match(surface, /chatSend\(\{[^}]*fastMode/);
+  assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
+});
+
 test('external conversation reload replaces or clears the shared accounting snapshot', async () => {
   const surface = await readSource('./ChatSurface.tsx');
 

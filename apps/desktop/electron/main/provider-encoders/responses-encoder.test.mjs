@@ -157,6 +157,21 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     assert.equal(body.reasoning.effort, 'max');
   });
 
+  it('adds the fast service tier only when Fast mode is enabled', () => {
+    const standard = encodeOpenAIResponsesRequest({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const fast = encodeOpenAIResponsesRequest({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hello' }],
+      fastMode: true,
+    });
+
+    assert.equal(standard.service_tier, undefined);
+    assert.equal(fast.service_tier, 'fast');
+  });
+
   it('passes Grok low/medium/high and maps default/off to high via effort map', () => {
     const make = (effort, reasoningEffortMap) => encodeOpenAIResponsesRequest({
       model: 'grok-4.5',

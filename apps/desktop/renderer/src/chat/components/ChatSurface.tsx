@@ -506,6 +506,10 @@ export function ChatSurface({
   // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
   // mode-source 进入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
+  const fastMode = convState.fastMode;
+  const changeFastMode = useCallback((enabled: boolean) => {
+    convActions.set({ fastMode: enabled });
+  }, [convActions]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
@@ -1892,6 +1896,7 @@ export function ChatSurface({
           workspacePath,
           mode,
           effort,
+          fastMode,
           modelProviderId,
           attachments: sentAttachments,
         });
@@ -2065,8 +2070,8 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+    void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
@@ -2273,6 +2278,8 @@ export function ChatSurface({
       effort={effort}
       effortLevels={composerEffortLevels}
       onEffortChange={changeEffort}
+      fastMode={fastMode}
+      onFastModeChange={changeFastMode}
       modelOptions={modelOptions}
       canSwitchModel={canSwitchModel}
       onModelChange={handleModelChange}
@@ -2293,6 +2300,8 @@ export function ChatSurface({
       effort={effort}
       effortLevels={composerEffortLevels}
       onEffortChange={changeEffort}
+      fastMode={fastMode}
+      onFastModeChange={changeFastMode}
       modelOptions={modelOptions}
       canSwitchModel={false}
       selectedModelProviderId={modelProviderId}
