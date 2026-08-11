@@ -311,56 +311,65 @@
     color: var(--za-accent);
   }
 
-  /* ---------- 交接列表（连体容器 + 四列） ---------- */
+  /* ---------- 待处理卡：单条限宽，多条双列 ---------- */
   .task-overview-handoff-list {
-    @apply overflow-hidden rounded-2xl border;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    @apply grid gap-3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-overview-handoff-list--single {
+    grid-template-columns: minmax(0, 42rem);
   }
 
   .task-overview-handoff-row {
-    @apply grid items-center gap-4 border-b px-4 py-3.5 last:border-b-0;
-    grid-template-columns: minmax(0, 1.4fr) minmax(7rem, 0.7fr) minmax(0, 1.1fr) auto;
+    @apply grid min-w-0 items-center gap-4 rounded-2xl border px-5 py-4;
+    grid-template-columns: minmax(0, 1fr) auto;
+    background: var(--za-surface-0);
     border-color: var(--za-line);
+    transition:
+      background-color var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
-  .task-overview-handoff-row:first-child {
-    background: color-mix(in srgb, var(--za-accent) 6%, var(--za-surface-0));
+  .task-overview-handoff-row:hover {
+    background: var(--za-surface-1);
+    border-color: var(--za-line-strong);
+  }
+
+  .task-overview-handoff-row > button:is(.task-overview-btn) {
+    @apply inline-flex items-center gap-1.5;
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .task-overview-task-copy {
     @apply min-w-0;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .task-overview-task-copy strong {
-    @apply block truncate text-sm font-semibold;
+    @apply block truncate font-semibold tracking-tight;
     color: var(--za-text);
+    font-size: var(--ui-font-body-lg, 15px);
   }
 
-  .task-overview-task-copy span {
-    @apply mt-0.5 block truncate text-xs;
-    color: var(--za-text-muted);
-  }
-
-  .task-overview-owner {
-    @apply flex items-center gap-2 text-xs;
+  .task-overview-handoff-reason {
+    @apply mt-1 truncate text-sm;
     color: var(--za-text-soft);
   }
 
-  .task-overview-owner i {
-    @apply inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold not-italic;
-    background: color-mix(in srgb, var(--za-accent) 16%, var(--za-surface-0));
-    color: var(--za-accent);
-  }
-
-  .task-overview-handoff-reason strong {
-    @apply block truncate text-sm font-semibold;
-    color: var(--za-text);
-  }
-
-  .task-overview-handoff-reason span {
-    @apply mt-0.5 block truncate text-xs;
+  .task-overview-handoff-context {
+    @apply mt-2 flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px];
     color: var(--za-text-muted);
+  }
+
+  .task-overview-handoff-context span {
+    @apply shrink-0 truncate;
+  }
+
+  .task-overview-handoff-context span:first-child {
+    @apply min-w-0 shrink;
   }
 
   .task-overview-btn {
@@ -1054,6 +1063,12 @@
     @apply m-0 rounded-none border-0;
   }
 
+  @media (max-width: 1180px) {
+    .task-overview-handoff-list {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 1100px) {
     .task-overview-discussion-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1064,6 +1079,12 @@
     .task-overview-handoff-row {
       grid-template-columns: 1fr;
       @apply gap-2;
+    }
+
+    .task-overview-task-copy,
+    .task-overview-handoff-row > button:is(.task-overview-btn) {
+      grid-column: 1;
+      grid-row: auto;
     }
 
     .task-overview-hero {

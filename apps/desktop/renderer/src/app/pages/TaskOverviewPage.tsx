@@ -178,15 +178,6 @@ function progressPercent(item: TaskOverviewItem): number {
   return Math.max(0, Math.min(100, Math.round((p.completed / p.total) * 100)));
 }
 
-function ownerLabel(item: TaskOverviewItem): string {
-  if (item.actionRight === 'needs_you') {
-    if (item.needsYouReason === 'plan_approval') return '行动权在你';
-    if (item.needsYouReason === 'user_input') return '等待确认';
-    return '等待决策';
-  }
-  return item.statusLabel;
-}
-
 function reasonTitle(item: TaskOverviewItem): string {
   // 投影层尚未单独建模「决策事由」字段，过渡期用 statusLabel 作主因，
   // 副行用 plan 进度 / action 补充。
@@ -201,7 +192,7 @@ function reasonTitle(item: TaskOverviewItem): string {
 
 function reasonMeta(item: TaskOverviewItem): string {
   if (item.planProgress) {
-    return `GoalPlan ${item.planProgress.completed} / ${item.planProgress.total} · ${item.statusLabel}`;
+    return `计划 ${item.planProgress.completed} / ${item.planProgress.total} · ${item.statusLabel}`;
   }
   return item.statusLabel;
 }
@@ -535,7 +526,9 @@ function HeroLayout({
             </div>
             <span className="task-overview-section-meta">决策与权限</span>
           </div>
-          <div className="task-overview-handoff-list">
+          <div
+            className={`task-overview-handoff-list${needsYou.length === 1 ? ' task-overview-handoff-list--single' : ''}`}
+          >
             {needsYou.map((item) => (
               <HandoffRow key={item.taskId} item={item} onOpenItem={onOpenItem} />
             ))}
@@ -678,20 +671,23 @@ function HandoffRow({
     item.nextAction === 'confirm_scope' ||
     item.nextAction === 'review_result';
   return (
-    <div className="task-overview-handoff-row">
+    <article className="task-overview-handoff-row">
       <div className="task-overview-task-copy">
         <strong>{item.title}</strong>
-        <span>
-          {item.workspaceLabel ?? 'workspace'} · {formatRelativeTime(item.lastActiveAt)}
-        </span>
-      </div>
-      <div className="task-overview-owner">
-        <i>你</i>
-        <span>{ownerLabel(item)}</span>
-      </div>
-      <div className="task-overview-handoff-reason">
-        <strong>{reasonTitle(item)}</strong>
-        <span>{reasonMeta(item)}</span>
+        <div className="task-overview-handoff-reason">{reasonTitle(item)}</div>
+        <div className="task-overview-handoff-context">
+          <span>{item.workspaceLabel ?? 'workspace'}</span>
+          <span aria-hidden="true">·</span>
+          <span>{formatRelativeTime(item.lastActiveAt)}</span>
+          {item.planProgress ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>
+                计划 {item.planProgress.completed} / {item.planProgress.total}
+              </span>
+            </>
+          ) : null}
+        </div>
       </div>
       <button
         type="button"
@@ -700,7 +696,7 @@ function HandoffRow({
       >
         {item.actionLabel}
       </button>
-    </div>
+    </article>
   );
 }
 
