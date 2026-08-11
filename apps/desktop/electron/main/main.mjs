@@ -1734,6 +1734,7 @@ const conversationApplicationService = createConversationApplicationService({
   },
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
+  updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
@@ -2634,6 +2635,7 @@ async function handleChatStartTask({
     title: String(title ?? normalizedText).slice(0, 48) || '新任务',
     workspacePath: workspacePath ?? settingsStore.getAll().activeWorkspace ?? null,
     mode,
+    fastMode,
   });
   if (effort !== undefined || modelProviderId !== undefined) {
     conversationStore.updateModelEffort(conversation.id, {

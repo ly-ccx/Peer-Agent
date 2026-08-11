@@ -7,8 +7,9 @@ import { Drawer } from './app/components/Drawer';
 import { ParticleShatterOverlay } from './app/fx/ParticleShatterOverlay';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import type { AcceptancePhase } from './app/state/acceptanceTransition';
+import { runAcceptanceTransition } from './app/state/acceptanceTransition';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
-import { continueTaskInConversation } from './app/taskContinuation';
+import { continueTaskInConversation, getTaskContinuationAction } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
 import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
@@ -141,8 +142,18 @@ function MainApp() {
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
   const [resultAcceptancePhase, setResultAcceptancePhase] = useState<AcceptancePhase | null>(null);
   const resultShatterRef = useRef<HTMLDivElement | null>(null);
+  const resultAcceptanceTimers = useRef<Set<number>>(new Set());
   const resultShattering =
     resultAcceptancePhase === 'celebrating' || resultAcceptancePhase === 'exiting';
+
+  useEffect(
+    () => () => {
+      for (const timer of resultAcceptanceTimers.current) window.clearTimeout(timer);
+      resultAcceptanceTimers.current.clear();
+    },
+    [],
+  );
+
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
     setCollectionDrawer(kind);
   }, []);
@@ -1340,21 +1351,83 @@ function MainApp() {
                             </button>
                           </div>
                           <div className="conversation-result-drawer__body">
-                            <ConversationResultView
-                              item={resultDrawerItem}
-                              isZh={isZh}
-                              onAcceptResult={(item) =>
-                                acceptResultFromWorkbench(item, { keepResultDrawer: true })
-                              }
-                              onAcceptancePhaseChange={setResultAcceptancePhase}
-                              onAccepted={() => {
-                                setResultDrawerItem(null);
-                                setCollectionDrawer(null);
-                                setResultAcceptancePhase(null);
-                              }}
-                              onContinueTask={handleContinueTask}
-                            />
+                            <ConversationResultView item={resultDrawerItem} isZh={isZh} />
                           </div>
+                          {(() => {
+                            const item = resultDrawerItem;
+                            if (!item) return null;
+                            const canAccept =
+                              item.source === 'goal_plan' && Boolean(item.taskId);
+                            const continuation = getTaskContinuationAction(item, isZh);
+                            if (!continuation && !canAccept) return null;
+                            return (
+                              <footer className="conversation-result-drawer__footer">
+                                {continuation ? (
+                                  <div className="conversation-result-view__continue">
+                                    <button
+                                      type="button"
+                                      className="task-overview-btn task-overview-btn--secondary"
+                                      onClick={() =>
+                                        handleContinueTask(
+                                          continuation.conversationId,
+                                          continuation.planId,
+                                        )
+                                      }
+                                    >
+                                      {continuation.label}
+                                    </button>
+                                  </div>
+                                ) : null}
+                                {canAccept ? (
+                                  <button
+                                    type="button"
+                                    className="task-overview-btn task-overview-btn--primary"
+                                    disabled={resultAcceptancePhase !== null}
+                                    onClick={() => {
+                                      if (resultAcceptancePhase !== null) return;
+                                      void runAcceptanceTransition({
+                                        submit: () =>
+                                          acceptResultFromWorkbench(item, {
+                                            keepResultDrawer: true,
+                                          }),
+                                        onPhase: setResultAcceptancePhase,
+                                        schedule: (callback, delayMs) => {
+                                          const timer = window.setTimeout(() => {
+                                            resultAcceptanceTimers.current.delete(timer);
+                                            callback();
+                                          }, delayMs);
+                                          resultAcceptanceTimers.current.add(timer);
+                                        },
+                                        onSettled: () => {
+                                          setResultDrawerItem(null);
+                                          setCollectionDrawer(null);
+                                          setResultAcceptancePhase(null);
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    {resultAcceptancePhase === 'submitting' ? (
+                                      <>
+                                        <span className="result-card-spinner" aria-hidden="true" />
+                                        {isZh ? '正在验收…' : 'Accepting…'}
+                                      </>
+                                    ) : null}
+                                    {resultAcceptancePhase === 'celebrating' ||
+                                    resultAcceptancePhase === 'exiting'
+                                      ? isZh
+                                        ? '已验收 ✓'
+                                        : 'Accepted ✓'
+                                      : null}
+                                    {resultAcceptancePhase === null
+                                      ? isZh
+                                        ? '确认验收'
+                                        : 'Accept result'
+                                      : null}
+                                  </button>
+                                ) : null}
+                              </footer>
+                            );
+                          })()}
                         </div>
                         <ParticleShatterOverlay active={resultShattering} targetRef={resultShatterRef} />
                       </div>

@@ -207,6 +207,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   },
   conversationsUpdateTitle: (params) => ipcRenderer.invoke('conversations:update-title', params),
   conversationsUpdateMode: (params) => ipcRenderer.invoke('conversations:update-mode', params),
+  conversationsUpdateFastMode: (params) => ipcRenderer.invoke('conversations:update-fast-mode', params),
   conversationsUpdateModelEffort: (params) => ipcRenderer.invoke('conversations:update-model-effort', params),
   conversationsAppendMessage: (params) => ipcRenderer.invoke('conversations:append-message', params),
   conversationsUpdateLastMessage: (params) => ipcRenderer.invoke('conversations:update-last-message', params),

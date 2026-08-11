@@ -12,6 +12,8 @@ import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
+const DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES = 2;
+const RECOVERABLE_INTERRUPTION_PATTERN = /(?:network|fetch failed|socket|connection|disconnect|econnreset|econnrefused|etimedout|timeout|timed out|stream.*(?:interrupt|closed|reset|error)|terminated|unexpected eof|http2|goaway|temporar(?:y|ily)|rate limit|\b429\b|\b502\b|\b503\b|\b504\b)/i;
 /** @deprecated 语义已弃用（不再作为每计划累计 Explorer 总数上限）；保留仅为兼容旧状态。 */
 const DEFAULT_MAX_EXPLORERS = 3;
 /** 每个 turn 内 Explorer 的并发上限（并发池大小）。 */
@@ -40,6 +42,13 @@ function errorMessage(error) {
   if (typeof error === 'string') return error;
   if (typeof error.message === 'string' && error.message.trim()) return error.message;
   return String(error);
+}
+
+function isRecoverableInterruption(value) {
+  if (value?.recoverable === true || value?.retryable === true) return true;
+  if (value?.recoverable === false || value?.retryable === false) return false;
+  const code = typeof value?.code === 'string' ? value.code : '';
+  return RECOVERABLE_INTERRUPTION_PATTERN.test(`${code} ${errorMessage(value)}`);
 }
 
 function countToolCalls(result) {
@@ -707,6 +716,7 @@ export function createGoalRunner({
   canRunPlan = null,
   now = () => new Date().toISOString(),
   logger = console,
+  maxRecoverableInterruptionRetries = DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
 } = {}) {
   if (!goalPlanStore) throw new Error('createGoalRunner requires goalPlanStore');
   if (!chatRuntime || typeof chatRuntime.runGoalTurn !== 'function') {
@@ -717,6 +727,11 @@ export function createGoalRunner({
   }
 
   const sessions = new Map();
+  const recoverableRetryLimit = toPositiveInteger(
+    maxRecoverableInterruptionRetries,
+    DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
+    { allowZero: true },
+  );
 
   function emit(type, payload = {}) {
     if (typeof emitEvent !== 'function') return;
@@ -1749,14 +1764,71 @@ export function createGoalRunner({
         });
       } catch (error) {
         const message = errorMessage(error);
+        const latest = goalPlanStore.getPlan(planId);
+        const previousAttempts = toPositiveInteger(
+          latest?.runner?.recoverableInterruptionCount,
+          0,
+          { allowZero: true },
+        );
+        if (isRecoverableInterruption(error) && previousAttempts < recoverableRetryLimit) {
+          const attempt = previousAttempts + 1;
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'running',
+            intent: 'execute',
+            phase: 'repair',
+            recoverableInterruptionCount: attempt,
+            maxRecoverableInterruptionRetries: recoverableRetryLimit,
+            interruption: {
+              source: 'runGoalTurn',
+              reason: message,
+              interruptedAt: now(),
+              recoverable: true,
+              attempt,
+            },
+            updatedAt: now(),
+          });
+          appendRunEvent(planId, {
+            type: 'step_failed',
+            summary: `Goal Runner turn ${turnNumber} interrupted; retrying (${attempt}/${recoverableRetryLimit})`,
+            payload: {
+              summaryCode: 'turn_interrupted_retrying',
+              source: 'runGoalTurn',
+              turnNumber,
+              reason: message,
+              attempt,
+              retryLimit: recoverableRetryLimit,
+            },
+          });
+          emit('goalRunner:retrying', {
+            planId,
+            turnNumber,
+            reason: message,
+            attempt,
+            retryLimit: recoverableRetryLimit,
+          });
+          continue;
+        }
         failPlanRun(goalPlanStore, planId, message, {
           appendRunEvent,
           emit,
-          summaryCode: 'turn_failed',
+          summaryCode: isRecoverableInterruption(error)
+            ? 'turn_retry_exhausted'
+            : 'turn_failed',
           source: 'runGoalTurn',
           turnNumber,
         });
         return getState(planId);
+      }
+
+      if (result?.terminalStatus !== 'error') {
+        const currentInterruption = goalPlanStore.getPlan(planId)?.runner?.interruption;
+        if (currentInterruption?.recoverable === true) {
+          goalPlanStore.setRunnerState(planId, {
+            interruption: null,
+            updatedAt: now(),
+          });
+        }
       }
 
       const afterTurnPlan = goalPlanStore.getPlan(planId);
@@ -1893,10 +1965,55 @@ export function createGoalRunner({
 
       if (result?.terminalStatus === 'error') {
         const message = result.failureReason || 'Goal Runner turn stream failed';
+        const previousAttempts = toPositiveInteger(
+          latest?.runner?.recoverableInterruptionCount,
+          0,
+          { allowZero: true },
+        );
+        if (isRecoverableInterruption(result) && previousAttempts < recoverableRetryLimit) {
+          const attempt = previousAttempts + 1;
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'running',
+            intent: 'execute',
+            phase: 'repair',
+            recoverableInterruptionCount: attempt,
+            maxRecoverableInterruptionRetries: recoverableRetryLimit,
+            interruption: {
+              source: 'stream_error',
+              reason: message,
+              interruptedAt: now(),
+              recoverable: true,
+              attempt,
+            },
+            updatedAt: now(),
+          });
+          appendRunEvent(planId, {
+            type: 'network_interrupted',
+            summary: `Goal Runner stream interrupted; retrying (${attempt}/${recoverableRetryLimit})`,
+            payload: {
+              summaryCode: 'stream_interrupted_retrying',
+              reason: message,
+              turnNumber,
+              attempt,
+              retryLimit: recoverableRetryLimit,
+            },
+          });
+          emit('goalRunner:retrying', {
+            planId,
+            turnNumber,
+            reason: message,
+            attempt,
+            retryLimit: recoverableRetryLimit,
+          });
+          continue;
+        }
         failPlanRun(goalPlanStore, planId, message, {
           appendRunEvent,
           emit,
-          summaryCode: 'stream_failed',
+          summaryCode: isRecoverableInterruption(result)
+            ? 'stream_retry_exhausted'
+            : 'stream_failed',
           source: 'stream_error',
           turnNumber,
         });

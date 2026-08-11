@@ -1247,8 +1247,22 @@ function normalizeRunnerState(runner, planId) {
       ? runner.interruption.interruptedAt.trim()
       : '';
     if (source && reason && interruptedAt) {
-      next.interruption = { source, reason, interruptedAt };
+      next.interruption = {
+        source,
+        reason,
+        interruptedAt,
+        recoverable: runner.interruption.recoverable === true,
+        attempt: Number.isFinite(runner.interruption.attempt)
+          ? Math.max(1, Math.trunc(runner.interruption.attempt))
+          : 1,
+      };
     }
+  }
+  if (Number.isFinite(runner.recoverableInterruptionCount)) {
+    next.recoverableInterruptionCount = Math.max(0, Math.trunc(runner.recoverableInterruptionCount));
+  }
+  if (Number.isFinite(runner.maxRecoverableInterruptionRetries)) {
+    next.maxRecoverableInterruptionRetries = Math.max(0, Math.trunc(runner.maxRecoverableInterruptionRetries));
   }
   if (Number.isFinite(runner.compactionCount)) {
     next.compactionCount = Math.max(0, Math.trunc(runner.compactionCount));
@@ -1774,9 +1788,14 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const prevStatus = options.prevStatus ?? existing?.status;
     const prevTiming = options.prevTiming ?? existing?.timing;
     const normalized = normalizePlan(plan);
-    // 未消费的执行中断是独立于叶子任务的失败事实。只要它存在，普通 persist 就不能
+    // 已停止且尚未消费的执行中断是独立于叶子任务的失败事实，普通 persist 不能
     // 把 failed 重新派生为 completed；仅 resumeRunner 能原子消费该事实并恢复执行。
-    const hasUnconsumedInterruption = Boolean(normalized.runner?.interruption);
+    // 可恢复中断在重试预算内仍由 running Runner 持有行动权，只记录失败尝试，不能
+    // 因为 interruption Evidence 的存在就把整个计划降级为 failed。
+    const hasUnconsumedInterruption = Boolean(
+      normalized.runner?.interruption &&
+      !(normalized.runner.interruption.recoverable === true && normalized.runner.status === 'running'),
+    );
     const nextStatus = hasUnconsumedInterruption
       ? 'failed'
       : options.preserveStatus

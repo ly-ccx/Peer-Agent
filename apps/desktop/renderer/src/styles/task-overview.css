@@ -1299,24 +1299,35 @@
     filter var(--za-motion-medium) var(--za-ease-decelerate);
 }
 
-/* 结果侧栏验收：host/source 只负责整栏粒子采样，不改变原有 Drawer 布局链。 */
+/* 结果侧栏验收：host/source 必须吃满 panel 的全部高度（不是内容高度）。
+ * flex-basis:0 + min-height:0 + flex:1，避免 head/footer 叠加后总高度溢出，
+ * 也避免 host 矮于 panel 时底部露出透明 vibrancy 色差条。 */
 .conversation-result-drawer__shatter-host,
 .conversation-result-drawer__shatter-source {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
 }
 
 .conversation-result-drawer__shatter-host {
   position: relative;
   overflow: hidden;
+  /* host 是 panel 的唯一内容子节点，必须自己撑满 panel；basis 保持 0，勿写 auto 覆盖。 */
+  flex: 1 1 0;
+  align-self: stretch;
 }
 
-/* 唯一滚动容器仍是 drawer body；粉碎包裹层不再另建滚动上下文。 */
+/* 唯一滚动容器仍是 drawer body；粉碎包裹层不另建滚动上下文。 */
 .conversation-result-drawer__shatter-source {
   overflow: hidden;
   background: var(--za-surface-0);
+  /* source 在 host 内吃满，footer 才能贴到底 */
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 
@@ -1342,7 +1353,7 @@
 
 
 .conversation-result-drawer__head {
-  @apply flex items-start justify-between gap-3 border-b px-5 py-4;
+  @apply flex flex-none items-start justify-between gap-3 border-b px-5 py-4;
   border-color: var(--za-line);
 }
 
@@ -1363,8 +1374,11 @@
   background: transparent;
 }
 
+/* body 必须吃掉 head/footer 之外的全部剩余高度；flex-basis:0 防止按内容高度参与分配，
+ * 否则空白会落到 footer 下方，看起来像「操作区 + 再一段空白」。 */
 .conversation-result-drawer__body {
-  @apply min-h-0 flex-1 overflow-y-auto px-5 py-4;
+  @apply min-h-0 overflow-y-auto px-5 py-4;
+  flex: 1 1 0;
 }
 
 /* ---------- 继续讨论：会话 Drawer（可关闭，挂载 ChatSurface） ---------- */
@@ -1414,9 +1428,10 @@
   box-shadow: none;
 }
 
-/* 结果视图铺满滚动容器：内容区独立滚动，footer 操作区独立在底部。 */
+/* 结果视图在 body 内按内容高度自然排布；滚动由 drawer body 负责，避免 h-full 再叠一层百分比。 */
 .conversation-result-view {
-  @apply flex h-full min-h-0 flex-col gap-4;
+  @apply flex min-h-0 flex-col gap-4;
+  height: auto;
   transform-origin: center top;
   transition:
     opacity 420ms cubic-bezier(0.33, 0, 0.2, 1),
@@ -1534,7 +1549,7 @@
   background: var(--za-surface-0);
 }
 
-.conversation-result-view__footer > .task-overview-btn,
+.conversation-result-drawer__footer > .task-overview-btn,
 .conversation-result-view__continue button {
   @apply inline-flex min-h-10 items-center justify-center rounded-full px-5 text-sm font-semibold;
 }
@@ -1571,11 +1586,15 @@
   border-color: color-mix(in srgb, #3f9a6f 28%, var(--za-line));
 }
 
-.conversation-result-view__footer {
-  /* 独立底部操作区：与内容区分开，不跟随内容滚动。 */
-  @apply flex items-start justify-between gap-3 pt-3;
+.conversation-result-drawer__footer {
+  /* 三区中的独立底部操作区：与 body 滚动区分开，贴 source 底边。 */
+  @apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;
+  margin-top: auto;
+  margin-bottom: 0;
   border-top: 1px solid var(--za-line);
-  margin-top: 2px;
+  background: var(--za-surface-0);
+  /* 与 panel 同色底，避免底部缝隙露出不同层的 vibrancy/scrim */
+  flex-shrink: 0;
 }
 
 .conversation-result-view__continue {

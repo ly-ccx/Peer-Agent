@@ -209,6 +209,28 @@ test('toGoalPlanSnapshot 组装 workspace 标签 / progress / runner.status', ()
   assert.equal(snapshot.accepted, false);
 });
 
+test('toGoalPlanSnapshot keeps an auto-recovering runner active instead of projecting a manual interruption', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-recovering',
+    status: 'executing',
+    runner: {
+      status: 'running',
+      phase: 'repair',
+      interruption: {
+        source: 'stream_error',
+        reason: 'socket disconnected',
+        interruptedAt: '2026-08-11T00:00:00.000Z',
+        recoverable: true,
+        attempt: 1,
+      },
+    },
+    title: '恢复网络中断',
+    updatedAt: '2026-08-11T00:00:01.000Z',
+  });
+  assert.equal(snapshot.interrupted, false);
+  assert.equal(snapshot.runnerStatus, 'running');
+});
+
 test('toGoalPlanSnapshot 透传未消费的 runner interruption', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-interrupted',

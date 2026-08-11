@@ -250,6 +250,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
+  fastMode: boolean;
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
@@ -260,6 +261,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     messages: [],
     tokenUsage: null,
     mode: 'chat',
+    fastMode: false,
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
@@ -267,6 +269,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
+  const convFastMode = conv.fastMode === true;
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
   // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
@@ -330,6 +333,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       messages: loaded,
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
+      fastMode: convFastMode,
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
@@ -342,6 +346,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       ? { input: totalInput, output: totalOutput, cacheWrite: totalCacheWrite, cacheRead: totalCacheRead }
       : null,
     mode: convMode,
+    fastMode: convFastMode,
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
@@ -509,7 +514,12 @@ export function ChatSurface({
   const fastMode = convState.fastMode;
   const changeFastMode = useCallback((enabled: boolean) => {
     convActions.set({ fastMode: enabled });
-  }, [convActions]);
+    if (conversationId) {
+      void clientApi.conversationsUpdateFastMode({ id: conversationId, fastMode: enabled }).catch(() => {
+        // 本地 UI 仍保留选择；后续重新进入会按持久化值恢复。
+      });
+    }
+  }, [convActions, conversationId]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
@@ -1151,6 +1161,7 @@ export function ChatSurface({
         messages: loaded,
         tokenUsage: usage,
         mode: convMode,
+        fastMode: convFastMode,
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
@@ -1167,6 +1178,7 @@ export function ChatSurface({
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
+      convActions.set({ fastMode: convFastMode });
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);

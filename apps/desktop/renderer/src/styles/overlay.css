@@ -98,8 +98,12 @@
 
   .pa-overlay-backdrop--drawer .pa-overlay-panel {
     width: min(var(--pa-drawer-width, 480px), var(--pa-drawer-max-width, 92vw));
-    height: 100vh;
-    max-height: 100vh;
+    /* 贴满 fixed inset:0 的 backdrop，不要用 100vh：
+       macOS vibrancy 透明窗口下 100vh 可能与实际视口不一致，底部会露出 glass/scrim 色差条。 */
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    align-self: stretch;
     border-radius: 0;
     /* 抽屉布局；磨砂仍由 ::before 提供，避免面板自身 overflow 废掉 blur。 */
     border-left: 1px solid var(--chrome-hairline);

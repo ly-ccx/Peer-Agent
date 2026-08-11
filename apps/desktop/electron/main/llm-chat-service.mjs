@@ -194,6 +194,10 @@ function buildAgentRunOutcome(streamRecord = {}) {
       ? Math.max(0, Math.trunc(streamRecord.toolCallCount))
       : 0,
     ...(hasBillableUsage(streamRecord.finalUsage) ? { usage: streamRecord.finalUsage } : {}),
+    failureReason: typeof streamRecord.failureReason === 'string'
+      ? streamRecord.failureReason
+      : null,
+    recoverable: streamRecord.recoverable === true,
   };
 }
 
@@ -1490,9 +1494,12 @@ export function createLlmChatService({
           accumulatingWebContents.send('chat:stream:aborted', { streamId });
         }
       } else {
+        const failureReason = describeFetchFailure(err);
+        streamRecord.failureReason = failureReason;
+        streamRecord.recoverable = true;
         accumulatingWebContents.send('chat:stream:error', {
           streamId,
-          error: describeFetchFailure(err),
+          error: failureReason,
         });
       }
     } finally {

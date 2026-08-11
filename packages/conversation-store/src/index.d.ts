@@ -23,6 +23,7 @@ export interface ConversationMeta {
   readonly title?: string;
   readonly workspacePath?: string | null;
   readonly mode?: string;
+  readonly fastMode: boolean;
   readonly updatedAt?: string;
   /**
    * 用户上次打开/阅读该会话的水位时间（ISO）。
@@ -94,6 +95,7 @@ export interface ConversationStore {
     title?: string;
     workspacePath?: string;
     mode?: string;
+    fastMode?: boolean;
     automationCreateContext?: AutomationCreateContext | null;
     automationOrigin?: ConversationAutomationOrigin | null;
   }): ConversationMeta;
@@ -104,6 +106,7 @@ export interface ConversationStore {
    */
   markRead(id: string, options?: { at?: string }): ConversationMeta | null;
   updateMode(id: string, mode: string): unknown;
+  updateFastMode(id: string, fastMode: boolean): ConversationMeta | null;
   updateAutomationCreateContext(id: string, context: AutomationCreateContext | null): ConversationMeta | null;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
   updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;

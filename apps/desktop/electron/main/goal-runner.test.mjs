@@ -36,7 +36,14 @@ function draftWithTasks(overrides = {}) {
   };
 }
 
-function createRunner({ runtime, explorerRunner = null, verifierRunner = null, events = [], logger = null } = {}) {
+function createRunner({
+  runtime,
+  explorerRunner = null,
+  verifierRunner = null,
+  events = [],
+  logger = null,
+  maxRecoverableInterruptionRetries,
+} = {}) {
   return createGoalRunner({
     goalPlanStore: store,
     chatRuntime: runtime,
@@ -45,6 +52,9 @@ function createRunner({ runtime, explorerRunner = null, verifierRunner = null, e
     emitEvent: (event) => events.push(event),
     now: () => '2026-01-01T00:00:00.000Z',
     logger: logger ?? { warn() {} },
+    ...(maxRecoverableInterruptionRetries === undefined
+      ? {}
+      : { maxRecoverableInterruptionRetries }),
   });
 }
 
@@ -638,6 +648,88 @@ test('Runner 每轮重新读 store，不依赖旧内存 plan', async () => {
   const got = store.getPlan(plan.planId);
   assert.equal(got.runner.status, 'idle');
   assert.equal(got.runner.intent, 'verify');
+});
+
+test('recoverable stream interruption automatically continues with the next turn', async () => {
+  const plan = createApprovedPlan();
+  const events = [];
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          terminalStatus: 'error',
+          failureReason: 'socket disconnected while reading stream',
+          recoverable: true,
+        };
+      }
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const runner = createRunner({ runtime, events });
+
+  const result = await runner.start(plan.planId, { awaitIdle: true });
+
+  assert.equal(calls, 2);
+  assert.equal(result.planStatus, 'executing');
+  assert.equal(result.runner.status, 'idle');
+  assert.equal(result.runner.recoverableInterruptionCount, 1);
+  assert.equal(result.runner.interruption, undefined);
+  assert.ok(events.some((event) => event.type === 'goalRunner:retrying'));
+});
+
+test('recoverable network exception automatically continues with the next turn', async () => {
+  const plan = createApprovedPlan();
+  const events = [];
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error('fetch failed: ECONNRESET');
+        error.code = 'ECONNRESET';
+        throw error;
+      }
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const runner = createRunner({ runtime, events });
+
+  const result = await runner.start(plan.planId, { awaitIdle: true });
+
+  assert.equal(calls, 2);
+  assert.equal(result.planStatus, 'executing');
+  assert.equal(result.runner.status, 'idle');
+  assert.equal(result.runner.recoverableInterruptionCount, 1);
+  assert.ok(events.some((event) => event.type === 'goalRunner:retrying'));
+});
+
+test('recoverable stream interruption fails the plan after retry budget is exhausted', async () => {
+  const plan = createApprovedPlan();
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      return {
+        terminalStatus: 'error',
+        failureReason: 'network connection reset',
+        recoverable: true,
+      };
+    },
+  };
+  const runner = createRunner({
+    runtime,
+    maxRecoverableInterruptionRetries: 1,
+  });
+
+  const result = await runner.start(plan.planId, { awaitIdle: true });
+
+  assert.equal(calls, 2);
+  assert.equal(result.planStatus, 'failed');
+  assert.equal(result.runner.status, 'failed');
+  assert.equal(result.runner.recoverableInterruptionCount, 1);
+  assert.equal(result.runner.lastError, 'network connection reset');
 });
 
 test('runtime failed: 失败会进入 failed 状态', async () => {

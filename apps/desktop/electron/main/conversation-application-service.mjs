@@ -11,6 +11,7 @@ export function createConversationApplicationService({
   getConversation,
   updateTitle,
   updateMode,
+  updateFastMode,
   updateAutomationCreateContext,
   updateModelEffort,
   appendMessage,
@@ -40,6 +41,7 @@ export function createConversationApplicationService({
     getConversation: assertFunction(getConversation, 'getConversation'),
     updateTitle: assertFunction(updateTitle, 'updateTitle'),
     updateMode: assertFunction(updateMode, 'updateMode'),
+    updateFastMode: assertFunction(updateFastMode, 'updateFastMode'),
     updateAutomationCreateContext: assertFunction(
       updateAutomationCreateContext,
       'updateAutomationCreateContext',
@@ -121,6 +123,7 @@ export function createConversationApplicationService({
     get: ({ id }) => ports.getConversation(id),
     updateTitle: ({ id, title }) => ports.updateTitle(id, title),
     updateMode: ({ id, mode }) => ports.updateMode(id, mode),
+    updateFastMode: ({ id, fastMode }) => ports.updateFastMode(id, fastMode),
     updateAutomationCreateContext: ({ id, context }) =>
       ports.updateAutomationCreateContext(id, context),
     updateModelEffort: ({ id, effort, modelProviderId }) =>

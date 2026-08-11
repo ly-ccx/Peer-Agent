@@ -367,6 +367,7 @@ function normalizeMeta(meta) {
   return {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
+    fastMode: meta?.fastMode === true,
     effort: normalizeEffort(meta?.effort),
     modelProviderId: normalizeModelProviderId(meta?.modelProviderId),
     model,
@@ -733,7 +734,7 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode, automationCreateContext, automationOrigin } = {}) {
+  function createConversation({ title, workspacePath, mode, fastMode, automationCreateContext, automationOrigin } = {}) {
     const now = new Date().toISOString();
     const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
     const meta = {
@@ -741,6 +742,7 @@ export function createConversationStore(options = {}) {
       title: title || '',
       workspacePath: workspacePath || null,
       mode: normalizeMode(mode),
+      fastMode: fastMode === true,
       // 会话级模型 + 思考模式绑定的初值（与 mode 同口径持久化）。默认 effort='default'、
       // modelProviderId=null（未绑定 → 发送时用全局默认 provider）。写入落盘 meta 使
       // createConversation 返回值与 getConversation（经 normalizeMeta）保持一致。
@@ -768,6 +770,16 @@ export function createConversationStore(options = {}) {
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.mode = normalizeMode(mode);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function updateFastMode(id, fastMode) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    meta.fastMode = fastMode === true;
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
@@ -1468,6 +1480,7 @@ export function createConversationStore(options = {}) {
     updateTitle: changed(updateTitle, 'metadata-updated'),
     markRead: changed(markRead, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
+    updateFastMode: changed(updateFastMode, 'metadata-updated'),
     updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),

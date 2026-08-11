@@ -8,20 +8,29 @@ const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8'
 const readStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
-test('result drawer accept view reports acceptance phases to the shell', async () => {
+test('result view stays a pure content component without acceptance logic', async () => {
   const source = await readView();
-  assert.match(source, /onAcceptancePhaseChange/);
-  assert.match(source, /runAcceptanceTransition/);
-  assert.match(source, /onAcceptancePhaseChange\?\.\(acceptancePhase\)/);
+  assert.match(source, /export function ConversationResultView\(\{/);
+  assert.doesNotMatch(source, /runAcceptanceTransition/);
+  assert.doesNotMatch(source, /onAcceptancePhaseChange/);
+  assert.doesNotMatch(source, /conversation-result-view__footer/);
+  assert.doesNotMatch(source, /acceptancePhase/);
+  // 打开结果侧栏时不得调用 scrollIntoView(...)，否则会带动 drawer body 整体上滚。
+  assert.doesNotMatch(source, /scrollIntoView\s*\(/);
 });
 
-test('result actions stay in a separate footer region below the content', async () => {
-  const source = await readView();
+test('result drawer places actions in a separate footer sibling of the body', async () => {
+  const source = await readApp();
   const styles = await readStyles();
-  assert.match(source, /<footer className="conversation-result-view__footer">/);
-  assert.doesNotMatch(source, /<div className="conversation-result-view__actions">/);
-  assert.match(styles, /\.conversation-result-view__footer \{/);
-  assert.doesNotMatch(styles, /\.conversation-result-view__actions/);
+  // 三区：head / body / footer 都是 shatter-source 的直接兄弟，footer 在 body 之后。
+  assert.match(source, /conversation-result-drawer__head/);
+  assert.match(source, /conversation-result-drawer__body/);
+  assert.match(
+    source,
+    /<div className="conversation-result-drawer__body">[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<footer className="conversation-result-drawer__footer">/,
+  );
+  assert.match(styles, /\.conversation-result-drawer__footer \{/);
+  assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
 test('result drawer shell shatters the whole panel before unload', async () => {
@@ -29,18 +38,18 @@ test('result drawer shell shatters the whole panel before unload', async () => {
   assert.match(source, /ParticleShatterOverlay/);
   assert.match(source, /conversation-result-drawer__shatter-host/);
   assert.match(source, /conversation-result-drawer__shatter-source/);
-  assert.match(source, /onAcceptancePhaseChange=\{setResultAcceptancePhase\}/);
+  assert.match(source, /onPhase: setResultAcceptancePhase/);
   assert.match(source, /active=\{resultShattering\}/);
   assert.match(source, /targetRef=\{resultShatterRef\}/);
   assert.match(source, /keepResultDrawer: true/);
   assert.match(
     source,
-    /ref=\{resultShatterRef\}[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<ParticleShatterOverlay active=\{resultShattering\} targetRef=\{resultShatterRef\}/,
+    /ref=\{resultShatterRef\}[\s\S]*?conversation-result-drawer__head[\s\S]*?conversation-result-drawer__body[\s\S]*?conversation-result-drawer__footer[\s\S]*?<\/div>[\s\S]*?<ParticleShatterOverlay active=\{resultShattering\} targetRef=\{resultShatterRef\}/,
   );
-  // 验收完成前不得立刻清空侧栏；收尾发生在 onAccepted / settled。
+  // 验收完成前不得立刻清空侧栏；收尾发生在 onSettled。
   assert.match(
     source,
-    /onAccepted=\{\(\) => \{[\s\S]*?setResultDrawerItem\(null\);[\s\S]*?setCollectionDrawer\(null\);/,
+    /onSettled: \(\) => \{[\s\S]*?setResultDrawerItem\(null\);[\s\S]*?setCollectionDrawer\(null\);/,
   );
 });
 
@@ -52,30 +61,53 @@ test('result drawer shatter styles keep canvas as a sibling of the source', asyn
   assert.match(styles, /\.conversation-result-drawer__shatter-host \.particle-shatter-canvas/);
 });
 
-test('result drawer content collapses to natural height with a separate footer', async () => {
+test('result drawer splits into head, scrolling body and independent footer', async () => {
   const styles = await readStyles();
-  // 根节点保持 h-full（铺满滚动容器），但消息列不再 flex-1，卡片按内容收口。
+  const overlay = await readFile(
+    new URL('../../styles/overlay.css', import.meta.url),
+    'utf8',
+  );
+  // head 固定，不参与高度抢占。
   assert.match(
     styles,
-    /\.conversation-result-view \{[\s\S]*?@apply flex h-full min-h-0 flex-col gap-4;/,
+    /\.conversation-result-drawer__head \{[\s\S]*?@apply flex flex-none items-start/,
   );
+  // body 是唯一滚动区，且必须 flex:1 1 0 吃掉剩余高度，避免空白落在 footer 下方。
   assert.match(
     styles,
-    /\.conversation-result-view__section--grow \{[\s\S]*?@apply flex min-h-0 flex-col;[\s\S]*?flex: 0 0 auto;/,
+    /\.conversation-result-drawer__body \{[\s\S]*?@apply min-h-0 overflow-y-auto px-5 py-4;[\s\S]*?flex: 1 1 0;/,
   );
+  // footer 是 flex-none 的独立底部区域，并用 margin-top:auto 贴底。
   assert.match(
     styles,
-    /\.conversation-result-view__messages \{[\s\S]*?@apply flex min-h-0 flex-col gap-3 pr-1;[\s\S]*?flex: 0 0 auto;[\s\S]*?overflow: visible;/,
+    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
   );
-  // footer 独立操作区：与内容区通过边框分隔。
+  // 粉碎包裹层按列排布三区，并用 flex-basis:0 + max-height:100% 避免「100%+head」溢出底部空白。
   assert.match(
     styles,
-    /\.conversation-result-view__footer \{[\s\S]*?border-top: 1px solid var\(--za-line\);/,
+    /\.conversation-result-drawer__shatter-host,[\s\S]*?\.conversation-result-drawer__shatter-source \{[\s\S]*?flex: 1 1 0;[\s\S]*?max-height: 100%;/,
   );
-  // 粉碎包裹层不建独立滚动上下文；滚动仍在 drawer body。
+  // host 必须吃满 panel（flex:1 1 0，勿用 auto 覆盖），避免底部露出 vibrancy 色差条。
   assert.match(
     styles,
-    /\.conversation-result-drawer__body \{[\s\S]*?@apply min-h-0 flex-1 overflow-y-auto px-5 py-4;/,
+    /\.conversation-result-drawer__shatter-host \{[\s\S]*?flex: 1 1 0;[\s\S]*?align-self: stretch;/,
   );
-  assert.match(styles, /\.conversation-result-drawer__shatter-host \.particle-shatter-canvas/);
+  assert.doesNotMatch(
+    styles,
+    /\.conversation-result-drawer__shatter-host \{[\s\S]*?flex: 1 1 auto;/,
+  );
+  // CRV 不再 h-full 叠百分比高度。
+  assert.match(
+    styles,
+    /\.conversation-result-view \{[\s\S]*?@apply flex min-h-0 flex-col gap-4;[\s\S]*?height: auto;/,
+  );
+  // drawer panel 贴满 fixed backdrop，禁止用 100vh 造成底部色差缝。
+  assert.match(
+    overlay,
+    /\.pa-overlay-backdrop--drawer \.pa-overlay-panel \{[\s\S]*?height: 100%;[\s\S]*?max-height: 100%;/,
+  );
+  assert.doesNotMatch(
+    overlay,
+    /\.pa-overlay-backdrop--drawer \.pa-overlay-panel \{[\s\S]*?height: 100vh;/,
+  );
 });
