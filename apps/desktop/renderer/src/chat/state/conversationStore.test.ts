@@ -53,6 +53,55 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot(null).draft, 'updated');
   });
 
+  it('keeps composer selections when a sidebar subscriber closes and reopens', () => {
+    const store = new ConversationStore();
+    const conversationId = 'sidebar-conversation';
+    let notifications = 0;
+
+    const unsubscribe = store.subscribe(conversationId, () => {
+      notifications += 1;
+    });
+    store.setState(conversationId, {
+      modelProviderId: 'openai-subscription',
+      effort: 'high',
+      fastMode: true,
+    });
+    assert.equal(notifications, 1);
+    unsubscribe();
+
+    // 关闭侧栏只移除订阅者，不应清空会话桶。重新挂载时读回同一份选择。
+    assert.equal(store.hasBucket(conversationId), true);
+    const reopened = store.getSnapshot(conversationId);
+    assert.equal(reopened.modelProviderId, 'openai-subscription');
+    assert.equal(reopened.effort, 'high');
+    assert.equal(reopened.fastMode, true);
+
+    let reopenedNotifications = 0;
+    const unsubscribeReopened = store.subscribe(conversationId, () => {
+      reopenedNotifications += 1;
+    });
+    store.setState(conversationId, { fastMode: false });
+    assert.equal(reopenedNotifications, 1);
+    assert.equal(store.getSnapshot(conversationId).modelProviderId, 'openai-subscription');
+    assert.equal(store.getSnapshot(conversationId).effort, 'high');
+    unsubscribeReopened();
+  });
+
+  it('keeps draft composer selections when the sidebar remounts before first send', () => {
+    const store = new ConversationStore();
+    store.setState(null, {
+      modelProviderId: 'openai-subscription',
+      effort: 'medium',
+      fastMode: true,
+    });
+
+    assert.equal(store.hasBucket(null), true);
+    const reopenedDraft = store.getSnapshot(null);
+    assert.equal(reopenedDraft.modelProviderId, 'openai-subscription');
+    assert.equal(reopenedDraft.effort, 'medium');
+    assert.equal(reopenedDraft.fastMode, true);
+  });
+
   it('isolates state between conversation buckets', () => {
     const store = new ConversationStore();
     store.setState('A', { messages: [msg('m1', 'hi from A')], isStreaming: true });

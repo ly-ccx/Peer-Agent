@@ -1,14 +1,16 @@
-import { useCallback, useState } from 'react';
+import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
 import { clientApi } from '../../clientApi';
+import { conversationStore } from '../state/conversationStore';
+import { useConversationState } from './useConversationState';
 import { isEffortLevel, writeLastModelProviderId, type EffortLevel } from '../state/preferences';
 
 /**
  * useConversationModelEffort —— 每会话独立的「模型（provider）+ 思考强度（effort）」绑定。
  *
- * 范式与 useConversationMode 一致：状态在本地 useState 持有，切换时回写当前会话 meta
- * （conversationsUpdateModelEffort），切换会话时由调用方在 loadConversation effect 里
- * 通过 setEffort / setModelProviderId 恢复该会话自己的绑定值（见 T5）。
+ * 范式与 useConversationMode 一致：状态在 conversationStore 的会话/草稿桶中持有，
+ * 切换时回写当前会话 meta（conversationsUpdateModelEffort），切换会话时由调用方在
+ * loadConversation effect 里通过 setEffort / setModelProviderId 恢复该会话自己的绑定值。
  *
  * 设计取舍：
  * - modelProviderId 为会话级真值，null 表示「未绑定，用全局默认 provider」。切换模型只回写
@@ -23,18 +25,33 @@ import { isEffortLevel, writeLastModelProviderId, type EffortLevel } from '../st
 export interface ConversationModelEffort {
   effort: EffortLevel;
   modelProviderId: string | null;
-  setEffort: React.Dispatch<React.SetStateAction<EffortLevel>>;
-  setModelProviderId: React.Dispatch<React.SetStateAction<string | null>>;
+  setEffort: Dispatch<SetStateAction<EffortLevel>>;
+  setModelProviderId: Dispatch<SetStateAction<string | null>>;
   changeEffort: (level: EffortLevel) => void;
   changeModelProviderId: (providerId: string | null) => void;
 }
 
 export function useConversationModelEffort(conversationId: string | null): ConversationModelEffort {
-  const [effort, setEffort] = useState<EffortLevel>(() => {
-    const stored = (clientApi.initialSettings as Record<string, unknown>)?.effort;
-    return isEffortLevel(stored) ? stored : 'default';
-  });
-  const [modelProviderId, setModelProviderId] = useState<string | null>(null);
+  const storedEffort = (clientApi.initialSettings as Record<string, unknown>)?.effort;
+  const defaultEffort = isEffortLevel(storedEffort) ? storedEffort : 'default';
+  if (!conversationStore.hasBucket(conversationId)) {
+    conversationStore.setState(conversationId, { effort: defaultEffort });
+  }
+  const { state } = useConversationState(conversationId);
+  const effort = state.effort;
+  const modelProviderId = state.modelProviderId;
+
+  const setEffort = useCallback<Dispatch<SetStateAction<EffortLevel>>>((value) => {
+    conversationStore.setState(conversationId, (current) => ({
+      effort: typeof value === 'function' ? value(current.effort) : value,
+    }));
+  }, [conversationId]);
+
+  const setModelProviderId = useCallback<Dispatch<SetStateAction<string | null>>>((value) => {
+    conversationStore.setState(conversationId, (current) => ({
+      modelProviderId: typeof value === 'function' ? value(current.modelProviderId) : value,
+    }));
+  }, [conversationId]);
 
   const changeEffort = useCallback((level: EffortLevel) => {
     setEffort(level);

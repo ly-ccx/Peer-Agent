@@ -29,7 +29,7 @@ import type {
   ContextAccountingSnapshot,
 } from '@peer-agent/protocol';
 
-import type { ChatMode } from './preferences';
+import type { ChatMode, EffortLevel } from './preferences';
 import { IDLE_COMPACTION_STATE } from './types.ts';
 import type {
   ChatMsg,
@@ -63,6 +63,10 @@ export interface ConversationRuntimeState {
   readonly pendingPermissionCalls: readonly ClientToolCall[];
   /** 对话模式（按会话持久化在 meta 上）；初值 chat，由会话加载 effect 覆盖。 */
   readonly mode: ChatMode;
+  /** 当前会话/草稿选择的模型 provider；已落库会话由加载 effect 用 meta 校准。 */
+  readonly modelProviderId: string | null;
+  /** 当前会话/草稿选择的思考强度；已落库会话由加载 effect 用 meta 校准。 */
+  readonly effort: EffortLevel;
   /** GPT 订阅本轮请求是否使用 Fast mode；按 renderer 会话桶隔离，不进入 Provider 配置。 */
   readonly fastMode: boolean;
   /** 本轮 wall-clock 起点（供流事件计算 turnDurationMs）；null = 未在跑。 */
@@ -88,6 +92,8 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],
   mode: 'chat',
+  modelProviderId: null,
+  effort: 'default',
   fastMode: false,
   turnStartedAt: null,
   streamId: null,
@@ -160,6 +166,11 @@ export class ConversationStore {
   private readonly listeners = new Map<string, Set<Listener>>();
   /** streamId → conversationId 路由表（发送/压缩/reattach 时登记）。 */
   private readonly streamRoutes = new Map<string, string>();
+
+  /** 判断某会话/草稿桶是否已经建立；用于只在首次进入时播种界面默认值。 */
+  hasBucket(conversationId: string | null): boolean {
+    return this.buckets.has(resolveConversationBucketId(conversationId));
+  }
 
   /** 读取某会话的当前快照；未知会话返回稳定的 EMPTY 单例。 */
   getSnapshot(conversationId: string | null): ConversationRuntimeState {
