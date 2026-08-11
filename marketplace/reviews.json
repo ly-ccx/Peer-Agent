@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "reviews": {
+    "anthropics-official/frontend-design": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Design",
+      "tags": ["frontend", "ui", "design"],
+      "whenToUse": "Use when creating polished web interfaces, pages, components, dashboards, or application UI.",
+      "version": "2026.08.06"
+    },
+    "anthropics-official/mcp-builder": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Development",
+      "tags": ["mcp", "integration", "tools"],
+      "whenToUse": "Use when designing or implementing an MCP server that exposes external services as model tools.",
+      "version": "2026.08.06"
+    },
+    "anthropics-official/skill-creator": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Development",
+      "tags": ["skills", "authoring", "workflow"],
+      "whenToUse": "Use when creating a new Skill or improving an existing Skill package and its instructions.",
+      "version": "2026.08.06"
+    },
+    "anthropics-official/slack-gif-creator": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Media",
+      "tags": ["gif", "slack", "animation"],
+      "whenToUse": "Use when creating an animated GIF optimized for posting in Slack.",
+      "version": "2026.08.06"
+    },
+    "anthropics-official/theme-factory": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Design",
+      "tags": ["theme", "color", "typography"],
+      "whenToUse": "Use when applying a coherent color and typography theme to documents, slides, pages, or other artifacts.",
+      "version": "2026.08.06"
+    },
+    "anthropics-official/webapp-testing": {
+      "status": "approved",
+      "reviewedAt": "2026-08-06T12:00:00.000Z",
+      "category": "Testing",
+      "tags": ["playwright", "web", "testing"],
+      "whenToUse": "Use when testing a local web application, reproducing UI behavior, capturing screenshots, or inspecting browser logs.",
+      "version": "2026.08.06"
+    }
+  }
+}

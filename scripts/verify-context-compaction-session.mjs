@@ -50,7 +50,7 @@ if (!sourceMarker) {
   process.exit(65);
 }
 
-// Use the failing provider shape observed for this Session: 258k context, 64k output.
+// Use the failing provider shape observed for this Session: 272k context, 64k output.
 // The synthetic delta is intentionally small; the continuity marker is the real persisted data.
 const result = await compactIfNeeded({
   messages: [
@@ -59,7 +59,7 @@ const result = await compactIfNeeded({
     { role: 'assistant', content: 'Acknowledged; compile a non-empty canonical checkpoint.' },
   ],
   systemPrompt: 'Offline context-compaction verification.',
-  contextWindow: 258_000,
+  contextWindow: 272_000,
   providerMaxOutputTokens: 64_000,
   providerConfig: null,
   force: true,
@@ -91,7 +91,7 @@ const report = {
   narrativeTokens: estimateTextTokens(narrative),
   finalRequestTokens,
   requestTargetTokens: requestTargetTokens ?? null,
-  triggerLimit: Math.floor(258_000 * COMPACTION_CONFIG.triggerRatio),
+  triggerLimit: Math.floor(272_000 * COMPACTION_CONFIG.triggerRatio),
   growthHeadroomTokens,
   coldHistoryRefCount: Array.isArray(marker.coldHistoryRefs) ? marker.coldHistoryRefs.length : 0,
   nonEmpty: narrative.length >= COMPACTION_CONFIG.minCanonicalNarrativeChars,

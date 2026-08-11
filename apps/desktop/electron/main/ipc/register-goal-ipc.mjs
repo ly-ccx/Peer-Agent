@@ -16,6 +16,10 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
     revise: assertFunction(goalPlans?.revise, 'goalPlans.revise'),
     approve: assertFunction(goalPlans?.approve, 'goalPlans.approve'),
     setStatus: assertFunction(goalPlans?.setStatus, 'goalPlans.setStatus'),
+    markRequestedUserInput: assertFunction(
+      goalPlans?.markRequestedUserInput,
+      'goalPlans.markRequestedUserInput',
+    ),
     recordManualConfirmation: assertFunction(
       goalPlans?.recordManualConfirmation,
       'goalPlans.recordManualConfirmation',
@@ -43,6 +47,8 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
       ipc.handle('goalPlans:revise', (_event, payload) => plans.revise(payload));
       ipc.handle('goalPlans:approve', (_event, payload) => plans.approve(payload));
       ipc.handle('goalPlans:set-status', (_event, payload) => plans.setStatus(payload));
+      ipc.handle('goalPlans:mark-requested-user-input', (_event, payload) =>
+        plans.markRequestedUserInput(payload));
       ipc.handle('goalPlans:record-manual-confirmation', (_event, payload) =>
         plans.recordManualConfirmation(payload));
       ipc.handle('goalPlans:record-task-evidence', (_event, payload) =>

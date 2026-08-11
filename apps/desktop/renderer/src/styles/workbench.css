@@ -1497,10 +1497,122 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    gap: 8px;
+    padding: 8px 8px 0;
+  }
+  .workbench-files-toolbar {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 2px;
+    padding: 0 2px;
+  }
+  .workbench-files-toolbar-btn {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--za-text-faint, #8b8f98);
+    cursor: pointer;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .workbench-files-toolbar-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+  .workbench-files-toolbar-btn:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--za-text);
+  }
+  .workbench-files-toolbar-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  }
+  .workbench-files-toolbar-btn:disabled {
+    cursor: progress;
+    opacity: 0.45;
+  }
+  .workbench-files-toolbar-btn:disabled svg {
+    animation: motion-spin 0.8s linear infinite;
+  }
+  .workbench-files-filter {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 10px 0 30px;
+    border-radius: 999px;
+    background: var(--ui-surface-muted, rgba(120, 124, 136, 0.12));
+    color: var(--za-text-faint, #8b8f98);
+  }
+  .workbench-files-filter-icon {
+    position: absolute;
+    left: 10px;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+  .workbench-files-filter-input {
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--za-text, #1f232b);
+    font-size: 12px;
+  }
+  .workbench-files-filter-input::placeholder {
+    color: var(--za-text-faint, #8b8f98);
   }
   .workbench-files .workbench-tree {
     flex: 1;
     min-height: 0;
+    padding-top: 2px;
+  }
+  .workbench-tree-children--root {
+    display: flex;
+    flex-direction: column;
+  }
+  .workbench-tree-draft {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 8px 0 calc(8px + (var(--tree-depth, 0) * 14px));
+    color: var(--za-text);
+    font-size: 12px;
+  }
+  .workbench-tree-draft-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-radius: 6px;
+    background: var(--ui-surface, #fff);
+    color: var(--za-text);
+    font-size: 12px;
+  }
+  .workbench-tree-draft-input:focus {
+    outline: none;
+    border-color: var(--za-accent, #4c8dff);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--za-accent, #4c8dff) 25%, transparent);
+  }
+  .workbench-tree-draft-error {
+    flex: 0 1 auto;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #d14b4b;
+    font-size: 11px;
   }
   .workbench-tree {
     height: 100%;
@@ -1655,6 +1767,135 @@
     color: var(--za-text-faint);
     font-size: var(--ui-font-meta, 12px);
     font-style: italic;
+  }
+
+  /* 后台线程 Tab：列表 + 详情双栏。 */
+  .workbench-view--threads {
+    padding: 12px 12px 16px;
+  }
+  .bg-threads-view {
+    display: grid;
+    grid-template-columns: minmax(140px, 38%) 1fr;
+    gap: 12px;
+    height: 100%;
+    min-height: 0;
+  }
+  .bg-threads-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 2px;
+  }
+  .bg-threads-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-radius: 10px;
+    background: transparent;
+    color: var(--za-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .bg-threads-item.is-active,
+  .bg-threads-item:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+  }
+  .bg-threads-item.is-running {
+    border-color: color-mix(in srgb, var(--za-accent, #4c8dff) 45%, transparent);
+  }
+  .bg-threads-item-status {
+    font-size: 11px;
+    color: var(--za-text-faint);
+  }
+  .bg-threads-item-command {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ui-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+  }
+  .bg-threads-item-meta {
+    font-size: 11px;
+    color: var(--za-text-faint);
+  }
+  .bg-threads-detail {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 4px 2px 8px 4px;
+  }
+  .bg-threads-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .bg-threads-detail-status {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .bg-threads-detail-id {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--za-text-faint);
+    word-break: break-all;
+  }
+  .bg-threads-stop {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: color-mix(in srgb, #e35d5d 18%, transparent);
+    color: #c0392b;
+    cursor: pointer;
+  }
+  .bg-threads-stop:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .bg-threads-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--za-text-faint);
+  }
+  .bg-threads-field pre {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--za-text) 4%, transparent);
+    color: var(--za-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--ui-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+  }
+  .bg-threads-output {
+    max-height: 220px;
+    overflow: auto;
+  }
+  .bg-threads-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    font-size: 11px;
+    color: var(--za-text-faint);
+  }
+  .bg-threads-error {
+    margin: 0;
+    color: #c0392b;
+    font-size: 12px;
   }
 
   @media (prefers-reduced-motion: reduce) {

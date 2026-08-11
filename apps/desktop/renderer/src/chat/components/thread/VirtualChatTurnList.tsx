@@ -31,11 +31,11 @@ interface VirtualChatTurnListProps {
   readonly enabled: boolean;
   readonly scrollRef: RefObject<HTMLDivElement | null>;
   readonly onMessageAction: (messageIndex: number, action: MessageActionId) => void;
-  readonly onEditMessage: (
+  readonly onBeginEdit: (
     messageId: string,
     text: string,
     attachments: readonly ChatAttachment[],
-  ) => Promise<boolean>;
+  ) => void;
   readonly onRegenerate: (messageIndex: number) => void;
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
 }
@@ -53,7 +53,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
     enabled,
     scrollRef,
     onMessageAction,
-    onEditMessage,
+    onBeginEdit,
     onRegenerate,
     onPreviewImage,
   }, ref) {
@@ -101,7 +101,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
               isZh={isZh}
               i18n={i18n}
               onMessageAction={onMessageAction}
-              onEditMessage={onEditMessage}
+              onBeginEdit={onBeginEdit}
               onRegenerate={onRegenerate}
               onPreviewImage={onPreviewImage}
               turnIndex={turnIndex}

@@ -1,6 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
+  AutomationCreateContext,
+  AutomationProposalAction,
   ClientToolCall,
   ConfigInstructionContextItem,
   ContextAccountingSnapshot,
@@ -14,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
+import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
@@ -54,6 +57,7 @@ import {
   buildMessageRailItemsIncremental,
   type MessageRailItemCache,
 } from '../state/messageRailItems';
+import { findMessageTargetWithRetry } from '../state/messageNavigation';
 import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
@@ -95,6 +99,12 @@ import type {
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
 import { ImagePreviewOverlay } from './thread/AttachmentStrip';
+import {
+  applyAutomationProposalActionResult,
+  buildAutomationProposalActionRequest,
+  selectAutomationChatProposal,
+} from '../../automations/automationChatProposal';
+import { AutomationProposalCard } from './AutomationProposalCard';
 import { ComposerDraftControls } from './ComposerDraftControls';
 import {
   buildSessionReferenceAttachment,
@@ -104,6 +114,8 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
+import { projectChatTaskContext } from './thread/taskContext';
+import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import {
   VirtualChatTurnList,
   type VirtualChatTurnListHandle,
@@ -134,6 +146,7 @@ import {
   resolveThreadFollowAfterScroll,
 } from '../state/threadScrollPolicy';
 import {
+  conversationHomeGreeting,
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
@@ -145,11 +158,13 @@ import {
   shouldVirtualizeChatTurns,
   type ChatTurnGroupCache,
 } from '../state/chatTurns';
-import { useWorkbench } from '../../workbench/WorkbenchContext';
+import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 const EMPTY_EFFORT_LEVELS: readonly EffortLevel[] = [];
+/** 无 WorkbenchProvider 时的降级空操作（会话抽屉等 Provider 之外场景）。 */
+const NOOP = () => {};
 
 function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
   const callbackRef = useRef(callback);
@@ -238,6 +253,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
+  automationCreateContext: AutomationCreateContext | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
   if (!conv?.messages) return {
@@ -247,6 +263,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
+    automationCreateContext: null,
   };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
@@ -316,6 +333,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
+      automationCreateContext: conv.automationCreateContext ?? null,
     };
   }
   return {
@@ -327,6 +345,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
+    automationCreateContext: conv.automationCreateContext ?? null,
   };
 }
 
@@ -336,48 +355,68 @@ export function ChatSurface({
   conversationId,
   conversationRevision,
   conversationTitle,
+  automationOrigin = null,
   systemInstructions,
   replyLanguage,
   gitBranchPrefix,
   resumeTask,
   onResumeConsumed,
   onOpenSettings,
+  onOpenTools,
   onConversationUpdated,
   onStreamingChange,
   onBranch,
-  onEnsureConversation,
+  onTaskStarted,
   onRenameConversation,
   onArchiveConversation,
+  onProvidersRefresh,
   workspacePath,
+  workspaces = [],
+  onWorkspaceChange,
   isPageActive,
   messageTarget,
+  onOpenAutomationRun,
+  onOpenTaskDetails,
+  onClose,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
+  readonly automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    originWorkspacePath?: string;
+    createdAt?: string;
+  } | null;
   readonly systemInstructions?: string;
   readonly replyLanguage?: string;
   readonly gitBranchPrefix?: string;
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
+  readonly onOpenTools?: () => void;
+  readonly onProvidersRefresh?: () => void | Promise<void>;
   readonly onConversationUpdated?: () => void;
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
-  // 草稿态发首条消息时创建会话（落库并进入左侧列表）。
-  readonly onEnsureConversation?: (seed?: {
-    title?: string;
-    mode?: string;
-    effort?: string;
-    modelProviderId?: string | null;
-  }) => Promise<{ id: string }>;
+  // 草稿态任务由 main 后台启动后，通知 App 选中任务并进入工作台。
+  readonly onTaskStarted?: (conversationId: string) => void;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
+  readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
+  readonly onOpenTaskDetails?: (conversationId: string) => void;
+  /** Drawer host close action; surfaces as a close control in ChatHeader. */
+  readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
+  readonly workspaces?: readonly { path: string; name: string }[];
+  readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
@@ -407,6 +446,7 @@ export function ChatSurface({
     [convActions],
   );
   const messages = convState.messages as ChatMsg[];
+  const automationProposal = selectAutomationChatProposal(convState.automationCreateContext);
   const loadStatus = convState.loadStatus;
   const isStreaming = convState.isStreaming;
   const turnGroupCacheRef = useRef<{
@@ -444,6 +484,7 @@ export function ChatSurface({
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
   const reorderQueuedMessage = convActions.reorderQueuedMessage;
+  const promoteQueuedMessageToFront = convActions.promoteQueuedMessageToFront;
   const queuedDispatchInFlightRef = useRef(new Set<string>());
   // useElapsedTimer 只保留本轮起点 ref；回合时长真值由 useConversationStreamRouter
   // 在 done/aborted/error 时读取。实时跳秒在末端 ChatTurn 内更新，避免每秒重渲染整页。
@@ -501,12 +542,17 @@ export function ChatSurface({
   >;
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  // 草稿态首条消息：create 完成后等会话 ready 再走 submitMessage，避免与加载竞态。
-  const pendingFirstSendRef = useRef<{
-    text: string;
-    attachments: ChatAttachment[];
-    effort?: string;
+  /** 会话级编辑态：目标用户消息进入底部输入框，而不是气泡内联编辑。 */
+  const [editingMessage, setEditingMessage] = useState<{
+    messageId: string;
+    preview: string;
   } | null>(null);
+
+  // 切换会话时退出编辑态，避免把 A 会话的编辑目标带到 B。
+  useEffect(() => {
+    setEditingMessage(null);
+  }, [conversationId]);
+  // 弱提示：非 vision 模型剥离本轮图片等（chat:stream:notice），不阻断发送。
   const creatingConversationRef = useRef(false);
   const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
   const pendingPermissionCalls = convState.pendingPermissionCalls as ClientToolCall[];
@@ -532,6 +578,19 @@ export function ChatSurface({
     }, 3000);
     return () => window.clearTimeout(timeoutId);
   }, [providerRecoveryNotice]);
+
+  // 非 vision 模型剥离本轮图片等弱提示：不阻断发送，只在附件错误位短暂展示。
+  useEffect(() => {
+    if (typeof clientApi.onChatStreamNotice !== 'function') return undefined;
+    return clientApi.onChatStreamNotice((payload) => {
+      if (!payload || payload.code !== 'vision_images_stripped') return;
+      const hint = i18n.t('settings.fallbackVision.strippedHint');
+      setAttachmentError(hint);
+      window.setTimeout(() => {
+        setAttachmentError((current) => (current === hint ? null : current));
+      }, 6000);
+    });
+  }, [i18n]);
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
@@ -759,20 +818,20 @@ export function ChatSurface({
     shouldAutoScrollRef.current = false;
     setIsThreadAtBottom((previous) => (previous ? false : previous));
     scrollToTurn(turnIndex, { align: 'center' });
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (
-          messageNavigationRequestRef.current !== requestId
-          || conversationIdRef.current !== requestConversationId
-        ) return;
-        const target = container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-        if (!target) return;
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.remove('chat-msg-flash');
-        void target.offsetWidth;
-        target.classList.add('chat-msg-flash');
-        window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
-      });
+    void findMessageTargetWithRetry({
+      findTarget: () => container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`),
+      scheduleFrame: (callback) => window.requestAnimationFrame(callback),
+      isActive: () => (
+        messageNavigationRequestRef.current === requestId
+        && conversationIdRef.current === requestConversationId
+      ),
+    }).then((target) => {
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.remove('chat-msg-flash');
+      void target.offsetWidth;
+      target.classList.add('chat-msg-flash');
+      window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
     });
   }, [messageTurnIndex, scrollToTurn]);
 
@@ -862,6 +921,32 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
+  const taskOverviewItems = useTaskOverview({
+    enabled: Boolean(conversationId),
+    workspacePath,
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+  const currentTaskItem = useMemo(
+    () => taskOverviewItems.find((item) => item.conversationId === conversationId),
+    [conversationId, taskOverviewItems],
+  );
+  const taskContext = useMemo(
+    () => projectChatTaskContext(currentTaskItem, isZh),
+    [currentTaskItem, isZh],
+  );
+  const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
+    if (!conversationId || !automationProposal) return;
+    const result = await clientApi.automationProposalAct(
+      buildAutomationProposalActionRequest(conversationId, automationProposal, action),
+    );
+    convActions.set({
+      automationCreateContext: applyAutomationProposalActionResult(
+        convState.automationCreateContext,
+        result,
+      ),
+    });
+  }, [automationProposal, convActions, convState.automationCreateContext, conversationId]);
   const modeOptions = useMemo<readonly DropdownOption[]>(
     () => CHAT_MODES.map((m) => ({ value: m, label: modeLabel(m, isZh) })),
     [isZh],
@@ -873,6 +958,13 @@ export function ChatSurface({
       tone: level === 'full_local' ? 'danger' : undefined,
     })),
     [isZh],
+  );
+  const workspaceOptions = useMemo<readonly DropdownOption[]>(
+    () => workspaces.map((workspace) => ({
+      value: workspace.path,
+      label: workspace.name,
+    })),
+    [workspaces],
   );
   const handleModeDropdownChange = useCallback((next: string) => {
     if (isChatMode(next)) changeMode(next);
@@ -946,14 +1038,17 @@ export function ChatSurface({
     });
     if (!requiresRestore || isBusy) return;
     if (typeof clientApi.chatContextRestored !== 'function') return;
-    contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey(restoreInput));
+    const restoreKey = contextAccountingRestoreKey(restoreInput);
     let cancelled = false;
     void clientApi.chatContextRestored({
       conversationId,
       modelProviderId: activeProvider?.id ?? modelProviderId,
     })
       .then((snap) => {
-        if (cancelled || !snap) return;
+        if (cancelled) return;
+        // 仅在请求真正结算后锁定 key：effect cleanup / 快速切会话不再把 restore 锁死。
+        contextRestoreAttemptedKeysRef.current.add(restoreKey);
+        if (!snap) return;
         contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey({
           ...restoreInput,
           snapshot: snap,
@@ -961,7 +1056,9 @@ export function ChatSurface({
         setContextAccountingSnapshot(snap);
       })
       .catch(() => {
-        // 重投影失败保持未知；内容修订或模型变化会生成新 key，并允许再次恢复。
+        if (cancelled) return;
+        // 失败也锁定同一 key，避免接口异常时重投影死循环。
+        contextRestoreAttemptedKeysRef.current.add(restoreKey);
       });
     return () => { cancelled = true; };
   }, [
@@ -1053,6 +1150,7 @@ export function ChatSurface({
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
@@ -1061,6 +1159,7 @@ export function ChatSurface({
         messages: loaded,
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1212,6 +1311,7 @@ export function ChatSurface({
       messages: loaded,
       tokenUsage: usage,
       contextAccounting: storedContextAccountingSnapshot,
+      automationCreateContext,
     }) => {
       if (cancelled) return;
       appliedExternalRevisionRef.current = conversationRevision;
@@ -1219,6 +1319,7 @@ export function ChatSurface({
         messages: loaded,
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
+        automationCreateContext,
       });
     });
     return () => { cancelled = true; };
@@ -1295,14 +1396,16 @@ export function ChatSurface({
   }, [conversationId, onConversationUpdated, setTurnStartedAt]);
 
   // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
-  const {
-    goalSlot,
-    setHasGoalPlan,
-    open: workbenchOpen,
-    activeTab: workbenchActiveTab,
-    setOpen: setWorkbenchOpen,
-    setActiveTab: setWorkbenchTab,
-  } = useWorkbench();
+  // 会话抽屉等渲染在 WorkbenchProvider 之外的场景也复用本组件：用可选版，
+  // 无 Provider 时 goalSlot=null（GoalPlanPanel 独立渲染）、开关动作降级为
+  // noop，避免抛 "useWorkbench must be used within a WorkbenchProvider"。
+  const workbench = useWorkbenchOptional();
+  const goalSlot = workbench?.goalSlot ?? null;
+  const setHasGoalPlan = workbench?.setHasGoalPlan ?? NOOP;
+  const workbenchOpen = workbench?.open ?? false;
+  const workbenchActiveTab = workbench?.activeTab ?? 'plan';
+  const setWorkbenchOpen = workbench?.setOpen ?? NOOP;
+  const setWorkbenchTab = workbench?.setActiveTab ?? NOOP;
   // Agent 调用内置浏览器工具（browser_*）时自动展开工作台并切到 Browser Tab，
   // 复用 Goal 计划创建时的自动切 Tab 先例，避免 webview 隐藏导致用户看不到 Agent 操作。
   const handleBrowserToolActivity = useCallback(() => {
@@ -1701,6 +1804,58 @@ export function ChatSurface({
     workspacePath,
   ]);
 
+  const cancelComposerEdit = useCallback(() => {
+    setEditingMessage(null);
+  }, []);
+
+  const beginComposerEdit = useCallback((
+    messageId: string,
+    text: string,
+    messageAttachments: readonly ChatAttachment[],
+  ) => {
+    const preview = text.trim().replace(/\s+/g, ' ');
+    setEditingMessage({
+      messageId,
+      preview: preview.length > 80 ? `${preview.slice(0, 80)}…` : preview,
+    });
+    conversationStore.setDraft(conversationId, text);
+    setAttachments(messageAttachments.map((item) => ({ ...item })));
+    setAttachmentError(null);
+    // 聚焦底部输入框，让编辑立即进入主输入流。
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector('.chat-composer textarea') as HTMLTextAreaElement | null;
+      if (!el) return;
+      el.focus();
+      const end = el.value.length;
+      try { el.setSelectionRange(end, end); } catch { /* ignore */ }
+    });
+  }, [conversationId]);
+
+  const stableBeginComposerEdit = useStableCallback(beginComposerEdit);
+  const stableCancelComposerEdit = useStableCallback(cancelComposerEdit);
+
+  const handleEditMessage = useCallback(async (
+    messageId: string,
+    editedText: string,
+    editedAttachments: readonly ChatAttachment[],
+  ) => {
+    if (isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
+    const text = editedText.trim();
+    if (!text && editedAttachments.length === 0) return false;
+    const retainedMessages = historyBeforeEditedUserMessage(messages, messageId);
+    if (!retainedMessages) return false;
+
+    // 先把目标原消息及后续旧分支从持久化中清掉，再沿现有发送链路创建唯一的新消息。
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(retainedMessages),
+      allowEmpty: true,
+    });
+    await submitMessage(text, [...editedAttachments], undefined, retainedMessages);
+    setEditingMessage(null);
+    return true;
+  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, submitMessage]);
+
   const handleSend = useCallback(async () => {
     // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
     // 随后的流收尾再以短列表 replaceMessages，覆盖仍在磁盘上的完整历史。
@@ -1710,25 +1865,39 @@ export function ChatSurface({
     if ((!text && attachments.length === 0) || !hasProvider) return;
     const sentAttachments = attachments;
 
-    // 草稿态：先创建会话进入左侧列表，再等 ready 后发出首条消息。
+    // 编辑态：复用截断历史后重发语义，不走普通发送/排队。
+    if (editingMessage) {
+      const ok = await handleEditMessage(editingMessage.messageId, text, sentAttachments);
+      if (ok) {
+        conversationStore.setDraft(conversationId, '');
+        setAttachments([]);
+        setAttachmentError(null);
+      }
+      return;
+    }
+
+    // 草稿态：由 main 原子创建会话、持久化首条消息并启动后台 turn。
+    // ChatSurface 不再是执行中转页，命令返回后即可直接进入工作台。
     if (!conversationId) {
-      if (!onEnsureConversation || creatingConversationRef.current) return;
+      if (creatingConversationRef.current) return;
       creatingConversationRef.current = true;
       conversationStore.setDraft(conversationId, '');
       setAttachments([]);
       setAttachmentError(null);
       try {
         const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
-        pendingFirstSendRef.current = { text, attachments: sentAttachments, effort };
-        await onEnsureConversation({
+        const started = await clientApi.chatStartTask({
+          text,
           title,
+          workspacePath,
           mode,
           effort,
           modelProviderId,
+          attachments: sentAttachments,
         });
+        onTaskStarted?.(started.conversationId);
       } catch (error) {
-        pendingFirstSendRef.current = null;
-        // 创建失败：恢复草稿与附件，用户可重试。
+        // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
         setAttachments(sentAttachments);
         setAttachmentError(error instanceof Error ? error.message : String(error));
@@ -1758,20 +1927,14 @@ export function ChatSurface({
     submitMessage,
     effort,
     enqueueMessage,
-    onEnsureConversation,
+    onTaskStarted,
+    workspacePath,
     mode,
     modelProviderId,
     isZh,
+    editingMessage,
+    handleEditMessage,
   ]);
-
-  // 草稿首条：会话 create 后 activeConversationId 切换并 load ready 时，自动发出挂起消息。
-  useEffect(() => {
-    if (!conversationId || loadStatus !== 'ready') return;
-    const pending = pendingFirstSendRef.current;
-    if (!pending) return;
-    pendingFirstSendRef.current = null;
-    void submitMessage(pending.text, pending.attachments, pending.effort);
-  }, [conversationId, loadStatus, submitMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1798,6 +1961,19 @@ export function ChatSurface({
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
   }, []);
+
+  /**
+   * 排队消息插队发送：
+   * 1) 将目标消息提到队首；
+   * 2) 若当前正在流式回复则 abort；
+   * 3) 空闲后由既有自动出队 effect 强送队首，其余队列顺序保持相对不变。
+   */
+  const handleForceSendQueued = useCallback((id: string) => {
+    promoteQueuedMessageToFront(id);
+    if (streamIdRef.current) {
+      void clientApi.chatAbort({ streamId: streamIdRef.current });
+    }
+  }, [promoteQueuedMessageToFront]);
 
   // 队列自动出队：loadStatus 只有在 reattach 收敛后才会 ready，避免切回运行中会话时
   // 把暂时的 isStreaming=false 当成真正空闲。每个会话同一时间只投递一条；发送路径明确
@@ -1920,27 +2096,6 @@ export function ChatSurface({
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
 
-  const handleEditMessage = useCallback(async (
-    messageId: string,
-    editedText: string,
-    editedAttachments: readonly ChatAttachment[],
-  ) => {
-    if (isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
-    const text = editedText.trim();
-    if (!text && editedAttachments.length === 0) return false;
-    const retainedMessages = historyBeforeEditedUserMessage(messages, messageId);
-    if (!retainedMessages) return false;
-
-    // 先把目标原消息及后续旧分支从持久化中清掉，再沿现有发送链路创建唯一的新消息。
-    await clientApi.conversationsReplaceMessages({
-      id: conversationId,
-      messages: serializeConversationMessages(retainedMessages),
-      allowEmpty: true,
-    });
-    await submitMessage(text, [...editedAttachments], undefined, retainedMessages);
-    return true;
-  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, submitMessage]);
-  const stableHandleEditMessage = useStableCallback(handleEditMessage);
 
   const handleMessageAction = useCallback((msgIndex: number, action: MessageActionId) => {
     if (action === 'regenerate') void handleRegenerate(msgIndex);
@@ -2080,6 +2235,71 @@ export function ChatSurface({
     });
   }, [conversationId, hasProvider, onOpenSettings]);
 
+  const showEmptyHome = shouldShowConversationEmptyHome({
+    loadStatus,
+    messageCount: messages.length,
+  });
+  const emptyHomeGreeting = conversationHomeGreeting(new Date().getHours(), isZh, workspaceLabel);
+  const handleContextWindowChange = useCallback(async (
+    providerId: string,
+    optionId: string,
+    value: string,
+  ) => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) return;
+    const nextValues = updateModelOptionSelection(
+      provider.modelOptions,
+      provider.modelOptionValues,
+      optionId,
+      value,
+    );
+    await clientApi.llmUpdateProvider({
+      id: providerId,
+      modelOptionValues: nextValues,
+    });
+    await onProvidersRefresh?.();
+  }, [onProvidersRefresh, providers]);
+
+  // 框内：模型 + 思考；框下右侧：上下文统计（首页与普通会话统一）。
+  const homeComposerModelControls = (
+    <ComposerTokenUsageDisplay
+      conversationId={conversationId}
+      providers={providers}
+      tokenUsage={tokenUsage}
+      activeUsage={activeUsage}
+      contextWindow={contextAccountingWindow}
+      isStreaming={isStreaming}
+      isZh={isZh}
+      effort={effort}
+      effortLevels={composerEffortLevels}
+      onEffortChange={changeEffort}
+      modelOptions={modelOptions}
+      canSwitchModel={canSwitchModel}
+      onModelChange={handleModelChange}
+      onContextWindowChange={handleContextWindowChange}
+      selectedModelProviderId={modelProviderId}
+      showContextUsage={false}
+    />
+  );
+  const homeComposerContextControls = (
+    <ComposerTokenUsageDisplay
+      conversationId={conversationId}
+      providers={providers}
+      tokenUsage={tokenUsage}
+      activeUsage={activeUsage}
+      contextWindow={contextAccountingWindow}
+      isStreaming={isStreaming}
+      isZh={isZh}
+      effort={effort}
+      effortLevels={composerEffortLevels}
+      onEffortChange={changeEffort}
+      modelOptions={modelOptions}
+      canSwitchModel={false}
+      selectedModelProviderId={modelProviderId}
+      showModelControls={false}
+    />
+  );
+
   // 草稿态（conversationId === null）也渲染完整聊天面：可输入，首条发送时再落库。
   return (
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
@@ -2087,7 +2307,7 @@ export function ChatSurface({
     <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
     <div
-      className="chat-surface"
+      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}`}
       onDragEnter={handleSurfaceDragEnter}
       onDragOver={handleSurfaceDragOver}
       onDragLeave={handleSurfaceDragLeave}
@@ -2104,13 +2324,19 @@ export function ChatSurface({
       ) : null}
       <ChatHeader
         title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
+        automationOrigin={automationOrigin}
+        onOpenAutomationRun={onOpenAutomationRun}
         isZh={isZh}
         i18n={i18n}
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
+        taskContext={taskContext}
+        onOpenTaskDetails={conversationId && onOpenTaskDetails
+          ? () => onOpenTaskDetails(conversationId)
+          : undefined}
         editTriggerRef={headerEditTriggerRef}
-        onOpenSettings={onOpenSettings}
+        onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
           ? (newTitle) => onRenameConversation(conversationId, newTitle)
           : undefined}
@@ -2119,6 +2345,7 @@ export function ChatSurface({
           : undefined}
         onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
         onFind={() => setFindOpen(true)}
+        onClose={onClose}
       />
       {findOpen ? (
         <ChatFindBar
@@ -2147,22 +2374,15 @@ export function ChatSurface({
             <div className="chat-thread-loading-mark" aria-hidden="true" />
             <p>{isZh ? '正在加载会话…' : 'Loading conversation…'}</p>
           </div>
-        ) : shouldShowConversationEmptyHome({ loadStatus, messageCount: messages.length }) ? (
-          <div className="chat-empty-state">
-            <div className="chat-empty-mark" aria-hidden="true">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 9h8" />
-                <path d="M8 13h5" />
-                <path d="M5 5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
-              </svg>
+        ) : showEmptyHome ? (
+          <div className="chat-empty-state chat-empty-home">
+            <div className="chat-empty-home-heading">
+              <div className="chat-empty-mark" aria-hidden="true">
+                <img className="chat-empty-logo light" src="./logo-light.png" alt="" />
+                <img className="chat-empty-logo dark" src="./logo-dark.png" alt="" />
+              </div>
+              <h2>{hasProvider ? emptyHomeGreeting : (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')}</h2>
             </div>
-            <h2>
-              {!hasProvider
-                ? (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')
-                : workspaceLabel
-                  ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
-                  : (isZh ? '接下来做什么？' : 'What should we work on?')}
-            </h2>
             {!hasProvider ? (
               <>
                 <p>
@@ -2178,11 +2398,9 @@ export function ChatSurface({
                   </button>
                 </div>
               </>
-            ) : (
-              <p>{isZh ? '描述任务，或从下面选一个开始' : 'Describe a task, or pick a starting point below'}</p>
-            )}
+            ) : null}
             {hasProvider ? (
-              <div className="chat-empty-cards">
+              <div className="chat-empty-cards" aria-label={isZh ? '任务快捷入口' : 'Task starters'}>
                 {emptyStarterCards.map((card) => (
                   <button
                     key={card.id}
@@ -2233,11 +2451,18 @@ export function ChatSurface({
             enabled={virtualizeChatTurns}
             scrollRef={threadRef}
             onMessageAction={stableHandleMessageAction}
-            onEditMessage={stableHandleEditMessage}
+            onBeginEdit={stableBeginComposerEdit}
             onRegenerate={stableHandleRegenerate}
             onPreviewImage={setImagePreview}
           />
         )}
+        {automationProposal ? (
+          <AutomationProposalCard
+            proposal={automationProposal}
+            isZh={isZh}
+            onAction={actOnAutomationProposal}
+          />
+        ) : null}
         {providerRecoveryNotice ? (
           <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">
@@ -2344,7 +2569,7 @@ export function ChatSurface({
         </button>
       ) : null}
 
-      <div className="chat-composer-wrap">
+      <div className={`chat-composer-wrap${showEmptyHome ? ' chat-composer-wrap--empty-home' : ''}`}>
         <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
@@ -2371,10 +2596,12 @@ export function ChatSurface({
             onRemove={removeQueuedMessage}
             onReorder={reorderQueuedMessage}
             onRefillToComposer={refillQueuedMessageToComposer}
+            onForceSend={handleForceSendQueued}
           />
         ) : null}
         <ComposerDraftControls
           conversationId={conversationId}
+          variant={showEmptyHome ? 'home' : 'conversation'}
           hasProvider={hasProvider}
           isBusy={isBusy}
           isStreaming={isStreaming}
@@ -2389,9 +2616,28 @@ export function ChatSurface({
           onAddFiles={addFiles}
           onAttachSessionReference={attachSessionReference}
           onPrimaryAction={stableHandlePrimaryAction}
+          editingMessage={editingMessage}
+          onCancelEdit={stableCancelComposerEdit}
+          homeModelSlot={homeComposerModelControls}
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
+            {workspacePath && workspaceOptions.length > 0 ? (
+              <Dropdown
+                className="composer-dropdown composer-workspace-dropdown"
+                value={workspacePath}
+                options={workspaceOptions}
+                onChange={(nextWorkspacePath) => {
+                  if (isDraftConversation) void onWorkspaceChange?.(nextWorkspacePath);
+                }}
+                disabled={!isDraftConversation}
+                ariaLabel={isZh ? '工作区' : 'Workspace'}
+                title={isDraftConversation
+                  ? (isZh ? '切换工作区' : 'Switch workspace')
+                  : (isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created')}
+                menuPlacement="up"
+              />
+            ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
@@ -2411,22 +2657,7 @@ export function ChatSurface({
               menuPlacement="up"
             />
           </div>
-          <ComposerTokenUsageDisplay
-            conversationId={conversationId}
-            providers={providers}
-            tokenUsage={tokenUsage}
-            activeUsage={activeUsage}
-            contextWindow={contextAccountingWindow}
-            isStreaming={isStreaming}
-            isZh={isZh}
-            effort={effort}
-            effortLevels={composerEffortLevels}
-            onEffortChange={changeEffort}
-            modelOptions={modelOptions}
-            canSwitchModel={canSwitchModel}
-            onModelChange={handleModelChange}
-            selectedModelProviderId={modelProviderId}
-          />
+          {homeComposerContextControls}
         </div>
       </div>
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (

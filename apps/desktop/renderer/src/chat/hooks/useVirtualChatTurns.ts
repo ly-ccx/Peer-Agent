@@ -219,7 +219,8 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
         DEFAULT_TURN_ESTIMATE_PX,
       );
       measuredSizesRef.current.set(index, nextSize);
-      if (scrollElement && oldOffset < scrollElement.scrollTop) {
+      const isAboveViewport = scrollElement && oldOffset < scrollElement.scrollTop;
+      if (isAboveViewport) {
         const oldSize = previousSize ?? DEFAULT_TURN_ESTIMATE_PX;
         // 累积到帧级一次性补偿：快滚时一帧会挂载/测量多个 turn，
         // 若每个都同步改 scrollTop，会与用户滚动惯性打架（表现为“回跳”），
@@ -240,6 +241,12 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
         // Measurement changes may alter offsets/padding even when start/end stay put.
         syncRangeRef.current();
       });
+      // 视口内/下方 turn（流式增长的那条）必须在本帧就把 spacer 同步到最新高度，
+      // 否则贴底逻辑用的是上一帧的 totalSize，每帧都会“先窜上去再被拉回”。
+      // 上方补偿仍走 rAF 合并，避免滚动惯性期间回跳。
+      if (!isAboveViewport) {
+        measurementFlushRef.current.flush();
+      }
     };
 
     element.dataset.virtualTurnIndex = String(index);

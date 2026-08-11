@@ -110,6 +110,40 @@ describe('task-notification-broker', () => {
     assert.equal(h.shown.length, 0);
   });
 
+  it('does not notify intake contracts that never become real goals', () => {
+    const h = createHarness();
+    h.plans.set('p-intake', {
+      planId: 'p-intake',
+      status: 'executing',
+      title: '所以我想看执行记录？',
+      conversationId: 'c-intake',
+      activation: { kind: 'intake', sourceMessageId: 'm1' },
+    });
+    h.broker.evaluatePlan(h.plans.get('p-intake'));
+    h.plans.set('p-intake', { ...h.plans.get('p-intake'), status: 'completed' });
+    const d = h.broker.evaluatePlan(h.plans.get('p-intake'));
+    assert.equal(d.action, 'skip');
+    assert.equal(d.reason, 'intake_contract');
+    assert.equal(h.shown.length, 0);
+  });
+
+  it('still notifies accepted goals after completion', () => {
+    const h = createHarness();
+    h.plans.set('p-goal', {
+      planId: 'p-goal',
+      status: 'executing',
+      title: '修复通知过滤',
+      conversationId: 'c-goal',
+      activation: { kind: 'accepted_goal', sourceMessageId: 'm2' },
+    });
+    h.broker.evaluatePlan(h.plans.get('p-goal'));
+    h.plans.set('p-goal', { ...h.plans.get('p-goal'), status: 'completed' });
+    const d = h.broker.evaluatePlan(h.plans.get('p-goal'));
+    assert.equal(d.action, 'notify');
+    assert.equal(h.shown.length, 1);
+    assert.equal(h.shown[0].title, '任务已完成');
+  });
+
   it('notifies waiting_user then failed with increasing attention versions', () => {
     const h = createHarness();
     h.plans.set('p1', {

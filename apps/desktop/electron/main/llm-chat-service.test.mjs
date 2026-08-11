@@ -522,11 +522,13 @@ describe('llm chat service tool materialization', () => {
     const events = [];
     const capturedBodies = [];
     const latestUser = 'please answer the latest request exactly';
+    let automationContextStatus = 'collecting';
 
     globalThis.fetch = async (_url, init) => {
       const body = JSON.parse(init.body);
       capturedBodies.push(body);
       if (capturedBodies.length === 1) {
+        automationContextStatus = 'proposed';
         return new Response(sse([
           { choices: [{ delta: { content: 'summary of older context with enough continuity detail' } }] },
           '[DONE]',
@@ -548,20 +550,33 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            // 增大可压缩的旧历史，使压前请求越过 17k 窗口的 80% 软线；
-            // 17k 同时为有效 canonical checkpoint 留出稳定的压后请求预算。
-            contextWindow: 17_000,
+            // 增大可压缩的旧历史，使压前请求越过 24k 窗口的 80% 软线；
+            // 24k 同时为受治理 System Context、canonical checkpoint 和增长预算留出稳定的压后空间。
+            contextWindow: 24_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
         conversationStore: {
           getConversation: () => ({
             contentRevision: 0,
+            automationCreateContext: {
+              kind: 'automation_create',
+              source: 'automation_center',
+              status: automationContextStatus,
+              ...(automationContextStatus === 'proposed'
+                ? {
+                    activeProposal: {
+                      proposalId: 'proposal-after-compact',
+                      status: 'proposed',
+                    },
+                  }
+                : {}),
+            },
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
-              inputTokens: 16_000,
-              contextWindow: 17_000,
+              inputTokens: 21_000,
+              contextWindow: 24_000,
             }),
           }),
         },
@@ -569,8 +584,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(10_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(10_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(16_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(16_000)}` },
           { role: 'user', content: latestUser },
         ],
         streamId: 's-compact-continue',
@@ -586,7 +601,16 @@ describe('llm chat service tool materialization', () => {
     assert.equal(capturedBodies.length, 2);
     const summaryBodyText = JSON.stringify(capturedBodies[0]);
     assert.doesNotMatch(summaryBodyText, new RegExp(latestUser));
+    const compactionSystemPrompt = capturedBodies[0].messages.find((message) => message.role === 'system')?.content ?? '';
     const finalMessages = capturedBodies[1].messages || [];
+    const rebuiltSystemPrompt = finalMessages.find((message) => message.role === 'system')?.content ?? '';
+    assert.match(compactionSystemPrompt, /上下文交接专家/);
+    assert.doesNotMatch(compactionSystemPrompt, /Status: collecting/);
+    assert.match(rebuiltSystemPrompt, /Automation task intent policy/);
+    assert.match(rebuiltSystemPrompt, /Status: proposed/);
+    assert.match(rebuiltSystemPrompt, /Active proposal id: proposal-after-compact/);
+    assert.match(rebuiltSystemPrompt, /already awaiting user action/);
+    assert.doesNotMatch(rebuiltSystemPrompt, /Status: collecting/);
     assert.equal(
       finalMessages.some((message) => message.role === 'user' && message.content === latestUser),
       true,
@@ -630,7 +654,7 @@ describe('llm chat service tool materialization', () => {
             isDefault: true,
             apiKeyConfigured: true,
             // 保持与上一个自动压缩集成场景相同的可实现预算。
-            contextWindow: 17_000,
+            contextWindow: 24_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -640,8 +664,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
               modelKey: 'p1::test-model',
-              inputTokens: 16_000,
-              contextWindow: 17_000,
+              inputTokens: 21_000,
+              contextWindow: 24_000,
             }),
           }),
         },
@@ -652,8 +676,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(10_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(10_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(16_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(16_000)}` },
           { role: 'user', content: 'latest user survives only if compaction persists' },
         ],
         streamId: 's-compact-persist-fail',

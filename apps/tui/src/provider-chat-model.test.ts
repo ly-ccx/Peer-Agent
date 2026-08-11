@@ -214,6 +214,11 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       capabilityId: 'local.file.write',
       description: 'Write a workspace file',
     };
+    const goalCreatePlanTool: RuntimeToolDefinition = {
+      name: 'goal_create_plan',
+      capabilityId: 'local.goal.create_plan',
+      description: 'Create a persistent GoalPlan',
+    };
     const provider: ModelProvider = {
       async stream(request) {
         requests.push(request);
@@ -223,14 +228,19 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const model = createProviderChatModel({
       provider,
       model: 'model-test',
-      toolDefinitionsForMode: (mode) => mode === 'goal'
-        ? [...toolDefinitions, writeTool]
-        : toolDefinitions,
+      toolDefinitionsForMode: (mode) => {
+        if (mode === 'chat') return [...toolDefinitions, goalCreatePlanTool];
+        if (mode === 'goal') return [...toolDefinitions, writeTool];
+        return toolDefinitions;
+      },
     });
-    const controller = createChatController({ host: host(), model, initialMode: 'explorer' });
+    const controller = createChatController({ host: host(), model, initialMode: 'chat' });
 
-    await controller.send('inspect');
-    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(['read_file']);
+    await controller.send('plan and execute');
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual([
+      'read_file',
+      'goal_create_plan',
+    ]);
 
     expect(controller.setMode('goal')).toBe(true);
     await controller.send('execute');

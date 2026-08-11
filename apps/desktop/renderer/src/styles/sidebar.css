@@ -119,7 +119,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-4) var(--space-2);
+  padding: 0 var(--space-4) var(--space-1);
   -webkit-app-region: no-drag;
 }
 .sidebar-brand-mark {
@@ -178,7 +178,7 @@
   color: var(--graphite-ink, var(--graphite-base));
 }
 .sidebar-search-icon-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--azure-seal, #3b82f6) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
   outline-offset: 1px;
 }
 .brand-wordmark {
@@ -225,53 +225,130 @@
   color: var(--graphite-mute);
 }
 
-/* ── Workspace selector ── */
-.sidebar-workspace-wrap {
-  position: relative;
+/* ── Workspace tree (flat list + nested sessions) ── */
+.sidebar-workspace-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
   -webkit-app-region: no-drag;
+  padding: 0 var(--space-2) var(--space-2);
 }
-.sidebar-workspace {
+
+.sidebar-workspace-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  user-select: none;
+}
+
+.sidebar-workspace-tree-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--graphite-fade);
+}
+
+.sidebar-workspace-tree-count {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--graphite-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-workspace-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Keep selected rows and their outlines inside the scrollport on both sides. */
+  padding: 0 var(--space-1) var(--space-2);
+}
+
+.sidebar-workspace-node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-workspace-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  margin: 0 var(--space-2) var(--space-1);
-  /* Match conversation rows / new-chat: panel radius for sidebar interactive rows. */
+  min-height: 48px;
+  padding: 8px 10px;
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   cursor: pointer;
-  transition: background var(--za-motion-fast);
+  transition:
+    background var(--za-motion-fast),
+    padding-right var(--za-motion-fast);
+  outline: none;
 }
-.sidebar-workspace:hover {
-  background: var(--za-sidebar-active-bg);
+
+.sidebar-workspace-row:hover {
+  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
 }
-.ws-name {
-  flex: 1 1 auto;
+
+/* hover / 键盘 focus-visible 时为绝对定位的 × 让出右侧空间，避免与状态点重叠。
+   不用 :focus-within：行可聚焦(tabIndex=0)，鼠标点击后焦点常驻会让 × 一直显示。 */
+.sidebar-workspace-row:hover,
+.sidebar-workspace-row:focus-visible,
+.sidebar-workspace-row:has(.sidebar-workspace-remove:focus-visible) {
+  padding-right: 30px;
+}
+
+.sidebar-workspace-node.is-active > .sidebar-workspace-row,
+.sidebar-workspace-node.is-home > .sidebar-workspace-row {
+  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.04));
+  box-shadow: 0 0 0 1px var(--chrome-hairline);
+}
+
+.sidebar-workspace-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.sidebar-workspace-meta {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  font-size: 0.78rem;
-  font-weight: 500;
+  flex: 1;
+  gap: 1px;
+}
+
+.sidebar-workspace-name {
+  font-size: 0.82rem;
+  font-weight: 600;
   color: var(--graphite-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ws-placeholder {
-  color: var(--graphite-mute);
-  font-weight: 400;
-}
-.ws-branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 55%;
+
+.sidebar-workspace-path {
+  font-size: 0.68rem;
+  color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.65rem;
-  color: var(--graphite-fade);
-  background: var(--chrome-sunken);
-  padding: 1px 6px;
-  /* inline chip: 4px (not radius-xs 2px indicator) */
-  border-radius: var(--ui-radius-chip);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 /* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
@@ -279,88 +356,89 @@
 .ws-running-dot {
   position: relative;
   isolation: isolate;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: var(--state-success, #3a9d6e);
-  --motion-ripple-color: var(--state-success, #3a9d6e);
-  --motion-ripple-strength: 55%;
-  --motion-ripple-scale: 2.67;
+  background: var(--state-info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-info) 22%, transparent);
+  --motion-ripple-color: var(--state-info);
+  --motion-ripple-strength: 45%;
+  --motion-ripple-scale: 2.4;
   --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 1;
 }
-.ws-chevron {
+
+/* 关闭按钮默认不占布局空间，仅 hover / 键盘 focus-visible 时叠在行右侧出现，避免常驻空白。
+   不用 :focus-within：行可聚焦(tabIndex=0)，鼠标点击后焦点常驻会让 × 一直显示。 */
+.sidebar-workspace-remove {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  border: none;
+  background: transparent;
   color: var(--graphite-mute);
-  flex-shrink: 0;
-  transition: transform var(--za-motion-fast) var(--za-ease-out);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: opacity var(--za-motion-fast), color var(--za-motion-fast), background var(--za-motion-fast);
 }
 
-.ws-dropdown {
-  position: absolute;
-  top: 100%;
-  left: var(--space-2);
-  right: var(--space-2);
-  z-index: 50;
-  border: 1px solid var(--chrome-hairline);
-  /* popover-level radius (design ~18px; token cap 16px via ui-radius-panel / za-radius-lg) */
-  border-radius: var(--ui-radius-panel, var(--za-radius-lg, 16px));
-  background: var(--za-popover-bg);
-  overflow: hidden;
-  box-shadow: var(--shadow-popover);
-  animation: motion-enter-rise 0.15s var(--za-ease-out) both;
+.sidebar-workspace-row:hover .sidebar-workspace-remove,
+.sidebar-workspace-row:focus-visible .sidebar-workspace-remove,
+.sidebar-workspace-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
-/* 退场:对称于进场,淡出并上移;动画结束由 onAnimationEnd 卸载。
-   prefers-reduced-motion 由 tokens.css 全局降级(animation-duration:1ms)兜底。 */
-.ws-dropdown.closing {
-  animation: motion-exit-sink 0.15s var(--za-ease-out) both;
+
+.sidebar-workspace-remove:hover {
+  color: var(--state-danger);
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
 }
-.ws-dropdown-item {
+
+/* Nested workbench / conversation list under a workspace is intentionally removed.
+   Clicking the workspace row itself activates the workspace and opens the workbench. */
+
+.sidebar-workspace-add {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: flex-start;
+  gap: 6px;
   min-height: 36px;
-  padding: var(--space-2) var(--space-3);
-  font-size: 0.78rem;
-  color: var(--graphite-base);
-  cursor: pointer;
-  transition: background var(--za-motion-fast);
-}
-.ws-dropdown-item:hover {
-  background: var(--za-hover);
-}
-.ws-dropdown-item.active {
-  font-weight: 500;
-  color: var(--azure-seal);
-}
-.ws-dropdown-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-dropdown-remove {
-  background: none;
-  border: none;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px dashed var(--chrome-hairline);
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  background: transparent;
   color: var(--graphite-mute);
+  font-size: 0.78rem;
   cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0 2px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity var(--za-motion-fast);
-}
-.ws-dropdown-item:hover .ws-dropdown-remove { opacity: 1; }
-.ws-dropdown-remove:hover { color: var(--state-danger); }
-.ws-dropdown-add {
-  color: var(--graphite-fade);
-  border-top: 1px solid var(--chrome-hairline);
+  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
 }
 
-/* ── New chat button ── */
+.sidebar-workspace-add:hover {
+  color: var(--graphite-base);
+  border-color: var(--graphite-mute);
+  background: var(--chrome-sunken);
+}
+
+/* ── New chat / top nav (must stay no-drag so Electron titlebar drag does not steal clicks) ── */
 .sidebar-top {
-  padding: 0 var(--space-3) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  /* 4 项纵向堆叠时用更紧的 gap，避免顶部区域被撑得过高。 */
+  gap: 2px;
+  padding: 0 var(--space-3) var(--space-1);
   -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
 }
 /* Shortcut badge for new-task row. */
 .sidebar-new-chat-kbd {
@@ -381,7 +459,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: 7px var(--space-3);
   /* Outline primary: faint border + transparent fill (not selected-row gray). */
   border: 1px solid color-mix(in srgb, var(--za-line, var(--chrome-hairline)) 70%, transparent);
   border-radius: var(--ui-radius-panel, var(--radius-lg));
@@ -391,6 +469,7 @@
   cursor: pointer;
   font-size: 0.82rem;
   transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+  -webkit-app-region: no-drag;
 }
 .sidebar-new-chat span {
   flex: 1 1 auto;
@@ -405,7 +484,38 @@
   color: var(--graphite-soft);
 }
 
-/* ── Conversation list ── */
+/* Top nav rows (工作台 / 自动化 / 插件) reuse footer nav-btn look. */
+.sidebar-top .sidebar-automation-nav,
+.sidebar-top .sidebar-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  /* 比通用 nav-btn 更紧一点，贴近原先侧栏顶部密度。 */
+  padding: 6px var(--space-3);
+  border: none;
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  background: transparent;
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  -webkit-app-region: no-drag;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.sidebar-top .sidebar-automation-nav:hover,
+.sidebar-top .sidebar-nav-btn:hover {
+  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
+}
+.sidebar-top .sidebar-automation-nav.active,
+.sidebar-top .sidebar-nav-btn.active {
+  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.05));
+  color: var(--graphite-ink, var(--graphite-base));
+}
+
+
+
 .channel-conversation-list {
   flex: 1;
   min-width: 0;
@@ -680,6 +790,23 @@
     box-shadow: inset 2px 0 0 var(--azure-trace);
   }
 }
+.sidebar-conv-automation-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 4.5rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
+  color: var(--azure-seal, #4f7cff);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .sidebar-conv-title {
   flex: 1 1 auto;
   min-width: 0;

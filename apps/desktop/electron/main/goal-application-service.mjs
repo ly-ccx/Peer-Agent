@@ -12,6 +12,7 @@ export function createGoalApplicationService({
   revisePlan,
   recordApproval,
   setPlanStatus,
+  markRequestedUserInput,
   recordManualConfirmation,
   recordTaskEvidence,
   deletePlan,
@@ -36,6 +37,10 @@ export function createGoalApplicationService({
     revisePlan: assertFunction(revisePlan, 'revisePlan'),
     recordApproval: assertFunction(recordApproval, 'recordApproval'),
     setPlanStatus: assertFunction(setPlanStatus, 'setPlanStatus'),
+    markRequestedUserInput: assertFunction(
+      markRequestedUserInput,
+      'markRequestedUserInput',
+    ),
     recordManualConfirmation: assertFunction(
       recordManualConfirmation,
       'recordManualConfirmation',
@@ -78,6 +83,12 @@ export function createGoalApplicationService({
       ports.revisePlan(planId, patch, { reason, changedBy }),
     approve,
     setStatus: ({ planId, status }) => ports.setPlanStatus(planId, status),
+    /**
+     * 待验收点「继续讨论」：验收未通过，重开同一 plan，离开 result_ready。
+     * runnerPatch 可选；store 会把 runner 置为 waiting_user。
+     */
+    markRequestedUserInput: ({ planId, runnerPatch } = {}) =>
+      ports.markRequestedUserInput(planId, runnerPatch),
     recordManualConfirmation: ({ planId, confirmation }) =>
       ports.recordManualConfirmation(planId, confirmation),
     recordTaskEvidence: ({ planId, taskId, change }) =>

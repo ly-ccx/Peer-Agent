@@ -19,6 +19,16 @@ function createHarness() {
       listAvailable: port('list-available'),
       link: port('link'),
       unlink: port('unlink'),
+      uninstall: port('uninstall'),
+      marketplaceList: port('marketplace-list'),
+      marketplaceGetDetail: port('marketplace-get-detail'),
+      marketplaceInstall: port('marketplace-install'),
+      skillHubQuery: port('skillhub-query'),
+      skillHubGetDetail: port('skillhub-get-detail'),
+      skillHubGetStatus: port('skillhub-get-status'),
+      skillHubSync: port('skillhub-sync'),
+      skillHubInstall: port('skillhub-install'),
+      skillHubListCategories: port('skillhub-list-categories'),
     },
   });
   const handlers = new Map();
@@ -43,7 +53,17 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
     'skills:link',
     'skills:list',
     'skills:list-available',
+    'skills:marketplace:get-detail',
+    'skills:marketplace:install',
+    'skills:marketplace:list',
     'skills:refresh',
+    'skills:skillhub:get-detail',
+    'skills:skillhub:get-status',
+    'skills:skillhub:install',
+    'skills:skillhub:list-categories',
+    'skills:skillhub:query',
+    'skills:skillhub:sync',
+    'skills:uninstall',
     'skills:unlink',
     'skills:upload',
   ]);
@@ -62,6 +82,16 @@ test('skills IPC preserves payload and result projection', async () => {
   assert.equal(await handlers.get('skills:list-available')(), 'list-available');
   assert.equal(await handlers.get('skills:link')(null, { skillId: 'skill-2' }), 'link');
   assert.equal(await handlers.get('skills:unlink')(null, { skillId: 'skill-2' }), 'unlink');
+  assert.equal(await handlers.get('skills:uninstall')(null, { skillId: 'skill-3' }), 'uninstall');
+  assert.equal(await handlers.get('skills:marketplace:list')(), 'marketplace-list');
+  assert.equal(await handlers.get('skills:marketplace:get-detail')(null, { catalogId: 'owned/demo' }), 'marketplace-get-detail');
+  assert.equal(await handlers.get('skills:marketplace:install')(null, { catalogId: 'owned/demo' }), 'marketplace-install');
+  assert.equal(await handlers.get('skills:skillhub:query')(null, { page: 2 }), 'skillhub-query');
+  assert.equal(await handlers.get('skills:skillhub:get-detail')(null, { namespace: 'owner', slug: 'demo' }), 'skillhub-get-detail');
+  assert.equal(await handlers.get('skills:skillhub:get-status')(), 'skillhub-get-status');
+  assert.equal(await handlers.get('skills:skillhub:sync')(null, { reset: true }), 'skillhub-sync');
+  assert.equal(await handlers.get('skills:skillhub:install')(null, { namespace: 'owner', slug: 'demo', version: '1' }), 'skillhub-install');
+  assert.equal(await handlers.get('skills:skillhub:list-categories')(), 'skillhub-list-categories');
 
   assert.deepEqual(calls, [
     ['list'],
@@ -74,6 +104,16 @@ test('skills IPC preserves payload and result projection', async () => {
     ['list-available'],
     ['link', 'skill-2'],
     ['unlink', 'skill-2'],
+    ['uninstall', 'skill-3'],
+    ['marketplace-list'],
+    ['marketplace-get-detail', 'owned/demo'],
+    ['marketplace-install', 'owned/demo'],
+    ['skillhub-query', { page: 2 }],
+    ['skillhub-get-detail', { namespace: 'owner', slug: 'demo' }],
+    ['skillhub-get-status'],
+    ['skillhub-sync', { reset: true }],
+    ['skillhub-install', { namespace: 'owner', slug: 'demo', version: '1' }],
+    ['skillhub-list-categories'],
   ]);
 });
 

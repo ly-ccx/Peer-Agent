@@ -15,6 +15,9 @@ function createHarness() {
       readDirectory: port('read-directory'),
       watchDirectories: port('watch-directories'),
       readFile: port('read-file'),
+      readImageDataUrl: port('read-image-data-url'),
+      writeFile: port('write-file'),
+      mkdir: port('mkdir'),
       dispose: port('dispose'),
     },
   });
@@ -36,6 +39,9 @@ test('file-access-ipc owns the exact governed file channel set', () => {
     'fs:read-dir',
     'fs:watch-dirs',
     'file:read',
+    'file:read-image-data-url',
+    'file:write',
+    'fs:mkdir',
   ]);
 });
 
@@ -48,6 +54,8 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
     readDirectory: { absPath: '/repo' },
     watch: { paths: ['/repo'] },
     readFile: { absPath: '/repo/file' },
+    writeFile: { absPath: '/repo/new.txt', content: '' },
+    mkdir: { absPath: '/repo/new-dir' },
   };
 
   await handlers.get('git:diff')({ sender }, payloads.git);
@@ -55,6 +63,8 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
   handlers.get('fs:read-dir')({ sender }, payloads.readDirectory);
   handlers.get('fs:watch-dirs')({ sender }, payloads.watch);
   await handlers.get('file:read')({ sender }, payloads.readFile);
+  handlers.get('file:write')({ sender }, payloads.writeFile);
+  handlers.get('fs:mkdir')({ sender }, payloads.mkdir);
   dispose();
 
   assert.deepEqual(calls, [
@@ -63,6 +73,8 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
     ['read-directory', payloads.readDirectory],
     ['watch-directories', sender, payloads.watch],
     ['read-file', payloads.readFile],
+    ['write-file', payloads.writeFile],
+    ['mkdir', payloads.mkdir],
     ['dispose'],
   ]);
 });

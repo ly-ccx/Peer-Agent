@@ -1,9 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
+import { ChatTaskContext } from './ChatTaskContext';
+import type { ChatTaskContextView } from './taskContext';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -24,31 +27,51 @@ export interface ChatHeaderAction {
  */
 export function ChatHeader({
   title,
+  automationOrigin = null,
   isZh,
   i18n,
   isStreaming,
   hasScroll,
   localAccessLevel,
+  taskContext,
   editTriggerRef,
   onRename,
   onArchive,
   onBranch,
   onFind,
-  onOpenSettings,
+  onOpenTools,
+  onOpenAutomationRun,
+  onOpenTaskDetails,
+  onClose,
 }: {
   readonly title: string;
+  readonly automationOrigin?: {
+    kind: 'automation_run';
+    automationId: string;
+    runId: string;
+    automationName?: string;
+    triggerSource?: string;
+    originWorkspacePath?: string;
+    createdAt?: string;
+  } | null;
   readonly isZh: boolean;
   readonly i18n: I18nRuntime;
   readonly isStreaming: boolean;
   readonly hasScroll?: boolean;
   readonly localAccessLevel: LocalAccessLevel;
+  readonly taskContext?: ChatTaskContextView | null;
   readonly editTriggerRef?: MutableRefObject<(() => void) | null>;
   readonly onRename?: (newTitle: string) => void;
   readonly onArchive?: () => void;
   readonly onBranch?: () => void;
   readonly onFind?: () => void;
-  readonly onOpenSettings?: () => void;
+  readonly onOpenTools?: () => void;
+  readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
+  readonly onOpenTaskDetails?: () => void;
+  /** When set (e.g. conversation Drawer), render a close control in the main header row. */
+  readonly onClose?: () => void;
 }) {
+  const workbench = useWorkbenchOptional();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(title);
@@ -133,7 +156,7 @@ export function ChatHeader({
   return (
     <header className={`chat-header${hasScroll ? ' has-scroll' : ''}`} aria-label={isZh ? '对话标题栏' : 'Conversation header'}>
       <div className="chat-header-left">
-        <SidebarToggle isZh={isZh} />
+        {workbench ? <SidebarToggle isZh={isZh} /> : null}
         {editing ? (
           <input
             ref={inputRef}
@@ -149,13 +172,34 @@ export function ChatHeader({
             }}
           />
         ) : (
-          <span
-            className="chat-header-title"
-            title={isZh ? '双击编辑标题' : 'Double-click to edit'}
-            onDoubleClick={onRename ? beginEdit : undefined}
-          >
-            {displayTitle}
-          </span>
+          <>
+            {automationOrigin?.kind === 'automation_run' ? (
+              <button
+                type="button"
+                className="chat-header-automation-badge"
+                onClick={() => onOpenAutomationRun?.({ automationId: automationOrigin.automationId, runId: automationOrigin.runId })}
+                title={
+                  automationOrigin.automationName
+                    ? (isZh
+                      ? `自动化：${automationOrigin.automationName}`
+                      : `Automation: ${automationOrigin.automationName}`)
+                    : (isZh ? '自动化会话' : 'Automation conversation')
+                }
+              >
+                {isZh ? '自动化 · 查看运行' : 'Automation · View run'}
+              </button>
+            ) : null}
+            <span
+              className="chat-header-title"
+              title={isZh ? '双击编辑标题' : 'Double-click to edit'}
+              onDoubleClick={onRename ? beginEdit : undefined}
+            >
+              {displayTitle}
+            </span>
+            {taskContext ? (
+              <ChatTaskContext context={taskContext} onOpenDetails={onOpenTaskDetails} />
+            ) : null}
+          </>
         )}
 
         {/* More actions menu */}
@@ -200,7 +244,7 @@ export function ChatHeader({
         <ChatHeaderCapabilities
           i18n={i18n}
           localAccessLevel={localAccessLevel}
-          onOpenSettings={onOpenSettings}
+          onOpenTools={onOpenTools}
         />
         {onFind ? (
           <button
@@ -216,7 +260,21 @@ export function ChatHeader({
             </svg>
           </button>
         ) : null}
-        <WorkbenchToggle isZh={isZh} />
+        {workbench ? <WorkbenchToggle isZh={isZh} /> : null}
+        {onClose ? (
+          <button
+            type="button"
+            className="chat-header-action-btn chat-header-close-btn"
+            aria-label={isZh ? '关闭' : 'Close'}
+            title={isZh ? '关闭抽屉' : 'Close drawer'}
+            onClick={onClose}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </header>
   );

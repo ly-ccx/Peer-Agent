@@ -44,6 +44,23 @@
     border-radius: 0;
   }
 
+  /* 工作台、自动化和插件共用一级页面材质与裁剪边界。页面内部仍各自负责滚动。 */
+  .primary-page-shell {
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--za-app-bg);
+    border-radius: var(--radius-lg);
+  }
+
+  .primary-page-shell > .automation-center,
+  .primary-page-shell > .capability-workbench {
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+  }
+
   .profile-chip {
     @apply flex items-center gap-2;
     -webkit-app-region: no-drag;

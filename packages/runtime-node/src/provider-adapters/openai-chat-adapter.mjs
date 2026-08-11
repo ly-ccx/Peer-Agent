@@ -433,6 +433,9 @@ export async function sendOpenAIChatStream({
   streamId,
   usePublicStreamConsumer = false,
   fetchWithRecovery,
+  wire = null,
+  channelId = null,
+  modelProviderId = null,
 }) {
   const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = encodeOpenAIChatRequest({
@@ -449,6 +452,10 @@ export async function sendOpenAIChatStream({
   const trace = createProviderStreamTrace({
     provider: 'openai',
     baseUrl,
+    endpoint: url,
+    wire,
+    channelId,
+    modelProviderId,
     model,
     effort,
     supportsReasoning,

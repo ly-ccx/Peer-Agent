@@ -260,6 +260,53 @@ test('shared store restores only provider-request observations, never runtime-tu
   }
 });
 
+test('shared store projects lastObserved baseline after contentRevision advances', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'restore baseline' });
+    store.updateModelEffort(conv.id, {
+      modelProviderId: 'provider-1',
+      model: 'model-1',
+    });
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
+      conversationId: conv.id,
+      modelKey: 'provider-1::model-1',
+      contextWindow: 100_000,
+      inputBudget: 100_000,
+      compactionThresholdTokens: 80_000,
+      authoritativeInputTokens: 45_000,
+      percent: 45,
+      lastObserved: {
+        inputTokens: 45_000,
+        requestFingerprint: 'request-final',
+        compactionEpoch: 0,
+        source: 'provider_usage',
+        observedAt: 123,
+      },
+    }));
+    assert.equal(store.getConversation(conv.id).contextSnapshot.percent, 45);
+
+    // Mid-turn / post-turn append advances contentRevision and clears the exact
+    // match, but session switch should still surface the last provider observation.
+    store.appendMessage(conv.id, {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'done',
+    });
+    const restored = store.getConversation(conv.id).contextSnapshot;
+    assert.ok(restored);
+    assert.equal(restored.phase, 'restored');
+    assert.equal(restored.pressureSource, 'provider_usage');
+    assert.equal(restored.authoritativeInputTokens, 45_000);
+    assert.equal(restored.percent, 45);
+    assert.equal(restored.pendingUncountedChanges, true);
+    assert.equal(restored.contentRevision, store.getConversation(conv.id).contentRevision);
+    assert.equal(restored.lastObserved.inputTokens, 45_000);
+  } finally {
+    cleanup();
+  }
+});
+
 test('message, compaction, and model changes invalidate the shared context snapshot', () => {
   const { store, cleanup } = freshStore();
   try {
@@ -275,6 +322,7 @@ test('message, compaction, and model changes invalidate the shared context snaps
     assert.ok(store.getConversation(conv.id).contextSnapshot);
 
     store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'changed' });
+    // Without lastObserved, content changes still invalidate the live snapshot.
     assert.equal(store.getConversation(conv.id).contextSnapshot, null);
 
     store.updateContextSnapshot(conv.id, accountingSnapshot({
@@ -562,6 +610,46 @@ test('legacy conversations without effort/modelProviderId load with safe fallbac
     assert.equal(conv.modelProviderId, null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('automationOrigin persists on create and survives rename', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const origin = {
+      kind: 'automation_run',
+      automationId: 'auto-1',
+      runId: 'run-9',
+      automationName: 'Daily review',
+      triggerSource: 'scheduled',
+      createdAt: '2026-08-04T00:00:00.000Z',
+    };
+    const conv = store.createConversation({
+      title: 'Automation: Daily review',
+      automationOrigin: origin,
+    });
+    assert.deepEqual(conv.automationOrigin, origin);
+
+    const loaded = store.getConversation(conv.id);
+    assert.deepEqual(loaded.automationOrigin, origin);
+
+    const renamed = store.updateTitle(conv.id, 'My renamed automation chat');
+    assert.equal(renamed.title, 'My renamed automation chat');
+    assert.deepEqual(renamed.automationOrigin, origin);
+
+    const listed = store.listConversations({ status: 'active' });
+    const row = listed.find((item) => item.id === conv.id);
+    assert.ok(row);
+    assert.deepEqual(row.automationOrigin, origin);
+
+    // Invalid origin shapes are dropped rather than trusted as badge truth.
+    const invalid = store.createConversation({
+      title: 'no origin',
+      automationOrigin: { kind: 'not_a_run', automationId: 'x' },
+    });
+    assert.equal(invalid.automationOrigin, undefined);
+  } finally {
+    cleanup();
   }
 });
 
@@ -1156,6 +1244,31 @@ test('listConversations can skip messageCount for workspace discovery', () => {
     // index 也不应被回填
     const persisted = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
     assert.equal(persisted.find((c) => c.id === conv.id)?.messageCount, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('markRead advances lastReadAt without changing updatedAt', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'read-watermark', workspacePath: '/ws/read' });
+    assert.ok(conv.lastReadAt);
+    assert.equal(conv.lastReadAt, conv.createdAt);
+
+    const beforeUpdatedAt = conv.updatedAt;
+    const later = '2099-01-01T00:00:00.000Z';
+    const marked = store.markRead(conv.id, { at: later });
+    assert.ok(marked);
+    assert.equal(marked.lastReadAt, later);
+    assert.equal(marked.updatedAt, beforeUpdatedAt);
+
+    // 水位只前进，不回退
+    const earlier = '2000-01-01T00:00:00.000Z';
+    const again = store.markRead(conv.id, { at: earlier });
+    assert.equal(again.lastReadAt, later);
+
+    assert.equal(store.markRead('missing-id'), null);
   } finally {
     cleanup();
   }

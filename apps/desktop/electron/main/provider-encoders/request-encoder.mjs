@@ -5,21 +5,40 @@ import {
 } from './message-normalizer.mjs';
 
 // OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
-// Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
+// Peer Agent 默认 off 不发 reasoning_effort；渠道 effortMap 若把 off 映射为
+// 显式值（如 Kimi 的 none）则照常下发。其余档位按 provider wire 契约透传。
 // medium 是 Grok 4.5 等渠道的原生档位，必须直通，不能被 default→medium 逻辑吞掉。
+// max 为 Kimi/部分 OpenAI 兼容渠道的原生顶档。
 const OPENAI_REASONING_EFFORT = {
   low: 'low',
   medium: 'medium',
   default: 'medium',
   high: 'high',
   xhigh: 'xhigh',
+  max: 'max',
 };
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
 // Anthropic output_config.effort 原生枚举为 low/medium/high/xhigh/max（与 thinking 是
 // adaptive 还是 enabled 无关，effort 始终属于顶层 output_config）。Peer Agent 的 xhigh
-// 忠实映射到原生 xhigh；max 无对应 UI 档位，按 YAGNI 不引入。
-const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+// 忠实映射到原生 xhigh；max 对 Claude 非通用，但 DeepSeek Anthropic 官方支持 max。
+const ANTHROPIC_OUTPUT_EFFORT = {
+  low: 'low',
+  medium: 'medium',
+  default: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
+// DeepSeek Anthropic 兼容：output_config.effort 仅 low/high/max；官方 xhigh→high，默认 high。
+const DEEPSEEK_ANTHROPIC_OUTPUT_EFFORT = {
+  low: 'low',
+  medium: 'high',
+  default: 'high',
+  high: 'high',
+  xhigh: 'high',
+  max: 'max',
+};
 // Anthropic 约束: max_tokens 必须 > thinking.budget_tokens。
 // max_tokens 是 (思考 token + 回复 token) 的总额，因此开启 thinking 时
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
@@ -82,8 +101,16 @@ export function encodeOpenAIChatRequest({
   void promptCaching;
   // 思考档位: off(关闭) / low / default / high / xhigh。
   // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
-  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
-    body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort) {
+    if (effort === 'off') {
+      // 默认省略；渠道 effortMap 显式给出 off 时（如 Kimi → none）才下发。
+      const offMapped = mappedEffortValue(effort, reasoningEffortMap, null);
+      if (offMapped !== undefined && offMapped !== null && offMapped !== '') {
+        body.reasoning_effort = offMapped;
+      }
+    } else {
+      body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+    }
   } else if (supportsReasoning && reasoningParamStyle === 'qwen-enable' && effort && effort !== 'off') {
     body.enable_thinking = true;
     body.thinking_budget = mappedNumericEffort(effort, reasoningEffortMap, QWEN_THINKING_BUDGET) ?? QWEN_THINKING_BUDGET.default;
@@ -294,13 +321,29 @@ export function encodeAnthropicMessagesRequest({
     stream: true,
     tools,
   };
-  // 思考档位: off(关闭) / low / default / high / xhigh。
-  // off 不开 thinking; output_config.effort 原生支持 xhigh，直接透传(adaptive/output-effort
+  // 思考档位: off(关闭) / low / default / high / xhigh / max。
+  // off 通常不开 thinking; output_config.effort 原生支持 xhigh，直接透传(adaptive/output-effort
   // 两条链路都走 output_config.effort)。enabled-budget 旧代际无 effort，按 budget_tokens 折算。
+  // DeepSeek Anthropic 兼容(anthropic-enabled-output-effort) 例外：off 必须显式 disabled，
+  // 开启时用 type:'enabled'（不是 adaptive）+ output_config.effort low/high/max。
   const paramStyle = reasoningParamStyle
     ?? (reasoningFormat === 'adaptive' ? 'anthropic-adaptive-effort' : null)
     ?? (anthropicModelUsesEffortConfig(model) ? 'anthropic-output-effort' : 'anthropic-enabled-budget');
-  if (supportsReasoning && effort && effort !== 'off') {
+  if (supportsReasoning && effort && paramStyle === 'anthropic-enabled-output-effort') {
+    if (effort === 'off') {
+      body.thinking = { type: 'disabled' };
+    } else {
+      body.thinking = { type: 'enabled' };
+      body.output_config = {
+        effort: mappedEffortValue(
+          effort,
+          reasoningEffortMap,
+          DEEPSEEK_ANTHROPIC_OUTPUT_EFFORT,
+          'default',
+        ) ?? 'high',
+      };
+    }
+  } else if (supportsReasoning && effort && effort !== 'off') {
     if (paramStyle === 'anthropic-adaptive-effort') {
       // display:'summarized' 让思维链以摘要形式回流，否则新代际默认 omitted
       // (thinking 字段恒空、仅 signature)，UI 的思考区永远无内容可渲染。

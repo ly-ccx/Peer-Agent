@@ -11,6 +11,7 @@ function createHarness(overrides = {}) {
   const [registration] = createChatIpcRegistrations({
     chat: {
       send: port('send'),
+      startTask: port('start-task'),
       abort: port('abort'),
       reattach: port('reattach'),
       listActive: port('list-active'),
@@ -29,11 +30,12 @@ function createHarness(overrides = {}) {
   return { calls, registration, handlers };
 }
 
-test('chat owner registers exactly the seven catalog channels', () => {
+test('chat owner registers exactly the eight catalog channels', () => {
   const { handlers, registration } = createHarness();
   assert.equal(registration.owner, 'chat-ipc');
   assert.deepEqual([...handlers.keys()], [
     'chat:send',
+    'chat:start-task',
     'chat:abort',
     'chat:stream:reattach',
     'chat:stream:list-active',
@@ -47,10 +49,12 @@ test('chat owner projects sender and payload only where required', () => {
   const { calls, handlers } = createHarness();
   const sender = { id: 17 };
   const sendPayload = { streamId: 'stream-1', conversationId: 'conversation-1' };
+  const startTaskPayload = { text: 'background task' };
   const compactPayload = { streamId: 'compact-1', conversationId: 'conversation-1' };
   const restoredPayload = { conversationId: 'conversation-1' };
 
   assert.equal(handlers.get('chat:send')({ sender }, sendPayload), 'send-result');
+  assert.equal(handlers.get('chat:start-task')({ sender }, startTaskPayload), 'start-task-result');
   assert.equal(handlers.get('chat:abort')({ sender }, { streamId: 'stream-1' }), 'abort-result');
   assert.equal(
     handlers.get('chat:stream:reattach')(
@@ -72,6 +76,7 @@ test('chat owner projects sender and payload only where required', () => {
 
   assert.deepEqual(calls, [
     ['send', sendPayload, sender],
+    ['start-task', startTaskPayload, sender],
     ['abort', { streamId: 'stream-1' }],
     ['reattach', { streamId: 'stream-1', conversationId: 'conversation-1' }],
     ['list-active'],
@@ -86,6 +91,7 @@ test('chat owner preserves default empty payloads', () => {
   const sender = { id: 17 };
 
   handlers.get('chat:send')({ sender });
+  handlers.get('chat:start-task')({ sender });
   handlers.get('chat:abort')({ sender });
   handlers.get('chat:stream:reattach')({ sender });
   handlers.get('chat:compact')({ sender });
@@ -94,6 +100,7 @@ test('chat owner preserves default empty payloads', () => {
 
   assert.deepEqual(calls, [
     ['send', {}, sender],
+    ['start-task', {}, sender],
     ['abort', {}],
     ['reattach', {}],
     ['compact', {}, sender],

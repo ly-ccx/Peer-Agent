@@ -70,6 +70,18 @@ export function shouldAutoStartAcceptedGoalRunnerFromChange(change, plan) {
 }
 
 /**
+ * A foreground answer to request_user_input may hand execution back only while
+ * the same accepted Goal is still persisted as runnable. This check happens
+ * after the foreground turn releases the conversation runtime.
+ */
+export function shouldResumeGoalRunnerAfterUserDecision(plan) {
+  return shouldAutoStartAcceptedGoalRunner(plan)
+    && plan?.runner?.enabled === true
+    && plan?.runner?.status === 'running'
+    && !plan?.runner?.blockedReason;
+}
+
+/**
  * 串行完成 intake -> Runner 交接。forceComplete 必须返回一个 release Promise，
  * 它只在原 sendMessage 的 finally 已释放 Runtime turn 后 resolve；不能仅凭 UI 流已
  * 标记 done 就启动下一轮，否则同一 conversation session 会撞上 active turn。

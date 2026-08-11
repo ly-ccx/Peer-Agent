@@ -6,6 +6,15 @@ export type AttachmentContextTransport =
   | 'metadata_only'
   | string;
 
+/**
+ * 全局「兜底多模态模型」配置。
+ * 主模型不支持 vision 时，可先用该模型识别本轮新图，再静默注入文本给主模型。
+ * providerId 指向 listProviders() 的复合 id；null/缺省表示未配置。
+ */
+export interface FallbackVisionModelSettings {
+  readonly providerId?: string | null;
+}
+
 export interface AttachmentContextItem {
   readonly id?: string;
   readonly name: string;
@@ -91,6 +100,22 @@ export interface ContextExtensionItem {
 export interface ChatProviderMessage {
   readonly role: string;
   readonly content: unknown;
+}
+
+export interface ChatStartTaskRequest {
+  readonly text: string;
+  readonly title?: string;
+  readonly workspacePath?: string | null;
+  readonly mode?: string;
+  readonly effort?: string;
+  readonly modelProviderId?: string | null;
+  readonly attachments?: readonly unknown[];
+}
+
+export interface ChatStartTaskResult {
+  readonly conversationId: string;
+  readonly streamId: string;
+  readonly assistantMessageId: string;
 }
 
 export interface ChatSendRequest {

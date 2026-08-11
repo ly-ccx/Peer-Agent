@@ -2,6 +2,7 @@ export {
   assembleSystemContext,
   createDefaultPromptSourceRegistry,
   renderSystemContext,
+  renderStableSystemContext,
 } from './prompt-assembler.mjs';
 export {
   buildConfigInstructionContext,
@@ -14,6 +15,7 @@ export {
 } from './host-config-instructions.mjs';
 export { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 export { createAttachmentPromptSource } from './sources/attachment-source.mjs';
+export { createAutomationIntentPromptSource } from './sources/automation-intent-source.mjs';
 export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';
 export { createAdaptivePlanningPromptSource, renderAdaptivePlanningPrompt } from './sources/adaptive-planning-source.mjs';
 export { createDiagnosisGatePromptSource, renderDiagnosisGatePrompt } from './sources/diagnosis-gate-source.mjs';

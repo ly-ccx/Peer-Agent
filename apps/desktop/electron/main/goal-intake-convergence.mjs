@@ -6,5 +6,6 @@ export {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from '@peer-agent/runtime-node';

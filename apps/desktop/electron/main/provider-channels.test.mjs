@@ -21,29 +21,36 @@ describe('provider channel registry', () => {
     const descriptor = listChannelDescriptors().find((channel) => channel.id === CHANNEL_IDS.DEEPSEEK);
 
     assert.equal(descriptor?.label, 'DeepSeek 官方');
-    assert.equal(descriptor?.defaultWire, 'openai-chat');
-    assert.deepEqual(descriptor?.allowedWires, ['openai-chat']);
-    assert.equal(descriptor?.authMethods.api_key.wire, 'openai-chat');
-    assert.equal(descriptor?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(descriptor?.defaultWire, 'anthropic-messages');
+    assert.deepEqual(descriptor?.allowedWires, ['anthropic-messages']);
+    assert.equal(descriptor?.authMethods.api_key.wire, 'anthropic-messages');
+    assert.equal(descriptor?.defaults.baseUrl, 'https://api.deepseek.com/anthropic');
     assert.equal(descriptor?.defaults.model, 'deepseek-chat');
+    assert.equal(descriptor?.capabilities?.reasoning?.paramStyle, 'anthropic-enabled-output-effort');
+    assert.deepEqual(descriptor?.capabilities?.reasoning?.effortLevels, ['off', 'low', 'high', 'max']);
+    assert.equal(descriptor?.capabilities?.reasoning?.defaultEffort, 'high');
 
     const resolved = resolveChannel({
       channelId: CHANNEL_IDS.DEEPSEEK,
       authMethod: 'api_key',
       apiKey: 'deepseek-test-key',
     });
-    assert.equal(resolved.wire, 'openai-chat');
-    assert.equal(resolved.baseUrl, 'https://api.deepseek.com');
-    assert.equal(resolved.endpoint, 'https://api.deepseek.com/chat/completions');
-    assert.equal(resolved.headers.Authorization, 'Bearer deepseek-test-key');
+    assert.equal(resolved.wire, 'anthropic-messages');
+    assert.equal(resolved.baseUrl, 'https://api.deepseek.com/anthropic');
+    assert.equal(resolved.endpoint, 'https://api.deepseek.com/anthropic/v1/messages');
+    assert.equal(resolved.headers['x-api-key'], 'deepseek-test-key');
+    assert.equal(resolved.headers['anthropic-version'], '2023-06-01');
+    assert.equal(resolved.reasoningParamStyle, 'anthropic-enabled-output-effort');
+    assert.deepEqual(resolved.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+    assert.equal(resolved.reasoningDefaultEffort, 'high');
     assert.throws(
       () => resolveChannel({
         channelId: CHANNEL_IDS.DEEPSEEK,
         authMethod: 'api_key',
-        wireOverride: 'openai-responses',
+        wireOverride: 'openai-chat',
         apiKey: 'deepseek-test-key',
       }),
-      /unsupported_wire:deepseek:openai-responses/,
+      /unsupported_wire:deepseek:openai-chat/,
     );
   });
 
@@ -228,7 +235,8 @@ describe('service templates', () => {
     assert.equal(deepseek?.accessCategory, 'official_api');
     assert.equal(deepseek?.channelId, CHANNEL_IDS.DEEPSEEK);
     assert.equal(deepseek?.authMethod, 'api_key');
-    assert.equal(deepseek?.defaults.baseUrl, 'https://api.deepseek.com');
+    assert.equal(deepseek?.defaultWire, 'anthropic-messages');
+    assert.equal(deepseek?.defaults.baseUrl, 'https://api.deepseek.com/anthropic');
     assert.equal(deepseek?.defaults.model, 'deepseek-chat');
     assert.equal(
       resolveServiceTemplateId({ channelId: CHANNEL_IDS.DEEPSEEK, authMethod: 'api_key' }),
@@ -294,9 +302,9 @@ describe('service templates', () => {
     assert.equal(moonshot?.accessCategory, 'third_party');
     assert.equal(kimi?.channelId, CHANNEL_IDS.KIMI_CODING_PLAN);
     assert.equal(moonshot?.channelId, CHANNEL_IDS.MOONSHOT);
-    assert.equal(kimi?.defaults.baseUrl, 'https://api.moonshot.cn/v1');
+    assert.equal(kimi?.defaults.baseUrl, 'https://api.kimi.com/coding/v1');
     assert.equal(moonshot?.defaults.baseUrl, 'https://api.moonshot.cn/v1');
-    assert.equal(kimi?.defaults.model, 'kimi-k2.7-code');
+    assert.equal(kimi?.defaults.model, 'k3');
     assert.equal(moonshot?.defaults.model, 'kimi-k3');
     assert.equal(
       resolveServiceTemplateId({ channelId: CHANNEL_IDS.KIMI_CODING_PLAN, authMethod: 'api_key' }),
@@ -311,10 +319,10 @@ describe('service templates', () => {
       channelId: CHANNEL_IDS.KIMI_CODING_PLAN,
       authMethod: 'api_key',
       apiKey: 'kimi-key',
-      model: 'kimi-k2.7-code',
+      model: 'k3',
     });
     assert.equal(resolvedKimi.wire, 'openai-chat');
-    assert.equal(resolvedKimi.endpoint, 'https://api.moonshot.cn/v1/chat/completions');
+    assert.equal(resolvedKimi.endpoint, 'https://api.kimi.com/coding/v1/chat/completions');
     assert.equal(resolvedKimi.headers.Authorization, 'Bearer kimi-key');
 
     const resolvedMoonshot = resolveChannel({
@@ -325,6 +333,17 @@ describe('service templates', () => {
     });
     assert.equal(resolvedMoonshot.wire, 'openai-chat');
     assert.equal(resolvedMoonshot.endpoint, 'https://api.moonshot.cn/v1/chat/completions');
+
+    // K3 官方多档：off/low/default/max，default 映射 high，max 映射 max。
+    for (const resolved of [resolvedKimi, resolvedMoonshot]) {
+      assert.equal(resolved.reasoningParamStyle, 'openai-effort');
+      assert.deepEqual(resolved.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+      assert.equal(resolved.reasoningDefaultEffort, 'default');
+      assert.equal(resolved.reasoningEffortMap?.off, 'none');
+      assert.equal(resolved.reasoningEffortMap?.low, 'low');
+      assert.equal(resolved.reasoningEffortMap?.default, 'high');
+      assert.equal(resolved.reasoningEffortMap?.max, 'max');
+    }
   });
 
   it('exposes MiniMax CN and Global coding templates with distinct endpoints', () => {
@@ -457,37 +476,100 @@ describe('service templates', () => {
     assert.equal(resolved.headers.Authorization, 'Bearer sk-sp-demo');
   });
 
-  it('exposes OpenCode Go OpenAI and Anthropic templates', () => {
+  it('exposes a single OpenCode Go subscription template with model-based wire routing', () => {
     const templates = listServiceTemplates();
-    const openai = templates.find((item) => item.id === 'opencode-go-openai');
-    const anthropic = templates.find((item) => item.id === 'opencode-go-anthropic');
-    assert.ok(openai);
-    assert.ok(anthropic);
-    assert.equal(openai?.accessCategory, 'third_party');
-    assert.equal(anthropic?.accessCategory, 'third_party');
-    assert.equal(openai?.channelId, CHANNEL_IDS.OPENCODE_GO_OPENAI);
-    assert.equal(anthropic?.channelId, CHANNEL_IDS.OPENCODE_GO_ANTHROPIC);
-    assert.equal(openai?.defaults.baseUrl, 'https://opencode.ai/zen/v1');
-    assert.equal(anthropic?.defaults.baseUrl, 'https://opencode.ai/zen');
-    assert.equal(openai?.defaults.model, 'gpt-5.5');
-    assert.equal(anthropic?.defaults.model, 'claude-sonnet-4-5');
+    const go = templates.find((item) => item.id === 'opencode-go');
+    assert.ok(go);
+    assert.equal(templates.filter((item) => String(item.id).startsWith('opencode-go')).length, 1);
+    assert.equal(go?.accessCategory, 'third_party');
+    assert.equal(go?.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(go?.defaults.baseUrl, 'https://opencode.ai/zen/go/v1');
+    assert.equal(go?.defaults.model, 'gpt-5.6-luna');
 
-    const resolvedOpenAi = resolveChannel({
-      channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+    const resolvedDefault = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
-      apiKey: 'zen-key',
-      model: 'gpt-5.5',
+      apiKey: 'go-key',
+      model: 'gpt-5.6-luna',
     });
-    assert.equal(resolvedOpenAi.wire, 'openai-responses');
-    assert.equal(resolvedOpenAi.endpoint, 'https://opencode.ai/zen/v1/responses');
-    assert.equal(resolvedOpenAi.headers.Authorization, 'Bearer zen-key');
+    assert.equal(resolvedDefault.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(resolvedDefault.wire, 'openai-responses');
+    assert.equal(resolvedDefault.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+    assert.equal(resolvedDefault.headers.Authorization, 'Bearer go-key');
+    assert.equal(resolvedDefault.capabilities.reasoning.paramStyle, 'openai-effort');
 
-    const resolvedAnthropic = resolveChannel({
-      channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+    const resolvedClaude = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
+      apiKey: 'go-key',
       model: 'claude-sonnet-4-5',
     });
-    assert.equal(resolvedAnthropic.wire, 'anthropic-messages');
-    assert.equal(resolvedAnthropic.endpoint, 'https://opencode.ai/zen/v1/messages');
+    assert.equal(resolvedClaude.wire, 'anthropic-messages');
+    assert.equal(resolvedClaude.endpoint, 'https://opencode.ai/zen/go/v1/messages');
+    assert.equal(resolvedClaude.legacyProvider, 'anthropic');
+    assert.equal(resolvedClaude.capabilities.reasoning.paramStyle, 'anthropic-enabled-budget');
+
+    // Official docs: glm / kimi / deepseek / grok use chat/completions, not responses.
+    const resolvedGlm = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+    });
+    assert.equal(resolvedGlm.wire, 'openai-chat');
+    assert.equal(resolvedGlm.endpoint, 'https://opencode.ai/zen/go/v1/chat/completions');
+    assert.equal(resolvedGlm.headers.Authorization, 'Bearer go-key');
+    assert.equal(resolvedGlm.capabilities.reasoning.paramStyle, 'openai-effort');
+
+    for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
+      const resolved = resolveChannel({
+        channelId: CHANNEL_IDS.OPENCODE_GO,
+        authMethod: 'api_key',
+        apiKey: 'go-key',
+        model,
+      });
+      assert.equal(resolved.wire, 'openai-chat', model);
+      assert.equal(resolved.endpoint, 'https://opencode.ai/zen/go/v1/chat/completions', model);
+    }
+
+    // MiniMax / Qwen on Go use Anthropic Messages.
+    for (const model of ['minimax-m2.5', 'qwen3.5-plus']) {
+      const resolved = resolveChannel({
+        channelId: CHANNEL_IDS.OPENCODE_GO,
+        authMethod: 'api_key',
+        apiKey: 'go-key',
+        model,
+      });
+      assert.equal(resolved.wire, 'anthropic-messages', model);
+      assert.equal(resolved.endpoint, 'https://opencode.ai/zen/go/v1/messages', model);
+    }
+
+    // Legacy dual-entry channel ids still resolve to the single Go channel.
+    const legacyOpenAi = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+      authMethod: 'api_key',
+      model: 'gpt-5.6-luna',
+    });
+    assert.equal(legacyOpenAi.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(legacyOpenAi.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+
+    const legacyAnthropic = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+      authMethod: 'api_key',
+      model: 'claude-opus-4-6',
+    });
+    assert.equal(legacyAnthropic.channelId, CHANNEL_IDS.OPENCODE_GO);
+    assert.equal(legacyAnthropic.wire, 'anthropic-messages');
+    assert.equal(legacyAnthropic.endpoint, 'https://opencode.ai/zen/go/v1/messages');
+
+    // Explicit wireOverride still wins over model auto-routing.
+    const forced = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      model: 'claude-sonnet-4-5',
+      wireOverride: 'openai-responses',
+    });
+    assert.equal(forced.wire, 'openai-responses');
+    assert.equal(forced.endpoint, 'https://opencode.ai/zen/go/v1/responses');
   });
 });

@@ -11,6 +11,7 @@ export type TuiCommandAction =
   | { readonly type: 'open-skill-picker' }
   | { readonly type: 'open-mcp-picker' }
   | { readonly type: 'show-help' }
+  | { readonly type: 'show-version' }
   | { readonly type: 'clear-chat' }
   | { readonly type: 'new-session' }
   | { readonly type: 'compact-context' }
@@ -75,6 +76,7 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'goal-cancel', label: 'Cancel goal', description: 'Cancel the active goal', keywords: ['stop', 'abort'], action: { type: 'goal-control', control: 'cancel' }, visible: GOAL_ACTIVE },
   { id: 'help', label: 'Help', description: 'Show keyboard shortcuts and command syntax', keywords: ['keys', 'shortcuts'], action: { type: 'show-help' } },
   { id: 'quit', label: 'Quit', description: 'Exit Peer Agent', keywords: ['exit'], action: { type: 'quit' } },
+  { id: 'version', label: 'Version', description: 'Show the Peer Agent CLI version', keywords: ['release', 'build', 'update'], action: { type: 'show-version' } },
 ]);
 
 export function localizeTuiCommand(

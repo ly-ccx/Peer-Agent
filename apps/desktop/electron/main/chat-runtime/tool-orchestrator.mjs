@@ -18,6 +18,7 @@ export function createToolContext({
   targetWorkspacePath = null,
   readableRoots = null,
   writableRoots = null,
+  permissionPolicy = null,
 } = {}) {
   return {
     conversationId,
@@ -26,6 +27,7 @@ export function createToolContext({
     targetWorkspacePath,
     readableRoots,
     writableRoots,
+    permissionPolicy,
     // 当前回合的交互模式（chat/goal/...）。由 llm-chat-service 在每次 run 时写入，
     // 供 goal 模式运行时闸门在工具执行层判定准入。见 Goal 模式运行时闸门设计。
     mode,
@@ -312,7 +314,9 @@ export async function executeModelToolCall({
   registry,
   runtimeProjection,
   mcpRegistry,
+  skillStore = null,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
 }) {
   const args = safeParseJson(rawArguments);
@@ -346,6 +350,7 @@ export async function executeModelToolCall({
     streamId,
     toolCallId,
     conversationId,
+    permissionPolicy: toolContext.permissionPolicy,
   });
   const requestLocalCapabilityPermission = permissionGate.createLocalCapabilityPermissionRequester({
     webContents,
@@ -353,6 +358,7 @@ export async function executeModelToolCall({
     toolCallId,
     conversationId,
     workspacePath,
+    permissionPolicy: toolContext.permissionPolicy,
   });
 
   // Milestone D: Goal side-effect guard. When Goal context is present, avoid
@@ -468,12 +474,15 @@ export async function executeModelToolCall({
       toolCallId,
       conversationId,
       workspacePath,
+      permissionPolicy: toolContext.permissionPolicy,
     }),
     signal,
     registry,
     runtimeProjection,
     mcpRegistry,
+    skillStore,
     goalPlanStore,
+    automationProposalService,
     ensureBrowserReady,
   });
   if (signal?.aborted) {

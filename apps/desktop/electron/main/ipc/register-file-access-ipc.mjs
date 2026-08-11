@@ -17,6 +17,9 @@ export function createFileAccessIpcRegistrations({ fileAccess } = {}) {
       'fileAccess.watchDirectories',
     ),
     readFile: assertFunction(fileAccess?.readFile, 'fileAccess.readFile'),
+    readImageDataUrl: assertFunction(fileAccess?.readImageDataUrl, 'fileAccess.readImageDataUrl'),
+    writeFile: assertFunction(fileAccess?.writeFile, 'fileAccess.writeFile'),
+    mkdir: assertFunction(fileAccess?.mkdir, 'fileAccess.mkdir'),
     dispose: assertFunction(fileAccess?.dispose, 'fileAccess.dispose'),
   };
 
@@ -29,6 +32,9 @@ export function createFileAccessIpcRegistrations({ fileAccess } = {}) {
         ports.watchDirectories(event.sender, payload)
       ));
       ipc.handle('file:read', (_event, payload) => ports.readFile(payload));
+      ipc.handle('file:read-image-data-url', (_event, payload) => ports.readImageDataUrl(payload));
+      ipc.handle('file:write', (_event, payload) => ports.writeFile(payload));
+      ipc.handle('fs:mkdir', (_event, payload) => ports.mkdir(payload));
       return () => ports.dispose();
     }),
   ]);

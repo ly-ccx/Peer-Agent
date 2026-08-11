@@ -11,6 +11,7 @@ export function createConversationApplicationService({
   getConversation,
   updateTitle,
   updateMode,
+  updateAutomationCreateContext,
   updateModelEffort,
   appendMessage,
   updateLastMessage,
@@ -39,6 +40,10 @@ export function createConversationApplicationService({
     getConversation: assertFunction(getConversation, 'getConversation'),
     updateTitle: assertFunction(updateTitle, 'updateTitle'),
     updateMode: assertFunction(updateMode, 'updateMode'),
+    updateAutomationCreateContext: assertFunction(
+      updateAutomationCreateContext,
+      'updateAutomationCreateContext',
+    ),
     updateModelEffort: assertFunction(updateModelEffort, 'updateModelEffort'),
     appendMessage: assertFunction(appendMessage, 'appendMessage'),
     updateLastMessage: assertFunction(updateLastMessage, 'updateLastMessage'),
@@ -116,6 +121,8 @@ export function createConversationApplicationService({
     get: ({ id }) => ports.getConversation(id),
     updateTitle: ({ id, title }) => ports.updateTitle(id, title),
     updateMode: ({ id, mode }) => ports.updateMode(id, mode),
+    updateAutomationCreateContext: ({ id, context }) =>
+      ports.updateAutomationCreateContext(id, context),
     updateModelEffort: ({ id, effort, modelProviderId }) =>
       ports.updateModelEffort(id, { effort, modelProviderId }),
     appendMessage: ({ id, message }) => ports.appendMessage(id, message),

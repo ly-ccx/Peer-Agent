@@ -21,6 +21,7 @@ const DEFAULT_SOURCE_IDS = [
   'project.instructions',
   'runtime.contextExtensions',
   'runtime.reminders',
+  'automation.intent-policy',
   'runtime.goal-plan',
   'runtime.goal-runner',
   'runtime.goal-checkpoint',
@@ -34,6 +35,90 @@ test('Desktop adapter exposes the canonical default Source registry', () => {
   assert.deepEqual(createDefaultPromptSourceRegistry().listSourceIds(), DEFAULT_SOURCE_IDS);
   assert.deepEqual(createDesktopRegistry().listSourceIds(), DEFAULT_SOURCE_IDS);
   assert.equal(assembleDesktopSystemContext, assembleSystemContext);
+});
+
+test('automation intent policy classifies ordinary chat without leaking into non-chat modes', () => {
+  const chat = assembleSystemContext({ mode: 'chat' });
+  const policy = chat.sections.find((section) => section.id === 'automation.intent-policy');
+  assert.ok(policy);
+  assert.equal(policy.layer, 'L5_TOOL_RULES');
+  assert.match(policy.content, /High confidence:/);
+  assert.match(policy.content, /Medium confidence:/);
+  assert.match(policy.content, /Low confidence:/);
+  assert.match(policy.content, /never creates an Automation/i);
+  assert.match(policy.content, /Never ask the user for a workspace path or timezone/);
+  assert.equal(chat.sections.some((section) => section.id === 'runtime.automation-create-state'), false);
+
+  const goal = assembleSystemContext({
+    mode: 'goal',
+    automationCreateContext: {
+      kind: 'automation_create',
+      source: 'automation_center',
+      status: 'collecting',
+    },
+  });
+  assert.equal(goal.sections.some((section) => section.id === 'automation.intent-policy'), false);
+  assert.equal(goal.sections.some((section) => section.id === 'runtime.automation-create-state'), false);
+});
+
+test('automation center entry and proposal lifecycle render from trusted conversation metadata', () => {
+  const collecting = assembleSystemContext({
+    mode: 'chat',
+    automationCreateContext: {
+      kind: 'automation_create',
+      source: 'automation_center',
+      status: 'collecting',
+      updatedAt: '2026-08-05T00:00:00.000Z',
+    },
+  });
+  const entryState = collecting.sections.find((section) => section.id === 'runtime.automation-create-state');
+  assert.ok(entryState);
+  assert.equal(entryState.layer, 'L7_CONTINUITY');
+  assert.match(entryState.content, /strong Automation Center entry/);
+  assert.match(entryState.content, /Do not ask whether they want automation/);
+  assert.equal(entryState.source.contextSource, 'automation_center');
+  assert.equal(entryState.source.status, 'collecting');
+
+  const proposed = assembleSystemContext({
+    mode: 'chat',
+    automationCreateContext: {
+      kind: 'automation_create',
+      source: 'chat',
+      status: 'proposed',
+      activeProposal: {
+        proposalId: 'proposal-1',
+        status: 'proposed',
+      },
+    },
+  });
+  const proposalState = proposed.sections.find((section) => section.id === 'runtime.automation-create-state');
+  assert.ok(proposalState);
+  assert.match(proposalState.content, /already awaiting user action/);
+  assert.match(proposalState.content, /complete revised task and schedule/);
+  assert.equal(proposalState.source.proposalId, 'proposal-1');
+  assert.equal(proposalState.source.proposalStatus, 'proposed');
+});
+
+test('terminal automation creation states suppress unprompted replay', () => {
+  const expectations = new Map([
+    ['created', /Do not propose it again unless the user explicitly starts a new automation request/],
+    ['cancelled', /Do not recreate the same proposal unless the user explicitly asks/],
+    ['failed', /Do not claim success or retry unprompted/],
+  ]);
+
+  for (const [status, pattern] of expectations) {
+    const context = assembleSystemContext({
+      mode: 'chat',
+      automationCreateContext: {
+        kind: 'automation_create',
+        source: 'chat',
+        status,
+      },
+    });
+    const state = context.sections.find((section) => section.id === 'runtime.automation-create-state');
+    assert.ok(state);
+    assert.match(state.content, pattern);
+  }
 });
 
 test('same runtime facts produce stable sections, checksums, and rendered hash', () => {

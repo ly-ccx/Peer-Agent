@@ -268,6 +268,7 @@ describe('agentLoopQoder', () => {
       tools,
       webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
       streamId: 'qoder-loop-thinking-only-after-tools',
+      toolContext: createToolContext({ conversationId: 'conv-qoder-thinking-only', mode: 'chat' }),
       permissionGate: {
         createFilePermissionRequester: () => async () => ({ granted: true }),
         createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),

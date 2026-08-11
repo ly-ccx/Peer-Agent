@@ -89,6 +89,13 @@ export interface SkillSummary {
   readonly scope: SkillScope;
   /** scope=workspace 时对应的工作空间绝对路径。 */
   readonly workspacePath?: string | null;
+  /** 市场/来源图标 URL；本地 skill 可为空。 */
+  readonly iconUrl?: string | null;
+  /**
+   * 安装来源标识。
+   * 例：skillhub、aone-open；本地手工 skill 可为空。
+   */
+  readonly source?: string | null;
 }
 
 export interface SkillDetail extends SkillSummary {
@@ -111,12 +118,14 @@ export interface AvailableSkillSummary {
   readonly linked: boolean;
 }
 
-/** linkSkill / unlinkSkill 的返回结果。 */
+/** linkSkill / unlinkSkill / uninstallSkill 的返回结果。 */
 export interface SkillLinkResult {
   readonly ok: boolean;
   readonly error?: string;
   readonly detail?: string;
   readonly alreadyLinked?: boolean;
+  /** uninstallSkill 成功时：deleted=删除用户安装目录；unlinked=仅取消借用软链。 */
+  readonly mode?: 'deleted' | 'unlinked';
 }
 
 export interface RuntimeProjection {
@@ -992,3 +1001,6 @@ export * from './system-context.ts';
 export * from './goal.ts';
 export * from './updater.ts';
 export * from './appshot.ts';
+export * from './automation.ts';
+export * from './task-overview.ts';
+export * from './skill-marketplace.ts';

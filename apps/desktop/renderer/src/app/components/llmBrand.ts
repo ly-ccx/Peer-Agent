@@ -48,7 +48,7 @@ const BRAND_LABELS: Readonly<Record<LlmBrandId, string>> = {
 };
 
 function matchBrand(value: string): LlmBrandId | null {
-  // Channel ids like opencode-go-anthropic / opencode-go-openai must win before generic anthropic/openai.
+  // Channel / template ids like opencode-go / opencode-go-openai must win before generic anthropic/openai.
   if (/opencode|opencode-go|\bzen\b/.test(value)) return 'opencode';
   if (/\b(anthropic|claude)\b/.test(value)) return 'anthropic';
   if (/\b(google|gemini|gemma|vertex)\b/.test(value)) return 'google';

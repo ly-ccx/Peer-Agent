@@ -45,3 +45,51 @@ export function resolveKeyboardActiveScrollTarget(
   if (!keyboardNav || activeItemIndex < 0) return { kind: 'none' };
   return { kind: 'index', index: activeItemIndex };
 }
+
+export interface CascadingSubmenuAnchorInput {
+  readonly panelRect: { readonly left: number; readonly right: number; readonly top: number };
+  readonly rowRect: { readonly top: number };
+  readonly submenuWidth: number;
+  readonly submenuHeight: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly margin?: number;
+  readonly gap?: number;
+}
+
+export interface CascadingSubmenuAnchor {
+  readonly left: number;
+  readonly top: number;
+  readonly side: 'left' | 'right';
+  readonly maxHeight: number;
+}
+
+/**
+ * Anchor the submenu to the hovered primary row (not the primary panel top).
+ * Flip left near the right edge; if it would overflow the bottom, slide up within the viewport.
+ */
+export function resolveCascadingSubmenuAnchor(input: CascadingSubmenuAnchorInput): CascadingSubmenuAnchor {
+  const margin = input.margin ?? 8;
+  const gap = input.gap ?? 0;
+  const subW = Math.max(0, input.submenuWidth);
+  const measuredH = Math.max(0, input.submenuHeight);
+  // Source of truth: the hovered provider row, not panelRect.top.
+  const preferredTop = Math.max(margin, input.rowRect.top);
+  const maxHeight = Math.max(160, input.viewportHeight - preferredTop - margin);
+  const subH = measuredH > 0 ? Math.min(measuredH, maxHeight) : maxHeight;
+
+  let left = input.panelRect.right + gap;
+  let side: CascadingSubmenuAnchor['side'] = 'right';
+  if (left + subW > input.viewportWidth - margin) {
+    left = Math.max(margin, input.panelRect.left - subW - gap);
+    side = 'left';
+  }
+
+  let top = preferredTop;
+  if (top + subH > input.viewportHeight - margin) {
+    top = Math.max(margin, input.viewportHeight - subH - margin);
+  }
+
+  const finalMaxHeight = Math.max(160, input.viewportHeight - top - margin);
+  return { left, top, side, maxHeight: finalMaxHeight };
+}

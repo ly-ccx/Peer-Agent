@@ -52,12 +52,17 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onAddFiles,
   onAttachSessionReference,
   onPrimaryAction,
+  editingMessage = null,
+  onCancelEdit,
+  homeModelSlot = null,
+  variant = 'conversation',
 }: {
   readonly conversationId: string | null;
   readonly hasProvider: boolean;
   readonly isBusy: boolean;
   readonly isStreaming: boolean;
   readonly isZh: boolean;
+  readonly variant?: 'conversation' | 'home';
   readonly attachments: readonly ChatAttachment[];
   readonly attachmentError: string | null;
   readonly messageQueue: readonly QueuedMessage[];
@@ -68,15 +73,23 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
+  /** 正在编辑的用户消息引用（底部输入框上方展示）。 */
+  readonly editingMessage?: { messageId: string; preview: string } | null;
+  readonly onCancelEdit?: () => void;
+  readonly homeModelSlot?: React.ReactNode;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 附件条挂在壳层 form 的兄弟节点，绝不进入 ComposerDraftField 子树。
   // 即使 React 协调时 field 重渲，attachment-strip 也不在 draft 叶子 DOM 子树内，
   // 可避免 field-sizing / 文本重排把大图缩略图一起刷掉。
-  const attachmentSlot = useMemo(
-    () => (
-      <>
+  // 必须是单个包裹节点：composer 是 grid，多个裸兄弟节点会被塞进同一网格单元
+  // 并与 textarea 叠放（缩略图压住文字）。包一层后附件条恒为一个 grid item，
+  // 占据独立的 home-attachments 行；无附件且无错误时整行不渲染，不占高度。
+  const attachmentSlot = useMemo(() => {
+    if (!attachments.length && !attachmentError) return null;
+    return (
+      <div className="composer-attachment-row">
         <AttachmentStrip
           attachments={attachments}
           onRemove={onRemoveAttachment}
@@ -85,20 +98,36 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
           isZh={isZh}
         />
         {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
-      </>
-    ),
-    [attachmentError, attachments, isZh, onPreviewImage, onRemoveAttachment, onReorderAttachment],
-  );
+      </div>
+    );
+  }, [attachmentError, attachments, isZh, onPreviewImage, onRemoveAttachment, onReorderAttachment]);
 
   return (
     <form
-      className="chat-composer"
+      className={`chat-composer ${variant === 'home' ? 'chat-composer--home' : 'chat-composer--compact'}`}
       onSubmit={(event) => {
         event.preventDefault();
         onPrimaryAction();
       }}
     >
-      {/* 顺序靠 CSS order：菜单(0) → 附件(1) → textarea/按钮(2/3) */}
+      {/* 顺序靠 CSS order：编辑引用(-1) → 菜单(0) → 附件(1) → textarea/按钮(2/3) */}
+      {editingMessage ? (
+        <div className="composer-edit-banner" role="status">
+          <div className="composer-edit-banner-main">
+            <span className="composer-edit-banner-label">{isZh ? '正在编辑' : 'Editing'}</span>
+            <span className="composer-edit-banner-preview">
+              {editingMessage.preview || (isZh ? '（空消息）' : '(empty message)')}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="composer-edit-banner-cancel"
+            onClick={() => onCancelEdit?.()}
+          >
+            {isZh ? '取消' : 'Cancel'}
+          </button>
+        </div>
+      ) : null}
       {attachmentSlot}
       <ComposerDraftField
         conversationId={conversationId}
@@ -108,11 +137,15 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         isZh={isZh}
         hasAttachments={attachments.length > 0}
         messageQueue={messageQueue}
+        variant={variant}
+        homeModelSlot={homeModelSlot}
         fileInputRef={fileInputRef}
         onPaste={onPaste}
         onAddFiles={onAddFiles}
         onAttachSessionReference={onAttachSessionReference}
         onPrimaryAction={onPrimaryAction}
+        editingMessage={editingMessage}
+        onCancelEdit={onCancelEdit}
       />
     </form>
   );
@@ -130,11 +163,15 @@ const ComposerDraftField = memo(function ComposerDraftField({
   isZh,
   hasAttachments,
   messageQueue,
+  variant,
+  homeModelSlot,
   fileInputRef,
   onPaste,
   onAddFiles,
   onAttachSessionReference,
   onPrimaryAction,
+  editingMessage = null,
+  onCancelEdit,
 }: {
   readonly conversationId: string | null;
   readonly hasProvider: boolean;
@@ -143,11 +180,15 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly isZh: boolean;
   readonly hasAttachments: boolean;
   readonly messageQueue: readonly QueuedMessage[];
+  readonly variant: 'conversation' | 'home';
+  readonly homeModelSlot: React.ReactNode;
   readonly fileInputRef: React.RefObject<HTMLInputElement | null>;
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
+  readonly editingMessage?: { messageId: string; preview: string } | null;
+  readonly onCancelEdit?: () => void;
 }) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -383,7 +424,9 @@ const ComposerDraftField = memo(function ComposerDraftField({
         placeholder={hasProvider
           ? isBusy
             ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
-            : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
+            : variant === 'home'
+              ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
+              : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
           : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
         rows={1}
         onPaste={onPaste}
@@ -443,6 +486,11 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
           }
+          if (event.key === 'Escape' && editingMessage) {
+            event.preventDefault();
+            onCancelEdit?.();
+            return;
+          }
           // IME composition (Chinese/Japanese/etc.): Enter confirms candidate, must not send.
           if (
             event.key === 'Enter'
@@ -465,28 +513,42 @@ const ComposerDraftField = memo(function ComposerDraftField({
           event.currentTarget.value = '';
         }}
       />
-      <button
-        type="button"
-        className="composer-attach-btn"
-        disabled={!hasProvider || isStreaming}
-        title={isZh ? '添加附件' : 'Attach file'}
-        aria-label={isZh ? '添加附件' : 'Attach file'}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-        </svg>
-      </button>
+      <div className="composer-home-action-row">
+        <div className="composer-home-action-left">
+          <button
+            type="button"
+            className="composer-attach-btn"
+            disabled={!hasProvider || isStreaming}
+            title={isZh ? '添加附件' : 'Attach file'}
+            aria-label={isZh ? '添加附件' : 'Attach file'}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <svg width="14" height="14" viewBox="4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          {homeModelSlot ? (
+            <div className="composer-home-model-slot">{homeModelSlot}</div>
+          ) : null}
+        </div>
       <button
         type="submit"
         disabled={!hasProvider || (!isStreaming && !hasComposerContent)}
         className={isStreaming ? 'streaming' : undefined}
-        title={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
-        aria-label={isStreaming ? (isZh ? '停止生成' : 'Stop') : (isZh ? '发送' : 'Send')}
+        title={isStreaming
+          ? (isZh ? '停止生成' : 'Stop')
+          : editingMessage
+            ? (isZh ? '保存并发送' : 'Save and send')
+            : (isZh ? '发送' : 'Send')}
+        aria-label={isStreaming
+          ? (isZh ? '停止生成' : 'Stop')
+          : editingMessage
+            ? (isZh ? '保存并发送' : 'Save and send')
+            : (isZh ? '发送' : 'Send')}
       >
         {isStreaming ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="5" y="5" width="14" height="14" rx="2.5" />
           </svg>
         ) : (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -494,6 +556,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
           </svg>
         )}
       </button>
+      </div>
     </>
   );
 });

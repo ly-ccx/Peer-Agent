@@ -3,6 +3,7 @@ import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
 import { contextAccountingModelKey, type LlmSubscriptionQuota, type LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
+import type { CliUpdateController, CliUpdateStatus } from './cli-update.ts';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { ThemedText, ThemedTextarea } from './themed-primitives.tsx';
@@ -10,6 +11,7 @@ import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections, resolveTuiCommandInput } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
+import { formatPeerVersionLine, resolvePeerCliVersion } from './cli-version.ts';
 import { resolveLeaderKey } from './leader-key.ts';
 import {
   createConversationRenderWindowState,
@@ -18,6 +20,7 @@ import {
   type ConversationRenderWindow,
   type ConversationRenderWindowState,
 } from './conversation-render-window.ts';
+import { measureTuiPerf, recordTuiPerf } from './tui-perf.ts';
 import {
   conversationMessageRenderId,
   latestUserMessage,
@@ -1184,16 +1187,23 @@ function findPendingUserInput(messages: readonly ChatMessage[]): TuiUserInputReq
 }
 
 
-export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
   readonly modelSelection?: TuiModelSelectionControl;
   readonly languageStore?: TuiLanguageStore;
   readonly themeStore?: TuiThemeStore;
+  readonly cliUpdate?: CliUpdateController;
   readonly onQuit: () => void;
 }) {
   const terminal = useTerminalDimensions();
+  const [cliUpdateStatus, setCliUpdateStatus] = useState<CliUpdateStatus>(() => cliUpdate?.getStatus() ?? { phase: 'idle' });
+  useEffect(() => {
+    if (!cliUpdate) return;
+    const unsubscribe = cliUpdate.subscribe(setCliUpdateStatus);
+    return () => { unsubscribe(); };
+  }, [cliUpdate]);
   const controllerRef = useRef<ChatController | null>(null);
   const composerRef = useRef<TextareaRenderable | null>(null);
   // 与 Desktop 对齐：goal 模式的自驱执行由共享 Goal Runner（goal-plan-store
@@ -1426,7 +1436,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     ?? snapshot.session?.conversationId
     ?? null;
   const renderProjection = useMemo(
-    () => projectConversationRenderWindow(snapshot.messages, renderWindowState),
+    () => measureTuiPerf(
+      'conversation.project',
+      () => projectConversationRenderWindow(snapshot.messages, renderWindowState),
+      { messages: snapshot.messages.length, mode: renderWindowState.mode },
+    ),
     [snapshot.messages, renderWindowState],
   );
   useEffect(() => {
@@ -1703,6 +1717,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   useEffect(() => controller.subscribe((next) => {
     persistence.syncSnapshot(next);
     setSnapshot(next);
+    recordTuiPerf('app.snapshot', 0, {
+      lane: 'state',
+      messages: next.messages.length,
+      running: next.status === 'running',
+    });
   }), [controller, persistence]);
   useEffect(() => persistence.subscribeExternalChanges(() => {
     setExternalConversationRevision((revision) => revision + 1);
@@ -1879,6 +1898,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       return `Goal is ${runnerStatus}; ${control} is unavailable`;
     },
     quit: onQuit,
+    showVersion: () => formatPeerVersionLine(resolvePeerCliVersion()),
     setNotice: setCommandNotice,
     updateExperience: setExperience,
   });
@@ -1904,6 +1924,20 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   };
 
   useKeyboard((key) => {
+    const updateCanPrompt = cliUpdateStatus.phase === 'available'
+      && experience.surface.type === 'composer'
+      && snapshot.status === 'idle'
+      && !approval
+      && !pendingUserInput
+      && snapshot.plan?.status !== 'awaiting_approval';
+    if (updateCanPrompt && (key.name === 'y' || key.name === 'enter')) {
+      void cliUpdate?.install();
+      return;
+    }
+    if (updateCanPrompt && (key.name === 'n' || key.name === 'escape')) {
+      cliUpdate?.dismiss();
+      return;
+    }
     const keyMeta = Boolean((key as { meta?: boolean; super?: boolean }).meta || (key as { super?: boolean }).super);
     const liveSelection = renderer.getSelection()?.getSelectedText?.() ?? selectedTextRef.current;
     const hasSelection = liveSelection.trim().length > 0 || hasTextSelection;
@@ -3072,6 +3106,24 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             <text fg={COLOR.muted}>{tuiMessage(locale, 'picker.skillmcp.searchLabel')} {(skillSurface ?? mcpSurface)!.query || tuiMessage(locale, 'picker.skillmcp.searchPlaceholder')}</text>
           </box>
         </box>
+      ) : null}
+
+      {cliUpdateStatus.phase === 'available'
+        && experience.surface.type === 'composer'
+        && snapshot.status === 'idle'
+        && !approval
+        && !pendingUserInput
+        && snapshot.plan?.status !== 'awaiting_approval' ? (
+        <box flexDirection="column" flexShrink={0} border={['top']} borderColor={COLOR.accent} paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
+          <text fg={COLOR.text}>Peer Agent {cliUpdateStatus.update.latestVersion} is available (current {cliUpdateStatus.update.currentVersion}).</text>
+          <text fg={COLOR.muted}>Press Y or Enter to update with {cliUpdateStatus.update.source}; N or Esc to dismiss.</text>
+        </box>
+      ) : cliUpdateStatus.phase === 'installing' ? (
+        <box flexShrink={0} paddingLeft={layout.outerPadding}><text fg={COLOR.muted}>Updating Peer Agent…</text></box>
+      ) : cliUpdateStatus.phase === 'installed' ? (
+        <box flexShrink={0} paddingLeft={layout.outerPadding}><text fg={COLOR.text}>Peer Agent updated. Restart peer to use the new version.</text></box>
+      ) : cliUpdateStatus.phase === 'failed' ? (
+        <box flexShrink={0} paddingLeft={layout.outerPadding}><text fg={COLOR.danger}>Update failed; the current version is unchanged: {cliUpdateStatus.error}</text></box>
       ) : null}
 
       {commandSurface ? (

@@ -31,6 +31,7 @@ import {
 import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
+  DEEPSEEK_ANTHROPIC_BASE_URL,
   GEMINI_CODE_ASSIST_BASE_URL,
   GEMINI_OAUTH_NAME,
   QODER_PRIVATE_NAME,
@@ -537,6 +538,79 @@ export function createLlmConfigStore({
       });
       if (before !== after) changed = true;
     }
+    // DeepSeek 官方改走 Anthropic 兼容入口：旧 openai-chat + api.deepseek.com
+    // 必须迁到 anthropic-messages + api.deepseek.com/anthropic，否则思考强度契约不生效。
+    // 模型侧可能仍持久化旧档位 off/default（UI 会优先读模型字段，导致滑条仍只有“标准思考”）。
+    if (item.channelId === 'deepseek') {
+      const baseUrl = String(item.baseUrl || '').replace(/\/+$/, '');
+      const isLegacyDeepSeekOpenAI =
+        !baseUrl
+        || baseUrl === 'https://api.deepseek.com'
+        || baseUrl === 'https://api.deepseek.com/v1';
+      if (isLegacyDeepSeekOpenAI && baseUrl !== DEEPSEEK_ANTHROPIC_BASE_URL) {
+        item.baseUrl = DEEPSEEK_ANTHROPIC_BASE_URL;
+        changed = true;
+      }
+      if (item.wireOverride === 'openai-chat' || item.wireOverride === 'openai-responses') {
+        delete item.wireOverride;
+        changed = true;
+      }
+      if (item.provider === 'openai') {
+        item.provider = 'anthropic';
+        changed = true;
+      }
+      // 渠道能力真源：off/low/high/max（默认 high）。覆盖历史 off/default 与空值。
+      const targetLevels = ['off', 'low', 'high', 'max'];
+      const currentLevels = Array.isArray(item.reasoningEffortLevels)
+        ? item.reasoningEffortLevels
+        : null;
+      const levelsStale = !currentLevels
+        || currentLevels.length !== targetLevels.length
+        || currentLevels.some((level, index) => level !== targetLevels[index]);
+      if (levelsStale) {
+        item.reasoningEffortLevels = [...targetLevels];
+        changed = true;
+      }
+      if (item.reasoningDefaultEffort !== 'high') {
+        item.reasoningDefaultEffort = 'high';
+        changed = true;
+      }
+      if (item.supportsReasoning !== true) {
+        item.supportsReasoning = true;
+        changed = true;
+      }
+      if (item.reasoningParamStyle !== 'anthropic-enabled-output-effort') {
+        item.reasoningParamStyle = 'anthropic-enabled-output-effort';
+        changed = true;
+      }
+    }
+    // Kimi Coding Plan / Moonshot：旧配置可能仍是 off/default + paramStyle none，
+    // UI 优先读模型持久化字段会导致滑条只有“标准思考”。强制对齐官方 K3 多档。
+    if (item.channelId === 'kimi-coding-plan' || item.channelId === 'moonshot') {
+      const targetLevels = ['off', 'low', 'default', 'max'];
+      const currentLevels = Array.isArray(item.reasoningEffortLevels)
+        ? item.reasoningEffortLevels
+        : null;
+      const levelsStale = !currentLevels
+        || currentLevels.length !== targetLevels.length
+        || currentLevels.some((level, index) => level !== targetLevels[index]);
+      if (levelsStale) {
+        item.reasoningEffortLevels = [...targetLevels];
+        changed = true;
+      }
+      if (item.reasoningDefaultEffort !== 'default') {
+        item.reasoningDefaultEffort = 'default';
+        changed = true;
+      }
+      if (item.supportsReasoning !== true) {
+        item.supportsReasoning = true;
+        changed = true;
+      }
+      if (item.reasoningParamStyle !== 'openai-effort') {
+        item.reasoningParamStyle = 'openai-effort';
+        changed = true;
+      }
+    }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
         validateCustomHeaders(item.customHeaders);
@@ -816,10 +890,36 @@ export function createLlmConfigStore({
       supportsVision: item.supportsVision ?? undefined,
       supportsReasoning: item.supportsReasoning ?? undefined,
       supportsPromptCaching: item.supportsPromptCaching ?? undefined,
-      reasoningParamStyle: item.reasoningParamStyle ?? undefined,
-      reasoningEffortMap: item.reasoningEffortMap ?? undefined,
-      reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
-      reasoningDefaultEffort: item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort ?? undefined,
+      // DeepSeek：渠道级思考契约优先于模型历史缓存，避免 off/default / 空 paramStyle 盖住新能力。
+      // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
+      reasoningParamStyle: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+      )
+        ? (resolved?.reasoningParamStyle ?? item.reasoningParamStyle ?? undefined)
+        : (item.reasoningParamStyle ?? undefined),
+      reasoningEffortMap: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+      )
+        ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
+        : (item.reasoningEffortMap ?? undefined),
+      reasoningEffortLevels: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+          ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
+          : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
+      ) ?? undefined,
+      reasoningDefaultEffort: (
+        item.channelId === 'deepseek'
+        || item.channelId === 'kimi-coding-plan'
+        || item.channelId === 'moonshot'
+          ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
+          : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
+      ) ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
@@ -1512,7 +1612,152 @@ export function createLlmConfigStore({
     return { updated, examined: items.length, skipped: false };
   }
 
-  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, backfillMissingPricingFromModelsDev };
+
+  async function completePrompt({ id, prompt, maxTokens = 400 } = {}) {
+    const connectionId = String(id || '').trim();
+    const userPrompt = String(prompt || '').trim();
+    if (!connectionId) return { success: false, error: 'Provider not found', text: '' };
+    if (!userPrompt) return { success: false, error: 'Prompt required', text: '' };
+
+    const items = readAll();
+    const item = items.find((entry) => entry.id === connectionId);
+    if (!item) return { success: false, error: 'Provider not found', text: '' };
+
+    // One-shot completion is for API-key providers. OAuth/subscription models use the chat runtime.
+    if (isOAuthAuthMethod(item.authMethod) || isLocalCliAuthMethod(item.authMethod)) {
+      return {
+        success: false,
+        error: 'Selected model does not support one-shot detection. Choose an API-key model.',
+        text: '',
+      };
+    }
+
+    const apiKey = readApiKey(item);
+    if (!apiKey) return { success: false, error: 'API key not configured', text: '' };
+
+    const start = Date.now();
+    const tokenLimit = Math.max(64, Math.min(1200, Number(maxTokens) || 400));
+    try {
+      const resolved = resolveChannel({ ...item, apiKey });
+      const fetchImpl = providerFetch;
+      let text = '';
+      if (resolved.wire === 'anthropic-messages') {
+        const res = await fetchImpl(resolved.endpoint, {
+          method: 'POST',
+          headers: resolved.headers,
+          body: JSON.stringify({
+            model: item.model,
+            max_tokens: tokenLimit,
+            messages: [{ role: 'user', content: userPrompt }],
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error: body?.error?.message || `HTTP ${res.status}`,
+            text: '',
+            latencyMs: Date.now() - start,
+          };
+        }
+        const blocks = Array.isArray(body?.content) ? body.content : [];
+        text = blocks.map((block) => block?.text || '').join('').trim();
+      } else if (resolved.wire === 'openai-responses') {
+        const res = await fetchImpl(resolved.endpoint, {
+          method: 'POST',
+          headers: resolved.headers,
+          body: JSON.stringify({
+            model: item.model,
+            input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
+            max_output_tokens: tokenLimit,
+            store: false,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error: body?.error?.message || `HTTP ${res.status}`,
+            text: '',
+            latencyMs: Date.now() - start,
+          };
+        }
+        if (typeof body?.output_text === 'string') text = body.output_text;
+        else {
+          const outputs = Array.isArray(body?.output) ? body.output : [];
+          text = outputs
+            .flatMap((itemOut) => (Array.isArray(itemOut?.content) ? itemOut.content : []))
+            .map((part) => part?.text || '')
+            .join('')
+            .trim();
+        }
+      } else if (resolved.wire === 'gemini') {
+        const res = await fetchImpl(resolved.testEndpoint || resolved.endpoint, {
+          method: 'POST',
+          headers: resolved.headers,
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: { maxOutputTokens: tokenLimit },
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error: body?.error?.message || `HTTP ${res.status}`,
+            text: '',
+            latencyMs: Date.now() - start,
+          };
+        }
+        const parts = body?.candidates?.[0]?.content?.parts;
+        text = Array.isArray(parts) ? parts.map((part) => part?.text || '').join('').trim() : '';
+      } else {
+        const res = await fetchImpl(resolved.endpoint, {
+          method: 'POST',
+          headers: resolved.headers,
+          body: JSON.stringify({
+            model: item.model,
+            messages: [{ role: 'user', content: userPrompt }],
+            max_tokens: tokenLimit,
+            temperature: 0.2,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            success: false,
+            error: body?.error?.message || `HTTP ${res.status}`,
+            text: '',
+            latencyMs: Date.now() - start,
+          };
+        }
+        text = String(body?.choices?.[0]?.message?.content || '').trim();
+      }
+      if (!text) {
+        return { success: false, error: 'Empty model response', text: '', latencyMs: Date.now() - start };
+      }
+      return {
+        success: true,
+        text,
+        model: item.model,
+        providerId: item.id,
+        latencyMs: Date.now() - start,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err?.message || String(err),
+        text: '',
+        latencyMs: Date.now() - start,
+      };
+    }
+  }
+
+  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start, fetchImpl) {

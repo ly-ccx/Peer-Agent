@@ -62,6 +62,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
+  readImageDataUrl: (absPath, workspaceRoot, relPath) =>
+    ipcRenderer.invoke('file:read-image-data-url', { absPath, workspaceRoot, relPath }),
+  writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
+  mkdir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:mkdir', { absPath, workspaceRoot, relPath }),
   readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
   /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
   watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
@@ -141,6 +145,16 @@ contextBridge.exposeInMainWorld('peerAgent', {
   listAvailableSkills: () => ipcRenderer.invoke('skills:list-available'),
   linkSkill: (skillId) => ipcRenderer.invoke('skills:link', { skillId }),
   unlinkSkill: (skillId) => ipcRenderer.invoke('skills:unlink', { skillId }),
+  uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', { skillId }),
+  listMarketplaceSkills: () => ipcRenderer.invoke('skills:marketplace:list'),
+  getMarketplaceSkillDetail: (catalogId) => ipcRenderer.invoke('skills:marketplace:get-detail', { catalogId }),
+  installMarketplaceSkill: (catalogId) => ipcRenderer.invoke('skills:marketplace:install', { catalogId }),
+  querySkillHubSkills: (query) => ipcRenderer.invoke('skills:skillhub:query', query || {}),
+  getSkillHubSkillDetail: (identity) => ipcRenderer.invoke('skills:skillhub:get-detail', identity || {}),
+  getSkillHubSyncStatus: () => ipcRenderer.invoke('skills:skillhub:get-status'),
+  syncSkillHubSkills: (options) => ipcRenderer.invoke('skills:skillhub:sync', options || {}),
+  installSkillHubSkill: (identity) => ipcRenderer.invoke('skills:skillhub:install', identity || {}),
+  listSkillHubCategories: () => ipcRenderer.invoke('skills:skillhub:list-categories'),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
@@ -177,6 +191,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsList: (params) => ipcRenderer.invoke('conversations:list', params),
   usageGetStats: () => ipcRenderer.invoke('usage:stats'),
   usageGetDaily: (params) => ipcRenderer.invoke('usage:daily', params),
+  usageGetDay: (params) => ipcRenderer.invoke('usage:day', params),
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
@@ -204,13 +219,38 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsAutoArchive: (params) => ipcRenderer.invoke('conversations:auto-archive', params),
   conversationsDelete: (params) => ipcRenderer.invoke('conversations:delete', params),
   conversationsAddUsage: (params) => ipcRenderer.invoke('conversations:add-usage', params),
+  automationsBootstrap: () => ipcRenderer.invoke('automations:bootstrap'),
+  automationsList: (params) => ipcRenderer.invoke('automations:list', params),
+  automationsGet: (params) => ipcRenderer.invoke('automations:get', params),
+  automationsCreate: (params) => ipcRenderer.invoke('automations:create', params),
+  automationsUpdate: (params) => ipcRenderer.invoke('automations:update', params),
+  automationRunsList: (params) => ipcRenderer.invoke('automations:runs:list', params),
+  automationRunsGet: (params) => ipcRenderer.invoke('automations:runs:get', params),
+  automationsRunNow: (params) => ipcRenderer.invoke('automations:run-now', params),
+  automationRunsRetry: (params) => ipcRenderer.invoke('automations:runs:retry', params),
+  automationRunsCancel: (params) => ipcRenderer.invoke('automations:runs:cancel', params),
+  automationsSetRuntimePaused: (params) => ipcRenderer.invoke('automations:runtime:set-paused', params),
+  automationProposalAct: (params) => ipcRenderer.invoke('automations:proposal:act', params),
+  onAutomationsChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('automations:changed', handler);
+    return () => ipcRenderer.removeListener('automations:changed', handler);
+  },
+  onAutomationOpenRun: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('automations:open-run', handler);
+    return () => ipcRenderer.removeListener('automations:open-run', handler);
+  },
   goalPlansList: (params) => ipcRenderer.invoke('goalPlans:list', params),
+  taskOverviewList: (params) => ipcRenderer.invoke('taskOverview:list', params),
   goalPlansAwaitingCounts: () => ipcRenderer.invoke('goalPlans:awaiting-counts'),
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),
   goalPlansApprove: (params) => ipcRenderer.invoke('goalPlans:approve', params),
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
+  goalPlansMarkRequestedUserInput: (params) =>
+    ipcRenderer.invoke('goalPlans:mark-requested-user-input', params),
   goalPlansRecordManualConfirmation: (params) => ipcRenderer.invoke('goalPlans:record-manual-confirmation', params),
   goalPlansRecordTaskEvidence: (params) => ipcRenderer.invoke('goalPlans:record-task-evidence', params),
   goalPlansDelete: (params) => ipcRenderer.invoke('goalPlans:delete', params),
@@ -224,12 +264,18 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('goalPlans:changed', handler);
     return () => ipcRenderer.removeListener('goalPlans:changed', handler);
   },
+  onTaskOverviewChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('taskOverview:changed', handler);
+    return () => ipcRenderer.removeListener('taskOverview:changed', handler);
+  },
   onGoalRunnerChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('goalRunner:changed', handler);
     return () => ipcRenderer.removeListener('goalRunner:changed', handler);
   },
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
+  chatStartTask: (params) => ipcRenderer.invoke('chat:start-task', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),
   chatStreamListActive: () => ipcRenderer.invoke('chat:stream:list-active'),
@@ -331,6 +377,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmRemoveGroup: (params) => ipcRenderer.invoke('llm:remove-group', params),
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
+  llmComplete: (params) => ipcRenderer.invoke('llm:complete', params),
   llmGetSubscriptionQuota: (params) => ipcRenderer.invoke('llm:quota', params),
   llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
   llmOAuthOpenPending: () => ipcRenderer.invoke('llm:oauth:open-pending'),

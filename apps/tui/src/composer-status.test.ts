@@ -83,8 +83,8 @@ describe('composer status', () => {
   });
 
   test('uses the repository model-catalog window for supported GPT models', () => {
-    expect(contextWindowForModel('gpt-5.6-sol · ChatGPT')).toBe(258_000);
-    expect(contextWindowForModel('gpt-5.5')).toBe(258_000);
+    expect(contextWindowForModel('gpt-5.6-sol · ChatGPT')).toBe(272_000);
+    expect(contextWindowForModel('gpt-5.5')).toBe(272_000);
     expect(contextWindowForModel('custom-model')).toBeUndefined();
   });
 

@@ -29,6 +29,7 @@ import {
   type WorkbenchFileMode,
 } from './documentSessionState';
 import { defaultModeForKind, detectFileKind } from './file-preview/fileTypes';
+import { workbenchIsLayoutVisible } from './workbenchLayoutProjection';
 import {
   normalizeWorkbenchOpenMap,
   resolveWorkbenchOpen,
@@ -99,6 +100,8 @@ interface WorkbenchState {
   filesTarget: WorkbenchFilesTarget | null;
   browserSession: BrowserSessionState;
   documentSession: DocumentSessionState;
+  /** 工作台点击后台线程卡片后，右侧 Threads 面板聚焦的 shell taskId。 */
+  focusThreadTaskId: string | null;
 }
 
 type BrowserSessionUpdater =
@@ -130,6 +133,8 @@ interface WorkbenchActions {
   ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
+  /** 展开右侧面板并打开后台线程 Tab；可选聚焦某个 shell taskId。 */
+  openBackgroundThread: (taskId?: string | null) => void;
   setBrowserSession: (next: BrowserSessionUpdater) => void;
   setDocumentSession: (next: DocumentSessionUpdater) => void;
 }
@@ -193,6 +198,7 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
   const collapsedRef = useRef<boolean>(initial.sidebarOpen === false);
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
+  const [focusThreadTaskId, setFocusThreadTaskId] = useState<string | null>(null);
 
   const currentSessionKey = workbenchSessionKey(conversationId);
   const open = resolveWorkbenchOpen(openByConversation, conversationId, legacyOpenDefault);
@@ -364,6 +370,18 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
+  const openBackgroundThread = useCallback((taskId?: string | null) => {
+    const normalized =
+      typeof taskId === 'string' && taskId.trim() !== ''
+        ? taskId.replace(/^shell:/, '').trim()
+        : null;
+    setFocusThreadTaskId(normalized);
+    const key = workbenchSessionKey(conversationId);
+    setActiveTabMap((prev) => (prev[key] === 'threads' ? prev : { ...prev, [key]: 'threads' }));
+    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
+    schedulePersist();
+  }, [conversationId, schedulePersist]);
+
   const registerGoalSlot = useCallback((el: HTMLElement | null) => {
     setGoalSlotState((prev) => (prev === el ? prev : el));
   }, []);
@@ -453,10 +471,10 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     document.documentElement.style.setProperty('--za-sidebar-current-width', `${sidebarWidth}px`);
   }, [sidebarWidth]);
 
-  // 同步 CSS data 属性：是否展开、sidebar 是否收起（统一来源）
+  // 根布局只投影当前可见的 Workbench；离开 Chat 时保留 open 状态但释放第三列。
   useEffect(() => {
-    document.documentElement.dataset.workbenchOpen = open ? 'true' : 'false';
-  }, [open]);
+    document.documentElement.dataset.workbenchOpen = workbenchIsLayoutVisible(open, isPageActive) ? 'true' : 'false';
+  }, [open, isPageActive]);
   useEffect(() => {
     document.documentElement.dataset.sidebarCollapsed = sidebarCollapsed ? 'true' : 'false';
   }, [sidebarCollapsed]);
@@ -515,6 +533,7 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     filesTarget,
     browserSession,
     documentSession,
+    focusThreadTaskId,
     conversationId,
     setOpen,
     toggleOpen,
@@ -529,14 +548,15 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
     openFile,
     openDiff,
     revealInFiles,
+    openBackgroundThread,
     setBrowserSession,
     setDocumentSession,
   }), [
     open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, conversationId,
+    filesTarget, browserSession, documentSession, focusThreadTaskId, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
-    setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, setBrowserSession,
-    setDocumentSession,
+    setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, openBackgroundThread,
+    setBrowserSession, setDocumentSession,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;

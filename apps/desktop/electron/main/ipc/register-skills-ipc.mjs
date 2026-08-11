@@ -18,6 +18,16 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
     listAvailable: assertFunction(skills?.listAvailable, 'skills.listAvailable'),
     link: assertFunction(skills?.link, 'skills.link'),
     unlink: assertFunction(skills?.unlink, 'skills.unlink'),
+    uninstall: assertFunction(skills?.uninstall, 'skills.uninstall'),
+    marketplaceList: assertFunction(skills?.marketplaceList, 'skills.marketplaceList'),
+    marketplaceGetDetail: assertFunction(skills?.marketplaceGetDetail, 'skills.marketplaceGetDetail'),
+    marketplaceInstall: assertFunction(skills?.marketplaceInstall, 'skills.marketplaceInstall'),
+    skillHubQuery: assertFunction(skills?.skillHubQuery, 'skills.skillHubQuery'),
+    skillHubGetDetail: assertFunction(skills?.skillHubGetDetail, 'skills.skillHubGetDetail'),
+    skillHubGetStatus: assertFunction(skills?.skillHubGetStatus, 'skills.skillHubGetStatus'),
+    skillHubSync: assertFunction(skills?.skillHubSync, 'skills.skillHubSync'),
+    skillHubInstall: assertFunction(skills?.skillHubInstall, 'skills.skillHubInstall'),
+    skillHubListCategories: assertFunction(skills?.skillHubListCategories, 'skills.skillHubListCategories'),
   };
 
   return Object.freeze([
@@ -31,6 +41,16 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
       ipc.handle('skills:list-available', () => ports.listAvailable());
       ipc.handle('skills:link', (_event, { skillId }) => ports.link(skillId));
       ipc.handle('skills:unlink', (_event, { skillId }) => ports.unlink(skillId));
+      ipc.handle('skills:uninstall', (_event, { skillId }) => ports.uninstall(skillId));
+      ipc.handle('skills:marketplace:list', () => ports.marketplaceList());
+      ipc.handle('skills:marketplace:get-detail', (_event, { catalogId } = {}) => ports.marketplaceGetDetail(catalogId));
+      ipc.handle('skills:marketplace:install', (_event, { catalogId } = {}) => ports.marketplaceInstall(catalogId));
+      ipc.handle('skills:skillhub:query', (_event, query = {}) => ports.skillHubQuery(query));
+      ipc.handle('skills:skillhub:get-detail', (_event, identity = {}) => ports.skillHubGetDetail(identity));
+      ipc.handle('skills:skillhub:get-status', () => ports.skillHubGetStatus());
+      ipc.handle('skills:skillhub:sync', (_event, options = {}) => ports.skillHubSync(options));
+      ipc.handle('skills:skillhub:install', (_event, identity = {}) => ports.skillHubInstall(identity));
+      ipc.handle('skills:skillhub:list-categories', () => ports.skillHubListCategories());
     }),
   ]);
 }

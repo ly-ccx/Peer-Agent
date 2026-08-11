@@ -721,6 +721,125 @@
   background: var(--chrome-sunken);
 }
 
+/* Skill 胶囊：运行时「正在使用 Skill」+ 技能名 pill，区别于通用 tool-call-card。 */
+.skill-capsule-card {
+  margin: var(--space-1) 0;
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  border-radius: var(--ui-radius-panel, var(--radius-md));
+  background: color-mix(in srgb, var(--azure-soft, #5b8def) 8%, var(--ui-surface-raised, var(--paper-sheet)));
+  overflow: hidden;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+.skill-capsule-card.running {
+  border-color: color-mix(in srgb, var(--azure-soft, #5b8def) 45%, var(--ui-border-subtle, var(--chrome-hairline)));
+}
+.skill-capsule-card.done {
+  background: var(--ui-surface-raised, var(--paper-sheet));
+}
+.skill-capsule-card.expanded {
+  border-color: var(--ui-selected-border, var(--azure-soft));
+}
+.skill-capsule-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  cursor: default;
+}
+.skill-capsule-card:has(.skill-capsule-expand) .skill-capsule-header {
+  cursor: pointer;
+}
+.skill-capsule-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--azure-seal, #3b6fd8);
+}
+.skill-capsule-card.running .skill-capsule-icon {
+  color: var(--azure-soft, #5b8def);
+}
+.skill-capsule-card.done .skill-capsule-icon {
+  color: var(--state-success, #2f9d63);
+}
+.skill-capsule-spinner-svg {
+  animation: spin 0.9s linear infinite;
+}
+.skill-capsule-status {
+  flex-shrink: 0;
+  font-size: var(--ui-font-meta, 12px);
+  font-weight: 600;
+  color: var(--graphite-base);
+  white-space: nowrap;
+}
+.skill-capsule-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 360px);
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-soft, #5b8def) 35%, transparent);
+  background: color-mix(in srgb, var(--azure-soft, #5b8def) 14%, transparent);
+  color: var(--graphite-base);
+}
+.skill-capsule-pill-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--azure-seal, #3b6fd8);
+}
+.skill-capsule-pill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-meta, 12px);
+  color: var(--graphite-soft);
+}
+.skill-capsule-duration {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-mute);
+}
+.skill-capsule-expand {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--graphite-mute);
+  transition: transform var(--za-motion-fast) var(--za-ease-out);
+}
+.skill-capsule-duration + .skill-capsule-expand {
+  margin-left: 0;
+}
+.skill-capsule-output {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--graphite-soft);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--chrome-sunken);
+}
+.timeline-skill {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
 /* request_user_input 交互卡：问题 + 可点击选项 + 等待你输入。
    见 docs/proposals/0004-goal-mode-runtime-gate.md。 */
 .tool-call-card.interaction-card {
@@ -801,6 +920,11 @@
 
 /* ── Composer ── */
 .chat-composer-wrap {
+  /* 变量挂在输入框容器：框内模型/思考与框下工具栏都能继承，并跟随外观 fontScale。 */
+  --composer-addon-height: 1.75rem;
+  --composer-addon-font-size: var(--ui-font-control, 0.8125rem);
+  --composer-addon-color: var(--graphite-fade, var(--graphite-mute));
+  --composer-addon-hover-bg: var(--control-composer);
   padding: var(--space-2) var(--space-6) var(--space-5);
   background: var(--chrome-canvas);
 }
@@ -823,6 +947,11 @@
   flex-wrap: wrap;
 }
 
+/* 框下右侧上下文统计贴右；模型/思考已进输入框。 */
+.chat-composer-toolbar > .token-usage-wrap {
+  margin-left: auto;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -839,14 +968,6 @@
   min-width: 0;
 }
 
-.chat-composer-toolbar {
-  --composer-addon-height: 24px;
-  --composer-addon-font-size: 0.68rem;
-  /* 深色下 mute 过暗；工具栏默认用次级文字色，hover 仍升到 soft。 */
-  --composer-addon-color: var(--graphite-fade, var(--graphite-mute));
-  --composer-addon-hover-bg: var(--control-composer);
-}
-
 .composer-dropdown .pa-dropdown-trigger,
 .token-usage-model {
   height: var(--composer-addon-height);
@@ -857,7 +978,7 @@
   color: var(--composer-addon-color);
   font-size: var(--composer-addon-font-size);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.2;
   box-shadow: none;
 }
 
@@ -894,13 +1015,21 @@
   max-width: 140px;
 }
 
+.composer-workspace-dropdown {
+  max-width: 180px;
+}
+
+.composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
+  display: none;
+}
+
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
    故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
 .pa-dropdown-menu.composer-dropdown {
-  /* 菜单经 portal 投到 body 后脱离 .chat-composer-toolbar,无法继承其上定义的
-     --composer-addon-font-size,导致菜单项 font-size 回退到全局 .pa-dropdown-item
-     (0.82rem) 偏大。此处在菜单根上重新声明该变量,使菜单项字号恢复设计值,与触发器一致。 */
-  --composer-addon-font-size: 0.68rem;
+  /* 菜单经 portal 投到 body 后脱离 .chat-composer-wrap,无法继承其上定义的
+     --composer-addon-font-size,导致菜单项 font-size 回退到全局 .pa-dropdown-item。
+     此处在菜单根上重新声明该变量,使菜单项字号与触发器一致并跟随外观 fontScale。 */
+  --composer-addon-font-size: var(--ui-font-control, 0.8125rem);
   padding: 4px;
   /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。
      覆盖全局 fixed 菜单的 width:var(--pa-dropdown-menu-width)，改回内容自适应。 */
@@ -968,7 +1097,8 @@
 .token-usage {
   font-size: var(--composer-addon-font-size);
   color: var(--composer-addon-color);
-  font-family: var(--font-mono);
+  /* 标签（模型名/思考）用 UI 字体；数字与用量环单独走 mono。 */
+  font-family: var(--font-sans);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -998,12 +1128,14 @@
 }
 .ctx-pct {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--composer-addon-color);
   line-height: 1;
 }
 .token-usage-detail {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   color: var(--graphite-fade);
 }
 .token-usage-model {
@@ -1014,6 +1146,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-sans);
 }
 
 .reasoning-effort-control {
@@ -1030,7 +1163,9 @@
   background: transparent;
   color: var(--composer-addon-color);
   font: inherit;
+  font-family: var(--font-sans);
   font-size: var(--composer-addon-font-size);
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1081,12 +1216,73 @@
   font-weight: 600;
 }
 
-.reasoning-effort-slider {
-  --effort-progress: 0%;
+/* 分档刻度滑条：轨道 / 刻度 / 拇指共用圆心几何
+   centerX = thumb/2 + (100% - thumb) * t ；垂直中线 = shell 50%。 */
+.reasoning-effort-slider-shell {
+  --effort-track-h: 12px;
+  --effort-thumb: 20px;
+  --effort-tick: 4px;
+  --effort-fill: #6ea8ff;
+  --effort-rest: color-mix(in srgb, #9aa4b2 28%, transparent);
+  position: relative;
   display: block;
   width: 100%;
-  height: 22px;
+  height: 28px;
+}
+
+.reasoning-effort-slider-track {
+  position: absolute;
+  /* 全宽：与 range input 同一盒模型，端点圆心落在 thumb/2 与 100%-thumb/2 */
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--effort-track-h);
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--effort-rest);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.reasoning-effort-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--effort-fill);
+}
+
+/* 刻度在 shell 坐标系定位（与拇指圆心一致），固定浅色 */
+.reasoning-effort-slider-tick {
+  position: absolute;
+  top: 50%;
+  width: var(--effort-tick);
+  height: var(--effort-tick);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: none;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.reasoning-effort-slider-tick.is-active {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.reasoning-effort-slider {
+  --effort-progress: 0%;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
   margin: 0;
+  padding: 0;
   appearance: none;
   background: transparent;
   cursor: grab;
@@ -1098,55 +1294,58 @@
 }
 
 .reasoning-effort-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: linear-gradient(
-    90deg,
-    var(--ui-accent, var(--azure-seal)) 0 var(--effort-progress),
-    var(--ui-border-subtle, var(--za-line)) var(--effort-progress) 100%
-  );
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-webkit-slider-thumb {
-  width: 8px;
-  height: 18px;
-  margin-top: -7px;
+  width: var(--effort-thumb);
+  height: var(--effort-thumb);
+  /* 拇指圆心落在 runnable-track 垂直中线 */
+  margin-top: calc((var(--effort-track-h) - var(--effort-thumb)) / 2);
   border: 0;
-  border-radius: 3px;
+  border-radius: 50%;
   appearance: none;
-  background: var(--ui-accent, var(--azure-seal));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 15%, transparent);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 1px 3px rgba(15, 23, 42, 0.18);
   transition: transform 100ms ease, box-shadow 100ms ease;
 }
 
 .reasoning-effort-slider:active::-webkit-slider-thumb {
-  transform: scaleX(1.3);
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 18%, transparent);
+  transform: scale(1.06);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.1),
+    0 2px 8px rgba(15, 23, 42, 0.22);
 }
 
 .reasoning-effort-slider::-moz-range-track {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: var(--ui-border-subtle, var(--za-line));
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-moz-range-progress {
-  height: 4px;
-  border-radius: var(--ui-radius-round);
-  background: var(--ui-accent, var(--azure-seal));
+  height: var(--effort-track-h);
+  border-radius: 999px;
+  background: transparent;
 }
 
 .reasoning-effort-slider::-moz-range-thumb {
-  width: 8px;
-  height: 18px;
+  width: var(--effort-thumb);
+  height: var(--effort-thumb);
   border: 0;
-  border-radius: 3px;
-  background: var(--ui-accent, var(--azure-seal));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 15%, transparent);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 1px 3px rgba(15, 23, 42, 0.18);
 }
 
 .reasoning-effort-slider:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 42%, transparent);
+  outline: 2px solid color-mix(in srgb, #6ea8ff 50%, transparent);
   outline-offset: 2px;
   border-radius: var(--ui-radius-round);
 }
@@ -1162,8 +1361,100 @@
 }
 .token-usage-cost {
   font-size: 0.62rem;
+  font-family: var(--font-mono);
   color: var(--azure-seal);
   font-weight: 500;
+}
+
+
+.token-usage-context-window {
+  display: inline-flex;
+  align-items: center;
+  max-width: 120px;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-family: var(--font-sans);
+  font-size: var(--ui-font-body, 0.875rem);
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-context-window-dropdown .pa-dropdown-trigger {
+  max-width: 140px;
+}
+
+/* 底部输入框上方的「正在编辑」条
+ * 只保留文字层：无边框 / 无底色 / 无阴影 / 无指示条。 */
+.composer-edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  order: -1;
+  flex: 1 1 100%;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 2px 2px 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.chat-composer > .composer-edit-banner {
+  order: -1;
+  flex: 1 1 100%;
+  box-sizing: border-box;
+}
+.composer-edit-banner-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.composer-edit-banner-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--graphite-soft);
+}
+.composer-edit-banner-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--graphite-mute);
+  opacity: 0.92;
+}
+.composer-edit-banner-cancel {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--graphite-mute);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.composer-edit-banner-cancel:hover {
+  background: color-mix(in srgb, var(--graphite-soft) 10%, transparent);
+  color: var(--graphite-soft);
+}
+.composer-edit-banner-cancel:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
 }
 
 .chat-composer {
@@ -1309,13 +1600,14 @@
   transform: translateZ(0);
   backface-visibility: hidden;
 }
-.chat-composer > .attachment-strip,
-.chat-composer > .attachment-error {
+.chat-composer > .composer-attachment-row {
   /* 壳层兄弟节点：强制整行排在 textarea/按钮之上 */
   flex: 0 0 100%;
   order: 1;
-}
-.chat-composer > .attachment-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
   max-height: 132px;
   overflow-y: auto;
   padding: 0 2px;
@@ -1614,6 +1906,32 @@
   gap: 4px;
   flex: 0 0 auto;
 }
+.message-queue-force-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+}
+.message-queue-force-send:hover {
+  border-color: var(--chrome-border);
+  background: var(--azure-soft);
+  color: var(--azure-seal);
+}
+.message-queue-force-send:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
+}
 .message-queue-edit {
   display: inline-flex;
   align-items: center;
@@ -1718,6 +2036,7 @@
 .message-queue-item:focus-within .message-queue-actions {
   opacity: 1;
 }
+.message-queue-force-send,
 .message-queue-edit,
 .message-queue-remove {
   width: 28px;
@@ -2695,6 +3014,25 @@
   -webkit-app-region: no-drag;
 }
 
+.chat-header-automation-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
+  color: var(--azure-seal, #4f7cff);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .chat-header-title {
   font-size: 0.82rem;
   font-weight: 500;
@@ -2733,11 +3071,77 @@
   box-shadow: 0 0 0 2px var(--za-focus);
 }
 
+.chat-task-context {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(42vw, 440px);
+  gap: var(--space-1);
+  padding: 2px 7px 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 20%, var(--ui-border-subtle));
+  border-radius: var(--ui-radius-round, 999px);
+  background: color-mix(in srgb, var(--ui-accent) 7%, transparent);
+  color: var(--graphite-base);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-task-context:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.chat-task-context:focus-visible {
+  outline: 2px solid var(--za-focus);
+  outline-offset: 1px;
+}
+
+.chat-task-context__status {
+  flex: none;
+  color: var(--ui-accent, var(--azure-seal));
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.chat-task-context__status::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 4px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chat-task-context__goal {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--graphite-mute);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-task-context__details {
+  flex: none;
+  color: var(--graphite-soft);
+  font-size: 0.68rem;
+}
+
+.chat-task-context__details::before {
+  content: '·';
+  margin-right: var(--space-1);
+}
+
 .chat-header-right {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   -webkit-app-region: no-drag;
+}
+
+.chat-header-close-btn {
+  margin-left: var(--space-1);
 }
 
 .chat-header-action-btn,
@@ -2983,6 +3387,25 @@
   background: var(--chrome-hover);
 }
 
+button.chat-header-cap-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.chat-header-cap-item:hover {
+  background: var(--chrome-hover);
+}
+
+button.chat-header-cap-item:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+
 .chat-header-cap-dot {
   flex: none;
   width: 7px;
@@ -3130,9 +3553,10 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--composer-addon-color);
+  font-family: var(--font-sans);
   font-size: var(--composer-addon-font-size);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.2;
   box-shadow: none;
   padding: 0 8px;
   cursor: pointer;
@@ -3381,4 +3805,764 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Conversation-scoped Automation proposal ── */
+.automation-proposal-card {
+  /* Sit below the virtual turn list inside .chat-thread (column flex).
+     overflow:hidden would auto min-height:0 and let flex-shrink crush the card
+     into a hairline border when the thread is height-constrained. */
+  flex-shrink: 0;
+  width: min(720px, calc(100% - 40px));
+  margin: 10px auto 22px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--za-accent) 20%, var(--graphite-hairline));
+  border-radius: var(--radius-lg);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  box-shadow: var(--shadow-card);
+  animation: motion-enter-rise 180ms var(--ease-out, ease-out) both;
+}
+
+.automation-proposal-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--graphite-hairline);
+  background: color-mix(in srgb, var(--za-accent) 6%, transparent);
+}
+
+.automation-proposal-card-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--za-accent);
+  background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+}
+
+.automation-proposal-card-kicker {
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.automation-proposal-card-status {
+  margin-left: auto;
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.automation-proposal-card.is-created .automation-proposal-card-status {
+  color: var(--success-text, var(--za-accent));
+}
+
+.automation-proposal-card.is-failed .automation-proposal-card-status {
+  color: var(--danger-text, var(--graphite-base));
+}
+
+.automation-proposal-card-body {
+  padding: 18px 18px 16px;
+}
+
+.automation-proposal-card-body h3 {
+  margin: 0;
+  font-size: 1.04rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.automation-proposal-card-prompt {
+  margin: 7px 0 16px;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.automation-proposal-card-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--graphite-hairline);
+  border-radius: var(--radius-md);
+  background: var(--graphite-hairline);
+}
+
+.automation-proposal-card-facts > div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--chrome-sunken);
+}
+
+.automation-proposal-card-facts dt {
+  margin-bottom: 3px;
+  color: var(--graphite-mute);
+  font-size: 0.68rem;
+  font-weight: 550;
+}
+
+.automation-proposal-card-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--graphite-base);
+  font-size: 0.76rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-proposal-receipt,
+.automation-proposal-card-error,
+.automation-proposal-card-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.automation-proposal-receipt {
+  border: 1px solid color-mix(in srgb, var(--success-text, var(--za-accent)) 22%, transparent);
+  background: color-mix(in srgb, var(--success-text, var(--za-accent)) 8%, transparent);
+}
+
+.automation-proposal-card-error {
+  border: 1px solid color-mix(in srgb, var(--danger-text, var(--graphite-base)) 22%, transparent);
+  color: var(--danger-text, var(--graphite-base));
+  background: color-mix(in srgb, var(--danger-text, var(--graphite-base)) 7%, transparent);
+}
+
+.automation-proposal-card-note {
+  color: var(--graphite-soft);
+  background: var(--chrome-sunken);
+}
+
+.automation-proposal-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--graphite-hairline);
+}
+
+.automation-proposal-card-footer > span {
+  flex: 1 1 auto;
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.automation-proposal-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-proposal-card-actions button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.automation-proposal-secondary {
+  border: 1px solid var(--graphite-hairline);
+  color: var(--graphite-soft);
+  background: transparent;
+}
+
+.automation-proposal-secondary:hover:not(:disabled) {
+  background: var(--chrome-sunken);
+}
+
+.automation-proposal-primary {
+  border: 1px solid color-mix(in srgb, var(--za-accent) 78%, transparent);
+  color: var(--white, #fff);
+  background: var(--za-accent);
+}
+
+.automation-proposal-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--za-accent) 88%, black);
+}
+
+.automation-proposal-card-actions button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+/* Terminal (created / cancelled): default compact strip, expandable for receipt/details. */
+.automation-proposal-card.is-compact {
+  margin: 8px auto 12px;
+}
+
+.automation-proposal-card.is-compact .automation-proposal-card-header {
+  min-height: 36px;
+  padding: 0 12px 0 14px;
+  border-bottom: 0;
+}
+
+.automation-proposal-card.is-compact .automation-proposal-card-kicker {
+  display: none;
+}
+
+.automation-proposal-card-compact-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--graphite-ink);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.automation-proposal-card-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--graphite-mute);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: transparent;
+  cursor: pointer;
+}
+
+.automation-proposal-card-toggle:hover {
+  color: var(--graphite-soft);
+  background: color-mix(in srgb, var(--chrome-sunken) 80%, transparent);
+}
+
+.automation-proposal-card.is-compact .automation-proposal-card-status {
+  margin-left: 0;
+}
+
+.automation-proposal-card-compact-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 0 14px 10px;
+}
+
+.automation-proposal-card-compact-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--graphite-soft);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.automation-proposal-card-compact-id {
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--graphite-mute);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.68rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.automation-proposal-card.is-terminal:not(.is-compact) .automation-proposal-card-status {
+  margin-right: 0;
+}
+
+.automation-proposal-card.is-terminal:not(.is-compact) .automation-proposal-card-toggle {
+  margin-left: 4px;
+}
+
+@media (max-width: 680px) {
+  .automation-proposal-card {
+    width: calc(100% - 24px);
+  }
+
+  .automation-proposal-card-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .automation-proposal-card-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .automation-proposal-card-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .automation-proposal-card {
+    animation: none;
+  }
+}
+
+/* ── Empty conversation home ──
+   The home changes only presentation. Draft, attachment, model, access and send state
+   continue to come from the regular composer and its existing stores. */
+.chat-surface--empty-home .chat-thread {
+  flex: 0 1 45%;
+  min-height: 190px;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding: clamp(48px, 9vh, 108px) clamp(24px, 6vw, 72px) 28px;
+}
+
+.chat-empty-home {
+  width: min(100%, var(--chat-content-max));
+  min-height: 0;
+  margin: 0 auto;
+  padding: 0;
+  align-items: flex-start;
+  justify-content: flex-end;
+  text-align: left;
+}
+
+.chat-empty-home-heading {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.2vw, 24px);
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-empty-home .chat-empty-mark {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.chat-empty-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.chat-empty-logo.dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .chat-empty-logo.light {
+  display: none;
+}
+
+:root[data-theme="dark"] .chat-empty-logo.dark {
+  display: block;
+}
+
+.chat-empty-home h2 {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--ink-strong, var(--ink-base));
+  /* 收紧欢迎语字号，贴近正文节奏，避免首页显得过大。 */
+  font-size: clamp(1.35rem, 2.1vw, 1.75rem);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-empty-home > p,
+.chat-empty-home .chat-empty-cards {
+  display: none;
+}
+
+.chat-empty-home .chat-empty-actions {
+  margin-top: 24px;
+  padding-left: 56px;
+}
+
+.chat-composer-wrap--empty-home {
+  flex: 1 1 55%;
+  min-height: 250px;
+  padding: 0 clamp(24px, 6vw, 72px) clamp(28px, 6vh, 64px);
+  background: var(--chrome-canvas);
+}
+
+.chat-composer-wrap--empty-home > :not(.chat-composer):not(.chat-composer-toolbar) {
+  max-width: var(--chat-content-max);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.chat-composer--home,
+.chat-composer--compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* 默认两行：文本在上，操作栏在下。必须覆盖普通会话里 textarea 的 flex order:2。
+     有附件时下方 :has() 规则会补出 home-attachments 行——不能无条件声明三行，
+     否则空附件行仍会吃掉一份 row-gap。 */
+  grid-template-areas:
+    "home-text"
+    "home-actions";
+  gap: 10px;
+  max-width: var(--chat-content-max);
+  padding: 10px;
+  border-radius: 22px;
+  border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--ink-base) 22%);
+  background: color-mix(in srgb, var(--chrome-canvas) 92%, var(--chrome-raised) 8%);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink-base) 8%, transparent), 0 1px 4px color-mix(in srgb, var(--ink-base) 4%, transparent);
+}
+
+/* 有附件时才补出顶部附件行；无附件时保持两行，高度与间距不变。 */
+.chat-composer--home:has(> .composer-attachment-row),
+.chat-composer--compact:has(> .composer-attachment-row) {
+  grid-template-areas:
+    "home-attachments"
+    "home-text"
+    "home-actions";
+}
+
+.chat-composer--home:has(> .composer-attachment-row) {
+  grid-template-rows: auto minmax(72px, 1fr) auto;
+}
+
+.chat-composer--compact:has(> .composer-attachment-row) {
+  grid-template-rows: auto auto auto;
+}
+
+/* 编辑引用条：独占顶部一行，可与附件条叠加。 */
+.chat-composer--home:has(> .composer-edit-banner),
+.chat-composer--compact:has(> .composer-edit-banner) {
+  grid-template-areas:
+    "home-edit"
+    "home-text"
+    "home-actions";
+}
+
+.chat-composer--home:has(> .composer-edit-banner):has(> .composer-attachment-row),
+.chat-composer--compact:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-areas:
+    "home-edit"
+    "home-attachments"
+    "home-text"
+    "home-actions";
+}
+
+.chat-composer--home:has(> .composer-edit-banner) {
+  grid-template-rows: auto minmax(72px, 1fr) auto;
+}
+
+.chat-composer--compact:has(> .composer-edit-banner) {
+  grid-template-rows: auto auto auto;
+}
+
+.chat-composer--home:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-rows: auto auto minmax(72px, 1fr) auto;
+}
+
+.chat-composer--compact:has(> .composer-edit-banner):has(> .composer-attachment-row) {
+  grid-template-rows: auto auto auto auto;
+}
+
+.chat-composer--home {
+  grid-template-rows: minmax(72px, 1fr) auto;
+  min-height: 154px;
+  padding: 10px;
+  border-radius: 26px;
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
+}
+
+/* 会话态：默认单行文本区，随输入扩展。 */
+.chat-composer--compact {
+  grid-template-rows: auto auto;
+  min-height: 0;
+  align-content: start;
+}
+
+/* 重置普通会话 flex 子项 order，否则 order:2 的 textarea 会掉到操作栏下面。 */
+.chat-composer--home > *,
+.chat-composer--compact > * {
+  order: 0;
+}
+
+/* 编辑引用条独占 home-edit 行。 */
+.chat-composer--home > .composer-edit-banner,
+.chat-composer--compact > .composer-edit-banner {
+  grid-area: home-edit;
+  width: 100%;
+  margin: 0;
+  order: 0;
+}
+
+/* 附件条独占 home-attachments 行：绝不与 textarea 共用网格单元，否则缩略图会压住文字。 */
+.chat-composer--home > .composer-attachment-row,
+.chat-composer--compact > .composer-attachment-row {
+  grid-area: home-attachments;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 0 2px;
+  order: -1;
+}
+
+.chat-composer--home > textarea,
+.chat-composer--compact > textarea {
+  grid-area: home-text;
+  width: 100%;
+  max-height: 160px;
+  box-sizing: border-box;
+  align-self: stretch;
+  /* 左 padding 对齐 + 图标左缘：附件按钮 28px, 图标 14px → (28-14)/2 = 7px。 */
+  padding: 0 7px;
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.45;
+}
+
+.chat-composer--home > textarea {
+  min-height: 72px;
+  font-size: var(--ui-font-body, 0.875rem);
+  line-height: 1.5;
+}
+
+.chat-composer--compact > textarea {
+  min-height: 28px;
+  max-height: 160px;
+}
+
+/* 操作栏必须是真实 flex 容器，否则子项会被拆散并受 order 干扰。 */
+.composer-action-row {
+  display: contents;
+}
+
+.composer-home-action-row {
+  grid-area: home-actions;
+  display: flex;
+  /* Bottom-align the shorter left controls with the taller send button. */
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  align-self: end;
+}
+
+.composer-home-action-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-composer--home .composer-attach-btn,
+.chat-composer--home button[type="submit"],
+.chat-composer--compact .composer-attach-btn,
+.chat-composer--compact button[type="submit"] {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+
+.chat-composer--home button[type="submit"] {
+  width: 40px;
+  height: 40px;
+}
+
+/* 附件按钮降级为与旁侧文字控件同级的紧凑 chip：去掉大圆 hitbox，图标 14px。 */
+.chat-composer--home .composer-attach-btn,
+.chat-composer--compact .composer-attach-btn {
+  width: var(--composer-addon-height);
+  height: var(--composer-addon-height);
+  border-radius: 8px;
+}
+
+/* 去掉基础规则的 margin-left:auto，让 space-between 独占左右对称。 */
+.chat-composer--home button[type="submit"],
+.chat-composer--compact button[type="submit"] {
+  margin-left: 0;
+}
+
+.composer-home-model-slot {
+  min-width: 0;
+}
+
+.composer-home-model-slot .token-usage-wrap,
+.composer-home-model-slot .token-usage {
+  display: inline-flex;
+  align-items: center;
+  /* Compact chip cluster: 8px read as loose between short labels. */
+  gap: 2px;
+  min-width: 0;
+  /* 框内模型/思考/上下文用控制级字号，比正文更精致。 */
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
+}
+
+/* 框内模型/思考：去描边、去背景；高度用 rem，字号跟控制级。 */
+.composer-home-model-slot .pa-cascading-trigger,
+.composer-home-model-slot .pa-cascading-trigger:hover:not(:disabled),
+.composer-home-model-slot .pa-cascading-trigger.open,
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger,
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
+.composer-home-model-slot .composer-dropdown .pa-dropdown-trigger.open,
+.composer-home-model-slot .reasoning-effort-trigger,
+.composer-home-model-slot .reasoning-effort-trigger.open {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
+  line-height: 1.2;
+}
+
+.composer-home-model-slot .pa-cascading-trigger:hover:not(:disabled),
+.composer-home-model-slot .pa-cascading-trigger.open,
+.composer-home-model-slot .reasoning-effort-trigger:hover,
+.composer-home-model-slot .reasoning-effort-trigger.open {
+  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+}
+
+.composer-home-model-slot .token-usage-model {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 8px;
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
+}
+
+.composer-home-model-slot .token-usage-context-window {
+  padding: 0 8px;
+  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: var(--chat-content-max);
+  margin: 10px auto 0;
+  padding: 0 10px;
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-composer-wrap--empty-home .chat-composer-toolbar .token-usage-wrap {
+  margin-left: auto;
+}
+
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--ink-base) 70%, transparent);
+  font-size: var(--composer-addon-font-size);
+}
+
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open {
+  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+}
+
+@media (max-width: 820px) {
+  .chat-surface--empty-home .chat-thread {
+    flex-basis: 42%;
+    min-height: 160px;
+    padding: 36px 22px 22px;
+  }
+
+  .chat-empty-home-heading {
+    align-items: center;
+  }
+
+  .chat-empty-home h2 {
+    font-size: clamp(1.25rem, 2.8vw, 1.55rem);
+  }
+
+  .chat-composer-wrap--empty-home {
+    padding: 0 20px 28px;
+  }
+
+  .chat-composer--home {
+    min-height: 140px;
+    border-radius: 22px;
+  }
+}
+
+@media (max-width: 560px) {
+  .chat-surface--empty-home .chat-thread {
+    flex-basis: 38%;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .chat-empty-home-heading {
+    gap: 13px;
+  }
+
+  .chat-empty-home .chat-empty-mark {
+    width: 38px;
+    height: 38px;
+    margin-top: 2px;
+    border-radius: 10px;
+  }
+
+  .chat-empty-home .chat-empty-actions {
+    padding-left: 0;
+  }
+
+  .chat-composer-wrap--empty-home {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .chat-composer-wrap--empty-home .chat-composer-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.image-preview-pending {
+  min-width: min(60vw, 480px);
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--graphite-soft, #9aa0a6);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
 }

@@ -44,7 +44,9 @@ export async function agentLoopGemini({
   registry,
   runtimeProjection,
   mcpRegistry,
+  skillStore = null,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
   resolvedChannel = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
@@ -274,7 +276,9 @@ export async function agentLoopGemini({
           registry,
           runtimeProjection,
           mcpRegistry,
+          skillStore,
           goalPlanStore,
+          automationProposalService,
           ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();

@@ -334,3 +334,48 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     }
   });
 });
+
+describe('Skill runtime tool projection', () => {
+  it('projects enabled skills into the runtime registry and OpenAI tools', () => {
+    const skillStore = {
+      listSkills: () => ([
+        {
+          skillId: 'weather-plus',
+          name: 'weather-plus',
+          description: '查询中国城市天气信息并提供穿衣建议。',
+          whenToUse: '用户询问天气时使用。',
+          enabled: true,
+        },
+        {
+          skillId: 'disabled-skill',
+          name: 'disabled-skill',
+          description: 'should not project',
+          enabled: false,
+        },
+      ]),
+    };
+
+    const { registry, modelProjection } = createRuntimeToolProjection({
+      skillStore,
+      projectionOptions: { mode: 'chat' },
+    });
+
+    const skillTool = registry.getTool('skill__weather-plus');
+    assert.ok(skillTool, 'skill__weather-plus should be registered');
+    assert.equal(skillTool.capabilityId, 'local.skill.weather-plus');
+    assert.equal(skillTool.runtime.executorCapabilityId, 'local.skill.weather-plus');
+    assert.equal(registry.getTool('skill__disabled-skill'), null);
+
+    const openAiNames = buildOpenAIToolsFromModelProjection(modelProjection).map(
+      (tool) => tool.function.name,
+    );
+    assert.ok(
+      openAiNames.includes('skill__weather-plus'),
+      'OpenAI tools should include skill__weather-plus',
+    );
+    assert.ok(
+      !openAiNames.includes('skill__disabled-skill'),
+      'disabled skills must not appear in provider tools',
+    );
+  });
+});

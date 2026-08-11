@@ -142,3 +142,22 @@ test('invalid plan ids do not invoke the notification port', () => {
 
   assert.equal(calls.some(([name]) => name === 'mark-task-read'), false);
 });
+
+test('opening a conversation marks conversation read when port is provided', () => {
+  const { calls, service } = createHarness({
+    markConversationRead: (conversationId) => {
+      calls.push(['mark-conversation-read', conversationId]);
+    },
+  });
+
+  service.setActiveConversation({ conversationId: 'conversation-1', planId: 'plan-read' });
+
+  assert.equal(
+    calls.some(([name, id]) => name === 'mark-conversation-read' && id === 'conversation-1'),
+    true,
+  );
+  assert.equal(
+    calls.some(([name, id]) => name === 'mark-task-read' && id === 'plan-read'),
+    true,
+  );
+});

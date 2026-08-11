@@ -84,13 +84,13 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
 
   assert.equal(provider.model, 'gpt-5.5');
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
   assert.equal(provider.cacheWritePrice, undefined);
-  assert.equal(provider.longContextInputThreshold, 258_000);
+  assert.equal(provider.longContextInputThreshold, 272_000);
   assert.equal(provider.longContextInputPrice, 10);
   assert.equal(provider.longContextCacheReadPrice, 1);
   assert.equal(provider.longContextOutputPrice, 45);
@@ -175,7 +175,7 @@ test('subscription provider migration backfills pricing and context metadata', (
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
@@ -186,7 +186,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(provider.supportsPromptCaching, true);
 
   const persisted = readPersistedModels(configFile)[0];
-  assert.equal(persisted.contextWindow, 258_000);
+  assert.equal(persisted.contextWindow, 272_000);
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);
@@ -212,12 +212,12 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 258_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.supportsPromptCaching, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const [persisted] = readPersistedModels(configFile);
-  assert.equal(persisted.contextWindow, 258_000);
+  assert.equal(persisted.contextWindow, 272_000);
   assert.equal(persisted.supportsPromptCaching, true);
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));
@@ -326,6 +326,95 @@ test('legacy provider entries migrate to channel fields without losing stored se
   assert.equal(persisted.apiKeyMasked, 'secr...-key');
   assert.equal(credentialSecrets.get('model/p1/api-key'), 'secret-key');
   assert.equal(store.getDecryptedApiKey('p1'), 'secret-key');
+}));
+
+test('Kimi Coding Plan models migrate off/default effort levels to K3 multi-level effort', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'kimi-group',
+      groupId: 'kimi-group',
+      provider: 'openai',
+      channelId: 'kimi-coding-plan',
+      authMethod: 'api_key',
+      name: 'Kimi Coding Plan',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      apiKeyConfigured: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'kimi-model',
+      groupId: 'kimi-group',
+      model: 'k3-256k',
+      enabled: true,
+      isDefault: true,
+      supportsReasoning: true,
+      reasoningEffortLevels: ['off', 'default'],
+      reasoningDefaultEffort: 'default',
+      reasoningParamStyle: 'none',
+      metadataSource: 'manual',
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.channelId, 'kimi-coding-plan');
+  assert.deepEqual(provider.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+  assert.equal(provider.reasoningDefaultEffort, 'default');
+  assert.equal(provider.reasoningParamStyle, 'openai-effort');
+  assert.equal(provider.supportsReasoning, true);
+  assert.equal(provider.reasoningEffortMap?.default, 'high');
+  assert.equal(provider.reasoningEffortMap?.max, 'max');
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.deepEqual(persisted.reasoningEffortLevels, ['off', 'low', 'default', 'max']);
+  assert.equal(persisted.reasoningDefaultEffort, 'default');
+  assert.equal(persisted.reasoningParamStyle, 'openai-effort');
+}));
+
+test('DeepSeek models migrate off/default effort levels to Anthropic low/high/max', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'ds-group',
+      groupId: 'ds-group',
+      provider: 'openai',
+      channelId: 'deepseek',
+      authMethod: 'api_key',
+      name: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKeyConfigured: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'ds-model',
+      groupId: 'ds-group',
+      model: 'deepseek-v4-flash',
+      enabled: true,
+      isDefault: true,
+      supportsReasoning: true,
+      reasoningEffortLevels: ['off', 'default'],
+      reasoningDefaultEffort: 'default',
+      metadataSource: 'manual',
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.channelId, 'deepseek');
+  assert.equal(provider.provider, 'anthropic');
+  assert.equal(provider.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.equal(provider.resolvedWire, 'anthropic-messages');
+  assert.deepEqual(provider.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+  assert.equal(provider.reasoningDefaultEffort, 'high');
+  assert.equal(provider.reasoningParamStyle, 'anthropic-enabled-output-effort');
+  assert.equal(provider.supportsReasoning, true);
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.equal(persisted.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.deepEqual(persisted.reasoningEffortLevels, ['off', 'low', 'high', 'max']);
+  assert.equal(persisted.reasoningDefaultEffort, 'high');
+  assert.equal(persisted.reasoningParamStyle, 'anthropic-enabled-output-effort');
 }));
 
 test('manual provider creation and updates persist max output tokens', () => withStore(({ configFile }) => {

@@ -17,6 +17,7 @@ function createHarness(overrides = {}) {
     revisePlan: port('revise'),
     recordApproval: port('approve', { planId: 'plan-1' }),
     setPlanStatus: port('set-status'),
+    markRequestedUserInput: port('mark-requested-user-input'),
     recordManualConfirmation: port('manual-confirmation'),
     recordTaskEvidence: port('task-evidence'),
     deletePlan: port('delete'),

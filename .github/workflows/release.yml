@@ -40,6 +40,30 @@ jobs:
       releaseType: ${{ steps.meta.outputs.releaseType }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main release source
+        shell: bash
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Check governed versions
+        run: npm run version:check
+
+      - name: Run release:source-check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_MAIN_REF: origin/main
+        run: npm run release:source-check
+
       - name: Derive version & channel from tag
         id: meta
         shell: bash

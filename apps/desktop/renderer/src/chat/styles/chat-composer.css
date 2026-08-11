@@ -32,7 +32,7 @@
   .cloud-chat-composer.thread textarea {
     height: auto;
     min-height: 40px;
-    max-height: 120px;
+    max-height: 200px;
     padding-top: 10px;
     padding-bottom: 10px;
   }

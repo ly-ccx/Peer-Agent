@@ -49,7 +49,7 @@ test('composer auto-sizing stays in CSS and does not force layout on every draft
 
   assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
   assert.match(styles, /field-sizing:\s*content/);
-  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*120px/);
+  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*200px/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
@@ -87,12 +87,25 @@ test('send path does not seed or estimate context occupancy', async () => {
   assert.doesNotMatch(surface, /contextReady=/);
 });
 
+test('new task starts in main and navigates directly to the workbench', async () => {
+  const [surface, app] = await Promise.all([
+    readSource('./ChatSurface.tsx'),
+    readSource('../../App.tsx'),
+  ]);
+
+  assert.match(surface, /await clientApi\.chatStartTask\(\{[\s\S]*text,[\s\S]*attachments: sentAttachments/);
+  assert.match(surface, /onTaskStarted\?\.\(started\.conversationId\)/);
+  assert.match(app, /onTaskStarted=\{\(conversationId\) => \{[\s\S]*setActivePage\('home'\)/);
+  assert.doesNotMatch(surface, /pendingFirstSendRef|onInitialMessageSubmitted|onEnsureConversation/);
+  assert.doesNotMatch(app, /const ensureConversation/);
+});
+
 test('external conversation reload replaces or clears the shared accounting snapshot', async () => {
   const surface = await readSource('./ChatSurface.tsx');
 
   assert.match(
     surface,
-    /contextAccounting: storedContextAccountingSnapshot,\s*\}\s*=\s*await loadConversationMessages/,
+    /loadConversationMessages\(conversationId\)\.then\(\(\{[\s\S]*contextAccounting: storedContextAccountingSnapshot/,
   );
   assert.match(
     surface,

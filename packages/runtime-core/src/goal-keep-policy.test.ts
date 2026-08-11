@@ -9,15 +9,15 @@ import {
 } from './goal-keep-policy.ts';
 
 test('resolveGoalKeepBudget clamps to window ratio and hard max', () => {
-  const budget = resolveGoalKeepBudget(258_000);
-  // 10% of 258k would be 25800, but hard maxKeepTokens is 16384.
+  const budget = resolveGoalKeepBudget(272_000);
+  // 10% of 272k would be 27200, but hard maxKeepTokens is 16384.
   assert.equal(
     budget.keepBudgetTokens,
     Math.min(
       GOAL_KEEP_POLICY.maxKeepTokens,
       Math.max(
         GOAL_KEEP_POLICY.minKeepTokens,
-        Math.floor(258_000 * GOAL_KEEP_POLICY.keepContextRatio),
+        Math.floor(272_000 * GOAL_KEEP_POLICY.keepContextRatio),
       ),
     ),
   );

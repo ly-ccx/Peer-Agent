@@ -1,6 +1,6 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CSSProperties, ReactElement } from 'react';
+import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
@@ -15,10 +15,12 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { projectGoalTiming } from '@peer-agent/protocol';
+import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
+import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { buildGoalPlanTreeRows, goalPlanTreeDepth } from './goal/goalPlanTree';
@@ -237,6 +239,115 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
 
 function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
+}
+
+/** 深度优先展开任务树（含嵌套 subtasks）。 */
+function collectGoalTasks(tasks: readonly GoalTask[] | undefined): GoalTask[] {
+  if (!tasks || tasks.length === 0) return [];
+  const out: GoalTask[] = [];
+  const walk = (nodes: readonly GoalTask[]) => {
+    for (const node of nodes) {
+      out.push(node);
+      if (node.subtasks && node.subtasks.length > 0) walk(node.subtasks);
+    }
+  };
+  walk(tasks);
+  return out;
+}
+
+function GoalTaskStatusIcon({ status }: { readonly status: ExecutionStatus }): ReactElement {
+  const common = {
+    className: 'goal-panel-toggle-progress-tooltip__icon-svg',
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true as const,
+  };
+
+  switch (status) {
+    case 'completed':
+      return (
+        <svg {...common}>
+          <path d="M3.5 8.2 6.4 11 12.5 4.8" />
+        </svg>
+      );
+    case 'failed':
+      return (
+        <svg {...common}>
+          <path d="M4.2 4.2 11.8 11.8" />
+          <path d="M11.8 4.2 4.2 11.8" />
+        </svg>
+      );
+    case 'running':
+      return (
+        <svg {...common} className={`${common.className} goal-panel-toggle-progress-tooltip__icon-svg--spin`}>
+          <path d="M8 2.5a5.5 5.5 0 1 1-4.6 2.5" />
+        </svg>
+      );
+    case 'waiting_user':
+      return (
+        <svg {...common}>
+          <path d="M5.2 3.8v8.4" />
+          <path d="M10.8 3.8v8.4" />
+        </svg>
+      );
+    case 'cancelled':
+      return (
+        <svg {...common}>
+          <path d="M4 8h8" />
+        </svg>
+      );
+    case 'pending':
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="3.2" />
+        </svg>
+      );
+  }
+}
+
+function renderGoalTasksTooltipContent(
+  plan: GoalPlan,
+  isZh: boolean,
+): ReactNode {
+  const tasks = collectGoalTasks(plan.tasks);
+  if (tasks.length === 0) {
+    return (
+      <span className="goal-panel-toggle-progress-tooltip">
+        <span className="goal-panel-toggle-progress-tooltip__icon goal-panel-toggle-progress-tooltip__icon--pending">
+          <GoalTaskStatusIcon status="pending" />
+        </span>
+        <span className="goal-panel-toggle-progress-tooltip__title">
+          {isZh ? '暂无步骤' : 'No steps'}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="goal-panel-toggle-progress-tooltip goal-panel-toggle-progress-tooltip--list">
+      <span className="goal-panel-toggle-progress-tooltip__list" role="list">
+        {tasks.map((task) => (
+          <span
+            key={task.taskId}
+            className="goal-panel-toggle-progress-tooltip__row"
+            role="listitem"
+          >
+            <span
+              className={`goal-panel-toggle-progress-tooltip__icon goal-panel-toggle-progress-tooltip__icon--${task.status}`}
+            >
+              <GoalTaskStatusIcon status={task.status} />
+            </span>
+            <span className="goal-panel-toggle-progress-tooltip__title">{task.title}</span>
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 }
 
 /** Live 时钟：仅在有 open segment / 进行中 timing 时 1s 刷新。 */
@@ -727,7 +838,9 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
         </span>
       </div>
       {plan.goal ? (
-        <p className="goal-contract-text">{plan.goal}</p>
+        <div className="goal-plan-goal goal-contract-current">
+          <p className="goal-contract-text goal-contract-text--current">{plan.goal}</p>
+        </div>
       ) : (
         <p className="goal-contract-text goal-contract-text--empty">
           {isZh ? '尚未写入目标描述' : 'No goal description recorded yet'}
@@ -1852,7 +1965,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         if (action === 'start') {
           await clientApi.goalRunnerStart({ planId: plan.planId, options: { intent: 'execute' } });
         } else {
-          await clientApi.goalPlansSetStatus({ planId: plan.planId, status: 'cancelled' });
+          // 与工作台一致：clear 才会真正停 runner / 后续流式，不能只写 cancelled 状态。
+          await clientApi.goalRunnerClear({ planId: plan.planId });
         }
         await reload({ mode: 'silent' });
       } catch (err) {
@@ -1979,14 +2093,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
   const dockedExecuting = hasExecutingPlan && !expanded;
-  // A：折叠态浮条「完成」标志——当不存在执行中 / 待批准的计划，且至少有一个计划已完成时，
-  // 视为整体处于「完成态」，给浮条停止扫光并显示静态完成视觉（完成色描边 + 对勾）。
+  // A：折叠态浮条「完成」标志只反馈正式 Goal 的执行完成。
+  // intake 草稿即使已收束为 completed，也不代表用户目标已执行完成，因此不展示完成视觉。
   // 注意优先级：执行中 / 待批准会压过完成态（dockedExecuting 与 lockedOpen 优先），
   // 避免「一个完成、另一个仍在跑」时误显示完成。
   const hasAwaitingPlan = hasPendingGoalApproval(plans);
-  const hasCompletedPlan = plans.some((plan) => plan.status === 'completed');
+  const hasCompletedFormalGoal = plans.some(shouldShowGoalCompletionFeedback);
   const dockedCompleted =
-    hasCompletedPlan && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
+    hasCompletedFormalGoal && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
   const summary = isZh
     ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
     : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
@@ -2000,66 +2114,93 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       }${hasPendingGoalApproval(plans) ? ' goal-panel--approval-inline' : ''
       }`}
     >
-      <button
-        type="button"
-        className="goal-panel-toggle"
-        aria-expanded={dockedToWorkbench ? undefined : expanded}
-        disabled={lockedOpen && !dockedToWorkbench}
-        title={
-          dockedToWorkbench
-            ? (isZh ? '在工作台中查看' : 'View in workbench')
-            : lockedOpen
-              ? (isZh ? '有待批准计划，需先处理' : 'Pending approval — resolve first')
-              : undefined
-        }
-        onClick={() => {
-          if (dockedToWorkbench) {
-            onRequestHostFocus?.();
-            return;
-          }
-          if (lockedOpen) return;
-          setManualCollapsed(expanded);
-        }}
-      >
-        <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
-        <span className="goal-panel-toggle-summary">{summary}</span>
-        {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
-        {(dockedToWorkbench || !expanded) && activePlan ? (
-          <span className="goal-panel-toggle-active">
-            {activePlan.status === 'executing' ? (
-              <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
-            ) : dockedCompleted ? (
-              <span
-                className="goal-panel-toggle-active-check"
-                aria-label={isZh ? '已完成' : 'Completed'}
-                role="img"
-              >
-                ✓
+      {(() => {
+        // 整条折叠灯条 hover 显示该 goal 全部步骤；点击仍走 button 展开/收起。
+        const goalTasksTooltipContent =
+          (dockedToWorkbench || !expanded) && activePlan
+            ? renderGoalTasksTooltipContent(activePlan, isZh)
+            : null;
+        const activeTaskList = activePlan ? collectGoalTasks(activePlan.tasks) : [];
+        const goalTasksAriaLabel =
+          activeTaskList.length > 0
+            ? activeTaskList
+                .map((task) => `${statusLabel(task.status, isZh)}: ${task.title}`)
+                .join('; ')
+            : (isZh ? '暂无步骤' : 'No steps');
+        const toggleButton = (
+          <button
+            type="button"
+            className="goal-panel-toggle"
+            aria-expanded={dockedToWorkbench ? undefined : expanded}
+            disabled={lockedOpen && !dockedToWorkbench}
+            aria-label={goalTasksTooltipContent ? goalTasksAriaLabel : undefined}
+            title={
+              // 有步骤 tooltip 时不再用原生 title，避免两套提示打架。
+              goalTasksTooltipContent
+                ? undefined
+                : dockedToWorkbench
+                  ? (isZh ? '在工作台中查看' : 'View in workbench')
+                  : lockedOpen
+                    ? (isZh ? '有待批准计划，需先处理' : 'Pending approval — resolve first')
+                    : undefined
+            }
+            onClick={() => {
+              if (dockedToWorkbench) {
+                onRequestHostFocus?.();
+                return;
+              }
+              if (lockedOpen) return;
+              setManualCollapsed(expanded);
+            }}
+          >
+            <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
+            <span className="goal-panel-toggle-summary">{summary}</span>
+            {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
+            {(dockedToWorkbench || !expanded) && activePlan ? (
+              <span className="goal-panel-toggle-active">
+                {activePlan.status === 'executing' ? (
+                  <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
+                ) : dockedCompleted ? (
+                  <span
+                    className="goal-panel-toggle-active-check"
+                    aria-label={isZh ? '已完成' : 'Completed'}
+                    role="img"
+                  >
+                    ✓
+                  </span>
+                ) : null}
+                <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
+                {activeProgress ? (
+                  <span className="goal-panel-toggle-active-progress">
+                    {`${activeProgress.completed}/${activeProgress.total}`}
+                  </span>
+                ) : null}
               </span>
             ) : null}
-            <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
-            {activeProgress ? (
-              <span className="goal-panel-toggle-active-progress">
-                {`${activeProgress.completed}/${activeProgress.total}`}
+            {lockedOpen && !dockedToWorkbench ? null : (
+              <span className="goal-panel-toggle-caret" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
               </span>
-            ) : null}
-          </span>
-        ) : null}
-        {lockedOpen && !dockedToWorkbench ? null : (
-          <span className="goal-panel-toggle-caret" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m9 6 6 6-6 6" />
-            </svg>
-          </span>
-        )}
-      </button>
+            )}
+          </button>
+        );
+        return goalTasksTooltipContent ? (
+          <Tooltip content={goalTasksTooltipContent} placement="top">
+            {toggleButton}
+          </Tooltip>
+        ) : (
+          toggleButton
+        );
+      })()}
       {!bodyMounted ? null : (() => {
         const body = (
       <div className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>

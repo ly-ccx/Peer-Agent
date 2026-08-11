@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { joinPromptSections } from './rendering.mjs';
 import { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 import { createAttachmentPromptSource } from './sources/attachment-source.mjs';
+import { createAutomationIntentPromptSource } from './sources/automation-intent-source.mjs';
 import { createContinuityPromptSource } from './sources/continuity-source.mjs';
 import { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
 import { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
@@ -85,6 +86,7 @@ export function createDefaultPromptSourceRegistry() {
       createProjectInstructionsPromptSource(),
       createContextExtensionPromptSource(),
       createRuntimeReminderPromptSource(),
+      createAutomationIntentPromptSource(),
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),
       createGoalCheckpointPromptSource(),
@@ -98,6 +100,18 @@ export function createDefaultPromptSourceRegistry() {
 
 export function renderSystemContext(context) {
   return joinPromptSections((context?.sections ?? []).map((section) => section.content));
+}
+
+/**
+ * 渲染仅含稳定层（L0-L5）的 system 前缀。
+ * 动态层（L6_MODE_REMINDER / L7_CONTINUITY）每轮变化，会毒化整块 system 的
+ * 前缀缓存；分离后，稳定块可独立命中缓存（Anthropic 断点 / OpenAI 前缀匹配）。
+ */
+export function renderStableSystemContext(context) {
+  const DYNAMIC_LAYERS = new Set(['L6_MODE_REMINDER', 'L7_CONTINUITY']);
+  return joinPromptSections((context?.sections ?? [])
+    .filter((section) => !DYNAMIC_LAYERS.has(section.layer))
+    .map((section) => section.content));
 }
 
 export function assembleSystemContext(input = {}, options = {}) {

@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>整条卡片粒子粉碎 Demo · 从右向左</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f141b;
+        --card: #1a222d;
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #e8eef7;
+        --muted: #8b98a8;
+        --accent: #3e7a6b;
+        --btn-ghost: transparent;
+        --btn-ghost-border: rgba(255, 255, 255, 0.14);
+        --btn-primary: #f2f4f7;
+        --btn-primary-text: #1a222d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "SF Pro Text",
+          "PingFang SC",
+          "Helvetica Neue",
+          system-ui,
+          sans-serif;
+        background:
+          radial-gradient(circle at 20% 0%, rgba(62, 122, 107, 0.12), transparent 40%),
+          radial-gradient(circle at 90% 10%, rgba(108, 180, 238, 0.08), transparent 35%),
+          var(--bg);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 32px 16px 48px;
+      }
+
+      .stage {
+        width: min(920px, 100%);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+      }
+
+      .hint {
+        margin: 0 0 22px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .card-stage {
+        position: relative;
+        min-height: 96px;
+      }
+
+      .card {
+        position: relative;
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--card) 92%, #000);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+        z-index: 1;
+      }
+
+      .card.is-shattering {
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .type {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .tag {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
+        color: #8fd0bc;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .type-note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .chip {
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .chip-ws {
+        color: #7eb8ff;
+        background: rgba(126, 184, 255, 0.12);
+      }
+
+      .actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        height: 34px;
+        padding: 0 14px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          opacity 160ms ease,
+          background 160ms ease;
+      }
+
+      .btn:active {
+        transform: scale(0.97);
+      }
+
+      .btn:disabled {
+        cursor: default;
+        opacity: 0.7;
+      }
+
+      .btn-ghost {
+        background: var(--btn-ghost);
+        border-color: var(--btn-ghost-border);
+        color: var(--text);
+      }
+
+      .btn-primary {
+        background: var(--btn-primary);
+        color: var(--btn-primary-text);
+      }
+
+      .fx-canvas {
+        position: absolute;
+        inset: -72px -80px -96px -72px;
+        width: calc(100% + 152px);
+        height: calc(100% + 168px);
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+
+      .toolbar button {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 8px 12px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .toolbar button:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .note {
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        color: #c9d6e5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <h1>整条卡片粒子粉碎 Demo</h1>
+      <p class="hint">
+        模拟总工作台验收卡。<strong>整条卡片</strong>（标签、标题、chips、操作按钮）会从
+        <strong>右向左</strong> 被粒子粉碎消散，不是只碎右侧按钮。
+      </p>
+
+      <div class="card-stage" id="cardStage">
+        <article class="card" id="card">
+          <div class="type">
+            <span class="tag" id="tag">验收</span>
+            <span class="type-note" id="typeNote">等待验收</span>
+          </div>
+          <div class="body">
+            <div class="title">修复验收卡片跳位</div>
+            <div class="chips">
+              <span class="chip chip-ws">peer-knowledge</span>
+              <span class="chip">3 / 3</span>
+              <span class="chip">耗时 5m57s</span>
+              <span class="chip">刚刚</span>
+            </div>
+          </div>
+          <div class="actions" id="actions">
+            <button type="button" class="btn btn-ghost" id="viewBtn">查看</button>
+            <button type="button" class="btn btn-primary" id="acceptBtn">确认验收</button>
+          </div>
+        </article>
+        <canvas class="fx-canvas" id="fx"></canvas>
+      </div>
+
+      <div class="toolbar">
+        <button type="button" id="resetBtn">重置 Demo</button>
+        <button type="button" id="replayBtn">再播一次</button>
+      </div>
+      <p class="note">
+        实现：把整条卡片栅格采样成粒子，按 X 从右到左延迟引爆，并加向外飞散 + 重力下落。
+        文件：<code>scratch/actionbar-particle-shatter-demo.html</code>
+      </p>
+    </div>
+
+    <script>
+      const card = document.getElementById("card");
+      const cardStage = document.getElementById("cardStage");
+      const acceptBtn = document.getElementById("acceptBtn");
+      const viewBtn = document.getElementById("viewBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const replayBtn = document.getElementById("replayBtn");
+      const canvas = document.getElementById("fx");
+      const tag = document.getElementById("tag");
+      const typeNote = document.getElementById("typeNote");
+      const ctx = canvas.getContext("2d");
+
+      let animId = 0;
+      let busy = false;
+
+      const PAD_X = 80;
+      const PAD_Y_TOP = 72;
+      const PAD_Y_BOTTOM = 96;
+
+      function resizeCanvas() {
+        const rect = cardStage.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const width = canvas.clientWidth || rect.width + PAD_X * 2 - 8;
+        const height = canvas.clientHeight || rect.height + PAD_Y_TOP + PAD_Y_BOTTOM;
+        canvas.width = Math.max(1, Math.floor(width * dpr));
+        canvas.height = Math.max(1, Math.floor(height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { width, height, dpr };
+      }
+
+      function roundRect(sctx, x, y, w, h, r) {
+        const rr = Math.min(r, w / 2, h / 2);
+        sctx.beginPath();
+        sctx.moveTo(x + rr, y);
+        sctx.arcTo(x + w, y, x + w, y + h, rr);
+        sctx.arcTo(x + w, y + h, x, y + h, rr);
+        sctx.arcTo(x, y + h, x, y, rr);
+        sctx.arcTo(x, y, x + w, y, rr);
+        sctx.closePath();
+      }
+
+      function paintText(sctx, text, x, y, color, font, align = "left") {
+        sctx.font = font;
+        sctx.fillStyle = color;
+        sctx.textAlign = align;
+        sctx.textBaseline = "middle";
+        sctx.fillText(text, x, y);
+      }
+
+      /** Paint a close visual of the whole card into an offscreen canvas, then sample particles. */
+      function sampleCardParticles() {
+        const { dpr } = resizeCanvas();
+        const cardRect = card.getBoundingClientRect();
+        const stageRect = cardStage.getBoundingClientRect();
+
+        const sw = Math.max(1, Math.ceil(cardRect.width * dpr));
+        const sh = Math.max(1, Math.ceil(cardRect.height * dpr));
+        const snap = document.createElement("canvas");
+        snap.width = sw;
+        snap.height = sh;
+        const sctx = snap.getContext("2d");
+        sctx.scale(dpr, dpr);
+
+        const W = cardRect.width;
+        const H = cardRect.height;
+
+        // Card background + border (matches CSS)
+        roundRect(sctx, 0.5, 0.5, W - 1, H - 1, 16);
+        sctx.fillStyle = "#181f29";
+        sctx.fill();
+        sctx.strokeStyle = "rgba(255,255,255,0.08)";
+        sctx.lineWidth = 1;
+        sctx.stroke();
+
+        // Soft inner shadow-ish highlight
+        roundRect(sctx, 0.5, 0.5, W - 1, H - 1, 16);
+        sctx.strokeStyle = "rgba(255,255,255,0.03)";
+        sctx.stroke();
+
+        // --- Left type column ---
+        // tag pill
+        const tagText = tag.textContent || "验收";
+        sctx.font = "600 12px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif";
+        const tagW = Math.ceil(sctx.measureText(tagText).width) + 20;
+        const tagH = 22;
+        const tagX = 18;
+        const tagY = 18;
+        roundRect(sctx, tagX, tagY, tagW, tagH, 999);
+        sctx.fillStyle = "rgba(62,122,107,0.18)";
+        sctx.fill();
+        paintText(
+          sctx,
+          tagText,
+          tagX + tagW / 2,
+          tagY + tagH / 2 + 0.5,
+          "#8fd0bc",
+          "600 12px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif",
+          "center",
+        );
+        paintText(
+          sctx,
+          typeNote.textContent || "等待验收",
+          tagX,
+          tagY + tagH + 14,
+          "#8b98a8",
+          "400 12px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif",
+          "left",
+        );
+
+        // --- Body column ---
+        const bodyX = 88 + 14 + 4; // grid col + gap approx
+        paintText(
+          sctx,
+          "修复验收卡片跳位",
+          bodyX,
+          28,
+          "#e8eef7",
+          "600 15px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif",
+          "left",
+        );
+
+        // chips
+        const chips = [
+          { text: "peer-knowledge", fill: "rgba(126,184,255,0.12)", color: "#7eb8ff" },
+          { text: "3 / 3", fill: "rgba(255,255,255,0.05)", color: "#8b98a8" },
+          { text: "耗时 5m57s", fill: "rgba(255,255,255,0.05)", color: "#8b98a8" },
+          { text: "刚刚", fill: "rgba(255,255,255,0.05)", color: "#8b98a8" },
+        ];
+        let chipX = bodyX;
+        const chipY = 46;
+        sctx.font = "400 12px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif";
+        for (const c of chips) {
+          const cw = Math.ceil(sctx.measureText(c.text).width) + 16;
+          const ch = 22;
+          roundRect(sctx, chipX, chipY, cw, ch, 999);
+          sctx.fillStyle = c.fill;
+          sctx.fill();
+          paintText(
+            sctx,
+            c.text,
+            chipX + cw / 2,
+            chipY + ch / 2 + 0.5,
+            c.color,
+            "400 12px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif",
+            "center",
+          );
+          chipX += cw + 6;
+        }
+
+        // --- Actions (right) ---
+        // Use real button rects when available for better alignment
+        const viewRect = viewBtn.getBoundingClientRect();
+        const acceptRect = acceptBtn.getBoundingClientRect();
+        const buttons = [
+          {
+            x: viewRect.left - cardRect.left,
+            y: viewRect.top - cardRect.top,
+            w: viewRect.width,
+            h: viewRect.height,
+            fill: "rgba(255,255,255,0.02)",
+            stroke: "rgba(255,255,255,0.14)",
+            text: "查看",
+            textColor: "#e8eef7",
+          },
+          {
+            x: acceptRect.left - cardRect.left,
+            y: acceptRect.top - cardRect.top,
+            w: acceptRect.width,
+            h: acceptRect.height,
+            fill: "#f2f4f7",
+            stroke: "transparent",
+            text: "确认验收",
+            textColor: "#1a222d",
+          },
+        ];
+        sctx.font = "600 13px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif";
+        for (const b of buttons) {
+          roundRect(sctx, b.x, b.y, b.w, b.h, 999);
+          sctx.fillStyle = b.fill;
+          sctx.fill();
+          if (b.stroke !== "transparent") {
+            sctx.strokeStyle = b.stroke;
+            sctx.lineWidth = 1;
+            sctx.stroke();
+          }
+          paintText(
+            sctx,
+            b.text,
+            b.x + b.w / 2,
+            b.y + b.h / 2 + 0.5,
+            b.textColor,
+            "600 13px SF Pro Text, PingFang SC, Helvetica Neue, system-ui, sans-serif",
+            "center",
+          );
+        }
+
+        // Sample opaque pixels into particles
+        const img = sctx.getImageData(0, 0, sw, sh).data;
+        const gap = Math.max(2, Math.round(2.6 * dpr));
+        const particles = [];
+        const originX = cardRect.left - stageRect.left + PAD_X - 8;
+        const originY = cardRect.top - stageRect.top + PAD_Y_TOP;
+
+        for (let py = 0; py < sh; py += gap) {
+          for (let px = 0; px < sw; px += gap) {
+            const i = (py * sw + px) * 4;
+            const a = img[i + 3];
+            if (a < 14) continue;
+            const r = img[i];
+            const g = img[i + 1];
+            const b = img[i + 2];
+            const lx = px / dpr;
+            const ly = py / dpr;
+            // right-to-left delay: larger x detonates earlier
+            const nx = lx / Math.max(1, W);
+            const delay = (1 - nx) * 360 + Math.random() * 50;
+            const speed = 1.15 + Math.random() * 2.1;
+            const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.7 + (nx - 0.5) * 0.4;
+            particles.push({
+              x: originX + lx,
+              y: originY + ly,
+              vx: Math.cos(angle) * speed * (0.4 + nx * 1.05) + (Math.random() - 0.5) * 1.1,
+              vy: Math.sin(angle) * speed * 0.9 - Math.random() * 1.6,
+              size: (gap / dpr) * (0.8 + Math.random() * 0.55),
+              r,
+              g,
+              b,
+              a: a / 255,
+              delay,
+              life: 0,
+              maxLife: 780 + Math.random() * 480,
+              rot: Math.random() * Math.PI,
+              vr: (Math.random() - 0.5) * 0.28,
+              drag: 0.984 - Math.random() * 0.02,
+            });
+          }
+        }
+        return particles;
+      }
+
+      function setAcceptedVisual(done) {
+        if (done) {
+          tag.textContent = "已验收";
+          typeNote.textContent = "验收完成";
+        } else {
+          tag.textContent = "验收";
+          typeNote.textContent = "等待验收";
+        }
+      }
+
+      function shatter() {
+        if (busy) return;
+        busy = true;
+        acceptBtn.disabled = true;
+        viewBtn.disabled = true;
+
+        // Sample while card is still visible, then hide whole card
+        const particles = sampleCardParticles();
+        card.classList.add("is-shattering");
+        setAcceptedVisual(true);
+
+        const start = performance.now();
+        const gravity = 0.09;
+
+        const frame = (now) => {
+          const width = canvas.clientWidth;
+          const height = canvas.clientHeight;
+          ctx.clearRect(0, 0, width, height);
+
+          let alive = 0;
+          for (const p of particles) {
+            const t = now - start - p.delay;
+            if (t < 0) {
+              // waiting: keep solid sample so the card erodes right → left
+              ctx.globalAlpha = p.a;
+              ctx.fillStyle = `rgb(${p.r},${p.g},${p.b})`;
+              ctx.fillRect(p.x, p.y, p.size, p.size);
+              alive++;
+              continue;
+            }
+            if (t > p.maxLife) continue;
+            alive++;
+            p.life = t;
+            p.vy += gravity;
+            p.vx *= p.drag;
+            p.vy *= 0.995;
+            p.x += p.vx;
+            p.y += p.vy;
+            p.rot += p.vr;
+
+            const fade = 1 - t / p.maxLife;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot);
+            ctx.globalAlpha = Math.max(0, p.a * fade);
+            ctx.fillStyle = `rgb(${p.r},${p.g},${p.b})`;
+            const s = p.size * (0.85 + fade * 0.25);
+            ctx.fillRect(-s / 2, -s / 2, s, s);
+            ctx.restore();
+          }
+
+          if (alive > 0 && now - start < 2600) {
+            animId = requestAnimationFrame(frame);
+          } else {
+            ctx.clearRect(0, 0, width, height);
+            busy = false;
+          }
+        };
+
+        cancelAnimationFrame(animId);
+        animId = requestAnimationFrame(frame);
+      }
+
+      function reset() {
+        cancelAnimationFrame(animId);
+        busy = false;
+        card.classList.remove("is-shattering");
+        acceptBtn.disabled = false;
+        viewBtn.disabled = false;
+        setAcceptedVisual(false);
+        const { width, height } = resizeCanvas();
+        ctx.clearRect(0, 0, width, height);
+      }
+
+      acceptBtn.addEventListener("click", shatter);
+      resetBtn.addEventListener("click", reset);
+      replayBtn.addEventListener("click", () => {
+        reset();
+        requestAnimationFrame(() => shatter());
+      });
+      window.addEventListener("resize", () => {
+        if (!busy) resizeCanvas();
+      });
+
+      resizeCanvas();
+    </script>
+  </body>
+</html>

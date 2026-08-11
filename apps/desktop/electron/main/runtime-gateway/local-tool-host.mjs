@@ -1,6 +1,7 @@
 import { createNodeRuntimeHostAdapter } from '@peer-agent/runtime-node';
 import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
+import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
@@ -27,6 +28,10 @@ export function createLocalToolHost({
   ensureBrowserReady = null,
   browserControlProvider = createLocalBrowserControlProvider({ userDataPath, ensureBrowserReady }),
   searchAggregateProvider = createLocalSearchAggregateProvider({ workspaceRoot }),
+  automationProposalService = null,
+  automationProposalProvider = createLocalAutomationProposalProvider({
+    proposalService: automationProposalService,
+  }),
   providers,
   extraProviders = [],
   hookRunner = null,
@@ -45,6 +50,7 @@ export function createLocalToolHost({
       activeShellProvider,
       goalProvider,
       interactionProvider,
+      automationProposalProvider,
       webProvider,
       browserControlProvider,
       searchAggregateProvider,

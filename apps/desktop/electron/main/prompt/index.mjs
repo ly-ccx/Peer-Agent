@@ -3,6 +3,7 @@ export {
   createDefaultPromptSourceRegistry,
   createPromptSourceRegistry,
   createAttachmentPromptSource,
+  createAutomationIntentPromptSource,
   createBrainstormingPromptSource,
   createContinuityPromptSource,
   createContextExtensionPromptSource,
@@ -14,5 +15,6 @@ export {
   renderBrainstormingPrompt,
   renderRuntimeContext,
   renderSystemContext,
+  renderStableSystemContext,
   renderSystemCorePrompt,
 } from '@peer-agent/system-context';

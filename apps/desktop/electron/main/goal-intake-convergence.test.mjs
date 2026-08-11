@@ -7,6 +7,7 @@ import {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
 
@@ -25,6 +26,20 @@ test('纯问答/咨询：intake 契约 + 正常结束 + 未提问 → remove', (
     requestedUserInput: false,
   });
   assert.equal(decision, 'remove');
+});
+
+test('讨论、评估和界面咨询正常答复后不会留下 GoalPlan', () => {
+  for (const messageText of [
+    '这是一个讨论问题，那我怎么在界面上看到 Task-Plan 的格式？',
+    '你觉得当前模式合理吗？',
+    '那界面怎么设计好？',
+  ]) {
+    const discussionIntake = { ...intakePlan, goal: messageText };
+    assert.equal(decideIntakeConvergence(discussionIntake, {
+      terminalStatus: 'done',
+      requestedUserInput: false,
+    }), 'remove');
+  }
 });
 
 test('模糊澄清：模型调用 request_user_input → keep（保留等待）', () => {
@@ -170,6 +185,24 @@ test('goal handoff: 等待期间 Goal 不再 accepted 时不启动 Runner', asyn
 
   assert.equal(result, false);
   assert.deepEqual(events, []);
+});
+
+test('user decision handoff: 只续接仍为 running 且无阻塞的 accepted Goal', () => {
+  const plan = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'executing',
+    runner: { enabled: true, status: 'running' },
+  };
+  assert.equal(shouldResumeGoalRunnerAfterUserDecision(plan), true);
+  assert.equal(shouldResumeGoalRunnerAfterUserDecision({
+    ...plan,
+    runner: { enabled: true, status: 'blocked', blockedReason: 'requested_user_input' },
+  }), false);
+  assert.equal(shouldResumeGoalRunnerAfterUserDecision({
+    ...plan,
+    status: 'completed',
+  }), false);
 });
 
 test('conversation open recovery: 只恢复磁盘上仍为 running 的 accepted Goal', () => {

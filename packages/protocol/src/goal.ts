@@ -281,6 +281,7 @@ export type GoalRunnerStatus =
   | 'resuming_after_compaction'
   | 'paused'
   | 'exploring'
+  | 'waiting_user'
   | 'blocked'
   | 'budget_exhausted'
   | 'completed'
@@ -742,6 +743,15 @@ export interface GoalPlan {
   readonly version: number;
   readonly revisionHistory: GoalRevision[];
   readonly evidenceRefs: string[];
+  /**
+   * 用户对 completed 结果的验收（工作台一键确认写入）。
+   * 与 GoalPlanStatus.accepted（计划被接受执行）无关。
+   * 有 acceptedAt 时 TaskOverview 投影为 terminal。
+   */
+  readonly resultAcceptance?: {
+    readonly acceptedAt: string;
+    readonly acceptedBy?: 'user' | string;
+  };
   /** 对齐 system-context.ts 的 epoch */
   readonly promptContextEpochId?: string;
   readonly createdAt: string;
