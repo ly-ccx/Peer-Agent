@@ -31,23 +31,31 @@
 
   .gwb-calm-card {
     @apply min-w-[220px] rounded-2xl border px-4 py-4;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.25rem;
+    align-items: center;
     background: color-mix(in srgb, var(--za-surface-0) 88%, transparent);
     border-color: var(--za-line);
   }
 
   .gwb-calm-dot {
-    @apply mb-2 h-3 w-3 rounded-full;
+    @apply h-3 w-3 rounded-full;
+    grid-row: 1 / span 2;
     background: var(--za-success, #3e7a6b);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-success, #3e7a6b) 16%, transparent);
   }
 
   .gwb-calm-card b {
     @apply block text-sm font-semibold;
+    grid-column: 2;
     color: var(--za-text);
   }
 
   .gwb-calm-card span {
-    @apply mt-1 block text-xs;
+    @apply block text-xs;
+    grid-column: 2;
     color: var(--za-text-muted);
   }
 
