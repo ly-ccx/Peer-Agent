@@ -11,7 +11,16 @@ import { resetCircuitBreaker } from './context-compactor.mjs';
 let tmpDir;
 
 async function loadService() {
-  return import(`./llm-chat-service.mjs?test=${Date.now()}-${Math.random()}`);
+  const module = await import(`./llm-chat-service.mjs?test=${Date.now()}-${Math.random()}`);
+  return {
+    ...module,
+    createLlmChatService: (options = {}) => module.createLlmChatService({
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'executing' }],
+      },
+      ...options,
+    }),
+  };
 }
 
 function sse(frames) {
@@ -54,16 +63,26 @@ function observedContextSnapshot({
 }
 
 async function runProjectedTool(name, args, workspacePath, toolContext = null, options = {}) {
+  const effectiveToolContext = toolContext ?? createToolContext({
+    mode: 'chat',
+    conversationId: 'c-projected-tool-test',
+    workspacePath,
+  });
   return executeProjectedModelTool({
     name,
     args,
     workspacePath,
-    toolContext,
-    requestPermission: options?.requestPermission,
+    toolContext: effectiveToolContext,
+    requestPermission: Object.hasOwn(options ?? {}, 'requestPermission')
+      ? options.requestPermission
+      : async () => ({ granted: true }),
     shellApprovalDecider: options?.shellApprovalDecider,
     toolCallId: options?.toolCallId,
     registry: options?.registry,
     runtimeProjection: options?.runtimeProjection,
+    goalPlanStore: options?.goalPlanStore ?? {
+      listPlansByConversation: () => [{ status: 'executing' }],
+    },
   });
 }
 
@@ -251,6 +270,7 @@ describe('llm chat service tool materialization', () => {
       { path: outsidePath, content: 'outside\n' },
       workspaceDir,
       toolContext,
+      { requestPermission: null },
     );
 
     assert.equal(result.success, false);
@@ -1858,9 +1878,9 @@ describe('llm chat service tool materialization', () => {
       globalThis.fetch = previousFetch;
     }
 
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].capabilityId, 'local.shell.exec');
-    assert.equal(requests[0].arguments.command, command);
+    const shellRequests = requests.filter((request) => request.capabilityId === 'local.shell.exec');
+    assert.equal(shellRequests.length, 1);
+    assert.equal(shellRequests[0].arguments.command, command);
     assert.equal(events.some((event) => (
       event.channel === 'chat:stream:tool-result' &&
       String(event.payload.result).includes('"stdoutPreview": "ok"')
@@ -1999,7 +2019,7 @@ describe('llm chat service tool materialization', () => {
     }
 
     assert.equal(fetchCalls, 1);
-    assert.equal(requests.length, 1);
+    assert.equal(requests.filter((request) => request.capabilityId === 'local.shell.exec').length, 1);
     assert.equal(events.some((event) => event.channel === 'chat:stream:tool-result'), true);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
     const error = events.find((event) => event.channel === 'chat:stream:error');

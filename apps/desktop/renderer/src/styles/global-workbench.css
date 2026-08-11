@@ -241,6 +241,11 @@
     border-color: var(--za-line);
   }
 
+  /* 首行去掉顶边，避免与 panel-head 的 border-b 叠成双线。 */
+  .gwb-run-list .gwb-run-row:first-child {
+    @apply border-t-0;
+  }
+
   .gwb-soft .gwb-run-row {
     grid-template-columns: minmax(0, 1fr);
   }

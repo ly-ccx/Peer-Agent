@@ -439,7 +439,7 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
     return {
       actionRight: 'result_ready',
       nextAction: 'review_result',
-      statusLabel: '等待验收',
+      statusLabel: '待用户验收',
       actionLabel: '验收 →',
     };
   }

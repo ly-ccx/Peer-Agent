@@ -216,8 +216,14 @@ export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalP
   } catch {
     plans = [];
   }
-  const hasPlan = plans.length > 0;
-  const hasApprovedPlan = plans.some((plan) => EXECUTABLE_PLAN_STATUSES.has(plan?.status));
+  // 只有非终态计划能承接新的副作用。历史 completed/cancelled/failed 计划不能被后续工作
+  // 借用；用户选择继续讨论时，application service 会先把同一计划重开为 executing。
+  const hasPlan = plans.some((plan) => !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status));
+  const hasApprovedPlan = plans.some(
+    (plan) =>
+      !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status)
+      && EXECUTABLE_PLAN_STATUSES.has(plan?.status),
+  );
   // intake 判别阶段事实：存在一条 activation.kind==='intake' 且仍活跃（非终态）的契约。
   // intake 阶段只做只读/问答/澄清，闸门据此拒绝一切有副作用能力（见「方案乙」write-gate）。
   const intakeActive = plans.some(
@@ -289,7 +295,7 @@ export function evaluateGoalModeGate({
   mode = 'chat',
   toolName,
   riskLevel = 'L2_local_write',
-  planGate = { hasPlan: false, hasApprovedPlan: false },
+  planGate = null,
   args = null,
   workspacePath = null,
   writableRoots = null,
@@ -297,16 +303,22 @@ export function evaluateGoalModeGate({
 } = {}) {
   // wire 值迁移后（见 ADR 41 / agent-mode-default-and-adaptive-planning）：
   // - plan 模式：审批门。计划获批前拒绝一切有副作用能力（下方逻辑）。
-  // - Agent 默认（wire=chat）只有在会话已有活跃计划时才启用 Goal hooks；没有计划的普通
-  //   Agent 工具调用继续由 Capability Provider 自身的权限 / Evidence 链治理，避免重复确认。
-  // - legacy goal 始终使用自驱内核，不施加整模式「计划审批门」。
-  if (mode === 'chat' && !planGate?.hasPlan) return { allowed: true };
-
+  // - Agent 默认（wire=chat）与 legacy goal 共用自驱内核，不施加整模式「计划审批门」；
+  //   但副作用工作必须先有持久化 GoalPlan，确保执行完成后能进入 Evidence 与用户验收流转。
+  // - 无计划时规划 / 提问 / 只读能力仍可用；这不是重复 PermissionGrant，而是任务生命周期准入。
   if (mode === 'goal' || mode === 'chat') {
     // 规划 / 回写 / 提问：始终放行。
     if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
     // 惰性 / 只读能力：直接放行。
     if (INERT_RISK_LEVELS.has(riskLevel)) return { allowed: true };
+    // 有副作用的 Agent 工作必须先建立持久化计划，否则执行结果没有可验收的任务事实。
+    if (typeof planGate?.hasPlan === 'boolean' && !planGate.hasPlan) {
+      return {
+        allowed: false,
+        reason: 'goal_plan_required_for_side_effect',
+        detail: toolName ?? undefined,
+      };
+    }
     // intake 判别阶段（方案乙 write-gate）：目标尚未确认，Runner 只做只读/问答/澄清。
     // 上方已放行规划/回写/提问与只读能力；到这里的都是有副作用能力（写文件、shell、
     // MCP 副作用等），在 intake 阶段一律结构化拒绝，直到 intake 收敛为 accepted_goal。
@@ -373,6 +385,11 @@ function denialMessage(reason, locale) {
     return zh
       ? 'Goal 模式 intake 判别阶段：当前尚未确认这是一个要执行的目标，仅允许只读调查、提问与产出目标计划。请先用 goal_create_plan 确认目标（升级为正式目标）后，再执行有副作用的操作；若这只是一次问答，直接回答即可。'
       : 'Goal mode intake phase: the goal is not confirmed yet. Only read-only investigation, questions, and producing a goal plan are allowed. Confirm the goal via goal_create_plan (promote to an accepted goal) before running side-effecting actions; if this is just a question, answer directly.';
+  }
+  if (reason === 'goal_plan_required_for_side_effect') {
+    return zh
+      ? 'Agent 模式：有副作用的工作必须先用 goal_create_plan 建立可追踪任务，才能执行。小改动可以创建单步骤 Micro GoalPlan；完成后任务会进入自动验证与待用户验收流程。'
+      : 'Agent mode: side-effecting work requires a trackable task created via goal_create_plan before execution. Small changes may use a one-step Micro GoalPlan so the result can enter verification and user acceptance.';
   }
   if (reason === 'goal_plan_not_approved') {
     return zh

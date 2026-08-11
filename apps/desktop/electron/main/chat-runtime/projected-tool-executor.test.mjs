@@ -70,6 +70,45 @@ describe('projected model tool executor', () => {
     assert.match(parsed.preview, /hello projection/);
   });
 
+  it('blocks projected Agent writes until the conversation has an active GoalPlan', async () => {
+    const outputPath = path.join(tmpDir, 'untracked.txt');
+    const result = await executeProjectedModelTool({
+      name: 'write_file',
+      args: { path: outputPath, content: 'must not write' },
+      workspacePath: tmpDir,
+      toolContext: { mode: 'chat', conversationId: 'c-untracked' },
+      toolCallId: 'tc_goal_plan_required',
+      goalPlanStore: {
+        listPlansByConversation: () => [],
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(existsSync(outputPath), false);
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_plan_required_for_side_effect');
+    assert.match(parsed.message, /goal_create_plan|可追踪任务/);
+  });
+
+  it('blocks projected Agent writes when the conversation only has terminal plan history', async () => {
+    const outputPath = path.join(tmpDir, 'after-completed.txt');
+    const result = await executeProjectedModelTool({
+      name: 'write_file',
+      args: { path: outputPath, content: 'must reopen first' },
+      workspacePath: tmpDir,
+      toolContext: { mode: 'chat', conversationId: 'c-terminal' },
+      toolCallId: 'tc_terminal_plan_history',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'completed' }],
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(existsSync(outputPath), false);
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_plan_required_for_side_effect');
+  });
+
   it('requires Goal scope expansion confirmation before projected writes outside inScope', async () => {
     const permissionRequests = [];
     const result = await executeProjectedModelTool({
@@ -167,6 +206,9 @@ describe('projected model tool executor', () => {
       workspacePath: tmpDir,
       toolContext: { mode: 'goal', conversationId: 'c-irreversible' },
       toolCallId: 'tc_irreversible',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'executing' }],
+      },
       requestPermission: async (request) => {
         permissionRequests.push(request);
         return { granted: false };
@@ -190,6 +232,9 @@ describe('projected model tool executor', () => {
       workspacePath: tmpDir,
       toolContext: { mode: 'goal', conversationId: 'c-high-risk' },
       toolCallId: 'tc_high_risk',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'executing' }],
+      },
       requestPermission: async (request) => {
         permissionRequests.push(request);
         return { granted: false };
@@ -219,8 +264,12 @@ describe('projected model tool executor', () => {
       name: 'bash',
       args: { command, timeoutMs: 5000 },
       workspacePath: tmpDir,
-      toolContext: { readFiles: new Map(), conversationId: 'c1' },
+      toolContext: { mode: 'chat', readFiles: new Map(), conversationId: 'c1' },
       toolCallId: 'tc_shell_abort',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'executing' }],
+      },
+      requestPermission: async () => ({ granted: true }),
       shellApprovalDecider: async () => ({ granted: true, reason: 'test_approved' }),
       signal: controller.signal,
     });

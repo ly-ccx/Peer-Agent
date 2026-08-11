@@ -196,7 +196,7 @@ test('rule 6: completed 未验收 → result_ready', () => {
   const item = projectGoalPlan(goalSnapshot({ status: 'completed', accepted: false }));
   assert.equal(item.actionRight, 'result_ready');
   assert.equal(item.nextAction, 'review_result');
-  assert.equal(item.statusLabel, '等待验收');
+  assert.equal(item.statusLabel, '待用户验收');
 });
 
 test('rule 16a: completed 已验收 → terminal', () => {

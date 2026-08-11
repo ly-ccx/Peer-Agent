@@ -11,18 +11,38 @@ import {
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 
-// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）:审批门归 plan
-// 模式独占;goal 是自驱目标模式,不施加「计划审批门」——有副作用能力由 Runner 托管、高风险
-// 动作走逐动作 hooks 确认,故在本闸门直接放行。
+// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）：审批门归 plan
+// 模式独占；chat/goal 是自驱内核，不要求用户先审批计划，但副作用工作必须先建立持久化
+// GoalPlan，保证执行结果进入 Evidence 与用户验收流转。
 describe('evaluateGoalModeGate', () => {
-  it('does not add Goal hooks to legacy chat wire mode without an active plan', () => {
-    const r = evaluateGoalModeGate({
-      mode: 'chat',
-      toolName: 'bash',
-      riskLevel: 'L4_privileged',
-      planGate: { hasPlan: false, hasApprovedPlan: false },
-    });
-    assert.deepEqual(r, { allowed: true });
+  it('allows read-only Agent tools without an active plan', () => {
+    for (const mode of ['chat', 'goal']) {
+      const r = evaluateGoalModeGate({
+        mode,
+        toolName: 'read_file',
+        riskLevel: 'L1_local_read',
+        planGate: { hasPlan: false, hasApprovedPlan: false },
+      });
+      assert.deepEqual(r, { allowed: true });
+    }
+  });
+
+  it('requires a persistent GoalPlan before side-effecting Agent work', () => {
+    for (const mode of ['chat', 'goal']) {
+      for (const [toolName, riskLevel] of [
+        ['write_file', 'L2_local_write'],
+        ['bash', 'L4_privileged'],
+      ]) {
+        const r = evaluateGoalModeGate({
+          mode,
+          toolName,
+          riskLevel,
+          planGate: { hasPlan: false, hasApprovedPlan: false },
+        });
+        assert.equal(r.allowed, false, `${mode}/${toolName} should require a GoalPlan`);
+        assert.equal(r.reason, 'goal_plan_required_for_side_effect');
+      }
+    }
   });
 
   it('keeps Goal hooks active in legacy chat wire mode when a plan exists', () => {
@@ -35,21 +55,6 @@ describe('evaluateGoalModeGate', () => {
     assert.equal(r.allowed, true);
     assert.equal(r.requiresConfirmation, true);
     assert.equal(r.confirmation?.kind, 'high_risk');
-  });
-
-  it('does not gate goal mode (self-driven): side-effecting tools allowed without an approved plan', () => {
-    for (const [toolName, riskLevel] of [
-      ['write_file', 'L2_local_write'],
-      ['bash', 'L4_privileged'],
-    ]) {
-      const r = evaluateGoalModeGate({
-        mode: 'goal',
-        toolName,
-        riskLevel,
-        planGate: { hasPlan: false, hasApprovedPlan: false },
-      });
-      assert.equal(r.allowed, true, `${toolName} should be allowed in goal mode`);
-    }
   });
 
   it('always allows planning/interaction tools in plan mode without a plan', () => {
@@ -143,6 +148,21 @@ describe('resolveGoalPlanGate', () => {
     };
     assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
       hasPlan: true,
+      hasApprovedPlan: false,
+      intakeActive: false,
+    });
+  });
+
+  it('does not let terminal plan history authorize new side effects', () => {
+    const fakeStore = {
+      listPlansByConversation: () => [
+        { status: 'completed' },
+        { status: 'cancelled' },
+        { status: 'failed' },
+      ],
+    };
+    assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
+      hasPlan: false,
       hasApprovedPlan: false,
       intakeActive: false,
     });
@@ -485,13 +505,13 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
     assert.notEqual(r.requiresConfirmation, true);
   });
 
-  it('does not impose a plan-approval gate in goal mode', () => {
+  it('does not impose a plan-approval gate once goal mode has a persistent plan', () => {
     const r = evaluateGoalModeGate({
       mode: 'goal',
       toolName: 'bash',
       riskLevel: 'L3_external_write',
       args: { command: 'node build.js' },
-      planGate: { hasPlan: false, hasApprovedPlan: false },
+      planGate: { hasPlan: true, hasApprovedPlan: false },
       workspacePath: '/ws',
     });
     assert.equal(r.allowed, true);
