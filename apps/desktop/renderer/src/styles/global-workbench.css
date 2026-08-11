@@ -251,7 +251,15 @@
 
   .gwb-run-dot {
     @apply h-2.5 w-2.5 rounded-full border-2;
-    border-color: var(--za-accent);
+    border-color: color-mix(in srgb, var(--za-accent) 28%, transparent);
+    border-top-color: var(--za-accent);
+    animation: gwb-run-spin 900ms linear infinite;
+  }
+
+  @keyframes gwb-run-spin {
+    to {
+      transform: rotate(1turn);
+    }
   }
 
   .gwb-run-title {
@@ -266,8 +274,24 @@
   }
 
   .gwb-run-pct {
-    @apply text-xs font-semibold;
+    @apply overflow-hidden text-xs font-semibold tabular-nums;
     color: var(--za-text-soft);
+  }
+
+  .gwb-run-pct-value {
+    display: inline-block;
+    animation: gwb-run-count-change 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes gwb-run-count-change {
+    from {
+      opacity: 0;
+      transform: translateY(0.35em);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   /* 脉搏卡复用 panel 外壳；body 负责内容区 padding。 */
@@ -434,7 +458,9 @@
     .gwb-item--celebrating,
     .gwb-item--exiting,
     .gwb-item-celebration i,
-    .gwb-accept-spinner {
+    .gwb-accept-spinner,
+    .gwb-run-dot,
+    .gwb-run-pct-value {
       animation: none !important;
       transition: none !important;
     }

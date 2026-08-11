@@ -345,8 +345,13 @@ export function GlobalWorkbenchPage({
                         </span>
                       </span>
                       {item.planProgress ? (
-                        <span className="gwb-run-pct">
-                          {item.planProgress.completed}/{item.planProgress.total}
+                        <span className="gwb-run-pct" aria-live="polite" aria-atomic="true">
+                          <span
+                            key={`${item.planProgress.completed}/${item.planProgress.total}`}
+                            className="gwb-run-pct-value"
+                          >
+                            {item.planProgress.completed}/{item.planProgress.total}
+                          </span>
                         </span>
                       ) : null}
                     </button>
