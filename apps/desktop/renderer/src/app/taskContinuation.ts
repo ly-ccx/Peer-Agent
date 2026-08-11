@@ -16,9 +16,7 @@ export interface TaskContinuationAction {
 export interface TaskContinuationNavigation {
   readonly showActiveConversations: () => void;
   readonly selectConversation: (conversationId: string) => void;
-  /** Close result drawer / result-only overlay if open. */
-  readonly closeResult: () => void;
-  /** Open the conversation drawer (preferred) instead of jumping to main Chat. */
+  /** Open a child conversation drawer without unmounting the result drawer beneath it. */
   readonly openConversationDrawer: () => void;
   /** Focus the drawer composer after mount. */
   readonly focusComposer?: () => void;
@@ -37,7 +35,6 @@ export function continueTaskInConversation(
 
   nav.showActiveConversations();
   nav.selectConversation(id);
-  nav.closeResult();
   nav.openConversationDrawer();
   nav.focusComposer?.();
 }

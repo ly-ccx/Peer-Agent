@@ -25,7 +25,6 @@ describe('continueTaskInConversation', () => {
     continueTaskInConversation('conversation-1', {
       showActiveConversations: () => effects.push('active'),
       selectConversation: (id) => effects.push(`conversation:${id}`),
-      closeResult: () => effects.push('close-result'),
       openConversationDrawer: () => effects.push('conversation-drawer'),
       focusComposer: () => effects.push('focus'),
     });
@@ -33,12 +32,11 @@ describe('continueTaskInConversation', () => {
     assert.deepEqual(effects, [
       'active',
       'conversation:conversation-1',
-      'close-result',
       'conversation-drawer',
       'focus',
     ]);
     assert.ok(!effects.includes('chat'), 'must not hard-switch main page to Chat');
-    assert.ok(!effects.includes('close-collection'), 'collection close is owned by openConversationDrawer mutual exclusion');
+    assert.ok(!effects.includes('close-result'), 'the parent result drawer must stay mounted beneath the child drawer');
   });
 });
 

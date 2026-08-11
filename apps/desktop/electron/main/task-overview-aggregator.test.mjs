@@ -645,6 +645,33 @@ test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收�
   );
 });
 
+test('workspace overview 使用按工作区读取接口，全局 overview 保持全量读取', () => {
+  const calls = [];
+  const goalPlanStore = {
+    listPlanDetails: () => {
+      calls.push(['all']);
+      return [];
+    },
+    listPlanDetailsByWorkspace: (workspacePath) => {
+      calls.push(['workspace', workspacePath]);
+      return [];
+    },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore,
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  agg.listTaskOverview({ workspacePath: '/tmp/workspace-a', includeTerminal: false });
+  agg.listTaskOverview({ includeTerminal: false });
+
+  assert.deepEqual(calls, [
+    ['workspace', '/tmp/workspace-a'],
+    ['all'],
+  ]);
+});
+
 test('isPlanResultAccepted：显式验收与存量祖父化', () => {
   assert.equal(
     isPlanResultAccepted({

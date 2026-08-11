@@ -36,6 +36,18 @@ test('global workbench acceptance failure returns the card to a retryable idle s
   assert.match(source, /disabled=\{acceptBusy\}/);
 });
 
+test('global workbench removes the final divider through the shatter host wrapper', async () => {
+  const source = await readPage();
+  assert.match(
+    source,
+    /className=\{`particle-shatter-host[\s\S]*>\s*<div\s+ref=\{cardRef\}\s+className=\{`gwb-item /,
+  );
+
+  const styles = await readStyles();
+  assert.match(styles, /\.gwb-list\s*>\s*:last-child\s*>\s*\.gwb-item\s*\{[\s\S]*border-b-0/);
+  assert.doesNotMatch(styles, /\.gwb-item:last-child\s*\{/);
+});
+
 test('advancing tasks animate the running ring and progress changes accessibly', async () => {
   const source = await readPage();
   assert.match(source, /className="gwb-run-dot"/);

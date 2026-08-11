@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
+import { ParticleShatterOverlay } from './app/fx/ParticleShatterOverlay';
 import { ConversationResultView } from './app/components/ConversationResultView';
+import type { AcceptancePhase } from './app/state/acceptanceTransition';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
 import { continueTaskInConversation } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
@@ -72,7 +74,7 @@ function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boo
 
 type AppPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
 /** 任务/历史/会话不再作为一级全屏页，改为 Drawer 承载。 */
-type CollectionDrawer = 'tasks' | 'history' | 'task_details' | 'result' | 'conversation' | null;
+type CollectionDrawer = 'tasks' | 'history' | 'task_details' | 'result' | null;
 type ConversationStatus = 'active' | 'archived';
 type ConversationView = 'active' | 'archived';
 
@@ -134,7 +136,13 @@ function MainApp() {
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
   const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
+  /** 二级会话 Drawer 独立于一级结果 Drawer，避免“继续讨论”替换并卸载父级。 */
+  const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
+  const [resultAcceptancePhase, setResultAcceptancePhase] = useState<AcceptancePhase | null>(null);
+  const resultShatterRef = useRef<HTMLDivElement | null>(null);
+  const resultShattering =
+    resultAcceptancePhase === 'celebrating' || resultAcceptancePhase === 'exiting';
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
     setCollectionDrawer(kind);
   }, []);
@@ -142,6 +150,7 @@ function MainApp() {
   const openResultDrawer = useCallback((item: TaskOverviewItem) => {
     setResultDrawerItem(item);
     setCollectionDrawer('result');
+    setResultAcceptancePhase(null);
   }, []);
 
   const acceptResultFromWorkbench = useCallback(
@@ -840,7 +849,7 @@ function MainApp() {
   }, []);
 
   const handleContinueTask = useCallback((conversationId: string, planId?: string) => {
-    // §14 继续讨论：打开会话 Drawer，不跳主 Chat。
+    // §14 继续讨论：保留一级结果 Drawer，叠加打开二级会话 Drawer，不跳主 Chat。
     // 若来自 result_ready（带 planId），语义=验收未通过：重开同一 plan，离开待验收队列。
     const id = planId?.trim();
     if (id) {
@@ -851,11 +860,7 @@ function MainApp() {
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
       selectConversation: setActiveConversationId,
-      closeResult: () => setResultDrawerItem(null),
-      openConversationDrawer: () => {
-        setResultDrawerItem(null);
-        setCollectionDrawer('conversation');
-      },
+      openConversationDrawer: () => setConversationDrawerOpen(true),
       focusComposer: () => {
         const focus = () => {
           document
@@ -1153,7 +1158,7 @@ function MainApp() {
                     await clientApi.workspaceSetActive({ path: nextWorkspacePath });
                     await handleWorkspaceChanged();
                   }}
-                  isPageActive={activePage === 'chat' && collectionDrawer !== 'conversation'}
+                  isPageActive={activePage === 'chat' && !conversationDrawerOpen}
                   messageTarget={notificationMessageTarget}
                   />
                 </section>
@@ -1204,8 +1209,10 @@ function MainApp() {
       {collectionDrawer ? (
                 <Drawer
                   onClose={() => {
+                    setConversationDrawerOpen(false);
                     setCollectionDrawer(null);
                     setResultDrawerItem(null);
+                    setResultAcceptancePhase(null);
                   }}
                   ariaLabel={
                     collectionDrawer === 'tasks'
@@ -1220,20 +1227,22 @@ function MainApp() {
                           ? isZh
                             ? '任务详情'
                             : 'Task details'
-                          : collectionDrawer === 'conversation'
-                            ? isZh
-                              ? '继续讨论'
-                              : 'Continue discussion'
-                            : isZh
-                              ? '执行结果'
-                              : 'Execution result'
+                          : isZh
+                            ? '执行结果'
+                            : 'Execution result'
                   }
                   panelClassName={
                     collectionDrawer === 'result' || collectionDrawer === 'task_details'
-                      ? 'conversation-result-drawer'
-                      : collectionDrawer === 'conversation'
-                        ? 'conversation-result-drawer conversation-chat-drawer'
-                        : 'workbench-collection-drawer'
+                      ? `conversation-result-drawer${
+                          collectionDrawer === 'result' && resultShattering
+                            ? ' conversation-result-drawer--shattering'
+                            : ''
+                        }${
+                          collectionDrawer === 'result' && conversationDrawerOpen
+                            ? ' conversation-result-drawer--pushed'
+                            : ''
+                        }`
+                      : 'workbench-collection-drawer'
                   }
                 >
                   {({ requestClose }) =>
@@ -1298,64 +1307,57 @@ function MainApp() {
                           />
                         </div>
                       </div>
-                    ) : collectionDrawer === 'conversation' && activeConversationId ? (
-                      <div className="conversation-chat-drawer-shell">
-                        <div className="conversation-chat-drawer__body">
-                          <ChatSurface
-                            i18n={i18n}
-                            providers={providers}
-                            conversationId={activeConversationId}
-                            conversationRevision={conversationRevision}
-                            conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
-                            automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
-                            onConversationUpdated={() => {
-                              void refreshConversations(activeWorkspace, conversationView);
-                            }}
-                            onStreamingChange={handleDrawerStreamingChange}
-                            onOpenSettings={() => {
-                              setSettingsInitialSection('providers');
-                              setActivePage('settings');
-                            }}
-                            onOpenTaskDetails={() => openCollectionDrawer('task_details')}
-                            onClose={requestClose}
-                            workspacePath={activeWorkspace}
-                            workspaces={workspaces}
-                            onWorkspaceChange={async (nextWorkspacePath) => {
-                              if (nextWorkspacePath === activeWorkspace) return;
-                              await clientApi.workspaceSetActive({ path: nextWorkspacePath });
-                              await handleWorkspaceChanged();
-                            }}
-                            isPageActive={collectionDrawer === 'conversation'}
-                            messageTarget={notificationMessageTarget}
-                          />
-                        </div>
-                      </div>
                     ) : resultDrawerItem ? (
-                      <>
-                        <div className="conversation-result-drawer__head">
-                          <div>
-                            <h2>{isZh ? '查看结果' : 'View result'}</h2>
-                            <p>{isZh ? '留在工作台，从右侧查看执行具体内容' : 'Stay on workbench; inspect execution details here'}</p>
+                      <div
+                        className={`conversation-result-drawer__shatter-host${
+                          resultAcceptancePhase === 'exiting' ? ' is-exiting' : ''
+                        }`}
+                      >
+                        <div
+                          ref={resultShatterRef}
+                          className={`conversation-result-drawer__shatter-source particle-shatter-source${
+                            resultAcceptancePhase
+                              ? ` conversation-result-drawer--${resultAcceptancePhase}`
+                              : ''
+                          }${resultShattering ? ' is-shattering' : ''}`}
+                        >
+                          <div className="conversation-result-drawer__head">
+                            <div>
+                              <h2>{isZh ? '查看结果' : 'View result'}</h2>
+                              <p>
+                                {isZh
+                                  ? '留在工作台，从右侧查看执行具体内容'
+                                  : 'Stay on workbench; inspect execution details on the right'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="conversation-result-drawer__close"
+                              onClick={requestClose}
+                              disabled={Boolean(resultAcceptancePhase)}
+                            >
+                              {isZh ? '关闭' : 'Close'}
+                            </button>
                           </div>
-                          <button type="button" className="conversation-result-drawer__close" onClick={requestClose}>
-                            {isZh ? '关闭' : 'Close'}
-                          </button>
+                          <div className="conversation-result-drawer__body">
+                            <ConversationResultView
+                              item={resultDrawerItem}
+                              isZh={isZh}
+                              onAcceptResult={(item) =>
+                                acceptResultFromWorkbench(item, { keepResultDrawer: true })
+                              }
+                              onAcceptancePhaseChange={setResultAcceptancePhase}
+                              onAccepted={() => {
+                                setResultDrawerItem(null);
+                                setCollectionDrawer(null);
+                                setResultAcceptancePhase(null);
+                              }}
+                              onContinueTask={handleContinueTask}
+                            />
+                          </div>
                         </div>
-                        <div className="conversation-result-drawer__body">
-                          <ConversationResultView
-                            item={resultDrawerItem}
-                            isZh={isZh}
-                            onAcceptResult={(item) =>
-                              acceptResultFromWorkbench(item, { keepResultDrawer: true })
-                            }
-                            onAccepted={() => {
-                              setResultDrawerItem(null);
-                              setCollectionDrawer(null);
-                            }}
-                            onContinueTask={handleContinueTask}
-                          />
-                        </div>
-                      </>
+                        <ParticleShatterOverlay active={resultShattering} targetRef={resultShatterRef} />
+                      </div>
                     ) : (
                       <div className="conversation-result-drawer__body">
                         <p className="conversation-result-view__hint">
@@ -1366,6 +1368,52 @@ function MainApp() {
                   }
                 </Drawer>
               ) : null}
+          {conversationDrawerOpen && activeConversationId ? (
+            <Drawer
+              onClose={() => setConversationDrawerOpen(false)}
+              ariaLabel={isZh ? '继续讨论' : 'Continue discussion'}
+              panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
+              softBackdrop
+            >
+              <div className="conversation-chat-drawer-shell">
+                <div className="conversation-chat-drawer__body">
+                  <ChatSurface
+                    i18n={i18n}
+                    providers={providers}
+                    conversationId={activeConversationId}
+                    conversationRevision={conversationRevision}
+                    conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
+                    automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
+                    systemInstructions={systemInstructions}
+                    replyLanguage={replyLanguage}
+                    gitBranchPrefix={gitBranchPrefix}
+                    onOpenSettings={() => openSettings('providers')}
+                    onProvidersRefresh={refreshProviders}
+                    onConversationUpdated={() => { void refreshConversations(); }}
+                    onBranch={(id) => {
+                      setConversationView('active');
+                      setActiveConversationId(id);
+                      void refreshConversations(activeWorkspace, 'active');
+                    }}
+                    onRenameConversation={handleRenameConversation}
+                    onArchiveConversation={handleArchiveConversation}
+                    onOpenAutomationRun={openAutomationRun}
+                    onOpenTaskDetails={() => openCollectionDrawer('task_details')}
+                    onClose={() => setConversationDrawerOpen(false)}
+                    workspacePath={activeWorkspace}
+                    workspaces={workspaces}
+                    onWorkspaceChange={async (nextWorkspacePath) => {
+                      if (nextWorkspacePath === activeWorkspace) return;
+                      await clientApi.workspaceSetActive({ path: nextWorkspacePath });
+                      await handleWorkspaceChanged();
+                    }}
+                    isPageActive={conversationDrawerOpen}
+                    messageTarget={notificationMessageTarget}
+                  />
+                </div>
+              </div>
+            </Drawer>
+          ) : null}
         </>
       ) : (
         <section className="main-panel">

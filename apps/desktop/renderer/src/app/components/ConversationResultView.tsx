@@ -16,12 +16,14 @@ import {
  *
  * - Markdown：复用会话主路径 MarkdownMessage
  * - 定位：加载后滚动到与当前 Task/Plan 最相关的消息
+ * - 验收退场：本视图只上报 AcceptancePhase；整栏（含标题）粒子粉碎由外壳 ParticleShatterOverlay 播放
  */
 export function ConversationResultView({
   item,
   onAcceptResult,
   onContinueTask,
   onAccepted,
+  onAcceptancePhaseChange,
   isZh = true,
 }: {
   readonly item: TaskOverviewItem;
@@ -29,6 +31,8 @@ export function ConversationResultView({
   readonly onContinueTask?: (conversationId: string, planId?: string) => void;
   /** 验收三段式动画走完后的收尾（关闭结果视图，回到工作台）。 */
   readonly onAccepted?: (item: TaskOverviewItem) => void;
+  /** 验收三段式阶段变化；侧栏外壳用它驱动整栏粉碎与退场。 */
+  readonly onAcceptancePhaseChange?: (phase: AcceptancePhase | null) => void;
   readonly isZh?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
@@ -46,6 +50,10 @@ export function ConversationResultView({
     },
     [],
   );
+
+  useEffect(() => {
+    onAcceptancePhaseChange?.(acceptancePhase);
+  }, [acceptancePhase, onAcceptancePhaseChange]);
 
   useEffect(() => {
     let cancelled = false;

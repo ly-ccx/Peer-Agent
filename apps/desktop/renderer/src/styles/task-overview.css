@@ -1294,7 +1294,52 @@
   --pa-drawer-width: 70vw;
   @apply flex h-full min-h-0 flex-col;
   background: var(--za-surface-0);
+  transition:
+    translate var(--za-motion-medium) var(--za-ease-decelerate),
+    filter var(--za-motion-medium) var(--za-ease-decelerate);
 }
+
+/* 结果侧栏验收：host/source 只负责整栏粒子采样，不改变原有 Drawer 布局链。 */
+.conversation-result-drawer__shatter-host,
+.conversation-result-drawer__shatter-source {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.conversation-result-drawer__shatter-host {
+  position: relative;
+  overflow: hidden;
+}
+
+/* 唯一滚动容器仍是 drawer body；粉碎包裹层不再另建滚动上下文。 */
+.conversation-result-drawer__shatter-source {
+  overflow: hidden;
+  background: var(--za-surface-0);
+}
+
+
+.conversation-result-drawer--celebrating,
+.conversation-result-drawer--exiting,
+.conversation-result-drawer--shattering {
+  pointer-events: none;
+}
+
+/* 粉碎时 Overlay 面板本体透明，只保留粒子层 */
+.conversation-result-drawer.conversation-result-drawer--shattering {
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-result-drawer__shatter-host .particle-shatter-canvas {
+  /* 侧栏更高更宽，给粒子更宽的离场空间 */
+  inset: -40px -120px -80px -160px;
+  width: calc(100% + 280px);
+  height: calc(100% + 120px);
+  z-index: 6;
+}
+
 
 .conversation-result-drawer__head {
   @apply flex items-start justify-between gap-3 border-b px-5 py-4;
@@ -1330,6 +1375,18 @@
   background: var(--za-surface-0);
 }
 
+/* Ant Design 风格多级 Drawer：父级保留挂载并左推，子级独立覆盖右侧。 */
+.conversation-result-drawer--pushed {
+  /* 使用独立 translate，避免被 Drawer 自身控制 transform 的入场动画覆盖。 */
+  translate: clamp(-220px, -12vw, -112px) 0;
+  filter: brightness(0.78);
+}
+
+.conversation-chat-drawer--nested {
+  --pa-drawer-width: min(920px, 88vw);
+  box-shadow: -24px 0 64px rgba(4, 8, 14, 0.32);
+}
+
 .conversation-chat-drawer-shell {
   @apply flex h-full min-h-0 flex-col;
 }
@@ -1357,6 +1414,7 @@
   box-shadow: none;
 }
 
+/* 结果视图铺满滚动容器：内容区独立滚动，footer 操作区独立在底部。 */
 .conversation-result-view {
   @apply flex h-full min-h-0 flex-col gap-4;
   transform-origin: center top;
@@ -1420,7 +1478,8 @@
 }
 
 .conversation-result-view__section--grow {
-  @apply flex min-h-0 flex-1 flex-col;
+  @apply flex min-h-0 flex-col;
+  flex: 0 0 auto;
 }
 
 .conversation-result-view__section-title {
@@ -1464,7 +1523,9 @@
 }
 
 .conversation-result-view__messages {
-  @apply flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1;
+  @apply flex min-h-0 flex-col gap-3 pr-1;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .conversation-result-view__msg {
@@ -1511,8 +1572,10 @@
 }
 
 .conversation-result-view__footer {
-  /* 两侧操作按按钮顶边对齐；继续任务下方的说明不再推高确认按钮。 */
+  /* 独立底部操作区：与内容区分开，不跟随内容滚动。 */
   @apply flex items-start justify-between gap-3 pt-3;
+  border-top: 1px solid var(--za-line);
+  margin-top: 2px;
 }
 
 .conversation-result-view__continue {

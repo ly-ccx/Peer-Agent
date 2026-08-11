@@ -603,7 +603,9 @@ export function createTaskOverviewAggregator({
 
     let plans = [];
     try {
-      plans = goalPlanStore.listPlanDetails() ?? [];
+      plans = workspacePath && typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
+        ? goalPlanStore.listPlanDetailsByWorkspace(workspacePath) ?? []
+        : goalPlanStore.listPlanDetails() ?? [];
     } catch {
       plans = [];
     }

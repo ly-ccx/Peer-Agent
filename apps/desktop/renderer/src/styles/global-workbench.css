@@ -129,7 +129,7 @@
     border-color: var(--za-line);
   }
 
-  .gwb-item:last-child {
+  .gwb-list > :last-child > .gwb-item {
     @apply border-b-0;
   }
 
