@@ -19,5 +19,5 @@ test('request-scoped Fast mode flows through main and the ChatGPT Responses runt
   assert.match(service, /fastMode: fastMode === true/);
   assert.match(loop, /fastMode: authMethod === 'oauth_chatgpt' && fastMode/);
   assert.match(adapter, /encodeOpenAIResponsesRequest\(\{[^\n]*fastMode/);
-  assert.match(encoder, /if \(fastMode\) body\.service_tier = 'fast'/);
+  assert.match(encoder, /if \(fastMode\) body\.service_tier = 'priority'/);
 });

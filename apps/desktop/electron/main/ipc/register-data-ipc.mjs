@@ -15,6 +15,7 @@ export function createDataIpcRegistrations({ conversations, promptSnapshots, usa
     get: assertFunction(conversations?.get, 'conversations.get'),
     updateTitle: assertFunction(conversations?.updateTitle, 'conversations.updateTitle'),
     updateMode: assertFunction(conversations?.updateMode, 'conversations.updateMode'),
+    updateFastMode: assertFunction(conversations?.updateFastMode, 'conversations.updateFastMode'),
     updateModelEffort: assertFunction(
       conversations?.updateModelEffort,
       'conversations.updateModelEffort',

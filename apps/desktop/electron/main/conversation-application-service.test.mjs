@@ -16,6 +16,7 @@ function createHarness(overrides = {}) {
     getConversation: port('get'),
     updateTitle: port('update-title'),
     updateMode: port('update-mode'),
+    updateFastMode: port('update-fast-mode'),
     updateAutomationCreateContext: port('update-automation-create-context'),
     updateModelEffort: port('update-model-effort'),
     appendMessage: port('append-message'),
@@ -112,6 +113,7 @@ test('conversation commands preserve payload mapping and return values', () => {
   assert.equal(service.get({ id: 'c' }), 'get');
   assert.equal(service.updateTitle({ id: 'c', title: 'New' }), 'update-title');
   assert.equal(service.updateMode({ id: 'c', mode: 'goal' }), 'update-mode');
+  assert.equal(service.updateFastMode({ id: 'c', fastMode: true }), 'update-fast-mode');
   assert.equal(
     service.updateModelEffort({ id: 'c', effort: 'high', modelProviderId: 'provider' }),
     'update-model-effort',
@@ -132,6 +134,7 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['get', 'c'],
     ['update-title', 'c', 'New'],
     ['update-mode', 'c', 'goal'],
+    ['update-fast-mode', 'c', true],
     ['update-model-effort', 'c', { effort: 'high', modelProviderId: 'provider' }],
     ['append-message', 'c', { role: 'user' }],
     ['update-last-message', 'c', 'x'],

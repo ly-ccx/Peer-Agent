@@ -16,6 +16,7 @@ function createHarness() {
       get: port('conversations.get'),
       updateTitle: port('conversations.updateTitle'),
       updateMode: port('conversations.updateMode'),
+      updateFastMode: port('conversations.updateFastMode'),
       updateModelEffort: port('conversations.updateModelEffort'),
       appendMessage: port('conversations.appendMessage'),
       updateLastMessage: port('conversations.updateLastMessage'),
@@ -74,11 +75,12 @@ const CONVERSATION_CHANNELS = [
   'conversations:unpin',
   'conversations:update-last-message',
   'conversations:update-mode',
+  'conversations:update-fast-mode',
   'conversations:update-model-effort',
   'conversations:update-title',
 ];
 
-test('data owners register the exact 25 invoke channels', () => {
+test('data owners register the exact 26 invoke channels', () => {
   const { handlers, owners } = createHarness();
   assert.deepEqual(owners, [
     'conversations-ipc',
@@ -122,6 +124,7 @@ test('conversation handlers pass payloads and defaults without transport logic',
       'conversations:unpin': 'unpin',
       'conversations:update-last-message': 'updateLastMessage',
       'conversations:update-mode': 'updateMode',
+      'conversations:update-fast-mode': 'updateFastMode',
       'conversations:update-model-effort': 'updateModelEffort',
       'conversations:update-title': 'updateTitle',
     })[channel]}`);
