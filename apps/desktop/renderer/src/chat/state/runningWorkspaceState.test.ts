@@ -5,6 +5,7 @@ import {
   applyLocalStreamingWorkspaceChange,
   deriveRunningWorkspacePaths,
   hasRunningWorkspaceOtherThan,
+  hasRunningWorkspaces,
   isWorkspaceRunning,
   normalizeWorkspacePathKey,
 } from './runningWorkspaceState.ts';
@@ -66,8 +67,17 @@ describe('runningWorkspaceState', () => {
     assert.equal(isWorkspaceRunning(running, '/ws-b'), false);
   });
 
+  it('aggregates any running workspace for the global workbench indicator', () => {
+    assert.equal(hasRunningWorkspaces(undefined), false);
+    assert.equal(hasRunningWorkspaces(new Set()), false);
+    assert.equal(hasRunningWorkspaces(new Set(['/ws-a'])), true);
+    assert.equal(hasRunningWorkspaces(new Set(['/ws-a', '/ws-b'])), true);
+  });
+
   it('idle streams project to no workspace dots', () => {
-    assert.equal(deriveRunningWorkspacePaths([]).size, 0);
-    assert.equal(hasRunningWorkspaceOtherThan(new Set(), '/ws-a'), false);
+    const running = deriveRunningWorkspacePaths([]);
+    assert.equal(running.size, 0);
+    assert.equal(hasRunningWorkspaces(running), false);
+    assert.equal(hasRunningWorkspaceOtherThan(running, '/ws-a'), false);
   });
 });

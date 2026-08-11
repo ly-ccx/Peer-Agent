@@ -86,6 +86,12 @@ export function hasRunningWorkspaceOtherThan(
 }
 
 /** Sidebar: does this workspace path currently have a running stream? */
+export function hasRunningWorkspaces(
+  runningWorkspacePaths: ReadonlySet<string> | null | undefined,
+): boolean {
+  return (runningWorkspacePaths?.size ?? 0) > 0;
+}
+
 export function isWorkspaceRunning(
   runningWorkspacePaths: ReadonlySet<string> | null | undefined,
   workspacePath: string | null | undefined,

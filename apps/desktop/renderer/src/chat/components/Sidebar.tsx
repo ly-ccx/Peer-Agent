@@ -13,7 +13,7 @@ import {
   sidebarConversationActivity,
 } from '../state/compactionStateView';
 import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
-import { isWorkspaceRunning } from '../state/runningWorkspaceState';
+import { hasRunningWorkspaces, isWorkspaceRunning } from '../state/runningWorkspaceState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
@@ -229,6 +229,7 @@ export function Sidebar({
 }) {
   const isZh = i18n.locale === 'zh-CN';
   const isArchivedView = conversationView === 'archived';
+  const isAnyWorkspaceRunning = hasRunningWorkspaces(runningWorkspacePaths);
   const confirm = useConfirm();
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
   
@@ -722,6 +723,14 @@ export function Sidebar({
             <path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z" />
           </svg>
           <span>{isZh ? '工作台' : 'Workbench'}</span>
+          {isAnyWorkspaceRunning ? (
+            <span
+              className="ws-running-dot"
+              role="img"
+              aria-label={isZh ? '有任务运行中' : 'Tasks running'}
+              title={isZh ? '有任务运行中' : 'Tasks running'}
+            />
+          ) : null}
         </button>
         <button type="button" className={`sidebar-automation-nav${activePage === 'automations' ? ' active' : ''}`} onClick={onOpenAutomations}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
