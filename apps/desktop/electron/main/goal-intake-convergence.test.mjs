@@ -64,6 +64,60 @@ test('回合中止 → keep（不误删）', () => {
   );
 });
 
+test('曾中断：intake 契约带 runner.interruption 标记 → 后续正常回合仍 keep', () => {
+  // 首答被打断后契约被打上 interruption 标记；下一轮用户补发"继续"且回合正常结束，
+  // 不能把它当纯问答静默删除，必须保留在任务页直到用户明确放弃。
+  const interruptedIntake = {
+    ...intakePlan,
+    runner: {
+      interruption: {
+        source: 'stream_interrupted',
+        reason: 'aborted',
+        interruptedAt: '2026-08-11T08:00:00.000Z',
+      },
+    },
+  };
+  assert.equal(
+    decideIntakeConvergence(interruptedIntake, {
+      terminalStatus: 'done',
+      requestedUserInput: false,
+    }),
+    'keep',
+  );
+});
+
+test('曾中断标记只拦截中断契约：正常纯问答（无标记）仍 remove', () => {
+  // 回归：普通讨论/咨询没有 interruption 标记，正常结束后仍静默移除契约。
+  assert.equal(
+    decideIntakeConvergence(intakePlan, {
+      terminalStatus: 'done',
+      requestedUserInput: false,
+    }),
+    'remove',
+  );
+});
+
+test('曾中断标记的契约升级为 accepted_goal 后 → skip（不再受收敛影响）', () => {
+  const upgradedInterrupted = {
+    planId: 'p1',
+    activation: { kind: 'accepted_goal' },
+    runner: {
+      interruption: {
+        source: 'stream_interrupted',
+        reason: 'aborted',
+        interruptedAt: '2026-08-11T08:00:00.000Z',
+      },
+    },
+  };
+  assert.equal(
+    decideIntakeConvergence(upgradedInterrupted, {
+      terminalStatus: 'done',
+      requestedUserInput: false,
+    }),
+    'skip',
+  );
+});
+
 test('明确目标：契约已被 goal_create_plan 升级为 accepted_goal → skip', () => {
   const upgraded = { planId: 'p1', activation: { kind: 'accepted_goal' } };
   assert.equal(

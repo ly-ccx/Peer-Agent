@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -455,6 +455,61 @@ test('listPlanDetails 返回完整计划而不是轻量 index meta', () => {
   assert.equal(details[0].tasks.length, 2);
 });
 
+test('listPlanDetailsByWorkspace 先按索引工作区筛选再返回完整计划', () => {
+  const alpha = store.createPlan({
+    ...draftWithTasks(),
+    title: 'Alpha',
+    originWorkspacePath: '/tmp/workspaces/alpha/',
+    targetWorkspacePath: '/tmp/repos/alpha-target',
+  });
+  store.createPlan({
+    ...draftWithTasks(),
+    title: 'Beta',
+    originWorkspacePath: '/tmp/workspaces/beta',
+  });
+
+  const alphaMeta = store.listPlans().find((meta) => meta.planId === alpha.planId);
+  assert.equal(alphaMeta.originWorkspacePath, '/tmp/workspaces/alpha/');
+  assert.equal(alphaMeta.targetWorkspacePath, '/tmp/repos/alpha-target');
+  assert.equal(alphaMeta.tasks, undefined);
+
+  const details = store.listPlanDetailsByWorkspace('/tmp/workspaces/alpha');
+  assert.equal(details.length, 1);
+  assert.equal(details[0].planId, alpha.planId);
+  assert.equal(details[0].tasks.length, 2);
+});
+
+test('listPlanDetailsByWorkspace 首次读取补齐旧索引的工作区字段', () => {
+  const alpha = store.createPlan({
+    ...draftWithTasks(),
+    originWorkspacePath: '/tmp/workspaces/legacy-alpha',
+  });
+  store.createPlan({
+    ...draftWithTasks(),
+    originWorkspacePath: '/tmp/workspaces/legacy-beta',
+  });
+  const indexPath = path.join(store.getStoreDir(), 'index.jsonl');
+  const legacyIndex = readFileSync(indexPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => {
+      const meta = JSON.parse(line);
+      delete meta.originWorkspacePath;
+      delete meta.targetWorkspacePath;
+      return JSON.stringify(meta);
+    })
+    .join('\n');
+  writeFileSync(indexPath, `${legacyIndex}\n`, 'utf8');
+
+  const details = store.listPlanDetailsByWorkspace('/tmp/workspaces/legacy-alpha');
+  assert.deepEqual(details.map((plan) => plan.planId), [alpha.planId]);
+  const upgradedIndex = readFileSync(indexPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.ok(upgradedIndex.every((meta) => Object.hasOwn(meta, 'originWorkspacePath')));
+});
+
 test('recordTaskEvidence: completed 必须带 evidenceRefs，否则抛错', () => {
   const plan = approvedPlanWithTasks();
   assert.throws(
@@ -645,6 +700,58 @@ test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
   assert.equal(store.getPlan(plan.planId)?.version, 1);
 });
 
+test('subscribeChanges 增量拼接半行并忽略订阅前历史记录', async () => {
+  const changeFile = path.join(store.getStoreDir(), '.changes.jsonl');
+  mkdirSync(path.dirname(changeFile), { recursive: true });
+  writeFileSync(changeFile, `${JSON.stringify({ revision: 'historical' })}\n`, 'utf8');
+  const events = [];
+  const unsubscribe = store.subscribeChanges((event) => events.push(event));
+
+  const event = { revision: 'incremental', planId: 'plan-incremental' };
+  const row = `${JSON.stringify(event)}\n`;
+  const splitAt = Math.floor(row.length / 2);
+  appendFileSync(changeFile, row.slice(0, splitAt), 'utf8');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(events, []);
+  appendFileSync(changeFile, row.slice(splitAt), 'utf8');
+
+  await new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('incremental event timeout')), 1_000);
+    const poll = setInterval(() => {
+      if (events.length !== 1) return;
+      clearInterval(poll);
+      clearTimeout(deadline);
+      resolve();
+    }, 10);
+  });
+  unsubscribe();
+  assert.deepEqual(events, [event]);
+});
+
+test('subscribeChanges 在 journal 截断后从头读取新事件', async () => {
+  const changeFile = path.join(store.getStoreDir(), '.changes.jsonl');
+  mkdirSync(path.dirname(changeFile), { recursive: true });
+  writeFileSync(changeFile, `${JSON.stringify({ revision: 'historical-padding', value: 'x'.repeat(200) })}\n`, 'utf8');
+  const events = [];
+  const unsubscribe = store.subscribeChanges((event) => events.push(event));
+  const replacement = { revision: 'after-truncate', planId: 'plan-truncated' };
+  writeFileSync(changeFile, '', 'utf8');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  appendFileSync(changeFile, `${JSON.stringify(replacement)}\n`, 'utf8');
+
+  await new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('truncated journal event timeout')), 1_000);
+    const poll = setInterval(() => {
+      if (events.length !== 1) return;
+      clearInterval(poll);
+      clearTimeout(deadline);
+      resolve();
+    }, 10);
+  });
+  unsubscribe();
+  assert.deepEqual(events, [replacement]);
+});
+
 test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的持久化变更', async () => {
   const storeDir = path.join(tmpRoot, 'shared-goal-plans');
   const desktopStore = createGoalPlanStore({ storeDir });
@@ -758,6 +865,65 @@ test('deletePlanByConversation: 没有任何计划匹配的会话 id 是 no-op',
   const remaining = store.deletePlanByConversation('conv-NOPE');
   assert.equal(remaining.length, 1);
   assert.equal(store.getPlan(a1.planId)?.planId, a1.planId);
+});
+
+test('appendIntakeConvergenceAudit: 追加写 intake-convergence.jsonl（含事件字段）', () => {
+  const storeDir = path.join(tmpRoot, 'audit-store');
+  const s = createGoalPlanStore({ storeDir });
+  const plan = s.createPlan({ ...draftWithTasks(), conversationId: 'conv-AUDIT' });
+
+  s.appendIntakeConvergenceAudit({
+    action: 'delete_plan',
+    decision: 'remove',
+    reason: 'pure_qa',
+    conversationId: 'conv-AUDIT',
+    planId: plan.planId,
+    terminalStatus: 'done',
+  });
+
+  const auditFile = path.join(storeDir, 'intake-convergence.jsonl');
+  assert.equal(existsSync(auditFile), true);
+  const lines = readFileSync(auditFile, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 1);
+  const row = JSON.parse(lines[0]);
+  assert.equal(row.event, 'intake_convergence');
+  assert.equal(row.action, 'delete_plan');
+  assert.equal(row.decision, 'remove');
+  assert.equal(row.reason, 'pure_qa');
+  assert.equal(row.conversationId, 'conv-AUDIT');
+  assert.equal(row.planId, plan.planId);
+  assert.equal(row.terminalStatus, 'done');
+  assert.equal(typeof row.createdAt, 'string');
+  assert.equal(typeof row.writerPid, 'number');
+});
+
+test('appendIntakeConvergenceAudit: 追加语义（多次调用各一行）', () => {
+  const storeDir = path.join(tmpRoot, 'audit-store-2');
+  const s = createGoalPlanStore({ storeDir });
+  const plan = s.createPlan({ ...draftWithTasks(), conversationId: 'conv-AUDIT2' });
+
+  s.appendIntakeConvergenceAudit({
+    action: 'mark_interrupted',
+    decision: 'keep',
+    reason: 'terminal_aborted',
+    conversationId: 'conv-AUDIT2',
+    planId: plan.planId,
+    terminalStatus: 'aborted',
+  });
+  s.appendIntakeConvergenceAudit({
+    action: 'delete_plan',
+    decision: 'remove',
+    reason: 'pure_qa',
+    conversationId: 'conv-AUDIT2',
+    planId: plan.planId,
+    terminalStatus: 'done',
+  });
+
+  const auditFile = path.join(storeDir, 'intake-convergence.jsonl');
+  const lines = readFileSync(auditFile, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+  assert.equal(JSON.parse(lines[0]).action, 'mark_interrupted');
+  assert.equal(JSON.parse(lines[1]).action, 'delete_plan');
 });
 
 test('deletePlanByConversation: 批量删除只广播一次 onChange（reason=delete）', () => {

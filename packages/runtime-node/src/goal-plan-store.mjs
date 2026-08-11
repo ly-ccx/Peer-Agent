@@ -1,8 +1,12 @@
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   writeFileSync,
   unlinkSync,
   renameSync,
@@ -1470,34 +1474,75 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     if (typeof listener !== 'function') return () => {};
     mkdirSync(storeDir, { recursive: true });
     if (!existsSync(changeFile)) writeFileSync(changeFile, '', 'utf8');
-    let offset = Buffer.byteLength(readFileSync(changeFile, 'utf8'));
-    let pending = '';
-    const drain = () => {
+
+    const currentSize = () => {
+      const fd = openSync(changeFile, 'r');
       try {
-        const content = readFileSync(changeFile, 'utf8');
-        if (Buffer.byteLength(content) < offset) {
-          offset = 0;
-          pending = '';
-        }
-        const delta = Buffer.from(content).subarray(offset).toString('utf8');
-        offset = Buffer.byteLength(content);
-        if (!delta) return;
-        const lines = `${pending}${delta}`.split('\n');
-        pending = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
+        return fstatSync(fd).size;
+      } finally {
+        closeSync(fd);
+      }
+    };
+
+    // Start at EOF: historical rows are already represented by persisted plans. Subsequent drains
+    // read only appended bytes instead of repeatedly loading the entire, potentially large journal.
+    let offset = currentSize();
+    let pending = Buffer.alloc(0);
+    let draining = false;
+    let drainAgain = false;
+    const drain = () => {
+      if (draining) {
+        drainAgain = true;
+        return;
+      }
+      draining = true;
+      try {
+        do {
+          drainAgain = false;
+          let fd;
           try {
-            listener(JSON.parse(line));
+            fd = openSync(changeFile, 'r');
+            const size = fstatSync(fd).size;
+            if (size < offset) {
+              // The journal was truncated in place. Drop any incomplete row from the old file.
+              offset = 0;
+              pending = Buffer.alloc(0);
+            }
+            let remaining = size - offset;
+            while (remaining > 0) {
+              const chunk = Buffer.allocUnsafe(Math.min(remaining, 64 * 1024));
+              const bytesRead = readSync(fd, chunk, 0, chunk.length, offset);
+              if (bytesRead <= 0) break;
+              offset += bytesRead;
+              remaining -= bytesRead;
+              pending = pending.length > 0
+                ? Buffer.concat([pending, chunk.subarray(0, bytesRead)])
+                : chunk.subarray(0, bytesRead);
+
+              let newlineIndex;
+              while ((newlineIndex = pending.indexOf(0x0a)) >= 0) {
+                const line = pending.subarray(0, newlineIndex).toString('utf8');
+                pending = pending.subarray(newlineIndex + 1);
+                if (!line.trim()) continue;
+                try {
+                  listener(JSON.parse(line));
+                } catch {
+                  // Ignore malformed rows while preserving later valid events.
+                }
+              }
+            }
           } catch {
-            // Ignore malformed historical rows while preserving later valid events.
+            // A concurrent writer may be between filesystem observations; the next event will retry.
+          } finally {
+            if (fd !== undefined) closeSync(fd);
           }
-        }
-      } catch {
-        // A concurrent writer may be between filesystem observations; the next event will retry.
+        } while (drainAgain);
+      } finally {
+        draining = false;
       }
     };
     const watcher = watch(changeFile, { persistent: false }, drain);
-    // Close the read→watch race: pick up rows appended after the initial offset snapshot.
+    // Close the size-snapshot → watch race without rereading historical journal bytes.
     drain();
     return () => watcher.close();
   }
@@ -1696,6 +1741,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       workflowKind: plan.workflowKind,
       conversationId: plan.conversationId ?? null,
       threadId: plan.threadId ?? null,
+      // 工作区归属随轻量索引持久化，列表消费者可先筛候选再读取详情。
+      originWorkspacePath: plan.originWorkspacePath ?? null,
+      targetWorkspacePath: plan.targetWorkspacePath ?? null,
       version: plan.version,
       percent: plan.progress?.percent ?? 0,
       createdAt: plan.createdAt,
@@ -1817,6 +1865,54 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
 
   function listPlanDetails() {
     return listPlans().map(hydratePlanMeta).filter(Boolean);
+  }
+
+  /**
+   * 仅 hydrate 与指定工作区直接关联的计划。
+   *
+   * 新索引行可直接按 origin/targetWorkspacePath 筛选；旧索引行没有工作区字段时，
+   * 只回退读取这些 legacy 详情，避免升级后漏掉历史计划。
+   */
+  function listPlanDetailsByWorkspace(workspacePath) {
+    const normalizePath = (value) => typeof value === 'string'
+      ? value.trim().replace(/[/\\]+$/, '').toLowerCase()
+      : '';
+    const wanted = normalizePath(workspacePath);
+    if (!wanted) return listPlanDetails();
+
+    const index = readIndex();
+    let indexChanged = false;
+    const details = [];
+    const nextIndex = index.map((rawMeta) => {
+      const meta = normalizePlan(rawMeta);
+      if (!meta || !activeMeta(meta)) return rawMeta;
+
+      const hasWorkspaceIndex = Object.hasOwn(rawMeta, 'originWorkspacePath')
+        || Object.hasOwn(rawMeta, 'targetWorkspacePath');
+      const indexedWorkspacePath = normalizePath(
+        meta.originWorkspacePath ?? meta.targetWorkspacePath,
+      );
+      if (hasWorkspaceIndex && indexedWorkspacePath !== wanted) return rawMeta;
+
+      const plan = hydratePlanMeta(meta);
+      if (!plan) return rawMeta;
+      const planWorkspacePath = normalizePath(
+        plan.originWorkspacePath ?? plan.targetWorkspacePath,
+      );
+      if (planWorkspacePath === wanted) details.push(plan);
+
+      if (hasWorkspaceIndex) return rawMeta;
+      indexChanged = true;
+      return {
+        ...rawMeta,
+        originWorkspacePath: plan.originWorkspacePath ?? null,
+        targetWorkspacePath: plan.targetWorkspacePath ?? null,
+      };
+    });
+
+    // 旧索引只在首次按工作区读取时补齐一次，后续切换即可直接跳过无关详情文件。
+    if (indexChanged) writeJsonl(indexFile, nextIndex);
+    return details;
   }
 
   function listPlanDetailsByConversation(conversationId) {
@@ -3014,6 +3110,30 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   }
 
   /**
+   * intake 收敛审计（追加式 JSONL，见 peer-knowledge intake-convergence 文档）。
+   *
+   * 每行一条结构化事件，用于定量回答「并发/中断漏了多少任务」：
+   * - action=delete_plan：intake 契约被收敛器判为纯问答而静默删除（每次 deletePlan 前）。
+   * - action=mark_interrupted：intake 契约首答被打断，升级为「待用户确认」打标。
+   *
+   * 写入失败只告警，绝不阻塞主流程（与 writeGoalChangeEvent 同策略）。
+   *
+   * @param {object} entry { action, decision, reason, conversationId, planId, terminalStatus }
+   */
+  function appendIntakeConvergenceAudit(entry = {}) {
+    try {
+      appendJsonl(path.join(storeDir, 'intake-convergence.jsonl'), {
+        event: 'intake_convergence',
+        ...entry,
+        createdAt: new Date().toISOString(),
+        writerPid: process.pid,
+      });
+    } catch (error) {
+      console.warn('[goal-plan-store] intake convergence audit failed:', error?.message || error);
+    }
+  }
+
+  /**
    * 级联删除：硬删除某个会话名下的全部计划（见 ADR 34）。
    *
    * 用于「删除会话」时联动清理其计划，避免孤儿计划文件/索引行。
@@ -3421,6 +3541,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     listPlansByConversation,
     countAwaitingApprovalsByConversation,
     listPlanDetails,
+    listPlanDetailsByWorkspace,
     listPlanDetailsByConversation,
     getActivePlanByConversation,
     getPlan,
@@ -3452,6 +3573,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordManualConfirmation,
     deletePlan,
     deletePlanByConversation,
+    appendIntakeConvergenceAudit,
     setOnChange,
     subscribeChanges,
   };

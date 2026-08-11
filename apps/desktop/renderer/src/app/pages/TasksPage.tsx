@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import { clientApi } from '../../clientApi';
 
 /**
  * 任务页 —— 对齐 peer-2-0 高保真「Active Tasks」表格布局。
@@ -237,6 +238,18 @@ export function TasksPage({
                 >
                   {rowOpenLabel(item)}
                 </button>
+                {item.source === 'goal_plan' && item.actionRight === 'paused' ? (
+                  <button
+                    type="button"
+                    className="task-row-abandon"
+                    onClick={() => {
+                      // goal_plan 项的 taskId 即 planId（投影 taskId: snapshot.planId）。
+                      void clientApi.goalPlansDelete({ planId: item.taskId });
+                    }}
+                  >
+                    放弃
+                  </button>
+                ) : null}
               </article>
             );
           })

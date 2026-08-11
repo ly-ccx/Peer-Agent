@@ -2573,8 +2573,42 @@ function convergeIntakeAfterGoalTurn(conversationId, outcome) {
     // override a goal_update_task(completed) that happened earlier in the same
     // turn, otherwise Task Overview sees only completed → result_ready.
     if (decision === 'keep' && typeof goalPlanStore.markRequestedUserInput === 'function') {
+      // 回合被打断（用户停止 / 流错误）：把 intake 契约升级为"待用户确认"——
+      // 写 runner.interruption 标记，任务页显示"执行中断"，后续正常回合也不会被
+      // 收敛器当纯问答静默删除，直到用户明确放弃（goalPlans:delete）。
+      if (outcome?.terminalStatus === 'aborted' || outcome?.terminalStatus === 'error') {
+        try {
+          goalPlanStore.setRunnerState?.(intake.planId, {
+            interruption: {
+              source: 'stream_interrupted',
+              reason: outcome.terminalStatus,
+              interruptedAt: new Date().toISOString(),
+            },
+          });
+        } catch (markError) {
+          console.warn('[main] mark intake interrupted failed:', markError?.message || markError);
+        }
+        goalPlanStore.appendIntakeConvergenceAudit?.({
+          // 审计事件 intake_convergence：中断升级为「待用户确认」。
+          action: 'mark_interrupted',
+          decision,
+          reason: `terminal_${outcome.terminalStatus}`,
+          conversationId,
+          planId: intake.planId,
+          terminalStatus: outcome.terminalStatus,
+        });
+      }
       goalPlanStore.markRequestedUserInput(intake.planId);
     } else if (decision === 'remove') {
+      // 审计：纯问答静默删除前记一条事件，未来可定量统计「并发漏了多少任务」。
+      goalPlanStore.appendIntakeConvergenceAudit?.({
+        action: 'delete_plan',
+        decision,
+        reason: 'pure_qa',
+        conversationId,
+        planId: intake.planId,
+        terminalStatus: outcome?.terminalStatus ?? null,
+      });
       goalPlanStore.deletePlan(intake.planId);
     }
   } catch (error) {

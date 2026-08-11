@@ -12,6 +12,8 @@
  *   - 模糊澄清：模型调用 request_user_input（outcome.requestedUserInput=true）→ 'keep'
  *     （保留 intake 契约，等待用户下一轮回复）。
  *   - 出错/中止：回合 terminalStatus 为 error/aborted → 'keep'（不误删，交既有失败链路）。
+ *   - 曾中断：契约带 runner.interruption 标记（首答被打断过，已升级为待用户确认）→ 'keep'
+ *     （即使后续回合正常结束也不静默删，保留在任务页直到用户明确放弃）。
  *   - 纯问答/咨询：仍是 intake 契约、未提问、回合正常结束 → 'remove'（静默移除契约，
  *     还原普通聊天体验）。
  */
@@ -34,6 +36,10 @@ export function decideIntakeConvergence(activePlan, outcome) {
   const terminalStatus = outcome?.terminalStatus;
   // 出错/中止的回合不误删，保留契约交由既有失败链路处理。
   if (terminalStatus === 'error' || terminalStatus === 'aborted') return 'keep';
+
+  // 曾中断：契约带 runner.interruption 标记（首答被打断过）→ 即使后续回合正常结束也
+  // keep（升级为待用户确认，保留在任务页，直到用户明确放弃才删除）。
+  if (activePlan?.runner?.interruption) return 'keep';
 
   // 模糊澄清：模型已调用 request_user_input，保留契约等待用户回复。
   if (outcome?.requestedUserInput) return 'keep';
