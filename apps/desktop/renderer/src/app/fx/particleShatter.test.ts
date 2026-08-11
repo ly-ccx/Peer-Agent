@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   PARTICLE_SHATTER_SWEEP_MS,
@@ -16,6 +17,9 @@ function makeOpaqueImageData(width: number, height: number, fill = [240, 244, 24
   }
   return { data, width, height, colorSpace: 'srgb' } as ImageData;
 }
+
+const readSource = () =>
+  readFile(new URL('./particleShatter.ts', import.meta.url), 'utf8');
 
 test('sampleParticlesFromImageData detonates from right to left', () => {
   // 宽 20 高 4 的实心矩形；固定 random 让 delay 只由 x 决定
@@ -54,4 +58,25 @@ test('sampleParticlesFromImageData skips fully transparent pixels', () => {
     random: () => 0,
   });
   assert.equal(particles.length, 0);
+});
+
+test('capture path rehydrates document theme attrs into foreignObject wrapper', async () => {
+  const source = await readSource();
+  assert.match(source, /readDocumentThemeAttrs/);
+  assert.match(source, /data-theme=\"\$\{themeAttrs\.theme\}\"/);
+  assert.match(source, /data-theme-mode=\"\$\{themeAttrs\.themeMode\}\"/);
+  assert.match(source, /data-palette=\"\$\{themeAttrs\.palette\}\"/);
+  assert.match(
+    source,
+    /<div xmlns=\"http:\/\/www\.w3\.org\/1999\/xhtml\" \$\{themeAttrText\}/,
+  );
+});
+
+test('fallback particles read theme tokens instead of hard-coded dark fill', async () => {
+  const source = await readSource();
+  assert.doesNotMatch(source, /#181f29/);
+  assert.match(source, /getComputedStyle/);
+  assert.match(source, /readThemeCssColor\('--za-surface-0'/);
+  assert.match(source, /readThemeCssColor\(\s*'--za-line'/);
+  assert.match(source, /isDark \? '#1E232C' : '#F7F9FC'/);
 });

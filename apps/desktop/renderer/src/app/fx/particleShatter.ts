@@ -115,13 +115,58 @@ export function sampleParticlesFromImageData(
   return particles;
 }
 
+/** 读取当前主题根属性（html data-*），供 foreignObject 截图复用。 */
+export function readDocumentThemeAttrs(): {
+  theme: string;
+  themeMode: string;
+  palette: string;
+} {
+  if (typeof document === 'undefined') {
+    return { theme: 'light', themeMode: 'system', palette: 'frost' };
+  }
+  const root = document.documentElement;
+  return {
+    theme: root.getAttribute('data-theme') || root.dataset.theme || 'light',
+    themeMode:
+      root.getAttribute('data-theme-mode') || root.dataset.themeMode || 'system',
+    palette: root.getAttribute('data-palette') || root.dataset.palette || 'frost',
+  };
+}
+
+/** 从计算样式读取 CSS 变量颜色；失败时回退。 */
+export function readThemeCssColor(
+  varName: string,
+  fallback: string,
+  element?: Element | null,
+): string {
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') {
+    return fallback;
+  }
+  try {
+    const target = element ?? document.documentElement;
+    const value = getComputedStyle(target).getPropertyValue(varName).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
- * 当真实 DOM 截图失败时，用卡片色块兜底，保证仍有从右向左粉碎反馈。
+ * 当真实 DOM 截图失败时，用当前主题 token 画卡片色块兜底。
+ * 不再写死深色，避免浅色模式下碎出黑噪点。
  */
 export function createFallbackCardImageData(
   cssWidth: number,
   cssHeight: number,
   dpr = 1,
+  colors?: {
+    card?: string;
+    border?: string;
+    primaryBtn?: string;
+    ghostBtn?: string;
+    tag?: string;
+    textSoft?: string;
+  },
 ): { imageData: ImageData; pixelWidth: number; pixelHeight: number } {
   const pixelWidth = Math.max(1, Math.ceil(cssWidth * dpr));
   const pixelHeight = Math.max(1, Math.ceil(cssHeight * dpr));
@@ -137,26 +182,49 @@ export function createFallbackCardImageData(
     };
   }
 
+  // 优先读当前主题 token；浅色默认贴近 Frost paper，深色默认贴近 surface-0。
+  const theme = readDocumentThemeAttrs().theme;
+  const isDark = theme === 'dark';
+  const card =
+    colors?.card ??
+    readThemeCssColor('--za-surface-0', isDark ? '#1E232C' : '#F7F9FC');
+  const border =
+    colors?.border ??
+    readThemeCssColor(
+      '--za-line',
+      isDark ? 'rgba(255,255,255,0.08)' : 'rgba(26,29,33,0.10)',
+    );
+  const primaryBtn =
+    colors?.primaryBtn ??
+    readThemeCssColor('--za-text', isDark ? '#F2F4F7' : '#1A1D21');
+  const ghostBtn =
+    colors?.ghostBtn ??
+    (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(26,29,33,0.06)');
+  const tag = colors?.tag ?? 'rgba(62,122,107,0.35)';
+  const textSoft =
+    colors?.textSoft ??
+    (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(26,29,33,0.10)');
+
   const w = cssWidth;
   const h = cssHeight;
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = '#181f29';
+  ctx.fillStyle = card;
   roundRectPath(ctx, 0.5, 0.5, w - 1, h - 1, 16);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.strokeStyle = border;
   ctx.stroke();
 
-  // 右侧亮块模拟操作按钮，左侧偏暗，强化“从右开始碎”的层次
-  ctx.fillStyle = '#f2f4f7';
+  // 右侧块模拟操作按钮，左侧偏软，强化“从右开始碎”的层次
+  ctx.fillStyle = primaryBtn;
   roundRectPath(ctx, w - 96, h / 2 - 14, 78, 28, 999);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillStyle = ghostBtn;
   roundRectPath(ctx, w - 176, h / 2 - 14, 68, 28, 999);
   ctx.fill();
-  ctx.fillStyle = 'rgba(62,122,107,0.35)';
+  ctx.fillStyle = tag;
   roundRectPath(ctx, 16, 16, 42, 22, 999);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillStyle = textSoft;
   roundRectPath(ctx, 100, 20, Math.max(40, w * 0.35), 14, 6);
   ctx.fill();
   roundRectPath(ctx, 100, 42, Math.max(30, w * 0.22), 12, 999);
@@ -235,10 +303,19 @@ export async function captureElementImageData(
 
     const cssText = collectDocumentCssText();
     const serialized = new XMLSerializer().serializeToString(clone);
+    // foreignObject 脱离真实 document，[data-theme]/[data-palette] 选择器需在包装层重放。
+    const themeAttrs = readDocumentThemeAttrs();
+    const themeAttrText = [
+      themeAttrs.theme ? `data-theme="${themeAttrs.theme}"` : '',
+      themeAttrs.themeMode ? `data-theme-mode="${themeAttrs.themeMode}"` : '',
+      themeAttrs.palette ? `data-palette="${themeAttrs.palette}"` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${cssWidth}" height="${cssHeight}">
   <foreignObject x="0" y="0" width="100%" height="100%">
-    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${cssWidth}px;height:${cssHeight}px;margin:0;padding:0;">
+    <div xmlns="http://www.w3.org/1999/xhtml" ${themeAttrText} style="width:${cssWidth}px;height:${cssHeight}px;margin:0;padding:0;">
       <style>${cssText.replace(/<\//g, '<\\/')}</style>
       ${serialized}
     </div>
