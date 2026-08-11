@@ -198,6 +198,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly status: GoalPlanStatus;
   /** Runner 实时态；Plan 未进入自驱时为 undefined。 */
   readonly runnerStatus?: GoalRunnerStatus;
+  /** Runner 上存在尚未被 resume 消费的网络/流式中断事实。 */
+  readonly interrupted?: boolean;
   readonly title: string;
   readonly workspaceLabel?: string;
   readonly progress?: { readonly completed: number; readonly total: number };
@@ -404,7 +406,18 @@ export function projectGoalPlan(
 }
 
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, accepted } = snapshot;
+  const { status, runnerStatus, interrupted, accepted } = snapshot;
+
+  // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
+  // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
+  if (interrupted === true) {
+    return {
+      actionRight: 'paused',
+      nextAction: 'resume',
+      statusLabel: '执行中断',
+      actionLabel: '继续 →',
+    };
+  }
 
   // request_user_input 是明确的当前行动权事实。即使旧记录或竞态窗口里
   // plan 已先写成 completed，只要 Runner 仍在 waiting_user，就必须先让用户回答，

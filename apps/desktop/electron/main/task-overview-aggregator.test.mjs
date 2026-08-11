@@ -203,9 +203,27 @@ test('toGoalPlanSnapshot 组装 workspace 标签 / progress / runner.status', ()
   });
   assert.equal(snapshot.planId, 'p1');
   assert.equal(snapshot.runnerStatus, 'running');
+  assert.equal(snapshot.interrupted, false);
   assert.equal(snapshot.workspaceLabel, 'peer_agent');
   assert.deepEqual(snapshot.progress, { completed: 7, total: 9 });
   assert.equal(snapshot.accepted, false);
+});
+
+test('toGoalPlanSnapshot 透传未消费的 runner interruption', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-interrupted',
+    status: 'failed',
+    runner: {
+      status: 'failed',
+      interruption: {
+        source: 'stream_error',
+        reason: 'socket disconnected',
+        interruptedAt: '2026-08-11T00:00:00.000Z',
+      },
+    },
+    title: '中断任务',
+  });
+  assert.equal(snapshot.interrupted, true);
 });
 
 test('toGoalPlanSnapshot 透传 timing，并从会话解析 modelLabel / providerLabel', () => {

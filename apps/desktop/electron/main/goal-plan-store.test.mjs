@@ -1194,8 +1194,43 @@ test('verifier: passed 必须带 evidenceRefs，且目标必须引用真实 task
 });
 
 
+test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，resume 后才可恢复', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  const completedLeaves = ['t1', 't2a', 't2b'];
+  const completedRefs = completedLeaves.map((taskId) => `artifact://stream-interrupted-${taskId}`);
+  registerEvidenceRefs(created.planId, completedRefs);
+  for (const taskId of completedLeaves) {
+    store.recordTaskEvidence(created.planId, taskId, {
+      status: 'completed',
+      evidenceRefs: [`artifact://stream-interrupted-${taskId}`],
+    });
+  }
+  assert.equal(store.getPlan(created.planId).status, 'completed');
+
+  store.setPlanStatus(created.planId, 'failed');
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+
+  const interrupted = store.getPlan(created.planId);
+  assert.equal(interrupted.status, 'failed');
+  assert.equal(interrupted.runner.interruption.source, 'stream_error');
+
+  const resumed = store.resumeRunner(created.planId, { phase: 'act' });
+  assert.equal(resumed.status, 'executing');
+  assert.equal(resumed.runner.status, 'running');
+  assert.equal(resumed.runner.interruption, undefined);
+});
+
 test('stream_error 后 setPlanStatus(failed)，任务全部 completed 时 plan 恢复为 completed', () => {
-  // 先批准再执行，模拟真实「中途 stream_error → 后续任务继续成功」路径
+  // 无持久化 interruption 的历史路径仍保持兼容：后续任务全部成功时可以恢复。
   const created = approvedPlanWithTasks();
   store.setPlanStatus(created.planId, 'executing');
   store.setPlanStatus(created.planId, 'failed');

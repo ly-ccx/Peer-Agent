@@ -136,13 +136,20 @@ function failPlanRun(goalPlanStore, planId, message, {
   }
   const failedTaskIds = markActiveLeafTasksFailed(goalPlanStore, planId, reason);
   if (typeof goalPlanStore?.setRunnerState === 'function') {
+    const interruptedAt = new Date().toISOString();
+    const recoverableInterruption = source === 'stream_error'
+      || source === 'runGoalTurn'
+      || source === 'runtime_failed';
     goalPlanStore.setRunnerState(planId, {
       enabled: true,
       status: 'failed',
       intent: 'block',
       phase: 'blocked',
       lastError: reason,
-      updatedAt: new Date().toISOString(),
+      ...(recoverableInterruption
+        ? { interruption: { source, reason, interruptedAt } }
+        : {}),
+      updatedAt: interruptedAt,
     });
   }
   if (typeof appendRunEvent === 'function') {

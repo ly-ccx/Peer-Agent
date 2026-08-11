@@ -687,6 +687,15 @@ export interface GoalRunnerState {
   readonly tokenUsed?: number;
   readonly blockedReason?: string;
   readonly lastError?: string;
+  /**
+   * 尚未被显式 resume 消费的执行中断事实。它独立于叶子任务终态，避免网络/流式
+   * 中断在计划状态重派生时被误判为完成。
+   */
+  readonly interruption?: {
+    readonly source: string;
+    readonly reason: string;
+    readonly interruptedAt: string;
+  };
   readonly updatedAt: string;
 }
 

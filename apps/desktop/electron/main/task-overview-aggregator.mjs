@@ -334,6 +334,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     planId,
     status,
     runnerStatus: plan.runner?.status,
+    interrupted: Boolean(plan.runner?.interruption),
     // 展示名 = 核对后的 plan 名字（GoalPlan.title），不用 goal 全文、不用会话名。
     title: typeof plan.title === 'string' && plan.title.trim() !== '' ? plan.title.trim() : planId,
     workspaceLabel: workspaceLabelFromPath(workspacePath),

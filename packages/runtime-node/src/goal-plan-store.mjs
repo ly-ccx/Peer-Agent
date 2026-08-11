@@ -1232,6 +1232,20 @@ function normalizeRunnerState(runner, planId) {
   if (typeof runner.runId === 'string' && runner.runId.trim()) {
     next.runId = runner.runId.trim();
   }
+  if (runner.interruption && typeof runner.interruption === 'object') {
+    const source = typeof runner.interruption.source === 'string'
+      ? runner.interruption.source.trim()
+      : '';
+    const reason = typeof runner.interruption.reason === 'string'
+      ? runner.interruption.reason.trim()
+      : '';
+    const interruptedAt = typeof runner.interruption.interruptedAt === 'string'
+      ? runner.interruption.interruptedAt.trim()
+      : '';
+    if (source && reason && interruptedAt) {
+      next.interruption = { source, reason, interruptedAt };
+    }
+  }
   if (Number.isFinite(runner.compactionCount)) {
     next.compactionCount = Math.max(0, Math.trunc(runner.compactionCount));
   }
@@ -1712,9 +1726,14 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const prevStatus = options.prevStatus ?? existing?.status;
     const prevTiming = options.prevTiming ?? existing?.timing;
     const normalized = normalizePlan(plan);
-    const nextStatus = options.preserveStatus
-      ? normalized.status
-      : derivePlanStatus(normalized.status, normalized.tasks);
+    // 未消费的执行中断是独立于叶子任务的失败事实。只要它存在，普通 persist 就不能
+    // 把 failed 重新派生为 completed；仅 resumeRunner 能原子消费该事实并恢复执行。
+    const hasUnconsumedInterruption = Boolean(normalized.runner?.interruption);
+    const nextStatus = hasUnconsumedInterruption
+      ? 'failed'
+      : options.preserveStatus
+        ? normalized.status
+        : derivePlanStatus(normalized.status, normalized.tasks);
     const nowIso = normalized.updatedAt || new Date().toISOString();
     const planTiming = applyGoalTimingTransition(
       prevTiming,
@@ -2336,9 +2355,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       blockerAudit: null,
       blockedReason: undefined,
       lastError: undefined,
+      interruption: undefined,
       updatedAt: patch.updatedAt || now,
     }, planId);
-    return persist({ ...plan, status: 'executing', runner: nextRunner, updatedAt: now });
+    return persist(
+      { ...plan, status: 'executing', runner: nextRunner, updatedAt: now },
+      { preserveStatus: true },
+    );
   }
 
   /** 更新 Goal Runner 托管推进状态；不允许借此改写任务状态或 evidence。 */

@@ -177,6 +177,21 @@ test('rule 5c: 历史终态上的 runner.blocked 不得进 needs_you', () => {
   assert.equal(cancelled.actionRight, 'terminal');
 });
 
+test('未消费的 stream 中断优先于 completed 待验收并提供继续入口', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'completed',
+      runnerStatus: 'failed',
+      interrupted: true,
+      accepted: false,
+    }),
+  );
+  assert.equal(item.actionRight, 'paused');
+  assert.equal(item.nextAction, 'resume');
+  assert.equal(item.statusLabel, '执行中断');
+  assert.equal(item.actionLabel, '继续 →');
+});
+
 test('rule 6: completed 未验收 → result_ready', () => {
   const item = projectGoalPlan(goalSnapshot({ status: 'completed', accepted: false }));
   assert.equal(item.actionRight, 'result_ready');
