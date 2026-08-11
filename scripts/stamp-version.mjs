@@ -66,7 +66,24 @@ const changed = [];
 writeFileSync(join(root, 'VERSION'), `${version}\n`);
 changed.push('VERSION');
 
-// 2) package.json 集合（保留 2 空格缩进 + 末尾换行，与仓库既有风格一致）
+// 2) README 当前正式版本摘要
+{
+  const file = 'README.md';
+  const abs = join(root, file);
+  const readme = readFileSync(abs, 'utf8');
+  const pattern = /Current release: \*\*`[^`]+`\*\* \(`latest`\)/g;
+  const matches = readme.match(pattern) ?? [];
+  if (matches.length !== 1) {
+    throw new Error(`${file}: expected exactly one current release marker, found ${matches.length}`);
+  }
+  const next = readme.replace(pattern, `Current release: **\`${version}\`** (\`latest\`)`);
+  if (next !== readme) {
+    writeFileSync(abs, next);
+    changed.push(file);
+  }
+}
+
+// 3) package.json 集合（保留 2 空格缩进 + 末尾换行，与仓库既有风格一致）
 for (const file of packageJsonFiles) {
   const abs = join(root, file);
   const json = JSON.parse(readFileSync(abs, 'utf8'));
@@ -77,7 +94,7 @@ for (const file of packageJsonFiles) {
   }
 }
 
-// 3) Rust package manifests —— 只改各 [package] 段的首个 version 行
+// 4) Rust package manifests —— 只改各 [package] 段的首个 version 行
 for (const [, file] of cargoPackages) {
   const abs = join(root, file);
   const toml = readFileSync(abs, 'utf8');
@@ -88,7 +105,7 @@ for (const [, file] of cargoPackages) {
   }
 }
 
-// 4) Cargo.lock —— 定位受治理的 Rust 包条目并替换其紧邻 version 行
+// 5) Cargo.lock —— 定位受治理的 Rust 包条目并替换其紧邻 version 行
 {
   const file = 'Cargo.lock';
   const abs = join(root, file);

@@ -27,6 +27,17 @@ const cargoPackages = [
 
 const errors = [];
 
+const readme = readFileSync(join(root, 'README.md'), 'utf8');
+const currentReleasePattern = /Current release: \*\*`([^`]+)`\*\* \(`latest`\)/g;
+const currentReleaseMatches = [...readme.matchAll(currentReleasePattern)];
+if (currentReleaseMatches.length !== 1) {
+  errors.push(
+    `README.md: expected exactly one current release marker, found ${currentReleaseMatches.length}`,
+  );
+} else if (currentReleaseMatches[0][1] !== expected) {
+  errors.push(`README.md: expected current release ${expected}, got ${currentReleaseMatches[0][1]}`);
+}
+
 for (const file of packageJsonFiles) {
   const json = JSON.parse(readFileSync(join(root, file), 'utf8'));
   if (json.version !== expected) {
