@@ -14,6 +14,8 @@
     "marketplace:build": "node marketplace/build-catalog.mjs",
     "marketplace:test": "node --test marketplace/*.test.mjs",
     "version:check": "node scripts/check-version.mjs",
+    "release:source-check": "node scripts/check-release-source.mjs",
+    "release:source-test": "node --test scripts/check-release-source.test.mjs",
     "build:changelog": "node scripts/build-changelog.mjs",
     "check:changelog": "node scripts/build-changelog.mjs --check",
     "runtime:pack-check": "node scripts/check-runtime-packages.mjs --contents",
