@@ -201,7 +201,9 @@ export function GlobalWorkbenchPage({
   );
 
   const actionCount = needsYou.length + resultReady.length;
-  const showEmpty = actionCount === 0 && advancing.length === 0 && discussionTotal === 0;
+  // 主列只承载「待你处理」；无待办时即使 Peer 推进中/有讨论，也应展示 calm 空态，
+  // 避免中间整片留白（推进与讨论在右侧栏）。
+  const showEmpty = actionCount === 0;
 
   // 工作区脉搏：按 workspaceLabel 聚合
   const pulse = useMemo(() => {
