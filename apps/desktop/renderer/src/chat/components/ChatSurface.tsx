@@ -43,7 +43,7 @@ import {
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
-import { loadComposerEntry, resolveComposerHydration } from '../state/composerPersistence';
+import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
@@ -135,6 +135,7 @@ import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
 import {
   conversationStore,
+  DRAFT_CONVERSATION_ID,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
@@ -518,7 +519,14 @@ export function ChatSurface({
       void clientApi.conversationsUpdateFastMode({ id: conversationId, fastMode: enabled }).catch(() => {
         // 本地 UI 仍保留选择；后续重新进入会按持久化值恢复。
       });
+      return;
     }
+    const draftComposer = conversationStore.getSnapshot(null);
+    saveComposerEntry(DRAFT_CONVERSATION_ID, {
+      draft: draftComposer.draft,
+      queue: [...draftComposer.messageQueue],
+      fastMode: enabled,
+    });
   }, [convActions, conversationId]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
@@ -1099,12 +1107,14 @@ export function ChatSurface({
     // - 冷启动 / 首次进入：回落 composerPersistence。
     // 草稿区附件不持久化(见 composerPersistence 取舍说明),故切换会话后附件区始终清空。
     const liveComposer = conversationStore.getSnapshot(conversationId);
-    const persisted = conversationId ? loadComposerEntry(conversationId) : null;
+    const composerId = conversationId ?? DRAFT_CONVERSATION_ID;
+    const persisted = loadComposerEntry(composerId);
     const hydrated = resolveComposerHydration(liveComposer, persisted);
     convActions.set({
       draft: hydrated.draft,
       // live 路径直接复用桶内 QueuedMessage；persisted 路径形状兼容。
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
+      ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
     const threadScrollSnapshot = conversationId
       ? threadScrollSnapshotsRef.current.get(conversationId) ?? null

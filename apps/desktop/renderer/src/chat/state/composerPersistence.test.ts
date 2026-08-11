@@ -51,6 +51,30 @@ describe('composerPersistence', () => {
     assert.equal(loadComposerEntry('conv-unknown'), null);
   });
 
+  it('persists and cold-restores draft Fast mode while keeping legacy entries compatible', () => {
+    const port = makePort({
+      composerDrafts: {
+        legacy: { draft: 'old draft', queue: [] },
+      },
+    });
+    __setComposerSettingsPort(port);
+
+    assert.equal(loadComposerEntry('legacy')?.fastMode, false);
+    saveComposerEntry('__draft__', { draft: '', queue: [], fastMode: true });
+    flushComposerPersistence();
+
+    const written = port.writes[0].composerDrafts as Record<string, unknown>;
+    const saved = written.__draft__ as { fastMode: boolean };
+    assert.equal(saved.fastMode, true);
+
+    __setComposerSettingsPort(makePort({ composerDrafts: written }));
+    const reopened = loadComposerEntry('__draft__');
+    assert.ok(reopened);
+    assert.equal(reopened.fastMode, true);
+    assert.equal(reopened.draft, '');
+    assert.deepEqual(reopened.queue, []);
+  });
+
   it('persists draft + queue under the conversation id', () => {
     const port = makePort({});
     __setComposerSettingsPort(port);

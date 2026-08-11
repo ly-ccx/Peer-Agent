@@ -47,6 +47,8 @@ export interface PersistedComposerEntry {
   draft: string;
   /** 当前轮运行时排队、尚未发送的消息。 */
   queue: PersistedQueuedMessage[];
+  /** 未落库新任务选择的 Fast mode；正式会话仍以会话 meta 为真值。 */
+  fastMode?: boolean;
 }
 
 /** 设置读写缝：默认绑定 window.peerAgent；测试可注入假端口。 */
@@ -85,8 +87,9 @@ function sanitizeEntry(raw: unknown): PersistedComposerEntry | null {
   if (!isPlainObject(raw)) return null;
   const draft = typeof raw.draft === 'string' ? raw.draft : '';
   const queue = Array.isArray(raw.queue) ? (raw.queue as PersistedQueuedMessage[]) : [];
-  if (draft.length === 0 && queue.length === 0) return null;
-  return { draft, queue };
+  const fastMode = raw.fastMode === true;
+  if (draft.length === 0 && queue.length === 0 && !fastMode) return null;
+  return { draft, queue, fastMode };
 }
 
 function getMap(): ComposerDraftMap {
@@ -150,7 +153,7 @@ export function flushComposerPersistence(): void {
 export function loadComposerEntry(conversationId: string): PersistedComposerEntry | null {
   const map = getMap();
   const entry = map[conversationId];
-  return entry ? { draft: entry.draft, queue: entry.queue } : null;
+  return entry ? { draft: entry.draft, queue: entry.queue, fastMode: entry.fastMode } : null;
 }
 
 /** 输入叶子重新挂载时，仅阻止初始空态覆盖尚待恢复的磁盘数据。 */
@@ -195,11 +198,12 @@ export function saveComposerEntry(conversationId: string, entry: PersistedCompos
   const map = getMap();
   const draft = entry.draft ?? '';
   const queue = entry.queue ?? [];
-  if (draft.length === 0 && queue.length === 0) {
+  const fastMode = entry.fastMode ?? map[conversationId]?.fastMode ?? false;
+  if (draft.length === 0 && queue.length === 0 && !fastMode) {
     if (!(conversationId in map)) return;
     delete map[conversationId];
   } else {
-    map[conversationId] = { draft, queue };
+    map[conversationId] = { draft, queue, fastMode };
   }
   schedulePersist();
 }

@@ -104,15 +104,17 @@ test('Fast mode is a ChatGPT subscription composer control and follows both send
   const [surface, display, composer, settings] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./thread/TokenUsageDisplay.tsx'),
-    readSource('./Composer.tsx'),
+    readSource('./thread/TokenUsageDisplay.tsx'),
     readSource('../../app/components/LlmSettingsPanel.tsx'),
   ]);
 
   assert.match(display, /defaultProvider\?\.authMethod === 'oauth_chatgpt'/);
-  assert.match(composer, /Fast mode/);
-  assert.match(composer, /aria-pressed=\{enabled\}/);
+  assert.match(composer, /isZh \? '快速' : 'Fast'/);
+  assert.match(composer, /aria-pressed=\{fastMode\}/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
   assert.match(surface, /chatSend\(\{[^}]*fastMode/);
+  assert.match(surface, /saveComposerEntry\(DRAFT_CONVERSATION_ID,[\s\S]*fastMode: enabled/);
+  assert.match(surface, /loadComposerEntry\(composerId\)[\s\S]*fastMode: persisted\?\.fastMode === true/);
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
 });
 
