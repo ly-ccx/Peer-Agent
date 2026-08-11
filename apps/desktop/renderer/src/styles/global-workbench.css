@@ -30,7 +30,7 @@
   }
 
   .gwb-calm-card {
-    @apply min-w-[220px] rounded-2xl border px-5 py-4;
+    @apply w-fit max-w-full rounded-2xl border px-5 py-4;
     background: color-mix(in srgb, var(--za-surface-0) 88%, transparent);
     border-color: var(--za-line);
   }
