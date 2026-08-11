@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
 
 /**
  * Overlay —— 统一的模态浮层基座（表达层）。
@@ -42,6 +43,7 @@ export function Overlay({
   readonly children: ReactNode | ((api: { readonly requestClose: () => void }) => ReactNode);
 }) {
   const [closing, setClosing] = useState(false);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
   const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,7 +65,11 @@ export function Overlay({
   useEffect(() => {
     if (!onClose) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') requestClose();
+      if (event.key !== 'Escape') return;
+      const overlays = Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
+      if (!isTopmostOverlay(overlayRef.current, overlays)) return;
+      event.stopImmediatePropagation();
+      requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -86,6 +92,8 @@ export function Overlay({
 
   const overlay = (
     <div
+      ref={overlayRef}
+      data-peer-overlay="true"
       className={backdropClassName ? `${backdropBase} ${backdropClassName}` : backdropBase}
       role="presentation"
       onClick={closeOnBackdrop && onClose ? requestClose : undefined}
