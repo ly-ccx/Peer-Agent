@@ -1021,6 +1021,7 @@ function MainApp() {
                 </section>
               ) : activePage === 'home' ? (
                 <section className="primary-page-shell task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
+                  <div className="task-overview-scroll-region">
                   {homeScope === 'all' ? (
                     <GlobalWorkbenchPage
                       onOpenTasks={() => openCollectionDrawer('tasks')}
@@ -1076,6 +1077,7 @@ function MainApp() {
                       onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
                     />
                   )}
+                  </div>
                 </section>
               ) : activePage === 'tools' ? (
                 <section className="primary-page-shell" aria-label={isZh ? '插件' : 'Plugins'}>

@@ -5,6 +5,7 @@ import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
  * 工作台页：只回答「现在需要关注什么」。
+ * 折叠头部状态 isHeaderCompact 由 TaskOverviewPage 内的实际滚动容器统一维护。
  *
  * 侧栏两套入口（勿混）：
  * - 顶部「工作台」→ workspacePath=null，跨工作区全部行动权

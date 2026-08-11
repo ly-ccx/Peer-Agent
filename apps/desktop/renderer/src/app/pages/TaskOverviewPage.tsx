@@ -387,7 +387,22 @@ function HeroLayout({
     Record<string, AcceptanceTransition>
   >({});
   const [acceptanceOrderSnapshot, setAcceptanceOrderSnapshot] = useState<readonly string[]>([]);
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
+  const headerSentinelRef = useRef<HTMLDivElement>(null);
   const transitionTimers = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const sentinel = headerSentinelRef.current;
+    const scrollContainer = sentinel?.closest<HTMLElement>('.task-overview-scroll-region');
+    if (!sentinel || !scrollContainer) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsHeaderCompact(!entry.isIntersecting),
+      { root: scrollContainer, threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(
     () => () => {
@@ -473,6 +488,28 @@ function HeroLayout({
 
   return (
     <div className="task-overview-page task-overview-page--home">
+      <div ref={headerSentinelRef} className="task-overview-header-sentinel" aria-hidden="true" />
+      <div className="task-overview-compact-anchor">
+        <header
+          className={`task-overview-compact-header${isHeaderCompact ? ' is-visible' : ''}`}
+          data-header-state={isHeaderCompact ? 'compact' : 'expanded'}
+          aria-hidden={!isHeaderCompact}
+        >
+          <div className="task-overview-compact-context">
+            <strong>工作台</strong>
+            <span className="task-overview-scope">
+              <i className="task-overview-scope-dot" />
+              {scopeLabel}
+            </span>
+          </div>
+          <div className="task-overview-compact-stats" aria-label="工作台状态">
+            <span><b>{needsYou.length}</b> 轮到你</span>
+            <span><b>{advancing.length}</b> Peer 推进</span>
+            <span><b>{resultReady.length}</b> 结果待验收</span>
+          </div>
+        </header>
+      </div>
+
       <TopLine
         pageTitle="工作台"
         crumbExtra={formatTodayCrumb()}
@@ -486,7 +523,7 @@ function HeroLayout({
             {subtitle ?? 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。'}
           </p>
         </div>
-        <div className="task-overview-hero-stats">
+        <div className="task-overview-hero-stats" aria-label="工作台状态">
           <div className="task-overview-stat">
             <b>{needsYou.length}</b>
             <span>轮到你</span>
