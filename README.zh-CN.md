@@ -61,6 +61,9 @@
 | 🎯 **任务流，而不是工具聊天** | 目标带着边界被签收，需要时澄清，按复杂度规划，并对照明确成功标准关闭。 |
 | ✅ **可执行成功标准（DoD-as-Code）** | `successCriteria`、`criterionResults` 与 `evidenceRefs` 把「完成」变成可验证闸门，而不是助手自称做完。 |
 | 🔒 **本地执行，信任显式** | 工具在*你的*机器上经 `PermissionGrant` 执行。认知可来自你选择的模型服务商 —— 能力权力仍留在本地且可审计。 |
+| 🔐 **系统钥匙串 + 加密密钥库** | OS 钥匙串只保存 vault 主密钥；Provider API Key 与 OAuth token 进入本地 AES-256-GCM 加密 vault，不落明文设置。 |
+| 🌐 **模型与 Provider 自由** | 官方 API、OAuth/订阅、Coding Plan，或自定义 OpenAI / Anthropic-compatible 端点都能接；`baseUrl`、模型 ID 与能力元数据由你配置。 |
+| 🧑‍🏫 **师徒式模型协作** | 你选的主模型负责推理；它不能看图时，可让兜底多模态模型先识图，再把文字结果静默交回主模型继续任务。 |
 | 🧾 **Evidence 是一等结果** | 产物、日志、元数据、拒绝、超时与失败都保留为结构化事实，供界面与自动化检查。 |
 | 🧩 **一条受治理能力链** | Shell、文件、浏览器、MCP、插件、技能都走 Manifest → Projection → Permission → Evidence，没有暗门。 |
 | 🔌 **可嵌入 Open Runtime** | 公开、宿主中立的 `protocol`、`runtime-core`、`runtime-sdk` 让其他 Node 宿主复用同一受治理运行时，不依赖 Electron。 |
@@ -146,6 +149,15 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 - 🧱 **宿主中立** —— 公开契约与编排不依赖 Electron、renderer 状态、具体 Shell/文件适配器或密钥存储
 - 🧠 **统一 System Context** —— Desktop 与 TUI 共享 source 注册、分层、checksum、prompt snapshot 与连续性规则，避免模型格式和产品指令漂移
 
+### 你的模型栈，你做主
+
+- 🔐 **一套安全凭证库** —— macOS Keychain、Windows Credential Manager 或 Linux Secret Service 托管随机 32-byte 主密钥；Provider 密钥在本地使用 AES-256-GCM 加密
+- 🔄 **一台机器，一套模型配置** —— Desktop、TUI、CLI 复用 `~/.peer-agent` 下同一套 Provider 目录、默认模型选择与 credential helper
+- 🌐 **Provider 自由** —— 官方 API、OAuth/订阅登录、Coding Plan 模板、自定义 OpenAI / Anthropic-compatible 端点可混用；模型 ID、headers、推理、视觉、缓存、上下文与价格元数据都可配置
+- 🧑‍🏫 **师徒式模型协作（主模型 + 兜底多模态）** —— 任意模型都可作为主模型；需要读图且主模型不支持时，兜底模型只负责识图，主模型继续掌握推理与任务流
+
+> “多端统一”指同一台机器、同一用户数据目录下的 Desktop / TUI / CLI 共用配置与凭证；Peer 不宣称把密钥通过云端同步到不同设备。
+
 ### 安全地控制本机
 
 - 📁 文件 · 💻 Shell · 🔍 搜索 · 🧰 本地工具 —— 一律经 Runtime Projection + PermissionGrant + Evidence
@@ -205,11 +217,13 @@ pnpm --filter @peer-agent/tui dev
 │  · 工具执行 + Evidence                                         │
 │  · Agent / Plan / Goal runner（任务流）                       │
 │  · MCP · 插件 · 技能 · Automation                             │
+│  · 共享 Provider 目录 + 加密凭证库                             │
 └────────────────────────────┬────────────────────────────────┘
-                             │ 模型 API
+                             │ Provider 路由 / 模型 API
 ┌────────────────────────────▼────────────────────────────────┐
-│  认知（模型服务商）                                            │
-│  你选择的云端 / API 服务商                                     │
+│  认知（你的模型栈）                                            │
+│  官方 · OAuth/订阅 · Coding Plan · 自定义 API                  │
+│  主模型 · 可选兜底多模态模型                                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -261,6 +275,8 @@ Peer Agent 的目标是成为面向真实工作的 **跨平台 Agent 操作系�
 | Desktop · TUI · CLI | ✅ 可用 |
 | Agent / Plan / Goal 任务流 | ✅ 可用 |
 | 统一核心能力链 | ✅ 可用 |
+| 安全的跨端 Provider / 模型配置 | ✅ 可用 |
+| 主模型 + 兜底多模态路由 | ✅ 可用 |
 | MCP · 插件 · 技能 | ✅ 可用 |
 | Automation（定时 Agent） | ✅ 可用 |
 

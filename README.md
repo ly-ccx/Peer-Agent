@@ -61,6 +61,9 @@ Three first-class shells share one unified core runtime:
 | 🎯 **Task flow, not tool chat** | Goals are accepted with boundaries, clarified when needed, planned by complexity, and closed against explicit success criteria. |
 | ✅ **Definition of Done as code** | `successCriteria`, `criterionResults`, and `evidenceRefs` turn “done” into a verifiable gate — not an assistant claim. |
 | 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
+| 🔐 **OS-backed encrypted secrets** | The OS keychain stores the vault master key; Provider API keys and OAuth tokens stay in a local AES-256-GCM encrypted vault, never in plain settings files. |
+| 🌐 **Bring any model** | Use official APIs, OAuth/subscription channels, Coding Plans, or a custom OpenAI / Anthropic-compatible endpoint with your own `baseUrl`, model ID, and capability metadata. |
+| 🧑‍🏫 **Main + fallback model routing** | Keep your preferred model in charge; if it cannot read images, an optional fallback vision model interprets them and silently hands text back to the main model. |
 | 🧾 **Evidence is a first-class result** | Artifacts, logs, metadata, denial, timeout, and failure remain structured facts that UI and automation can inspect. |
 | 🧩 **One governed capability chain** | Shell, files, browser, MCP, plugins, and skills all flow through Manifest → Projection → Permission → Evidence. No hidden side doors. |
 | 🔌 **Embeddable Open Runtime** | Public, host-neutral `protocol`, `runtime-core`, and `runtime-sdk` packages let another Node host embed the same governed runtime without Electron. |
@@ -146,6 +149,15 @@ Task flow decides *what* work is accepted and when it is finished. The capabilit
 - 🧱 **Host-neutral by construction** — Public contracts and orchestration do not depend on Electron, renderer state, concrete Shell/file adapters, or secret storage
 - 🧠 **Canonical System Context** — Desktop and TUI share source registration, layering, checksums, prompt snapshots, and continuity rules so provider formatting and product instructions do not drift
 
+### Own your model stack
+
+- 🔐 **One secure credential vault** — macOS Keychain, Windows Credential Manager, or Linux Secret Service protects a random 32-byte master key; Provider secrets are encrypted locally with AES-256-GCM
+- 🔄 **One machine, one model setup** — Desktop, TUI, and CLI reuse the same Provider catalog, default model selection, and credential helper under `~/.peer-agent`
+- 🌐 **Provider freedom** — Mix official APIs, OAuth/subscription sign-in, Coding Plan templates, and custom OpenAI / Anthropic-compatible endpoints; configure model IDs, headers, reasoning, vision, cache, context, and pricing metadata
+- 🧑‍🏫 **Main + fallback vision** — Choose any main model for reasoning and optionally pair it with a vision-capable fallback; image recognition stays a supporting role and the main model continues the task
+
+> “Shared across surfaces” means the same user and data home on one machine. Peer does not claim cloud synchronization of secrets across devices.
+
 ### Control the machine (safely)
 
 - 📁 Files · 💻 Shell · 🔍 Search · 🧰 Local tooling — always via Runtime Projection + PermissionGrant + Evidence
@@ -205,11 +217,13 @@ Workspace packages live under `apps/` (product shells) and `packages/` (runtime,
 │  · Tool execution + Evidence                                │
 │  · Agent / Plan / Goal runner (task flow)                   │
 │  · MCP · Plugins · Skills · Automation                      │
+│  · Shared Provider catalog + encrypted credential vault     │
 └────────────────────────────┬────────────────────────────────┘
-                             │ model API
+                             │ provider routing / model API
 ┌────────────────────────────▼────────────────────────────────┐
-│  Cognition (model provider)                                 │
-│  Your chosen cloud / API provider                           │
+│  Cognition (your model stack)                               │
+│  Official · OAuth/subscription · Coding Plan · custom API   │
+│  Main model · optional fallback vision model                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -261,6 +275,8 @@ Philosophy stays fixed while the surface grows: **cognition is pluggable; author
 | Desktop · TUI · CLI shells | ✅ Available |
 | Agent / Plan / Goal task flow | ✅ Available |
 | Unified core capability chain | ✅ Available |
+| Secure shared Provider/model configuration | ✅ Available |
+| Main model + fallback vision routing | ✅ Available |
 | MCP · Plugins · Skills | ✅ Available |
 | Automation (scheduled agents) | ✅ Available |
 

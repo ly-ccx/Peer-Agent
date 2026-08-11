@@ -22,6 +22,9 @@ All notable changes to Peer Agent are tracked here.
 - Publish the host-neutral Open Runtime packages: `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`.
 - Add SkillHub, MCP/tool controls, skill details/capsules, tool definitions, provider channel wiring, and uninstall paths.
 - Add npm-installed CLI/TUI binaries, `/version`, shared conversations/settings, and clearer runtime feedback.
+- Protect a random vault master key with the platform keychain while encrypting Provider API keys and OAuth tokens locally with AES-256-GCM.
+- Share Provider metadata, default model selection, and credential access across Desktop, TUI, and CLI on the same machine.
+- Support custom OpenAI / Anthropic-compatible endpoints plus main-model / fallback-vision routing for text-only models.
 
 ### Changed
 
