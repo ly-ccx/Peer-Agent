@@ -37,6 +37,22 @@
     color: var(--pa-text-primary);
   }
 
+  .sidebar-version-dev-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 15px;
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--cinnabar-seal) 28%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cinnabar-seal) 9%, transparent);
+    color: var(--cinnabar-seal);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
   .sidebar-version-badge.has-update .sidebar-version-text-btn {
     color: var(--cinnabar-seal);
   }

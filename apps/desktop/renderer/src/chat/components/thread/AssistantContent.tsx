@@ -26,8 +26,10 @@ import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
 import { buildBatchSearchView } from '../../state/batchSearchLaneView';
 import { neutralizeToolCallSyntaxForDisplay } from '../../state/historicalLocalRecord';
+import { parseSkillToolView } from '../../state/skillToolView';
 import { InteractionAnsweredContext } from './interactionContext';
 import { InteractionToolCard } from './InteractionToolCard';
+import { SkillCapsuleCard } from './SkillCapsuleCard';
 
 function toolProgressLabel(
   progress: ToolProgress,
@@ -360,6 +362,26 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
     if (hasBatchContent) {
       return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZh} />;
     }
+  }
+
+  // local.skill.*：独立 Skill 胶囊，而不是通用 tool-call-card / read_file 行。
+  const skillView = parseSkillToolView({
+    tool: tc.tool,
+    displayName: tc.displayName,
+  });
+  if (skillView) {
+    const isSynthetic = tc.synthetic === true;
+    const isDone = tc.result !== undefined && !isSynthetic;
+    return (
+      <SkillCapsuleCard
+        skill={skillView}
+        isZh={isZh}
+        isDone={isDone}
+        isRunning={!isDone && !isSynthetic}
+        durationMs={tc.durationMs}
+        result={tc.result}
+      />
+    );
   }
 
   const label = tc.tool === 'bash'

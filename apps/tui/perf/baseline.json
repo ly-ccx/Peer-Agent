@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-04T07:20:50.554Z",
+  "runtime": {
+    "bun": "1.2.17",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "results": [
+    {
+      "scenario": "markdown.parse",
+      "iterations": 250,
+      "p50Ms": 0.08337500000001796,
+      "p95Ms": 0.116375000000005,
+      "p99Ms": 0.27045800000000497,
+      "maxMs": 1.7524999999999977,
+      "totalMs": 23.692624999999992,
+      "metadata": {
+        "chars": 7701
+      }
+    },
+    {
+      "scenario": "code.highlight",
+      "iterations": 100,
+      "p50Ms": 2.2883329999999944,
+      "p95Ms": 2.9139999999999873,
+      "p99Ms": 3.3182079999999985,
+      "maxMs": 3.503832999999986,
+      "totalMs": 239.48012500000002,
+      "metadata": {
+        "chars": 71779,
+        "lines": 1000
+      }
+    },
+    {
+      "scenario": "conversation.project",
+      "iterations": 1000,
+      "p50Ms": 0.02616699999998673,
+      "p95Ms": 0.04775000000000773,
+      "p99Ms": 0.0837500000000091,
+      "maxMs": 0.1844579999999496,
+      "totalMs": 31.238875000000007,
+      "metadata": {
+        "messages": 10000
+      }
+    },
+    {
+      "scenario": "tool.presentation",
+      "iterations": 1000,
+      "p50Ms": 0.005457999999975982,
+      "p95Ms": 0.01125000000001819,
+      "p99Ms": 0.01650000000000773,
+      "maxMs": 0.06441599999999426,
+      "totalMs": 6.395832999999982,
+      "metadata": {
+        "chars": 539999,
+        "lines": 5000
+      }
+    }
+  ]
+}

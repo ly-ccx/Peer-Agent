@@ -52,6 +52,7 @@ import {
   formatToolResultSummary,
   type ToolPresentation,
 } from './tool-result-summary.ts';
+import { recordTuiPerf, tuiPerfNow } from './tui-perf.ts';
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling' | 'compacting';
@@ -526,8 +527,17 @@ export function createChatController(options: {
   });
 
   const publish = (next: ChatSnapshot) => {
+    const startedAt = tuiPerfNow();
+    const previous = snapshot;
     snapshot = next;
     for (const listener of listeners) listener(snapshot);
+    recordTuiPerf('controller.publish', tuiPerfNow() - startedAt, {
+      lane: next.messages !== previous.messages ? 'transcript' : 'state',
+      listeners: listeners.size,
+      messages: next.messages.length,
+      messageChanged: next.messages !== previous.messages,
+      statusChanged: next.status !== previous.status,
+    });
   };
 
   const resolveContextWindow = (): number | undefined => {
@@ -769,12 +779,14 @@ export function createChatController(options: {
   };
 
   const flushStreamDeltaBuffer = () => {
+    const startedAt = tuiPerfNow();
     if (streamFlushTimer) {
       clearTimeout(streamFlushTimer);
       streamFlushTimer = null;
     }
     if (streamDeltaBuffer.length === 0) return;
     const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
+    const chars = events.reduce((total, event) => total + event.content.length, 0);
     const messages = [...snapshot.messages];
     let accounting = turnAccountingLifecycle?.current();
     for (const event of events) {
@@ -790,11 +802,23 @@ export function createChatController(options: {
           }
         : {}),
     });
+    recordTuiPerf('stream.flush', tuiPerfNow() - startedAt, {
+      lane: 'stream',
+      count: events.length,
+      chars,
+      messages: messages.length,
+    });
   };
 
   const enqueueStreamDelta = (event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string }) => {
     if (!event.content) return;
     streamDeltaBuffer.push(event);
+    recordTuiPerf('stream.enqueue', 0, {
+      lane: 'stream',
+      count: 1,
+      chars: event.content.length,
+      buffered: streamDeltaBuffer.length,
+    });
     if (streamFlushTimer) return;
     streamFlushTimer = setTimeout(flushStreamDeltaBuffer, STREAM_BUFFER_FLUSH_MS);
   };

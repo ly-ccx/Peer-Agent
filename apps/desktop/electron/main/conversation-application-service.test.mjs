@@ -16,6 +16,7 @@ function createHarness(overrides = {}) {
     getConversation: port('get'),
     updateTitle: port('update-title'),
     updateMode: port('update-mode'),
+    updateAutomationCreateContext: port('update-automation-create-context'),
     updateModelEffort: port('update-model-effort'),
     appendMessage: port('append-message'),
     updateLastMessage: port('update-last-message'),

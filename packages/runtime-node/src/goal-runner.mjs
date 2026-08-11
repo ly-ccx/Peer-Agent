@@ -1786,6 +1786,37 @@ export function createGoalRunner({
 
       if (!latest || session.cancelled) return getState(planId);
       if (latest.status === 'paused' || latestRunner?.status === 'paused') return getState(planId);
+
+      // request_user_input is the final action-owner fact of this turn. Process
+      // it before terminal progress because the model may complete the current
+      // leaf and then ask the user to choose the next direction in one response.
+      if (result?.requestedUserInput && (latest.status === 'completed' || hasCompletedProgress(latest))) {
+        const reason = result.blockedReason || 'requested_user_input';
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner requested user input: ${reason}`,
+          payload: { summaryCode: 'requested_user_input', reason, requestedUserInput: true },
+        });
+        appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
+        // Persist the action owner last: audit/checkpoint writes derive terminal
+        // status from completed leaves, so an earlier waiting_user write would
+        // be overwritten back to completed in this exact sequence.
+        if (typeof goalPlanStore.markRequestedUserInput === 'function') {
+          goalPlanStore.markRequestedUserInput(planId, {
+            ...blockerPatch(latest, reason, { phase: 'waiting_user' }),
+          });
+        } else {
+          goalPlanStore.setRunnerState(planId, {
+            status: 'waiting_user',
+            intent: 'block',
+            phase: 'waiting_user',
+            blockedReason: reason,
+          });
+        }
+        emit('goalRunner:blocked', { planId, reason, requestedUserInput: true });
+        return getState(planId);
+      }
+
       if (latest.status === 'completed' || hasCompletedProgress(latest)) continue;
       if (latest.status === 'failed') continue;
 
@@ -1836,11 +1867,11 @@ export function createGoalRunner({
         const reason = result.blockedReason || 'requested_user_input';
         goalPlanStore.setRunnerState(planId, {
           enabled: true,
-          status: 'blocked',
+          status: 'waiting_user',
           intent: 'block',
-          phase: 'blocked',
+          phase: 'waiting_user',
           blockedReason: reason,
-          ...blockerPatch(latest, reason, { phase: 'blocked' }),
+          ...blockerPatch(latest, reason, { phase: 'waiting_user' }),
           updatedAt: now(),
         });
         appendRunEvent(planId, {

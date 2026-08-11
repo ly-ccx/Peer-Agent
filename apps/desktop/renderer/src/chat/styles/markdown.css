@@ -288,4 +288,97 @@
     @apply my-1 border-0 border-t;
     border-color: var(--za-line);
   }
+
+  .markdown-content .markdown-local-image {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: min(100%, 360px);
+    vertical-align: top;
+    margin: 4px 0;
+  }
+
+  .markdown-content .markdown-local-image-thumb {
+    display: block;
+    padding: 0;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm, 8px);
+    background: var(--za-bg-1);
+    cursor: zoom-in;
+    overflow: hidden;
+    max-width: 100%;
+  }
+
+  .markdown-content .markdown-local-image-thumb img {
+    display: block;
+    max-width: min(100%, 320px);
+    max-height: 180px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+
+  .markdown-content .markdown-local-image .markdown-file-path {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Lightbox sits outside .markdown-content stacking; fixed to viewport. */
+.markdown-local-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+  cursor: zoom-out;
+}
+
+.markdown-local-image-lightbox-figure {
+  margin: 0;
+  max-width: min(96vw, 1100px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: default;
+}
+
+.markdown-local-image-lightbox-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 40px);
+  object-fit: contain;
+  border-radius: 8px;
+  background: #111;
+}
+
+.markdown-local-image-lightbox-figure figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #f5f5f5;
+  font-size: 12px;
+}
+
+.markdown-local-image-lightbox-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-local-image-lightbox-close {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
 }

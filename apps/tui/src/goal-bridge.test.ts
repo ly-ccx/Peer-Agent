@@ -96,7 +96,7 @@ describe('TuiGoalBridge', () => {
       ]);
       expect(
         bridge.toolDefinitions.find((tool) => tool.name === GOAL_TOOL_NAMES.requestExplorer)?.modeScopes,
-      ).toEqual(['goal']);
+      ).toEqual(['chat', 'goal']);
 
       const blocked = bridge.evaluateIntake({
         mode: 'goal',

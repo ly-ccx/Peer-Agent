@@ -1,281 +1,326 @@
-# Peer Agent
+<p align="center">
+  <img src="docs/logo.png" alt="Peer Agent" width="120" />
+</p>
 
-**The AI agent that lives on your machine, not in someone's cloud.**
+<h1 align="center">Peer Agent</h1>
 
-Local-first. Permission-gated. Evidence-backed.
+<p align="center">
+  <strong>A local-first Task Flow Agent — authorized, planned, and proven on your machine.</strong>
+</p>
 
-> Most AI assistants run their "tools" on a server you can't see, with access you can't audit. Peer Agent flips that: every capability runs locally, every action asks for your authorization, and every result leaves a verifiable trace. Your AI gets hands — you keep the keys.
+<p align="center">
+  Local-first · Permission-gated · Evidence-backed · Task flow by default
+</p>
 
-Peer Agent is a privacy-first local agent platform with three first-class shells — **Desktop**, **TUI**, and **CLI** — on one shared capability runtime. An agent can read files, run commands, drive a browser, call MCP tools, and automate work **on your computer**, under explicit, auditable control.
+<p align="center">
+  <strong>English</strong> ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ly-ccx/Peer-Agent/stargazers"><img src="https://img.shields.io/github/stars/ly-ccx/Peer-Agent?style=for-the-badge&logo=github&label=Stars" alt="GitHub Stars" /></a>
+  <a href="https://www.npmjs.com/package/@peer-agent/cli"><img src="https://img.shields.io/npm/v/@peer-agent/cli?style=for-the-badge&logo=npm&label=npm%20%40peer-agent%2Fcli" alt="npm version" /></a>
+  <a href="https://github.com/ly-ccx/Peer-Agent/releases"><img src="https://img.shields.io/github/v/release/ly-ccx/Peer-Agent?include_prereleases&style=for-the-badge&label=Release" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
+</p>
+
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-why-peer-agent">Why</a> ·
+  <a href="#-design-philosophy">Philosophy</a> ·
+  <a href="#-task-flow">Task Flow</a> ·
+  <a href="#-what-you-can-do">Features</a> ·
+  <a href="#-architecture-at-a-glance">Architecture</a> ·
+  <a href="#-product-vision">Vision</a> ·
+  <a href="#-roadmap">Roadmap</a>
+</p>
+
+---
+
+Many coding agents already run tools on your machine. That alone is no longer a differentiator.
+
+**Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
+
+Three first-class shells share one unified core runtime:
+
+| Surface | What it is |
+| --- | --- |
+| **Desktop** | Task threads, composer, review cards, Workbench, tray |
+| **TUI** | Full terminal agent (`peer`) with the same runtime |
+| **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current series: **`0.0.1`** (stable / latest). The capability runtime, Desktop shell, TUI/CLI, Agent/Plan workflows, and MCP path are usable today. On-device LLM inference (Local Agent Runtime) is still in progress — see [Roadmap](#-roadmap).
+> Current release: **`0.0.2`** (`latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 
 ## ✨ Why Peer Agent
 
-- 🔒 **Privacy-first by architecture** — Capabilities execute on your machine. Files, commands, and local state are not shipped to a third-party tool server.
-- ✅ **Permission-gated execution** — No tool runs without a `PermissionGrant`. Authorization is enforced by the runtime, not by a polite prompt.
-- 🧾 **Evidence-backed accountability** — Every capability call returns structured Evidence (artifacts, logs, metadata) you can inspect after the fact.
-- 🧩 **One runtime for every capability** — Shell, files, web/browser, MCP, plugins, and skills all flow through a single governed chain. No hidden side doors.
-- 🖥️ **Multi-surface product** — Desktop GUI, terminal TUI, and installable `peer` CLI share the same local runtime and data under `~/.peer-agent`.
-- 🎯 **Modes that match how you work** — **Agent** for self-driven execution, **Plan** for review-first planning, plus Goal runner / Quick Chat for longer or lighter tasks.
+| | |
+| --- | --- |
+| 🎯 **Task flow, not tool chat** | Goals are accepted with boundaries, clarified when needed, planned by complexity, and closed against explicit success criteria. |
+| ✅ **Definition of Done as code** | `successCriteria`, `criterionResults`, and `evidenceRefs` turn “done” into a verifiable gate — not an assistant claim. |
+| 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
+| 🔐 **OS-backed encrypted secrets** | The OS keychain stores the vault master key; Provider API keys and OAuth tokens stay in a local AES-256-GCM encrypted vault, never in plain settings files. |
+| 🌐 **Bring any model** | Use official APIs, OAuth/subscription channels, Coding Plans, or a custom OpenAI / Anthropic-compatible endpoint with your own `baseUrl`, model ID, and capability metadata. |
+| 🧑‍🏫 **Main + fallback model routing** | Keep your preferred model in charge; if it cannot read images, an optional fallback vision model interprets them and silently hands text back to the main model. |
+| 🧾 **Evidence is a first-class result** | Artifacts, logs, metadata, denial, timeout, and failure remain structured facts that UI and automation can inspect. |
+| 🧩 **One governed capability chain** | Shell, files, browser, MCP, plugins, and skills all flow through Manifest → Projection → Permission → Evidence. No hidden side doors. |
+| 🔌 **Embeddable Open Runtime** | Public, host-neutral `protocol`, `runtime-core`, and `runtime-sdk` packages let another Node host embed the same governed runtime without Electron. |
+| 🔁 **Long-task continuity** | Goal state, pause/resume, `waiting_user`, compact summaries, context checksums, and continuity sources let work survive interruptions without treating a summary as proof. |
+| 🖥️ **One core, multiple surfaces** | Desktop, TUI, and the `peer` CLI share runtime, System Context, and data under `~/.peer-agent`; the interfaces do not fork the execution truth. |
 
 ---
 
-## 🧠 Design Philosophy
+## 🧭 Design Philosophy
 
-Peer Agent is built on the **Capability Agent** model:
+Peer Agent is built around a simple split of responsibility:
+
+| Role | Owns |
+| --- | --- |
+| **Model** | Cognition — understanding, planning, deciding what to try next. A *role* supplied by your chosen model provider. |
+| **Local runtime** | Capability — discovery, permission, execution, and Evidence on your machine. |
+| **Interface** | Expression — Desktop / TUI / CLI present work; they do not hold permission truth. |
+| **Contract** | Boundaries — protocol types, Runtime Projection, and hard bans between layers. |
+| **Evidence** | Governance — what actually happened, inspectable after the fact. |
+
+Product principles we try not to violate:
+
+- **Elegance first** — Prefer one clear concept over two overlapping ones; refuse “good enough” seams that will rot.
+- **Task over chat** — Multi-step work is accepted as a goal with boundaries and success criteria, not freelanced mid-conversation.
+- **Ask when blocked** — Material ambiguity and high-risk trade-offs interrupt; silent guessing does not.
+- **Prove completion** — Done means tool results and Evidence, not assertive prose.
+- **One capability chain** — Shell, files, browser, MCP, plugins, and skills all pass through the same permission + Evidence path.
+
+These ideas shape both the product surface (Agent / Plan / Goal) and the engineering baseline in the companion knowledge base.
+
+---
+
+## 🧠 Task Flow
+
+Peer Agent treats multi-step work as a **task**, not a free-form chat turn.
+
+Before acting, it turns your request into an objective, boundaries, and success criteria you can review. If something material is missing — a product choice, a risky trade-off, or a permission — it asks instead of guessing. Planning depth scales with complexity:
+
+| Depth | When | Behavior |
+| --- | --- | --- |
+| **L0** | Simple Q&A | Answer directly |
+| **L1** | Small scoped change | Short plan, then act |
+| **L2** | Multi-step work | Self-driven GoalPlan with trackable subtasks |
+| **L3** | High-risk / irreversible | Explicit **Plan** review before side effects |
+
+**Agent** is the default. **Plan** is the brake when you want review first. Subtasks and success criteria close only with real tool results and Evidence — not “done” prose.
+
+For longer work, the Goal runner persists the plan graph and supports pause, resume, and `waiting_user`. Auto-verifiable criteria can run as commands, tests, or file checks; their results must be attached before the goal can close. Read-only Explorer workers may investigate in parallel, while the lead task flow retains scope, budget, and completion ownership.
+
+Local execution still goes through one chain:
 
 ```text
-模型负责认知。
-本地负责能力。
-界面负责表达。
-契约负责边界。
-证据负责治理。
+Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence
 ```
 
-```text
-The model owns cognition.
-Local owns capability.
-Interface owns expression.
-Contract owns boundaries.
-Evidence owns governance.
-```
-
-> "模型 / the model" is a **role, not a location**. It may be a cloud provider today, or the on-device Local Agent Runtime once it lands. Either way, capability execution, authorization, and Evidence stay on your machine.
-
-Every local action flows through one non-negotiable runtime chain:
-
-```text
-Capability Provider
-  → Manifest
-    → Runtime Projection
-      → Tool Call
-        → PermissionGrant
-          → Evidence
-```
-
-This keeps model intent, local execution, user authorization, and factual results separate and traceable — instead of letting an LLM quietly do whatever it wants on your disk.
+Task flow decides *what* work is accepted and when it is finished. The capability chain decides *how* local power is authorized and proven.
 
 ---
 
 ## 🚀 What You Can Do
 
-**Work in the way that fits**
-- 🖥️ **Desktop app** — Task threads, composer, review cards, Workbench, tray/lifecycle, and a glass-style shell.
-- ⌨️ **TUI / CLI (`peer`)** — Full terminal agent with the same runtime; install via `@peer-agent/cli` or build from source.
-- ⚡ **Quick Chat** — Lightweight global chat for fast questions without opening a full task thread.
-- 🎯 **Agent & Plan modes** — Self-driven Agent execution, or Plan-first review before side effects.
-- 📋 **Goal runner** — Multi-step goals with trackable subtasks, evidence-backed completion, and resume continuity.
+### Work the way that fits
 
-**Work with your machine**
-- 📂 **File operations** — Read, search, and edit workspace files under scoped permissions.
-- 💻 **Shell execution** — Run builds, tests, and scripts; results return as inspectable artifacts.
-- 🌐 **Web fetch** — Pull pages into governed context.
-- 🧭 **Visible browser / Workbench** — Navigate, click, type, screenshot, and read DOM in a conversation-bound browser surface.
+- 🖥️ **Desktop app** — Task threads, composer, review cards, Workbench, tray/lifecycle, glass-style shell
+- ⌨️ **TUI / CLI (`peer`)** — Full terminal agent; install via `@peer-agent/cli` or build from source
+- ⚡ **Quick Chat** — Lightweight global chat without opening a full task thread
+- 🎯 **Agent & Plan modes** — Agent auto-plans and executes (L0–L3); Plan requires review before side effects
+- 📋 **Goal runner** — Trackable subtasks, clarification when blocked, evidence-backed completion
 
-**Extend the agent**
-- 🔌 **MCP integration** — Connect Model Context Protocol servers (including OAuth-capable setups) as first-class capabilities.
-- 🧩 **Plugins & Skills** — Add capabilities through manifests and skill packs, not by patching the core.
-- ☁️ **Cloud cognition, local hands** — Plug in cloud providers for reasoning while tools still execute locally under your grants.
+### Connect tools and knowledge
 
-**Stay in control**
-- 🔐 **Authorize per action** — Grant or deny capability requests as they happen.
-- 🧾 **Audit everything** — Review the Evidence trail for what the agent actually did.
-- 🧱 **Shared local state** — Settings, conversations, credentials, and runtime data live under `~/.peer-agent`.
+- 🔌 **MCP** — Connect external MCP servers (stdio / HTTP / SSE) as first-class capabilities
+- 🧩 **Plugins & Skills** — Marketplace-style install, enable/disable, and skill-triggered workflows
+- 📎 **Attachments & context** — Files and other context admitted through governed paths (not free-form prompt injection)
+- 🌐 **Web & browser** — Fetch, navigate, and interact under the same permission + Evidence model
+- ⏰ **Automation** — Scheduled / recurring agent runs with run-result viewing
+- 🌿 **Isolated automation runs** — Repository jobs can run in a dedicated Git worktree, then return commit/diff artifact refs and a receipt instead of mutating your active checkout invisibly
+- 🧭 **Workbench + embedded Browser** — Keep task status, artifacts, diffs, terminal output, and visible browser actions beside the conversation
 
----
+### Build on the runtime
 
-## 📦 Surfaces & Tech Stack
+- 🔌 **Open Runtime SDK** — Embed the governed capability pipeline in another Node host via `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`
+- 🧱 **Host-neutral by construction** — Public contracts and orchestration do not depend on Electron, renderer state, concrete Shell/file adapters, or secret storage
+- 🧠 **Canonical System Context** — Desktop and TUI share source registration, layering, checksums, prompt snapshots, and continuity rules so provider formatting and product instructions do not drift
 
-```text
-Desktop (Electron)     TUI / CLI (`peer`)
-        \                 /
-         \               /
-          Local Capability Runtime
-          (protocol · chat-kernel · runtime-*)
-                 |
-         PermissionGrant → Evidence
-```
+### Own your model stack
 
-| Layer | What it is |
-|-------|------------|
-| **Desktop** (`apps/desktop`) | Electron shell: threads, composer, Workbench/browser, permissions UI, tray |
-| **TUI** (`apps/tui`) | Terminal agent binary `peer`, shares runtime packages with Desktop |
-| **CLI installer** (`packages/npm-cli` → `@peer-agent/cli`) | npm package that installs the platform `peer` binary from GitHub Releases |
-| **Local Capability Runtime** | Manifest → projection → tool call → permission → Evidence |
-| **Local Agent Runtime** | On-device LLM inference (**WIP**) |
+- 🔐 **One secure credential vault** — macOS Keychain, Windows Credential Manager, or Linux Secret Service protects a random 32-byte master key; Provider secrets are encrypted locally with AES-256-GCM
+- 🔄 **One machine, one model setup** — Desktop, TUI, and CLI reuse the same Provider catalog, default model selection, and credential helper under `~/.peer-agent`
+- 🌐 **Provider freedom** — Mix official APIs, OAuth/subscription sign-in, Coding Plan templates, and custom OpenAI / Anthropic-compatible endpoints; configure model IDs, headers, reasoning, vision, cache, context, and pricing metadata
+- 🧑‍🏫 **Main + fallback vision** — Choose any main model for reasoning and optionally pair it with a vision-capable fallback; image recognition stays a supporting role and the main model continues the task
+
+> “Shared across surfaces” means the same user and data home on one machine. Peer does not claim cloud synchronization of secrets across devices.
+
+### Control the machine (safely)
+
+- 📁 Files · 💻 Shell · 🔍 Search · 🧰 Local tooling — always via Runtime Projection + PermissionGrant + Evidence
 
 ---
 
 ## 🏁 Quick Start
 
-| Entry | Who it's for | Install path |
-|-------|--------------|--------------|
-| **CLI / TUI (`peer`)** | Terminal-first use | `npm i -g @peer-agent/cli@latest` or build `apps/tui` |
-| **Desktop app** | GUI shell | Dev: `pnpm --filter @peer-agent/desktop dev` · Release: GitHub Releases / `pnpm dist` |
+### Option A — Desktop (recommended for most users)
 
-Both share the same local Runtime and data under `~/.peer-agent` (settings, conversations, credentials).
+1. Download a release from **[GitHub Releases](https://github.com/ly-ccx/Peer-Agent/releases)**
+2. Install and open Peer Agent
+3. Add a model provider / API key in settings
+4. Start a conversation — or hand it a real goal and let **Agent** mode drive
 
-### CLI / TUI (no Desktop required)
-
-#### Option A — npm (beta)
+### Option B — CLI / TUI via npm
 
 ```bash
-npm install -g @peer-agent/cli@latest
-# or: pnpm add -g @peer-agent/cli@latest
-
+npm install -g @peer-agent/cli
 peer --version
 peer
 ```
 
-`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (`v0.0.1` assets for this version). Requires **Node.js 20+**.
+The npm package downloads the platform `peer` binary from GitHub Releases on install (macOS / Linux, arm64 / x64).
 
-Supported installer platforms today: **macOS / Linux** (`darwin`/`linux` × `arm64`/`x64`). See [`packages/npm-cli/README.md`](./packages/npm-cli/README.md) for env overrides and manual tarball install.
-
-#### Option B — from this monorepo
+### Option C — Build from source
 
 ```bash
+# Prerequisites: Node.js 20+, pnpm, Rust toolchain (for native pieces)
+
+git clone https://github.com/ly-ccx/Peer-Agent.git
+cd Peer-Agent
 pnpm install
-pnpm --filter @peer-agent/tui build
-./apps/tui/dist/peer --version
-./apps/tui/dist/peer
-```
 
-For day-to-day TUI development:
+# Desktop (Electron)
+pnpm --filter @peer-agent/desktop dev
 
-```bash
+# Terminal agent (TUI)
 pnpm --filter @peer-agent/tui dev
 ```
 
-### Desktop app
-
-#### From source (developers)
-
-```bash
-pnpm install
-pnpm --filter @peer-agent/desktop dev
-# or from repo root:
-pnpm dev
-```
-
-#### Packaged build
-
-```bash
-pnpm dist        # current host
-pnpm dist:mac    # macOS
-pnpm dist:win    # Windows
-```
-
-Release notes for each beta live under [`release-notes/`](./release-notes/) and in [`CHANGELOG.md`](./CHANGELOG.md).
+Workspace packages live under `apps/` (product shells) and `packages/` (runtime, protocol, CLI publish package `@peer-agent/cli`).
 
 ---
 
-## 🗂️ Repository Structure
+## 🏗️ Architecture at a Glance
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  Desktop / TUI / CLI  (expression + interaction only)         │
+└────────────────────────────┬────────────────────────────────┘
+                             │ protocol / IPC
+┌────────────────────────────▼────────────────────────────────┐
+│  Local runtime                                              │
+│  · Capability discovery & Runtime Projection                │
+│  · PermissionGrant enforcement                              │
+│  · Tool execution + Evidence                                │
+│  · Agent / Plan / Goal runner (task flow)                   │
+│  · MCP · Plugins · Skills · Automation                      │
+│  · Shared Provider catalog + encrypted credential vault     │
+└────────────────────────────┬────────────────────────────────┘
+                             │ provider routing / model API
+┌────────────────────────────▼────────────────────────────────┐
+│  Cognition (your model stack)                               │
+│  Official · OAuth/subscription · Coding Plan · custom API   │
+│  Main model · optional fallback vision model                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Repository layout
 
 ```text
 peer_agent/
-├── apps/
-│   ├── desktop/              # Electron Desktop shell
-│   └── tui/                  # Terminal agent (`peer` binary)
-├── packages/
-│   ├── npm-cli/              # Public installer: @peer-agent/cli
-│   ├── protocol/             # Cross-layer contracts
-│   ├── chat-kernel/          # Chat / agent loop kernel
-│   ├── runtime-core/         # Capability runtime core
-│   ├── runtime-node/         # Node host adapters
-│   ├── runtime-sdk/          # Runtime SDK surface
-│   ├── system-context/       # System prompt / context assembly
-│   ├── task-thread/          # Task-thread model
-│   ├── conversation-store/   # Conversation persistence
-│   ├── credential-helper/    # Credential helper bindings
-│   ├── ui/                   # Shared UI primitives
-│   └── i18n/                 # Shared strings
-├── crates/
-│   └── peer-credential-helper/  # Native credential helper
-├── capabilities/             # Built-in capability manifests
-├── skills/                   # Built-in skills
-├── docs/                     # Product site static pages
-├── release-notes/            # Per-version release notes
-├── scripts/                  # Version, pack, architecture checks
-├── CHANGELOG.md
-├── VERSION                   # 0.0.1
-└── AGENTS.md                 # Repo engineering rules for agents
+├── apps/            # Desktop, CLI/TUI product shells
+├── packages/        # Shared runtime, protocol, UI, providers, CLI publish package
+├── capabilities/    # Capability packs / manifests
+├── crates/          # Rust native components
+├── marketplace/     # Plugin / skill marketplace assets
+├── skills/          # Bundled skills
+├── docs/            # Site assets (logo, pages)
+└── scripts/         # Build / release tooling
 ```
-
-Architecture design docs are **not** stored in this code repo. They live in the companion knowledge base **`peer-knowledge`** (see below and `AGENTS.md`).
 
 ---
 
-## 📚 Documentation
+## 🔭 Product Vision
 
-| Kind | Where |
-|------|--------|
-| **Product site (static)** | [`docs/`](./docs/) (`index.html`, `docs.html`, changelog page assets) |
-| **Changelog** | [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Release notes** | [`release-notes/`](./release-notes/) |
-| **CLI installer** | [`packages/npm-cli/README.md`](./packages/npm-cli/README.md) |
-| **Repo agent rules** | [`AGENTS.md`](./AGENTS.md) |
-| **Architecture & ADRs** | Companion repo **`peer-knowledge`** (not published inside this tree) |
+Peer Agent aims to be a **cross-platform agent OS for real work** — not another chat window that can shell out.
 
-### Knowledge base map (`peer-knowledge`)
+The long-term product spine:
 
-When you have the knowledge workspace checked out next to this repo:
+| Pillar | Meaning |
+| --- | --- |
+| **Cross-platform** | Same product truth on macOS first, then broader desktop / environment coverage without forking the core model. |
+| **Unified core flow** | Desktop, TUI, CLI, Automation, MCP, plugins, and skills share one runtime chain: projection → permission → execution → Evidence. |
+| **Task flow** | Work is accepted, clarified, planned, executed, and closed as a governed task — not freelanced chat. |
+| **Self-closed loop** | Explore → plan → act → verify → adjust, with success criteria and Evidence as the completion gate. |
+| **Self-evolution** | Improve playbooks, skills, and workflows from prior Evidence — reviewable iteration, never silent rewrite of trust boundaries. |
+| **Multi-agent collaboration** | Specialist roles under one task (explore / implement / review) with explicit handoffs and shared Evidence. |
+| **Agent swarm** | Optional larger parallel fan-out for exploration and verification — still budgeted, owned by a lead task flow, not an unconstrained crowd. |
+| **Canvas creation system** | A spatial surface for plans, diagrams, and intermediate artifacts — thinking and creation you can see and edit next to the conversation. |
+| **Memory system** | Durable, permission-aware memory beyond a single thread: preferences, project facts, and retrieval that stay local. |
 
-| Topic | Path in `peer-knowledge` |
-|-------|---------------------------|
-| Engineering philosophy | `knowledge/architecture/00-engineering-philosophy.md` |
-| Project structure | `knowledge/architecture/01-project-structure.md` |
-| Architecture governance | `knowledge/architecture/20-architecture-governance.md` |
-| System prompt & context | `knowledge/architecture/19-system-prompt-context-architecture.md` |
-| TUI/Desktop shared runtime | `knowledge/architecture/22-tui-desktop-shared-runtime-and-host-governance.md` |
-| Plugin / Skill / MCP | `knowledge/decisions/15-plugin-skill-mcp-system.md` |
-| Skill call lifecycle | `knowledge/decisions/16-skill-call-lifecycle.md` |
-| Mode-scoped tools | `knowledge/decisions/35-mode-scoped-tool-projection.md` |
-| Embedded browser | `knowledge/decisions/40-embedded-browser-and-agent-control.md` |
-
-> Do not recreate architecture trees inside this code repository unless that decision is explicitly revisited.
+Philosophy stays fixed while the surface grows: **cognition is pluggable; authorization and Evidence stay local.**
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] Local capability runtime (provider → permission → Evidence)
-- [x] Electron Desktop shell
-- [x] TUI + first-class CLI release (`peer` / `@peer-agent/cli`)
-- [x] MCP connection & authentication
-- [x] Agent / Plan modes and Goal runner
-- [x] Quick Chat
-- [x] Workbench + conversation-bound browser control
-- [ ] **Local Agent Runtime** — on-device LLM inference
-- [ ] Expanded plugin & skill ecosystem
-- [ ] Broader multi-platform packaging parity
+### Available now
+
+| Area | Status |
+| --- | --- |
+| Local capability runtime + Evidence | ✅ Available |
+| Desktop · TUI · CLI shells | ✅ Available |
+| Agent / Plan / Goal task flow | ✅ Available |
+| Unified core capability chain | ✅ Available |
+| Secure shared Provider/model configuration | ✅ Available |
+| Main model + fallback vision routing | ✅ Available |
+| MCP · Plugins · Skills | ✅ Available |
+| Automation (scheduled agents) | ✅ Available |
+
+### In progress
+
+| Area | Status |
+| --- | --- |
+| Broader marketplace ecosystem | 🚧 Growing |
+| Cross-platform hardening / packaging | 🚧 Ongoing |
+
+### Planned — not implemented yet
+
+These are **direction, not shipping claims**. They are **not** available in the current beta.
+
+| Area | Intent |
+| --- | --- |
+| **Memory system** | Durable, governed memory beyond a single thread — preferences, project facts, and retrieval that stays local and permission-aware. |
+| **Stronger self-closed loops** | Tighter verify/adjust cycles, richer success criteria, and resume continuity across longer goals. |
+| **Self-evolution / self-iteration** | Safe loops where the agent improves workflows, skills, and playbooks from Evidence — always reviewable. |
+| **Multi-agent collaboration** | Coordinated specialist agents under one task flow (explore / implement / review), with shared Evidence and clear handoffs. |
+| **Agent swarm** | Budgeted parallel exploration / verification workers under a lead task — not unconstrained swarms. |
+| **Canvas creation system** | Spatial canvas for plans, diagrams, and intermediate artifacts alongside the conversation. |
 
 ---
 
 ## 🤝 Contributing
 
-Issues and PRs are welcome.
+Issues, discussions, and PRs are welcome.
 
-Before large changes, read `AGENTS.md` and the governance baseline in `peer-knowledge`. Prefer extending existing providers, protocol types, reducers, and context sources over adding ad-hoc execution paths.
+1. Fork and create a branch
+2. Keep changes scoped; prefer protocol/runtime seams over one-off branches
+3. Add or update tests when you touch contracts, permissions, or tool execution
+4. Open a PR with a clear problem statement and verification notes
 
-Useful checks from the repo root:
-
-```bash
-pnpm typecheck
-pnpm architecture:check
-pnpm version:check
-pnpm check
-```
+Please do **not** expand renderer direct `fs` / `child_process` access, bypass Runtime Projection, or replace Evidence with free-form assistant text.
 
 ---
 
 ## 📄 License
 
-[MIT](./LICENSE)
+[MIT](LICENSE) © 2026 梁音
 
 ---
 
-**Peer Agent** — local hands for AI, with keys you still hold.
+<p align="center">
+  <sub>Built for people who want AI that can act — with authorization, task flow, and Evidence.</sub>
+</p>

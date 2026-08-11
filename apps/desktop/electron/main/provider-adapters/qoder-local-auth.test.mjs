@@ -107,4 +107,39 @@ describe('qoder local auth', () => {
     assert.equal(extractEmbeddedAuthWasmBytes('var MsC="not-wasm-payload";'), null);
     assert.equal(extractEmbeddedAuthWasmBytes(''), null);
   });
+
+  it('maps missing local auth files to qoder_auth_not_found instead of bare ENOENT', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-auth-missing-'));
+    try {
+      await assert.rejects(
+        () => loadQoderLocalAuth({
+          env: {},
+          homeDir: dir,
+        }),
+        (error) => {
+          assert.equal(error.code, 'qoder_auth_not_found');
+          assert.notEqual(error.message, 'ENOENT');
+          assert.match(error.message, /not found|sign in|login/i);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('can still load local auth when PEER_AGENT_HOST_NODE is set (host-node fallback path stays available)', async () => {
+    // Smoke-check: with a real host node path, env token short-circuits before file IO.
+    // Full EPERM fallback is covered by the Electron probe in verify.
+    const hostNode = process.execPath;
+    const auth = await loadQoderLocalAuth({
+      env: {
+        QODER_ACCESS_TOKEN: 'host-node-env-token',
+        PEER_AGENT_HOST_NODE: hostNode,
+      },
+      homeDir: '/missing-home',
+    });
+    assert.equal(auth.token, 'host-node-env-token');
+    assert.equal(auth.source, 'QODER_ACCESS_TOKEN');
+  });
 });

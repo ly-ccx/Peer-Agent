@@ -22,6 +22,8 @@ export const CHANNEL_IDS = {
   XIAOMI_MIMO: 'xiaomi-mimo',
   XIAOMI_MIMO_TOKEN_PLAN: 'xiaomi-mimo-token-plan',
   ALIYUN_BAILIAN: 'aliyun-bailian',
+  OPENCODE_GO: 'opencode-go',
+  /** @deprecated legacy dual-entry ids — normalized to OPENCODE_GO */
   OPENCODE_GO_OPENAI: 'opencode-go-openai',
   OPENCODE_GO_ANTHROPIC: 'opencode-go-anthropic',
   OPENAI_COMPATIBLE: 'openai-compatible',
@@ -31,6 +33,14 @@ export const CHANNEL_IDS = {
   QODER: 'qoder',
 };
 
+/**
+ * DeepSeek 官方 Anthropic 兼容入口。
+ * 文档: https://api-docs.deepseek.com/zh-cn/guides/anthropic_api
+ * 思考契约: thinking.type enabled/disabled + output_config.effort low/high/max
+ */
+export const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic';
+export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-chat';
+
 /** GLM Coding Plan Anthropic-compatible endpoints (region-specific; keys are not interchangeable). */
 export const GLM_CODING_PLAN_CN_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
 export const GLM_CODING_PLAN_GLOBAL_BASE_URL = 'https://api.z.ai/api/anthropic';
@@ -39,7 +49,9 @@ export const GLM_CODING_PLAN_DEFAULT_MODEL = 'glm-4.7';
 /** Moonshot / Kimi OpenAI-compatible endpoints (CN vs international). */
 export const MOONSHOT_CN_BASE_URL = 'https://api.moonshot.cn/v1';
 export const MOONSHOT_GLOBAL_BASE_URL = 'https://api.moonshot.ai/v1';
-export const KIMI_CODING_PLAN_DEFAULT_MODEL = 'kimi-k2.7-code';
+/** Kimi Coding Plan OpenAI-compatible endpoint (member keys are not interchangeable with Moonshot open platform). */
+export const KIMI_CODING_PLAN_BASE_URL = 'https://api.kimi.com/coding/v1';
+export const KIMI_CODING_PLAN_DEFAULT_MODEL = 'k3';
 export const MOONSHOT_DEFAULT_MODEL = 'kimi-k3';
 
 /** MiniMax Coding / Token Plan Anthropic-compatible endpoints (region-specific). */
@@ -62,14 +74,20 @@ export const ALIYUN_BAILIAN_CODING_BASE_URL = 'https://coding.dashscope.aliyuncs
 export const ALIYUN_BAILIAN_DEFAULT_MODEL = 'qwen3-coder-plus';
 
 /**
- * OpenCode Zen / Go subscription endpoints.
- * GPT family uses Responses API; Claude family uses Anthropic Messages.
- * @see https://opencode.ai/docs/zen
+ * OpenCode Go subscription (single entry, not Zen pay-as-you-go).
+ * OpenAI-compatible base: https://opencode.ai/zen/go/v1
+ * Anthropic Messages base: https://opencode.ai/zen/go  (runtime appends /v1/messages)
+ * Models: https://opencode.ai/zen/go/v1/models
+ * Protocol is auto-selected by model in resolveChannel / resolveOpenCodeGoWire.
+ * @see https://opencode.ai/docs/go
  */
-export const OPENCODE_ZEN_OPENAI_BASE_URL = 'https://opencode.ai/zen/v1';
-export const OPENCODE_ZEN_ANTHROPIC_BASE_URL = 'https://opencode.ai/zen';
-export const OPENCODE_ZEN_OPENAI_DEFAULT_MODEL = 'gpt-5.5';
-export const OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-5';
+export const OPENCODE_GO_OPENAI_BASE_URL = 'https://opencode.ai/zen/go/v1';
+export const OPENCODE_GO_ANTHROPIC_BASE_URL = 'https://opencode.ai/zen/go';
+export const OPENCODE_GO_DEFAULT_MODEL = 'gpt-5.6-luna';
+/** @deprecated use OPENCODE_GO_DEFAULT_MODEL */
+export const OPENCODE_GO_OPENAI_DEFAULT_MODEL = OPENCODE_GO_DEFAULT_MODEL;
+/** @deprecated legacy dual-entry default */
+export const OPENCODE_GO_ANTHROPIC_DEFAULT_MODEL = 'minimax-m2.5';
 const PROTECTED_HEADER_NAMES = new Set([
   'authorization',
   'x-api-key',
@@ -134,17 +152,30 @@ const CHANNEL_DESCRIPTORS = {
   [CHANNEL_IDS.DEEPSEEK]: {
     id: CHANNEL_IDS.DEEPSEEK,
     label: 'DeepSeek 官方',
-    legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
-    allowedWires: ['openai-chat'],
-    authMethods: { api_key: { wire: 'openai-chat' } },
-    defaults: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+    // 官方 Anthropic 兼容 API：base_url + /v1/messages，思考走 thinking + output_config.effort。
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+    defaults: { baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL, model: DEEPSEEK_DEFAULT_MODEL },
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
-        defaultEffort: 'default',
+        // DeepSeek Anthropic: thinking.enabled/disabled + output_config.effort(low/high/max)
+        // 与 Claude adaptive 不同：不能发 type:'adaptive'，off 必须显式 disabled。
+        paramStyle: 'anthropic-enabled-output-effort',
+        // 官方档位 low/high/max；xhigh 官方映射到 high；default 对齐官方默认 high。
+        effortLevels: ['off', 'low', 'high', 'max'],
+        defaultEffort: 'high',
+        effortMap: {
+          off: 'disabled',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'high',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: false,
@@ -210,15 +241,28 @@ const CHANNEL_DESCRIPTORS = {
     allowedWires: ['openai-chat'],
     authMethods: { api_key: { wire: 'openai-chat' } },
     defaults: {
-      baseUrl: MOONSHOT_CN_BASE_URL,
+      baseUrl: KIMI_CODING_PLAN_BASE_URL,
       model: KIMI_CODING_PLAN_DEFAULT_MODEL,
     },
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
+        // 官方 K3 reasoning_effort：low / high / max（默认 high）；off 对应 none。
+        // UI 用 default 表示官方 high（标准思考），max 表示顶档。
+        // 文档：https://www.kimi.com/code/docs/kimi-code/models.html
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'max'],
         defaultEffort: 'default',
+        // UI default/medium/high 对齐官方 high；xhigh 升到 max。
+        effortMap: {
+          off: 'none',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'max',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: false,
@@ -240,9 +284,19 @@ const CHANNEL_DESCRIPTORS = {
     capabilities: {
       reasoning: {
         supported: true,
-        paramStyle: 'none',
-        effortLevels: ['off', 'default'],
+        // 与 Kimi Coding Plan 同一套 K3 reasoning_effort 契约。
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'max'],
         defaultEffort: 'default',
+        effortMap: {
+          off: 'none',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'max',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: true,
@@ -396,46 +450,26 @@ const CHANNEL_DESCRIPTORS = {
       temperature: true,
     },
   },
-  [CHANNEL_IDS.OPENCODE_GO_OPENAI]: {
-    id: CHANNEL_IDS.OPENCODE_GO_OPENAI,
-    label: 'OpenCode Go (OpenAI)',
+  [CHANNEL_IDS.OPENCODE_GO]: {
+    id: CHANNEL_IDS.OPENCODE_GO,
+    label: 'OpenCode Go',
     legacyProvider: 'openai',
+    // Official Go endpoint table is model-specific:
+    // - GPT Luna -> /v1/responses
+    // - most open models -> /v1/chat/completions
+    // - Anthropic-compatible models -> /v1/messages
+    // Default stays on Luna (responses); resolveOpenCodeGoWire picks per model.
     defaultWire: 'openai-responses',
-    allowedWires: ['openai-responses'],
+    allowedWires: ['openai-responses', 'openai-chat', 'anthropic-messages'],
     authMethods: { api_key: { wire: 'openai-responses' } },
     defaults: {
-      baseUrl: OPENCODE_ZEN_OPENAI_BASE_URL,
-      model: OPENCODE_ZEN_OPENAI_DEFAULT_MODEL,
+      baseUrl: OPENCODE_GO_OPENAI_BASE_URL,
+      model: OPENCODE_GO_DEFAULT_MODEL,
     },
     capabilities: {
       reasoning: {
         supported: true,
         paramStyle: 'openai-effort',
-        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
-        defaultEffort: 'default',
-      },
-      promptCache: true,
-      vision: true,
-      toolUse: true,
-      temperature: true,
-    },
-  },
-  [CHANNEL_IDS.OPENCODE_GO_ANTHROPIC]: {
-    id: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
-    label: 'OpenCode Go (Anthropic)',
-    legacyProvider: 'anthropic',
-    defaultWire: 'anthropic-messages',
-    allowedWires: ['anthropic-messages'],
-    authMethods: { api_key: { wire: 'anthropic-messages' } },
-    defaults: {
-      baseUrl: OPENCODE_ZEN_ANTHROPIC_BASE_URL,
-      model: OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL,
-    },
-    headers: buildClaudeCliIdentityHeaders(),
-    capabilities: {
-      reasoning: {
-        supported: true,
-        paramStyle: 'anthropic-enabled-budget',
         effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
       },
@@ -639,20 +673,20 @@ const SERVICE_TEMPLATES = [
     id: 'deepseek-api',
     brand: 'DeepSeek',
     title: 'DeepSeek',
-    description: 'DeepSeek 官方 API Key 直连',
+    description: 'DeepSeek 官方 Anthropic 兼容 API（思考强度 low/high/max）',
     accessCategory: 'official_api',
     supportTier: 'verified',
     channelId: CHANNEL_IDS.DEEPSEEK,
     authMethod: 'api_key',
-    legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
     defaults: {
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
+      baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL,
+      model: DEEPSEEK_DEFAULT_MODEL,
       hideBaseUrlByDefault: true,
     },
     searchAliases: ['deepseek', '深度求索'],
-    tags: ['官方 API', 'API Key'],
+    tags: ['官方 API', 'API Key', 'Anthropic 兼容'],
   },
   {
     id: 'glm-coding-plan-cn',
@@ -698,7 +732,7 @@ const SERVICE_TEMPLATES = [
     id: 'kimi-coding-plan',
     brand: 'Kimi',
     title: 'Kimi Coding Plan',
-    description: 'Kimi 编程计划 API · 默认 Coding 模型（国区 moonshot.cn）',
+    description: 'Kimi 编程计划 API · 官方 Coding 端点（api.kimi.com/coding）',
     accessCategory: 'third_party',
     supportTier: 'verified',
     channelId: CHANNEL_IDS.KIMI_CODING_PLAN,
@@ -706,15 +740,16 @@ const SERVICE_TEMPLATES = [
     legacyProvider: 'openai',
     defaultWire: 'openai-chat',
     defaults: {
-      baseUrl: MOONSHOT_CN_BASE_URL,
+      baseUrl: KIMI_CODING_PLAN_BASE_URL,
       model: KIMI_CODING_PLAN_DEFAULT_MODEL,
       hideBaseUrlByDefault: true,
     },
-    searchAliases: ['kimi', 'coding plan', 'moonshot', 'k2.7', '编程计划'],
-    tags: ['Coding Plan', '国区'],
+    searchAliases: ['kimi', 'coding plan', 'moonshot', 'k3', 'kimi code', '编程计划'],
+    tags: ['Coding Plan', '套餐'],
     knownLimitations: [
-      'OpenAI 兼容；国际用户可改 baseUrl 为 https://api.moonshot.ai/v1',
-      '编程场景也可选用 kimi-k2.7-code-highspeed / kimi-k3',
+      '必须使用 Kimi Code / Coding Plan 专属 API Key，与 api.moonshot.cn 开放平台 Key 不可混用',
+      '默认 OpenAI 兼容端点：https://api.kimi.com/coding/v1；Anthropic 兼容可改 https://api.kimi.com/coding/',
+      '可选模型：k3 / k3-256k / k3-turbo / k3-turbo-highspeed 等，以官方文档为准',
     ],
   },
   {
@@ -879,49 +914,29 @@ const SERVICE_TEMPLATES = [
     ],
   },
   {
-    id: 'opencode-go-openai',
+    id: 'opencode-go',
     brand: 'OpenCode',
-    title: 'OpenCode Go (OpenAI)',
-    description: 'OpenCode Zen Go 订阅 — OpenAI 兼容模型（用 Responses API）',
+    title: 'OpenCode Go',
+    description: 'OpenCode Go 订阅 — 单一入口，按模型自动分流协议',
     accessCategory: 'third_party',
     supportTier: 'verified',
-    channelId: CHANNEL_IDS.OPENCODE_GO_OPENAI,
+    channelId: CHANNEL_IDS.OPENCODE_GO,
     authMethod: 'api_key',
     legacyProvider: 'openai',
     defaultWire: 'openai-responses',
     defaults: {
-      baseUrl: OPENCODE_ZEN_OPENAI_BASE_URL,
-      model: OPENCODE_ZEN_OPENAI_DEFAULT_MODEL,
+      baseUrl: OPENCODE_GO_OPENAI_BASE_URL,
+      model: OPENCODE_GO_DEFAULT_MODEL,
       hideBaseUrlByDefault: true,
     },
-    searchAliases: ['opencode', 'zen', 'go', 'gpt'],
-    tags: ['订阅', 'OpenAI'],
+    searchAliases: ['opencode', 'zen', 'go', 'gpt', 'luna', 'claude', 'minimax'],
+    tags: ['订阅'],
     knownLimitations: [
-      'GPT 系列走 Responses API：https://opencode.ai/zen/v1/responses',
-      '在 opencode.ai 登录后复制 API Key；模型列表见 /zen/v1/models',
-    ],
-  },
-  {
-    id: 'opencode-go-anthropic',
-    brand: 'OpenCode',
-    title: 'OpenCode Go (Anthropic)',
-    description: 'OpenCode Zen Go 订阅 — Anthropic Messages 协议模型',
-    accessCategory: 'third_party',
-    supportTier: 'verified',
-    channelId: CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
-    authMethod: 'api_key',
-    legacyProvider: 'anthropic',
-    defaultWire: 'anthropic-messages',
-    defaults: {
-      baseUrl: OPENCODE_ZEN_ANTHROPIC_BASE_URL,
-      model: OPENCODE_ZEN_ANTHROPIC_DEFAULT_MODEL,
-      hideBaseUrlByDefault: true,
-    },
-    searchAliases: ['opencode', 'zen', 'go', 'claude', 'anthropic'],
-    tags: ['订阅', 'Anthropic'],
-    knownLimitations: [
-      'Claude 系列走 Anthropic Messages：https://opencode.ai/zen/v1/messages',
-      '与 OpenAI 卡共用 Zen API Key，但 wire/baseUrl 不同',
+      '单一订阅入口；协议按模型自动选择（可手动 wireOverride）',
+      'Go 端点：https://opencode.ai/zen/go/v1（非 Zen 按量 /zen/v1）',
+      '默认 / GPT / Grok 等走 Responses：/zen/go/v1/responses',
+      'Claude 走 Anthropic Messages：/zen/go/v1/messages',
+      '在 opencode.ai 登录后复制 API Key；模型列表见 /zen/go/v1/models',
     ],
   },
   {
@@ -1057,12 +1072,119 @@ function normalizeReasoningEffortMap(value) {
   return Object.keys(normalized).length ? normalized : undefined;
 }
 
+
+const OPENCODE_GO_LEGACY_CHANNEL_IDS = new Set([
+  CHANNEL_IDS.OPENCODE_GO_OPENAI,
+  CHANNEL_IDS.OPENCODE_GO_ANTHROPIC,
+]);
+
+/**
+ * Normalize legacy dual OpenCode Go channel ids to the single subscription channel.
+ */
+export function normalizeChannelId(channelId) {
+  const id = String(channelId || '').trim();
+  if (!id) return id;
+  if (id === CHANNEL_IDS.OPENCODE_GO || OPENCODE_GO_LEGACY_CHANNEL_IDS.has(id)) {
+    return CHANNEL_IDS.OPENCODE_GO;
+  }
+  return id;
+}
+
+/**
+ * OpenCode Go: auto-select wire by model according to the official endpoint table.
+ * @see https://opencode.ai/docs/zh-cn/go#api-%E7%AB%AF%E7%82%B9
+ *
+ * - GPT Luna family -> openai-responses (`/v1/responses`)
+ * - Claude / MiniMax / Qwen family -> anthropic-messages (`/v1/messages`)
+ * - GLM / Kimi / DeepSeek / Grok / MiMo / HY3 family -> openai-chat (`/v1/chat/completions`)
+ * - Unknown models default to openai-chat (safer OpenAI-compatible path)
+ */
+export function resolveOpenCodeGoWire(model) {
+  const id = String(model || '').trim().toLowerCase();
+  if (!id) return 'openai-chat';
+
+  // Official docs: only GPT Luna uses the Responses endpoint on Go.
+  if (id.includes('luna') || /^gpt-[\w.-]*luna\b/.test(id)) {
+    return 'openai-responses';
+  }
+
+  // Anthropic Messages endpoint on Go.
+  if (
+    id.includes('claude')
+    || id.includes('anthropic')
+    || id.includes('minimax')
+    || id.startsWith('qwen')
+    || id.includes('qwen3')
+  ) {
+    return 'anthropic-messages';
+  }
+
+  // Chat Completions endpoint: glm / kimi / deepseek / grok / mimo / hy3, etc.
+  return 'openai-chat';
+}
+
+/**
+ * Pick the correct OpenCode Go base URL for the selected wire.
+ * Accepts either /zen/go or /zen/go/v1 from saved configs and normalizes.
+ */
+export function resolveOpenCodeGoBaseUrl(wire, configuredBaseUrl) {
+  const raw = String(configuredBaseUrl || '').trim().replace(/\/+$/, '');
+  if (wire === 'anthropic-messages') {
+    if (!raw) return OPENCODE_GO_ANTHROPIC_BASE_URL;
+    if (/\/zen\/go\/v1$/i.test(raw)) return raw.replace(/\/v1$/i, '');
+    return raw;
+  }
+  if (!raw) return OPENCODE_GO_OPENAI_BASE_URL;
+  if (/\/zen\/go$/i.test(raw)) return `${raw}/v1`;
+  return raw;
+}
+
+const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
+  'openai-responses': {
+    reasoning: {
+      supported: true,
+      paramStyle: 'openai-effort',
+      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      defaultEffort: 'default',
+    },
+    promptCache: true,
+    vision: true,
+    toolUse: true,
+    temperature: true,
+  },
+  'openai-chat': {
+    reasoning: {
+      supported: true,
+      paramStyle: 'openai-effort',
+      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      defaultEffort: 'default',
+    },
+    promptCache: true,
+    vision: true,
+    toolUse: true,
+    temperature: true,
+  },
+  'anthropic-messages': {
+    reasoning: {
+      supported: true,
+      paramStyle: 'anthropic-enabled-budget',
+      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      defaultEffort: 'default',
+    },
+    promptCache: true,
+    vision: true,
+    toolUse: true,
+    temperature: true,
+  },
+};
+
 export function listChannelDescriptors() {
   return Object.values(CHANNEL_DESCRIPTORS).map((descriptor) => structuredClone(descriptor));
 }
 
 export function getChannelDescriptor(channelId) {
-  return CHANNEL_DESCRIPTORS[channelId] ?? null;
+  const normalized = normalizeChannelId(channelId);
+  return CHANNEL_DESCRIPTORS[normalized] ?? CHANNEL_DESCRIPTORS[channelId] ?? null;
 }
 
 export function listServiceTemplates() {
@@ -1080,12 +1202,22 @@ export function getServiceTemplate(templateId) {
 export function resolveServiceTemplateId({ channelId, authMethod } = {}) {
   if (!channelId) return null;
   const method = authMethod || 'api_key';
+  const normalizedChannelId = normalizeChannelId(channelId);
   const exact = SERVICE_TEMPLATES.find(
-    (item) => item.channelId === channelId && item.authMethod === method,
+    (item) => item.channelId === normalizedChannelId && item.authMethod === method,
   );
   if (exact) return exact.id;
-  const byChannel = SERVICE_TEMPLATES.find((item) => item.channelId === channelId);
-  return byChannel?.id ?? null;
+  const byChannel = SERVICE_TEMPLATES.find((item) => item.channelId === normalizedChannelId);
+  if (byChannel) return byChannel.id;
+  // Legacy dual-entry template ids collapse to the single Go template.
+  if (
+    channelId === 'opencode-go-openai'
+    || channelId === 'opencode-go-anthropic'
+    || normalizedChannelId === CHANNEL_IDS.OPENCODE_GO
+  ) {
+    return 'opencode-go';
+  }
+  return null;
 }
 
 export function inferChannelId(config = {}) {
@@ -1190,9 +1322,10 @@ function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectI
 }
 
 export function resolveChannel(config = {}) {
-  const channelId = inferChannelId(config);
+  const channelId = normalizeChannelId(inferChannelId(config));
   const descriptor = getChannelDescriptor(channelId);
   if (!descriptor) throw new Error(`unknown_channel:${channelId}`);
+  const isOpenCodeGo = channelId === CHANNEL_IDS.OPENCODE_GO;
 
   const authMethod = config.authMethod === 'oauth_chatgpt'
     ? 'oauth_chatgpt'
@@ -1207,9 +1340,14 @@ export function resolveChannel(config = {}) {
   if (!authRule) throw new Error(`unsupported_auth_method:${channelId}:${authMethod}`);
 
   const wireOverride = config.wireOverride || config.wire;
-  const wire = authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok'
-    ? authRule.wire
-    : (wireOverride ?? authRule.wire ?? descriptor.defaultWire);
+  let wire;
+  if (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok') {
+    wire = authRule.wire;
+  } else if (isOpenCodeGo && !wireOverride) {
+    wire = resolveOpenCodeGoWire(config.model || descriptor.defaults.model);
+  } else {
+    wire = wireOverride ?? authRule.wire ?? descriptor.defaultWire;
+  }
   if (wireOverride && !descriptor.allowedWires.includes(wireOverride)) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
@@ -1229,13 +1367,16 @@ export function resolveChannel(config = {}) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
 
-  const baseUrl = authMethod === 'oauth_chatgpt'
+  let baseUrl = authMethod === 'oauth_chatgpt'
     ? CHATGPT_SUBSCRIPTION_BASE_URL
     : authMethod === 'oauth_grok'
       ? GROK_SUBSCRIPTION_BASE_URL
       : authMethod === 'oauth_google'
         ? GEMINI_CODE_ASSIST_BASE_URL
         : (config.baseUrl || descriptor.defaults.baseUrl);
+  if (isOpenCodeGo) {
+    baseUrl = resolveOpenCodeGoBaseUrl(wire, baseUrl);
+  }
   const apiKey = config.apiKey || '';
   const endpoint = endpointForWire(baseUrl, wire, { model: config.model, apiKey, authMethod, stream: true });
   const accountId = config.accountId || null;
@@ -1250,11 +1391,16 @@ export function resolveChannel(config = {}) {
       oauthProjectId: config.oauthProjectId,
     }),
     descriptor.headers,
+    isOpenCodeGo && wire === 'anthropic-messages' ? buildClaudeCliIdentityHeaders() : {},
     descriptor.customHeaders,
     customHeaders,
   );
 
-  const capabilities = structuredClone(descriptor.capabilities || {});
+  const capabilities = structuredClone(
+    (isOpenCodeGo && OPENCODE_GO_CAPABILITIES_BY_WIRE[wire])
+      || descriptor.capabilities
+      || {},
+  );
   if (config.supportsReasoning !== undefined) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
@@ -1300,6 +1446,6 @@ export function resolveChannel(config = {}) {
     reasoningEffortLevels: capabilities.reasoning?.effortLevels || undefined,
     reasoningDefaultEffort: capabilities.reasoning?.defaultEffort || undefined,
     supportsReasoning: Boolean(capabilities.reasoning?.supported),
-    supportsPromptCaching: Boolean(capabilities.promptCache),
+    supportsPromptCaching: capabilities.promptCache !== false,
   };
 }

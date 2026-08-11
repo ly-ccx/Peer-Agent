@@ -118,9 +118,24 @@ function requestBody(request: ModelProviderRequest): Record<string, unknown> {
 function usageOf(value: unknown): ModelUsage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const usage = value as Record<string, unknown>;
-  const inputTokens = Number(usage.input_tokens ?? 0);
+  // Responses API 的 input_tokens 已包含缓存命中；内部账本字段必须互斥，
+  // 否则 context meter 做 input + cacheRead 累加会 double count。
+  // 与 openai-chat-stream.usageFrom / Desktop openai-responses-adapter 保持同口径。
+  const rawInputTokens = Number(usage.input_tokens ?? 0);
   const outputTokens = Number(usage.output_tokens ?? 0);
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+  const details = usage.input_tokens_details ?? usage.prompt_tokens_details;
+  const cacheReadTokens = Number(
+    (details && typeof details === 'object' && (details as Record<string, unknown>).cached_tokens)
+    ?? usage.prompt_cache_hit_tokens
+    ?? usage.prompt_cache_hit
+    ?? 0,
+  );
+  return {
+    inputTokens: Math.max(0, rawInputTokens - cacheReadTokens),
+    outputTokens,
+    totalTokens: rawInputTokens + outputTokens,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+  };
 }
 
 async function consumeResponsesStream(response: Response, request: ModelProviderRequest): Promise<ModelProviderResult> {

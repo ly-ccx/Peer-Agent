@@ -68,9 +68,10 @@ export function Tooltip({
 
   useEffect(() => () => clearOpenTimer(), [clearOpenTimer]);
 
-  // 打开后按锚点与浮层实际尺寸计算位置；视口上方空间不足时翻到下方。
-  useLayoutEffect(() => {
-    if (!open) return;
+  // 按锚点与浮层实际尺寸计算位置；视口上方空间不足时翻到下方。
+  // 抽成 updatePosition，供打开后 layout 与滚动/resize 共用：
+  // 聊天流式自动滚动会冒泡 window scroll，若直接 hide 会关掉仍在 hover 的气泡。
+  const updatePosition = useCallback(() => {
     const anchor = anchorRef.current;
     const tip = tooltipRef.current;
     if (!anchor || !tip) return;
@@ -87,18 +88,23 @@ export function Tooltip({
     let left = a.left + a.width / 2 - t.width / 2;
     left = Math.max(margin, Math.min(left, window.innerWidth - t.width - margin));
     setCoords({ top, left, place });
-  }, [open, placement, content, lines]);
+  }, [placement]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, placement, content, lines, updatePosition]);
 
   useEffect(() => {
     if (!open) return;
-    const onScrollOrResize = () => hide();
+    const onScrollOrResize = () => updatePosition();
     window.addEventListener('scroll', onScrollOrResize, true);
     window.addEventListener('resize', onScrollOrResize);
     return () => {
       window.removeEventListener('scroll', onScrollOrResize, true);
       window.removeEventListener('resize', onScrollOrResize);
     };
-  }, [open, hide]);
+  }, [open, updatePosition]);
 
   const anchor = cloneElement(children, {
     ref: (node: HTMLElement | null) => {

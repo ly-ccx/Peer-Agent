@@ -104,7 +104,7 @@ const PLAN_ACTIVE_STATUSES = new Set(['executing']);
  * Runner 人在回路 / 暂停态：即使 plan 仍为 executing 也停表。
  * exploring / compacting_context 等系统侧工作不停表。
  */
-const RUNNER_PAUSE_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted']);
+const RUNNER_PAUSE_STATUSES = new Set(['paused', 'waiting_user', 'blocked', 'budget_exhausted']);
 const RUNNER_ACTIVE_STATUSES = new Set([
   'running',
   'compacting_context',
@@ -474,6 +474,7 @@ const RUNNER_STATUSES = new Set([
   'resuming_after_compaction',
   'paused',
   'exploring',
+  'waiting_user',
   'blocked',
   'budget_exhausted',
   'completed',
@@ -534,6 +535,7 @@ const GOAL_RUNNER_PHASES = new Set([
   'verify',
   'repair',
   'synthesize',
+  'waiting_user',
   'blocked',
 ]);
 const ASK_USER_REASONS = new Set([
@@ -1837,7 +1839,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * - exceptPlanId 排除新计划自身。
    * - 走 persist 正规写盘 + onChange 广播（不旁路），并向 revisionHistory 追加一条
    *   supersede 审计，保留可追溯事实。
-   * - 只对活跃态计划生效；已是 completed/failed/cancelled 等终态的旧计划不再触碰。
+   * - 活跃态计划照旧收尾/作废。
+   * - 额外：同会话「completed 但未验收」也要离开待验收队列，避免续接纠偏后再开新计划时
+   *   工作台叠出「旧待验收卡 + 新执行卡」。
    *
    * @param {string|null|undefined} conversationId
    * @param {string|null|undefined} exceptPlanId
@@ -1850,15 +1854,28 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const superseded = [];
     for (const meta of listPlansByConversation(normalizedConversationId)) {
       if (meta.planId === exceptPlanId) continue;
-      // 仅处理仍处于活跃态的旧计划；终态计划不再触碰。
-      if (!isActivePlan(meta)) continue;
       const plan = getPlan(meta.planId);
-      // 二次校验全量计划状态，避免 index 与计划文件偶发不一致时误作废。
-      if (!plan || !isActivePlan(plan)) continue;
+      if (!plan) continue;
+
+      const isUnacceptedCompleted =
+        plan.status === 'completed'
+        && !(
+          plan.resultAcceptance
+          && typeof plan.resultAcceptance.acceptedAt === 'string'
+          && plan.resultAcceptance.acceptedAt.trim()
+        );
+
+      // 活跃态 + 未验收 completed 都要处理；已验收 / failed / cancelled 不触碰。
+      if (!isActivePlan(plan) && !isUnacceptedCompleted) continue;
 
       let nextStatus;
       let reasonText;
-      if (plan.status === 'awaiting_approval') {
+      if (isUnacceptedCompleted) {
+        // 未验收结果被同会话新计划取代：归档出待验收队列，不谎报用户已验收。
+        nextStatus = 'cancelled';
+        reasonText =
+          reason || 'superseded before user accepted the previous result in the same conversation';
+      } else if (plan.status === 'awaiting_approval') {
         // 未批准草稿：保持既有行为，直接作废。
         nextStatus = 'cancelled';
         reasonText = reason || 'superseded by a newer plan in the same conversation';
@@ -1878,7 +1895,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       }
 
       const nextVersion = (plan.version || 1) + 1;
-      persist({
+      const nextPlan = {
         ...plan,
         status: nextStatus,
         version: nextVersion,
@@ -1892,7 +1909,12 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
           },
         ],
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (isUnacceptedCompleted) {
+        // 清掉验收字段，避免 cancelled 仍被当成 result_ready 数据残留。
+        delete nextPlan.resultAcceptance;
+      }
+      persist(nextPlan);
       superseded.push(meta.planId);
     }
     return superseded;
@@ -1905,6 +1927,24 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * approved / executing / paused）的旧计划做收尾或作废（见 supersedeAwaitingDrafts）——
    * 全叶子终态的如实收尾为 completed/failed，否则作废为 cancelled，杜绝「僵尸 executing 计划」累积。
    */
+
+  function sanitizePlanTitle(rawTitle, goalText) {
+    const raw = typeof rawTitle === 'string' ? rawTitle.replace(/\s+/g, ' ').trim() : '';
+    const goal = typeof goalText === 'string' ? goalText.replace(/\s+/g, ' ').trim() : '';
+    const isAck = (value) => /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(value || '');
+    const isCmd = (value) => /^[>$]\s/.test(value || '') || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(value || '') && (value || '').includes('/'));
+    let title = raw;
+    if (!title || isAck(title) || isCmd(title) || title.length > 40) {
+      // Prefer a short slice of goal when title is bad; never keep pure ack/cmd.
+      if (goal && !isAck(goal) && !isCmd(goal)) {
+        title = goal.length <= 24 ? goal : `${goal.slice(0, 24)}…`;
+      } else {
+        title = '未命名任务';
+      }
+    }
+    return title;
+  }
+
   function createPlan(draft = {}, { changeKind = 'persist' } = {}) {
     const now = new Date().toISOString();
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
@@ -1945,7 +1985,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       rootPlanId: parentPlan ? (parentPlan.rootPlanId || parentPlan.planId) : undefined,
       relationType: parentPlan ? 'derived' : undefined,
       depth: parentPlan ? (Number.isInteger(parentPlan.depth) ? parentPlan.depth + 1 : 1) : undefined,
-      title: draft.title || '',
+      title: sanitizePlanTitle(draft.title, draft.goal),
       goal: draft.goal || '',
       // 成功标准规范化为结构化 SuccessCriterion[]（字符串向后兼容归一为 manual）。
       successCriteria: normalizeSuccessCriteria(draft.successCriteria),
@@ -2352,6 +2392,145 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     // 已在上面按 runner 调整 timing 时，把 prev 标成与 next 相同，避免 persist 因 plan 仍为
     // executing 而再次 open/close segment。
     return persist(nextPlan, {
+      changeKind: 'runner-state',
+      runner: nextRunner,
+      prevStatus: plan.status,
+      prevTiming: timing ?? plan.timing,
+    });
+  }
+
+  /**
+   * Persist request_user_input as the final action-owner transition of a turn.
+   *
+   * A model may complete the current leaf task and then ask the user to choose
+   * the next direction in the same turn. In that sequence the question is the
+   * final fact: reopen a just-completed plan and persist waiting_user so Task
+   * Overview does not misclassify the turn as a result awaiting acceptance.
+   *
+   * Also used when the user clicks「继续讨论 / 继续追问」on a result_ready card:
+   * that means acceptance failed and the same GoalPlan must leave the acceptance
+   * queue (same card continues), instead of staying result_ready while a new
+   * plan stacks on top.
+   */
+  function markRequestedUserInput(planId, runnerPatch = {}) {
+    const plan = getPlan(planId);
+    if (!plan || ['failed', 'cancelled'].includes(plan.status)) return null;
+
+    const now = new Date().toISOString();
+    const currentRunner = normalizeRunnerState(plan.runner, planId) || {
+      enabled: false,
+      status: 'idle',
+      turnCount: 0,
+      roundCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
+      updatedAt: now,
+    };
+    const nextRunner = normalizeRunnerState({
+      ...currentRunner,
+      ...runnerPatch,
+      enabled: true,
+      status: 'waiting_user',
+      intent: 'block',
+      phase: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      lastError: undefined,
+      updatedAt: now,
+    }, planId);
+    const timing = applyGoalTimingTransition(
+      plan.timing,
+      plan.status,
+      'executing',
+      currentRunner.status,
+      nextRunner?.status,
+      now,
+    );
+
+    const nextPlan = {
+      ...plan,
+      status: 'executing',
+      runner: nextRunner,
+      updatedAt: now,
+      ...(timing ? { timing } : {}),
+    };
+    // 从待验收续接时清掉验收戳，避免同卡再被投影成已验收终态。
+    if (plan.status === 'completed') {
+      delete nextPlan.resultAcceptance;
+    }
+    return persist(nextPlan, {
+      preserveStatus: true,
+      changeKind: 'runner-state',
+      runner: nextRunner,
+      prevStatus: plan.status,
+      prevTiming: plan.timing,
+    });
+  }
+
+  /**
+   * Consume a user reply to request_user_input as one persisted transition.
+   * The Runner state and decision event must not diverge because Task Overview
+   * projects its action owner directly from the persisted Runner.
+   */
+  function consumeRequestedUserInput(planId, event = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    if (
+      plan.status !== 'executing'
+      || !['waiting_user', 'blocked'].includes(plan.runner?.status)
+      || plan.runner?.blockedReason !== 'requested_user_input'
+    ) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const currentTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: planId });
+    const normalizedEvent = normalizeRunEvent({
+      ...event,
+      goalPlanId: planId,
+      createdAt: event.createdAt || now,
+    }, { goalPlanId: planId });
+    if (!normalizedEvent) {
+      throw new Error(`[goal-plan-store] invalid requested user input event for plan ${planId}`);
+    }
+
+    const currentRunner = normalizeRunnerState(plan.runner, planId) || {};
+    const nextRunner = normalizeRunnerState({
+      ...currentRunner,
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: ['waiting_user', 'blocked'].includes(currentRunner.phase) ? 'orient' : (currentRunner.phase || 'orient'),
+      blockerAudit: null,
+      blockedReason: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    }, planId);
+    const timing = applyGoalTimingTransition(
+      plan.timing,
+      plan.status,
+      plan.status,
+      currentRunner.status,
+      nextRunner?.status,
+      now,
+    );
+    const nextTrace = {
+      ...currentTrace,
+      events: [...currentTrace.events, normalizedEvent],
+    };
+    const activeNodeId = normalizeOptionalString(event.activeNodeId) || normalizedEvent.nodeId;
+    if (activeNodeId) nextTrace.activeNodeId = activeNodeId;
+
+    return persist({
+      ...plan,
+      runner: nextRunner,
+      runTrace: nextTrace,
+      updatedAt: now,
+      ...(timing ? { timing } : {}),
+    }, {
       changeKind: 'runner-state',
       runner: nextRunner,
       prevStatus: plan.status,
@@ -3231,6 +3410,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordApproval,
     setPlanStatus,
     resumeRunner,
+    markRequestedUserInput,
+    consumeRequestedUserInput,
     setRunnerState,
     prepareContextCheckpoint,
     commitContextCheckpoint,

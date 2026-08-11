@@ -1,17 +1,22 @@
-import type {
-  ContextAccountingSnapshot,
-  LlmProviderConfigView,
-  LlmSubscriptionQuota,
+import {
+  resolveLlmModelOptionValues,
+  type ContextAccountingSnapshot,
+  type LlmProviderConfigView,
+  type LlmSubscriptionQuota,
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import type { DropdownOption } from '../../../app/components/Dropdown';
+import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import {
   formatQuotaTooltipLine,
   isOAuthMethod,
   supportsSubscriptionQuotaMethod,
 } from '../../../app/components/llmSubscriptionQuota';
+import {
+  contextWindowDefinition,
+  selectedModelContextWindow,
+} from '../../../app/components/llmModelConfiguration';
 import { Tooltip } from '../../../app/components/Tooltip';
 import { clientApi } from '../../../clientApi';
 import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
@@ -20,6 +25,24 @@ import { getProviderDisplayName } from '../../state/providerDisplay';
 import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
 import { resolveStickyContextDisplay } from './stickyContextDisplay';
+
+/** 上下文档位标签：极简，如 500k / 1M / 272k。 */
+function formatContextWindowLabel(tokens: number | undefined): string {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) {
+    return '—';
+  }
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    const text = Number.isInteger(millions) ? `${millions}` : millions.toFixed(1).replace(/\.0$/, '');
+    return `${text}M`;
+  }
+  if (tokens >= 1000) {
+    const thousands = tokens / 1000;
+    const text = Number.isInteger(thousands) ? `${thousands}` : thousands.toFixed(1).replace(/\.0$/, '');
+    return `${text}k`;
+  }
+  return `${Math.round(tokens)}`;
+}
 
 function ReasoningEffortSlider({
   effort,
@@ -136,32 +159,66 @@ function ReasoningEffortSlider({
             <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
             <strong>{effortLabel(displayedLevel, isZh)}</strong>
           </div>
-          <input
-            className="reasoning-effort-slider"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={effectiveValue}
-            aria-label={isZh ? '思考强度' : 'Reasoning effort'}
-            aria-valuetext={effortLabel(displayedLevel, isZh)}
-            style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
-            onInput={(event) => {
-              setDirty(true);
-              setDragValue(Number(event.currentTarget.value));
-            }}
-            onChange={(event) => {
-              setDirty(true);
-              setDragValue(Number(event.currentTarget.value));
-            }}
-            onPointerUp={(event) => commit(Number(event.currentTarget.value))}
-            onKeyUp={(event) => {
-              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-                commit(Number(event.currentTarget.value));
-              }
-            }}
-            onBlur={(event) => commit(Number(event.currentTarget.value))}
-          />
+          <div className="reasoning-effort-slider-shell">
+            {/*
+              几何契约（与 WebKit/Firefox range 拇指圆心一致）：
+              centerX = thumb/2 + (100% - thumb) * t
+              轨道/刻度/填充必须共用此坐标系，不能再用 track 局部 0–100%。
+            */}
+            <div className="reasoning-effort-slider-track" aria-hidden="true">
+              <div
+                className="reasoning-effort-slider-fill"
+                style={{
+                  width: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${effectiveValue} / 100)`,
+                }}
+              />
+            </div>
+            {effortLevels.map((level, index) => {
+              const t = effortLevels.length > 1
+                ? index / (effortLevels.length - 1)
+                : 0;
+              const previewIndex = dirty
+                ? effortIndexFromValue(effectiveValue, effortLevels.length)
+                : selectedIndex;
+              const active = index <= previewIndex;
+              return (
+                <span
+                  key={level}
+                  className={`reasoning-effort-slider-tick${active ? ' is-active' : ''}`}
+                  style={{
+                    left: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${t})`,
+                  }}
+                  aria-hidden="true"
+                />
+              );
+            })}
+            <input
+              className="reasoning-effort-slider"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={effectiveValue}
+              aria-label={isZh ? '思考强度' : 'Reasoning effort'}
+              aria-valuetext={effortLabel(displayedLevel, isZh)}
+              style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
+              onInput={(event) => {
+                setDirty(true);
+                setDragValue(Number(event.currentTarget.value));
+              }}
+              onChange={(event) => {
+                setDirty(true);
+                setDragValue(Number(event.currentTarget.value));
+              }}
+              onPointerUp={(event) => commit(Number(event.currentTarget.value))}
+              onKeyUp={(event) => {
+                if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                  commit(Number(event.currentTarget.value));
+                }
+              }}
+              onBlur={(event) => commit(Number(event.currentTarget.value))}
+            />
+          </div>
         </div>,
         document.body,
       )
@@ -204,6 +261,9 @@ export function TokenUsageDisplay({
   canSwitchModel = false,
   onModelChange,
   selectedModelProviderId = null,
+  showContextUsage = true,
+  showModelControls = true,
+  onContextWindowChange,
 }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
@@ -226,6 +286,11 @@ export function TokenUsageDisplay({
   readonly onModelChange?: (providerId: string) => void;
   /** 会话级绑定的模型记录 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
   readonly selectedModelProviderId?: string | null;
+  /** 首页框内只保留模型/思考；框下右侧单独放上下文统计。 */
+  readonly showContextUsage?: boolean;
+  readonly showModelControls?: boolean;
+  /** 多档上下文切换：写入 modelOptionValues，并刷新 provider 列表。 */
+  readonly onContextWindowChange?: (providerId: string, optionId: string, value: string) => void | Promise<void>;
 }) {
   // 当前展示的 provider：优先会话绑定的 modelProviderId（随会话切换模型），其次全局默认，
   // 最后取首个已配置 Key 的 provider。这样价格/上下文窗口/模型名都跟随会话选中的模型走。
@@ -422,6 +487,42 @@ export function TokenUsageDisplay({
       ]
     : [];
   const ctxTooltip = ctxTooltipLines.join('\n');
+  const contextOptionDefinition = useMemo(
+    () => (defaultProvider ? contextWindowDefinition(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const selectedContextWindow = useMemo(
+    () => (defaultProvider ? selectedModelContextWindow(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const contextOptionValues = useMemo(
+    () => (defaultProvider
+      ? resolveLlmModelOptionValues(defaultProvider.modelOptions, defaultProvider.modelOptionValues)
+      : {}),
+    [defaultProvider],
+  );
+  const selectedContextOptionValue = contextOptionDefinition
+    ? String(contextOptionValues[contextOptionDefinition.id] ?? contextOptionDefinition.defaultValue)
+    : '';
+  const contextWindowChoices = contextOptionDefinition?.choices.filter((choice) => (
+    typeof choice.contextWindow === 'number' && choice.contextWindow > 0
+  )) ?? [];
+  const canSwitchContextWindow = Boolean(
+    showModelControls
+    && defaultProvider
+    && onContextWindowChange
+    && contextOptionDefinition
+    && contextWindowChoices.length > 1,
+  );
+  const contextWindowOptions: DropdownOption[] = contextWindowChoices.map((choice) => ({
+    value: String(choice.value),
+    // 始终用极简档位文案（500k / 1M），不用 definition 里可能偏长的 label。
+    label: formatContextWindowLabel(choice.contextWindow),
+  }));
+  const fixedContextWindowLabel = formatContextWindowLabel(
+    selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow,
+  );
+
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
   const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
   const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
@@ -431,7 +532,7 @@ export function TokenUsageDisplay({
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
-        {defaultProvider?.model ? (
+        {showModelControls && defaultProvider?.model ? (
           shouldShowModelDropdown ? (
             <CascadingMenu
               className="composer-cascading-menu composer-model-dropdown"
@@ -447,7 +548,7 @@ export function TokenUsageDisplay({
             <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
           )
         ) : null}
-        {effortLevels.length > 0 ? (
+        {showModelControls && effortLevels.length > 0 ? (
           <ReasoningEffortSlider
             effort={effort}
             effortLevels={effortLevels}
@@ -456,7 +557,28 @@ export function TokenUsageDisplay({
             onChange={onEffortChange}
           />
         ) : null}
-        {hasCtxRing ? (
+        {showModelControls && canSwitchContextWindow && contextOptionDefinition && defaultProvider ? (
+          <Dropdown
+            className="composer-dropdown composer-context-window-dropdown"
+            value={selectedContextOptionValue}
+            options={contextWindowOptions}
+            onChange={(value) => {
+              void onContextWindowChange?.(defaultProvider.id, contextOptionDefinition.id, value);
+            }}
+            ariaLabel={isZh ? '上下文窗口' : 'Context window'}
+            title={isZh ? '切换上下文窗口' : 'Switch context window'}
+            menuPlacement="up"
+            disabled={Boolean(isStreaming)}
+          />
+        ) : showModelControls && (selectedContextWindow ?? contextWindow ?? defaultProvider?.contextWindow) ? (
+          <span
+            className="token-usage-context-window"
+            title={isZh ? '当前上下文窗口' : 'Current context window'}
+          >
+            {fixedContextWindowLabel}
+          </span>
+        ) : null}
+        {showContextUsage && hasCtxRing ? (
           <Tooltip lines={ctxTooltipLines} placement="top">
             <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
               <span
@@ -470,10 +592,10 @@ export function TokenUsageDisplay({
               </span>
             </span>
           </Tooltip>
-        ) : currentContextTokens != null && currentContextTokens > 0 ? (
+        ) : showContextUsage && currentContextTokens != null && currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
-        {costStr ? (
+        {showContextUsage && costStr ? (
           <span
             className="token-usage-cost"
             title={

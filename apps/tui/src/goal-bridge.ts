@@ -30,6 +30,8 @@ export const GOAL_CAPABILITY_IDS = Object.freeze({
 });
 
 const GOAL_CAPABILITY_SET = new Set<string>(Object.values(GOAL_CAPABILITY_IDS));
+const GOAL_PLAN_TOOL_MODE_SCOPES = ['chat', 'plan', 'goal'] as const;
+const GOAL_EXPLORER_TOOL_MODE_SCOPES = ['chat', 'goal'] as const;
 
 const GOAL_ALWAYS_ALLOWED = new Set<string>([
   GOAL_CAPABILITY_IDS.create,
@@ -281,7 +283,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.createPlan,
       capabilityId: GOAL_CAPABILITY_IDS.create,
-      modeScopes: ['plan', 'goal'],
+      modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
       description:
         'Create a persistent, trackable goal/plan. In Goal mode, establish the objective and subtasks before side-effecting work.',
       inputSchema: {
@@ -310,7 +312,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.updateTask,
       capabilityId: GOAL_CAPABILITY_IDS.update,
-      modeScopes: ['plan', 'goal'],
+      modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
       description: 'Record execution evidence for a goal/plan subtask.',
       inputSchema: {
         type: 'object',
@@ -333,7 +335,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.getPlan,
       capabilityId: GOAL_CAPABILITY_IDS.read,
-      modeScopes: ['plan', 'goal'],
+      modeScopes: [...GOAL_PLAN_TOOL_MODE_SCOPES],
       description: 'Read back an existing goal/plan or list active plans for the conversation.',
       inputSchema: {
         type: 'object',
@@ -346,7 +348,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.requestExplorer,
       capabilityId: GOAL_CAPABILITY_IDS.explore,
-      modeScopes: ['goal'],
+      modeScopes: [...GOAL_EXPLORER_TOOL_MODE_SCOPES],
       description: 'Register a focused read-only Explorer request for the Goal Runner to execute after this turn.',
       inputSchema: {
         type: 'object',

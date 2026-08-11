@@ -89,6 +89,26 @@ describe('task-notification-policy decide', () => {
     assert.equal(d.reason, 'foreground_same_conversation');
   });
 
+  it('skips intake contracts even when status transitions to completed', () => {
+    const d = decideTaskNotification({
+      ...base,
+      nextStatus: 'completed',
+      activationKind: 'intake',
+    });
+    assert.equal(d.action, 'skip');
+    assert.equal(d.reason, 'intake_contract');
+  });
+
+  it('still notifies accepted goals after completion', () => {
+    const d = decideTaskNotification({
+      ...base,
+      nextStatus: 'completed',
+      activationKind: 'accepted_goal',
+    });
+    assert.equal(d.action, 'notify');
+    assert.equal(d.copy.title, '任务已完成');
+  });
+
   it('does not suppress when foreground but different conversation', () => {
     const d = decideTaskNotification({
       ...base,
@@ -178,7 +198,7 @@ describe('task-notification-policy helpers', () => {
       status: 'awaiting_approval',
       title: '发布预发',
       conversationId: 'c1',
-      activation: { sourceMessageId: 'assistant-message-1' },
+      activation: { kind: 'accepted_goal', sourceMessageId: 'assistant-message-1' },
       originWorkspacePath: '/tmp/conversation-workspace',
       targetWorkspacePath: '/tmp/execution-repository',
       failureReason: 'x',
@@ -187,7 +207,20 @@ describe('task-notification-policy helpers', () => {
     assert.equal(task.status, 'waiting_user');
     assert.equal(task.workspacePath, '/tmp/conversation-workspace');
     assert.equal(task.sourceMessageId, 'assistant-message-1');
+    assert.equal(task.activationKind, 'accepted_goal');
     assert.equal(task.waitingReason, 'confirmation');
+  });
+
+  it('projects intake activation kind for notification filtering', () => {
+    const task = projectPlanToNotificationTask({
+      planId: 'p-intake',
+      status: 'completed',
+      title: '纯问答',
+      conversationId: 'c2',
+      activation: { kind: 'intake', sourceMessageId: 'user-1' },
+    });
+    assert.equal(task.activationKind, 'intake');
+    assert.equal(task.status, 'completed');
   });
 
   it('falls back to the execution workspace for legacy plans without a conversation workspace', () => {

@@ -242,6 +242,13 @@ export function decideTaskNotification(input = {}) {
   if (!taskId) {
     return { ...base, action: 'skip', reason: 'missing_task_id' };
   }
+  // intake 判别契约不是真正可执行 Goal；纯问答/未升级不应弹「任务已完成」等系统通知。
+  // 仅当 activation.kind 明确为 intake 时跳过；缺省/历史计划保持兼容仍可通知。
+  const activationKind =
+    typeof input.activationKind === 'string' ? input.activationKind.trim() : '';
+  if (activationKind === 'intake') {
+    return { ...base, action: 'skip', reason: 'intake_contract' };
+  }
   if (!settings.enabled) {
     return { ...base, action: 'skip', reason: 'settings_disabled' };
   }
@@ -326,6 +333,11 @@ export function projectPlanToNotificationTask(plan) {
     (typeof plan.targetWorkspacePath === 'string' && plan.targetWorkspacePath) ||
     null;
 
+  const activationKind =
+    typeof plan.activation?.kind === 'string' && plan.activation.kind.trim()
+      ? plan.activation.kind.trim()
+      : null;
+
   return {
     taskId: planId,
     planId,
@@ -335,6 +347,7 @@ export function projectPlanToNotificationTask(plan) {
       (typeof plan.activation?.sourceMessageId === 'string' && plan.activation.sourceMessageId.trim())
         ? plan.activation.sourceMessageId.trim()
         : null,
+    activationKind,
     status,
     title,
     shortError: extractShortError(plan),

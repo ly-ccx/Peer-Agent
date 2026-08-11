@@ -32,6 +32,22 @@ describe('workspaceShortName', () => {
 });
 
 describe('buildTrayMenuTemplate', () => {
+  it('shows recent Automation results and returns to the exact Run', () => {
+    let target = null;
+    const template = buildTrayMenuTemplate({
+      automationRuntime: { activeCount: 1, globallyPaused: false },
+      recentAutomationRuns: [{
+        automationId: 'a1', runId: 'r1', automationName: 'Daily review',
+        status: 'succeeded', summary: 'Two repositories changed.',
+      }],
+      handlers: { onOpenAutomationRun: (value) => { target = value; } },
+    });
+    const item = template.find((entry) => entry.id === 'tray-automation-run-r1');
+    assert.equal(item.label, 'Daily review');
+    assert.match(item.sublabel, /Two repositories changed/);
+    item.click();
+    assert.deepEqual(target, { automationId: 'a1', runId: 'r1' });
+  });
   it('builds empty Recent state with lifecycle actions', () => {
     const calls = [];
     const template = buildTrayMenuTemplate({
@@ -56,6 +72,21 @@ describe('buildTrayMenuTemplate', () => {
     template.find((item) => item.id === 'tray-open').click();
     template.find((item) => item.id === 'tray-quit').click();
     assert.deepEqual(calls, ['new', 'open', 'quit']);
+  });
+
+  it('shows automation runtime status and pause control', () => {
+    const calls = [];
+    const template = buildTrayMenuTemplate({
+      automationRuntime: { activeCount: 3, globallyPaused: false },
+      handlers: {
+        onToggleAutomations: (paused) => calls.push(paused),
+        onOpenAutomations: () => calls.push('open'),
+      },
+    });
+    assert.ok(template.some((item) => item.label === 'Automations · 3 active'));
+    template.find((item) => item.id === 'tray-automations-toggle').click();
+    template.find((item) => item.id === 'tray-automations-open').click();
+    assert.deepEqual(calls, [true, 'open']);
   });
 
   it('includes recent conversations with title and workspace subtitle', () => {

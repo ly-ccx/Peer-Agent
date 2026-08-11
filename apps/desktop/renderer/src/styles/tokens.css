@@ -125,6 +125,8 @@
   /* 与 confirm 同 hue 区，靠 icon+文案区分 */
   --state-danger: #7A3E50;
   --state-denied: #5C5A70;
+  /* 运行中/信息指示：冷蓝（对齐 azure-seal，非 Tailwind blue-500） */
+  --state-info: #3B7FAB;
 
   /* ─── Spacing / Radius / Shadow ─── */
   --space-1: 4px;
@@ -411,6 +413,7 @@
   --state-warn: #6B9FCB;
   --state-danger: #AA6E80;
   --state-denied: #8C8AA0;
+  --state-info: #5D9CBF;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
   --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
@@ -549,6 +552,7 @@
   --state-warn: #DF8E1D;      /* yellow */
   --state-danger: #D20F39;    /* red */
   --state-denied: #6C6F85;
+  --state-info: #1E66F5;      /* blue */
 
   /* --za-* 别名层（组件实际消费） */
   --za-bg-0: #EFF1F5;
@@ -636,6 +640,7 @@
   --state-warn: #F9E2AF;      /* yellow */
   --state-danger: #F38BA8;    /* red */
   --state-denied: #6C7086;
+  --state-info: #89B4FA;      /* blue */
 
   /* --za-* 别名层（组件实际消费） */
   --za-bg-0: #1E1E2E;

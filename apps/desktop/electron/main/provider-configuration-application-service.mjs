@@ -25,6 +25,7 @@ export function createProviderConfigurationApplicationService({
   removeGroup,
   setDefault,
   testConnection,
+  completePrompt,
   recordBaseline,
   notifyOAuthRefreshed = () => {},
   reportRefreshError = () => {},
@@ -50,6 +51,7 @@ export function createProviderConfigurationApplicationService({
     removeGroup: assertFunction(removeGroup, 'removeGroup'),
     setDefault: assertFunction(setDefault, 'setDefault'),
     testConnection: assertFunction(testConnection, 'testConnection'),
+    completePrompt: assertFunction(completePrompt, 'completePrompt'),
     recordBaseline: assertFunction(recordBaseline, 'recordBaseline'),
     notifyOAuthRefreshed: assertFunction(notifyOAuthRefreshed, 'notifyOAuthRefreshed'),
     reportRefreshError: assertFunction(reportRefreshError, 'reportRefreshError'),
@@ -174,6 +176,7 @@ export function createProviderConfigurationApplicationService({
       return providers;
     },
     test: (id) => ports.testConnection(id),
+    complete: (params) => ports.completePrompt(params),
     scheduleMissingPricingBackfill,
   });
 }

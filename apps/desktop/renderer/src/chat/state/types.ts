@@ -23,6 +23,11 @@ export interface ChatAttachment {
    * ADR 59 决策 3：整图只经 artifactRef 落盘引用，dataUrl 仅承载小缩略图。
    */
   artifactRef?: string;
+  /**
+   * 本地图片文件绝对路径（Appshot 整图落盘路径等）。
+   * 用于 dataUrl 缺失时按需预览，不替代 artifactRef 作为存储契约。
+   */
+  filePath?: string;
   /** Appshot 元数据；存在即按 Appshot 卡片渲染（来源 App / 捕获时间 / 尺寸）。 */
   appshot?: {
     appshotId: string;

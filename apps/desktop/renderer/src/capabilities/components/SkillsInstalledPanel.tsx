@@ -1,28 +1,35 @@
 import type { AvailableSkillSummary, SkillSummary } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 import { SkillDetailDialog } from './SkillDetailDialog';
 
-function SkillAvatar({ name }: { readonly name: string }) {
+/** 优先展示 skill.iconUrl，失败时回退到字母头像。 */
+function SkillIcon({
+  name,
+  iconUrl,
+}: {
+  readonly name: string;
+  readonly iconUrl?: string | null;
+}) {
+  const [failed, setFailed] = useState(false);
   const letter = (name || '?').charAt(0).toUpperCase();
-  return <span className="skill-avatar" aria-hidden="true">{letter}</span>;
+  const src = typeof iconUrl === 'string' ? iconUrl.trim() : '';
+  if (!src || failed) {
+    return <span className="skill-avatar" aria-hidden="true">{letter}</span>;
+  }
+  return (
+    <span className="skill-avatar skill-avatar--image" aria-hidden="true">
+      <img src={src} alt="" onError={() => setFailed(true)} />
+    </span>
+  );
 }
 
-function SkillToggle({ enabled, onChange }: {
-  readonly enabled: boolean;
-  readonly onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      className={`skill-toggle ${enabled ? 'on' : 'off'}`}
-      onClick={(event) => { event.stopPropagation(); onChange(!enabled); }}
-    >
-      <span className="skill-toggle-thumb" />
-    </button>
-  );
+function sourceBadgeLabel(source?: string | null): string | null {
+  const value = typeof source === 'string' ? source.trim() : '';
+  if (!value) return null;
+  if (value === 'skillhub') return 'SkillHub';
+  return value;
 }
 
 function SkillSection({
@@ -65,12 +72,17 @@ function SkillSection({
               }
             }}
           >
-            <SkillAvatar name={skill.name} />
+            <SkillIcon name={skill.name} iconUrl={skill.iconUrl} />
             <div className="skill-card-body">
               <div className="skill-card-title-row">
-                <strong className="skill-card-name">{skill.name}</strong>
+                <div className="skill-card-title-main">
+                  <strong className="skill-card-name">{skill.name}</strong>
+                  {sourceBadgeLabel(skill.source) ? (
+                    <span className="skill-source-badge">{sourceBadgeLabel(skill.source)}</span>
+                  ) : null}
+                </div>
                 <span className="skill-card-actions" onClick={(event) => event.stopPropagation()}>
-                  <SkillToggle enabled={skill.enabled} onChange={() => onToggle(skill)} />
+                  <Switch checked={skill.enabled} onCheckedChange={() => onToggle(skill)} aria-label={`${skill.name} ${skill.enabled ? '已启用' : '已停用'}`} />
                 </span>
               </div>
               <span className="skill-card-desc">{skill.description || '暂无描述'}</span>
@@ -153,6 +165,22 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
     setSelectedSkill((current) => current?.skillId === skillId ? { ...current, enabled } : current);
   }, []);
 
+  const uninstallSkill = useCallback(async (skillId: string) => {
+    const result = await clientApi.uninstallSkill(skillId);
+    if (!result.ok) {
+      const reason = result.error === 'workspace-skill-not-uninstallable'
+        ? '项目级 Skill 不能从这里删除源文件'
+        : result.error === 'path-escape'
+          ? '拒绝删除：路径不在用户安装目录内'
+          : result.error === 'not-found'
+            ? '未找到可卸载的安装'
+            : result.error ?? '未知错误';
+      throw new Error(reason);
+    }
+    // 刷新列表，但不要在这里硬卸载详情弹窗；由 SkillDetailDialog 走 Overlay requestClose 退场。
+    await Promise.all([loadSkills(), loadAvailable()]);
+  }, [loadAvailable, loadSkills]);
+
   const handleLink = useCallback(async (skill: AvailableSkillSummary) => {
     setBusyId(skill.skillId);
     setLinkError(null);
@@ -212,7 +240,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           <div className="skill-grid">
             {borrowable.map((skill) => (
               <div key={`${skill.sourceRoot}:${skill.skillId}`} className="skill-card borrowable">
-                <SkillAvatar name={skill.name} />
+                <SkillIcon name={skill.name} />
                 <div className="skill-card-body">
                   <div className="skill-card-title-row">
                     <strong className="skill-card-name">{skill.name}</strong>
@@ -235,6 +263,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           skill={selectedSkill}
           onClose={() => setSelectedSkill(null)}
           onToggle={setSkillEnabled}
+          onUninstall={uninstallSkill}
         />
       ) : null}
     </div>

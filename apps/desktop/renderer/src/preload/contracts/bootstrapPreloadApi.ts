@@ -2,6 +2,8 @@ import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 import type {
   CapabilityManifest,
   ChatSendRequest,
+  ChatStartTaskRequest,
+  ChatStartTaskResult,
   ClientBootstrap,
   ClientSessionState,
   ClientToolCall,
@@ -12,6 +14,18 @@ import type {
   GoalManualConfirmation,
   GoalPlan,
   GoalPlanStatus,
+  AutomationBootstrapResult,
+  AutomationCreateContext,
+  AutomationCreateInput,
+  AutomationDefinition,
+  AutomationEvent,
+  AutomationProposalAction,
+  AutomationProposalActionResult,
+  AutomationRun,
+  AutomationRunListInput,
+  AutomationRunNowInput,
+  AutomationSummary,
+  AutomationUpdateInput,
   LlmModelListResult,
   LlmModelFetchRequest,
   LlmModelInfo,
@@ -37,6 +51,14 @@ import type {
   SkillSummary,
   AvailableSkillSummary,
   SkillLinkResult,
+  SkillMarketplaceCatalog,
+  SkillMarketplaceEntry,
+  SkillMarketplaceInstallResult,
+  SkillHubInstallRequest,
+  SkillHubMarketplacePage,
+  SkillHubMarketplaceQuery,
+  SkillHubSyncStatus,
+  TaskOverviewItem,
   UpdateChannelPreference,
   UpdaterEvent,
   UpdaterStatus,
@@ -243,6 +265,55 @@ export interface UsageDailySnapshot {
   };
 }
 
+/** 请求日志按天详情（点击热力图/日条某一天后的下钻，对应 main `usage:day`）。 */
+export interface UsageDayModelRow {
+  readonly key: string;
+  readonly label: string;
+  readonly modelProviderId: string | null;
+  readonly providerName: string | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+  readonly requestCount: number;
+  readonly estimatedCostUsd: number | null;
+}
+
+export interface UsageDayHourBucket {
+  readonly hour: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+  readonly requestCount: number;
+}
+
+export interface UsageDaySnapshot {
+  readonly date: string | null;
+  readonly source: string;
+  readonly totals: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheWriteTokens: number;
+    readonly totalTokens: number;
+    readonly requestCount: number;
+    readonly pricedRequestCount: number;
+    readonly estimatedCostUsd: number | null;
+    readonly modelCount: number;
+    readonly activeHourCount: number;
+    readonly maxHourTokens: number;
+  };
+  readonly byModel: readonly UsageDayModelRow[];
+  readonly hours: readonly UsageDayHourBucket[];
+  readonly notes: {
+    readonly emptyDay: boolean;
+    readonly scope: string;
+  };
+}
+
 /**
  * ADR 27: 活跃流投影(带工作区维度)。
  * - conversationId:正在运行的会话 id。
@@ -381,6 +452,74 @@ export interface BootstrapPreloadApi {
       | 'error';
     readonly content: string;
     readonly size?: number;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
+   * 按需读取本地图片为 dataUrl，供聊天气泡缩略图/放大预览。
+   * ADR 59：会话存储不内联整图；仅在用户可见预览时临时加载。
+   */
+  readonly readImageDataUrl: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'not_found'
+      | 'not_file'
+      | 'too_large'
+      | 'unsupported_type'
+      | 'invalid_path'
+      | 'error';
+    readonly dataUrl: string;
+    readonly mimeType?: string;
+    readonly size?: number;
+    readonly path?: string;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
+   * 在已存在父目录下新建文件。默认写空内容；不覆盖已有文件。
+   * status：ok / already_exists / not_found / not_dir / invalid_path / error。
+   */
+  readonly writeFile: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    content?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'already_exists'
+      | 'not_found'
+      | 'not_dir'
+      | 'invalid_path'
+      | 'error';
+    readonly path?: string;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
+   * 在已存在父目录下新建文件夹。不覆盖已有路径。
+   * status：ok / already_exists / not_found / not_dir / invalid_path / error。
+   */
+  readonly mkdir: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'already_exists'
+      | 'not_found'
+      | 'not_dir'
+      | 'invalid_path'
+      | 'error';
+    readonly path?: string;
     readonly resolvedFrom?: string;
     readonly error?: string;
   }>;
@@ -658,6 +797,22 @@ export interface BootstrapPreloadApi {
   readonly linkSkill: (skillId: string) => Promise<SkillLinkResult>;
   /** 解除借用：仅删除本地软链，不影响来源目录。 */
   readonly unlinkSkill: (skillId: string) => Promise<SkillLinkResult>;
+  /**
+   * 卸载用户安装的 Skill：
+   * - userData/skills 实装目录：删除
+   * - 借用软链：仅取消链接
+   * - workspace Skill：拒绝删除源文件
+   */
+  readonly uninstallSkill: (skillId: string) => Promise<SkillLinkResult>;
+  readonly listMarketplaceSkills: () => Promise<SkillMarketplaceCatalog>;
+  readonly getMarketplaceSkillDetail: (catalogId: string) => Promise<SkillMarketplaceEntry | null>;
+  readonly installMarketplaceSkill: (catalogId: string) => Promise<SkillMarketplaceInstallResult>;
+  readonly querySkillHubSkills: (query?: SkillHubMarketplaceQuery) => Promise<SkillHubMarketplacePage>;
+  readonly getSkillHubSkillDetail: (identity: Omit<SkillHubInstallRequest, 'version'>) => Promise<Record<string, unknown>>;
+  readonly getSkillHubSyncStatus: () => Promise<SkillHubSyncStatus>;
+  readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
+  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
+  readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;
@@ -694,6 +849,7 @@ export interface BootstrapPreloadApi {
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
   readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;
+  readonly usageGetDay: (params: { date: string }) => Promise<UsageDaySnapshot>;
   readonly conversationsList: (params?: {
     workspacePath?: string | null;
     status?: 'active' | 'archived' | readonly ('active' | 'archived')[];
@@ -728,7 +884,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
@@ -758,9 +914,34 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
       cacheReadTokens?: number;
     };
   }) => Promise<LifetimeUsage>;
+  readonly automationsBootstrap: () => Promise<AutomationBootstrapResult>;
+  readonly automationsList: (params?: { workspacePath?: string; statuses?: string[]; query?: string }) => Promise<readonly AutomationSummary[]>;
+  readonly automationsGet: (params: { automationId: string }) => Promise<AutomationDefinition | null>;
+  readonly automationsCreate: (params: AutomationCreateInput) => Promise<AutomationDefinition>;
+  readonly automationsUpdate: (params: AutomationUpdateInput) => Promise<AutomationDefinition>;
+  readonly automationRunsList: (params: AutomationRunListInput) => Promise<readonly AutomationRun[]>;
+  readonly automationRunsGet: (params: { runId: string }) => Promise<AutomationRun | null>;
+  readonly automationsRunNow: (params: AutomationRunNowInput) => Promise<AutomationRun>;
+  readonly automationRunsRetry: (params: { runId: string }) => Promise<AutomationRun>;
+  readonly automationRunsCancel: (params: { runId: string }) => Promise<AutomationRun>;
+  readonly automationsSetRuntimePaused: (params: { paused: boolean }) => Promise<AutomationBootstrapResult['runtime']>;
+  readonly automationProposalAct: (params: {
+    conversationId: string;
+    proposalId: string;
+    fingerprint: string;
+    action: AutomationProposalAction;
+  }) => Promise<AutomationProposalActionResult>;
+  readonly onAutomationsChanged: (listener: (event: AutomationEvent) => void) => () => void;
+  readonly onAutomationOpenRun: (listener: (event: { automationId: string; runId: string; conversationId?: number | null }) => void) => () => void;
   // Goal 模式计划（见 Goal 模式设计）。
   // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
   readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
+  readonly taskOverviewList: (params?: {
+    workspacePath?: string | null;
+    includeTerminal?: boolean;
+    activeWithinMs?: number;
+    limit?: number;
+  }) => Promise<readonly TaskOverviewItem[]>;
   readonly goalPlansAwaitingCounts: () => Promise<Record<string, number>>;
   readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansCreate: (params: { draft: Partial<GoalPlan> }) => Promise<GoalPlan>;
@@ -772,6 +953,13 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   }) => Promise<GoalPlan>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
+  /**
+   * 待验收点「继续讨论」：验收未通过，重开同一 plan（completed → executing + waiting_user）。
+   */
+  readonly goalPlansMarkRequestedUserInput: (params: {
+    planId: string;
+    runnerPatch?: Record<string, unknown>;
+  }) => Promise<GoalPlan | null>;
   readonly goalPlansRecordManualConfirmation: (params: {
     planId: string;
     confirmation: GoalManualConfirmation;
@@ -800,6 +988,9 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
       runner?: GoalPlan['runner'] | null;
     }) => void,
   ) => () => void;
+  readonly onTaskOverviewChanged: (
+    listener: (payload: { reason?: string }) => void,
+  ) => () => void;
   readonly onGoalRunnerChanged: (
     listener: (payload: {
       type?: string;
@@ -811,6 +1002,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     }) => void,
   ) => () => void;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
+  readonly chatStartTask: (params: ChatStartTaskRequest) => Promise<ChatStartTaskResult>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
   // 全局活跃流查询:挂载时拉取当前正在运行的会话 id 列表(不依赖切入某个会话)。
@@ -893,6 +1085,13 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
   }) => void) => () => void;
+  /** 弱提示（如非 vision 模型剥离图片），不中断发送。 */
+  readonly onChatStreamNotice: (listener: (payload: {
+    streamId: string;
+    code?: string;
+    message?: string;
+    imageCount?: number;
+  }) => void) => () => void;
   readonly onChatStreamProviderRecovery: (listener: (payload: {
     streamId: string;
     conversationId: string;
@@ -970,6 +1169,14 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly llmRemoveGroup: (params: { groupId: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;
+  readonly llmComplete: (params: { id: string; prompt: string; maxTokens?: number }) => Promise<{
+    readonly success: boolean;
+    readonly text?: string;
+    readonly error?: string;
+    readonly model?: string;
+    readonly providerId?: string;
+    readonly latencyMs?: number;
+  }>;
   readonly llmGetSubscriptionQuota: (params: { id: string; force?: boolean }) => Promise<LlmSubscriptionQuota>;
   // ADR 28: 启动 ChatGPT 订阅 OAuth 登录(browser 模式)。
   // 链路契约:"先登录、成功后才落盘"。

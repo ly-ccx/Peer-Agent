@@ -476,14 +476,17 @@ export function createTuiThemeStore({
     return { mode, scheme };
   };
 
-  // Apply persisted mode on store creation so COLOR matches settings.
+  // Cache the scheme that was actually applied. In system mode this is the
+  // watcher-updated source of truth; re-detecting the OS in getScheme() can
+  // disagree with an injected watcher and with the live COLOR palette.
   const initial = readState();
-  applyThemeMode(initial.mode);
+  let currentState = applyThemeMode(initial.mode);
 
   const listeners = new Set<TuiThemeChangeListener>();
   let stopWatcher: (() => void) | null = null;
 
   const notify = (state: TuiThemeState): void => {
+    currentState = state;
     for (const listener of listeners) listener(state);
   };
 
@@ -509,12 +512,9 @@ export function createTuiThemeStore({
   };
 
   return {
-    getState: () => {
-      const mode = getMode();
-      return { mode, scheme: resolveThemeScheme(mode) };
-    },
+    getState: () => ({ mode: getMode(), scheme: currentState.scheme }),
     getMode,
-    getScheme: () => resolveThemeScheme(getMode()),
+    getScheme: () => currentState.scheme,
     setMode(mode) {
       const nextMode = normalizeTuiThemeMode(mode, 'dark');
       writeSettings({

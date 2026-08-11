@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  MODEL_PROVIDER_ROW_HEIGHT,
+  resolveModelSubmenuTop,
   resolveQuickChatPopoverPosition,
   resolveQuickChatPopoverVisualSize,
 } from './quickChatPopoverLayout.ts';
@@ -22,6 +24,32 @@ test('sizes compact popover from content, not full bar width', () => {
   assert.equal(size.width < barRect.width, true);
   assert.equal(size.width >= 190, true);
   assert.equal(size.height, 18 + 2 * 34);
+});
+
+test('anchors each model submenu to its hovered provider row', () => {
+  const topProvider = resolveModelSubmenuTop(0);
+  const middleProvider = resolveModelSubmenuTop(3);
+  const bottomProvider = resolveModelSubmenuTop(7);
+
+  assert.equal(topProvider, 0);
+  assert.equal(middleProvider, MODEL_PROVIDER_ROW_HEIGHT * 3);
+  assert.equal(bottomProvider, MODEL_PROVIDER_ROW_HEIGHT * 7);
+  assert.notEqual(middleProvider, topProvider);
+  assert.notEqual(bottomProvider, topProvider);
+});
+
+test('sizes grouped model cascade for provider and model columns', () => {
+  const size = resolveQuickChatPopoverVisualSize({
+    kind: 'model',
+    selectedValue: 'a',
+    items: [
+      { value: 'a', label: 'GPT-5.4', group: 'OpenAI' },
+      { value: 'b', label: 'Claude Sonnet', group: 'Anthropic' },
+      { value: 'c', label: 'K2.7 Coding Highspeed', group: 'Kimi Coding Plan' },
+    ],
+  });
+  assert.equal(size.width >= 480, true);
+  assert.equal(size.height, 14 + 3 * MODEL_PROVIDER_ROW_HEIGHT);
 });
 
 test('right-aligns model menu to the trigger and flushes under the bar', () => {

@@ -10,6 +10,7 @@ function owner(ownerName, register) {
 export function createChatIpcRegistrations({ chat } = {}) {
   const ports = {
     send: assertFunction(chat?.send, 'chat.send'),
+    startTask: assertFunction(chat?.startTask, 'chat.startTask'),
     abort: assertFunction(chat?.abort, 'chat.abort'),
     reattach: assertFunction(chat?.reattach, 'chat.reattach'),
     listActive: assertFunction(chat?.listActive, 'chat.listActive'),
@@ -21,6 +22,7 @@ export function createChatIpcRegistrations({ chat } = {}) {
   return [
     owner('chat-ipc', (ipc) => {
       ipc.handle('chat:send', (event, payload = {}) => ports.send(payload, event.sender));
+      ipc.handle('chat:start-task', (event, payload = {}) => ports.startTask(payload, event.sender));
       ipc.handle('chat:abort', (_event, payload = {}) => ports.abort(payload));
       ipc.handle('chat:stream:reattach', (_event, payload = {}) => ports.reattach(payload));
       ipc.handle('chat:stream:list-active', () => ports.listActive());

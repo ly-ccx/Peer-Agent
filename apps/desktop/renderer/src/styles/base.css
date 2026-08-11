@@ -56,7 +56,8 @@
 
   button {
     @apply border-0 bg-transparent text-inherit;
-    cursor: default;
+    /* 可点按钮默认小手；禁用态在下方单独覆盖为 not-allowed */
+    cursor: pointer;
     font-weight: 400;
     transition:
       background-color var(--za-motion-fast) var(--za-ease-standard),
@@ -70,6 +71,10 @@
   input:disabled,
   select:disabled {
     opacity: 0.46;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
   }
 
   button:focus-visible,

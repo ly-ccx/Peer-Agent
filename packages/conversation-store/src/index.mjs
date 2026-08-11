@@ -226,6 +226,123 @@ function normalizeContextSnapshot(snapshot, meta) {
   };
 }
 
+function projectDurableContextSnapshot(snapshot, meta) {
+  const exact = normalizeContextSnapshot(snapshot, meta);
+  if (exact) return exact;
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  if (snapshot.version !== 1) return null;
+  const conversationId = typeof snapshot.conversationId === 'string'
+    ? snapshot.conversationId.trim()
+    : '';
+  if (!conversationId || conversationId !== String(meta?.id ?? '')) return null;
+  const observation = snapshot.lastObserved;
+  if (!observation || typeof observation !== 'object') return null;
+  if (observation.source !== 'provider_usage') return null;
+  const inputTokens = Number(observation.inputTokens);
+  if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
+  if (!modelKey) return null;
+  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
+  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
+    ? meta.model.trim()
+    : null;
+  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
+  const legacyModelKey = providerBinding ?? storedModel;
+  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
+  const contentRevisionRaw = Number(meta?.contentRevision);
+  const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
+    ? contentRevisionRaw
+    : 0;
+  const revisionRaw = Number(snapshot.revision);
+  const revision = Number.isSafeInteger(revisionRaw) && revisionRaw >= 0 ? revisionRaw : 0;
+  const compactionEpochRaw = Number(
+    observation.compactionEpoch ?? snapshot.compactionEpoch ?? 0,
+  );
+  const compactionEpoch = Number.isSafeInteger(compactionEpochRaw) && compactionEpochRaw >= 0
+    ? compactionEpochRaw
+    : 0;
+  const normalizeNullablePositive = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+  };
+  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
+  const inputBudget = normalizeNullablePositive(snapshot.inputBudget) ?? contextWindow;
+  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens)
+    ?? (contextWindow == null ? null : Math.floor(contextWindow * 0.8));
+  const observedAtRaw = Number(observation.observedAt ?? snapshot.updatedAt);
+  const updatedAt = Number.isFinite(observedAtRaw) && observedAtRaw >= 0
+    ? observedAtRaw
+    : Date.now();
+  const requestFingerprint = typeof observation.requestFingerprint === 'string'
+    ? observation.requestFingerprint.trim()
+    : '';
+  const countCapability = snapshot.countCapability && typeof snapshot.countCapability === 'object'
+    ? snapshot.countCapability
+    : { kind: 'observed_usage_only' };
+  const counterStatus = snapshot.counterStatus === 'degraded' ? 'degraded' : 'active';
+  return {
+    version: 1,
+    conversationId,
+    contentRevision,
+    modelKey,
+    revision,
+    phase: 'restored',
+    compactionEpoch,
+    contextWindow,
+    inputBudget,
+    compactionThresholdTokens,
+    authoritativeInputTokens: inputTokens,
+    percent: contextWindow == null
+      ? null
+      : Math.min(100, Math.round((inputTokens / contextWindow) * 100)),
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: true,
+    pendingContentChars: 0,
+    countCapability,
+    counterStatus,
+    updatedAt,
+    lastObserved: {
+      inputTokens,
+      requestFingerprint: requestFingerprint
+        || `restored_observation_${conversationId}_${compactionEpoch}`,
+      compactionEpoch,
+      source: 'provider_usage',
+      observedAt: updatedAt,
+    },
+  };
+}
+
+
+const AUTOMATION_TRIGGER_SOURCES = new Set(['scheduled', 'manual', 'retry']);
+
+function normalizeAutomationOrigin(origin) {
+  if (!origin || typeof origin !== 'object') return null;
+  if (origin.kind !== 'automation_run') return null;
+  const automationId = typeof origin.automationId === 'string' ? origin.automationId.trim() : '';
+  const runId = typeof origin.runId === 'string' ? origin.runId.trim() : '';
+  if (!automationId || !runId) return null;
+  const automationName = typeof origin.automationName === 'string' ? origin.automationName.trim() : '';
+  const triggerSource = AUTOMATION_TRIGGER_SOURCES.has(origin.triggerSource)
+    ? origin.triggerSource
+    : 'manual';
+  const originWorkspacePath = typeof origin.originWorkspacePath === 'string' && origin.originWorkspacePath.trim()
+    ? origin.originWorkspacePath.trim()
+    : null;
+  const createdAt = typeof origin.createdAt === 'string' && origin.createdAt.trim()
+    ? origin.createdAt.trim()
+    : null;
+  return {
+    kind: 'automation_run',
+    automationId,
+    runId,
+    automationName,
+    triggerSource,
+    ...(originWorkspacePath ? { originWorkspacePath } : {}),
+    ...(createdAt ? { createdAt } : {}),
+  };
+}
+
 function normalizeMeta(meta) {
   const status = normalizeStatus(meta?.status);
   const pinnedAt = typeof meta?.pinnedAt === 'string' && meta.pinnedAt.trim() ? meta.pinnedAt : null;
@@ -237,10 +354,16 @@ function normalizeMeta(meta) {
   const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
     ? contentRevisionRaw
     : 0;
+  const automationOrigin = normalizeAutomationOrigin(meta?.automationOrigin);
   const normalizedBase = {
     ...meta,
     contentRevision,
   };
+  // Drop untrusted automationOrigin from the spread base; reattach only when valid.
+  if ('automationOrigin' in normalizedBase) delete normalizedBase.automationOrigin;
+  const lastReadAt = typeof meta?.lastReadAt === 'string' && meta.lastReadAt.trim()
+    ? meta.lastReadAt.trim()
+    : null;
   return {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
@@ -250,9 +373,11 @@ function normalizeMeta(meta) {
     contextSnapshot: normalizeContextSnapshot(meta?.contextSnapshot, normalizedBase),
     status,
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
+    lastReadAt,
     pinnedAt,
     pinnedOrder,
     ...(messageCount === undefined ? {} : { messageCount }),
+    ...(automationOrigin ? { automationOrigin } : {}),
   };
 }
 
@@ -359,10 +484,20 @@ export function createConversationStore(options = {}) {
   function contextSnapshotFile(id) {
     return path.join(contextSnapshotDir, `${encodeURIComponent(id)}.json`);
   }
+  /**
+   * Read the durable context snapshot for a conversation.
+   *
+   * Exact contentRevision matches return the live snapshot as-is. When messages
+   * advanced the revision after an observed provider_usage baseline was stored,
+   * project that lastObserved baseline into a pending restored snapshot so session
+   * switches can show the last measured occupancy without waiting for another turn.
+   * Unknown / non-observed sidecars still resolve to null.
+   */
   function durableContextSnapshot(meta) {
-    return normalizeContextSnapshot(readJson(contextSnapshotFile(meta.id)), meta)
+    const rawSnapshot = readJson(contextSnapshotFile(meta.id))
       ?? meta.contextSnapshot
       ?? null;
+    return projectDurableContextSnapshot(rawSnapshot, meta);
   }
   function publishChange(meta, changeType) {
     if (!meta?.id) return;
@@ -525,7 +660,10 @@ export function createConversationStore(options = {}) {
     // 先按 index meta 过滤 workspace / status，再投影 messageCount。
     // 避免「先全量扫 jsonl 再过滤」的历史路径。
     const filtered = readIndex().filter((meta) => {
-      if ((meta.workspacePath || null) !== (workspacePath || null)) return false;
+      const requestedWorkspace = workspacePath || null;
+      const executionWorkspace = meta.workspacePath || null;
+      const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
+      if (executionWorkspace !== requestedWorkspace && automationWorkspace !== requestedWorkspace) return false;
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
       return true;
     });
@@ -595,8 +733,9 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode } = {}) {
+  function createConversation({ title, workspacePath, mode, automationCreateContext, automationOrigin } = {}) {
     const now = new Date().toISOString();
+    const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
     const meta = {
       id: randomUUID(),
       title: title || '',
@@ -609,11 +748,14 @@ export function createConversationStore(options = {}) {
       modelProviderId: null,
       status: 'active',
       archivedAt: null,
+      lastReadAt: now,
       pinnedAt: null,
       pinnedOrder: null,
       messageCount: 0,
       contentRevision: 0,
       contextSnapshot: null,
+      ...(automationCreateContext ? { automationCreateContext: structuredClone(automationCreateContext) } : {}),
+      ...(normalizedOrigin ? { automationOrigin: structuredClone(normalizedOrigin) } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -626,6 +768,17 @@ export function createConversationStore(options = {}) {
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.mode = normalizeMode(mode);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function updateAutomationCreateContext(id, context) {
+    const index = readIndex();
+    const meta = index.find((conversation) => conversation.id === id);
+    if (!meta) return null;
+    if (context === null || context === undefined) delete meta.automationCreateContext;
+    else meta.automationCreateContext = structuredClone(context);
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
@@ -789,12 +942,40 @@ export function createConversationStore(options = {}) {
     };
   }
 
-  function updateTitle(id, title) {
+  function updateTitle(id, title, options = {}) {
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.title = title;
+    if (options && typeof options === 'object' && typeof options.source === 'string' && options.source.trim()) {
+      meta.titleSource = options.source.trim();
+    } else {
+      meta.titleSource = 'manual';
+    }
     meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  /**
+   * 标记会话已读水位。只推进 lastReadAt，不改 updatedAt，
+   * 避免「打开阅读」被当成内容更新，把已读会话重新顶到时间序前面。
+   */
+  function markRead(id, options = {}) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    const candidate = typeof options?.at === 'string' && options.at.trim()
+      ? options.at.trim()
+      : new Date().toISOString();
+    const previous = typeof meta.lastReadAt === 'string' && meta.lastReadAt.trim()
+      ? meta.lastReadAt.trim()
+      : null;
+    // 水位只前进，不回退。
+    if (previous && Date.parse(candidate) <= Date.parse(previous)) {
+      return withMessageCount(meta);
+    }
+    meta.lastReadAt = candidate;
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
   }
@@ -823,8 +1004,21 @@ export function createConversationStore(options = {}) {
         return withMessageCount(meta);
       }
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
-      if (!meta.title && message.role === 'user') {
-        meta.title = message.content.slice(0, 50);
+      // 首条用户消息只写短草稿标题，禁止原话全文当永久名。
+      // plan/manual 覆盖后不再被消息回填。
+      if (!meta.title && message.role === 'user' && typeof message.content === 'string') {
+        const compact = message.content.replace(/\s+/g, ' ').trim();
+        if (compact) {
+          const isAck = /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(compact);
+          const isCmd = /^[>$]\s/.test(compact) || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(compact) && compact.includes('/'));
+          if (!isAck && !isCmd) {
+            meta.title = compact.length <= 16 ? compact : `${compact.slice(0, 16)}…`;
+            meta.titleSource = 'user_snippet';
+          } else {
+            meta.title = '未命名沟通';
+            meta.titleSource = 'fallback';
+          }
+        }
       }
       // index 维护 messageCount，listConversations 不再扫全文 jsonl。
       const prevCount = Number.isFinite(Number(meta.messageCount)) ? Number(meta.messageCount) : null;
@@ -1272,7 +1466,9 @@ export function createConversationStore(options = {}) {
     getConversation,
     getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
+    markRead: changed(markRead, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
+    updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
     appendMessage: changed(appendMessage, 'messages-updated'),

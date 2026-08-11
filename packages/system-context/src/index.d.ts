@@ -28,6 +28,7 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly effort?: string | null;
   readonly goalPlanStore?: unknown;
   readonly mcpRegistry?: unknown;
+  readonly automationCreateContext?: unknown;
   readonly contextAttachments?: readonly unknown[];
   readonly attachmentContext?: readonly unknown[];
   readonly configInstructions?: readonly unknown[];
@@ -99,6 +100,7 @@ export function assembleSystemContext(
   options?: { readonly registry?: PromptSourceRegistry },
 ): AssembledSystemContext;
 export function renderSystemContext(context?: Pick<AssembledSystemContext, 'sections'>): string;
+export function renderStableSystemContext(context?: Pick<AssembledSystemContext, 'sections'>): string;
 
 export const DEFAULT_GIT_BRANCH_PREFIX: 'PeerAgent/';
 export const REPLY_LANGUAGE_OPTIONS: readonly string[];
@@ -121,6 +123,7 @@ export function renderBrainstormingPrompt(): string;
 export function renderRuntimeContext(workspacePath?: string | null): string;
 
 export function createAttachmentPromptSource(): PromptSource;
+export function createAutomationIntentPromptSource(): PromptSource;
 export function createBrainstormingPromptSource(): PromptSource;
 export function createContinuityPromptSource(): PromptSource;
 export function createContextExtensionPromptSource(options?: { readonly maxCharsPerExtension?: number }): PromptSource;

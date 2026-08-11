@@ -28,6 +28,7 @@ export async function agentLoopAnthropic({
   apiKey,
   model,
   systemPrompt,
+  stableSystemPrompt,
   messages,
   tools,
   webContents,
@@ -35,7 +36,7 @@ export async function agentLoopAnthropic({
   signal,
   effort,
   supportsReasoning = false,
-  supportsPromptCaching = false,
+  supportsPromptCaching = true,
   contextWindow,
   maxOutputTokens,
   conversationId,
@@ -48,7 +49,9 @@ export async function agentLoopAnthropic({
   registry,
   runtimeProjection,
   mcpRegistry,
+  skillStore = null,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
   onNativeReasoningFallback = null,
   resolvedChannel = null,
@@ -154,6 +157,7 @@ export async function agentLoopAnthropic({
           buildCanonicalRequest: ({ messages: projectedMessages, systemPrompt: projectedSystem }) => ({
             model,
             system: projectedSystem,
+            stableSystem: stableSystemPrompt,
             messages: sanitizeApiMessages(
               projectedMessages.filter((message) => message.role !== 'system'),
             ),
@@ -297,7 +301,9 @@ export async function agentLoopAnthropic({
           registry,
           runtimeProjection,
           mcpRegistry,
+          skillStore,
           goalPlanStore,
+          automationProposalService,
           ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();

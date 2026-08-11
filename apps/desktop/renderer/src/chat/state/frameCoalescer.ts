@@ -22,6 +22,20 @@ export function createFrameCoalescer(scheduler: FrameScheduler) {
         task?.();
       });
     },
+    /**
+     * Runs the queued callback synchronously, canceling the scheduled frame.
+     * Use when the work must be reflected before the next paint (e.g. keeping a
+     * virtual list spacer in sync with content that is about to render).
+     */
+    flush(): void {
+      if (frameId !== null) {
+        scheduler.cancel(frameId);
+        frameId = null;
+      }
+      const task = pending;
+      pending = null;
+      task?.();
+    },
     cancel(): void {
       if (frameId !== null) scheduler.cancel(frameId);
       frameId = null;

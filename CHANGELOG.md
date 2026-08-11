@@ -4,6 +4,185 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.2 - 2026-08-10
+
+### Notes
+
+- Graduate the full `0.0.2-beta.1` → `0.0.2-beta.5` line to the stable `latest` channel.
+- Move Peer from tool-capable chat toward a Task Flow Agent: structured intake and follow-up questions, complexity-aware planning, persisted goals, and Evidence-backed completion.
+- Preserve the governed local chain: Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence.
+
+### Added
+
+- Add Agent / Plan / Goal workflows with persisted plan graphs, subtasks, pause/resume, `waiting_user`, and read-only Explorer investigations.
+- Add executable success criteria (command, test, file-exists, file-contains) with `criterionResults` and `evidenceRefs` as the completion gate.
+- Add the global Workbench for advancing tasks, results awaiting acceptance, history, background shell threads, and continue-task flows.
+- Add conversation-driven Automation proposals, isolated Git worktree runs, commit/diff artifact refs, run receipts, history, and tray status.
+- Add an embedded Browser with visible navigation, click, type, DOM, and screenshot tools under PermissionGrant + Evidence.
+- Publish the host-neutral Open Runtime packages: `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`.
+- Add SkillHub, MCP/tool controls, skill details/capsules, tool definitions, provider channel wiring, and uninstall paths.
+- Add npm-installed CLI/TUI binaries, `/version`, shared conversations/settings, and clearer runtime feedback.
+- Protect a random vault master key with the platform keychain while encrypting Provider API keys and OAuth tokens locally with AES-256-GCM.
+- Share Provider metadata, default model selection, and credential access across Desktop, TUI, and CLI on the same machine.
+- Support custom OpenAI / Anthropic-compatible endpoints plus main-model / fallback-vision routing for text-only models.
+
+### Changed
+
+- Share runtime, System Context, conversation data, and `~/.peer-agent` configuration across Desktop, TUI, and CLI.
+- Stabilize prompt prefixes and add cache metrics, including ChatGPT Responses cache-hit token accounting.
+- Refine the workspace tree, composer, model strip, task cards, usage charts, and result-acceptance motion.
+
+### Fixed
+
+- Fix streaming scroll, context-usage restoration, provider stream metadata, Qoder local-auth errors, Kimi reasoning, Automation idempotency, and stale result-acceptance state.
+- Harden long-task continuity with compaction, continuity sources, prompt checksums, and Evidence-preserving resume behavior.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.2` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.2`.
+- Memory, self-evolution, full multi-agent collaboration, Agent swarm, and Canvas remain planned and are not shipped in 0.0.2.
+
+## 0.0.2-beta.5 - 2026-08-10
+
+### Notes
+
+- Turn the Desktop workbench into a real task hub: global workbench separate from workspace views, task overview/history drawers, result-acceptance animations, continue-task flows, a flattened workspace sidebar tree, skill capsules, and chat/usage polish.
+- Skills gain tool definitions, uninstall paths, header capability-list detail entry, and more readable SkillHub install errors.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Added
+
+- Separate the global workbench from workspace views to centralize in-progress tasks, results awaiting acceptance, and history, with task overview and history drawers.
+- Show plan steps on advancing cards, continue the same task for unaccepted results, and animate accept cards with right-to-left shatter transitions.
+- Show completion time on result-ready cards and drop stale unaccepted results from the acceptance queue.
+- Surface Peer background shell threads in the workbench.
+- Flatten the sidebar into a workspace tree; pick a draft workspace for new chats and lock the workspace for existing chats.
+- Track lastReadAt / markRead watermarks so recent discussions become unread-only “discussing”.
+- Surface conversation task context in chat; show the full goal step list on dock hover.
+- Open skill detail from the header capability list, show skill capsules, and make SkillHub install errors readable.
+- Add skill tool definitions, provider channel wiring, and skill uninstall.
+- Add cache metrics engine and prompt-prefix stabilization; report prompt cache hit tokens for ChatGPT Responses usage.
+- Add TUI `/version` slash command to show the CLI version.
+
+### Changed
+
+- Unify chat composer padding, enlarge the stop glyph, refine action-row/attach-chip spacing, use a text-only editing banner, and apply a control-level model-strip font.
+- Restore last context-usage display when switching sessions.
+- Collapse accept cards so the list slides up; restore dual-column workbench result cards.
+- Smooth usage-trend chart corners; shorten task-overview copy.
+- Keep open tooltips during stream auto-scroll; wire the running dot to the status token.
+
+### Fixed
+
+- Reopen the same task when continuing unaccepted results instead of starting another.
+- Surface waiting-for-user tasks correctly in the workbench.
+- Fix `durationLabel is not defined` crash in GlobalWorkbenchPage.
+- Open the workbench correctly after workspace switches; stop sidebar rows from clipping.
+- Stop streaming scroll bounce from an out-of-sync virtual spacer.
+- Show six recent discussions on the task overview; align discussion-status fallback assertions.
+- Map Qoder local-auth errno codes to readable errors and fall back to the host node for auth reads.
+- Fix provider stream metadata, skill id extraction, and task-overview rules.
+- Center the skill-detail close icon geometrically; align skill card radius.
+
+## 0.0.2-beta.4 - 2026-08-07
+
+### Notes
+
+- Bring the full Tencent SkillHub skill marketplace to Desktop, with remote metadata sync, verified install-time ZIP download, global/workspace install scope, and uninstall.
+- Preview local chat attachment images inline, and polish Kimi multi-level reasoning effort plus several Desktop detail interactions.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Added
+
+- Sync SkillHub marketplace metadata into a local paginated index with search, category filters, sorting, background resume, and last-complete-snapshot fallback.
+- Install SkillHub skills after Ed25519 platform signature, ZIP MD5, hash v1 content fingerprint, and archive safety checks into the existing Skill Store.
+- Choose install scope in the marketplace detail panel: global (`userData/skills`) or current workspace (`workspace/skills`).
+- Uninstall user-installed skills from the installed list; project-level workspace skills stay protected.
+- Render local chat attachment images inline through a dedicated file data-url IPC path.
+
+### Changed
+
+- Prefer SkillHub `iconUrl` for marketplace avatars, with letter fallback.
+- Use the shared Dropdown for marketplace category filtering and flatten nested detail chrome around install actions.
+- Map Kimi Coding Plan / Moonshot to official off/low/high/max effort and align the discrete effort slider geometry.
+- Clarify Automation detail header hierarchy and check for updates when the app is reactivated.
+
+### Fixed
+
+- Close the skill detail overlay with the shared exit animation after uninstall instead of hard-unmounting it.
+- Keep marketplace card footers bottom-aligned across equal-height grid cards.
+
+## 0.0.2-beta.3 - 2026-08-06
+
+### Notes
+
+- Make Automation run results easier to find, trace, compare, and control while preserving Fresh Run, isolated-worktree, immutable Receipt, permission, and Evidence boundaries.
+- Continue polishing Automation proposals and the Desktop composer experience.
+
+### Added
+
+- Persist final Automation summaries in immutable Run Receipts, with a final-assistant-message fallback and an explicit successful-run fallback.
+- Show recent Automation results in Overview and the system tray, with direct navigation to the exact Run.
+- Compare the current result with the previous completed result and optionally notify only when a successful result changes.
+- Project Automation conversations back to their origin workspace and expose a clickable Automation origin badge in Fresh Run chats.
+
+### Changed
+
+- Refresh Automation Runs and the selected Receipt when runtime state changes.
+- Collapse terminal Automation proposals by default, clear proposal cards after confirm or cancel, and use clearer green active-status pills.
+- Tighten home composer controls and keep Automation proposal cards from flex-collapse.
+
+### Fixed
+
+- Convert missing-runner and asynchronous startup failures into visible failed Runs with failure Receipts.
+- Preserve idempotent Automation proposal confirmation after the proposal card is cleared, returning the original Receipt without creating a duplicate.
+- Update `lastRunAt` on terminal Automation states and skip intake-contract handling for system-task notifications.
+
+## 0.0.2-beta.2 - 2026-08-06
+
+### Notes
+
+- Desktop polish release after 0.0.2-beta.1, focused on composer attachment layout, action-bar spacing, and cascading model-menu placement.
+- Local capability execution, explicit authorization, and Evidence remain unchanged.
+
+### Fixed
+
+- Keep pasted image thumbnails on a dedicated composer row so they no longer cover draft text.
+- Tighten home/session composer padding around the bottom action bar.
+- Align cascading model submenus to the current provider row instead of stacking from the first item.
+
+## 0.0.2-beta.1 - 2026-08-05
+
+### Notes
+
+- First public beta in the 0.0.2 line, building on the 0.0.1 stable release.
+- Local execution, explicit permission grants, and Evidence remain the governing boundary for all new Automation and Workbench capabilities.
+
+### Added
+
+- Create scheduled Automations from structured proposals in conversations, with explicit confirmation, idempotent identity checks, and authoritative creation receipts.
+- Prompt-first Automation Center creation with model-assisted detection, editable generated plans, confirmation overlays, access presets, and tray runtime status.
+- Workbench file create / folder create, refresh, and filter actions.
+- Configurable model context-window tiers carried into chat runtime budgeting.
+- Automatic update checks and localized release prompts.
+
+### Changed
+
+- Unified settings, capability, Automation, and import toggles on accessible Switch / Checkbox controls with governed theme tokens.
+- Improved Provider connection flows, model catalog handling, refresh-result preservation, service icons, and model settings.
+- Let CSS own chat composer auto-sizing with a higher thread input limit, avoiding synchronous per-character layout measurement.
+- Bounded TUI streaming refresh, Markdown, and syntax-highlight work for more stable long-session rendering.
+- Kept TUI theme state aligned with the palette actually applied after system-theme changes.
+
+### Fixed
+
+- Clear or replace context accounting correctly after external conversation reloads.
+- Release the Workbench layout column outside Chat while preserving the user's open state.
+- Align Workbench file opening, directory refresh, and watcher calls with their canonical interfaces.
+- Prevent stale, repeated, or cross-conversation Automation proposals from creating duplicate tasks.
+- Preserve Provider catalog refresh results and surface Automation runtime status in the tray.
+
 ## 0.0.1 - 2026-08-04
 
 ### Notes

@@ -1,0 +1,1517 @@
+/* TaskOverview 三页面 —— 对齐 peer-2-0 高保真首页结构。
+ *
+ * 首页：topline + hero(说明|统计) + 交接四列 + 双列瀑布流推进 + 结果待验收。
+ * 颜色只走 --za-* token，由 [data-theme] 切换，无硬编码 fallback。
+ */
+@layer components {
+  .task-overview-page-layer {
+    @apply h-full min-h-0 min-w-0 overflow-y-auto;
+    background: var(--za-app-bg);
+    border-radius: var(--radius-lg);
+  }
+
+  .task-overview-page {
+    @apply mx-auto w-full max-w-5xl px-7 py-6;
+  }
+
+  .task-overview-page--home {
+    @apply max-w-6xl;
+  }
+
+  /* ---------- topline：面包屑 + Workspace 徽标 ---------- */
+  .task-overview-topline {
+    @apply mb-5 flex items-center justify-between gap-4;
+  }
+
+  .task-overview-crumb {
+    @apply flex items-center gap-2 text-sm;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-crumb b {
+    @apply font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-scope {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-scope-dot {
+    @apply inline-block h-1.5 w-1.5 rounded-full;
+    background: var(--za-accent);
+  }
+
+  /* ---------- hero ---------- */
+  .task-overview-hero {
+    @apply mb-8 flex flex-wrap items-end justify-between gap-6 border-b pb-6;
+    border-color: var(--za-line);
+  }
+
+  .task-overview-hero-copy {
+    @apply min-w-0 max-w-2xl flex-1;
+  }
+
+  .task-overview-kicker {
+    @apply mb-2 text-xs font-medium uppercase tracking-[0.14em];
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-kicker::before {
+    content: '— ';
+    color: var(--za-accent);
+  }
+
+  .task-overview-hero h1,
+  .task-overview-header h1 {
+    @apply text-3xl font-semibold leading-tight tracking-tight;
+    color: var(--za-text);
+  }
+
+  .task-overview-hero-copy p,
+  .task-overview-subtitle {
+    @apply mt-2 max-w-xl text-sm leading-relaxed;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-hero-stats {
+    @apply flex shrink-0 items-stretch gap-0;
+  }
+
+  .task-overview-stat {
+    @apply flex min-w-[4.5rem] flex-col items-start px-4 first:pl-0;
+  }
+
+  .task-overview-stat + .task-overview-stat {
+    border-left: 1px solid var(--za-line);
+  }
+
+  .task-overview-stat b {
+    @apply text-2xl font-semibold tabular-nums leading-none;
+    color: var(--za-text);
+  }
+
+  .task-overview-stat span {
+    @apply mt-1.5 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-header {
+    @apply mb-6;
+  }
+
+  /* ---------- section ---------- */
+  .task-overview-section {
+    @apply mb-8;
+  }
+
+  .task-overview-section-head {
+    @apply mb-3 flex items-center justify-between gap-3;
+  }
+
+  .task-overview-section-title {
+    @apply flex items-center gap-2;
+  }
+
+  .task-overview-section-title h2 {
+    @apply text-base font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-section-title small {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-section-meta {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-section-link {
+    @apply inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border py-1 pl-3 pr-1.5;
+    /* 抵消胶囊右内边距，让右边缘与板块内容右侧光学对齐 */
+    margin-right: -0.375rem;
+    background: transparent;
+    border-color: transparent;
+    color: var(--za-text-muted);
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease;
+  }
+
+  .task-overview-section-link__label {
+    @apply text-xs font-medium;
+  }
+
+  .task-overview-section-link__count {
+    @apply inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none tabular-nums;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+    transition:
+      background 140ms ease,
+      color 140ms ease;
+  }
+
+  .task-overview-section-link__arrow {
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center;
+    transition: transform 160ms ease;
+  }
+
+  .task-overview-section-link:hover {
+    background: var(--za-surface-1);
+    border-color: var(--za-line);
+    color: var(--za-text);
+  }
+
+  .task-overview-section-link:hover .task-overview-section-link__count {
+    background: color-mix(in srgb, var(--za-accent) 14%, transparent);
+    color: var(--za-accent);
+  }
+
+  .task-overview-section-link:hover .task-overview-section-link__arrow {
+    transform: translateX(2px);
+  }
+
+  .task-overview-section-link:active {
+    background: var(--za-surface-1);
+    border-color: var(--za-line-strong);
+    transform: translateY(0.5px);
+  }
+
+  .task-overview-section-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--za-accent) 45%, transparent);
+    outline-offset: 2px;
+    color: var(--za-text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .task-overview-section-link,
+    .task-overview-section-link__arrow,
+    .task-overview-section-link__count {
+      transition: none;
+    }
+
+    .task-overview-section-link:hover .task-overview-section-link__arrow {
+      transform: none;
+    }
+  }
+
+  .task-overview-discussion-link {
+    @apply inline-flex min-h-10 items-center gap-3 rounded-full px-3 text-left;
+    margin: -0.5rem -0.75rem -0.5rem 0;
+  }
+
+  .task-overview-discussion-link__copy {
+    @apply inline-flex items-baseline gap-2;
+  }
+
+  .task-overview-discussion-link__label {
+    @apply text-sm font-medium;
+    color: var(--za-text);
+  }
+
+  .task-overview-discussion-link__meta {
+    @apply text-[11px] font-normal tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-discussion-link__arrow {
+    @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm transition-all;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-discussion-link:hover,
+  .task-overview-discussion-link:focus-visible {
+    background: var(--za-surface-0);
+  }
+
+  .task-overview-discussion-link:hover .task-overview-discussion-link__label,
+  .task-overview-discussion-link:focus-visible .task-overview-discussion-link__label {
+    color: var(--za-accent);
+  }
+
+  .task-overview-discussion-link:hover .task-overview-discussion-link__arrow,
+  .task-overview-discussion-link:focus-visible .task-overview-discussion-link__arrow {
+    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+    color: var(--za-accent);
+    transform: translateX(2px);
+  }
+
+  .task-overview-discussion-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--za-accent) 45%, transparent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- 最近讨论（紧凑卡片，不复用执行态） ---------- */
+  .task-overview-discussion-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .task-overview-discussion-card {
+    @apply flex min-h-32 min-w-0 flex-col rounded-2xl border p-4 transition-colors;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-discussion-card.is-clickable {
+    @apply cursor-pointer;
+  }
+
+  .task-overview-discussion-card.is-clickable:hover {
+    background: var(--za-surface-1);
+    border-color: color-mix(in srgb, var(--za-accent) 42%, var(--za-line));
+  }
+
+  .task-overview-discussion-card__meta,
+  .task-overview-discussion-card__footer {
+    @apply flex min-w-0 items-center justify-between gap-3 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-discussion-card__status {
+    @apply inline-flex min-w-0 items-center gap-1.5 font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-discussion-card__status i {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full;
+    background: var(--za-accent);
+  }
+
+  .task-overview-discussion-card__meta time {
+    @apply shrink-0 tabular-nums;
+  }
+
+  .task-overview-discussion-card h3 {
+    @apply my-3 min-w-0 overflow-hidden text-sm font-semibold leading-5;
+    color: var(--za-text);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .task-overview-discussion-card__footer {
+    @apply mt-auto;
+  }
+
+  .task-overview-discussion-card__footer span {
+    @apply min-w-0 truncate;
+  }
+
+  .task-overview-discussion-card__footer strong {
+    @apply shrink-0 font-semibold;
+    color: var(--za-accent);
+  }
+
+  /* ---------- 交接列表（连体容器 + 四列） ---------- */
+  .task-overview-handoff-list {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-handoff-row {
+    @apply grid items-center gap-4 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: minmax(0, 1.4fr) minmax(7rem, 0.7fr) minmax(0, 1.1fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .task-overview-handoff-row:first-child {
+    background: color-mix(in srgb, var(--za-accent) 6%, var(--za-surface-0));
+  }
+
+  .task-overview-task-copy {
+    @apply min-w-0;
+  }
+
+  .task-overview-task-copy strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-task-copy span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-owner {
+    @apply flex items-center gap-2 text-xs;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-owner i {
+    @apply inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold not-italic;
+    background: color-mix(in srgb, var(--za-accent) 16%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .task-overview-handoff-reason strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-overview-handoff-reason span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-btn {
+    @apply shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold;
+    /*
+     * macOS 透明 + vibrancy 窗口中，hover opacity transition 会触发新的合成层，
+     * Chromium 仍报告 pointer，但 AppKit 可能把原生 cursor rect 重置成箭头。
+     * 按钮只过渡颜色，并明确排除 Electron 拖拽命中区。
+     */
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition:
+      background-color var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard),
+      color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .task-overview-btn--primary {
+    background: var(--za-text);
+    color: var(--za-surface-0);
+  }
+
+  .task-overview-btn--primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--za-text) 88%, var(--za-surface-0));
+  }
+
+  .task-overview-btn--secondary {
+    background: var(--za-surface-0);
+    color: var(--za-text);
+    border: 1px solid var(--za-line);
+  }
+
+  .task-overview-btn--secondary:hover:not(:disabled) {
+    background: var(--za-surface-1);
+    border-color: var(--za-line-strong);
+  }
+
+  .task-overview-btn:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* ---------- 推进/验收 稳定双列 ---------- */
+  /* 用 grid 替代 column-count：自动高度时 column-count 会把卡片压成半宽却只堆左列 */
+  .task-overview-work-stream {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem; /* gap-3 */
+  }
+
+  @media (min-width: 768px) {
+    .task-overview-work-stream {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .task-overview-work-stream > * {
+    min-width: 0;
+  }
+
+  .task-overview-list {
+    @apply grid gap-3;
+  }
+
+  .task-overview-work-item {
+    @apply flex flex-col rounded-2xl border p-4;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-overview-work-item.is-clickable {
+    @apply cursor-pointer transition-shadow;
+  }
+
+  .task-overview-work-item.is-clickable:hover {
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--za-text) 8%, transparent);
+  }
+
+  .task-overview-work-top {
+    @apply mb-2 flex items-center justify-between gap-3 text-xs;
+  }
+
+  .task-overview-work-state {
+    @apply inline-flex items-center gap-1.5 font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-spinner {
+    @apply inline-block h-3.5 w-3.5 rounded-full border-2;
+    border-color: color-mix(in srgb, var(--za-accent) 35%, transparent);
+    border-top-color: var(--za-accent);
+    animation: motion-spin 0.9s linear infinite;
+  }
+
+  .task-overview-work-top time,
+  .task-overview-work-meta {
+    @apply tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-work-meta {
+    @apply inline-flex max-w-[60%] flex-wrap items-center justify-end gap-x-1;
+    text-align: right;
+  }
+
+  .task-overview-work-meta-part {
+    @apply inline-flex items-center gap-x-1;
+  }
+
+  .task-overview-work-meta-sep {
+    color: color-mix(in srgb, var(--za-text-muted) 70%, transparent);
+  }
+
+  .task-overview-work-provider {
+    @apply font-medium uppercase tracking-wide;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-work-model {
+    @apply font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .task-overview-work-duration {
+    @apply tabular-nums;
+  }
+
+  .task-overview-work-item h3 {
+    @apply text-sm font-semibold leading-snug;
+    color: var(--za-text);
+  }
+
+  .task-overview-work-item p {
+    @apply mt-1 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-steps {
+    @apply m-0 mt-3 flex list-none flex-col gap-1.5 p-0;
+  }
+
+  .task-overview-plan-step {
+    @apply grid items-center gap-2 text-[12px] leading-snug;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-step.is-current {
+    color: var(--za-text);
+    font-weight: 550;
+  }
+
+  .task-overview-plan-step.is-completed {
+    opacity: 0.78;
+  }
+
+  .task-overview-plan-step.is-failed {
+    color: var(--za-danger, #ef4444);
+  }
+
+  .task-overview-plan-step-marker {
+    @apply block h-2 w-2 rounded-full;
+    background: color-mix(in srgb, var(--za-text-muted) 55%, transparent);
+  }
+
+  /* 当前/进行中子任务：静止蓝点 + 外扩 ring（motion-ripple 基元），与 sidebar
+   * 运行点、卡片 spinner 的「活着」语义一致。动画只跑在 ::after 的
+   * transform/opacity 上，本体 box-shadow 保持静态，避免持续重绘。 */
+  .task-overview-plan-step.is-running .task-overview-plan-step-marker,
+  .task-overview-plan-step.is-current .task-overview-plan-step-marker {
+    position: relative;
+    isolation: isolate;
+    overflow: visible;
+    background: var(--za-accent, #3b82f6);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent, #3b82f6) 22%, transparent);
+    --motion-ripple-color: var(--za-accent, #3b82f6);
+    --motion-ripple-strength: 45%;
+    --motion-ripple-scale: 2.4;
+    --motion-ripple-duration: 1.6s;
+    --motion-ripple-peak: 0.9;
+  }
+
+  .task-overview-plan-step.is-running .task-overview-plan-step-marker::after,
+  .task-overview-plan-step.is-current .task-overview-plan-step-marker::after {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    border: 1px solid color-mix(
+      in srgb,
+      var(--motion-ripple-color, var(--za-accent, #3b82f6)) var(--motion-ripple-strength, 45%),
+      transparent
+    );
+    border-radius: inherit;
+    content: '';
+    pointer-events: none;
+    transform: scale(0.72);
+    will-change: transform, opacity;
+    animation: motion-ripple var(--motion-ripple-duration, 1.6s) var(--za-ease-standard) infinite;
+  }
+
+  .task-overview-plan-step.is-completed .task-overview-plan-step-marker {
+    background: color-mix(in srgb, var(--za-success, #22c55e) 85%, transparent);
+  }
+
+  .task-overview-plan-step.is-failed .task-overview-plan-step-marker {
+    background: var(--za-danger, #ef4444);
+  }
+
+  .task-overview-plan-step-title {
+    @apply min-w-0 truncate;
+  }
+
+  .task-overview-plan-step-status {
+    @apply shrink-0 text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-plan-step.is-current .task-overview-plan-step-status {
+    color: var(--za-accent, #3b82f6);
+  }
+
+  .task-overview-progress {
+    @apply mt-3 h-1 overflow-hidden rounded-full;
+    background: var(--za-surface-1);
+  }
+
+  .task-overview-progress i {
+    @apply block h-full rounded-full;
+    background: var(--za-text);
+  }
+
+  /* ---------- 结果待验收（与推进中同款双列瀑布流） ---------- */
+  .result-section {
+    @apply mb-8;
+  }
+
+  .result-card-stack {
+    /* 兼容旧类名：等同 work-stream 稳定双列 */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .result-card-stack {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .result-card-stack > * {
+    min-width: 0;
+  }
+
+  .result-card-state {
+    color: #2f7a57;
+  }
+
+  .result-card-seal {
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold not-italic;
+    background: color-mix(in srgb, #3f9a6f 18%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  /* 结果卡：按钮贴右下 */
+  .task-overview-work-item.result-card {
+    @apply flex flex-col;
+  }
+
+  .result-card-actions {
+    /* 瀑布流下卡片高度随内容，操作区贴内容末尾 */
+    @apply mt-3 flex flex-wrap items-center justify-end gap-2 pt-0;
+  }
+
+  .result-card-actions .task-overview-btn {
+    @apply text-xs;
+  }
+
+  .result-card {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+    transition:
+      border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 420ms cubic-bezier(0.33, 0, 0.2, 1),
+      transform 420ms cubic-bezier(0.33, 0, 0.2, 1);
+  }
+
+  .result-card--submitting .result-card-accept { min-width: 7.5rem; }
+
+  .result-card-spinner {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    margin-right: 0.45rem;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    vertical-align: -0.1rem;
+    animation: result-card-spin 700ms linear infinite;
+  }
+
+  .result-card--celebrating,
+  .result-card--exiting {
+    border-color: color-mix(in srgb, var(--za-accent) 38%, var(--za-line));
+    background: color-mix(in srgb, var(--za-accent) 7%, var(--za-surface-0));
+    box-shadow: 0 14px 34px color-mix(in srgb, var(--za-accent) 13%, transparent);
+  }
+
+  .result-card--celebrating {
+    animation: result-card-celebrate-lift 980ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .result-card--celebrating .result-card-seal {
+    animation: result-card-seal-pop 640ms cubic-bezier(0.34, 1.45, 0.45, 1) both;
+  }
+
+  .result-card--celebrating .result-card-accept,
+  .result-card--exiting .result-card-accept {
+    color: var(--za-surface-0);
+    background: var(--za-accent);
+  }
+
+  .result-card--exiting {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--za-accent) 4%, transparent);
+    pointer-events: none;
+  }
+
+  .result-card-celebration {
+    position: absolute;
+    top: 2.2rem;
+    right: 4.5rem;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
+  }
+
+  .result-card-celebration i {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--za-accent);
+    animation: result-card-spark 860ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .result-card-celebration i:nth-child(2) { --spark-x: 28px; --spark-y: -18px; animation-delay: 40ms; }
+  .result-card-celebration i:nth-child(3) { --spark-x: 34px; --spark-y: 10px; animation-delay: 80ms; }
+  .result-card-celebration i:nth-child(4) { --spark-x: -27px; --spark-y: 18px; animation-delay: 55ms; }
+  .result-card-celebration i:nth-child(5) { --spark-x: -33px; --spark-y: -9px; animation-delay: 100ms; }
+  .result-card-celebration i:nth-child(6) { --spark-x: 4px; --spark-y: -30px; animation-delay: 25ms; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .result-card,
+    .result-card-spinner,
+    .result-card--celebrating,
+    .result-card--celebrating .result-card-seal,
+    .result-card-celebration i {
+      animation: none;
+      transition-duration: 0.01ms;
+    }
+
+    /* 进行中子任务点：撤掉扩散环，只留静止蓝点本体 */
+    .task-overview-plan-step.is-running .task-overview-plan-step-marker::after,
+    .task-overview-plan-step.is-current .task-overview-plan-step-marker::after {
+      animation: none;
+      display: none;
+    }
+
+    .result-card-celebration { display: none; }
+
+    .result-card--exiting {
+      opacity: 0;
+      transform: none;
+    }
+  }
+
+  .work-item-actions {
+    /* 卡片高度随内容；按钮组贴内容末尾即可，不再依赖 grid 拉伸 */
+    @apply mt-3 flex flex-wrap items-center justify-end gap-2 pt-0;
+  }
+
+  /* 兼容旧类名，避免残留引用 */
+  .task-overview-result-list {
+    @apply grid gap-3;
+  }
+  .task-overview-result-row {
+    @apply flex items-center gap-4 rounded-2xl border px-4 py-3.5;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+  .task-overview-result-seal {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold;
+    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  /* ---------- 空态 ---------- */
+  .task-overview-empty {
+    @apply flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed py-16 text-sm;
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-empty-action {
+    @apply mt-1;
+  }
+
+  /* ---------- 任务页 collection-shell / task-table ---------- */
+  .task-overview-page--collection {
+    @apply max-w-6xl;
+  }
+
+  .task-collection-head {
+    @apply mb-3 flex items-center;
+  }
+
+  .task-collection-head h1 {
+    @apply text-2xl font-semibold leading-tight tracking-tight;
+    color: var(--za-text);
+  }
+
+  .task-collection-tools {
+    @apply mb-3 flex flex-wrap items-center justify-between gap-3;
+  }
+
+  .task-filter-group {
+    @apply inline-flex flex-wrap items-center gap-1 rounded-full border p-1;
+    background: color-mix(in srgb, var(--za-surface-1) 70%, var(--za-surface-0));
+    border-color: var(--za-line);
+  }
+
+  .task-filter-group button {
+    @apply rounded-full px-3 py-1.5 text-xs font-medium transition-colors;
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .task-filter-group button em {
+    @apply ml-1 not-italic tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-filter-group button.is-active {
+    background: var(--za-surface-0);
+    color: var(--za-text);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 8%, transparent);
+  }
+
+  .task-filter-group button.is-active em {
+    color: var(--za-text-soft);
+  }
+
+  .task-search-box {
+    @apply inline-flex min-w-[14rem] items-center gap-2 rounded-full border px-3 py-2 text-xs;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+  }
+
+  .task-search-box input {
+    @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-xs outline-none;
+    color: var(--za-text);
+  }
+
+  .task-search-box input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .task-table {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .task-table-head {
+    @apply grid items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em];
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    border-color: var(--za-line);
+    color: var(--za-text-muted);
+    background: color-mix(in srgb, var(--za-surface-1) 55%, var(--za-surface-0));
+  }
+
+  .task-record {
+    @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    border-color: var(--za-line);
+  }
+
+  /* Grid items default min-width:auto; allow columns to shrink and clip. */
+  .task-record > * {
+    @apply min-w-0;
+  }
+
+  .task-record-title {
+    @apply flex min-w-0 items-start gap-2.5 overflow-hidden;
+  }
+
+  /* Inner text wrapper must also min-w-0 or truncate on strong/span never fires. */
+  .task-record-title > div {
+    @apply min-w-0 flex-1 overflow-hidden;
+  }
+
+  .task-status-dot {
+    @apply mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full;
+    background: var(--za-text-faint);
+  }
+
+  .task-status-dot--user {
+    background: #c48a3a;
+  }
+
+  .task-status-dot--peer {
+    background: var(--za-accent);
+  }
+
+  .task-status-dot--review {
+    background: #3f9a6f;
+  }
+
+  .task-status-dot--paused {
+    background: var(--za-text-faint);
+  }
+
+  .task-record-title strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .task-record-title span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .task-action-owner {
+    @apply inline-flex w-fit max-w-full truncate rounded-full px-2.5 py-1 text-[11px] font-medium;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .task-action-owner--user {
+    background: color-mix(in srgb, #c48a3a 16%, var(--za-surface-0));
+    color: #9a6a2a;
+  }
+
+  .task-action-owner--peer {
+    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .task-action-owner--review {
+    background: color-mix(in srgb, #3f9a6f 14%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  .task-action-owner--paused {
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .task-goal-progress {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .task-goal-progress b {
+    @apply shrink-0 text-xs font-semibold tabular-nums;
+    color: var(--za-text);
+  }
+
+  .task-goal-progress > div {
+    @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
+    background: var(--za-surface-1);
+  }
+
+  .task-goal-progress > div > i {
+    @apply block h-full rounded-full;
+    background: var(--za-accent);
+  }
+
+  .task-record time {
+    @apply text-xs tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-row-open {
+    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .task-row-open:hover {
+    background: var(--za-surface-1);
+  }
+
+  .task-table-empty {
+    @apply m-0 rounded-none border-0 border-t;
+    border-color: var(--za-line);
+  }
+
+  /* ---------- 历史页 history-list ---------- */
+  .history-list {
+    @apply overflow-hidden rounded-2xl border;
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
+  }
+
+  .history-record {
+    @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
+    grid-template-columns: auto minmax(0, 1.5fr) minmax(4.5rem, 0.6fr) minmax(6rem, 0.8fr) auto;
+    border-color: var(--za-line);
+  }
+
+  .history-state {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm font-semibold;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .history-state--accepted {
+    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
+    color: #2f7a57;
+  }
+
+  .history-state--archived {
+    background: color-mix(in srgb, var(--za-accent) 12%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .history-state--cancelled {
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .history-state--failed {
+    background: color-mix(in srgb, #c45b5b 14%, var(--za-surface-0));
+    color: #a53f3f;
+  }
+
+  .history-record-title {
+    @apply min-w-0;
+  }
+
+  .history-record-title strong {
+    @apply block truncate text-sm font-semibold;
+    color: var(--za-text);
+  }
+
+  .history-record-title span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .history-badge {
+    @apply text-xs font-semibold;
+  }
+
+  .history-badge--accepted {
+    color: #2f7a57;
+  }
+
+  .history-badge--archived {
+    color: var(--za-accent);
+  }
+
+  .history-badge--cancelled {
+    color: var(--za-text-muted);
+  }
+
+  .history-badge--failed {
+    color: #a53f3f;
+  }
+
+  .history-evidence-count {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .history-row-open {
+    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .history-row-open:hover {
+    background: var(--za-surface-1);
+  }
+
+  .history-list-empty {
+    @apply m-0 rounded-none border-0;
+  }
+
+  @media (max-width: 1100px) {
+    .task-overview-discussion-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 900px) {
+    .task-overview-handoff-row {
+      grid-template-columns: 1fr;
+      @apply gap-2;
+    }
+
+    .task-overview-hero {
+      @apply flex-col items-start;
+    }
+
+    .task-overview-btn {
+      @apply w-full;
+    }
+
+    .task-table-head {
+      display: none;
+    }
+
+    .task-record {
+      grid-template-columns: 1fr;
+      @apply gap-2;
+    }
+
+    .task-row-open {
+      @apply justify-self-start;
+    }
+
+    .task-collection-tools {
+      @apply flex-col items-stretch;
+    }
+
+    .task-search-box {
+      @apply w-full;
+    }
+
+    .history-record {
+      grid-template-columns: auto 1fr;
+      @apply gap-2;
+    }
+
+    .history-badge,
+    .history-evidence-count,
+    .history-row-open {
+      grid-column: 2;
+      @apply justify-self-start;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .task-overview-discussion-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .task-overview-section-head {
+      @apply items-start;
+    }
+  }
+}
+
+/* ---------- 工作台：任务/历史 Drawer ---------- */
+@layer components {
+  .workbench-collection-drawer {
+    --pa-drawer-width: min(920px, 92vw);
+  }
+
+  .workbench-collection-drawer-shell {
+    @apply flex h-full min-h-0 flex-col;
+    background: var(--za-app-bg);
+  }
+
+  .workbench-collection-drawer-header {
+    @apply flex items-center justify-between gap-4 border-b px-5 py-4;
+    border-color: var(--za-line);
+  }
+
+  .workbench-collection-drawer-kicker {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em];
+    color: var(--za-text-muted);
+  }
+
+  .workbench-collection-drawer-header h2 {
+    @apply m-0 text-base font-semibold;
+    color: var(--za-text);
+  }
+
+  .workbench-collection-drawer-header p {
+    @apply m-0 mt-1 text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .workbench-collection-drawer-close {
+    @apply rounded-full border px-3 py-1.5 text-xs font-semibold;
+    border-color: var(--za-line);
+    background: var(--za-surface-0);
+    color: var(--za-text);
+  }
+
+  .workbench-collection-drawer-body {
+    @apply min-h-0 flex-1 overflow-y-auto;
+  }
+}
+
+
+/* ---------- 查看结果 Drawer / 只读会话结果 ---------- */
+/* 只设宽度 token，不要写 w-full：否则 unlayered 的 width:100% 会压过 Overlay 的 70% 抽屉宽 */
+.conversation-result-drawer {
+  --pa-drawer-width: 70vw;
+  @apply flex h-full min-h-0 flex-col;
+  background: var(--za-surface-0);
+}
+
+.conversation-result-drawer__head {
+  @apply flex items-start justify-between gap-3 border-b px-5 py-4;
+  border-color: var(--za-line);
+}
+
+.conversation-result-drawer__head h2 {
+  @apply m-0 text-base font-semibold;
+  color: var(--za-text);
+}
+
+.conversation-result-drawer__head p {
+  @apply m-0 mt-1 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-drawer__close {
+  @apply rounded-full border px-3 py-1 text-xs;
+  border-color: var(--za-line);
+  color: var(--za-text-muted);
+  background: transparent;
+}
+
+.conversation-result-drawer__body {
+  @apply min-h-0 flex-1 overflow-y-auto px-5 py-4;
+}
+
+/* ---------- 继续讨论：会话 Drawer（可关闭，挂载 ChatSurface） ---------- */
+/* 壳头已收敛：标题/状态/关闭由 ChatHeader 承担，Drawer 不再叠一层 chrome。 */
+.conversation-chat-drawer {
+  --pa-drawer-width: min(920px, 92vw);
+  @apply flex h-full min-h-0 flex-col;
+  background: var(--za-surface-0);
+}
+
+.conversation-chat-drawer-shell {
+  @apply flex h-full min-h-0 flex-col;
+}
+
+.conversation-chat-drawer__body {
+  @apply min-h-0 flex-1 overflow-hidden;
+}
+
+.conversation-chat-drawer__body .thread,
+.conversation-chat-drawer__body .chat-surface,
+.conversation-chat-drawer__body > * {
+  @apply h-full min-h-0;
+}
+
+/* Drawer 内主栏 + 当前问题条：略收占高，避免再显第三层面板感 */
+.conversation-chat-drawer .chat-header {
+  min-height: 44px;
+}
+
+.conversation-chat-drawer .current-turn-context {
+  min-height: 34px;
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.conversation-result-view {
+  @apply flex h-full min-h-0 flex-col gap-4;
+  transform-origin: center top;
+  transition:
+    opacity 420ms cubic-bezier(0.33, 0, 0.2, 1),
+    transform 420ms cubic-bezier(0.33, 0, 0.2, 1);
+}
+
+/* 验收三段式：与首页结果卡共用 980ms 庆祝 + 420ms 退场的节奏。 */
+.conversation-result-view--submitting .task-overview-btn--primary {
+  min-width: 7.5rem;
+}
+
+.conversation-result-view--celebrating {
+  animation: result-card-celebrate-lift 980ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.conversation-result-view--celebrating .task-overview-btn--primary,
+.conversation-result-view--exiting .task-overview-btn--primary {
+  color: var(--za-surface-0);
+  background: var(--za-accent);
+  border-color: var(--za-accent);
+}
+
+.conversation-result-view--exiting {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.985);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-result-view--celebrating {
+    animation-duration: 1ms;
+  }
+
+  .conversation-result-view--exiting {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+.conversation-result-view__kicker {
+  @apply text-[11px] font-medium uppercase tracking-wide;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__title {
+  @apply m-0 mt-1 text-lg font-semibold leading-snug;
+  color: var(--za-text);
+}
+
+.conversation-result-view__meta {
+  @apply m-0 mt-1 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__section {
+  @apply rounded-2xl border p-3;
+  border-color: var(--za-line);
+  background: color-mix(in srgb, var(--za-surface-0) 92%, var(--za-text) 4%);
+}
+
+.conversation-result-view__section--grow {
+  @apply flex min-h-0 flex-1 flex-col;
+}
+
+.conversation-result-view__section-title {
+  @apply mb-2 text-xs font-semibold;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__progress {
+  @apply h-1.5 overflow-hidden rounded-full;
+  background: color-mix(in srgb, var(--za-line) 80%, transparent);
+}
+
+.conversation-result-view__progress > i {
+  @apply block h-full rounded-full;
+  background: #3f9a6f;
+}
+
+.conversation-result-view__hint {
+  @apply m-0 mt-2 text-xs;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__error {
+  @apply m-0 text-xs;
+  color: #c4554d;
+}
+
+.conversation-result-view__task-list {
+  @apply m-0 list-none space-y-2 p-0;
+}
+
+.conversation-result-view__task-list li {
+  @apply flex items-start gap-2 text-sm;
+  color: var(--za-text);
+}
+
+.conversation-result-view__task-status {
+  @apply shrink-0 rounded-full px-2 py-0.5 text-[11px];
+  background: color-mix(in srgb, var(--za-line) 70%, transparent);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__messages {
+  @apply flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1;
+}
+
+.conversation-result-view__msg {
+  @apply rounded-xl border px-3 py-2;
+  border-color: var(--za-line);
+  background: var(--za-surface-0);
+}
+
+.conversation-result-view__footer > .task-overview-btn,
+.conversation-result-view__continue button {
+  @apply inline-flex min-h-10 items-center justify-center rounded-full px-5 text-sm font-semibold;
+}
+
+.conversation-result-view__continue button {
+  @apply border transition-colors;
+  border-color: var(--za-line-strong);
+  background: var(--za-surface-1);
+  color: var(--za-text);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 8%, transparent);
+}
+
+.conversation-result-view__continue button:hover:not(:disabled) {
+  border-color: var(--za-text-soft);
+  background: var(--za-surface-2);
+}
+
+.conversation-result-view__continue button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--za-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.conversation-result-view__msg-role {
+  @apply mb-1 text-[11px] font-semibold;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__msg-body {
+  @apply whitespace-pre-wrap break-words text-sm leading-relaxed;
+  color: var(--za-text);
+}
+
+.conversation-result-view__msg.is-assistant {
+  border-color: color-mix(in srgb, #3f9a6f 28%, var(--za-line));
+}
+
+.conversation-result-view__footer {
+  /* 两侧操作按按钮顶边对齐；继续任务下方的说明不再推高确认按钮。 */
+  @apply flex items-start justify-between gap-3 pt-3;
+}
+
+.conversation-result-view__continue {
+  @apply flex min-w-0 flex-col items-start gap-1;
+}
+
+.conversation-result-view__continue-hint {
+  @apply text-xs leading-relaxed;
+  color: var(--za-text-muted);
+}
+
+/* 本任务高亮：只用一层边框，避免 border + box-shadow 叠成双边框 */
+.conversation-result-view__msg.is-task-target {
+  border-color: color-mix(in srgb, #3f9a6f 55%, var(--za-line));
+  background: color-mix(in srgb, #3f9a6f 6%, var(--za-surface-0));
+}
+
+.conversation-result-view__target-tag {
+  @apply ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium;
+  background: color-mix(in srgb, #3f9a6f 18%, transparent);
+  color: #2f7a57;
+}
+
+.conversation-result-view__msg-body .markdown-content {
+  @apply text-sm leading-relaxed;
+  color: var(--za-text);
+}
+
+.conversation-result-view__msg-body .markdown-content pre {
+  @apply overflow-x-auto rounded-lg p-2 text-xs;
+  background: color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0));
+}
+
+.conversation-result-view__msg-body .markdown-content code {
+  @apply text-[0.85em];
+}
+
+.conversation-result-view__msg-body .markdown-content p {
+  @apply m-0 mb-2 last:mb-0;
+}
+
+.conversation-result-view__msg-body .markdown-content ul,
+.conversation-result-view__msg-body .markdown-content ol {
+  @apply my-2 pl-5;
+}
+
+.task-details-view {
+  @apply flex flex-col gap-6 p-5;
+}
+
+.task-details-view__header {
+  @apply border-b pb-5;
+  border-color: var(--za-line);
+}
+
+.task-details-view__header > span {
+  @apply text-[11px] font-semibold uppercase tracking-[0.14em];
+  color: var(--za-accent);
+}
+
+.task-details-view__header h2 {
+  @apply mt-1 text-xl font-semibold;
+  color: var(--za-text);
+}
+
+.task-details-view__header p,
+.task-details-view__muted,
+.task-details-view__empty p,
+.task-details-plan p {
+  @apply mt-1 text-sm leading-relaxed;
+  color: var(--za-text-soft);
+}
+
+.task-details-view__section {
+  @apply flex flex-col gap-3;
+}
+
+.task-details-view__section h3 {
+  @apply text-xs font-semibold uppercase tracking-[0.12em];
+  color: var(--za-text-muted);
+}
+
+.task-details-view__empty,
+.task-details-plan {
+  @apply rounded-xl border p-4;
+  border-color: var(--za-line);
+  background: var(--za-surface-0);
+}
+
+.task-details-view__empty strong,
+.task-details-plan__heading strong {
+  color: var(--za-text);
+}
+
+.task-details-view__history {
+  @apply flex flex-col gap-3;
+}
+
+.task-details-plan__heading {
+  @apply flex items-start justify-between gap-3;
+}
+
+.task-details-plan__heading span {
+  @apply rounded-full px-2 py-0.5 text-[10px] font-medium uppercase;
+  background: color-mix(in srgb, var(--za-accent) 10%, transparent);
+  color: var(--za-accent);
+}
+
+.task-details-plan__progress {
+  @apply mt-3 flex items-center gap-3 text-xs;
+  color: var(--za-text-muted);
+}
+
+.task-details-plan__progress progress {
+  @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
+  accent-color: var(--za-accent);
+}
+
+
+/* 讨论区降级：次于行动权三桶 */
+.task-overview-section--discussion {
+  opacity: 0.92;
+}
+.task-overview-section--discussion .task-overview-section-title h2 {
+  font-size: 0.95em;
+  font-weight: 500;
+}

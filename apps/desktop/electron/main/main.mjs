@@ -1,7 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -44,6 +44,10 @@ import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
+import { createSkillHubApiClient } from './skillhub-api-client.mjs';
+import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
+import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
+import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
 import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
@@ -60,7 +64,9 @@ import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-cre
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
+import { collectCacheHitRateMetrics } from './cache-hit-rate.mjs';
 import { collectUsageDaily } from './usage-daily.mjs';
+import { collectUsageDay } from './usage-day.mjs';
 import { listChannelDescriptors, listServiceTemplates, resolveChannel } from './provider-channels.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { createHostRestarter } from './host-restart.mjs';
@@ -74,6 +80,7 @@ import { createTrayController, TRAY_RECENT_EXPANDED_LIMIT, TRAY_RECENT_LIMIT } f
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import {
+  createAutomationStore,
   createGoalPlanStore,
   createGoalRunner,
   decideIntakeConvergence,
@@ -86,6 +93,7 @@ import {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from '@peer-agent/runtime-node';
 import {
@@ -107,12 +115,20 @@ import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
+import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
+import { createAutomationRunner } from './automation-runner.mjs';
+import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
+import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
 import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
-import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
+import {
+  applyGoalMessageRoute,
+  consumesRequestedUserInput,
+  routeGoalMessage,
+} from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import {
   buildPersistedCompactedMessages,
@@ -133,6 +149,11 @@ import { createConversationSessionIpcRegistrations } from './ipc/register-conver
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
+import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
+import { createTaskOverviewIpcRegistrations } from './ipc/register-task-overview-ipc.mjs';
+import { createTaskOverviewAggregator } from './task-overview-aggregator.mjs';
+import { createAutomationApplicationService } from './automation-application-service.mjs';
+import { createAutomationChatProposalService } from './automation-chat-proposal-service.mjs';
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
@@ -144,6 +165,7 @@ import { createRuntimeHostIpcRegistrations } from './ipc/register-runtime-host-i
 import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mjs';
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
+import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
@@ -260,7 +282,19 @@ const sessionStore = createSessionStore({
   preferredAccessLevel: initialSettings.localAccessLevel,
 });
 
-let skillStore;
+// SkillStore must exist before createLlmChatService so chat-time tool projection
+// can read enabled skills. Marketplace services remain lazy in startLocalRuntime.
+const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
+const skillSourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
+let skillStore = disableLocalSkill
+  ? null
+  : createSkillStore({
+      userDataPath: dataHome,
+      sourceRoots: skillSourceRoots,
+      workspacePath: initialSettings.activeWorkspace || null,
+    });
+let skillMarketplaceService;
+let skillHubMarketplaceService;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
@@ -332,6 +366,7 @@ function waitForMcpOAuthCallback(expectedState) {
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
+  broadcastToAllWindows('taskOverview:changed', { reason: 'conversations:changed' });
   if (event.writerPid === process.pid) return;
 
   const workspacePath = typeof event.workspacePath === 'string' ? event.workspacePath : null;
@@ -343,12 +378,36 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
   trayController?.scheduleRefresh?.();
 });
 
+const automationStore = createAutomationStore({
+  onChange: (payload) => {
+    broadcastToAllWindows('automations:changed', payload);
+    broadcastToAllWindows('taskOverview:changed', { reason: 'automations:changed' });
+  },
+});
+let automationRuntimeOwner = null;
+let automationRunner = null;
+const automationApplicationService = createAutomationApplicationService({
+  store: automationStore,
+  getRunner: () => automationRunner,
+  getScheduler: () => automationRuntimeOwner?.scheduler ?? null,
+});
+const automationProposalService = createAutomationChatProposalService({
+  getContext: (conversationId) => (
+    conversationStore.getConversation(conversationId)?.automationCreateContext ?? null
+  ),
+  saveContext: (conversationId, context) => (
+    conversationStore.updateAutomationCreateContext(conversationId, context)
+  ),
+  createAutomation: (definition) => automationApplicationService.create(definition),
+});
+
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
+    broadcastToAllWindows('taskOverview:changed', { reason: 'goalPlans:changed' });
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
@@ -367,6 +426,17 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let localToolHost = null;
+// TaskOverview 聚合器：组装 goal-plan-store 与 automation-store 的投影快照，
+// 供 taskOverview:list IPC 使用（阶段 1，见 peer-2-0-gap-analysis §11）。
+const taskOverviewAggregator = createTaskOverviewAggregator({
+  goalPlanStore,
+  automationStore,
+  listConversations: (params) => conversationStore.listConversations(params),
+  // localToolHost 在 startLocalRuntime 后才赋值；list 时惰性读取，避免启动环依赖。
+  listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
+  // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
+  listProviders: () => llmConfigStore.listProviders(),
+});
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
   isBrowserReady: (conversationId) => {
@@ -529,6 +599,19 @@ function openConversationFromTaskNotification(payload = {}) {
   return false;
 }
 
+function openAutomationRunFromNotification(payload = {}) {
+  showOrCreateMainWindow();
+  const window = getMainWindow();
+  if (!window || window.isDestroyed()) return;
+  const send = () => window.webContents.send('automations:open-run', {
+    automationId: typeof payload.automationId === 'string' ? payload.automationId : '',
+    runId: typeof payload.runId === 'string' ? payload.runId : '',
+    conversationId: payload.conversationId ?? null,
+  });
+  if (window.webContents.isLoadingMainFrame()) window.webContents.once('did-finish-load', send);
+  else send();
+}
+
 function showOrCreateMainWindow() {
   const existing = getPeerAgentMainWindow();
   if (existing && !existing.isDestroyed()) {
@@ -594,6 +677,19 @@ function createAppTrayController() {
     workspaceRoot: workspaceRoot || path.join(__dirname, '../../..'),
     resourcesRoot: process.resourcesPath,
     listRecentConversations: listTrayRecentConversations,
+    listRecentAutomationRuns: async ({ limit = 3 } = {}) => automationStore.listRuns({ limit })
+      .filter((run) => run.receipt?.summary || run.failureReason || run.blockedReason)
+      .map((run) => ({
+        automationId: run.automationId,
+        runId: run.runId,
+        automationName: run.snapshot?.name,
+        status: run.status,
+        summary: run.receipt?.summary || run.failureReason || run.blockedReason,
+      })),
+    getAutomationRuntime: async () => ({
+      globallyPaused: automationStore.getRuntimeState().globallyPaused,
+      activeCount: automationStore.listDefinitions({ statuses: ['active'] }).length,
+    }),
     handlers: {
       onOpenConversation: (payload) => {
         openConversationFromTaskNotification({
@@ -606,6 +702,13 @@ function createAppTrayController() {
       onNewChat: () => openTrayNewChat(),
       onOpenApp: () => {
         showOrCreateMainWindow();
+      },
+      onOpenAutomations: () => openAutomationRunFromNotification({}),
+      onOpenAutomationRun: (target) => openAutomationRunFromNotification(target),
+      onToggleAutomations: (paused) => {
+        const scheduler = automationRuntimeOwner?.scheduler;
+        if (scheduler) scheduler.setGloballyPaused(paused);
+        else automationStore.setRuntimeState({ globallyPaused: paused });
       },
       onQuit: () => {
         app.quit();
@@ -953,12 +1056,16 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
+  skillStore,
+  automationProposalService,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
   // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
   ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
+  // 全局兜底多模态模型配置（settings.json → fallbackVision）。
+  getSettings: () => settingsStore.getAll(),
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
@@ -1516,6 +1623,7 @@ const providerConfigurationApplicationService = createProviderConfigurationAppli
   removeGroup: (groupId) => llmConfigStore.removeGroup(groupId),
   setDefault: (id) => llmConfigStore.setDefault(id),
   testConnection: (id) => llmConfigStore.testConnection(id),
+  completePrompt: (params) => llmConfigStore.completePrompt(params),
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
   notifyOAuthRefreshed: ({ reason, refreshed }) => {
     console.info(`[llm] silent oauth refresh (${reason}): refreshed ${refreshed} credential(s)`);
@@ -1626,6 +1734,8 @@ const conversationApplicationService = createConversationApplicationService({
   },
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
+  updateAutomationCreateContext: (id, context) =>
+    conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
   appendMessage: (id, message) => conversationStore.appendMessage(id, message),
   updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
@@ -1719,6 +1829,7 @@ const conversationSessionApplicationService = createConversationSessionApplicati
   scheduleRecovery: (task) => queueMicrotask(task),
   startGoalRunner: (planId) => goalRunner?.start(planId) ?? null,
   markTaskRead: (planId) => taskNotificationBroker?.markTaskRead(planId),
+  markConversationRead: (conversationId) => conversationStore?.markRead?.(conversationId),
   reportRecoveryFailure: (error) => {
     console.error('[main] recover active goal runner failed:', error?.message || error);
   },
@@ -1758,6 +1869,8 @@ const fileAccessApplicationService = createFileAccessApplicationService({
   statPath: (candidate) => statSync(candidate),
   readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
   readFile: (candidate) => readFileSync(candidate),
+  writeFile: (candidate, content) => writeFileSync(candidate, content, 'utf8'),
+  createDirectory: (candidate) => mkdirSync(candidate, { recursive: false }),
   watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
   executeGit: (cwd, args, options) =>
     execFileAsync('git', ['-C', cwd, ...args], options),
@@ -1774,6 +1887,8 @@ const goalApplicationService = createGoalApplicationService({
   revisePlan: (planId, patch, options) => goalPlanStore.revisePlan(planId, patch, options),
   recordApproval: (planId, approval) => goalPlanStore.recordApproval(planId, approval),
   setPlanStatus: (planId, status) => goalPlanStore.setPlanStatus(planId, status),
+  markRequestedUserInput: (planId, runnerPatch) =>
+    goalPlanStore.markRequestedUserInput(planId, runnerPatch),
   recordManualConfirmation: (planId, confirmation) =>
     goalPlanStore.recordManualConfirmation(planId, confirmation),
   recordTaskEvidence: (planId, taskId, change) =>
@@ -1903,6 +2018,7 @@ function registerDesktopIpcHost() {
     ...createChatIpcRegistrations({
       chat: {
         send: handleChatSend,
+        startTask: handleChatStartTask,
         abort: (payload) => chatStreamApplicationService.abort(payload),
         reattach: (payload) => chatStreamApplicationService.reattach(payload),
         listActive: () => chatStreamApplicationService.listActive(),
@@ -1926,7 +2042,16 @@ function registerDesktopIpcHost() {
       usage: {
         stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
         daily: (params) => collectUsageDaily(params),
+        day: (params) => collectUsageDay({ ...params, llmConfigStore }),
+        cacheHitRate: () => collectCacheHitRateMetrics(),
       },
+    }),
+    ...createAutomationIpcRegistrations({
+      automations: automationApplicationService,
+      proposals: automationProposalService,
+    }),
+    ...createTaskOverviewIpcRegistrations({
+      taskOverview: taskOverviewAggregator,
     }),
     ...createGoalIpcRegistrations({
       goalPlans: goalApplicationService,
@@ -1992,6 +2117,37 @@ function registerDesktopIpcHost() {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.unlinkSkill(skillId);
         },
+        uninstall: (skillId) => {
+          if (!skillStore) throw new Error('skill_store_not_available');
+          return skillStore.uninstallSkill(skillId);
+        },
+        marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
+        marketplaceGetDetail: (catalogId) => skillMarketplaceService?.getDetail(catalogId) ?? null,
+        marketplaceInstall: (catalogId) => {
+          if (!skillMarketplaceService) return { ok: false, error: 'skill_marketplace_not_available' };
+          return skillMarketplaceService.install(catalogId);
+        },
+        skillHubQuery: (query) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.query(query);
+        },
+        skillHubGetDetail: (identity) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.getDetail(identity);
+        },
+        skillHubGetStatus: () => skillHubMarketplaceService?.getStatus() ?? { status: 'idle', nextPage: 1, total: 0, indexed: 0, updatedAt: null, error: null },
+        skillHubSync: (options) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.sync(options);
+        },
+        skillHubInstall: (identity) => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.install(identity);
+        },
+        skillHubListCategories: () => {
+          if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
+          return skillHubMarketplaceService.listCategories();
+        },
       },
     }),
     ...createPendingTaskIpcRegistrations({
@@ -2045,6 +2201,9 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
+          // 相对 hiddenInset 默认原点下移，使三点在约 40px 标题栏内垂直居中
+          //（对照 Codex 观感；仅 macOS 生效）。
+          trafficLightPosition: { x: 16, y: 18 },
         }
       : {}),
     titleBarStyle: 'hiddenInset',
@@ -2400,15 +2559,87 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
 
 function convergeIntakeAfterGoalTurn(conversationId, outcome) {
   try {
-    if (typeof goalPlanStore.getActivePlanByConversation !== 'function') return;
-    const active = goalPlanStore.getActivePlanByConversation(conversationId);
-    // 三分支决策抽到纯函数 decideIntakeConvergence（可单测）；main 只负责执行副作用。
-    if (decideIntakeConvergence(active, outcome) === 'remove') {
-      goalPlanStore.deletePlan(active.planId);
+    if (
+      typeof goalPlanStore.listPlansByConversation !== 'function'
+      || typeof goalPlanStore.getPlan !== 'function'
+    ) return;
+    const intake = goalPlanStore.listPlansByConversation(conversationId)
+      .map((meta) => goalPlanStore.getPlan(meta.planId))
+      .filter(Boolean)
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+      .find((plan) => plan?.activation?.kind === 'intake') ?? null;
+    const decision = decideIntakeConvergence(intake, outcome);
+    // request_user_input is the final action-owner fact of the turn. It must
+    // override a goal_update_task(completed) that happened earlier in the same
+    // turn, otherwise Task Overview sees only completed → result_ready.
+    if (decision === 'keep' && typeof goalPlanStore.markRequestedUserInput === 'function') {
+      goalPlanStore.markRequestedUserInput(intake.planId);
+    } else if (decision === 'remove') {
+      goalPlanStore.deletePlan(intake.planId);
     }
   } catch (error) {
     console.warn('[main] intake convergence failed:', error?.message || error);
   }
+}
+
+async function handleChatStartTask({
+  text,
+  title,
+  workspacePath,
+  mode = 'goal',
+  effort,
+  modelProviderId,
+  attachments = [],
+} = {}, sender) {
+  const normalizedText = String(text ?? '').trim();
+  if (!normalizedText && (!Array.isArray(attachments) || attachments.length === 0)) {
+    throw new Error('task_text_or_attachment_required');
+  }
+  const conversation = conversationStore.createConversation({
+    title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+    workspacePath: workspacePath ?? settingsStore.getAll().activeWorkspace ?? null,
+    mode,
+  });
+  if (effort !== undefined || modelProviderId !== undefined) {
+    conversationStore.updateModelEffort(conversation.id, {
+      effort,
+      modelProviderId,
+    });
+  }
+  const now = new Date().toISOString();
+  const userMessageId = randomUUID();
+  const assistantMessageId = randomUUID();
+  const streamId = randomUUID();
+  conversationStore.appendMessage(conversation.id, {
+    id: userMessageId,
+    role: 'user',
+    content: normalizedText,
+    timestamp: now,
+    ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
+  });
+  conversationStore.appendMessage(conversation.id, {
+    id: assistantMessageId,
+    role: 'assistant',
+    content: '',
+    timestamp: now,
+    segments: [],
+  });
+  void Promise.resolve(handleChatSend({
+    streamId,
+    assistantMessageId,
+    effort,
+    mode,
+    conversationId: conversation.id,
+    modelProviderId,
+    workspacePath: conversation.workspacePath ?? workspacePath ?? null,
+  }, sender)).catch((error) => {
+    console.error('[main] background task failed:', error);
+  });
+  return {
+    conversationId: conversation.id,
+    streamId,
+    assistantMessageId,
+  };
 }
 
 function handleChatSend({
@@ -2441,6 +2672,7 @@ function handleChatSend({
   const resolvedContinuityContext = persistedConversation?.messages
     ? desktopContinuityContextFromProjection(persistedProjection)
     : continuityContext;
+  let answeredRequestedUserInputPlanId = null;
   // Agent 默认（chat）与 legacy goal 共享 intake / 路由契约。
   if ((mode === 'goal' || mode === 'chat') && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
     const goal = latestUserTextFromProviderMessages(messages);
@@ -2450,11 +2682,18 @@ function handleChatSend({
         const activeGoal = activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null;
         const route = routeGoalMessage({ messageText: goal, activeGoalPlan: activeGoal });
         if (route.type === 'append_goal_event') {
+          const answersRequestedUserInput = consumesRequestedUserInput({
+            route,
+            activeGoalPlan: activeGoal,
+          });
           applyGoalMessageRoute({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
           });
+          if (answersRequestedUserInput) {
+            answeredRequestedUserInputPlanId = activeGoal.planId;
+          }
         } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =
             conversationStore.getConversation(conversationId)?.workspacePath ||
@@ -2526,12 +2765,25 @@ function handleChatSend({
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
-      // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
-      // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
-      // auto-start 判定抽到 shouldAutoStartAcceptedGoalRunner，accepted/executing 都要启动。
-      if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
-        // 双保险：outcome resolve 时再幂等 kick 一次。不能在这里按 conversation
-        // force-complete；goal-accepted 回调可能已经启动 Runner，再按会话收口会误杀 Runner 流。
+      if (answeredRequestedUserInputPlanId) {
+        // The user's answer ran in the foreground chat turn. Hand ownership back
+        // only after that turn has released the conversation runtime, and re-read
+        // persisted state before starting so a new block/completion wins the race.
+        void serializeAcceptedGoalRunnerHandoff({
+          forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+            conversationId,
+            { reason: 'goal_user_decision_handoff' },
+          ) ?? { released: Promise.resolve() },
+          isStillAccepted: () => shouldResumeGoalRunnerAfterUserDecision(
+            goalPlanStore.getPlan?.(answeredRequestedUserInputPlanId),
+          ),
+          startRunner: () => goalRunner?.start(answeredRequestedUserInputPlanId),
+        }).catch((error) => {
+          console.error('[main] resume goal runner after user decision failed:', error?.message || error);
+        });
+      } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
+        // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
+        // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
         queueMicrotask(() => {
           void goalRunner?.start(acceptedGoal.planId).catch((error) => {
             console.error('[main] auto-start goal runner failed:', error?.message || error);
@@ -2679,7 +2931,7 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
             tools,
             effort: conv.effort || 'default',
             supportsReasoning: Boolean(provider.supportsReasoning),
-            promptCaching: Boolean(provider.supportsPromptCaching),
+            promptCaching: provider.supportsPromptCaching !== false,
             maxOutputTokens: provider.maxOutputTokens || 0,
           };
         }
@@ -2892,7 +3144,7 @@ async function handleChatContextRestored(
           tools,
           effort: conv.effort || 'default',
           supportsReasoning: Boolean(provider.supportsReasoning),
-          promptCaching: Boolean(provider.supportsPromptCaching),
+          promptCaching: provider.supportsPromptCaching !== false,
           maxOutputTokens: provider.maxOutputTokens || 0,
         }
       : {
@@ -3031,17 +3283,36 @@ async function startRecoveryAndAppearance() {
 
 function startLocalRuntime() {
   const userDataPath = dataHome;
-  const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
-  // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
-  // listAvailableSkills 列举候选，用户显式 link 后才在 userData/skills 下建软链。
-  const sourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
-  skillStore = disableLocalSkill
-    ? null
-    : createSkillStore({
-        userDataPath,
-        sourceRoots,
-        workspacePath: settingsStore.getAll().activeWorkspace || null,
-      });
+  // skillStore 已在模块初始化阶段创建（供 chat tool projection 使用）。
+  // 这里只挂 marketplace，并把当前 workspace 再同步一次。
+  skillStore?.setWorkspacePath?.(settingsStore.getAll().activeWorkspace || null);
+  skillMarketplaceService = createSkillMarketplaceService({
+    catalogRoot: isPackaged ? path.join(process.resourcesPath, 'marketplace') : path.join(workspaceRoot, 'marketplace', 'dist'),
+    installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),
+  });
+  const skillHubApiClient = createSkillHubApiClient();
+  const skillHubStore = createSkillHubMarketplaceStore({
+    filePath: path.join(userDataPath, 'marketplace', 'skillhub-index.json'),
+    apiClient: skillHubApiClient,
+  });
+  const skillHubInstaller = createSkillHubVerifiedInstaller({
+    apiClient: skillHubApiClient,
+    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+  });
+  skillHubMarketplaceService = createSkillHubMarketplaceService({
+    store: skillHubStore,
+    installer: skillHubInstaller,
+    apiClient: skillHubApiClient,
+  });
+  // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
+  // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
+  const skillHubSyncStatus = skillHubMarketplaceService.getStatus();
+  const skillHubIndexStale = !skillHubSyncStatus.updatedAt || Date.now() - skillHubSyncStatus.updatedAt > 24 * 60 * 60 * 1_000;
+  if (skillHubSyncStatus.status === 'error' || skillHubSyncStatus.nextPage > 1 || skillHubIndexStale) {
+    void skillHubMarketplaceService.sync().catch((error) => {
+      console.warn('[skillhub] Background marketplace sync paused:', error instanceof Error ? error.message : error);
+    });
+  }
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,
@@ -3055,6 +3326,7 @@ function startLocalRuntime() {
     mcpRegistry,
     mcpCredentialResolver,
     shellProvider,
+    automationProposalService,
     // 让 AI 工具路径（goal_create_plan / goal_update_task）与 IPC 路径共享同一个
     // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
     goalProvider: createLocalGoalProvider({ goalPlanStore }),
@@ -3190,6 +3462,45 @@ function startBackgroundWork() {
   });
 }
 
+function startAutomationRuntime() {
+  const worktreeAdapter = createAutomationWorktreeAdapter();
+  const outcomeController = createAutomationOutcomeController({
+    store: automationStore,
+    createNotification: (options) => new Notification(options),
+    openRun: openAutomationRunFromNotification,
+    logger: console,
+  });
+  automationRunner = createAutomationRunner({
+    store: automationStore,
+    conversationStore,
+    llmChatService,
+    worktreeAdapter,
+    onBackgroundEvent: ({ channel, payload }) => broadcastToAllWindows(channel, payload),
+    onRunUpdated: (run) => outcomeController.handleRunUpdated(run),
+    logger: console,
+  });
+  automationRuntimeOwner = createAutomationRuntimeOwner({
+    store: automationStore,
+    powerMonitor,
+    onRunReady: (run) => {
+      void automationRunner.run(run).catch((error) => {
+        console.error('[automation-runtime] runner failed:', error);
+      });
+    },
+    scheduleTimer: (callback, delay) => setTimeout(callback, delay),
+    cancelTimer: (timer) => clearTimeout(timer),
+    logger: console,
+  });
+  automationRuntimeOwner.start();
+  return {
+    dispose: () => {
+      automationRuntimeOwner?.dispose();
+      automationRuntimeOwner = null;
+      automationRunner = null;
+    },
+  };
+}
+
 const desktopCompositionRoot = createDesktopCompositionRoot({
   logger: console,
   initialOwners: [
@@ -3217,6 +3528,7 @@ const desktopCompositionRoot = createDesktopCompositionRoot({
       },
     },
     { name: 'desktop-affordances', optional: true, start: startDesktopAffordances },
+    { name: 'automation-runtime', optional: true, start: startAutomationRuntime },
     { name: 'background-work', optional: true, start: startBackgroundWork },
   ],
 });

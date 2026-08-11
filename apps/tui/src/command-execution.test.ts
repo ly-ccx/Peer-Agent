@@ -9,6 +9,7 @@ const history = TUI_COMMANDS.find((command) => command.id === 'history')!;
 const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
 const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
 const newSession = TUI_COMMANDS.find((command) => command.id === 'new')!;
+const version = TUI_COMMANDS.find((command) => command.id === 'version')!;
 
 function harness() {
   let state = createTuiExperienceState('chat');
@@ -37,6 +38,7 @@ function harness() {
     },
     controlGoal: () => 'unused',
     quit: () => { quitCount += 1; },
+    showVersion: () => 'peer 0.0.2-test',
     setNotice: (notice: string | null) => { notices.push(notice); },
     updateExperience: (update: (current: typeof state) => typeof state) => { state = update(state); },
   };
@@ -104,6 +106,15 @@ describe('TUI command execution', () => {
 
     expect(subject.newSessionCount).toBe(1);
     expect(subject.notices.at(-1)).toBe('New session');
+    expect(subject.state.surface).toEqual({ type: 'composer' });
+  });
+
+  test('executes /version through the shared dispatcher and surfaces the version notice', () => {
+    const subject = harness();
+
+    executeTuiCommand(version, subject.handlers);
+
+    expect(subject.notices.at(-1)).toBe('peer 0.0.2-test');
     expect(subject.state.surface).toEqual({ type: 'composer' });
   });
 });

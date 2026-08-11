@@ -1,0 +1,135 @@
+.peer-switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  align-items: center;
+  padding: 1px;
+  border: 1px solid var(--graphite-hairline);
+  border-radius: 10px;
+  background: var(--control-fill);
+  color: var(--graphite-mute);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.peer-switch:hover:not(:disabled) {
+  border-color: var(--graphite-fade);
+  background: var(--control-fill-hover);
+}
+
+.peer-switch:focus-visible,
+.peer-checkbox-input:focus-visible + .peer-checkbox-box {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
+}
+
+.peer-switch[data-state="checked"] {
+  border-color: var(--state-active-on);
+  background: var(--state-active-on);
+}
+
+.peer-switch:disabled,
+.peer-checkbox-input:disabled + .peer-checkbox-box {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.peer-switch-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--paper-sheet);
+  transform: translateX(0);
+  transition: transform 160ms ease;
+}
+
+.peer-switch[data-state="checked"] .peer-switch-thumb {
+  transform: translateX(16px);
+}
+
+.peer-checkbox {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  vertical-align: middle;
+}
+
+.peer-checkbox-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.peer-checkbox-input:disabled {
+  cursor: not-allowed;
+}
+
+.peer-checkbox-box {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--graphite-hairline);
+  border-radius: 5px;
+  background: var(--control-fill);
+  /* Keep the mark legible on the selected fill in every governed palette. */
+  color: var(--za-primary-control-ink);
+  transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.peer-checkbox-input:hover:not(:disabled):not(:checked) + .peer-checkbox-box {
+  border-color: var(--graphite-fade);
+  background: var(--control-fill-hover);
+}
+
+.peer-checkbox-input:checked + .peer-checkbox-box {
+  /* Brand fill + white check works in both light and dark themes. */
+  border-color: var(--azure-seal);
+  background: var(--azure-seal);
+  color: var(--za-primary-control-ink);
+}
+
+/* Keep the selected surface when hovering a checked box; hover must not paint over it. */
+.peer-checkbox-input:checked:hover:not(:disabled) + .peer-checkbox-box {
+  border-color: var(--azure-seal);
+  background: var(--azure-seal);
+  color: var(--za-primary-control-ink);
+}
+
+.peer-checkbox-box svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.peer-checkbox-input:checked + .peer-checkbox-box svg {
+  opacity: 1;
+  transform: scale(1);
+  stroke: var(--za-primary-control-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peer-switch,
+  .peer-switch-thumb,
+  .peer-checkbox-box,
+  .peer-checkbox-box svg {
+    transition: none;
+  }
+}

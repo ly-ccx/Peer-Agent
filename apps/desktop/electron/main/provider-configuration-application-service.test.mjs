@@ -50,6 +50,7 @@ function createHarness(overrides = {}) {
       return providers;
     },
     testConnection: (id) => ({ id, ok: true }),
+    completePrompt: async (params) => ({ success: true, text: '{"name":"x","scheduleKind":"daily","hour":9,"minute":0}', params }),
     recordBaseline: (reason, provider) => calls.push(['baseline', reason, provider.id]),
     notifyOAuthRefreshed: (payload) => calls.push(['refreshed', payload]),
     reportRefreshError: (error) => calls.push(['refresh-error', error.message]),

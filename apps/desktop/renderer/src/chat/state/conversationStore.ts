@@ -24,6 +24,7 @@
 //     执行真值。
 
 import type {
+  AutomationCreateContext,
   ClientToolCall,
   ContextAccountingSnapshot,
 } from '@peer-agent/protocol';
@@ -55,6 +56,8 @@ export interface ConversationRuntimeState {
   readonly activeUsage: TokenUsageState | null;
   /** ADR 56: renderer consumes the provider-backed snapshot verbatim. */
   readonly contextAccounting: ContextAccountingSnapshot | null;
+  /** 结构化 Automation 创建提案的会话级事实；执行与确认真值仍在 Main。 */
+  readonly automationCreateContext: AutomationCreateContext | null;
   readonly providerRecoveryNotice: ProviderRecoveryNotice | null;
   readonly toolProgress: ToolProgress | null;
   readonly pendingPermissionCalls: readonly ClientToolCall[];
@@ -78,6 +81,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   tokenUsage: null,
   activeUsage: null,
   contextAccounting: null,
+  automationCreateContext: null,
   providerRecoveryNotice: null,
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],
@@ -264,6 +268,22 @@ export class ConversationStore {
       const next = queue.slice();
       const [item] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, item);
+      return { messageQueue: next };
+    });
+  }
+
+  /**
+   * 插队：把指定排队消息提到队首。
+   * 已在队首 / 找不到 id 时为 no-op。配合 ChatSurface 的 abort + 自动出队实现「强送」。
+   */
+  promoteQueuedMessageToFront(conversationId: string | null, id: string): void {
+    this.setState(conversationId, (prev) => {
+      const queue = prev.messageQueue;
+      const index = queue.findIndex((item) => item.id === id);
+      if (index <= 0) return prev;
+      const next = queue.slice();
+      const [item] = next.splice(index, 1);
+      next.unshift(item);
       return { messageQueue: next };
     });
   }

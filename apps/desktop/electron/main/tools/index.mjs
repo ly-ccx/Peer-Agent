@@ -1,7 +1,9 @@
+import { AUTOMATION_TOOL_DEFINITIONS } from './automation-tool-definitions.mjs';
 import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { INTERACTION_TOOL_DEFINITIONS } from './interaction-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
+import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mjs';
 import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
@@ -45,23 +47,26 @@ export function createDefaultToolRegistry() {
   });
 }
 
-export function createRuntimeToolRegistry({ mcpRegistry } = {}) {
+export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
   return createToolRegistry({
     tools: [
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
       ...SEARCH_TOOL_DEFINITIONS,
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
+      ...AUTOMATION_TOOL_DEFINITIONS,
       ...WEB_TOOL_DEFINITIONS,
       ...BROWSER_TOOL_DEFINITIONS,
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
+      ...createSkillToolDefinitionsFromStore(skillStore),
     ],
   });
 }
 
 export function createRuntimeToolProjection({
   mcpRegistry,
-  registry = createRuntimeToolRegistry({ mcpRegistry }),
+  skillStore,
+  registry = createRuntimeToolRegistry({ mcpRegistry, skillStore }),
   projectionOptions = {},
 } = {}) {
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);

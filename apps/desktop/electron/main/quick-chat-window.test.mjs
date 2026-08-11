@@ -183,10 +183,10 @@ test('shows native Menu for simple enums without creating a popover window', () 
 
   controller.show();
   assert.equal(controller.showPopover({
-    kind: 'model',
-    selectedValue: 'model-a',
+    kind: 'workspace',
+    selectedValue: 'ws-a',
     anchorRect: { x: 180, y: 72, width: 100, height: 24 },
-    items: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }],
+    items: [{ value: 'ws-a', label: 'Workspace A' }, { value: 'ws-b', label: 'Workspace B' }],
   }), true);
 
   assert.equal(popoverCreations, 0);
@@ -288,12 +288,18 @@ test('effort menu selection validates and sends to the main window', () => {
   );
 });
 
-test('groups model items into provider submenus', () => {
+test('routes model menus through the controlled popover window, not native Menu', () => {
   const parent = createFakeWindow();
+  const popover = createFakeWindow({ x: 0, y: 0, width: 280, height: 180 });
   const menu = createFakeMenu();
+  let popoverCreations = 0;
   const controller = createQuickChatWindowController({
     screen,
     createWindow: () => parent,
+    createPopoverWindow: () => {
+      popoverCreations += 1;
+      return popover;
+    },
     Menu: menu,
   });
   controller.show();
@@ -309,16 +315,14 @@ test('groups model items into provider submenus', () => {
     ],
   }), true);
 
-  assert.equal(menu.lastTemplate?.length, 3);
-  assert.equal(menu.lastTemplate?.[0]?.label, 'OpenAI');
-  assert.equal(Array.isArray(menu.lastTemplate?.[0]?.submenu), true);
-  assert.equal(menu.lastTemplate?.[0]?.submenu?.length, 2);
-  assert.equal(menu.lastTemplate?.[0]?.submenu?.[1]?.label, 'gpt-b');
-  assert.equal(menu.lastTemplate?.[0]?.submenu?.[1]?.checked, true);
-  assert.equal(menu.lastTemplate?.[1]?.label, 'Anthropic');
-  assert.equal(menu.lastTemplate?.[1]?.submenu?.length, 1);
-  assert.equal(menu.lastTemplate?.[2]?.label, 'standalone');
-  assert.equal(menu.lastTemplate?.[2]?.type, 'checkbox');
+  assert.equal(menu.lastTemplate, null);
+  assert.equal(menu.calls.some(([name]) => name === 'buildFromTemplate'), false);
+  assert.equal(popoverCreations, 1);
+  assert.equal(popover.isVisible(), true);
+  assert.equal(
+    popover.calls.some((call) => call[0] === 'send' && call[1] === 'quick-chat-popover:state'),
+    true,
+  );
 });
 
 test('keeps bar content height while native menu is open', () => {

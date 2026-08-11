@@ -35,7 +35,7 @@ export async function agentLoopOpenAI({
   signal,
   effort,
   supportsReasoning = false,
-  supportsPromptCaching = false,
+  supportsPromptCaching = true,
   contextWindow,
   maxOutputTokens,
   conversationId,
@@ -48,7 +48,9 @@ export async function agentLoopOpenAI({
   registry,
   runtimeProjection,
   mcpRegistry,
+  skillStore = null,
   goalPlanStore,
+  automationProposalService = null,
   ensureBrowserReady = null,
   onNativeReasoningFallback = null,
   resolvedChannel = null,
@@ -61,6 +63,7 @@ export async function agentLoopOpenAI({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  channelId = null,
   accountingIdentity = null,
   initialContextAccounting = null,
 }) {
@@ -168,6 +171,9 @@ export async function agentLoopOpenAI({
             webContents: loop.providerWebContents,
             streamId,
             usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
+            wire: resolvedChannel?.wire,
+            channelId,
+            modelProviderId: providerId,
           }),
         });
         apiMessages = execution.messages;
@@ -271,7 +277,9 @@ export async function agentLoopOpenAI({
           registry,
           runtimeProjection,
           mcpRegistry,
+          skillStore,
           goalPlanStore,
+          automationProposalService,
           ensureBrowserReady,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();

@@ -160,6 +160,7 @@ export async function sendAnthropicMessagesStream({
   headers,
   model,
   system,
+  stableSystem,
   messages,
   tools,
   effort,
@@ -181,6 +182,7 @@ export async function sendAnthropicMessagesStream({
   const body = encodeAnthropicMessagesRequest({
     model,
     system,
+    stableSystem,
     messages,
     tools,
     effort,

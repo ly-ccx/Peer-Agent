@@ -247,7 +247,9 @@ export type TuiMessageKey =
   | 'command.help.label'
   | 'command.help.description'
   | 'command.quit.label'
-  | 'command.quit.description';
+  | 'command.quit.description'
+  | 'command.version.label'
+  | 'command.version.description';
 
 const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string>>>> = Object.freeze({
   'zh-CN': {
@@ -320,6 +322,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.help.description': '显示快捷键与命令说明',
     'command.quit.label': '退出',
     'command.quit.description': '退出 Peer Agent',
+    'command.version.label': '版本',
+    'command.version.description': '显示 Peer Agent 当前版本',
   },
   'en-US': {
     'language.switched': 'Switched to English (UI + replies)',
@@ -391,6 +395,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.help.description': 'Show keyboard shortcuts and command syntax',
     'command.quit.label': 'Quit',
     'command.quit.description': 'Exit Peer Agent',
+    'command.version.label': 'Version',
+    'command.version.description': 'Show the current Peer Agent version',
   },
 });
 

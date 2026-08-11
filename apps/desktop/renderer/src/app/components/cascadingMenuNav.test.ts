@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   firstEnabledIndex,
+  resolveCascadingSubmenuAnchor,
   resolveKeyboardActiveScrollTarget,
   resolveOpenGroupScrollTarget,
   stepEnabledIndex,
@@ -72,5 +73,63 @@ describe('resolveKeyboardActiveScrollTarget', () => {
   });
   it('does not scroll when active index is invalid', () => {
     assert.deepEqual(resolveKeyboardActiveScrollTarget(true, -1), { kind: 'none' });
+  });
+});
+
+describe('resolveCascadingSubmenuAnchor', () => {
+  const panelRect = { left: 100, right: 320, top: 80 };
+  const base = {
+    panelRect,
+    submenuWidth: 220,
+    submenuHeight: 120,
+    viewportWidth: 1200,
+    viewportHeight: 900,
+    margin: 8,
+    gap: 0,
+  };
+
+  it('anchors each submenu to its hovered provider row, not the panel top', () => {
+    const topRow = resolveCascadingSubmenuAnchor({
+      ...base,
+      rowRect: { top: 80 },
+    });
+    const middleRow = resolveCascadingSubmenuAnchor({
+      ...base,
+      rowRect: { top: 260 },
+    });
+    const bottomRow = resolveCascadingSubmenuAnchor({
+      ...base,
+      rowRect: { top: 420 },
+    });
+
+    assert.equal(topRow.top, 80);
+    assert.equal(middleRow.top, 260);
+    assert.equal(bottomRow.top, 420);
+    assert.notEqual(middleRow.top, panelRect.top);
+    assert.notEqual(bottomRow.top, panelRect.top);
+    assert.equal(topRow.left, 320);
+    assert.equal(topRow.side, 'right');
+  });
+
+  it('does not clamp preferred top back to the primary panel top', () => {
+    const anchored = resolveCascadingSubmenuAnchor({
+      ...base,
+      rowRect: { top: 360 },
+    });
+    assert.equal(anchored.top, 360);
+    assert.ok(anchored.top > panelRect.top);
+  });
+
+  it('slides up only when the submenu would overflow the viewport bottom', () => {
+    const anchored = resolveCascadingSubmenuAnchor({
+      ...base,
+      rowRect: { top: 820 },
+      submenuHeight: 200,
+      viewportHeight: 900,
+    });
+    // Available height below row is 72, but maxHeight floors at 160 → subH=160.
+    // 820 + 160 > 892, so slide up to keep the submenu inside the viewport.
+    assert.equal(anchored.top, 900 - 160 - 8);
+    assert.ok(anchored.top < 820);
   });
 });

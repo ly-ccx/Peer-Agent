@@ -420,4 +420,49 @@
   62%, 100% { opacity: 1; transform: scaleX(1); }
 }
 
+/* --------------------------------------------------------------------------
+ * Task result / Global Workbench acceptance effects.
+ * Definitions live here so task surfaces consume one motion source of truth.
+ * ------------------------------------------------------------------------ */
+@keyframes result-card-spin { to { transform: rotate(360deg); } }
+
+@keyframes result-card-celebrate-lift {
+  0% { transform: translateY(0) scale(1); }
+  28% { transform: translateY(-3px) scale(1.012); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes result-card-seal-pop {
+  0% { transform: scale(0.78); opacity: 0.72; }
+  55% { transform: scale(1.16); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes result-card-spark {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.35); }
+  18% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--spark-x, -18px), var(--spark-y, -24px)) scale(0.85); }
+}
+
+@keyframes gwb-accept-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes gwb-item-celebrate-pop {
+  0% { transform: scale(0.985); }
+  55% { transform: scale(1.012); }
+  100% { transform: scale(1); }
+}
+
+@keyframes gwb-item-confetti {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.6);
+  }
+  20% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 42px, 0) scale(1);
+  }
+}
 

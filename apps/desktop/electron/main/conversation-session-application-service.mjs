@@ -13,6 +13,7 @@ export function createConversationSessionApplicationService({
   scheduleRecovery,
   startGoalRunner,
   markTaskRead,
+  markConversationRead,
   reportRecoveryFailure,
   reportNotificationFailure,
 } = {}) {
@@ -25,6 +26,9 @@ export function createConversationSessionApplicationService({
     scheduleRecovery: assertFunction(scheduleRecovery, 'scheduleRecovery'),
     startGoalRunner: assertFunction(startGoalRunner, 'startGoalRunner'),
     markTaskRead: assertFunction(markTaskRead, 'markTaskRead'),
+    // 可选：旧 harness 可不注入；有注入时打开会话推进 lastReadAt。
+    markConversationRead:
+      typeof markConversationRead === 'function' ? markConversationRead : null,
     reportRecoveryFailure: assertFunction(reportRecoveryFailure, 'reportRecoveryFailure'),
     reportNotificationFailure: assertFunction(
       reportNotificationFailure,
@@ -55,6 +59,15 @@ export function createConversationSessionApplicationService({
     }
   }
 
+  function markCurrentConversationRead(conversationId) {
+    if (!conversationId || typeof ports.markConversationRead !== 'function') return;
+    try {
+      ports.markConversationRead(conversationId);
+    } catch (error) {
+      ports.reportNotificationFailure(error);
+    }
+  }
+
   return Object.freeze({
     setActiveConversation(payload = {}) {
       const conversationId = normalizeIdentifier(payload?.conversationId);
@@ -63,6 +76,7 @@ export function createConversationSessionApplicationService({
 
       if (conversationId) {
         scheduleGoalRecovery(conversationId);
+        markCurrentConversationRead(conversationId);
         markCurrentTaskRead(planId);
       }
 

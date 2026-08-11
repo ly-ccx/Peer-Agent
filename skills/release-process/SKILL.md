@@ -2,7 +2,7 @@
 name: release-process
 description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、GitHub Pages 文档站、打 tag 触发 CI）。
 whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、检查/更新根 README、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
-version: 0.1.2
+version: 0.1.3
 ---
 
 # Peer Agent 发布流程 Skill
@@ -28,7 +28,7 @@ version: 0.1.2
 ## 前置检查
 
 1. 在干净工作区或明确列出的改动集上工作：`git status -sb`。
-2. 确认当前分支策略：常见是在 `dev/0.0.1`（或发布约定分支）完成内容后打 tag；**不要**在未知脏状态上 stamp 版本。
+2. 确认当前分支策略：预发布可以在 `dev/<version>` 或发布约定分支打 tag；**正式版必须先合并 `main`，再创建正式 tag**，不得直接从开发/发布分支发布 latest。
 3. 与用户确认目标版本字符串：
    - 预发布：`0.0.1-beta.N` → tag `v0.0.1-beta.N`（CI prerelease / beta 通道）
    - 正式：`x.y.z` → tag `vX.Y.Z`（latest 通道）
@@ -208,16 +208,26 @@ release: prepare v<version>
 
 只提交发版相关文件；不要夹带无关本地实验。若本轮更新了根 `README.md`，一并纳入该准备提交。
 
-### 6) 打 tag 并推送（触发 CI）
+### 6) 合并主线并打 tag（触发 CI）
+
+预发布 tag 可以继续留在发布分支。正式版本必须先把已验证的发布准备提交通过 PR 合并到 `main`，再从最新 `origin/main` 创建 tag：
 
 ```bash
-git tag v<version>
 git push origin HEAD
+# 正式版：创建/合并以当前分支为 head、main 为 base 的 PR
+git fetch origin main --tags
+git switch main
+git pull --ff-only origin main
+RELEASE_TAG=v<version> RELEASE_COMMIT=HEAD pnpm release:source-check
+git tag -a v<version> -m "<version>"
 git push origin v<version>
 ```
 
+`release:source-check` 会校验 tag 版本与 `VERSION` 一致；对稳定版还会校验发布提交已被 `origin/main` 包含。门禁失败时禁止打 tag。预发布仅校验版本，可从发布分支触发 beta 通道。
+
 CI（`release.yml`）会：
 
+- 在任何构建/发布前运行 `version:check` 与 `release:source-check`
 - 从 tag 解析版本/通道
 - matrix 构建 Desktop（mac/win）
 - 组装 CLI 归档（含 `peer` + `peer-credential-helper`）

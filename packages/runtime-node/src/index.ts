@@ -187,6 +187,23 @@ export {
   normalizeGoalTiming,
 } from './goal-plan-store.mjs';
 export {
+  automationRunIsTerminal,
+  createAutomationStore,
+} from './automation-store.mjs';
+export {
+  automationOccurrences,
+  latestAutomationOccurrence,
+  nextAutomationOccurrence,
+  parseAutomationCron,
+  validateAutomationSchedule,
+} from './automation-schedule.mjs';
+export {
+  automationIdempotencyKey,
+  completeOnceAutomationIfNeeded,
+  createAutomationScheduler,
+  reconcileAutomationSchedules,
+} from './automation-scheduler.mjs';
+export {
   computePlanScopeSnapshot,
   computeReanchorInterval,
   createDeterministicExplorePlan,
@@ -201,6 +218,7 @@ export {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
 
@@ -227,6 +245,11 @@ export {
 export { createLocalMcpProvider } from './local-mcp-provider.mjs';
 export { createLocalSkillProvider } from './local-skill-provider.mjs';
 export { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
+export {
+  createSkillToolDefinition,
+  createSkillToolDefinitionsFromStore,
+  SKILL_PREFIX,
+} from './skill-tool-definitions.mjs';
 export {
   createFailedClientToolResult,
   createPermissionGrant,

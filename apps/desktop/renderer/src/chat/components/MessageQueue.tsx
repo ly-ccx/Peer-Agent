@@ -36,12 +36,24 @@ function TrashIcon() {
   );
 }
 
+/** 插队/强送：中断当前流并立刻发送该排队消息。 */
+function ForceSendIcon() {
+  return (
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h11" />
+      <path d="m12 5 7 7-7 7" />
+      <path d="M5 5v14" />
+    </svg>
+  );
+}
+
 export function MessageQueue({
   items,
   isZh,
   onRemove,
   onReorder,
   onRefillToComposer,
+  onForceSend,
 }: {
   readonly items: readonly QueuedMessage[];
   readonly isZh: boolean;
@@ -49,6 +61,8 @@ export function MessageQueue({
   readonly onReorder: (fromIndex: number, toIndex: number) => void;
   /** 点击编辑：回填输入框（文案 + 附件），不从队列移除。 */
   readonly onRefillToComposer: (item: QueuedMessage) => void;
+  /** 插队：中断当前对话并强行发送该排队消息。 */
+  readonly onForceSend: (id: string) => void;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -113,6 +127,15 @@ export function MessageQueue({
               ) : null}
             </div>
             <div className="message-queue-actions">
+              <button
+                type="button"
+                className="message-queue-force-send"
+                onClick={() => onForceSend(item.id)}
+                aria-label={isZh ? `插队发送排队消息 ${index + 1}` : `Force send queued message ${index + 1}`}
+                title={isZh ? '插队发送（中断当前回复）' : 'Force send (interrupt current reply)'}
+              >
+                <ForceSendIcon />
+              </button>
               <button
                 type="button"
                 className="message-queue-edit"

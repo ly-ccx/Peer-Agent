@@ -43,6 +43,29 @@ test('ChatGPT Responses provider encodes requests, streams text, tools, and usag
   assert.deepEqual(events, ['text.delta', 'tool_call.completed', 'usage']);
 });
 
+test('ChatGPT Responses provider reports prompt cache hit tokens in usage', async () => {
+  let captured: { body?: any } = {};
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://chatgpt.example/codex/',
+    tokens: { access: 'secret-access', accountId: 'account-1' },
+    fetch: async (input, init) => {
+      captured = { body: JSON.parse(String(init?.body)) };
+      return response([
+        'data: {"type":"response.output_text.delta","delta":"Cached"}',
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":2,"input_tokens_details":{"cached_tokens":60}}}}',
+        'data: [DONE]',
+      ]);
+    },
+  });
+  const result = await provider.stream({
+    model: 'gpt-test',
+    messages: [{ role: 'user', content: 'Hi' }],
+    onEvent: () => {},
+  });
+  // 缓存命中 60/100：inputTokens 互斥扣减（净 40），cacheReadTokens 单独记账，totalTokens 保持上游毛口径。
+  assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 2, totalTokens: 102, cacheReadTokens: 60 });
+});
+
 test('ChatGPT Responses provider resolves desktop credentials lazily on first request', async () => {
   let resolutions = 0;
   const provider = createChatGptResponsesProvider({

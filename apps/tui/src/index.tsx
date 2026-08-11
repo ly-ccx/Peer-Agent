@@ -15,6 +15,7 @@ import {
 
 import { App } from './app.tsx';
 import { handleCliVersionArgs } from './cli-version.ts';
+import { createCliUpdateController } from './cli-update.ts';
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
@@ -39,6 +40,7 @@ import {
 import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
+import { flushTuiPerfSync } from './tui-perf.ts';
 import { buildTuiSystemPrompt, createTuiLanguageStore } from './tui-language.ts';
 import { createTuiThemeStore } from './tui-theme.ts';
 import { formatTerminalTitle } from './terminal-title.ts';
@@ -289,11 +291,15 @@ const model = provider
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
 renderer.setTerminalTitle(formatTerminalTitle(workspaceRoot));
+const cliUpdate = createCliUpdateController();
 const root = createRoot(renderer);
 const shutdown = createTuiShutdown({
   unmount: () => root.unmount(),
   destroyRenderer: () => renderer.destroy(),
-  exitProcess: (code) => process.exit(code),
+  exitProcess: (code) => {
+    flushTuiPerfSync();
+    process.exit(code);
+  },
 });
 
 root.render(
@@ -304,6 +310,8 @@ root.render(
     modelSelection={modelSelection}
     languageStore={languageStore}
     themeStore={themeStore}
+    cliUpdate={cliUpdate}
     onQuit={shutdown}
   />,
 );
+queueMicrotask(() => void cliUpdate.check());

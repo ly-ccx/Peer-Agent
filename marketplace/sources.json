@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "sourceId": "anthropics-official",
+      "kind": "github-directory",
+      "repository": "anthropics/skills",
+      "revision": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+      "path": "skills",
+      "entries": [
+        "frontend-design",
+        "mcp-builder",
+        "skill-creator",
+        "slack-gif-creator",
+        "theme-factory",
+        "webapp-testing"
+      ],
+      "enabled": true,
+      "defaultCategory": "Official Skills",
+      "defaults": {
+        "whenToUse": "Use when the task matches this Skill's documented workflow.",
+        "version": "2026.08.06"
+      }
+    }
+  ]
+}

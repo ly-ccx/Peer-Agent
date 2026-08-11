@@ -3,7 +3,7 @@
  * postinstall — download peer + peer-credential-helper for the current platform
  * from the matching GitHub Release (package version == release tag without v).
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installBinary } from '../lib/install-binary.mjs';
@@ -31,6 +31,12 @@ try {
     root,
     log: (msg) => console.log(msg),
   });
+  const userAgent = process.env.npm_config_user_agent ?? '';
+  const packageManager = userAgent.startsWith('pnpm/') ? 'pnpm' : 'npm';
+  writeFileSync(
+    join(root, 'vendor', '.peer-agent-install.json'),
+    `${JSON.stringify({ source: packageManager, packageName: pkg.name })}\n`,
+  );
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`[@peer-agent/cli] postinstall failed: ${message}`);
