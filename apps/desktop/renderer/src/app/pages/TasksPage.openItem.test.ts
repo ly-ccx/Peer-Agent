@@ -16,8 +16,9 @@ test('task row view button opens the matching task details', async () => {
     tasksPageSource,
     /className="task-row-open"[\s\S]*?onClick=\{\(\) => onOpenItem\?\.\(item\)\}/,
   );
-  assert.match(
-    appSource,
-    /<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?if \(!item\.conversationId\) return;[\s\S]*?handleContinueTask\(String\(item\.conversationId\), planId\);/,
-  );
+  const openItemHandler =
+    appSource.match(/<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?\n                            \}\}/)?.[0] ?? '';
+  assert.match(openItemHandler, /if \(!item\.conversationId\) return;/);
+  assert.match(openItemHandler, /handleContinueTask\(String\(item\.conversationId\)\);/);
+  assert.doesNotMatch(openItemHandler, /planId|goalPlansMarkRequestedUserInput/);
 });

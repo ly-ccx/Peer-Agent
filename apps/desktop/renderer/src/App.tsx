@@ -859,15 +859,9 @@ function MainApp() {
     setActivePage('chat');
   }, []);
 
-  const handleContinueTask = useCallback((conversationId: string, planId?: string) => {
-    // §14 继续讨论：保留一级结果 Drawer，叠加打开二级会话 Drawer，不跳主 Chat。
-    // 若来自 result_ready（带 planId），语义=验收未通过：重开同一 plan，离开待验收队列。
-    const id = planId?.trim();
-    if (id) {
-      void clientApi.goalPlansMarkRequestedUserInput({ planId: id }).catch((error) => {
-        console.error('[workbench] failed to reopen unaccepted result for continuation', error);
-      });
-    }
+  const handleContinueTask = useCallback((conversationId: string) => {
+    // §14 继续讨论仅恢复会话现场：导航和聚焦都不是用户发言，不能改变任务状态。
+    // 真正的新回合只由 ChatSurface.submitMessage → chatSend 创建。
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
       selectConversation: setActiveConversationId,
@@ -1272,14 +1266,9 @@ function MainApp() {
                           <TasksPage
                             workspacePath={activeWorkspace}
                             onOpenItem={(item) => {
-                              // 任务列表点击：打开会话 Drawer 继续讨论（§14）
-                              // result_ready 时带 planId，验收未通过则同卡重开。
+                              // 任务列表点击只打开会话 Drawer；发送消息后才会创建新回合。
                               if (!item.conversationId) return;
-                              const planId =
-                                item.source === 'goal_plan' && item.actionRight === 'result_ready'
-                                  ? item.taskId
-                                  : undefined;
-                              handleContinueTask(String(item.conversationId), planId);
+                              handleContinueTask(String(item.conversationId));
                             }}
                           />
                         </div>
@@ -1367,12 +1356,7 @@ function MainApp() {
                                     <button
                                       type="button"
                                       className="task-overview-btn task-overview-btn--secondary"
-                                      onClick={() =>
-                                        handleContinueTask(
-                                          continuation.conversationId,
-                                          continuation.planId,
-                                        )
-                                      }
+                                      onClick={() => handleContinueTask(continuation.conversationId)}
                                     >
                                       {continuation.label}
                                     </button>

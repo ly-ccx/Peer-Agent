@@ -2,13 +2,6 @@ import type { TaskOverviewItem } from '@peer-agent/protocol';
 
 export interface TaskContinuationAction {
   readonly conversationId: string;
-  /** goal_plan taskId is the planId; used to reopen the same plan when leaving result_ready. */
-  readonly planId?: string;
-  /**
-   * true when the card is result_ready for a goal plan: continue discussion means
-   * acceptance failed and the same plan should leave the acceptance queue.
-   */
-  readonly reopenUnacceptedResult: boolean;
   readonly label: string;
   readonly description: string;
 }
@@ -50,20 +43,11 @@ export function getTaskContinuationAction(
   const conversationId = item.conversationId?.trim();
   if (!conversationId) return null;
 
-  const reopenUnacceptedResult =
-    item.source === 'goal_plan' && item.actionRight === 'result_ready' && Boolean(item.taskId?.trim());
-
   return {
     conversationId,
-    planId: reopenUnacceptedResult ? item.taskId : undefined,
-    reopenUnacceptedResult,
     label: isZh ? '继续讨论' : 'Continue discussion',
     description: isZh
-      ? reopenUnacceptedResult
-        ? '验收未通过，回到原任务继续改（同一张卡）'
-        : '打开原会话继续追问或发起下一步'
-      : reopenUnacceptedResult
-        ? 'Acceptance failed — reopen the same task to continue (no new card)'
-        : 'Open the original conversation to ask a follow-up or take the next step',
+      ? '打开原会话；发送消息后才会创建新的用户回合'
+      : 'Open the original conversation; a new user turn starts only after you send a message',
   };
 }

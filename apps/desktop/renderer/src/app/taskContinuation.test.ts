@@ -41,32 +41,31 @@ describe('continueTaskInConversation', () => {
 });
 
 describe('getTaskContinuationAction', () => {
-  it('marks result_ready goal plans as reopen-unaccepted (same card continuation)', () => {
+  it('keeps result_ready continuation as navigation without a plan mutation command', () => {
     assert.deepEqual(getTaskContinuationAction(item(), true), {
       conversationId: 'conversation-1',
-      planId: 'plan-1',
-      reopenUnacceptedResult: true,
       label: '继续讨论',
-      description: '验收未通过，回到原任务继续改（同一张卡）',
+      description: '打开原会话；发送消息后才会创建新的用户回合',
     });
   });
 
-  it('does not reopen non-result_ready cards as acceptance failure', () => {
+  it('uses the same navigation-only contract for non-result-ready cards', () => {
     const action = getTaskContinuationAction(
       item({ actionRight: 'peer_advancing', nextAction: 'none', actionLabel: '推进中', statusLabel: '推进中' }),
       true,
     );
-    assert.equal(action?.reopenUnacceptedResult, false);
-    assert.equal(action?.planId, undefined);
-    assert.equal(action?.description, '打开原会话继续追问或发起下一步');
+    assert.deepEqual(action, {
+      conversationId: 'conversation-1',
+      label: '继续讨论',
+      description: '打开原会话；发送消息后才会创建新的用户回合',
+    });
   });
 
-  it('uses stable English copy for unaccepted result continuation', () => {
+  it('explains that only a sent message starts a new user turn in English', () => {
     const action = getTaskContinuationAction(item(), false);
     assert.equal(action?.label, 'Continue discussion');
-    assert.match(action?.description ?? '', /same task|no new card/i);
-    assert.equal(action?.reopenUnacceptedResult, true);
-    assert.equal(action?.planId, 'plan-1');
+    assert.match(action?.description ?? '', /only after you send a message/i);
+    assert.deepEqual(Object.keys(action ?? {}).sort(), ['conversationId', 'description', 'label']);
   });
 
   it('does not offer continuation for sources without a Conversation', () => {

@@ -333,7 +333,9 @@ export function toGoalPlanSnapshot(plan, options = {}) {
   return {
     planId,
     status,
-    runnerStatus: plan.runner?.status,
+    // Plan completion is authoritative over stale runner state. A completed plan cannot
+    // still own a live "waiting for you" interaction until a real user message reopens it.
+    runnerStatus: status === GOAL_COMPLETED_STATUS ? undefined : plan.runner?.status,
     interrupted: Boolean(
       plan.runner?.interruption &&
       !(plan.runner.interruption.recoverable === true && plan.runner.status === 'running'),

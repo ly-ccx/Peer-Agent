@@ -44,6 +44,16 @@ test('acceptance celebration has smoother timing and a reduced-motion fallback',
   assert.match(styles, /\.result-card--exiting/);
 });
 
+test('continue discussion only navigates; plan state changes remain behind real message submission', async () => {
+  const app = await readApp();
+  const handler = app.match(/const handleContinueTask = useCallback\([\s\S]*?\n  \}, \[\]\);/)?.[0] ?? '';
+  assert.match(handler, /continueTaskInConversation/);
+  assert.match(handler, /focusComposer/);
+  assert.doesNotMatch(handler, /goalPlansMarkRequestedUserInput/);
+  assert.doesNotMatch(handler, /goalRunnerResume/);
+  assert.match(app, /ChatSurface\.submitMessage → chatSend/);
+});
+
 test('result card prefers completedAt with completion-relative copy', async () => {
   const source = await readPage();
   assert.match(source, /item\.completedAt/);

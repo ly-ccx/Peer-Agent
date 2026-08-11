@@ -954,7 +954,7 @@ test('listTaskOverview moves waiting_user GoalPlans out of Peer advancing', () =
   assert.equal(item.statusLabel, '等待你的选择');
 });
 
-test('listTaskOverview keeps stale completed + waiting_user in needs_you', () => {
+test('listTaskOverview ignores stale waiting_user after plan completion', () => {
   const agg = createTaskOverviewAggregator({
     goalPlanStore: {
       listPlanDetails: () => [{
@@ -971,10 +971,10 @@ test('listTaskOverview keeps stale completed + waiting_user in needs_you', () =>
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
   });
   const [item] = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
-  assert.equal(item.actionRight, 'needs_you');
-  assert.equal(item.needsYouReason, 'user_input');
-  assert.equal(item.nextAction, 'answer_question');
-  assert.equal(item.statusLabel, '等待你的选择');
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.nextAction, 'review_result');
+  assert.equal(item.statusLabel, '待用户验收');
 });
 
 test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活跃任务并存', () => {
