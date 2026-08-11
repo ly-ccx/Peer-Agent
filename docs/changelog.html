@@ -273,10 +273,20 @@
         text-transform: uppercase;
         color: var(--ink-fade);
       }
-      .section.added h3 { color: #3e7a6b; }
-      .section.fixed h3 { color: #9a5b3c; }
-      .section.improved h3 { color: var(--azure); }
-      .section.breaking h3 { color: #a33b3b; }
+      .section.added > h3 { color: #3e7a6b; }
+      .section.fixed > h3 { color: #9a5b3c; }
+      .section.improved > h3 { color: var(--azure); }
+      .section.breaking > h3 { color: #a33b3b; }
+      .subsection {
+        margin-top: 14px;
+      }
+      .subsection h4 {
+        margin: 0 0 8px;
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
       ul {
         margin: 0;
         padding: 0 0 0 1.1em;
@@ -544,19 +554,32 @@
             head.appendChild(badge);
           }
           card.appendChild(head);
-          (sections || []).forEach(function (sec) {
-            var wrap = document.createElement("div");
-            wrap.className = "section " + (sec.key || "other");
-            var h3 = document.createElement("h3");
-            h3.textContent = (LABELS[state.lang] && LABELS[state.lang][sec.key]) || sec.title || LABELS[state.lang].other;
-            wrap.appendChild(h3);
+          function renderItems(items) {
             var ul = document.createElement("ul");
-            (sec.items || []).forEach(function (item) {
+            items.forEach(function (item) {
               var li = document.createElement("li");
               li.innerHTML = formatInline(item);
               ul.appendChild(li);
             });
-            wrap.appendChild(ul);
+            return ul;
+          }
+
+          (sections || []).forEach(function (sec) {
+            var wrap = document.createElement("section");
+            wrap.className = "section " + (sec.key || "other");
+            var h3 = document.createElement("h3");
+            h3.textContent = sec.title || (LABELS[state.lang] && LABELS[state.lang][sec.key]) || LABELS[state.lang].other;
+            wrap.appendChild(h3);
+            if (sec.items && sec.items.length) wrap.appendChild(renderItems(sec.items));
+            (sec.subsections || []).forEach(function (subsection) {
+              var subwrap = document.createElement("section");
+              subwrap.className = "subsection";
+              var h4 = document.createElement("h4");
+              h4.textContent = subsection.title;
+              subwrap.appendChild(h4);
+              subwrap.appendChild(renderItems(subsection.items));
+              wrap.appendChild(subwrap);
+            });
             card.appendChild(wrap);
           });
           root.appendChild(card);

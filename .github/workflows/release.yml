@@ -54,8 +54,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check governed versions
-        run: npm run version:check
+      - name: Check release readiness
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run release:readiness-check
 
       - name: Run release:source-check
         env:

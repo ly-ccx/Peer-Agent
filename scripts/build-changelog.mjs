@@ -40,38 +40,50 @@ function parseLocale(markdown, marker, lang) {
   const body = nextLocale < 0 ? rest : rest.slice(0, nextLocale);
   const sections = [];
   let section = null;
-  let subsection = "";
-  let item = null;
+  let subsection = null;
+  let itemTarget = null;
+  let itemIndex = -1;
 
   for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line === "---" || localeMarker.test(line)) continue;
     const heading = line.match(/^##\s+(.+)$/);
     if (heading) {
-      section = { key: classify(heading[1], lang), title: heading[1], items: [] };
+      section = { key: classify(heading[1], lang), title: heading[1], items: [], subsections: [] };
       sections.push(section);
-      subsection = "";
-      item = null;
+      subsection = null;
+      itemTarget = null;
+      itemIndex = -1;
       continue;
     }
     const subheading = line.match(/^###\s+(.+)$/);
-    if (subheading) {
-      subsection = subheading[1];
-      item = null;
+    if (subheading && section) {
+      subsection = { title: subheading[1], items: [] };
+      section.subsections.push(subsection);
+      itemTarget = null;
+      itemIndex = -1;
       continue;
     }
     const bullet = line.match(/^[-*]\s+(.+)$/);
     if (bullet && section) {
-      item = `${subsection ? `**${subsection}** — ` : ""}${bullet[1]}`;
-      section.items.push(item);
+      itemTarget = subsection ? subsection.items : section.items;
+      itemTarget.push(bullet[1]);
+      itemIndex = itemTarget.length - 1;
       continue;
     }
-    if (item && section) {
-      section.items[section.items.length - 1] += ` ${line}`;
-      item = section.items[section.items.length - 1];
+    if (itemTarget && itemIndex >= 0) {
+      itemTarget[itemIndex] += ` ${line}`;
     }
   }
-  return sections.filter((candidate) => candidate.items.length > 0);
+
+  return sections
+    .map((candidate) => {
+      const subsections = candidate.subsections.filter((entry) => entry.items.length > 0);
+      const result = { key: candidate.key, title: candidate.title, items: candidate.items };
+      if (subsections.length > 0) result.subsections = subsections;
+      return result;
+    })
+    .filter((candidate) => candidate.items.length > 0 || (candidate.subsections?.length ?? 0) > 0);
 }
 
 function parseVersion(filename) {
