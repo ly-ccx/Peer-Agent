@@ -1034,6 +1034,7 @@ function MainApp() {
                   <div className="task-overview-scroll-region">
                   {homeScope === 'all' ? (
                     <GlobalWorkbenchPage
+                      enabled={!conversationDrawerOpen && collectionDrawer === null}
                       onOpenTasks={() => openCollectionDrawer('tasks')}
                       onOpenHistory={() => openCollectionDrawer('history')}
                       onNewTask={() => {
@@ -1063,6 +1064,7 @@ function MainApp() {
                     />
                   ) : (
                     <HomePage
+                      enabled={!conversationDrawerOpen && collectionDrawer === null}
                       workspacePath={activeWorkspace ?? null}
                       onOpenTasks={() => openCollectionDrawer('tasks')}
                       onOpenHistory={() => openCollectionDrawer('history')}

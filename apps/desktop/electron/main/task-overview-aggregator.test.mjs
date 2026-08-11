@@ -1022,3 +1022,82 @@ test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活
   assert.equal(items[1].actionRight, 'result_ready');
   assert.equal(items[1].title, '已完成待验收');
 });
+
+test('conversation-scoped TaskOverview never falls back to hydrating every GoalPlan', () => {
+  let fullListCalls = 0;
+  let conversationListCalls = 0;
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => {
+        fullListCalls += 1;
+        throw new Error('conversation query must not hydrate the global plan list');
+      },
+      listPlanDetailsByConversation: (conversationId) => {
+        conversationListCalls += 1;
+        assert.equal(conversationId, 'conversation-target');
+        return [
+          {
+            planId: 'plan-target',
+            conversationId: 'conversation-target',
+            status: 'executing',
+            title: '目标会话任务',
+            updatedAt: RECENT,
+            targetWorkspacePath: '/x/peer_agent',
+            runner: { status: 'running' },
+          },
+        ];
+      },
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-target',
+        title: '目标会话',
+        workspacePath: '/x/peer_agent',
+        updatedAt: RECENT,
+      },
+      {
+        id: 'conversation-unrelated',
+        title: '无关会话',
+        workspacePath: '/x/peer_agent',
+        updatedAt: RECENT,
+      },
+    ],
+  });
+
+  const items = agg.listTaskOverview({
+    conversationId: 'conversation-target',
+    workspacePath: '/x/peer_agent',
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+
+  assert.equal(fullListCalls, 0);
+  assert.equal(conversationListCalls, 1);
+  assert.deepEqual(items.map((item) => item.conversationId), ['conversation-target']);
+});
+
+test('workspace-scoped TaskOverview uses the indexed workspace query instead of the global list', () => {
+  let fullListCalls = 0;
+  let workspaceListCalls = 0;
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => {
+        fullListCalls += 1;
+        return [];
+      },
+      listPlanDetailsByWorkspace: (workspacePath) => {
+        workspaceListCalls += 1;
+        assert.equal(workspacePath, '/x/peer_agent');
+        return [];
+      },
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
+
+  assert.equal(fullListCalls, 0);
+  assert.equal(workspaceListCalls, 1);
+});

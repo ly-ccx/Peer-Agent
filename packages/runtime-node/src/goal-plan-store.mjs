@@ -1762,6 +1762,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       percent: plan.progress?.percent ?? 0,
       createdAt: plan.createdAt,
       updatedAt: plan.updatedAt,
+      // TaskOverview 可在 hydrate 前排除已验收/祖父化 completed。
+      resultAcceptance: plan.resultAcceptance ?? null,
+      resultAcceptedAt: plan.resultAcceptedAt ?? null,
+      resultAcceptedBy: plan.resultAcceptedBy ?? null,
     };
   }
 
@@ -1892,12 +1896,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * 新索引行可直接按 origin/targetWorkspacePath 筛选；旧索引行没有工作区字段时，
    * 只回退读取这些 legacy 详情，避免升级后漏掉历史计划。
    */
-  function listPlanDetailsByWorkspace(workspacePath) {
+  function listPlanDetailsByWorkspace(workspacePath, options = {}) {
     const normalizePath = (value) => typeof value === 'string'
       ? value.trim().replace(/[/\\]+$/, '').toLowerCase()
       : '';
     const wanted = normalizePath(workspacePath);
     if (!wanted) return listPlanDetails();
+    const candidateFilter = typeof options?.candidateFilter === 'function'
+      ? options.candidateFilter
+      : null;
 
     const index = readIndex();
     let indexChanged = false;
@@ -1912,6 +1919,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         meta.originWorkspacePath ?? meta.targetWorkspacePath,
       );
       if (hasWorkspaceIndex && indexedWorkspacePath !== wanted) return rawMeta;
+      if (hasWorkspaceIndex && candidateFilter && !candidateFilter(meta)) return rawMeta;
 
       const plan = hydratePlanMeta(meta);
       if (!plan) return rawMeta;

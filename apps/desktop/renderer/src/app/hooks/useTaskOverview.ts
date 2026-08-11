@@ -19,10 +19,23 @@ import { clientApi } from '../../clientApi';
 export type UseTaskOverviewOptions = {
   readonly enabled?: boolean;
   readonly workspacePath?: string | null;
+  readonly conversationId?: string | null;
   readonly includeTerminal?: boolean;
   readonly activeWithinMs?: number;
   readonly limit?: number;
 };
+
+function areTaskOverviewItemsEqual(
+  current: readonly TaskOverviewItem[],
+  next: readonly TaskOverviewItem[],
+): boolean {
+  if (current === next) return true;
+  if (current.length !== next.length) return false;
+  for (let index = 0; index < current.length; index += 1) {
+    if (JSON.stringify(current[index]) !== JSON.stringify(next[index])) return false;
+  }
+  return true;
+}
 
 export function useTaskOverview(
   options: UseTaskOverviewOptions | boolean = true,
@@ -31,6 +44,7 @@ export function useTaskOverview(
     typeof options === 'boolean' ? { enabled: options } : (options ?? {});
   const enabled = opts.enabled !== false;
   const workspacePath = opts.workspacePath ?? null;
+  const conversationId = opts.conversationId ?? null;
   const includeTerminal = opts.includeTerminal === true;
   const activeWithinMs = opts.activeWithinMs;
   const limit = opts.limit;
@@ -57,12 +71,13 @@ export function useTaskOverview(
       try {
         const result = await clientApi.taskOverviewList({
           workspacePath: workspacePath ?? undefined,
+          conversationId: conversationId ?? undefined,
           includeTerminal,
           ...(Number.isFinite(activeWithinMs) ? { activeWithinMs } : {}),
           ...(Number.isFinite(limit) ? { limit } : {}),
         });
         if (requestId !== requestIdRef.current) return;
-        setItems(result);
+        setItems((current) => areTaskOverviewItemsEqual(current, result) ? current : result);
       } catch {
         // 只读投影：拉取失败保持空列表，不阻断页面渲染。
         if (requestId === requestIdRef.current) setItems([]);
@@ -79,7 +94,7 @@ export function useTaskOverview(
         void reload();
       }
     }
-  }, [enabled, workspacePath, includeTerminal, activeWithinMs, limit]);
+  }, [enabled, workspacePath, conversationId, includeTerminal, activeWithinMs, limit]);
 
   useEffect(() => {
     void reload();

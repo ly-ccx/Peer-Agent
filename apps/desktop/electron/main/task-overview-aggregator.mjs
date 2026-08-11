@@ -13,7 +13,7 @@
  *
  * 数据边界（首页对齐设计稿，2026-08-08）：
  * - 默认只投影「当前 Workspace + 非终态/近期活跃」任务，避免历史全量灌首页。
- * - 支持 workspacePath / includeTerminal / activeWithinMs / limit 过滤。
+ * - 支持 workspacePath / conversationId / includeTerminal / activeWithinMs / limit 过滤。
  *
  * 纯函数 + 依赖注入：本模块不直接持有 store，由 main.mjs 注入
  * goalPlanStore / automationStore，便于单测。
@@ -404,6 +404,25 @@ export function toAutomationSnapshot(definition, latestRun) {
  * - workspacePath 过滤（target/origin 任一匹配）。
  * - 展示名固定使用 plan.title（核对后的 plan 名字）。
  */
+export function isGoalPlanMetaCandidate(plan, options = {}) {
+  if (!plan || typeof plan !== 'object') return false;
+  const {
+    includeTerminal = false,
+    activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
+    nowMs = Date.now(),
+  } = options;
+  const status = typeof plan.status === 'string' ? plan.status : null;
+  if (!status) return false;
+  if (status === GOAL_COMPLETED_STATUS) {
+    return !isPlanResultAccepted(plan);
+  }
+  if (!GOAL_HISTORY_TERMINAL_STATUSES.has(status)) {
+    return true;
+  }
+  if (!includeTerminal) return false;
+  return isWithinActiveWindow(plan.updatedAt, activeWithinMs, nowMs);
+}
+
 export function isGoalPlanInScope(plan, options = {}) {
   if (!plan || typeof plan !== 'object') return false;
   const {
@@ -572,6 +591,10 @@ export function createTaskOverviewAggregator({
       typeof query?.workspacePath === 'string' && query.workspacePath.trim() !== ''
         ? query.workspacePath
         : null;
+    const conversationId =
+      typeof query?.conversationId === 'string' && query.conversationId.trim() !== ''
+        ? query.conversationId.trim()
+        : null;
     const includeTerminal = query?.includeTerminal === true;
     const activeWithinMs = Number.isFinite(query?.activeWithinMs)
       ? query.activeWithinMs
@@ -594,10 +617,16 @@ export function createTaskOverviewAggregator({
     let conversations = [];
     if (typeof listConversations === 'function') {
       try {
-        conversations = listConversations({ status: 'active' }) ?? [];
+        conversations = listConversations({
+          status: 'active',
+          ...(conversationId ? { conversationId } : {}),
+        }) ?? [];
       } catch {
         conversations = [];
       }
+    }
+    if (conversationId) {
+      conversations = conversations.filter((conversation) => conversation?.id === conversationId);
     }
     const conversationById = new Map(
       conversations
@@ -608,9 +637,21 @@ export function createTaskOverviewAggregator({
 
     let plans = [];
     try {
-      plans = workspacePath && typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
-        ? goalPlanStore.listPlanDetailsByWorkspace(workspacePath) ?? []
-        : goalPlanStore.listPlanDetails() ?? [];
+      if (
+        conversationId &&
+        typeof goalPlanStore.listPlanDetailsByConversation === 'function'
+      ) {
+        plans = goalPlanStore.listPlanDetailsByConversation(conversationId) ?? [];
+      } else if (
+        workspacePath &&
+        typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
+      ) {
+        plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, {
+          candidateFilter: (meta) => isGoalPlanMetaCandidate(meta, scope),
+        }) ?? [];
+      } else {
+        plans = goalPlanStore.listPlanDetails() ?? [];
+      }
     } catch {
       plans = [];
     }
@@ -744,7 +785,10 @@ export function createTaskOverviewAggregator({
       if (projected) items.push(projected);
     }
 
-    const sorted = sortTaskOverview(items);
+    const scopedItems = conversationId
+      ? items.filter((item) => item?.conversationId === conversationId)
+      : items;
+    const sorted = sortTaskOverview(scopedItems);
     // result_ready 不单独限流；仅受首页合计 limit 约束（默认放宽到 200）。
     return sorted.slice(0, limit);
   }

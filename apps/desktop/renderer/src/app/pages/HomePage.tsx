@@ -19,6 +19,7 @@ export function HomePage({
   onOpenItem,
   onAcceptResult,
   onCancelItem,
+  enabled = true,
 }: {
   /** null = 全部工作区；有 path = 仅该工作区。 */
   readonly workspacePath?: string | null;
@@ -31,6 +32,7 @@ export function HomePage({
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
   const isGlobal = !workspacePath;
@@ -62,6 +64,7 @@ export function HomePage({
           : '当前工作区没有需要处理的任务'
       }
       hero
+      enabled={enabled}
       workspacePath={workspacePath}
       onOpenTasks={onOpenTasks}
       onOpenHistory={onOpenHistory}

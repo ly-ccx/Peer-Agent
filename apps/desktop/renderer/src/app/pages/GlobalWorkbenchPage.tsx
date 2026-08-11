@@ -37,6 +37,7 @@ export function GlobalWorkbenchPage({
   onAcceptResult,
   onCancelItem,
   onOpenWorkspace,
+  enabled = true,
 }: {
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
@@ -46,10 +47,11 @@ export function GlobalWorkbenchPage({
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   /** 点击「工作区脉搏」行：切到对应区级工作台。 */
   readonly onOpenWorkspace?: (workspacePath: string) => void;
+  readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
-  // 全局拉数：不传 workspacePath。
-  const items = useTaskOverview({ workspacePath: null, includeTerminal: false });
+  // 全局拉数：不传 workspacePath。Drawer 覆盖时暂停底页刷新。
+  const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
   const handleOpenItem = useCallback((item: TaskOverviewItem) => {
     if (

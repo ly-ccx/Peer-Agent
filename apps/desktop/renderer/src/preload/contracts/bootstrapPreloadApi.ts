@@ -939,6 +939,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
   readonly taskOverviewList: (params?: {
     workspacePath?: string | null;
+    conversationId?: string;
     includeTerminal?: boolean;
     activeWithinMs?: number;
     limit?: number;

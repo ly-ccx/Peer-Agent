@@ -36,6 +36,7 @@ interface TaskOverviewPageProps {
   /** 传给聚合层的过滤 path；null/undefined = 全局。 */
   readonly workspacePath?: string | null;
   readonly includeTerminal?: boolean;
+  readonly enabled?: boolean;
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页。 */
@@ -282,6 +283,7 @@ export function TaskOverviewPage({
   hero = false,
   workspacePath = null,
   includeTerminal = false,
+  enabled = true,
   onOpenTasks,
   onOpenHistory,
   onNewTask,
@@ -289,7 +291,7 @@ export function TaskOverviewPage({
   onAcceptResult,
   onCancelItem,
 }: TaskOverviewPageProps) {
-  const items = useTaskOverview({ workspacePath, includeTerminal });
+  const items = useTaskOverview({ enabled, workspacePath, includeTerminal });
   const filtered = items.filter(filter);
   const scopeLabel = scopeDisplayLabel(workspacePath);
 
