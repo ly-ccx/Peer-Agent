@@ -30,33 +30,23 @@
   }
 
   .gwb-calm-card {
-    @apply min-w-[220px] rounded-2xl border px-4 py-4;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 0.75rem;
-    row-gap: 0.25rem;
-    align-items: center;
+    @apply min-w-[220px] rounded-2xl border px-5 py-4;
     background: color-mix(in srgb, var(--za-surface-0) 88%, transparent);
     border-color: var(--za-line);
   }
 
-  .gwb-calm-dot {
-    @apply h-3 w-3 rounded-full;
-    grid-row: 1 / span 2;
-    background: var(--za-success, #3e7a6b);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-success, #3e7a6b) 16%, transparent);
+  .gwb-calm-title {
+    @apply flex items-center gap-2.5;
   }
 
-  .gwb-calm-card b {
-    @apply block text-sm font-semibold;
-    grid-column: 2;
+  .gwb-calm-title b {
+    @apply text-sm font-semibold;
     color: var(--za-text);
   }
 
-  .gwb-calm-card span {
-    @apply block text-xs;
-    grid-column: 2;
-    color: var(--za-text-muted);
+  .gwb-calm-dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full;
+    background: color-mix(in srgb, var(--za-success, #3e7a6b) 82%, var(--za-text-muted));
   }
 
   .gwb-layout {

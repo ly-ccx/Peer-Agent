@@ -234,9 +234,10 @@ export function GlobalWorkbenchPage({
             <p>汇总待你处理的决策、权限与验收。其余由 Peer 推进。</p>
           </div>
           <div className="gwb-calm-card">
-            <div className="gwb-calm-dot" aria-hidden="true" />
-            <b>{advancing.length} 个任务在推进</b>
-            <span>{actionCount === 0 ? '无需你介入' : 'Peer 会在交接点叫你'}</span>
+            <div className="gwb-calm-title">
+              <span className="gwb-calm-dot" aria-hidden="true" />
+              <b>{advancing.length} 个任务在推进</b>
+            </div>
           </div>
         </header>
 
