@@ -298,6 +298,7 @@ export {
   loadQoderAccessToken,
   loadQoderLocalAuth,
   prepareQoderInferRequest,
+  resolveHostNodeBinary,
   resolveQoderCliBinary,
   resolveQoderConfigDir,
   resolveQoderInferenceEndpoint,

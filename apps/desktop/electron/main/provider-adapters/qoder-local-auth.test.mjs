@@ -7,11 +7,35 @@ import { describe, it } from 'node:test';
 import {
   extractEmbeddedAuthWasmBytes,
   loadQoderLocalAuth,
+  resolveHostNodeBinary,
   resolveQoderCliBinary,
   resolveQoderConfigDir,
 } from './qoder-local-auth.mjs';
 
 describe('qoder local auth', () => {
+  it('does not treat the packaged Peer Agent executable as host Node', () => {
+    const packagedExecutable = '/Applications/Peer Agent.app/Contents/MacOS/Peer Agent';
+    assert.equal(resolveHostNodeBinary(
+      {},
+      {
+        execPath: packagedExecutable,
+        versions: { electron: '39.2.7', node: '22.20.0' },
+      },
+      () => false,
+    ), null);
+  });
+
+  it('reuses process.execPath only for a plain Node runtime', () => {
+    assert.equal(resolveHostNodeBinary(
+      {},
+      {
+        execPath: '/custom/bin/node',
+        versions: { node: '22.20.0' },
+      },
+      () => false,
+    ), '/custom/bin/node');
+  });
+
   it('uses an explicit environment token before reading local auth files', async () => {
     const auth = await loadQoderLocalAuth({
       env: { QODER_ACCESS_TOKEN: 'env-token' },

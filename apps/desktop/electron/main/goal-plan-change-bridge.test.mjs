@@ -47,6 +47,37 @@ test('bindExternalGoalPlanChanges broadcasts external persisted changes and igno
   assert.equal(stopped, true);
 });
 
+test('bindExternalGoalPlanChanges default error reporting survives a broken stderr pipe', () => {
+  let listener = null;
+  const originalWarn = console.warn;
+  console.warn = () => {
+    const error = new Error('write EPIPE');
+    error.code = 'EPIPE';
+    throw error;
+  };
+  try {
+    bindExternalGoalPlanChanges({
+      currentPid: 1,
+      goalPlanStore: {
+        subscribeChanges(nextListener) {
+          listener = nextListener;
+          return () => {};
+        },
+      },
+      broadcast: () => {},
+      getTaskNotificationBroker: () => ({
+        handleGoalPlanChanged() { throw new Error('notification failed'); },
+      }),
+    });
+
+    assert.doesNotThrow(() => {
+      listener({ writerPid: 2, planId: 'plan-external' });
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('bindExternalGoalPlanChanges keeps panel refresh alive when notification delivery fails', () => {
   let listener = null;
   const broadcasts = [];

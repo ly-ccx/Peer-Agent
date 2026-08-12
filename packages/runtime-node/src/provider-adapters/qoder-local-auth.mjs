@@ -78,9 +78,13 @@ function tokenFromEnv(env = process.env) {
  * Resolve a system Node binary that is not the Electron binary.
  * Electron main can hit EPERM on ~/.qoder/.auth while host node can still read it.
  */
-function resolveHostNodeBinary(env = process.env) {
+export function resolveHostNodeBinary(
+  env = process.env,
+  runtime = process,
+  existsSync = fsSync.existsSync,
+) {
   const explicit = nonEmpty(env.PEER_AGENT_HOST_NODE) || nonEmpty(env.QODER_HOST_NODE);
-  if (explicit && fsSync.existsSync(explicit) && !/electron/i.test(explicit)) {
+  if (explicit && existsSync(explicit) && !/electron/i.test(explicit)) {
     return explicit;
   }
   const candidates = [
@@ -89,11 +93,13 @@ function resolveHostNodeBinary(env = process.env) {
     '/usr/bin/node',
   ];
   for (const candidate of candidates) {
-    if (fsSync.existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) return candidate;
   }
-  // Last resort: process.execPath when not Electron (e.g. plain node tests).
-  if (process.execPath && !/electron/i.test(process.execPath)) {
-    return process.execPath;
+  // process.execPath is the Electron application executable in packaged builds,
+  // even though its path does not contain the word "electron". Only reuse it
+  // when runtime metadata proves this is a plain Node process.
+  if (!runtime?.versions?.electron && runtime?.execPath) {
+    return runtime.execPath;
   }
   return null;
 }

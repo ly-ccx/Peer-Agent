@@ -13,6 +13,17 @@ test('main entry parses as an ECMAScript module', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test('packaged desktop acquires a single-instance lock before creating the composition root', () => {
+  const lockIndex = mainSource.indexOf('app.requestSingleInstanceLock()');
+  const rootIndex = mainSource.indexOf('createDesktopCompositionRoot({');
+  assert.ok(lockIndex >= 0, 'main entry must request the Electron single-instance lock');
+  assert.ok(rootIndex > lockIndex, 'single-instance lock must be acquired before the composition root starts');
+  assert.match(mainSource, /const hasSingleInstanceLock = !isPackaged \|\| app\.requestSingleInstanceLock\(\)/);
+  assert.match(mainSource, /if \(!hasSingleInstanceLock\) app\.quit\(\)/);
+  assert.match(mainSource, /app\.on\(['"]second-instance['"], \(\) => \{\s*showOrCreateMainWindow\(\)/);
+  assert.match(mainSource, /desktopLifecycleBinding = hasSingleInstanceLock \? bindDesktopAppLifecycle/);
+});
+
 test('main delegates Electron lifecycle ownership to the desktop composition root', () => {
   assert.match(mainSource, /createDesktopCompositionRoot\(\{/);
   assert.match(mainSource, /bindDesktopAppLifecycle\(\{/);

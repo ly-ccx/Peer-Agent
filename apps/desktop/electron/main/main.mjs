@@ -216,6 +216,10 @@ function findWorkspaceRoot(startDir) {
 }
 
 const isPackaged = app.isPackaged;
+// Keep development launches independent while ensuring an installed desktop app
+// has exactly one process owning local stores, runtime services, and windows.
+const hasSingleInstanceLock = !isPackaged || app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 const workspaceRoot = isPackaged ? null : findWorkspaceRoot(__dirname);
 const resourcesRoot = isPackaged ? process.resourcesPath : workspaceRoot;
 const loadedEnvKeys = isPackaged ? [] : loadLocalEnv({ workspaceRoot });
@@ -3542,7 +3546,7 @@ function startAutomationRuntime() {
   };
 }
 
-const desktopCompositionRoot = createDesktopCompositionRoot({
+const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionRoot({
   logger: console,
   initialOwners: [
     { name: 'conversation-change-subscription', dispose: stopConversationChangeSubscription },
@@ -3572,9 +3576,15 @@ const desktopCompositionRoot = createDesktopCompositionRoot({
     { name: 'automation-runtime', optional: true, start: startAutomationRuntime },
     { name: 'background-work', optional: true, start: startBackgroundWork },
   ],
-});
+}) : null;
 
-desktopLifecycleBinding = bindDesktopAppLifecycle({
+if (hasSingleInstanceLock) {
+  app.on('second-instance', () => {
+    showOrCreateMainWindow();
+  });
+}
+
+desktopLifecycleBinding = hasSingleInstanceLock ? bindDesktopAppLifecycle({
   app,
   root: desktopCompositionRoot,
   platform: process.platform,
@@ -3586,4 +3596,4 @@ desktopLifecycleBinding = bindDesktopAppLifecycle({
   onFatalStartupError: (error) => {
     console.error('[main] desktop composition startup failed:', error);
   },
-});
+}) : null;
