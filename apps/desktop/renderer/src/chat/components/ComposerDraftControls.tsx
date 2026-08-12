@@ -423,7 +423,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
         disabled={!hasProvider}
         placeholder={hasProvider
           ? isBusy
-            ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
+            ? (isZh ? '随心输入' : 'Message will auto-send when done...')
             : variant === 'home'
               ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
               : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
