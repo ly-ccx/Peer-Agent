@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
+import {
+  groupSearchConversationsByWorkspace,
+  type SearchConversationHit,
+} from './conversationSearchGrouping';
 
-export type SearchConversationHit = {
-  readonly id: string;
-  readonly title?: string;
-  readonly workspacePath?: string | null;
-  readonly updatedAt?: string;
-  readonly createdAt?: string;
-};
+export type { SearchConversationHit } from './conversationSearchGrouping';
 
 type PaletteItem =
   | { readonly kind: 'conversation'; readonly conversation: SearchConversationHit }
@@ -22,13 +20,6 @@ interface ConversationSearchPaletteProps {
   readonly onClose: () => void;
   readonly onSelectConversation: (hit: SearchConversationHit) => void | Promise<void>;
   readonly onNewTask: () => void | Promise<void>;
-}
-
-function workspaceShortName(workspacePath?: string | null): string {
-  if (!workspacePath) return '';
-  const normalized = String(workspacePath).replace(/[\\/]+$/, '');
-  const parts = normalized.split(/[\\/]/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : normalized;
 }
 
 function normalizeSearchQuery(query?: string): string {
@@ -165,9 +156,17 @@ export function ConversationSearchPalette({
   }, [open]);
 
   // Typing only re-ranks the in-memory catalog — no IPC, no debounce needed.
-  const results = useMemo(
+  const rankedResults = useMemo(
     () => filterAndRankConversations(catalog, query, 50),
     [catalog, query],
+  );
+  const workspaceGroups = useMemo(
+    () => groupSearchConversationsByWorkspace(rankedResults, activeWorkspace),
+    [activeWorkspace, rankedResults],
+  );
+  const results = useMemo(
+    () => workspaceGroups.flatMap((group) => group.conversations),
+    [workspaceGroups],
   );
 
   useEffect(() => {
@@ -274,38 +273,50 @@ export function ConversationSearchPalette({
             {results.length === 0 && !loading ? (
               <div className="conversation-search-empty">{i18n.t('searchChats.empty')}</div>
             ) : null}
-            {results.map((conversation, index) => {
-              const title = (conversation.title || '').trim() || i18n.t('searchChats.untitled');
-              const workspaceName = workspaceShortName(conversation.workspacePath);
-              const isForeign = Boolean(
-                conversation.workspacePath
-                && activeWorkspace
-                && conversation.workspacePath !== activeWorkspace,
-              );
-              const isActive = activeIndex === index;
+            {workspaceGroups.map((group, groupIndex) => {
+              const groupStartIndex = workspaceGroups
+                .slice(0, groupIndex)
+                .reduce((total, previous) => total + previous.conversations.length, 0);
+              const groupLabel = group.workspaceName || i18n.t('searchChats.workspace.unassigned');
               return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  className={`conversation-search-item${isActive ? ' is-active' : ''}`}
-                  data-search-index={index}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => { void activateItem({ kind: 'conversation', conversation }, requestClose); }}
+                <section
+                  key={group.workspacePath || '__unassigned__'}
+                  className="conversation-search-workspace-group"
+                  aria-label={groupLabel}
                 >
-                  <div className="conversation-search-item-main">
-                    <div className="conversation-search-item-title">
-                      {highlightTitle(title, query)}
-                    </div>
-                    {workspaceName ? (
-                      <div className={`conversation-search-item-meta${isForeign ? ' is-foreign' : ''}`}>
-                        {workspaceName}
-                      </div>
+                  <div className="conversation-search-workspace-label">
+                    <span>{groupLabel}</span>
+                    {group.isActiveWorkspace ? (
+                      <span className="conversation-search-workspace-current">
+                        {i18n.t('searchChats.workspace.current')}
+                      </span>
                     ) : null}
                   </div>
-                  {index < 9 ? (
-                    <kbd className="conversation-search-item-shortcut">⌘{index + 1}</kbd>
-                  ) : null}
-                </button>
+                  {group.conversations.map((conversation, groupItemIndex) => {
+                    const index = groupStartIndex + groupItemIndex;
+                    const title = (conversation.title || '').trim() || i18n.t('searchChats.untitled');
+                    const isActive = activeIndex === index;
+                    return (
+                      <button
+                        key={conversation.id}
+                        type="button"
+                        className={`conversation-search-item${isActive ? ' is-active' : ''}`}
+                        data-search-index={index}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onClick={() => { void activateItem({ kind: 'conversation', conversation }, requestClose); }}
+                      >
+                        <div className="conversation-search-item-main">
+                          <div className="conversation-search-item-title">
+                            {highlightTitle(title, query)}
+                          </div>
+                        </div>
+                        {index < 9 ? (
+                          <kbd className="conversation-search-item-shortcut">⌘{index + 1}</kbd>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </section>
               );
             })}
 

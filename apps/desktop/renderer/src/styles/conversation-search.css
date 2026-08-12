@@ -76,6 +76,28 @@
     margin-top: 6px;
   }
 
+  .conversation-search-workspace-group + .conversation-search-workspace-group {
+    margin-top: 8px;
+  }
+
+  .conversation-search-workspace-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 4px;
+    color: var(--pa-text-secondary, var(--graphite-soft));
+    font-size: var(--ui-font-caption, 0.6875rem);
+    font-weight: 600;
+  }
+
+  .conversation-search-workspace-current {
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: var(--za-sidebar-active-bg, rgba(127, 127, 127, 0.08));
+    font-size: 0.625rem;
+    font-weight: 500;
+  }
+
   .conversation-search-empty {
     padding: 12px 10px;
     font-size: var(--ui-font-control, 0.8125rem);

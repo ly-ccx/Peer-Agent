@@ -12,6 +12,8 @@ export type TranslationKey =
   | 'searchChats.placeholder'
   | 'searchChats.section.chats'
   | 'searchChats.section.suggested'
+  | 'searchChats.workspace.current'
+  | 'searchChats.workspace.unassigned'
   | 'searchChats.empty'
   | 'searchChats.untitled'
   | 'searchChats.newTask'
@@ -622,6 +624,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'searchChats.placeholder': '搜索任务',
     'searchChats.section.chats': '任务',
     'searchChats.section.suggested': '建议',
+    'searchChats.workspace.current': '当前工作区',
+    'searchChats.workspace.unassigned': '未关联工作区',
     'searchChats.empty': '未找到相关任务',
     'searchChats.untitled': '未命名任务',
     'searchChats.newTask': '新建任务',
@@ -1231,6 +1235,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'searchChats.placeholder': 'Search tasks',
     'searchChats.section.chats': 'Tasks',
     'searchChats.section.suggested': 'Suggested',
+    'searchChats.workspace.current': 'Current workspace',
+    'searchChats.workspace.unassigned': 'Unassigned workspace',
     'searchChats.empty': 'No tasks found',
     'searchChats.untitled': 'Untitled',
     'searchChats.newTask': 'New task',
