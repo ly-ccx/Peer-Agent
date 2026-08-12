@@ -6,6 +6,7 @@ import {
   isLocalImagePath,
   loadLocalImageDataUrl,
 } from '../../state/localImagePreview';
+import { findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -99,7 +100,7 @@ function resolveAbsolutePath(
   return `${root}/${rel}`;
 }
 
-function FilePathCode({ raw }: { raw: string }) {
+function FilePathCode({ raw, children }: { raw: string; children?: ReactNode }) {
   const workspacePath = useContext(WorkspacePathContext);
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
@@ -149,18 +150,20 @@ function FilePathCode({ raw }: { raw: string }) {
     };
   }, [absPath, exists, isDir, looksLikeImage, relPath, workspacePath]);
 
+  const content = children ?? raw;
+
   if (!parsed || !absPath) {
-    return <code>{raw}</code>;
+    return <code>{content}</code>;
   }
 
   // 探测中：先以普通 code 呈现，避免闪烁可点样式
   if (exists === null) {
-    return <code>{raw}</code>;
+    return <code>{content}</code>;
   }
 
   // 磁盘上不存在 → 保持普通 inline code 行为
   if (!exists) {
-    return <code>{raw}</code>;
+    return <code>{content}</code>;
   }
 
   const handleOpen = () => {
@@ -207,7 +210,7 @@ function FilePathCode({ raw }: { raw: string }) {
             }
           }}
         >
-          {raw}
+          {content}
         </code>
         {previewOpen ? (
           <LocalImageLightbox
@@ -234,7 +237,7 @@ function FilePathCode({ raw }: { raw: string }) {
         }
       }}
     >
-      {raw}
+      {content}
     </code>
   );
 }
@@ -312,7 +315,9 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
 
   while (cursor < text.length) {
     const fontToken = findFontToken(text, cursor);
+    const linkToken = findMarkdownLink(text, cursor);
     const candidates = [
+      ...(linkToken ? [{ type: 'link' as const, ...linkToken }] : []),
       { type: 'code' as const, start: text.indexOf('`', cursor), marker: '`' },
       { type: 'strong' as const, start: text.indexOf('**', cursor), marker: '**' },
       { type: 'em' as const, start: findSingleStar(text, cursor), marker: '*' },
@@ -327,6 +332,25 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
 
     if (next.start > cursor) {
       tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor, next.start), keyPrefix, tokenIndex);
+    }
+    if (next.type === 'link') {
+      const key = `${keyPrefix}-inline-${tokenIndex}`;
+      const label = renderInlineMarkdown(next.label, `${key}-label`);
+      const externalHref = safeExternalHref(next.destination);
+      if (externalHref) {
+        nodes.push(
+          <a key={key} href={externalHref} target="_blank" rel="noreferrer noopener">
+            {label}
+          </a>,
+        );
+      } else if (parseFilePathToken(next.destination)) {
+        nodes.push(<FilePathCode key={key} raw={next.destination}>{label}</FilePathCode>);
+      } else {
+        nodes.push(<span key={key}>{label}</span>);
+      }
+      tokenIndex += 1;
+      cursor = next.end;
+      continue;
     }
     if (next.type === 'font') {
       const contentStart = next.start + next.openingTag.length;
