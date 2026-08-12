@@ -56,7 +56,6 @@ export function useTaskOverview(
 
   const reload = useCallback(async () => {
     if (!enabled) {
-      setItems([]);
       return;
     }
 
