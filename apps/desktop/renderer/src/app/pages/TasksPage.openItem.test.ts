@@ -14,6 +14,10 @@ test('task row view button opens the matching task details', async () => {
   assert.match(tasksPageSource, /readonly onOpenItem\?: \(item: TaskOverviewItem\) => void;/);
   assert.match(
     tasksPageSource,
+    /if \(item\.source === 'conversation'\) return item\.statusLabel;/,
+  );
+  assert.match(
+    tasksPageSource,
     /className="task-row-open"[\s\S]*?onClick=\{\(\) => onOpenItem\?\.\(item\)\}/,
   );
   const openItemHandler =

@@ -49,6 +49,14 @@ test('conversation discussion projection never invents plan progress or steps', 
   assert.equal(item.planSteps, undefined);
 });
 
+test('conversation discussion projection exposes read state without removing history', () => {
+  const item = projectConversation(
+    conversationSnapshot({ lastReadAt: '2026-08-09T01:30:00.000Z' }),
+  );
+  assert.equal(item.conversationId, 'conversation-1');
+  assert.equal(item.statusLabel, '已读');
+});
+
 test('isConversationUnreadForDiscussion compares updatedAt and lastReadAt', () => {
   assert.equal(
     isConversationUnreadForDiscussion({
@@ -183,6 +191,7 @@ test('未消费的 stream 中断优先于 completed 待验收并提供继续入�
       status: 'completed',
       runnerStatus: 'failed',
       interrupted: true,
+      interruptionReason: '连接意外断开',
       accepted: false,
     }),
   );
@@ -190,6 +199,7 @@ test('未消费的 stream 中断优先于 completed 待验收并提供继续入�
   assert.equal(item.nextAction, 'resume');
   assert.equal(item.statusLabel, '执行中断');
   assert.equal(item.actionLabel, '继续 →');
+  assert.equal(item.issueDetail, '连接意外断开');
 });
 
 test('rule 6: completed 未验收 → result_ready', () => {

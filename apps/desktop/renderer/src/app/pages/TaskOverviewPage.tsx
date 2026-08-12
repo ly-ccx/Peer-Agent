@@ -1,5 +1,5 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatDuration } from '../../chat/state/format';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -383,6 +383,7 @@ function HeroLayout({
   const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
   const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
+  const paused = items.filter((i) => i.actionRight === 'paused');
   const advancing = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing');
   const resultReady = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready');
   const [acceptanceTransitions, setAcceptanceTransitions] = useState<
@@ -570,6 +571,41 @@ function HeroLayout({
           >
             {needsYou.map((item) => (
               <HandoffRow key={item.taskId} item={item} onOpenItem={onOpenItem} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {paused.length > 0 ? (
+        <section className="task-overview-section">
+          <div className="task-overview-section-head">
+            <div className="task-overview-section-title">
+              <h2 title="执行异常">执行异常</h2>
+              <small>{paused.length}</small>
+            </div>
+            <span className="task-overview-section-hint">中断原因与恢复入口已保留</span>
+          </div>
+          <div className="task-overview-work-grid">
+            {paused.map((item) => (
+              <WorkItem
+                key={item.taskId}
+                item={item}
+                onOpenItem={onOpenItem}
+                actionSlot={
+                  item.nextAction === 'resume' && onOpenItem ? (
+                    <button
+                      type="button"
+                      className="task-overview-text-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenItem(item);
+                      }}
+                    >
+                      继续执行
+                    </button>
+                  ) : undefined
+                }
+              />
             ))}
           </div>
         </section>
@@ -773,10 +809,12 @@ function WorkItem({
   item,
   onOpenItem,
   onCancelItem,
+  actionSlot,
 }: {
   readonly item: TaskOverviewItem;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly actionSlot?: ReactNode;
 }) {
   const pct = progressPercent(item);
   const canCancel = item.source === 'goal_plan' && typeof onCancelItem === 'function';
@@ -807,7 +845,7 @@ function WorkItem({
       {item.currentGoalTitle ? (
         <p className="task-overview-current-goal">当前目标 · {item.currentGoalTitle}</p>
       ) : null}
-      <p>{item.source === 'conversation' ? '继续讨论，或在明确实施时创建 GoalPlan' : reasonMeta(item)}</p>
+      <p>{item.issueDetail ?? (item.source === 'conversation' ? '继续讨论，或在明确实施时创建 GoalPlan' : reasonMeta(item))}</p>
       {item.planSteps && item.planSteps.length > 0 ? (
         <ol className="task-overview-plan-steps" aria-label="计划步骤">
           {item.planSteps.map((step) => (
@@ -829,18 +867,21 @@ function WorkItem({
           <i style={{ width: `${pct}%` }} />
         </div>
       ) : null}
-      {canCancel ? (
+      {actionSlot || canCancel ? (
         <div className="result-card-actions work-item-actions">
-          <button
-            type="button"
-            className="task-overview-btn task-overview-btn--secondary"
-            onClick={(event) => {
-              event.stopPropagation();
-              void onCancelItem?.(item);
-            }}
-          >
-            取消
-          </button>
+          {actionSlot}
+          {canCancel ? (
+            <button
+              type="button"
+              className="task-overview-btn task-overview-btn--secondary"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onCancelItem?.(item);
+              }}
+            >
+              取消
+            </button>
+          ) : null}
         </div>
       ) : null}
     </article>

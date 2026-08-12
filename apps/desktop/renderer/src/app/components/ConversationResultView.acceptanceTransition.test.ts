@@ -46,6 +46,22 @@ test('result drawer shell shatters the whole panel before unload', async () => {
     source,
     /ref=\{resultShatterRef\}[\s\S]*?conversation-result-drawer__head[\s\S]*?conversation-result-drawer__body[\s\S]*?conversation-result-drawer__footer[\s\S]*?<\/div>[\s\S]*?<ParticleShatterOverlay active=\{resultShattering\} targetRef=\{resultShatterRef\}/,
   );
+
+  const acceptHandler = source.slice(
+    source.indexOf('const acceptResultFromWorkbench'),
+    source.indexOf('const cancelPlanFromWorkbench'),
+  );
+  const keepDrawerBranch = acceptHandler.match(
+    /if \(!options\?\.keepResultDrawer\) \{\n([\s\S]*?)\n        \}/,
+  );
+  assert.ok(keepDrawerBranch, 'accept handler must have a keepResultDrawer guard');
+  assert.match(keepDrawerBranch[1], /setResultDrawerItem/);
+  assert.match(
+    keepDrawerBranch[1],
+    /setCollectionDrawer\(\(current\) => \(current === 'result' \? null : current\)\)/,
+    'keepResultDrawer must preserve both the result item and its drawer until animation settles',
+  );
+
   // 验收完成前不得立刻清空侧栏；收尾发生在 onSettled。
   assert.match(
     source,

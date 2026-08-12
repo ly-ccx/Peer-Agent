@@ -69,7 +69,7 @@ function sourceKindLabel(item: TaskOverviewItem): string {
 }
 
 function actionOwnerLabel(item: TaskOverviewItem): string {
-  if (item.source === 'conversation') return '有未读';
+  if (item.source === 'conversation') return item.statusLabel;
   if (item.actionRight === 'needs_you') {
     if (item.needsYouReason === 'plan_approval') return '等待你的决策';
     if (item.needsYouReason === 'user_input') {

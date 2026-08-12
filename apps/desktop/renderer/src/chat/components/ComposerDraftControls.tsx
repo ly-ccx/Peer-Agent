@@ -388,11 +388,11 @@ const ComposerDraftField = memo(function ComposerDraftField({
         </div>
       ) : null}
       {showSessionMentions ? (
-        <div className="slash-command-menu" role="listbox" aria-label={isZh ? '引用会话' : 'Mention session'}>
+        <div className="slash-command-menu" role="listbox" aria-label={isZh ? '引用任务' : 'Mention task'}>
           {sessionLoading ? (
-            <div className="slash-command-empty">{isZh ? '搜索会话…' : 'Searching sessions…'}</div>
+            <div className="slash-command-empty">{isZh ? '搜索任务…' : 'Searching tasks…'}</div>
           ) : sessionHits.length === 0 ? (
-            <div className="slash-command-empty">{isZh ? '没有匹配的会话' : 'No matching sessions'}</div>
+            <div className="slash-command-empty">{isZh ? '没有匹配的任务' : 'No matching tasks'}</div>
           ) : (
             sessionHits.map((hit, index) => (
               <button

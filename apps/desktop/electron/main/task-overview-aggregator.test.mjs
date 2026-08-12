@@ -48,7 +48,7 @@ test('aggregator projects conversations without GoalPlans as discussion tasks', 
   assert.equal(items[0].actionLabel, '打开');
 });
 
-test('aggregator omits read conversations from 正在讨论 projection', () => {
+test('aggregator keeps read and unread conversations in discussion history', () => {
   const agg = createTaskOverviewAggregator({
     goalPlanStore: { listPlanDetails: () => [] },
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
@@ -71,9 +71,14 @@ test('aggregator omits read conversations from 正在讨论 projection', () => {
   });
 
   const items = agg.listTaskOverview({ activeWithinMs: 0 });
-  assert.equal(items.length, 1);
-  assert.equal(items[0].conversationId, 'conversation-unread');
-  assert.equal(items[0].statusLabel, '有未读');
+  assert.equal(items.length, 2);
+  assert.deepEqual(
+    items.map((item) => [item.conversationId, item.statusLabel]),
+    [
+      ['conversation-unread', '有未读'],
+      ['conversation-read', '已读'],
+    ],
+  );
 });
 
 test('displayConversationTitle truncates long user text and rejects command-like titles', () => {
@@ -246,6 +251,44 @@ test('toGoalPlanSnapshot 透传未消费的 runner interruption', () => {
     title: '中断任务',
   });
   assert.equal(snapshot.interrupted, true);
+  assert.equal(snapshot.interruptionReason, 'socket disconnected');
+});
+
+test('aggregator keeps interrupted Goal as one paused item instead of discussion', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [{
+        planId: 'p-interrupted',
+        conversationId: 'conversation-interrupted',
+        status: 'executing',
+        runner: {
+          status: 'failed',
+          interruption: {
+            source: 'stream_error',
+            reason: 'socket disconnected',
+            interruptedAt: '2026-08-11T00:00:00.000Z',
+            recoverable: true,
+          },
+        },
+        title: '修复执行中断归类',
+        updatedAt: '2026-08-11T00:00:01.000Z',
+      }],
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [{
+      id: 'conversation-interrupted',
+      title: '你还是没有解决中断的问题',
+      workspacePath: '/work/peer_agent',
+      updatedAt: '2026-08-11T00:00:02.000Z',
+    }],
+  });
+
+  const items = agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].source, 'goal_plan');
+  assert.equal(items[0].actionRight, 'paused');
+  assert.equal(items[0].nextAction, 'resume');
+  assert.equal(items[0].issueDetail, 'socket disconnected');
 });
 
 test('toGoalPlanSnapshot 透传 timing，并从会话解析 modelLabel / providerLabel', () => {

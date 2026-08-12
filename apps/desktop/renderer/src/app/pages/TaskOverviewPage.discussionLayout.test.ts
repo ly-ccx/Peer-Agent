@@ -16,8 +16,18 @@ test('discussion preview uses compact cards instead of execution WorkItem cards'
   assert.match(discussionSection, /<DiscussionCard/);
   assert.doesNotMatch(discussionSection, /<WorkItem/);
   assert.match(source, /const DISCUSSION_PREVIEW_LIMIT = 6;/);
+  assert.match(source, /const visibleDiscussions = discussions\.slice\(0, DISCUSSION_PREVIEW_LIMIT\);/);
   assert.match(source, /item\.statusLabel \|\| '有未读'/);
   assert.doesNotMatch(discussionSection, /advancingStateLabel/);
+});
+
+test('interrupted execution is rendered as a visible recovery section', async () => {
+  const source = await readPageSource();
+  assert.match(source, /const paused = items\.filter\(\(i\) => i\.actionRight === 'paused'\);/);
+  assert.match(source, /title="执行异常"/);
+  assert.match(source, /item\.issueDetail/);
+  assert.match(source, /item\.nextAction === 'resume'/);
+  assert.match(source, />\s*继续执行\s*</);
 });
 
 test('discussion grid has explicit spacing and responsive 3-2-1 columns', async () => {

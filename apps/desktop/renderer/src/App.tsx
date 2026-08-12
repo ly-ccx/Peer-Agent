@@ -182,8 +182,8 @@ function MainApp() {
         // 结果抽屉自带三段式验收动画，关闭时机交给动画收尾，避免动画被立刻卸载。
         if (!options?.keepResultDrawer) {
           setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
+          setCollectionDrawer((current) => (current === 'result' ? null : current));
         }
-        setCollectionDrawer((current) => (current === 'result' ? null : current));
       } catch (error) {
         console.error('[workbench] accept result failed', error);
         throw error;

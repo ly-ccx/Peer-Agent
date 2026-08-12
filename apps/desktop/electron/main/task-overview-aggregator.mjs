@@ -20,7 +20,6 @@
  */
 
 import {
-  isConversationUnreadForDiscussion,
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
@@ -340,6 +339,9 @@ export function toGoalPlanSnapshot(plan, options = {}) {
       plan.runner?.interruption &&
       !(plan.runner.interruption.recoverable === true && plan.runner.status === 'running'),
     ),
+    ...(typeof plan.runner?.interruption?.reason === 'string' && plan.runner.interruption.reason.trim()
+      ? { interruptionReason: plan.runner.interruption.reason.trim() }
+      : {}),
     // 展示名 = 核对后的 plan 名字（GoalPlan.title），不用 goal 全文、不用会话名。
     title: typeof plan.title === 'string' && plan.title.trim() !== '' ? plan.title.trim() : planId,
     workspaceLabel: workspaceLabelFromPath(workspacePath),
@@ -726,16 +728,8 @@ export function createTaskOverviewAggregator({
       ) {
         continue;
       }
-      // 首页「正在讨论」只收未读沟通；已读会话不占位。
+      // 会话历史始终保留；lastReadAt 仅供协议投影已读/未读状态。
       // 活跃任务 conversation 已在 projectedPlanConversationIds 排除（一会话一投影）。
-      if (
-        !isConversationUnreadForDiscussion({
-          updatedAt: conversation.updatedAt,
-          lastReadAt: conversation.lastReadAt,
-        })
-      ) {
-        continue;
-      }
       const labels = resolveConversationModelLabels(conversation, providerIndex);
       items.push(projectConversation({
         conversationId,

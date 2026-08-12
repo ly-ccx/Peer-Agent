@@ -1013,19 +1013,19 @@ test('searchConversations ranks title matches and excludes archived by default',
   const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-search-'));
   try {
     const store = createConversationStore({ storeDir: dir });
-    const exact = store.createConversation({ title: 'Search Chats', workspacePath: '/ws/a' });
-    const prefix = store.createConversation({ title: 'Search chats palette', workspacePath: '/ws/b' });
-    const contains = store.createConversation({ title: 'Implement search chats', workspacePath: '/ws/c' });
+    const exact = store.createConversation({ title: 'Search Tasks', workspacePath: '/ws/a' });
+    const prefix = store.createConversation({ title: 'Search tasks palette', workspacePath: '/ws/b' });
+    const contains = store.createConversation({ title: 'Implement search tasks', workspacePath: '/ws/c' });
     const other = store.createConversation({ title: 'Unrelated task', workspacePath: '/ws/a' });
     const archived = store.createConversation({ title: 'Search archived', workspacePath: '/ws/a' });
     store.archiveConversation(archived.id);
 
     // Make recency deterministic among equal-score items.
-    store.updateTitle(contains.id, 'Implement search chats');
-    store.updateTitle(prefix.id, 'Search chats palette');
-    store.updateTitle(exact.id, 'Search Chats');
+    store.updateTitle(contains.id, 'Implement search tasks');
+    store.updateTitle(prefix.id, 'Search tasks palette');
+    store.updateTitle(exact.id, 'Search Tasks');
 
-    const results = store.searchConversations({ query: 'search chats' });
+    const results = store.searchConversations({ query: 'search tasks' });
     assert.deepEqual(results.map((item) => item.id), [exact.id, prefix.id, contains.id]);
     assert.equal(results.some((item) => item.id === other.id), false);
     assert.equal(results.some((item) => item.id === archived.id), false);
@@ -1055,10 +1055,10 @@ test('searchConversations empty query returns recent active conversations with l
 
 test('rankConversationMatch prefers exact and prefix title matches', async () => {
   const { rankConversationMatch } = await import('@peer-agent/conversation-store');
-  assert.equal(rankConversationMatch({ title: 'Search Chats' }, 'search chats'), 300);
-  assert.equal(rankConversationMatch({ title: 'Search chats palette' }, 'search chats'), 200);
-  assert.equal(rankConversationMatch({ title: 'Implement search chats' }, 'search chats'), 100);
-  assert.equal(rankConversationMatch({ title: 'Other' }, 'search chats'), -1);
+  assert.equal(rankConversationMatch({ title: 'Search Tasks' }, 'search tasks'), 300);
+  assert.equal(rankConversationMatch({ title: 'Search tasks palette' }, 'search tasks'), 200);
+  assert.equal(rankConversationMatch({ title: 'Implement search tasks' }, 'search tasks'), 100);
+  assert.equal(rankConversationMatch({ title: 'Other' }, 'search tasks'), -1);
   assert.equal(rankConversationMatch({ title: 'Other', workspacePath: '/tmp/search-chats' }, 'search', { includeWorkspaceNameMatch: true }), 50);
 });
 

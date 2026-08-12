@@ -135,6 +135,8 @@ export interface TaskOverviewItem {
   readonly workspaceLabel?: string;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
+  /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
+  readonly issueDetail?: string;
   /** Plan 进度「x / y」；无 Plan 概念的任务为 undefined。 */
   readonly planProgress?: { readonly completed: number; readonly total: number };
   /**
@@ -200,6 +202,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly runnerStatus?: GoalRunnerStatus;
   /** Runner 上存在尚未被 resume 消费的网络/流式中断事实。 */
   readonly interrupted?: boolean;
+  /** 持久化中断事实中的用户可展示原因。 */
+  readonly interruptionReason?: string;
   readonly title: string;
   readonly workspaceLabel?: string;
   readonly progress?: { readonly completed: number; readonly total: number };
@@ -311,6 +315,7 @@ export function projectConversation(
     typeof snapshot.providerLabel === 'string' && snapshot.providerLabel.trim()
       ? snapshot.providerLabel.trim()
       : undefined;
+  const unread = isConversationUnreadForDiscussion(snapshot);
   return {
     taskId: snapshot.conversationId,
     source: 'conversation',
@@ -318,8 +323,8 @@ export function projectConversation(
     nextAction: 'continue_task',
     title: snapshot.title,
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
-    // 「正在讨论」是未读入口，不是任务态；状态文案用「有未读」。
-    statusLabel: '有未读',
+    // 已读水位只改变状态，不应把会话从历史投影中删除。
+    statusLabel: unread ? '有未读' : '已读',
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),
@@ -391,6 +396,9 @@ export function projectGoalPlan(
     title: snapshot.title,
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     statusLabel: decision.statusLabel,
+    ...(decision.actionRight === 'paused' && snapshot.interruptionReason
+      ? { issueDetail: snapshot.interruptionReason }
+      : {}),
     ...(snapshot.progress ? { planProgress: snapshot.progress } : {}),
     ...(snapshot.planSteps && snapshot.planSteps.length > 0
       ? { planSteps: snapshot.planSteps }
