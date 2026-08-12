@@ -10,7 +10,7 @@
   }
 
   .gwb-hero {
-    @apply mb-6 flex flex-wrap items-start justify-between gap-5;
+    @apply mb-6;
   }
 
   .gwb-eyebrow {
@@ -27,26 +27,6 @@
   .gwb-hero-copy p {
     @apply mt-2 max-w-xl text-sm leading-relaxed;
     color: var(--za-text-soft);
-  }
-
-  .gwb-calm-card {
-    @apply w-fit max-w-full rounded-2xl border px-5 py-4;
-    background: color-mix(in srgb, var(--za-surface-0) 88%, transparent);
-    border-color: var(--za-line);
-  }
-
-  .gwb-calm-title {
-    @apply flex items-center gap-2.5;
-  }
-
-  .gwb-calm-title b {
-    @apply text-sm font-semibold;
-    color: var(--za-text);
-  }
-
-  .gwb-calm-dot {
-    @apply inline-block h-2 w-2 shrink-0 rounded-full;
-    background: color-mix(in srgb, var(--za-success, #3e7a6b) 82%, var(--za-text-muted));
   }
 
   .gwb-layout {

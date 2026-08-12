@@ -6,6 +6,18 @@ const readPage = () => readFile(new URL('./GlobalWorkbenchPage.tsx', import.meta
 const readStyles = () =>
   readFile(new URL('../../styles/global-workbench.css', import.meta.url), 'utf8');
 
+test('advancing count has one overview entry and no duplicate hero summary', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(
+    source,
+    /<span className="gwb-side-label">PEER 推进<\/span>\s*<span className="gwb-side-count">\{advancing\.length\} 个任务<\/span>/,
+  );
+  assert.doesNotMatch(source, /个任务在推进|gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
+  assert.doesNotMatch(styles, /\.gwb-calm-card|\.gwb-calm-title|\.gwb-calm-dot/);
+});
+
 test('global workbench acceptance waits for success before celebrating and freezes order snapshot', async () => {
   const source = await readPage();
   assert.match(source, /mergeAcceptanceTransitionItems/);

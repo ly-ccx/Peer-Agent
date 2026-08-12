@@ -235,12 +235,6 @@ export function GlobalWorkbenchPage({
             <h1>工作台</h1>
             <p>汇总待你处理的决策、权限与验收。其余由 Peer 推进。</p>
           </div>
-          <div className="gwb-calm-card">
-            <div className="gwb-calm-title">
-              <span className="gwb-calm-dot" aria-hidden="true" />
-              <b>{advancing.length} 个任务在推进</b>
-            </div>
-          </div>
         </header>
 
         <div className="gwb-layout">
