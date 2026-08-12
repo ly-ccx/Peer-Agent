@@ -244,6 +244,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   },
   goalPlansList: (params) => ipcRenderer.invoke('goalPlans:list', params),
   taskOverviewList: (params) => ipcRenderer.invoke('taskOverview:list', params),
+  taskOverviewMarkRead: (params) => ipcRenderer.invoke('taskOverview:mark-read', params),
   goalPlansAwaitingCounts: () => ipcRenderer.invoke('goalPlans:awaiting-counts'),
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),

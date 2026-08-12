@@ -144,6 +144,7 @@ const unavailableApi: ClientApi = {
   conversationsAddUsage: unavailableMethod('conversationsAddUsage'),
   goalPlansList: unavailableMethod('goalPlansList'),
   taskOverviewList: unavailableMethod('taskOverviewList'),
+  taskOverviewMarkRead: unavailableMethod('taskOverviewMarkRead'),
   goalPlansAwaitingCounts: unavailableMethod('goalPlansAwaitingCounts'),
   goalPlansGet: unavailableMethod('goalPlansGet'),
   goalPlansCreate: unavailableMethod('goalPlansCreate'),

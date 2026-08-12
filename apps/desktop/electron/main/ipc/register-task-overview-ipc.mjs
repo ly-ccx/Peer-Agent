@@ -29,11 +29,16 @@ export function createTaskOverviewIpcRegistrations({ taskOverview } = {}) {
     taskOverview?.listTaskOverview,
     'taskOverview.listTaskOverview',
   );
+  const markTasksRead = assertFunction(
+    taskOverview?.markTasksRead,
+    'taskOverview.markTasksRead',
+  );
 
   return Object.freeze([
     owner('taskOverview-ipc', (ipc) => {
       // payload: { workspacePath?, includeTerminal?, activeWithinMs?, limit? }
       ipc.handle('taskOverview:list', (_event, payload) => listTaskOverview(payload ?? {}));
+      ipc.handle('taskOverview:mark-read', (_event, payload) => markTasksRead(payload ?? {}));
     }),
   ]);
 }

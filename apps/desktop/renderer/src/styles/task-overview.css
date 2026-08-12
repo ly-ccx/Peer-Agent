@@ -930,6 +930,38 @@
     color: var(--za-text-soft);
   }
 
+  .task-read-tools {
+    @apply ml-auto inline-flex items-center gap-2;
+  }
+
+  .task-unread-filter,
+  .task-mark-all-read {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors;
+    border-color: var(--za-line);
+    background: var(--za-surface-0);
+    color: var(--za-text-soft);
+  }
+
+  .task-unread-filter i {
+    @apply h-2 w-2 rounded-full;
+    background: var(--za-accent);
+  }
+
+  .task-unread-filter em {
+    @apply not-italic tabular-nums;
+  }
+
+  .task-unread-filter.is-active {
+    border-color: color-mix(in srgb, var(--za-accent) 45%, var(--za-line));
+    background: color-mix(in srgb, var(--za-accent) 12%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
+  .task-mark-all-read:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
   .task-search-box {
     @apply inline-flex min-w-[14rem] items-center border text-sm;
     min-height: 2.75rem;
@@ -981,6 +1013,10 @@
     border-color: var(--za-line);
   }
 
+  .task-record--unread {
+    background: color-mix(in srgb, var(--za-accent) 5%, transparent);
+  }
+
   /* Grid items default min-width:auto; allow columns to shrink and clip. */
   .task-record > * {
     @apply min-w-0;
@@ -1026,8 +1062,18 @@
   }
 
   .task-record-title strong {
-    @apply block truncate text-sm font-semibold;
+    @apply inline-block max-w-full truncate align-middle text-sm font-semibold;
     color: var(--za-text);
+  }
+
+  .task-record--unread .task-record-title strong {
+    @apply font-bold;
+  }
+
+  .task-new-activity {
+    @apply ml-2 inline-flex rounded-full px-1.5 py-0.5 align-middle text-[10px] font-semibold not-italic;
+    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
+    color: var(--za-accent);
   }
 
   .task-record-title span {

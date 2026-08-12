@@ -944,6 +944,9 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     activeWithinMs?: number;
     limit?: number;
   }) => Promise<readonly TaskOverviewItem[]>;
+  readonly taskOverviewMarkRead: (params: {
+    conversationIds: readonly string[];
+  }) => Promise<{ markedCount: number }>;
   readonly goalPlansAwaitingCounts: () => Promise<Record<string, number>>;
   readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansCreate: (params: { draft: Partial<GoalPlan> }) => Promise<GoalPlan>;

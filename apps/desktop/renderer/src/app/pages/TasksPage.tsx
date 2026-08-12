@@ -107,7 +107,9 @@ export function TasksPage({
   readonly workspacePath?: string | null;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
 }) {
-  const items = useTaskOverview({ workspacePath, includeTerminal: false });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [markingRead, setMarkingRead] = useState(false);
+  const items = useTaskOverview({ workspacePath, includeTerminal: false, refreshKey });
   const activeItems = useMemo(
     () => items.filter((item) => item.actionRight !== 'terminal'),
     [items],
@@ -125,6 +127,11 @@ export function TasksPage({
     return base;
   }, [activeItems]);
 
+  const unreadItems = useMemo(
+    () => activeItems.filter((item) => item.isUnread && item.conversationId),
+    [activeItems],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return activeItems.filter((item) => {
@@ -134,6 +141,20 @@ export function TasksPage({
       return hay.includes(q);
     });
   }, [activeItems, filter, query]);
+
+  async function markAllRead() {
+    const conversationIds = unreadItems.flatMap((item) =>
+      item.conversationId ? [item.conversationId] : [],
+    );
+    if (conversationIds.length === 0 || markingRead) return;
+    setMarkingRead(true);
+    try {
+      await clientApi.taskOverviewMarkRead({ conversationIds });
+      setRefreshKey((value) => value + 1);
+    } finally {
+      setMarkingRead(false);
+    }
+  }
 
   const scopeLabel = workspaceLabelFromPath(workspacePath);
 
@@ -178,6 +199,25 @@ export function TasksPage({
             </button>
           ))}
         </div>
+        <div className="task-read-tools" aria-label="阅读状态操作">
+          <button
+            type="button"
+            className={`task-unread-filter${unreadOnly ? ' is-active' : ''}`}
+            aria-pressed={unreadOnly}
+            onClick={() => setUnreadOnly((value) => !value)}
+          >
+            <i aria-hidden="true" />
+            有新动态 <em>{unreadItems.length}</em>
+          </button>
+          <button
+            type="button"
+            className="task-mark-all-read"
+            disabled={unreadItems.length === 0 || markingRead}
+            onClick={() => void markAllRead()}
+          >
+            {markingRead ? '标记中…' : '全部已读'}
+          </button>
+        </div>
         <label className="task-search-box">
           <svg className="task-search-box__icon" viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="11" cy="11" r="6.5" />
@@ -208,15 +248,14 @@ export function TasksPage({
         ) : (
           visible.map((item) => {
             const status = filterKeyOf(item);
-            const visualStatus =
-              item.source === 'conversation'
-                ? item.statusLabel === '已读'
-                  ? 'read'
-                  : 'unread'
-                : status;
+            const visualStatus = item.isUnread ? 'unread' : status;
             const pct = progressPercent(item);
             return (
-              <article key={item.taskId} className="task-record" data-status={status}>
+              <article
+                key={item.taskId}
+                className={`task-record${item.isUnread ? ' task-record--unread' : ''}`}
+                data-status={status}
+              >
                 <div className="task-record-title">
                   <i
                     className={`task-status-dot task-status-dot--${visualStatus}`}
@@ -224,6 +263,7 @@ export function TasksPage({
                   />
                   <div>
                     <strong>{item.title}</strong>
+                    {item.isUnread ? <em className="task-new-activity">新动态</em> : null}
                     <span>
                       {item.workspaceLabel ?? scopeLabel} · {sourceKindLabel(item)}
                     </span>

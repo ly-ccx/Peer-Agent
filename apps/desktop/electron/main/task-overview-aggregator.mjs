@@ -565,6 +565,7 @@ export function createTaskOverviewAggregator({
   listConversations,
   listShellTasks,
   listProviders,
+  markTaskRead,
 } = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
@@ -697,16 +698,24 @@ export function createTaskOverviewAggregator({
       // 行动权任务流：有 GoalPlan 时主标题 = plan.title（projected.title）。
       // conversation.title 不得压过任务名；currentGoalTitle 改为当前步骤（若有）。
       const stepTitle = currentStepTitleFromItem(projected);
+      const lastActiveMs = Date.parse(projected.lastActiveAt ?? '');
+      const readAtMs = Date.parse(conversation?.lastReadAt ?? '');
+      const isUnread =
+        Boolean(conversation) &&
+        Number.isFinite(lastActiveMs) &&
+        (!Number.isFinite(readAtMs) || lastActiveMs > readAtMs);
       if (conversation) {
         projectedPlanConversationIds.add(snapshot.conversationId);
         items.push({
           ...projected,
           title: projected.title,
+          isUnread,
           ...(stepTitle ? { currentGoalTitle: stepTitle } : {}),
         });
       } else {
         items.push({
           ...projected,
+          isUnread: false,
           ...(stepTitle ? { currentGoalTitle: stepTitle } : {}),
         });
       }
@@ -787,7 +796,20 @@ export function createTaskOverviewAggregator({
     return sorted.slice(0, limit);
   }
 
-  return Object.freeze({ listTaskOverview });
+  function markTasksRead(params = {}) {
+    const conversationIds = Array.isArray(params.conversationIds)
+      ? [...new Set(params.conversationIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
+    if (typeof markTaskRead !== 'function' || conversationIds.length === 0) {
+      return { markedCount: 0 };
+    }
+    for (const conversationId of conversationIds) {
+      markTaskRead(conversationId);
+    }
+    return { markedCount: conversationIds.length };
+  }
+
+  return Object.freeze({ listTaskOverview, markTasksRead });
 }
 
 /**

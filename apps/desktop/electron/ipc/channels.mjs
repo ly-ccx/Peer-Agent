@@ -132,6 +132,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'goalPlans:record-task-evidence',
   'goalPlans:revise',
   'taskOverview:list',
+  'taskOverview:mark-read',
   'goalPlans:set-status',
   'goalRunner:clear',
   'goalRunner:get-state',

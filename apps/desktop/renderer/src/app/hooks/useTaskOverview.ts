@@ -18,6 +18,8 @@ import { clientApi } from '../../clientApi';
  */
 export type UseTaskOverviewOptions = {
   readonly enabled?: boolean;
+  /** 主进程命令完成后由调用方递增，立即重拉权威投影。 */
+  readonly refreshKey?: number;
   readonly workspacePath?: string | null;
   readonly conversationId?: string | null;
   readonly includeTerminal?: boolean;
@@ -43,6 +45,7 @@ export function useTaskOverview(
   const opts: UseTaskOverviewOptions =
     typeof options === 'boolean' ? { enabled: options } : (options ?? {});
   const enabled = opts.enabled !== false;
+  const refreshKey = opts.refreshKey ?? 0;
   const workspacePath = opts.workspacePath ?? null;
   const conversationId = opts.conversationId ?? null;
   const includeTerminal = opts.includeTerminal === true;
@@ -93,7 +96,7 @@ export function useTaskOverview(
         void reload();
       }
     }
-  }, [enabled, workspacePath, conversationId, includeTerminal, activeWithinMs, limit]);
+  }, [enabled, refreshKey, workspacePath, conversationId, includeTerminal, activeWithinMs, limit]);
 
   useEffect(() => {
     void reload();

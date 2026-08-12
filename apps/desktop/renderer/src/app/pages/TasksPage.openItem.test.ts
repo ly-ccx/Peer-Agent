@@ -7,25 +7,21 @@ const readAppSource = () => readFile(new URL('../../App.tsx', import.meta.url), 
 const readTaskOverviewStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
-test('conversation rows visually distinguish read and unread status labels', async () => {
+test('task rows expose unread filtering, durable mark-all-read, and redundant visual cues', async () => {
   const [tasksPageSource, styles] = await Promise.all([
     readTasksPageSource(),
     readTaskOverviewStyles(),
   ]);
 
-  assert.match(tasksPageSource, /item\.source === 'conversation'/);
-  assert.match(tasksPageSource, /item\.statusLabel === '已读'/);
-  assert.match(tasksPageSource, /task-action-owner--\$\{visualStatus\}/);
+  assert.match(tasksPageSource, /activeItems\.filter\(\(item\) => item\.isUnread && item\.conversationId\)/);
+  assert.match(tasksPageSource, /await clientApi\.taskOverviewMarkRead\(\{ conversationIds \}\)/);
+  assert.match(tasksPageSource, /有新动态 <em>\{unreadItems\.length\}<\/em>/);
+  assert.match(tasksPageSource, /全部已读/);
+  assert.match(tasksPageSource, /item\.isUnread \? <em className="task-new-activity">新动态<\/em>/);
   assert.match(tasksPageSource, /task-status-dot--\$\{visualStatus\}/);
-  assert.match(
-    styles,
-    /\.task-action-owner--unread\s*\{[\s\S]*?color: var\(--za-accent\);/,
-  );
-  assert.match(
-    styles,
-    /\.task-action-owner--read\s*\{[\s\S]*?color: var\(--za-text-muted\);/,
-  );
-  assert.match(styles, /\.task-status-dot--unread\s*\{[\s\S]*?var\(--za-accent\)/);
+  assert.match(styles, /\.task-record--unread\s*\{/);
+  assert.match(styles, /\.task-record--unread \.task-record-title strong\s*\{/);
+  assert.match(styles, /\.task-new-activity\s*\{/);
 });
 
 test('task row view button opens the matching task details', async () => {

@@ -26,6 +26,49 @@ import {
 // Conversation 讨论态与 GoalPlan 去重
 // ---------------------------------------------------------------------------
 
+test('GoalPlan unread state follows the persisted conversation read watermark', () => {
+  const conversations = [
+    {
+      id: 'conversation-1',
+      title: '任务会话',
+      workspacePath: '/work/peer_agent',
+      updatedAt: '2026-08-09T02:00:00.000Z',
+      lastReadAt: '2026-08-09T01:00:00.000Z',
+    },
+  ];
+  const marked = [];
+  const plan = {
+    planId: 'plan-1',
+    conversationId: 'conversation-1',
+    title: '验证阅读水位',
+    status: 'executing',
+    updatedAt: '2026-08-09T02:00:00.000Z',
+    targetWorkspacePath: '/work/peer_agent',
+    runner: { status: 'running' },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [plan],
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => conversations,
+    markTaskRead: (conversationId) => marked.push(conversationId),
+  });
+
+  assert.equal(agg.listTaskOverview({ activeWithinMs: 0 })[0].isUnread, true);
+  assert.deepEqual(
+    agg.markTasksRead({ conversationIds: ['conversation-1', 'conversation-1', ''] }),
+    { markedCount: 1 },
+  );
+  assert.deepEqual(marked, ['conversation-1']);
+
+  conversations[0].lastReadAt = '2026-08-09T02:00:00.000Z';
+  assert.equal(agg.listTaskOverview({ activeWithinMs: 0 })[0].isUnread, false);
+  conversations[0].updatedAt = '2026-08-09T03:00:00.000Z';
+  plan.updatedAt = '2026-08-09T03:00:00.000Z';
+  assert.equal(agg.listTaskOverview({ activeWithinMs: 0 })[0].isUnread, true);
+});
+
 test('aggregator projects conversations without GoalPlans as discussion tasks', () => {
   const agg = createTaskOverviewAggregator({
     goalPlanStore: { listPlanDetails: () => [] },

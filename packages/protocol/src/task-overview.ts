@@ -170,7 +170,12 @@ export interface TaskOverviewItem {
   readonly providerLabel?: string;
   /** 动作按钮标签（原型「处理 →」「验收 →」「继续 →」）。 */
   readonly actionLabel: string;
-  /** 关联的 conversationId，用于深链跳转。 */
+  /**
+   * 是否存在用户尚未查看的新动态。
+   * 该值由主进程依据任务最近活跃时间与持久化阅读水位投影，renderer 不自行推断。
+   */
+  readonly isUnread?: boolean;
+  /** 关联的 conversationId，用于深链跳转和推进阅读水位。 */
   readonly conversationId?: string;
 }
 

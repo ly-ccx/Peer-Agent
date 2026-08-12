@@ -432,6 +432,7 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   goalPlanStore,
   automationStore,
   listConversations: (params) => conversationStore.listConversations(params),
+  markTaskRead: (conversationId) => conversationStore.markRead(conversationId),
   // localToolHost 在 startLocalRuntime 后才赋值；list 时惰性读取，避免启动环依赖。
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
