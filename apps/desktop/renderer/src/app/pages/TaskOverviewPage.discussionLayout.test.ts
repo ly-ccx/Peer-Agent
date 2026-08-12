@@ -21,13 +21,34 @@ test('discussion preview uses compact cards instead of execution WorkItem cards'
   assert.doesNotMatch(discussionSection, /advancingStateLabel/);
 });
 
-test('interrupted execution is rendered as a visible recovery section', async () => {
+test('interrupted execution excludes ordinary conversations and keeps recovery semantics', async () => {
   const source = await readPageSource();
-  assert.match(source, /const paused = items\.filter\(\(i\) => i\.actionRight === 'paused'\);/);
+  assert.match(
+    source,
+    /const paused = items\.filter\(\s*\(i\) => i\.source !== 'conversation' && i\.actionRight === 'paused',?\s*\);/,
+  );
   assert.match(source, /title="执行异常"/);
   assert.match(source, /item\.issueDetail/);
   assert.match(source, /item\.nextAction === 'resume'/);
   assert.match(source, />\s*继续执行\s*</);
+  assert.match(source, /item\.actionRight === 'paused' \? item\.statusLabel : advancingStateLabel\(item\)/);
+});
+
+test('interrupted execution reuses the container-responsive work stream', async () => {
+  const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
+  const interruptedSection = source.match(
+    /<h2 title="执行异常">执行异常<\/h2>[\s\S]*?<div className="(task-overview-work-[^"]+)">/,
+  );
+
+  assert.equal(interruptedSection?.[1], 'task-overview-work-stream');
+  assert.match(
+    styles,
+    /\.task-overview-work-stream\s*\{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 28rem\), 1fr\)\);/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /@media \(min-width: 768px\)[\s\S]*?\.task-overview-work-stream/,
+  );
 });
 
 test('discussion grid has explicit spacing and responsive 3-2-1 columns', async () => {

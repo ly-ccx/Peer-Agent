@@ -501,18 +501,12 @@
     @apply cursor-not-allowed opacity-50;
   }
 
-  /* ---------- 推进/验收 稳定双列 ---------- */
-  /* 用 grid 替代 column-count：自动高度时 column-count 会把卡片压成半宽却只堆左列 */
+  /* ---------- 推进/验收 容器自适应 ---------- */
+  /* 主内容会被侧栏/检查器挤压，列数必须由列表自身宽度决定，不能绑 viewport 断点。 */
   .task-overview-work-stream {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem; /* gap-3 */
-  }
-
-  @media (min-width: 768px) {
-    .task-overview-work-stream {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+    gap: 0.75rem;
   }
 
   .task-overview-work-stream > * {
@@ -524,9 +518,10 @@
   }
 
   .task-overview-work-item {
-    @apply flex flex-col rounded-2xl border p-4;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    @apply flex flex-col rounded-xl border px-4 py-3.5;
+    background: var(--za-surface-1);
+    border-color: var(--za-line-strong);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 6%, transparent);
   }
 
   .task-overview-work-item.is-clickable {

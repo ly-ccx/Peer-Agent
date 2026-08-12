@@ -383,7 +383,9 @@ function HeroLayout({
   const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
   const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
-  const paused = items.filter((i) => i.actionRight === 'paused');
+  const paused = items.filter(
+    (i) => i.source !== 'conversation' && i.actionRight === 'paused',
+  );
   const advancing = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing');
   const resultReady = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready');
   const [acceptanceTransitions, setAcceptanceTransitions] = useState<
@@ -585,7 +587,7 @@ function HeroLayout({
             </div>
             <span className="task-overview-section-hint">中断原因与恢复入口已保留</span>
           </div>
-          <div className="task-overview-work-grid">
+          <div className="task-overview-work-stream">
             {paused.map((item) => (
               <WorkItem
                 key={item.taskId}
@@ -834,10 +836,10 @@ function WorkItem({
     >
       <div className="task-overview-work-top">
         <span className="task-overview-work-state">
-          {item.source !== 'conversation' ? (
+          {item.actionRight !== 'paused' && item.source !== 'conversation' ? (
             <i className="task-overview-spinner" aria-hidden="true" />
           ) : null}
-          {advancingStateLabel(item)}
+          {item.actionRight === 'paused' ? item.statusLabel : advancingStateLabel(item)}
         </span>
         <WorkItemMeta item={item} />
       </div>
