@@ -180,6 +180,13 @@
     color: var(--za-surface-0);
   }
 
+  .gwb-btn-arrow {
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-left: 0.25rem;
+    flex: 0 0 auto;
+  }
+
   .gwb-btn-ghost {
     @apply border;
     border-color: var(--za-line);

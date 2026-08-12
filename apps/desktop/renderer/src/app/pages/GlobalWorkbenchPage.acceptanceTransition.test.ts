@@ -18,6 +18,18 @@ test('advancing count has one overview entry and no duplicate hero summary', asy
   assert.doesNotMatch(styles, /\.gwb-calm-card|\.gwb-calm-title|\.gwb-calm-dot/);
 });
 
+test('global workbench renders action arrows as decorative svg icons', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(source, /item\.nextAction === 'decide_blocked'/);
+  assert.match(source, /function ActionArrowIcon\(\)/);
+  assert.match(source, /className="gwb-btn-arrow"/);
+  assert.match(source, /<path d="M5 12h14M13 6l6 6-6 6" \/>/);
+  assert.match(source, /aria-hidden="true"/);
+  assert.match(styles, /\.gwb-btn-arrow/);
+});
+
 test('global workbench acceptance waits for success before celebrating and freezes order snapshot', async () => {
   const source = await readPage();
   assert.match(source, /mergeAcceptanceTransitionItems/);

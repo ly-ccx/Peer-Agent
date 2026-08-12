@@ -509,7 +509,7 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
       needsYouReason: 'decision',
       nextAction: 'decide_blocked',
       statusLabel: runnerStatus === 'budget_exhausted' ? '预算已耗尽' : '执行受阻',
-      actionLabel: '决策 →',
+      actionLabel: '决策',
     };
   }
   // rule 12: 计划暂停（先于 runner 态判断，用户主动暂停优先）

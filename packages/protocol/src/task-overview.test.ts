@@ -172,6 +172,7 @@ test('rule 5b: runner budget_exhausted → needs_you / decision', () => {
   assert.equal(item.actionRight, 'needs_you');
   assert.equal(item.needsYouReason, 'decision');
   assert.equal(item.statusLabel, '预算已耗尽');
+  assert.equal(item.actionLabel, '决策');
 });
 
 test('rule 5c: 历史终态上的 runner.blocked 不得进 needs_you', () => {

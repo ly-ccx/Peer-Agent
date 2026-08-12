@@ -546,6 +546,7 @@ function InboxRow({
           ) : (
             <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
               {cta}
+              {item.nextAction === 'decide_blocked' ? <ActionArrowIcon /> : null}
             </button>
           )}
         </div>
@@ -556,6 +557,25 @@ function InboxRow({
     </div>
   );
 }
+
+function ActionArrowIcon() {
+  return (
+    <svg
+      className="gwb-btn-arrow"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 function formatRelativeTime(iso?: string): string {
   if (!iso) return '刚刚';
   const t = Date.parse(iso);
