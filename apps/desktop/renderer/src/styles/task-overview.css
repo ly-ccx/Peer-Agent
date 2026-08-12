@@ -540,9 +540,8 @@
 
   .task-overview-work-item {
     @apply flex flex-col rounded-xl border px-4 py-3.5;
-    background: var(--za-surface-1);
-    border-color: var(--za-line-strong);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 6%, transparent);
+    background: var(--za-surface-0);
+    border-color: var(--za-line);
   }
 
   .task-overview-work-item.is-clickable {
@@ -1013,8 +1012,17 @@
     background: #3f9a6f;
   }
 
-  .task-status-dot--paused {
+  .task-status-dot--paused,
+  .task-status-dot--read {
     background: var(--za-text-faint);
+  }
+
+  .task-status-dot--read {
+    opacity: 0.42;
+  }
+
+  .task-status-dot--unread {
+    background: var(--za-accent);
   }
 
   .task-record-title strong {
