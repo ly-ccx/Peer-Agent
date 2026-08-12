@@ -165,6 +165,20 @@ test('rule 5: runner blocked → needs_you / decision', () => {
   assert.equal(item.statusLabel, '执行受阻');
 });
 
+test('recoverable system blocker does not become a user decision', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'blocked',
+      systemBlocked: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'paused');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.nextAction, 'inspect');
+  assert.equal(item.statusLabel, '系统执行中断');
+});
+
 test('rule 5b: runner budget_exhausted → needs_you / decision', () => {
   const item = projectGoalPlan(
     goalSnapshot({ status: 'executing', runnerStatus: 'budget_exhausted' }),

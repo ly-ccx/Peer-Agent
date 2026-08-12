@@ -25,6 +25,7 @@ import {
   projectGoalPlan,
   projectShellBackgroundTask,
 } from '@peer-agent/protocol';
+import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
 
 /** 工作台默认只看近 7 天活跃任务（推进中 / 待你处理）。 */
 export const DEFAULT_ACTIVE_WITHIN_MS = 7 * 24 * 60 * 60 * 1000;
@@ -335,6 +336,9 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     // Plan completion is authoritative over stale runner state. A completed plan cannot
     // still own a live "waiting for you" interaction until a real user message reopens it.
     runnerStatus: status === GOAL_COMPLETED_STATUS ? undefined : plan.runner?.status,
+    systemBlocked: status !== GOAL_COMPLETED_STATUS
+      && plan.runner?.status === 'blocked'
+      && isRecoverableSystemGoalBlocker(plan.runner?.blockedReason),
     interrupted: Boolean(
       plan.runner?.interruption &&
       !(plan.runner.interruption.recoverable === true && plan.runner.status === 'running'),

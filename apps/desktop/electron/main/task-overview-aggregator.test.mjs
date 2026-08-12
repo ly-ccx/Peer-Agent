@@ -257,6 +257,20 @@ test('toGoalPlanSnapshot 组装 workspace 标签 / progress / runner.status', ()
   assert.equal(snapshot.accepted, false);
 });
 
+test('toGoalPlanSnapshot classifies renderer unavailability as a system-owned blocker', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-system-blocked',
+    status: 'executing',
+    runner: {
+      status: 'blocked',
+      blockedReason: 'No renderer window is available for Goal Runner',
+    },
+    title: '等待前台接管',
+  });
+  assert.equal(snapshot.runnerStatus, 'blocked');
+  assert.equal(snapshot.systemBlocked, true);
+});
+
 test('toGoalPlanSnapshot keeps an auto-recovering runner active instead of projecting a manual interruption', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-recovering',

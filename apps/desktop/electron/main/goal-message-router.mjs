@@ -1,3 +1,5 @@
+import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
+
 const RESUME_PATTERNS = [
   /^继续$/,
   /^继续执行$/,
@@ -157,10 +159,16 @@ export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, so
   }
 
   // A user message starts a fresh chat stream directly; it does not pass through
-  // goalRunner.resume. Restore failed continuations before recording the new turn.
+  // goalRunner.resume. Atomically restore failed continuations and take over only
+  // the narrow allow-list of recoverable infrastructure blockers.
+  const continuesCurrentGoal = CONTINUATION_INTENTS.has(route.intent);
+  const foregroundTakesOverSystemBlocker = continuesCurrentGoal
+    && activeGoalPlan?.status === 'executing'
+    && activeGoalPlan?.runner?.status === 'blocked'
+    && isRecoverableSystemGoalBlocker(activeGoalPlan.runner.blockedReason);
   if (
-    activeGoalPlan?.status === 'failed'
-    && CONTINUATION_INTENTS.has(route.intent)
+    continuesCurrentGoal
+    && (activeGoalPlan?.status === 'failed' || foregroundTakesOverSystemBlocker)
   ) {
     goalPlanStore?.resumeRunner?.(route.goalPlanId, {
       intent: 'execute',

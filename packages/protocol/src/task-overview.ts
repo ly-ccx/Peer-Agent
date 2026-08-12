@@ -205,6 +205,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly status: GoalPlanStatus;
   /** Runner 实时态；Plan 未进入自驱时为 undefined。 */
   readonly runnerStatus?: GoalRunnerStatus;
+  /** Runner 阻塞是否由系统基础设施持有，而不是用户行动权。 */
+  readonly systemBlocked?: boolean;
   /** Runner 上存在尚未被 resume 消费的网络/流式中断事实。 */
   readonly interrupted?: boolean;
   /** 持久化中断事实中的用户可展示原因。 */
@@ -488,6 +490,18 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   }
   const planStillActive =
     status === 'executing' || status === 'accepted' || status === 'approved';
+  const recoverableSystemBlocked = runnerStatus === 'blocked'
+    && snapshot.systemBlocked === true;
+  // System infrastructure failures are not user decisions. A foreground turn may
+  // take over this blocker; until then expose an inspectable interruption.
+  if (planStillActive && recoverableSystemBlocked) {
+    return {
+      actionRight: 'paused',
+      nextAction: 'inspect',
+      statusLabel: '系统执行中断',
+      actionLabel: '诊断 →',
+    };
+  }
   // rule 4: Runner 已明确把行动权交给用户，不再展示为“Peer 正在推进”。
   if (planStillActive && runnerStatus === 'waiting_user') {
     return {

@@ -147,6 +147,56 @@ test('applyGoalMessageRoute does not reset a non-failed Goal', () => {
   assert.equal(resumeCount, 0);
 });
 
+test('applyGoalMessageRoute lets a foreground continuation take over a recoverable system blocker', () => {
+  const blockedPlan = {
+    ...activeGoalPlan,
+    runner: {
+      status: 'blocked',
+      phase: 'blocked',
+      blockedReason: 'No renderer window is available for Goal Runner',
+    },
+  };
+  const route = routeGoalMessage({ messageText: '继续推进刚才的改动', activeGoalPlan: blockedPlan });
+  const calls = [];
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan: blockedPlan,
+    goalPlanStore: {
+      resumeRunner(planId, patch) {
+        calls.push(['resume', planId, patch]);
+      },
+      appendRunEvent(planId, event) {
+        calls.push(['event', planId, event]);
+      },
+    },
+  });
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'event']);
+  assert.equal(calls[0][1], 'goal-1');
+  assert.equal(calls[0][2].intent, 'execute');
+  assert.equal(calls[0][2].phase, 'orient');
+});
+
+test('applyGoalMessageRoute preserves user-owned and unknown blockers', () => {
+  for (const blockedReason of ['permission_required', 'product decision required']) {
+    const blockedPlan = {
+      ...activeGoalPlan,
+      runner: { status: 'blocked', phase: 'blocked', blockedReason },
+    };
+    const route = routeGoalMessage({ messageText: '补充一些背景', activeGoalPlan: blockedPlan });
+    let resumeCount = 0;
+    applyGoalMessageRoute({
+      route,
+      activeGoalPlan: blockedPlan,
+      goalPlanStore: {
+        resumeRunner() { resumeCount += 1; },
+        appendRunEvent() {},
+      },
+    });
+    assert.equal(resumeCount, 0, blockedReason);
+  }
+});
+
 test('routeGoalMessage routes requirement overrides to the current Goal', () => {
   const route = routeGoalMessage({
     messageText: '全部改成 209',
