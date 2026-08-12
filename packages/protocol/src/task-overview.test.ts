@@ -37,6 +37,7 @@ test('projects a conversation without a GoalPlan as a discussion task', () => {
     title: '讨论 Task 与 Plan 的界面关系',
     workspaceLabel: 'peer_agent',
     statusLabel: '有未读',
+    isUnread: true,
     lastActiveAt: '2026-08-09T01:00:00.000Z',
     actionLabel: '打开',
     conversationId: 'conversation-1',
@@ -55,6 +56,7 @@ test('conversation discussion projection exposes read state without removing his
   );
   assert.equal(item.conversationId, 'conversation-1');
   assert.equal(item.statusLabel, '已读');
+  assert.equal(item.isUnread, false);
 });
 
 test('isConversationUnreadForDiscussion compares updatedAt and lastReadAt', () => {

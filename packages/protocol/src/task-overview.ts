@@ -330,6 +330,7 @@ export function projectConversation(
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     // 已读水位只改变状态，不应把会话从历史投影中删除。
     statusLabel: unread ? '有未读' : '已读',
+    isUnread: unread,
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),

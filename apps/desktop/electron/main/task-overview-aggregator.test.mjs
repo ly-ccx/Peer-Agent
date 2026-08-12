@@ -116,10 +116,10 @@ test('aggregator keeps read and unread conversations in discussion history', () 
   const items = agg.listTaskOverview({ activeWithinMs: 0 });
   assert.equal(items.length, 2);
   assert.deepEqual(
-    items.map((item) => [item.conversationId, item.statusLabel]),
+    items.map((item) => [item.conversationId, item.statusLabel, item.isUnread]),
     [
-      ['conversation-unread', '有未读'],
-      ['conversation-read', '已读'],
+      ['conversation-unread', '有未读', true],
+      ['conversation-read', '已读', false],
     ],
   );
 });
