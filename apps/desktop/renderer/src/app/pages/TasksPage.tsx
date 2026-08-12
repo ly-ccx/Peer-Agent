@@ -208,11 +208,20 @@ export function TasksPage({
         ) : (
           visible.map((item) => {
             const status = filterKeyOf(item);
+            const visualStatus =
+              item.source === 'conversation'
+                ? item.statusLabel === '已读'
+                  ? 'read'
+                  : 'unread'
+                : status;
             const pct = progressPercent(item);
             return (
               <article key={item.taskId} className="task-record" data-status={status}>
                 <div className="task-record-title">
-                  <i className={`task-status-dot task-status-dot--${status}`} aria-hidden="true" />
+                  <i
+                    className={`task-status-dot task-status-dot--${visualStatus}`}
+                    aria-hidden="true"
+                  />
                   <div>
                     <strong>{item.title}</strong>
                     <span>
@@ -220,7 +229,7 @@ export function TasksPage({
                     </span>
                   </div>
                 </div>
-                <span className={`task-action-owner task-action-owner--${status}`}>
+                <span className={`task-action-owner task-action-owner--${visualStatus}`}>
                   {actionOwnerLabel(item)}
                 </span>
                 <div className="task-goal-progress">

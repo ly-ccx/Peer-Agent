@@ -1061,6 +1061,16 @@
     color: var(--za-text-muted);
   }
 
+  .task-action-owner--read {
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .task-action-owner--unread {
+    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
+    color: var(--za-accent);
+  }
+
   .task-goal-progress {
     @apply flex min-w-0 items-center gap-2;
   }
