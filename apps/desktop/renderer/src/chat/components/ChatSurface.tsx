@@ -151,7 +151,10 @@ import {
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
-import { shouldHardBeginConversationLoad } from '../state/conversationLoadGate';
+import {
+  shouldHardBeginConversationLoad,
+  shouldPersistEffortCorrection,
+} from '../state/conversationLoadGate';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import {
   getTurnUserMessage,
@@ -898,9 +901,11 @@ export function ChatSurface({
     [activeProviderSupportsReasoning, effortLevels],
   );
   // 渠道能力变化后（如切到 Grok 仅 low/medium/high），把会话旧档位投影到合法默认值。
+  // 已有会话恢复完成前，当前 effort/provider 只是临时种子，不能把校正结果当成用户选择持久化。
   useEffect(() => {
     if (!activeProviderSupportsReasoning) return;
     if (effortLevels.includes(effort)) return;
+    if (!shouldPersistEffortCorrection({ conversationId, loadStatus })) return;
     const preferred = resolvePreferredEffort(
       effortLevels,
       activeProvider?.reasoningDefaultEffort,
@@ -910,8 +915,10 @@ export function ChatSurface({
     activeProvider?.reasoningDefaultEffort,
     activeProviderSupportsReasoning,
     changeEffort,
+    conversationId,
     effort,
     effortLevels,
+    loadStatus,
   ]);
   const handleModelChange = useCallback((providerId: string) => {
     const targetProvider = providers.find((provider) => provider.id === providerId && provider.apiKeyConfigured);

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   conversationLoadEffectShouldDependOnProviders,
   shouldHardBeginConversationLoad,
+  shouldPersistEffortCorrection,
 } from './conversationLoadGate.ts';
 
 describe('conversation load gate', () => {
@@ -27,5 +28,24 @@ describe('conversation load gate', () => {
 
   it('never couples the main conversation load effect to providers', () => {
     assert.equal(conversationLoadEffectShouldDependOnProviders(), false);
+  });
+
+  it('does not persist a temporary effort correction while an existing conversation restores', () => {
+    assert.equal(
+      shouldPersistEffortCorrection({ conversationId: 'existing-chat', loadStatus: 'idle' }),
+      false,
+    );
+    assert.equal(
+      shouldPersistEffortCorrection({ conversationId: 'existing-chat', loadStatus: 'loading' }),
+      false,
+    );
+    assert.equal(
+      shouldPersistEffortCorrection({ conversationId: 'existing-chat', loadStatus: 'ready' }),
+      true,
+    );
+    assert.equal(
+      shouldPersistEffortCorrection({ conversationId: null, loadStatus: 'idle' }),
+      true,
+    );
   });
 });
