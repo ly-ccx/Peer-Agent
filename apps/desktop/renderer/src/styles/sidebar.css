@@ -504,6 +504,12 @@
   -webkit-app-region: no-drag;
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
+
+/* 工作台的聚合运行状态是导航项的尾随信息，不属于标题内容。 */
+.sidebar-top .sidebar-automation-nav > .ws-running-dot {
+  margin-left: auto;
+}
+
 .sidebar-top .sidebar-automation-nav:hover,
 .sidebar-top .sidebar-nav-btn:hover {
   background: var(--za-sidebar-active-bg, var(--chrome-sunken));
