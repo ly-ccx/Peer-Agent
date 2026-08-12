@@ -176,7 +176,10 @@ export function HistoryPage({ workspacePath = null }: { readonly workspacePath?:
           ))}
         </div>
         <label className="task-search-box">
-          <span aria-hidden="true">⌕</span>
+          <svg className="task-search-box__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="m16 16 4 4" />
+          </svg>
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}

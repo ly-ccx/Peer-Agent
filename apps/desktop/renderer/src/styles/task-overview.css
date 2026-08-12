@@ -932,14 +932,29 @@
   }
 
   .task-search-box {
-    @apply inline-flex min-w-[14rem] items-center gap-2 rounded-full border px-3 py-2 text-xs;
+    @apply inline-flex min-w-[14rem] items-center border text-sm;
+    min-height: 2.75rem;
+    gap: 0.625rem;
+    padding: 0.625rem 0.875rem;
+    border-radius: 1rem;
     background: var(--za-surface-0);
     border-color: var(--za-line);
     color: var(--za-text-muted);
   }
 
+  .task-search-box__icon {
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .task-search-box input {
-    @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-xs outline-none;
+    @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none;
     color: var(--za-text);
   }
 
