@@ -51,6 +51,25 @@ test('interrupted execution reuses the container-responsive work stream', async 
   );
 });
 
+test('discussion status visually distinguishes unread and read items', async () => {
+  const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
+
+  assert.match(source, /statusLabel === '已读' \? 'is-read' : 'is-unread'/);
+  assert.match(source, /task-overview-discussion-card__status \$\{statusTone\}/);
+  assert.match(
+    styles,
+    /\.task-overview-discussion-card__status\.is-unread\s*\{[\s\S]*?color: var\(--za-accent\);[\s\S]*?background:/,
+  );
+  assert.match(
+    styles,
+    /\.task-overview-discussion-card__status\.is-read\s*\{[\s\S]*?color: var\(--za-text-muted\);[\s\S]*?background:/,
+  );
+  assert.match(
+    styles,
+    /\.task-overview-discussion-card__status\.is-read i\s*\{[\s\S]*?opacity: 0\.42;/,
+  );
+});
+
 test('discussion grid has explicit spacing and responsive 3-2-1 columns', async () => {
   const styles = await readStyles();
 

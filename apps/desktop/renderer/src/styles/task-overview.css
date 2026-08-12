@@ -367,13 +367,30 @@
   }
 
   .task-overview-discussion-card__status {
-    @apply inline-flex min-w-0 items-center gap-1.5 font-medium;
-    color: var(--za-text-soft);
+    @apply inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1 font-medium;
   }
 
   .task-overview-discussion-card__status i {
     @apply h-1.5 w-1.5 shrink-0 rounded-full;
+  }
+
+  .task-overview-discussion-card__status.is-unread {
+    color: var(--za-accent);
+    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+  }
+
+  .task-overview-discussion-card__status.is-unread i {
     background: var(--za-accent);
+  }
+
+  .task-overview-discussion-card__status.is-read {
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+  }
+
+  .task-overview-discussion-card__status.is-read i {
+    background: currentColor;
+    opacity: 0.42;
   }
 
   .task-overview-discussion-card__meta time {
@@ -507,6 +524,10 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
     gap: 0.75rem;
+  }
+
+  .task-overview-work-stream:has(> :only-child) {
+    grid-template-columns: minmax(0, 42rem);
   }
 
   .task-overview-work-stream > * {

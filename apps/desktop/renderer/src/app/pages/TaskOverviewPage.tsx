@@ -785,15 +785,18 @@ function DiscussionCard({
   readonly item: TaskOverviewItem;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
 }) {
+  const statusLabel = item.statusLabel || '有未读';
+  const statusTone = statusLabel === '已读' ? 'is-read' : 'is-unread';
+
   return (
     <article
       className={`task-overview-discussion-card${onOpenItem ? ' is-clickable' : ''}`}
       onClick={() => onOpenItem?.(item)}
     >
       <div className="task-overview-discussion-card__meta">
-        <span className="task-overview-discussion-card__status">
+        <span className={`task-overview-discussion-card__status ${statusTone}`}>
           <i aria-hidden="true" />
-          {item.statusLabel || '有未读'}
+          {statusLabel}
         </span>
         <time>{formatRelativeTime(item.lastActiveAt)}</time>
       </div>
