@@ -381,7 +381,6 @@ function HeroLayout({
 }) {
   const discussions = items.filter((i) => i.source === 'conversation');
   const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
-  const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
   const paused = items.filter(
     (i) => i.source !== 'conversation' && i.actionRight === 'paused',
@@ -649,8 +648,8 @@ function HeroLayout({
             {onOpenTasks ? (
               <SectionLink
                 label="查看全部"
-                count={hiddenDiscussionCount}
-                countHint={`还有 ${hiddenDiscussionCount} 条`}
+                count={discussions.length}
+                countHint={`共 ${discussions.length} 条`}
                 onClick={onOpenTasks}
               />
             ) : (

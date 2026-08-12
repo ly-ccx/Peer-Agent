@@ -21,6 +21,15 @@ test('discussion preview uses compact cards instead of execution WorkItem cards'
   assert.doesNotMatch(discussionSection, /advancingStateLabel/);
 });
 
+test('discussion view-all link reports the total while the home preview stays capped', async () => {
+  const source = await readPageSource();
+
+  assert.match(source, /count=\{discussions\.length\}/);
+  assert.match(source, /countHint=\{`共 \$\{discussions\.length\} 条`\}/);
+  assert.doesNotMatch(source, /hiddenDiscussionCount/);
+  assert.match(source, /const visibleDiscussions = discussions\.slice\(0, DISCUSSION_PREVIEW_LIMIT\);/);
+});
+
 test('interrupted execution excludes ordinary conversations and keeps recovery semantics', async () => {
   const source = await readPageSource();
   assert.match(
