@@ -7,7 +7,7 @@ const readAppSource = () => readFile(new URL('../../App.tsx', import.meta.url), 
 const readTaskOverviewStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
-test('task rows expose unread filtering, durable mark-all-read, and redundant visual cues', async () => {
+test('task rows expose durable one-click read and redundant unread visual cues', async () => {
   const [tasksPageSource, styles] = await Promise.all([
     readTasksPageSource(),
     readTaskOverviewStyles(),
@@ -15,8 +15,9 @@ test('task rows expose unread filtering, durable mark-all-read, and redundant vi
 
   assert.match(tasksPageSource, /activeItems\.filter\(\(item\) => item\.isUnread && item\.conversationId\)/);
   assert.match(tasksPageSource, /await clientApi\.taskOverviewMarkRead\(\{ conversationIds \}\)/);
-  assert.match(tasksPageSource, /有新动态 <em>\{unreadItems\.length\}<\/em>/);
-  assert.match(tasksPageSource, /全部已读/);
+  assert.match(tasksPageSource, /未读 \{unreadItems\.length\}/);
+  assert.match(tasksPageSource, /一键已读/);
+  assert.doesNotMatch(tasksPageSource, /setUnreadOnly|aria-pressed=\{unreadOnly\}/);
   assert.match(tasksPageSource, /item\.isUnread \? <em className="task-new-activity">新动态<\/em>/);
   assert.match(tasksPageSource, /task-status-dot--\$\{visualStatus\}/);
   assert.match(styles, /\.task-record--unread\s*\{/);

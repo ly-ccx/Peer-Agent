@@ -200,22 +200,14 @@ export function TasksPage({
           ))}
         </div>
         <div className="task-read-tools" aria-label="阅读状态操作">
-          <button
-            type="button"
-            className={`task-unread-filter${unreadOnly ? ' is-active' : ''}`}
-            aria-pressed={unreadOnly}
-            onClick={() => setUnreadOnly((value) => !value)}
-          >
-            <i aria-hidden="true" />
-            有新动态 <em>{unreadItems.length}</em>
-          </button>
+          <span className="task-unread-count">未读 {unreadItems.length}</span>
           <button
             type="button"
             className="task-mark-all-read"
             disabled={unreadItems.length === 0 || markingRead}
             onClick={() => void markAllRead()}
           >
-            {markingRead ? '标记中…' : '全部已读'}
+            {markingRead ? '标记中…' : '一键已读'}
           </button>
         </div>
         <label className="task-search-box">

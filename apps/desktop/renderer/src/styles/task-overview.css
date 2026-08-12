@@ -934,26 +934,15 @@
     @apply ml-auto inline-flex items-center gap-2;
   }
 
-  .task-unread-filter,
+  .task-unread-count {
+    @apply text-xs tabular-nums;
+    color: var(--za-text-muted);
+  }
+
   .task-mark-all-read {
-    @apply inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors;
-    border-color: var(--za-line);
-    background: var(--za-surface-0);
-    color: var(--za-text-soft);
-  }
-
-  .task-unread-filter i {
-    @apply h-2 w-2 rounded-full;
-    background: var(--za-accent);
-  }
-
-  .task-unread-filter em {
-    @apply not-italic tabular-nums;
-  }
-
-  .task-unread-filter.is-active {
-    border-color: color-mix(in srgb, var(--za-accent) 45%, var(--za-line));
-    background: color-mix(in srgb, var(--za-accent) 12%, var(--za-surface-0));
+    @apply inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors;
+    border-color: color-mix(in srgb, var(--za-accent) 40%, var(--za-line));
+    background: color-mix(in srgb, var(--za-accent) 10%, var(--za-surface-0));
     color: var(--za-accent);
   }
 
