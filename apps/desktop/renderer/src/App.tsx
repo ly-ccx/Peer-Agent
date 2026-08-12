@@ -292,6 +292,11 @@ function MainApp() {
   // reading a stale closure of the authoritative set.
   const runningWorkspacePathsRef = useRef<ReadonlySet<string>>(new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
+  // A draft task may target a workspace without navigating the application there.
+  // Keep that choice separate from the globally active workspace until submission.
+  const [draftWorkspacePath, setDraftWorkspacePath] = useState<string | null>(
+    () => startupSnapshot?.activeWorkspace ?? null,
+  );
   const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>(
     () => startupSnapshot?.workspaces ?? [],
   );
@@ -791,6 +796,7 @@ function MainApp() {
       ws = ensured.path;
       setActiveWorkspace(ws);
     }
+    setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
     // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。
     setConversationView('active');
@@ -1152,19 +1158,15 @@ function MainApp() {
                     setActiveConversationId(conversationId);
                     setCollectionDrawer(null);
                     setActivePage('home');
-                    void refreshConversations(activeWorkspace, 'active');
+                    void refreshConversations(draftWorkspacePath, 'active');
                   }}
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
                   onOpenAutomationRun={openAutomationRun}
                   onOpenTaskDetails={() => openCollectionDrawer('task_details')}
-                  workspacePath={activeWorkspace}
+                  workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                   workspaces={workspaces}
-                  onWorkspaceChange={async (nextWorkspacePath) => {
-                    if (nextWorkspacePath === activeWorkspace) return;
-                    await clientApi.workspaceSetActive({ path: nextWorkspacePath });
-                    await handleWorkspaceChanged();
-                  }}
+                  onWorkspaceChange={setDraftWorkspacePath}
                   isPageActive={activePage === 'chat' && !conversationDrawerOpen}
                   messageTarget={notificationMessageTarget}
                   />
@@ -1459,13 +1461,9 @@ function MainApp() {
                     onOpenAutomationRun={openAutomationRun}
                     onOpenTaskDetails={() => openCollectionDrawer('task_details')}
                     onClose={() => setConversationDrawerOpen(false)}
-                    workspacePath={activeWorkspace}
+                    workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                     workspaces={workspaces}
-                    onWorkspaceChange={async (nextWorkspacePath) => {
-                      if (nextWorkspacePath === activeWorkspace) return;
-                      await clientApi.workspaceSetActive({ path: nextWorkspacePath });
-                      await handleWorkspaceChanged();
-                    }}
+                    onWorkspaceChange={setDraftWorkspacePath}
                     isPageActive={conversationDrawerOpen}
                     messageTarget={notificationMessageTarget}
                   />
