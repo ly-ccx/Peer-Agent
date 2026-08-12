@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useAppearance } from './AppearanceProvider';
 import { PALETTE_LABELS, PALETTE_SWATCHES } from './themePresets';
-import { PaletteSelect } from './PaletteSelect';
 import { AppearanceSlider } from './AppearanceSlider';
 import {
   CODE_FONT_SIZE_MAX,
@@ -29,7 +28,6 @@ export function AppearancePanel({
     activeScheme,
     settings,
     setMode,
-    setPalette,
     setFontScale,
     setCodeFontSize,
     setDiffMarkerMode,
@@ -85,27 +83,7 @@ export function AppearancePanel({
         />
       </section>
 
-      {/* 3. 预设配色 */}
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.palette')}</div>
-        <PaletteSelect
-          value={settings.palette}
-          onChange={setPalette}
-          label={i18n.t('appearance.palette')}
-        />
-        <div className="appearance-swatch-strip" aria-label={i18n.t('appearance.swatches')}>
-          {(PALETTE_SWATCHES[settings.palette]?.[activeScheme] ?? []).slice(0, 6).map((swatch) => (
-            <span
-              key={swatch.label}
-              className="appearance-swatch-dot"
-              style={{ backgroundColor: swatch.value }}
-              title={`${swatch.label} ${swatch.value}`}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* 4. 统一 settings list：字号 / 代码字号 / 差异标记 */}
+      {/* 3. 统一 settings list：字号 / 代码字号 / 差异标记 */}
       <section className="appearance-group">
         <div className="appearance-field-label">{i18n.t('appearance.settingsList')}</div>
         <div className="appearance-settings-list appearance-settings-card">
