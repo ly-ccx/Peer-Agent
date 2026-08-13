@@ -142,6 +142,8 @@ function MainApp() {
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
   const [resultAcceptancePhase, setResultAcceptancePhase] = useState<AcceptancePhase | null>(null);
   const resultShatterRef = useRef<HTMLDivElement | null>(null);
+  const resultBodyRef = useRef<HTMLDivElement | null>(null);
+  const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
   const resultAcceptanceTimers = useRef<Set<number>>(new Set());
   const resultShattering =
     resultAcceptancePhase === 'celebrating' || resultAcceptancePhase === 'exiting';
@@ -153,6 +155,47 @@ function MainApp() {
     },
     [],
   );
+
+  const updateResultScrollButton = useCallback((container: HTMLDivElement | null) => {
+    if (!container) {
+      setShowResultScrollToBottom((previous) => (previous ? false : previous));
+      return;
+    }
+    const overflowed = container.scrollHeight > container.clientHeight + 1;
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const next = overflowed && remaining > 64;
+    setShowResultScrollToBottom((previous) => (previous === next ? previous : next));
+  }, []);
+
+  useEffect(() => {
+    if (!resultDrawerItem) {
+      setShowResultScrollToBottom(false);
+      return;
+    }
+    const container = resultBodyRef.current;
+    if (!container) return;
+    container.scrollTop = 0;
+    const onScroll = () => updateResultScrollButton(container);
+    container.addEventListener('scroll', onScroll, { passive: true });
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => updateResultScrollButton(container));
+    observer?.observe(container);
+    if (container.firstElementChild) observer?.observe(container.firstElementChild);
+    updateResultScrollButton(container);
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      observer?.disconnect();
+    };
+  }, [resultDrawerItem, updateResultScrollButton]);
+
+  const scrollResultToBottom = useCallback(() => {
+    const container = resultBodyRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    setShowResultScrollToBottom(false);
+  }, []);
 
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
     setCollectionDrawer(kind);
@@ -1343,9 +1386,33 @@ function MainApp() {
                               {isZh ? '关闭' : 'Close'}
                             </button>
                           </div>
-                          <div className="conversation-result-drawer__body">
+                          <div ref={resultBodyRef} className="conversation-result-drawer__body">
                             <ConversationResultView item={resultDrawerItem} isZh={isZh} />
                           </div>
+                          {showResultScrollToBottom ? (
+                            <button
+                              type="button"
+                              className="chat-scroll-bottom-btn conversation-result-drawer__scroll-bottom"
+                              onClick={scrollResultToBottom}
+                              aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
+                              title={isZh ? '滚动到底部' : 'Scroll to bottom'}
+                            >
+                              <svg
+                                aria-hidden="true"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M12 5v14" />
+                                <path d="m19 12-7 7-7-7" />
+                              </svg>
+                            </button>
+                          ) : null}
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;

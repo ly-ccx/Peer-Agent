@@ -27,9 +27,16 @@ test('result drawer places actions in a separate footer sibling of the body', as
   assert.match(source, /conversation-result-drawer__body/);
   assert.match(
     source,
-    /<div className="conversation-result-drawer__body">[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<footer className="conversation-result-drawer__footer">/,
+    /<div(?:\s+ref=\{resultBodyRef\})?\s+className="conversation-result-drawer__body">[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<footer className="conversation-result-drawer__footer">/,
   );
+  assert.match(source, /conversation-result-drawer__scroll-bottom/);
+  assert.match(source, /chat-scroll-bottom-btn/);
+  assert.match(source, /M12 5v14/);
+  assert.match(source, /resultBodyRef/);
+  assert.match(source, /showResultScrollToBottom/);
+  assert.match(source, /scrollResultToBottom/);
   assert.match(styles, /\.conversation-result-drawer__footer \{/);
+  assert.match(styles, /\.conversation-result-drawer__scroll-bottom\.chat-scroll-bottom-btn \{/);
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 

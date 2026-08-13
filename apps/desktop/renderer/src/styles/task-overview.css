@@ -1465,6 +1465,10 @@
   flex: 1 1 0;
 }
 
+.conversation-result-drawer__scroll-bottom.chat-scroll-bottom-btn {
+  bottom: 5.75rem;
+}
+
 /* ---------- 继续讨论：会话 Drawer（可关闭，挂载 ChatSurface） ---------- */
 /* 壳头已收敛：标题/状态/关闭由 ChatHeader 承担，Drawer 不再叠一层 chrome。 */
 .conversation-chat-drawer {
