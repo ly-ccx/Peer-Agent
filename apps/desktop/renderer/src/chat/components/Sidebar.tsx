@@ -1,9 +1,11 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
 import { BrandWordmark } from '../../app/components/BrandWordmark';
+import { EditProjectDialog, type ProjectWorkspace } from './EditProjectDialog';
+import { abbreviateWorkspacePath } from './workspacePathDisplay';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
@@ -45,19 +47,13 @@ interface WorkspaceEntry {
   path: string;
   name: string;
   addedAt: string;
+  linkedFolders?: readonly { path: string; name: string }[];
 }
 
 interface WorkspaceInfo {
   name: string;
   absolutePath: string;
   git?: { branch?: string; isDirty?: boolean };
-}
-
-/** 工作区路径缩略：/Users/x/... 或 /home/x/... -> ~/... */
-function abbreviateWorkspacePath(absPath: string): string {
-  const match = absPath.match(/^\/(?:Users|home)\/[^/]+(\/.*)?$/);
-  if (match) return `~${match[1] || ''}`;
-  return absPath;
 }
 
 /** 工作区名称缩写：peer_agent -> PA, peer-knowledge -> PK */
@@ -233,7 +229,11 @@ export function Sidebar({
   const confirm = useConfirm();
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
   
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; conversation: ConversationMeta } | null>(null);
+  const [contextMenu, setContextMenu] = useState<
+    | { kind: 'conversation'; x: number; y: number; conversation: ConversationMeta }
+    | { kind: 'workspace'; x: number; y: number; workspace: WorkspaceEntry }
+    | null
+  >(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editingInputRef = useRef<HTMLInputElement | null>(null);
@@ -244,6 +244,9 @@ export function Sidebar({
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
+  const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
+  const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null);
+  const projectPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -311,8 +314,7 @@ export function Sidebar({
     }
   }, [refreshWorkspaces, onWorkspaceChanged, ensureWorkspaceActive, onOpenWorkspaceHome, onOpenHome]);
 
-  const handleRemoveWorkspace = useCallback(async (wsPath: string, e: MouseEvent) => {
-    e.stopPropagation();
+  const handleRemoveWorkspace = useCallback(async (wsPath: string) => {
     const target = workspaces.find((ws) => ws.path === wsPath);
     const name = target?.name?.trim() || wsPath;
     const ok = await confirm({
@@ -329,6 +331,33 @@ export function Sidebar({
     await refreshWorkspaces();
     onWorkspaceChanged?.();
   }, [confirm, isZh, workspaces, refreshWorkspaces, onWorkspaceChanged]);
+
+  const handleRevealWorkspace = useCallback(async (wsPath: string) => {
+    try {
+      await clientApi.openPath(wsPath);
+    } catch (error: unknown) {
+      console.error('Failed to reveal workspace in Finder', error);
+    }
+  }, []);
+
+  const openProjectEditor = useCallback((wsPath: string) => {
+    setProjectPopoverPath(null);
+    setEditingProjectPath(wsPath);
+  }, []);
+
+  useEffect(() => {
+    if (!projectPopoverPath) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (projectPopoverRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(`[data-project-path="${CSS.escape(projectPopoverPath)}"]`)) {
+        return;
+      }
+      setProjectPopoverPath(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [projectPopoverPath]);
 
   useEffect(() => {
     if (!editingConversationId) return;
@@ -490,7 +519,7 @@ export function Sidebar({
         onClick={() => onSelectConversation(conv.id)}
         onContextMenu={(e) => {
           e.preventDefault();
-          setContextMenu({ x: e.clientX, y: e.clientY, conversation: conv });
+          setContextMenu({ kind: 'conversation', x: e.clientX, y: e.clientY, conversation: conv });
         }}
       >
         {canTogglePin ? (
@@ -658,7 +687,8 @@ export function Sidebar({
     );
   };
 
-  const contextConv = contextMenu?.conversation ?? null;
+  const contextConv = contextMenu?.kind === 'conversation' ? contextMenu.conversation : null;
+  const contextWorkspace = contextMenu?.kind === 'workspace' ? contextMenu.workspace : null;
   const contextIsPinned = Boolean(contextConv?.pinnedAt);
   const contextIsRunning = Boolean(contextConv && runningConversationIds?.has(contextConv.id));
   const contextCompactionState = contextConv ? compactionStates?.get(contextConv.id) : undefined;
@@ -772,7 +802,12 @@ export function Sidebar({
               >
                 <div
                   className="sidebar-workspace-row"
+                  data-project-path={ws.path}
                   onClick={() => { void handleOpenWorkspaceHome(ws.path); }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({ kind: 'workspace', x: e.clientX, y: e.clientY, workspace: ws });
+                  }}
                   role="button"
                   tabIndex={0}
                   title={isZh ? '打开工作台' : 'Open workbench'}
@@ -795,13 +830,43 @@ export function Sidebar({
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
                   <button
                     type="button"
-                    className="sidebar-workspace-remove"
-                    title={isZh ? '移除工作区' : 'Remove workspace'}
-                    onClick={(e) => { void handleRemoveWorkspace(ws.path, e); }}
+                    className="sidebar-workspace-more"
+                    aria-label={isZh ? '查看项目文件夹' : 'Show project folders'}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setProjectPopoverPath((current) => current === ws.path ? null : ws.path);
+                    }}
                   >
-                    ×
+                    ···
                   </button>
                 </div>
+                {projectPopoverPath === ws.path ? (
+                  <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
+                    <div className="sidebar-project-popover-title">{ws.name}</div>
+                    <div className="sidebar-project-popover-folders">
+                      <div className="sidebar-project-popover-folder">
+                        <span className="sidebar-project-popover-path" title={ws.path}>
+                          {abbreviateWorkspacePath(ws.path)}
+                        </span>
+                        <span className="sidebar-project-popover-primary">{isZh ? '主要' : 'Primary'}</span>
+                      </div>
+                      {(ws.linkedFolders ?? []).map((folder) => (
+                        <div key={folder.path} className="sidebar-project-popover-folder">
+                          <span className="sidebar-project-popover-path" title={folder.path}>
+                            {abbreviateWorkspacePath(folder.path)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="sidebar-project-popover-edit"
+                      onClick={() => openProjectEditor(ws.path)}
+                    >
+                      {isZh ? '编辑项目' : 'Edit project'}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -812,6 +877,50 @@ export function Sidebar({
         </div>
       </div>
 
+
+      {contextMenu && contextWorkspace
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="sidebar-context-menu"
+              role="menu"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  void handleRevealWorkspace(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '在 Finder 中显示' : 'Reveal in Finder'}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  openProjectEditor(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '编辑项目' : 'Edit project'}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="danger"
+                onClick={() => {
+                  closeContextMenu();
+                  void handleRemoveWorkspace(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '移除' : 'Remove'}</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {contextMenu && contextConv
         ? createPortal(
@@ -898,6 +1007,23 @@ export function Sidebar({
         <VersionBadge i18n={i18n} />
       </div>
       <SidebarResizer isZh={isZh} />
+      {editingProjectPath
+        ? (() => {
+            const editingProject = workspaces.find((workspace) => workspace.path === editingProjectPath) as ProjectWorkspace | undefined;
+            return editingProject ? (
+              <EditProjectDialog
+                workspace={editingProject}
+                isZh={isZh}
+                onClose={() => setEditingProjectPath(null)}
+                onChanged={refreshWorkspaces}
+                onRemoveProject={async (path) => {
+                  setEditingProjectPath(null);
+                  await handleRemoveWorkspace(path);
+                }}
+              />
+            ) : null;
+          })()
+        : null}
     </aside>
   );
 }

@@ -62,8 +62,8 @@ test('lists configured and existing discovered workspaces once', () => {
 
   assert.deepEqual(service.listWorkspaces(), {
     workspaces: [
-      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
-      { path: '/discovered', name: 'discovered', addedAt: '1970-01-01T00:00:00.000Z' },
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+      { path: '/discovered', name: 'discovered', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] },
     ],
     activeWorkspace: '/configured',
   });
@@ -99,6 +99,7 @@ test('creates and persists the default workspace when no active path exists', ()
         path: '/home/user/PeerAgent',
         name: 'PeerAgent',
         addedAt: '2026-08-01T12:00:00.000Z',
+        linkedFolders: [],
       },
     ],
     activeWorkspace: '/home/user/PeerAgent',
@@ -132,8 +133,8 @@ test('directory selection preserves cancellation, existing, and new workspace be
   });
   assert.deepEqual(harness.state, {
     workspaces: [
-      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
-      { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z' },
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+      { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
     ],
     activeWorkspace: '/new-project',
   });
@@ -146,8 +147,8 @@ test('directory selection preserves cancellation, existing, and new workspace be
     ['choose-directory', sender],
     ['merge', {
       workspaces: [
-        { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
-        { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z' },
+        { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+        { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
       ],
       activeWorkspace: '/new-project',
     }],
@@ -168,7 +169,7 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
     activeWorkspace: '/other',
   });
   assert.deepEqual(harness.service.removeWorkspace('/other'), {
-    workspaces: [{ path: '/configured', name: 'Configured' }],
+    workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
     activeWorkspace: null,
   });
   assert.deepEqual(harness.calls, [
@@ -176,11 +177,89 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
     ['chat-workspace', '/other'],
     ['skill-workspace', '/other'],
     ['merge', {
-      workspaces: [{ path: '/configured', name: 'Configured' }],
+      workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
       activeWorkspace: null,
     }],
     ['skill-workspace', null],
   ]);
+});
+
+test('stores, updates, and promotes linked folders without merging two projects', async () => {
+  const sender = { id: 3 };
+  const harness = createHarness({
+    workspaces: [
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
+      { path: '/other', name: 'Other', addedAt: '2026-01-02T00:00:00.000Z' },
+    ],
+  });
+
+  assert.deepEqual(harness.service.updateWorkspace({
+    path: '/configured',
+    name: 'Knowledge',
+    linkedFolders: [
+      { path: '/configured' },
+      { path: '/code' },
+      { path: '/code' },
+    ],
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [{ path: '/code', name: 'code' }],
+    },
+  });
+
+  harness.setSelection('/other');
+  assert.deepEqual(await harness.service.addLinkedFolder(sender, { path: '/configured' }), {
+    ok: false,
+    reason: 'other-project-primary',
+    path: '/other',
+    name: 'Other',
+  });
+
+  harness.setSelection('/docs');
+  assert.deepEqual(await harness.service.addLinkedFolder(sender, { path: '/configured' }), {
+    ok: true,
+    existing: false,
+    workspace: {
+      path: '/configured',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [
+        { path: '/code', name: 'code' },
+        { path: '/docs', name: 'docs' },
+      ],
+    },
+  });
+
+  assert.deepEqual(harness.service.removeLinkedFolder({
+    path: '/configured',
+    folderPath: '/docs',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [{ path: '/code', name: 'code' }],
+    },
+  });
+
+  assert.deepEqual(harness.service.setPrimaryFolder({
+    path: '/configured',
+    folderPath: '/code',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/code',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [{ path: '/configured', name: 'configured' }],
+    },
+  });
+  assert.equal(harness.state.activeWorkspace, '/code');
 });
 
 test('returns project metadata with basename fallback', () => {

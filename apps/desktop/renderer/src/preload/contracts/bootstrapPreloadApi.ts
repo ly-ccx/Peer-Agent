@@ -830,7 +830,15 @@ export interface BootstrapPreloadApi {
   readonly mcpReadResource: (params: { mcpId?: string | number; serverId?: string | number; uri: string }) => Promise<unknown>;
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
-  readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
+  readonly workspaceList: () => Promise<{
+    workspaces: readonly {
+      path: string;
+      name: string;
+      addedAt: string;
+      linkedFolders?: readonly { path: string; name: string }[];
+    }[];
+    activeWorkspace: string | null;
+  }>;
   readonly quickChatHide: () => Promise<{ ok: true }>;
   readonly quickChatSetTaskCardVisible: (visible: boolean) => Promise<{ ok: boolean }>;
   readonly quickChatSetContentHeight: (height: number) => Promise<{ ok: boolean; height: number }>;
@@ -846,6 +854,27 @@ export interface BootstrapPreloadApi {
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
+  readonly workspaceUpdate: (params: {
+    path: string;
+    name?: string;
+    linkedFolders?: readonly { path: string; name?: string }[];
+  }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
+  readonly workspaceAddLinkedFolder: (params: { path: string }) => Promise<{
+    ok: boolean;
+    reason?: string;
+    existing?: boolean;
+    workspace?: unknown;
+    path?: string;
+    name?: string;
+  }>;
+  readonly workspaceRemoveLinkedFolder: (params: {
+    path: string;
+    folderPath: string;
+  }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
+  readonly workspaceSetPrimary: (params: {
+    path: string;
+    folderPath: string;
+  }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
   readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;

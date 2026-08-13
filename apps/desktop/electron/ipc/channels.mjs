@@ -250,11 +250,15 @@ const INVOKE_CHANNELS = Object.freeze([
   'usage:day',
   'usage:stats',
   'workspace:add',
+  'workspace:add-linked-folder',
   'workspace:ensure-default',
   'workspace:info',
   'workspace:list',
   'workspace:remove',
+  'workspace:remove-linked-folder',
   'workspace:set-active',
+  'workspace:set-primary',
+  'workspace:update',
 ]);
 
 const SEND_SYNC_CHANNELS = Object.freeze([

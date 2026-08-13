@@ -143,6 +143,32 @@ function resolveRunWorkspacePath({
   return process.cwd();
 }
 
+function resolveProjectLinkedFolders(workspacePath, getSettings) {
+  if (!workspacePath || typeof getSettings !== 'function') return [];
+  const workspaces = Array.isArray(getSettings()?.workspaces) ? getSettings().workspaces : [];
+  const current = workspaces.find((workspace) => workspace?.path === workspacePath);
+  const folders = [];
+  const seen = new Set();
+  for (const folder of current?.linkedFolders || []) {
+    const folderPath = typeof folder?.path === 'string' ? folder.path : null;
+    if (!folderPath || folderPath === workspacePath || seen.has(folderPath)) continue;
+    seen.add(folderPath);
+    folders.push(folderPath);
+  }
+  return folders;
+}
+
+function mergeReadableRoots(baseRoots, extraRoots) {
+  const merged = [];
+  const seen = new Set();
+  for (const root of [...(baseRoots || []), ...(extraRoots || [])]) {
+    if (typeof root !== 'string' || !root || seen.has(root)) continue;
+    seen.add(root);
+    merged.push(root);
+  }
+  return merged.length > 0 ? merged : null;
+}
+
 function buildGoalWorkspaceBindingExtensions(binding) {
   const origin = binding?.originWorkspacePath ?? null;
   const target = binding?.targetWorkspacePath ?? null;
@@ -947,6 +973,7 @@ export function createLlmChatService({
       ? resolveActiveGoalExecutionBinding(conversationId, conversationWorkspacePath, goalPlanStore)
       : null;
     const runWorkspacePath = goalWorkspaceBinding?.executionWorkspacePath || conversationWorkspacePath;
+    const projectLinkedFolders = resolveProjectLinkedFolders(conversationWorkspacePath, getSettings);
     const effectiveContextExtensions = [
       ...(Array.isArray(contextExtensions) ? contextExtensions : []),
       ...buildGoalWorkspaceBindingExtensions(goalWorkspaceBinding),
@@ -1047,7 +1074,10 @@ export function createLlmChatService({
       toolContext.workspacePath = runWorkspacePath;
       toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
       toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
-      toolContext.readableRoots = goalWorkspaceBinding?.readableRoots ?? null;
+      toolContext.readableRoots = mergeReadableRoots(
+        goalWorkspaceBinding?.readableRoots ?? [runWorkspacePath].filter(Boolean),
+        projectLinkedFolders,
+      );
       toolContext.writableRoots = goalWorkspaceBinding?.writableRoots ?? null;
       toolContext.permissionPolicy = permissionPolicy;
       // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
@@ -1149,6 +1179,7 @@ export function createLlmChatService({
           automationCreateContext: storedConversation?.automationCreateContext ?? null,
           effort,
           mode,
+          linkedFolders: projectLinkedFolders,
           // goal-plan 事实上下文 Source（0006）：goal 模式下注入活动计划权威 taskId。
           goalPlanStore,
           // mcp-host 自我认知 Source：注入「我自己是 MCP host + 注册表路径 + 已装清单」。
@@ -1192,6 +1223,7 @@ export function createLlmChatService({
             automationCreateContext: rebuiltAutomationCreateContext,
             effort,
             mode,
+            linkedFolders: projectLinkedFolders,
             goalPlanStore,
             mcpRegistry,
             provider: resolvedChannel.legacyProvider,

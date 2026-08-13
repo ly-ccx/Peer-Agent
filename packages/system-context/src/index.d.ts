@@ -21,6 +21,7 @@ export interface PromptSection {
 
 export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly workspacePath?: string | null;
+  readonly linkedFolders?: readonly (string | { readonly path?: string | null })[];
   readonly conversationId?: string | null;
   readonly provider?: string | null;
   readonly model?: string | null;
@@ -120,7 +121,10 @@ export function buildHostConfigInstructions(
 
 export function renderSystemCorePrompt(): string;
 export function renderBrainstormingPrompt(): string;
-export function renderRuntimeContext(workspacePath?: string | null): string;
+export function renderRuntimeContext(
+  workspacePath?: string | null,
+  options?: { readonly linkedFolders?: readonly (string | { readonly path?: string | null })[] },
+): string;
 
 export function createAttachmentPromptSource(): PromptSource;
 export function createAutomationIntentPromptSource(): PromptSource;

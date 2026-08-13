@@ -20,6 +20,10 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
       'workspace.setActiveWorkspace',
     ),
     remove: assertFunction(workspace?.removeWorkspace, 'workspace.removeWorkspace'),
+    update: assertFunction(workspace?.updateWorkspace, 'workspace.updateWorkspace'),
+    addLinkedFolder: assertFunction(workspace?.addLinkedFolder, 'workspace.addLinkedFolder'),
+    removeLinkedFolder: assertFunction(workspace?.removeLinkedFolder, 'workspace.removeLinkedFolder'),
+    setPrimary: assertFunction(workspace?.setPrimaryFolder, 'workspace.setPrimaryFolder'),
     getInfo: assertFunction(workspace?.getWorkspaceInfo, 'workspace.getWorkspaceInfo'),
   };
 
@@ -30,6 +34,10 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
       ipc.handle('workspace:add', (event) => ports.add(event.sender));
       ipc.handle('workspace:set-active', (_event, { path } = {}) => ports.setActive(path));
       ipc.handle('workspace:remove', (_event, { path } = {}) => ports.remove(path));
+      ipc.handle('workspace:update', (_event, payload = {}) => ports.update(payload));
+      ipc.handle('workspace:add-linked-folder', (event, payload = {}) => ports.addLinkedFolder(event.sender, payload));
+      ipc.handle('workspace:remove-linked-folder', (_event, payload = {}) => ports.removeLinkedFolder(payload));
+      ipc.handle('workspace:set-primary', (_event, payload = {}) => ports.setPrimary(payload));
       ipc.handle('workspace:info', (_event, { path } = {}) => ports.getInfo(path));
     }),
   ]);

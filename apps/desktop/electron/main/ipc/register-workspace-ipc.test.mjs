@@ -15,6 +15,10 @@ function createHarness() {
       addWorkspace: port('add'),
       setActiveWorkspace: port('set-active'),
       removeWorkspace: port('remove'),
+      updateWorkspace: port('update'),
+      addLinkedFolder: port('add-linked-folder'),
+      removeLinkedFolder: port('remove-linked-folder'),
+      setPrimaryFolder: port('set-primary'),
       getWorkspaceInfo: port('info'),
     },
   });
@@ -36,6 +40,10 @@ test('workspace-ipc owns the exact workspace channel set', () => {
     'workspace:add',
     'workspace:set-active',
     'workspace:remove',
+    'workspace:update',
+    'workspace:add-linked-folder',
+    'workspace:remove-linked-folder',
+    'workspace:set-primary',
     'workspace:info',
   ]);
 });
@@ -49,6 +57,10 @@ test('workspace-ipc projects sender and path payloads into the service', async (
   await handlers.get('workspace:add')({ sender });
   handlers.get('workspace:set-active')({ sender }, { path: '/active' });
   handlers.get('workspace:remove')({ sender }, { path: '/removed' });
+  handlers.get('workspace:update')({ sender }, { path: '/updated', name: 'New' });
+  await handlers.get('workspace:add-linked-folder')({ sender }, { path: '/updated' });
+  handlers.get('workspace:remove-linked-folder')({ sender }, { path: '/updated', folderPath: '/extra' });
+  handlers.get('workspace:set-primary')({ sender }, { path: '/updated', folderPath: '/extra' });
   handlers.get('workspace:info')({ sender }, { path: '/info' });
 
   assert.deepEqual(calls, [
@@ -57,6 +69,10 @@ test('workspace-ipc projects sender and path payloads into the service', async (
     ['add', sender],
     ['set-active', '/active'],
     ['remove', '/removed'],
+    ['update', { path: '/updated', name: 'New' }],
+    ['add-linked-folder', sender, { path: '/updated' }],
+    ['remove-linked-folder', { path: '/updated', folderPath: '/extra' }],
+    ['set-primary', { path: '/updated', folderPath: '/extra' }],
     ['info', '/info'],
   ]);
 });
