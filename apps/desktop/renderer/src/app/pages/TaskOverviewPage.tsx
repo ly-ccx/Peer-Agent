@@ -1,5 +1,5 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { formatDuration } from '../../chat/state/format';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -311,6 +311,7 @@ export function TaskOverviewPage({
         onNewTask={onNewTask}
         onOpenItem={onOpenItem}
         onAcceptResult={onAcceptResult}
+        acceptHandlerRef={acceptHandlerRef}
         onCancelItem={onCancelItem}
       />
     );
@@ -368,6 +369,7 @@ function HeroLayout({
   onNewTask,
   onOpenItem,
   onAcceptResult,
+  acceptHandlerRef,
   onCancelItem,
 }: {
   readonly title: string;
@@ -380,6 +382,7 @@ function HeroLayout({
   readonly onNewTask?: () => void;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
   const discussions = items.filter((i) => i.source === 'conversation');
@@ -425,15 +428,15 @@ function HeroLayout({
     }
   }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
 
-  const scheduleTransition = (callback: () => void, delayMs: number) => {
+  const scheduleTransition = useCallback((callback: () => void, delayMs: number) => {
     const timer = window.setTimeout(() => {
       transitionTimers.current.delete(timer);
       callback();
     }, delayMs);
     transitionTimers.current.add(timer);
-  };
+  }, []);
 
-  const handleAccept = async (item: TaskOverviewItem) => {
+  const handleAccept = useCallback(async (item: TaskOverviewItem) => {
     if (!onAcceptResult || item.source !== 'goal_plan' || !item.taskId) return;
     if (acceptanceTransitions[item.taskId]) return;
 
@@ -483,7 +486,7 @@ function HeroLayout({
         return next;
       });
     }
-  };
+  }, [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition]);
 
   useEffect(() => {
     if (!acceptHandlerRef) return;

@@ -35,7 +35,7 @@ test('result drawer keeps 确认验收 and routes 还不行 back to the conversa
 test('result drawer places actions in a separate footer sibling of the body', async () => {
   const source = await readApp();
   const styles = await readStyles();
-  // 三区：head / body / footer 都是 shatter-source 的直接兄弟，footer 在 body 之后。
+  // 三区：head / body / footer 是抽屉的直接子节点，footer 在 body 之后。
   assert.match(source, /conversation-result-drawer__head/);
   assert.match(source, /conversation-result-drawer__body/);
   assert.match(
@@ -53,48 +53,26 @@ test('result drawer places actions in a separate footer sibling of the body', as
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
-test('result drawer shell shatters the whole panel before unload', async () => {
+test('result drawer closes first and leaves shatter to the workbench card', async () => {
   const source = await readApp();
-  assert.match(source, /ParticleShatterOverlay/);
-  assert.match(source, /conversation-result-drawer__shatter-host/);
-  assert.match(source, /conversation-result-drawer__shatter-source/);
-  assert.match(source, /onPhase: setResultAcceptancePhase/);
-  assert.match(source, /active=\{resultShattering\}/);
-  assert.match(source, /targetRef=\{resultShatterRef\}/);
-  assert.match(source, /keepResultDrawer: true/);
-  assert.match(
-    source,
-    /ref=\{resultShatterRef\}[\s\S]*?conversation-result-drawer__head[\s\S]*?conversation-result-drawer__body[\s\S]*?conversation-result-drawer__footer[\s\S]*?<\/div>[\s\S]*?<ParticleShatterOverlay active=\{resultShattering\} targetRef=\{resultShatterRef\}/,
-  );
-
-  const acceptHandler = source.slice(
-    source.indexOf('const acceptResultFromWorkbench'),
-    source.indexOf('const cancelPlanFromWorkbench'),
-  );
-  const keepDrawerBranch = acceptHandler.match(
-    /if \(!options\?\.keepResultDrawer\) \{\n([\s\S]*?)\n        \}/,
-  );
-  assert.ok(keepDrawerBranch, 'accept handler must have a keepResultDrawer guard');
-  assert.match(keepDrawerBranch[1], /setResultDrawerItem/);
-  assert.match(
-    keepDrawerBranch[1],
-    /setCollectionDrawer\(\(current\) => \(current === 'result' \? null : current\)\)/,
-    'keepResultDrawer must preserve both the result item and its drawer until animation settles',
-  );
-
-  // 验收完成前不得立刻清空侧栏；收尾发生在 onSettled。
-  assert.match(
-    source,
-    /onSettled: \(\) => \{[\s\S]*?setResultDrawerItem\(null\);[\s\S]*?setCollectionDrawer\(null\);/,
-  );
+  assert.doesNotMatch(source, /ParticleShatterOverlay/);
+  assert.doesNotMatch(source, /resultShatterRef/);
+  assert.doesNotMatch(source, /resultShattering/);
+  assert.doesNotMatch(source, /setResultAcceptancePhase/);
+  assert.doesNotMatch(source, /runAcceptanceTransition/);
+  assert.match(source, /setResultAcceptancePending\(item\)/);
+  assert.match(source, /requestClose\(\)/);
+  assert.match(source, /acceptHandlerRef=\{workbenchAcceptRef\}/);
+  assert.match(source, /workbenchAcceptRef\.current\?\.\(pending\)/);
 });
 
-test('result drawer shatter styles keep canvas as a sibling of the source', async () => {
-  const styles = await readStyles();
-  assert.match(styles, /\.conversation-result-drawer__shatter-host/);
-  assert.match(styles, /\.conversation-result-drawer__shatter-source/);
-  assert.match(styles, /conversation-result-drawer--shattering/);
-  assert.match(styles, /\.conversation-result-drawer__shatter-host \.particle-shatter-canvas/);
+test('result drawer no longer mounts a fullscreen shatter layer', async () => {
+  const [source, styles] = await Promise.all([readApp(), readStyles()]);
+  assert.doesNotMatch(source, /conversation-result-drawer__shatter-host/);
+  assert.doesNotMatch(source, /conversation-result-drawer__shatter-source/);
+  assert.doesNotMatch(styles, /conversation-result-drawer__shatter-host/);
+  assert.doesNotMatch(styles, /conversation-result-drawer__shatter-source/);
+  assert.doesNotMatch(styles, /conversation-result-drawer--shattering/);
 });
 
 test('result drawer splits into head, scrolling body and independent footer', async () => {
@@ -118,19 +96,10 @@ test('result drawer splits into head, scrolling body and independent footer', as
     styles,
     /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
   );
-  // 粉碎包裹层按列排布三区，并用 flex-basis:0 + max-height:100% 避免「100%+head」溢出底部空白。
+  // 抽屉本体自己吃满 panel，不再依赖粉碎包裹层撑高度。
   assert.match(
     styles,
-    /\.conversation-result-drawer__shatter-host,[\s\S]*?\.conversation-result-drawer__shatter-source \{[\s\S]*?flex: 1 1 0;[\s\S]*?max-height: 100%;/,
-  );
-  // host 必须吃满 panel（flex:1 1 0，勿用 auto 覆盖），避免底部露出 vibrancy 色差条。
-  assert.match(
-    styles,
-    /\.conversation-result-drawer__shatter-host \{[\s\S]*?flex: 1 1 0;[\s\S]*?align-self: stretch;/,
-  );
-  assert.doesNotMatch(
-    styles,
-    /\.conversation-result-drawer__shatter-host \{[\s\S]*?flex: 1 1 auto;/,
+    /\.conversation-result-drawer \{[\s\S]*?flex: 1 1 0;[\s\S]*?align-self: stretch;[\s\S]*?max-height: 100%;/,
   );
   // CRV 不再 h-full 叠百分比高度。
   assert.match(

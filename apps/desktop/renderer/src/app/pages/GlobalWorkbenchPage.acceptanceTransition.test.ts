@@ -39,6 +39,7 @@ test('global workbench acceptance waits for success before celebrating and freez
   assert.match(source, /setAcceptanceOrderSnapshot\(resultReady\.map\(\(candidate\) => candidate\.taskId\)\)/);
   assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
   assert.match(source, /ParticleShatterOverlay/);
+  assert.match(source, /acceptHandlerRef\.current = handleAccept/);
   assert.match(source, /is-shattering/);
   assert.match(source, /is-exiting/);
   assert.match(source, /className="gwb-type"/);

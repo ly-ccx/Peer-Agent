@@ -140,6 +140,7 @@ function MainApp() {
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const resultBodyRef = useRef<HTMLDivElement | null>(null);
   const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
+  /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
   const updateResultScrollButton = useCallback((container: HTMLDivElement | null) => {
@@ -900,7 +901,6 @@ function MainApp() {
     if (options?.closeResult) {
       setResultDrawerItem(null);
       setCollectionDrawer(null);
-      setResultAcceptancePhase(null);
     }
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
@@ -1093,6 +1093,7 @@ function MainApp() {
                         openCollectionDrawer('tasks');
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
+                      acceptHandlerRef={workbenchAcceptRef}
                       onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
                       onOpenWorkspace={(workspacePath: string) => {
                         // 与侧栏 onOpenWorkspaceHome 一致：先本地切区，再打开区级工作台。
@@ -1126,6 +1127,7 @@ function MainApp() {
                         openCollectionDrawer('tasks');
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
+                      acceptHandlerRef={workbenchAcceptRef}
                       onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
                     />
                   )}
@@ -1279,10 +1281,6 @@ function MainApp() {
                   panelClassName={
                     collectionDrawer === 'result' || collectionDrawer === 'task_details'
                       ? `conversation-result-drawer${
-                          collectionDrawer === 'result' && resultShattering
-                            ? ' conversation-result-drawer--shattering'
-                            : ''
-                        }${
                           collectionDrawer === 'result' && conversationDrawerOpen
                             ? ' conversation-result-drawer--pushed'
                             : ''
@@ -1348,19 +1346,7 @@ function MainApp() {
                         </div>
                       </div>
                     ) : resultDrawerItem ? (
-                      <div
-                        className={`conversation-result-drawer__shatter-host${
-                          resultAcceptancePhase === 'exiting' ? ' is-exiting' : ''
-                        }`}
-                      >
-                        <div
-                          ref={resultShatterRef}
-                          className={`conversation-result-drawer__shatter-source particle-shatter-source${
-                            resultAcceptancePhase
-                              ? ` conversation-result-drawer--${resultAcceptancePhase}`
-                              : ''
-                          }${resultShattering ? ' is-shattering' : ''}`}
-                        >
+                      <>
                           <div className="conversation-result-drawer__head">
                             <div>
                               <h2>{isZh ? '查看结果' : 'View result'}</h2>
@@ -1374,7 +1360,7 @@ function MainApp() {
                               type="button"
                               className="conversation-result-drawer__close"
                               onClick={requestClose}
-                              disabled={Boolean(resultAcceptancePhase)}
+                              disabled={Boolean(resultAcceptancePending)}
                             >
                               {isZh ? '关闭' : 'Close'}
                             </button>
@@ -1432,55 +1418,26 @@ function MainApp() {
                                   <button
                                     type="button"
                                     className="task-overview-btn task-overview-btn--primary"
-                                    disabled={resultAcceptancePhase !== null}
+                                    disabled={Boolean(resultAcceptancePending)}
                                     onClick={() => {
-                                      if (resultAcceptancePhase !== null) return;
-                                      void runAcceptanceTransition({
-                                        submit: () =>
-                                          acceptResultFromWorkbench(item, {
-                                            keepResultDrawer: true,
-                                          }),
-                                        onPhase: setResultAcceptancePhase,
-                                        schedule: (callback, delayMs) => {
-                                          const timer = window.setTimeout(() => {
-                                            resultAcceptanceTimers.current.delete(timer);
-                                            callback();
-                                          }, delayMs);
-                                          resultAcceptanceTimers.current.add(timer);
-                                        },
-                                        onSettled: () => {
-                                          setResultDrawerItem(null);
-                                          setCollectionDrawer(null);
-                                          setResultAcceptancePhase(null);
-                                        },
-                                      });
+                                      if (resultAcceptancePending) return;
+                                      setResultAcceptancePending(item);
+                                      requestClose();
                                     }}
                                   >
-                                    {resultAcceptancePhase === 'submitting' ? (
-                                      <>
-                                        <span className="result-card-spinner" aria-hidden="true" />
-                                        {isZh ? '正在验收…' : 'Accepting…'}
-                                      </>
-                                    ) : null}
-                                    {resultAcceptancePhase === 'celebrating' ||
-                                    resultAcceptancePhase === 'exiting'
+                                    {resultAcceptancePending
                                       ? isZh
-                                        ? '已验收 ✓'
-                                        : 'Accepted ✓'
-                                      : null}
-                                    {resultAcceptancePhase === null
-                                      ? isZh
+                                        ? '正在验收…'
+                                        : 'Accepting…'
+                                      : isZh
                                         ? '确认验收'
-                                        : 'Accept result'
-                                      : null}
+                                        : 'Accept result'}
                                   </button>
                                 ) : null}
                               </footer>
                             );
                           })()}
-                        </div>
-                        <ParticleShatterOverlay active={resultShattering} targetRef={resultShatterRef} />
-                      </div>
+                      </>
                     ) : (
                       <div className="conversation-result-drawer__body">
                         <p className="conversation-result-view__hint">
@@ -1498,39 +1455,46 @@ function MainApp() {
               panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested"
               softBackdrop
             >
-              <div className="conversation-chat-drawer-shell">
-                <div className="conversation-chat-drawer__body">
-                  <ChatSurface
-                    i18n={i18n}
-                    providers={providers}
-                    conversationId={activeConversationId}
-                    conversationRevision={conversationRevision}
-                    conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
-                    automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
-                    systemInstructions={systemInstructions}
-                    replyLanguage={replyLanguage}
-                    gitBranchPrefix={gitBranchPrefix}
-                    onOpenSettings={() => openSettings('providers')}
-                    onProvidersRefresh={refreshProviders}
-                    onConversationUpdated={() => { void refreshConversations(); }}
-                    onBranch={(id) => {
-                      setConversationView('active');
-                      setActiveConversationId(id);
-                      void refreshConversations(activeWorkspace, 'active');
-                    }}
-                    onRenameConversation={handleRenameConversation}
-                    onArchiveConversation={handleArchiveConversation}
-                    onOpenAutomationRun={openAutomationRun}
-                    onOpenTaskDetails={() => openCollectionDrawer('task_details')}
-                    onClose={() => setConversationDrawerOpen(false)}
-                    workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
-                    workspaces={workspaces}
-                    onWorkspaceChange={setDraftWorkspacePath}
-                    isPageActive={conversationDrawerOpen}
-                    messageTarget={notificationMessageTarget}
-                  />
+              <WorkbenchProvider
+                conversationId={activeConversationId}
+                isPageActive={conversationDrawerOpen}
+                layoutHost="local"
+              >
+                <div className="conversation-chat-drawer-shell">
+                  <div className="conversation-chat-drawer__body">
+                    <ChatSurface
+                      i18n={i18n}
+                      providers={providers}
+                      conversationId={activeConversationId}
+                      conversationRevision={conversationRevision}
+                      conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
+                      automationOrigin={conversations.find((c) => c.id === activeConversationId)?.automationOrigin ?? null}
+                      systemInstructions={systemInstructions}
+                      replyLanguage={replyLanguage}
+                      gitBranchPrefix={gitBranchPrefix}
+                      onOpenSettings={() => openSettings('providers')}
+                      onProvidersRefresh={refreshProviders}
+                      onConversationUpdated={() => { void refreshConversations(); }}
+                      onBranch={(id) => {
+                        setConversationView('active');
+                        setActiveConversationId(id);
+                        void refreshConversations(activeWorkspace, 'active');
+                      }}
+                      onRenameConversation={handleRenameConversation}
+                      onArchiveConversation={handleArchiveConversation}
+                      onOpenAutomationRun={openAutomationRun}
+                      onOpenTaskDetails={() => openCollectionDrawer('task_details')}
+                      onClose={() => setConversationDrawerOpen(false)}
+                      workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
+                      workspaces={workspaces}
+                      onWorkspaceChange={setDraftWorkspacePath}
+                      isPageActive={conversationDrawerOpen}
+                      messageTarget={notificationMessageTarget}
+                    />
+                  </div>
+                  <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
                 </div>
-              </div>
+              </WorkbenchProvider>
             </Drawer>
           ) : null}
         </>

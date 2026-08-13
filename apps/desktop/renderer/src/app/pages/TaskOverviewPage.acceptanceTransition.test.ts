@@ -12,6 +12,7 @@ test('result acceptance waits for success before celebrating and preserves a rem
   assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
   assert.match(source, /Object\.values\(acceptanceTransitions\)/);
   assert.match(source, /ParticleShatterOverlay/);
+  assert.match(source, /acceptHandlerRef\.current = handleAccept/);
   assert.match(source, /is-shattering/);
   assert.match(source, /is-exiting/);
   assert.match(source, /正在验收…/);
@@ -29,7 +30,7 @@ test('acceptance transitions freeze the complete taskId order instead of collidi
 test('a failed acceptance returns the card to a retryable idle state', async () => {
   const [source, app] = await Promise.all([readPage(), readApp()]);
   assert.match(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
-  assert.match(app, /disabled=\{resultAcceptancePhase !== null\}/);
+  assert.match(app, /disabled=\{Boolean\(resultAcceptancePending\)\}/);
   assert.match(app, /accept result failed'[\s\S]*throw error/);
 });
 

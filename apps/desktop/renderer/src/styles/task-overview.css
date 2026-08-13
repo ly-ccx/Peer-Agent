@@ -1378,61 +1378,12 @@
   --pa-drawer-width: 70vw;
   @apply flex h-full min-h-0 flex-col;
   background: var(--za-surface-0);
+  flex: 1 1 0;
+  align-self: stretch;
+  max-height: 100%;
   transition:
     translate var(--za-motion-medium) var(--za-ease-decelerate),
     filter var(--za-motion-medium) var(--za-ease-decelerate);
-}
-
-/* 结果侧栏验收：host/source 必须吃满 panel 的全部高度（不是内容高度）。
- * flex-basis:0 + min-height:0 + flex:1，避免 head/footer 叠加后总高度溢出，
- * 也避免 host 矮于 panel 时底部露出透明 vibrancy 色差条。 */
-.conversation-result-drawer__shatter-host,
-.conversation-result-drawer__shatter-source {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  min-height: 0;
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-}
-
-.conversation-result-drawer__shatter-host {
-  position: relative;
-  overflow: hidden;
-  /* host 是 panel 的唯一内容子节点，必须自己撑满 panel；basis 保持 0，勿写 auto 覆盖。 */
-  flex: 1 1 0;
-  align-self: stretch;
-}
-
-/* 唯一滚动容器仍是 drawer body；粉碎包裹层不另建滚动上下文。 */
-.conversation-result-drawer__shatter-source {
-  overflow: hidden;
-  background: var(--za-surface-0);
-  /* source 在 host 内吃满，footer 才能贴到底 */
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-
-.conversation-result-drawer--celebrating,
-.conversation-result-drawer--exiting,
-.conversation-result-drawer--shattering {
-  pointer-events: none;
-}
-
-/* 粉碎时 Overlay 面板本体透明，只保留粒子层 */
-.conversation-result-drawer.conversation-result-drawer--shattering {
-  background: transparent;
-  box-shadow: none;
-}
-
-.conversation-result-drawer__shatter-host .particle-shatter-canvas {
-  /* 侧栏更高更宽，给粒子更宽的离场空间 */
-  inset: -40px -120px -80px -160px;
-  width: calc(100% + 280px);
-  height: calc(100% + 120px);
-  z-index: 6;
 }
 
 
@@ -1472,7 +1423,7 @@
 /* ---------- 继续讨论：会话 Drawer（可关闭，挂载 ChatSurface） ---------- */
 /* 壳头已收敛：标题/状态/关闭由 ChatHeader 承担，Drawer 不再叠一层 chrome。 */
 .conversation-chat-drawer {
-  --pa-drawer-width: min(920px, 92vw);
+  --pa-drawer-width: min(1320px, 96vw);
   @apply flex h-full min-h-0 flex-col;
   background: var(--za-surface-0);
 }
@@ -1485,16 +1436,21 @@
 }
 
 .conversation-chat-drawer--nested {
-  --pa-drawer-width: min(920px, 88vw);
+  --pa-drawer-width: min(1320px, 94vw);
   box-shadow: -24px 0 64px rgba(4, 8, 14, 0.32);
 }
 
 .conversation-chat-drawer-shell {
-  @apply flex h-full min-h-0 flex-col;
+  @apply flex h-full min-h-0 flex-row;
 }
 
 .conversation-chat-drawer__body {
-  @apply min-h-0 flex-1 overflow-hidden;
+  @apply min-h-0 min-w-0 flex-1 overflow-hidden;
+}
+
+.conversation-chat-drawer-shell > .workbench-panel {
+  flex: 0 0 auto;
+  height: 100%;
 }
 
 .conversation-chat-drawer__body .thread,
