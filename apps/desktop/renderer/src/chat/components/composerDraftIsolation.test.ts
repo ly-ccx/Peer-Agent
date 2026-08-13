@@ -100,7 +100,7 @@ test('new task starts in main and navigates directly to the workbench', async ()
   assert.doesNotMatch(app, /const ensureConversation/);
 });
 
-test('Fast mode is a ChatGPT subscription composer control and follows both send paths', async () => {
+test('Fast mode is a ChatGPT/Grok subscription composer control and follows both send paths', async () => {
   const [surface, display, composer, settings] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./thread/TokenUsageDisplay.tsx'),
@@ -108,7 +108,7 @@ test('Fast mode is a ChatGPT subscription composer control and follows both send
     readSource('../../app/components/LlmSettingsPanel.tsx'),
   ]);
 
-  assert.match(display, /defaultProvider\?\.authMethod === 'oauth_chatgpt'/);
+  assert.match(display, /defaultProvider\?\.authMethod === 'oauth_chatgpt' \|\| defaultProvider\?\.authMethod === 'oauth_grok'/);
   assert.match(composer, /isZh \? '快速' : 'Fast'/);
   assert.match(composer, /aria-pressed=\{fastMode\}/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);

@@ -167,9 +167,15 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
       messages: [{ role: 'user', content: 'hello' }],
       fastMode: true,
     });
+    const grokFast = encodeOpenAIResponsesRequest({
+      model: 'grok-4.5',
+      messages: [{ role: 'user', content: 'hello' }],
+      fastMode: true,
+    });
 
     assert.equal(standard.service_tier, undefined);
     assert.equal(fast.service_tier, 'priority');
+    assert.equal(grokFast.service_tier, 'priority');
   });
 
   it('passes Grok low/medium/high and maps default/off to high via effort map', () => {

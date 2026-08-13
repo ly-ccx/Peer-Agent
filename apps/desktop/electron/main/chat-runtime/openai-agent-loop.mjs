@@ -75,7 +75,7 @@ export async function agentLoopOpenAI({
     ? (args) => sendOpenAIResponsesStream({
         ...args,
         accountId,
-        fastMode: authMethod === 'oauth_chatgpt' && fastMode,
+        fastMode: (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok') && fastMode,
         omitMaxOutputTokens: authMethod === 'oauth_chatgpt',
       })
     : sendOpenAIChatStream;

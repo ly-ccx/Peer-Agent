@@ -621,7 +621,7 @@ export function TokenUsageDisplay({
           <ReasoningEffortSlider
             effort={effort}
             effortLevels={effortLevels}
-            fastAvailable={defaultProvider?.authMethod === 'oauth_chatgpt' && Boolean(onFastModeChange)}
+            fastAvailable={(defaultProvider?.authMethod === 'oauth_chatgpt' || defaultProvider?.authMethod === 'oauth_grok') && Boolean(onFastModeChange)}
             fastMode={fastMode}
             isZh={isZh}
             disabled={Boolean(isStreaming)}

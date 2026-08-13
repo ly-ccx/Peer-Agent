@@ -153,7 +153,7 @@ export function encodeOpenAIResponsesRequest({
   };
   const outputLimit = positiveTokenLimit(maxOutputTokens);
   if (!omitMaxOutputTokens && outputLimit) body.max_output_tokens = outputLimit;
-  // Fast mode is the product-facing name; OpenAI's supported wire value is "priority".
+  // Fast mode is the product-facing name; OpenAI/xAI supported wire value is "priority".
   if (fastMode) body.service_tier = 'priority';
 
   // Keep effort only. Do NOT request reasoning.summary by default:
