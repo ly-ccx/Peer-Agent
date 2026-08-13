@@ -2271,3 +2271,37 @@ test('getUnacceptedCompletedPlanByConversation keeps the latest unaccepted resul
   assert.equal(found?.status, 'completed');
 });
 
+test('upsertGoalContract continues the same unaccepted Goal instead of opening a new one', () => {
+  const conversationId = 'conv-continue-unaccepted';
+  const created = store.createGoalContract({
+    conversationId,
+    title: '修好验收卡被冲掉',
+    goal: '修好验收卡被冲掉',
+    tasks: [
+      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
+      { taskId: 'fix', title: '修正续接', status: 'completed', evidenceRefs: ['e2'] },
+    ],
+  });
+  store.setPlanStatus(created.planId, 'completed', { changedBy: 'system:test' });
+  assert.equal(store.getPlan(created.planId)?.status, 'completed');
+  assert.equal(store.getActivePlanByConversation(conversationId), null);
+
+  const continued = store.upsertGoalContract(conversationId, {
+    title: '修好验收卡被冲掉',
+    goal: '修好验收卡被冲掉',
+    tasks: [
+      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
+      { taskId: 'fix', title: '修正续接', status: 'running', evidenceRefs: [] },
+      { taskId: 'test', title: '补测试', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+
+  assert.equal(continued.planId, created.planId);
+  assert.notEqual(continued.status, 'completed');
+  assert.equal(store.getPlan(created.planId)?.status, continued.status);
+  const siblings = store.listPlansByConversation(conversationId);
+  assert.equal(siblings.length, 1);
+  assert.equal(siblings[0].planId, created.planId);
+  assert.notEqual(siblings[0].status, 'cancelled');
+});
+

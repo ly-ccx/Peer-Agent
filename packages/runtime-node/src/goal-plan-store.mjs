@@ -2437,11 +2437,21 @@ export function createGoalPlanStore({
       createdBy,
       ...planPatch
     } = draft;
-    const activeGoal = normalizedConversationId
+    const conversationPlans = normalizedConversationId
       ? listPlanDetailsByConversation(normalizedConversationId)
-        .filter((plan) => isActivePlan(plan) && isSelfDrivenGoal(plan))
+      : [];
+    let activeGoal = conversationPlans
+      .filter((plan) => isActivePlan(plan) && isSelfDrivenGoal(plan))
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
+      || null;
+    // 待验收 completed 仍属于同一任务。goal_create_plan 应原地续接，
+    // 不能另开新计划再 supersede 掉验收卡。
+    if (!activeGoal) {
+      activeGoal = conversationPlans
+        .filter((plan) => isUnacceptedCompletedPlan(plan) && isSelfDrivenGoal(plan))
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
-      : null;
+        || null;
+    }
     if (!activeGoal) {
       return createGoalContract({ ...draft, conversationId: normalizedConversationId ?? draft.conversationId });
     }
