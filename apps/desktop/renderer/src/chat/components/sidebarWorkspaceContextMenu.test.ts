@@ -11,6 +11,9 @@ test('workspace rows open a context menu instead of an inline remove button', ()
     /setContextMenu\(\{ kind: 'workspace', x: e\.clientX, y: e\.clientY, workspace: ws \}\)/,
   );
   assert.doesNotMatch(sidebarSource, /sidebar-workspace-remove/);
+  assert.doesNotMatch(sidebarSource, /sidebar-workspace-more/);
+  assert.match(sidebarSource, /isZh \? '查看项目文件夹' : 'Show project folders'/);
+  assert.match(sidebarSource, /setProjectPopoverPath\(contextWorkspace\.path\)/);
   assert.match(sidebarSource, /isZh \? '在 Finder 中显示' : 'Reveal in Finder'/);
   assert.match(sidebarSource, /isZh \? '移除' : 'Remove'/);
   assert.match(sidebarSource, /isZh \? '编辑项目' : 'Edit project'/);

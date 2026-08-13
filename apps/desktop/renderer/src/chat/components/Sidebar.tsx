@@ -828,17 +828,6 @@ export function Sidebar({
                     </span>
                   </span>
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
-                  <button
-                    type="button"
-                    className="sidebar-workspace-more"
-                    aria-label={isZh ? '查看项目文件夹' : 'Show project folders'}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setProjectPopoverPath((current) => current === ws.path ? null : ws.path);
-                    }}
-                  >
-                    ···
-                  </button>
                 </div>
                 {projectPopoverPath === ws.path ? (
                   <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
@@ -886,6 +875,16 @@ export function Sidebar({
               role="menu"
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  setProjectPopoverPath(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '查看项目文件夹' : 'Show project folders'}</span>
+              </button>
               <button
                 type="button"
                 role="menuitem"
