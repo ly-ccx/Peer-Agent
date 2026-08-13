@@ -15,6 +15,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
+import { attachWorkspaceHeadBinding } from './goal-delivery-binding.mjs';
 import { normalizeGoalCheckpoint, validateGoalCheckpoint } from '@peer-agent/runtime-core';
 
 /**
@@ -538,10 +539,14 @@ const GOAL_RUNNER_PHASES = new Set([
   'act',
   'verify',
   'repair',
+  'quality_review',
   'synthesize',
   'waiting_user',
   'blocked',
 ]);
+const QUALITY_REVIEW_STATUSES = new Set(['reviewing', 'passed', 'failed']);
+const QUALITY_CHECK_STATUSES = new Set(['passed', 'failed', 'skipped']);
+const QUALITY_CHECK_IDS = new Set(['intent', 'mechanical', 'artifact', 'integration']);
 const ASK_USER_REASONS = new Set([
   'ambiguous_goal',
   'product_decision',
@@ -1203,6 +1208,78 @@ function normalizeWorkspacePath(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+const TARGET_BRANCH_SOURCES = new Set(['user_confirmed', 'workspace_head', 'preconfigured']);
+const EXECUTION_ISOLATIONS = new Set(['none', 'worktree']);
+
+/** Trim a non-empty string. Never invent a default such as `main`. */
+function normalizeQualityReview(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  if (!QUALITY_REVIEW_STATUSES.has(value.status)) return undefined;
+  const checks = Array.isArray(value.checks)
+    ? value.checks
+      .map((check) => {
+        if (!check || typeof check !== 'object') return null;
+        if (!QUALITY_CHECK_IDS.has(check.id) || !QUALITY_CHECK_STATUSES.has(check.status)) return null;
+        const label = typeof check.label === 'string' && check.label.trim()
+          ? check.label.trim()
+          : check.id;
+        const next = { id: check.id, label, status: check.status };
+        if (typeof check.note === 'string' && check.note.trim()) next.note = check.note.trim();
+        return next;
+      })
+      .filter(Boolean)
+    : [];
+  const review = { status: value.status };
+  if (typeof value.reviewedAt === 'string' && value.reviewedAt.trim()) {
+    review.reviewedAt = value.reviewedAt.trim();
+  }
+  if (checks.length > 0) review.checks = checks;
+  return review;
+}
+
+function normalizeOptionalName(value) {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeTargetBranchSource(value) {
+  if (typeof value !== 'string') return undefined;
+  return TARGET_BRANCH_SOURCES.has(value) ? value : undefined;
+}
+
+function normalizeExecutionIsolation(value) {
+  if (typeof value !== 'string') return undefined;
+  return EXECUTION_ISOLATIONS.has(value) ? value : undefined;
+}
+
+/**
+ * Persist an explicit delivery binding only. Missing branch / source means
+ * unbound — do not fall back to main or the origin workspace branch.
+ */
+function normalizeDeliveryBinding(value, fallbacks = {}) {
+  if (!value || typeof value !== 'object') return undefined;
+  const repoId = normalizeOptionalName(value.repoId);
+  const targetBranch = normalizeOptionalName(value.targetBranch);
+  const targetBranchSource = normalizeTargetBranchSource(value.targetBranchSource);
+  if (!repoId || !targetBranch || !targetBranchSource) return undefined;
+  const binding = {
+    repoId,
+    targetBranch,
+    targetBranchSource,
+    executionIsolation: normalizeExecutionIsolation(value.executionIsolation) || 'none',
+    boundAt: typeof value.boundAt === 'string' && value.boundAt.trim()
+      ? value.boundAt.trim()
+      : (fallbacks.boundAt || new Date().toISOString()),
+  };
+  const targetWorkspacePath = normalizeWorkspacePath(value.targetWorkspacePath)
+    ?? normalizeWorkspacePath(fallbacks.targetWorkspacePath);
+  if (targetWorkspacePath) binding.targetWorkspacePath = targetWorkspacePath;
+  const baseCommit = normalizeOptionalName(value.baseCommit) ?? normalizeOptionalName(fallbacks.baseCommit);
+  if (baseCommit) binding.baseCommit = baseCommit;
+  return binding;
+}
+
 function normalizeRunnerState(runner, planId) {
   if (!runner || typeof runner !== 'object') return undefined;
   const now = new Date().toISOString();
@@ -1366,6 +1443,15 @@ function normalizePlan(plan) {
     conversationId: normalizedConversationId ?? undefined,
     originWorkspacePath: normalizeWorkspacePath(plan.originWorkspacePath) ?? undefined,
     targetWorkspacePath: normalizeWorkspacePath(plan.targetWorkspacePath) ?? undefined,
+    targetRepoId: normalizeOptionalName(plan.targetRepoId) ?? normalizeOptionalName(plan.deliveryBinding?.repoId),
+    targetBranch: normalizeOptionalName(plan.targetBranch) ?? normalizeOptionalName(plan.deliveryBinding?.targetBranch),
+    baseCommit: normalizeOptionalName(plan.baseCommit) ?? normalizeOptionalName(plan.deliveryBinding?.baseCommit),
+    targetBranchSource: normalizeTargetBranchSource(plan.targetBranchSource)
+      ?? normalizeTargetBranchSource(plan.deliveryBinding?.targetBranchSource),
+    deliveryBinding: normalizeDeliveryBinding(plan.deliveryBinding, {
+      targetWorkspacePath: plan.targetWorkspacePath,
+      baseCommit: plan.baseCommit,
+    }),
     workflowKind,
     activation: normalizeActivation(plan.activation, workflowKind, normalizedStatus),
     executionPolicy: normalizeExecutionPolicy(plan.executionPolicy, workflowKind),
@@ -1376,6 +1462,7 @@ function normalizePlan(plan) {
     successCriteria: normalizeSuccessCriteria(plan.successCriteria),
     criterionResults: normalizeCriterionResults(plan.criterionResults),
     manualConfirmations: normalizeManualConfirmations(plan.manualConfirmations),
+    qualityReview: normalizeQualityReview(plan.qualityReview),
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
@@ -1422,7 +1509,11 @@ function isInactivePlan(plan) {
   return plan?.status === 'cancelled';
 }
 
-export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange } = {}) {
+export function createGoalPlanStore({
+  storeDir = pathOf('goalPlans'),
+  onChange,
+  readWorkspaceHead,
+} = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
   const changeFile = path.join(storeDir, '.changes.jsonl');
@@ -1758,6 +1849,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       // 工作区归属随轻量索引持久化，列表消费者可先筛候选再读取详情。
       originWorkspacePath: plan.originWorkspacePath ?? null,
       targetWorkspacePath: plan.targetWorkspacePath ?? null,
+      targetRepoId: plan.targetRepoId ?? null,
+      targetBranch: plan.targetBranch ?? null,
+      targetBranchSource: plan.targetBranchSource ?? null,
       version: plan.version,
       percent: plan.progress?.percent ?? 0,
       createdAt: plan.createdAt,
@@ -1791,7 +1885,20 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     })() : null;
     const prevStatus = options.prevStatus ?? existing?.status;
     const prevTiming = options.prevTiming ?? existing?.timing;
-    const normalized = normalizePlan(plan);
+    const shouldAttachBinding = Boolean(
+      plan?.targetWorkspacePath
+      && !existing?.deliveryBinding
+      && (
+        !existing
+        || existing.targetWorkspacePath !== plan.targetWorkspacePath
+        || (existing.activation?.kind === 'intake' && plan.activation?.kind !== 'intake')
+      ),
+    );
+    const normalized = normalizePlan(
+      shouldAttachBinding
+        ? attachWorkspaceHeadBinding(plan, { readWorkspaceHead })
+        : plan,
+    );
     // 已停止且尚未消费的执行中断是独立于叶子任务的失败事实，普通 persist 不能
     // 把 failed 重新派生为 completed；仅 resumeRunner 能原子消费该事实并恢复执行。
     // 可恢复中断在重试预算内仍由 running Runner 持有行动权，只记录失败尝试，不能
@@ -1955,6 +2062,28 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       .filter(isActivePlan)
       .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
     return activePlans[0] ?? null;
+  }
+
+  function isUnacceptedCompletedPlan(plan) {
+    return plan?.status === 'completed'
+      && !(
+        plan.resultAcceptance
+        && typeof plan.resultAcceptance.acceptedAt === 'string'
+        && plan.resultAcceptance.acceptedAt.trim()
+      );
+  }
+
+  /**
+   * 同会话最近一条未验收 completed 计划。待验收结果仍属于同一任务，
+   * 后续指令应续接它，而不是另开 intake。
+   */
+  function getUnacceptedCompletedPlanByConversation(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return null;
+    const plans = listPlanDetailsByConversation(normalizedConversationId)
+      .filter(isUnacceptedCompletedPlan)
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    return plans[0] ?? null;
   }
 
   function getPlan(planId) {
@@ -2122,6 +2251,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       agentId: draft.agentId,
       originWorkspacePath: normalizeWorkspacePath(draft.originWorkspacePath) ?? undefined,
       targetWorkspacePath: normalizeWorkspacePath(draft.targetWorkspacePath) ?? undefined,
+      targetRepoId: normalizeOptionalName(draft.targetRepoId) ?? normalizeOptionalName(draft.deliveryBinding?.repoId),
+      targetBranch: normalizeOptionalName(draft.targetBranch) ?? normalizeOptionalName(draft.deliveryBinding?.targetBranch),
+      baseCommit: normalizeOptionalName(draft.baseCommit) ?? normalizeOptionalName(draft.deliveryBinding?.baseCommit),
+      targetBranchSource: normalizeTargetBranchSource(draft.targetBranchSource)
+        ?? normalizeTargetBranchSource(draft.deliveryBinding?.targetBranchSource),
+      deliveryBinding: normalizeDeliveryBinding(draft.deliveryBinding, {
+        targetWorkspacePath: draft.targetWorkspacePath,
+        baseCommit: draft.baseCommit,
+      }),
       parentPlanId: parentPlan?.planId,
       sourceTaskId: sourceTask?.taskId,
       rootPlanId: parentPlan ? (parentPlan.rootPlanId || parentPlan.planId) : undefined,
@@ -3071,6 +3209,18 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return persist({ ...plan, criterionResults: [...byId.values()], updatedAt: now });
   }
 
+  function recordQualityReview(planId, review = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const qualityReview = normalizeQualityReview(review);
+    if (!qualityReview) return plan;
+    return persist({
+      ...plan,
+      qualityReview,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   /**
    * 记录 Manual DoD 的人工确认事实。
    *
@@ -3571,6 +3721,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     listPlanDetailsByWorkspace,
     listPlanDetailsByConversation,
     getActivePlanByConversation,
+    getUnacceptedCompletedPlanByConversation,
     getPlan,
     createPlan,
     createGoalContract,
@@ -3597,6 +3748,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     listEvidenceIndex: readEvidenceIndex,
     recordTaskEvidence,
     recordCriterionResults,
+    recordQualityReview,
     recordManualConfirmation,
     deletePlan,
     deletePlanByConversation,

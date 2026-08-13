@@ -5,6 +5,7 @@ import {
   applyGoalMessageRoute,
   classifyGoalMessage,
   consumesRequestedUserInput,
+  resolveContinuableGoalPlan,
   routeGoalMessage,
 } from './goal-message-router.mjs';
 
@@ -259,5 +260,68 @@ test('applyGoalMessageRoute restores a failed Goal on follow_up (not only resume
   assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'event']);
   assert.equal(calls[0][0], 'resume');
   assert.equal(calls[0][1], 'goal-1');
+});
+
+test('resolveContinuableGoalPlan reopens the unaccepted plan instead of starting intake', () => {
+  const unaccepted = {
+    planId: 'goal-unaccepted',
+    status: 'completed',
+    conversationId: 'conv-1',
+  };
+  const calls = [];
+  const store = {
+    getUnacceptedCompletedPlanByConversation(conversationId) {
+      calls.push(['lookup', conversationId]);
+      return conversationId === 'conv-1' ? unaccepted : null;
+    },
+    markRequestedUserInput(planId, payload) {
+      calls.push(['reopen', planId, payload.question]);
+      return {
+        ...unaccepted,
+        status: 'executing',
+        runner: { status: 'waiting_user', blockedReason: 'requested_user_input' },
+      };
+    },
+  };
+
+  const continued = resolveContinuableGoalPlan({
+    activeGoalPlan: null,
+    goalPlanStore: store,
+    conversationId: 'conv-1',
+  });
+  assert.equal(continued.planId, 'goal-unaccepted');
+  assert.equal(continued.status, 'executing');
+  assert.deepEqual(calls, [
+    ['lookup', 'conv-1'],
+    ['reopen', 'goal-unaccepted', '用户继续当前未验收任务'],
+  ]);
+
+  const route = routeGoalMessage({
+    messageText: 'commit',
+    activeGoalPlan: continued,
+  });
+  assert.equal(route.type, 'append_goal_event');
+  assert.equal(route.goalPlanId, 'goal-unaccepted');
+  assert.notEqual(route.type, 'start_intake');
+});
+
+test('resolveContinuableGoalPlan keeps an already-active plan untouched', () => {
+  const calls = [];
+  const continued = resolveContinuableGoalPlan({
+    activeGoalPlan,
+    goalPlanStore: {
+      getUnacceptedCompletedPlanByConversation() {
+        calls.push('lookup');
+        return { planId: 'other' };
+      },
+      markRequestedUserInput() {
+        calls.push('reopen');
+        return null;
+      },
+    },
+    conversationId: 'conv-1',
+  });
+  assert.equal(continued, activeGoalPlan);
+  assert.deepEqual(calls, []);
 });
 

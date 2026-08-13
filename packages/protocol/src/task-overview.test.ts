@@ -224,6 +224,43 @@ test('rule 6: completed 未验收 → result_ready', () => {
   assert.equal(item.actionRight, 'result_ready');
   assert.equal(item.nextAction, 'review_result');
   assert.equal(item.statusLabel, '待用户验收');
+  assert.equal(item.actionLabel, '查看结果');
+});
+
+test('completed 但质量自检未过线时仍算正在处理，不进待验收', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: false,
+    requiresQualityReview: true,
+    qualityReviewStatus: 'reviewing',
+  }));
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.statusLabel, 'Peer 正在自检');
+  assert.notEqual(item.actionRight, 'result_ready');
+});
+
+test('completed 且需要自检但尚未写入过线结果时，不得进入待验收', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: false,
+    requiresQualityReview: true,
+  }));
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.statusLabel, 'Peer 正在自检');
+  assert.notEqual(item.actionRight, 'result_ready');
+});
+
+test('completed 且质量自检过线后才进入待验收', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: false,
+    requiresQualityReview: true,
+    qualityReviewStatus: 'passed',
+    qualityChecks: [{ id: 'intent', label: '对照你的目标', status: 'passed' }],
+  }));
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.qualityReviewStatus, 'passed');
+  assert.equal(item.qualityChecks?.[0]?.label, '对照你的目标');
 });
 
 test('rule 16a: completed 已验收 → terminal', () => {
@@ -505,6 +542,14 @@ test('shell_background running → peer_advancing and open_background_thread', (
   assert.equal(item.nextAction, 'open_background_thread');
   assert.equal(item.statusLabel, '后台线程运行中');
   assert.equal(item.actionLabel, '查看线程 →');
+});
+
+test('projectGoalPlan 透传交付路由，不把缺分支补成 main', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    deliveryRoute: '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4',
+  }));
+  assert.equal(item.deliveryRoute, '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4');
+  assert.notEqual(item.deliveryRoute, 'main');
 });
 
 test('shell_background cancelled → terminal', () => {

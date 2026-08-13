@@ -558,6 +558,16 @@
   white-space: nowrap;
 }
 
+.goal-plan-head-route {
+  flex: none;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-soft);
+}
+
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;

@@ -133,6 +133,11 @@ export interface TaskOverviewItem {
   readonly currentGoalTitle?: string;
   /** Workspace 标签（原型卡片右上角）。 */
   readonly workspaceLabel?: string;
+  /**
+   * 用户可见的交付路由：来源工作区 · 目标仓库 · 目标分支。
+   * 缺目标分支时写「未确认」，不得补 main。
+   */
+  readonly deliveryRoute?: string;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -168,7 +173,7 @@ export interface TaskOverviewItem {
    * 来源：modelProviderId 的 group 段；无绑定时省略。
    */
   readonly providerLabel?: string;
-  /** 动作按钮标签（原型「处理 →」「验收 →」「继续 →」）。 */
+  /** 动作按钮标签（原型「处理 →」「查看结果」「继续 →」）。 */
   readonly actionLabel: string;
   /**
    * 是否存在用户尚未查看的新动态。
@@ -213,6 +218,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly interruptionReason?: string;
   readonly title: string;
   readonly workspaceLabel?: string;
+  /** 用户可见的交付路由；缺目标分支时写「未确认」。 */
+  readonly deliveryRoute?: string;
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -239,6 +246,15 @@ export interface GoalPlanProjectionSnapshot {
    * result_ready，由用户在 Result Review 页手动归档）。
    */
   readonly accepted?: boolean;
+  /** 有代码副作用时，完成门之后还要质量自检过线才能待验收。 */
+  readonly requiresQualityReview?: boolean;
+  readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
+  readonly qualityChecks?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly status: 'passed' | 'failed' | 'skipped';
+    readonly note?: string;
+  }[];
 }
 
 /** Automation 投影所需的最小字段快照（Definition 与 Run 联合判断）。 */
@@ -403,6 +419,10 @@ export function projectGoalPlan(
     nextAction: decision.nextAction,
     title: snapshot.title,
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
+    ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
+    ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
+    ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
+    ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),
     statusLabel: decision.statusLabel,
     ...(decision.actionRight === 'paused' && snapshot.interruptionReason
       ? { issueDetail: snapshot.interruptionReason }
@@ -451,12 +471,23 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   // rule 16 first: 其他终态计划优先于 runner 残留态
   // （历史 failed/cancelled/completed 上的 runner.blocked 不得再进 needs_you）
   if (status === 'completed' && accepted !== true) {
+    if (
+      snapshot.requiresQualityReview === true
+      && snapshot.qualityReviewStatus !== 'passed'
+    ) {
+      return {
+        actionRight: 'peer_advancing',
+        nextAction: 'none',
+        statusLabel: 'Peer 正在自检',
+        actionLabel: '查看 →',
+      };
+    }
     // rule 6: 完成且未验收 → 结果就绪
     return {
       actionRight: 'result_ready',
       nextAction: 'review_result',
       statusLabel: '待用户验收',
-      actionLabel: '验收 →',
+      actionLabel: '查看结果',
     };
   }
   if (status === 'completed' || status === 'cancelled' || status === 'failed') {

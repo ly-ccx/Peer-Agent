@@ -17,6 +17,19 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.doesNotMatch(source, /acceptancePhase/);
   // 打开结果侧栏时不得调用 scrollIntoView(...)，否则会带动 drawer body 整体上滚。
   assert.doesNotMatch(source, /scrollIntoView\s*\(/);
+  assert.match(source, /交卷前查过/);
+  assert.match(source, /item\.qualityChecks/);
+  assert.doesNotMatch(source, /意图关|机械关|产物关|集成关/);
+  assert.doesNotMatch(source, /Finding|第 N 轮|第\s*\d+\s*轮/);
+});
+
+test('result drawer keeps 确认验收 and routes 还不行 back to the conversation', async () => {
+  const [app, styles] = await Promise.all([readApp(), readStyles()]);
+  assert.match(app, /closeResult: item\.actionRight === 'result_ready'/);
+  assert.match(app, /continuation\.label/);
+  assert.match(app, /\? '确认验收'/);
+  assert.match(styles, /conversation-result-view__checks/);
+  assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
 });
 
 test('result drawer places actions in a separate footer sibling of the body', async () => {

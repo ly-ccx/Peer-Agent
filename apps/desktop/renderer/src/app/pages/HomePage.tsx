@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { TaskOverviewPage } from './TaskOverviewPage';
@@ -18,6 +18,7 @@ export function HomePage({
   onNewTask,
   onOpenItem,
   onAcceptResult,
+  acceptHandlerRef,
   onCancelItem,
   enabled = true,
 }: {
@@ -30,6 +31,7 @@ export function HomePage({
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   /** 工作台一键确认验收（落库 resultAcceptance）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly enabled?: boolean;
@@ -71,6 +73,7 @@ export function HomePage({
       onNewTask={onNewTask}
       onOpenItem={handleOpenItem}
       onAcceptResult={onAcceptResult}
+      acceptHandlerRef={acceptHandlerRef}
       onCancelItem={onCancelItem}
     />
   );

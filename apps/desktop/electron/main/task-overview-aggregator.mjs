@@ -20,6 +20,8 @@
  */
 
 import {
+  formatGoalDeliveryRoute,
+  planRequiresQualityReview,
   projectAutomationRun,
   projectConversation,
   projectGoalPlan,
@@ -349,6 +351,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     // 展示名 = 核对后的 plan 名字（GoalPlan.title），不用 goal 全文、不用会话名。
     title: typeof plan.title === 'string' && plan.title.trim() !== '' ? plan.title.trim() : planId,
     workspaceLabel: workspaceLabelFromPath(workspacePath),
+    ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
@@ -358,6 +361,11 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(providerLabel ? { providerLabel } : {}),
     // USER ACCEPTANCE：一键确认写 resultAcceptance；存量 completed 按上线截止祖父化。
     accepted: isPlanResultAccepted(plan),
+    ...(planRequiresQualityReview(plan) ? { requiresQualityReview: true } : {}),
+    ...(plan.qualityReview?.status ? { qualityReviewStatus: plan.qualityReview.status } : {}),
+    ...(Array.isArray(plan.qualityReview?.checks) && plan.qualityReview.checks.length > 0
+      ? { qualityChecks: plan.qualityReview.checks }
+      : {}),
   };
 }
 

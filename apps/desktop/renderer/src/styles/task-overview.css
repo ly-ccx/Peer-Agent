@@ -1590,6 +1590,20 @@
   color: var(--za-text-muted);
 }
 
+.conversation-result-view__checks {
+  @apply m-0 list-none space-y-2 p-0;
+}
+
+.conversation-result-view__check {
+  @apply flex items-start justify-between gap-3 text-xs;
+  color: var(--za-text);
+}
+
+.conversation-result-view__check b {
+  @apply font-medium;
+  color: var(--za-text-muted);
+}
+
 .conversation-result-view__progress {
   @apply h-1.5 overflow-hidden rounded-full;
   background: color-mix(in srgb, var(--za-line) 80%, transparent);

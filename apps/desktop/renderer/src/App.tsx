@@ -4,10 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
-import { ParticleShatterOverlay } from './app/fx/ParticleShatterOverlay';
 import { ConversationResultView } from './app/components/ConversationResultView';
-import type { AcceptancePhase } from './app/state/acceptanceTransition';
-import { runAcceptanceTransition } from './app/state/acceptanceTransition';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
 import { continueTaskInConversation, getTaskContinuationAction } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
@@ -140,21 +137,10 @@ function MainApp() {
   /** 二级会话 Drawer 独立于一级结果 Drawer，避免“继续讨论”替换并卸载父级。 */
   const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
-  const [resultAcceptancePhase, setResultAcceptancePhase] = useState<AcceptancePhase | null>(null);
-  const resultShatterRef = useRef<HTMLDivElement | null>(null);
+  const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const resultBodyRef = useRef<HTMLDivElement | null>(null);
   const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
-  const resultAcceptanceTimers = useRef<Set<number>>(new Set());
-  const resultShattering =
-    resultAcceptancePhase === 'celebrating' || resultAcceptancePhase === 'exiting';
-
-  useEffect(
-    () => () => {
-      for (const timer of resultAcceptanceTimers.current) window.clearTimeout(timer);
-      resultAcceptanceTimers.current.clear();
-    },
-    [],
-  );
+  const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
   const updateResultScrollButton = useCallback((container: HTMLDivElement | null) => {
     if (!container) {
@@ -204,36 +190,36 @@ function MainApp() {
   const openResultDrawer = useCallback((item: TaskOverviewItem) => {
     setResultDrawerItem(item);
     setCollectionDrawer('result');
-    setResultAcceptancePhase(null);
+    setResultAcceptancePending(null);
   }, []);
 
-  const acceptResultFromWorkbench = useCallback(
-    async (item: TaskOverviewItem, options?: { readonly keepResultDrawer?: boolean }) => {
-      if (item.source !== 'goal_plan' || !item.taskId) return;
-      try {
-        await clientApi.goalPlansRevise({
-          planId: item.taskId,
-          patch: {
-            resultAcceptance: {
-              acceptedAt: new Date().toISOString(),
-              acceptedBy: 'user',
-            },
+  const closeResultDrawer = useCallback(() => {
+    setConversationDrawerOpen(false);
+    setCollectionDrawer(null);
+    setResultDrawerItem(null);
+  }, []);
+
+  const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
+    if (item.source !== 'goal_plan' || !item.taskId) return;
+    try {
+      await clientApi.goalPlansRevise({
+        planId: item.taskId,
+        patch: {
+          resultAcceptance: {
+            acceptedAt: new Date().toISOString(),
+            acceptedBy: 'user',
           },
-          reason: 'workbench_one_click_accept',
-          changedBy: 'user',
-        });
-        // 结果抽屉自带三段式验收动画，关闭时机交给动画收尾，避免动画被立刻卸载。
-        if (!options?.keepResultDrawer) {
-          setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
-          setCollectionDrawer((current) => (current === 'result' ? null : current));
-        }
-      } catch (error) {
-        console.error('[workbench] accept result failed', error);
-        throw error;
-      }
-    },
-    [],
-  );
+        },
+        reason: 'workbench_one_click_accept',
+        changedBy: 'user',
+      });
+      setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
+      setCollectionDrawer((current) => (current === 'result' ? null : current));
+    } catch (error) {
+      console.error('[workbench] accept result failed', error);
+      throw error;
+    }
+  }, []);
 
   const cancelPlanFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
     if (item.source !== 'goal_plan' || !item.taskId) return;
@@ -908,9 +894,14 @@ function MainApp() {
     setActivePage('chat');
   }, []);
 
-  const handleContinueTask = useCallback((conversationId: string) => {
+  const handleContinueTask = useCallback((conversationId: string, options?: { readonly closeResult?: boolean }) => {
     // §14 继续讨论仅恢复会话现场：导航和聚焦都不是用户发言，不能改变任务状态。
     // 真正的新回合只由 ChatSurface.submitMessage → chatSend 创建。
+    if (options?.closeResult) {
+      setResultDrawerItem(null);
+      setCollectionDrawer(null);
+      setResultAcceptancePhase(null);
+    }
     continueTaskInConversation(conversationId, {
       showActiveConversations: () => setConversationView('active'),
       selectConversation: setActiveConversationId,
@@ -1261,10 +1252,12 @@ function MainApp() {
       {collectionDrawer ? (
                 <Drawer
                   onClose={() => {
-                    setConversationDrawerOpen(false);
-                    setCollectionDrawer(null);
-                    setResultDrawerItem(null);
-                    setResultAcceptancePhase(null);
+                    const pending = resultAcceptancePending;
+                    closeResultDrawer();
+                    if (pending) {
+                      setResultAcceptancePending(null);
+                      void workbenchAcceptRef.current?.(pending);
+                    }
                   }}
                   ariaLabel={
                     collectionDrawer === 'tasks'
@@ -1427,7 +1420,9 @@ function MainApp() {
                                     <button
                                       type="button"
                                       className="task-overview-btn task-overview-btn--secondary"
-                                      onClick={() => handleContinueTask(continuation.conversationId)}
+                                      onClick={() => handleContinueTask(continuation.conversationId, {
+                                        closeResult: item.actionRight === 'result_ready',
+                                      })}
                                     >
                                       {continuation.label}
                                     </button>

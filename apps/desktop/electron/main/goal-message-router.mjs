@@ -134,6 +134,28 @@ export function consumesRequestedUserInput({ route, activeGoalPlan } = {}) {
     && activeGoalPlan?.runner?.blockedReason === 'requested_user_input';
 }
 
+/**
+ * 待验收结果仍属于同一任务。用户后续指令（例如 commit / 还不行后再说哪里不对）
+ * 应先把同一计划重开，而不是另开 intake 把验收卡冲掉。
+ */
+export function resolveContinuableGoalPlan({
+  activeGoalPlan,
+  goalPlanStore,
+  conversationId,
+} = {}) {
+  if (activeGoalPlan) return activeGoalPlan;
+  const unaccepted = typeof goalPlanStore?.getUnacceptedCompletedPlanByConversation === 'function'
+    ? goalPlanStore.getUnacceptedCompletedPlanByConversation(conversationId)
+    : null;
+  if (!unaccepted?.planId) return null;
+  if (typeof goalPlanStore?.markRequestedUserInput === 'function') {
+    return goalPlanStore.markRequestedUserInput(unaccepted.planId, {
+      question: '用户继续当前未验收任务',
+    }) ?? unaccepted;
+  }
+  return unaccepted;
+}
+
 export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, source = 'chat:send' } = {}) {
   if (route?.type !== 'append_goal_event' || !route.goalPlanId) return null;
 

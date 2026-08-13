@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
@@ -35,6 +35,7 @@ export function GlobalWorkbenchPage({
   onNewTask,
   onOpenItem,
   onAcceptResult,
+  acceptHandlerRef,
   onCancelItem,
   onOpenWorkspace,
   enabled = true,
@@ -44,6 +45,7 @@ export function GlobalWorkbenchPage({
   readonly onNewTask?: () => void;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   /** 点击「工作区脉搏」行：切到对应区级工作台。 */
   readonly onOpenWorkspace?: (workspacePath: string) => void;
@@ -178,6 +180,16 @@ export function GlobalWorkbenchPage({
     },
     [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition],
   );
+
+  useEffect(() => {
+    if (!acceptHandlerRef) return;
+    acceptHandlerRef.current = handleAccept;
+    return () => {
+      if (acceptHandlerRef.current === handleAccept) {
+        acceptHandlerRef.current = null;
+      }
+    };
+  }, [acceptHandlerRef, handleAccept]);
 
   const displayedResults = useMemo(
     () =>

@@ -44,8 +44,8 @@ describe('getTaskContinuationAction', () => {
   it('keeps result_ready continuation as navigation without a plan mutation command', () => {
     assert.deepEqual(getTaskContinuationAction(item(), true), {
       conversationId: 'conversation-1',
-      label: '继续讨论',
-      description: '打开原会话；发送消息后才会创建新的用户回合',
+      label: '还不行',
+      description: '打开对应会话并聚焦输入框；在对话里说明哪里不对',
     });
   });
 
@@ -63,8 +63,8 @@ describe('getTaskContinuationAction', () => {
 
   it('explains that only a sent message starts a new user turn in English', () => {
     const action = getTaskContinuationAction(item(), false);
-    assert.equal(action?.label, 'Continue discussion');
-    assert.match(action?.description ?? '', /only after you send a message/i);
+    assert.equal(action?.label, 'Not yet');
+    assert.match(action?.description ?? '', /focus the input/i);
     assert.deepEqual(Object.keys(action ?? {}).sort(), ['conversationId', 'description', 'label']);
   });
 

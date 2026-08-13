@@ -32,6 +32,85 @@ export type GoalPlanStatus =
 export type GoalWorkflowKind = 'plan_approval' | 'goal_self_driven';
 
 /**
+ * 目标分支从哪来。P0-A 必须可见，禁止静默写成 main。
+ * - user_confirmed：用户确认过的目标分支
+ * - workspace_head：读取目标仓库当前 HEAD 分支（不是猜 main）
+ * - preconfigured：仓库/工作区已配置且仍有效的目标分支
+ */
+export type GoalTargetBranchSource =
+  | 'user_confirmed'
+  | 'workspace_head'
+  | 'preconfigured';
+
+/** P0 不做 Worktree；有代码副作用时必须标明未隔离执行。 */
+export type GoalExecutionIsolation = 'none' | 'worktree';
+
+/**
+ * 有代码副作用的 Goal 才建立的交付绑定。
+ * 入口/上下文仓库 ≠ 交付仓库；知识仓分支不能推断代码仓目标分支。
+ */
+export interface GoalDeliveryBinding {
+  readonly repoId: string;
+  readonly targetWorkspacePath?: string;
+  readonly targetBranch: string;
+  readonly baseCommit?: string;
+  readonly targetBranchSource: GoalTargetBranchSource;
+  readonly executionIsolation: GoalExecutionIsolation;
+  readonly boundAt: string;
+}
+
+function workspaceLeafName(pathValue: string | null | undefined): string | undefined {
+  if (typeof pathValue !== 'string') return undefined;
+  const trimmed = pathValue.trim().replace(/[\\/]+$/, '');
+  if (!trimmed) return undefined;
+  const parts = trimmed.split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || undefined;
+}
+
+/**
+ * 用户可见的交付路由。缺目标分支时写「未确认」，绝不补 main。
+ */
+export function formatGoalDeliveryRoute(
+  input: {
+    readonly originWorkspacePath?: string | null;
+    readonly targetWorkspacePath?: string | null;
+    readonly targetRepoId?: string | null;
+    readonly targetBranch?: string | null;
+    readonly executionIsolation?: GoalExecutionIsolation | null;
+    readonly deliveryBinding?: GoalDeliveryBinding | null;
+  },
+  options?: { readonly locale?: 'zh' | 'en' },
+): string | undefined {
+  const locale = options?.locale === 'en' ? 'en' : 'zh';
+  const origin = workspaceLeafName(input.originWorkspacePath);
+  const targetPath = workspaceLeafName(
+    input.deliveryBinding?.targetWorkspacePath ?? input.targetWorkspacePath,
+  );
+  const repoId = input.deliveryBinding?.repoId?.trim() || input.targetRepoId?.trim() || undefined;
+  const target = repoId || targetPath;
+  const branch = input.deliveryBinding?.targetBranch?.trim() || input.targetBranch?.trim() || undefined;
+  const isolation = input.deliveryBinding?.executionIsolation ?? input.executionIsolation;
+  const parts: string[] = [];
+  if (origin && target && origin !== target) {
+    parts.push(locale === 'zh' ? `来源 ${origin}` : `from ${origin}`);
+  }
+  if (target) {
+    parts.push(locale === 'zh' ? `交付 ${target}` : `to ${target}`);
+  } else if (origin) {
+    parts.push(origin);
+  }
+  if (branch) {
+    parts.push(branch);
+  } else if (target || origin) {
+    parts.push(locale === 'zh' ? '目标分支未确认' : 'target branch unconfirmed');
+  }
+  if (isolation === 'none' && (branch || target)) {
+    parts.push(locale === 'zh' ? '未隔离执行' : 'not isolated');
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+/**
  * Goal/Plan 的执行准入事实。
  *
  * `intake` 是 goal 模式下的「判别前置态」：用户首发消息先落成 intake 契约，
@@ -302,8 +381,48 @@ export type GoalRunnerPhase =
   | 'act'
   | 'verify'
   | 'repair'
+  | 'quality_review'
   | 'synthesize'
   | 'blocked';
+
+export type GoalQualityReviewStatus = 'reviewing' | 'passed' | 'failed';
+
+export type GoalQualityCheckStatus = 'passed' | 'failed' | 'skipped';
+
+/** 用户可见的通俗检查记录；内部四层检查名不进界面。 */
+export interface GoalQualityCheck {
+  readonly id: 'intent' | 'mechanical' | 'artifact' | 'integration';
+  readonly label: string;
+  readonly status: GoalQualityCheckStatus;
+  readonly note?: string;
+}
+
+/**
+ * 完成门之后、待验收之前的质量自检。
+ * 有代码副作用时必须过线，才能进入 result_ready。
+ */
+export interface GoalQualityReview {
+  readonly status: GoalQualityReviewStatus;
+  readonly reviewedAt?: string;
+  readonly checks?: readonly GoalQualityCheck[];
+}
+
+export function planRequiresQualityReview(plan: {
+  readonly targetWorkspacePath?: string | null;
+  readonly targetRepoId?: string | null;
+  readonly deliveryBinding?: GoalDeliveryBinding | null;
+} | null | undefined): boolean {
+  if (!plan) return false;
+  // 只有真正建立了交付绑定的代码副作用 Goal 才强制自检。
+  // 仅有 workspace 路径不等于要改仓库，不能把问答/存量完成结果拦在待验收外。
+  return Boolean(plan.deliveryBinding);
+}
+
+export function isQualityReviewPassed(plan: {
+  readonly qualityReview?: GoalQualityReview | null;
+} | null | undefined): boolean {
+  return plan?.qualityReview?.status === 'passed';
+}
 
 export interface GoalBlockerAudit {
   readonly fingerprint: string;
@@ -710,6 +829,22 @@ export interface GoalPlan {
   readonly originWorkspacePath?: string;
   /** Workspace/repository where the Goal should write and verify changes. */
   readonly targetWorkspacePath?: string;
+  /**
+   * 交付仓库标识。不能只靠 workspace 路径推断；跨仓时入口仓 ≠ 交付仓。
+   */
+  readonly targetRepoId?: string;
+  /**
+   * 本次开发要合入的目标分支。不是固定 main，也不得在缺失时静默兜底 main。
+   */
+  readonly targetBranch?: string;
+  /** 建立交付绑定时所对照的目标分支 tip。 */
+  readonly baseCommit?: string;
+  /** 目标分支的确认来源；缺字段表示尚未确认，不能当已绑定。 */
+  readonly targetBranchSource?: GoalTargetBranchSource;
+  /**
+   * 有代码副作用时才物化。P0 不创建 Worktree，isolation 应为 `none` 并在界面标明未隔离执行。
+   */
+  readonly deliveryBinding?: GoalDeliveryBinding;
   /** 派生目标关系；全部可选以兼容历史计划。 */
   readonly parentPlanId?: string;
   readonly sourceTaskId?: string;
@@ -752,6 +887,10 @@ export interface GoalPlan {
   readonly version: number;
   readonly revisionHistory: GoalRevision[];
   readonly evidenceRefs: string[];
+  /**
+   * 完成门之后的质量自检。有代码副作用时未过线不得进入待验收。
+   */
+  readonly qualityReview?: GoalQualityReview;
   /**
    * 用户对 completed 结果的验收（工作台一键确认写入）。
    * 与 GoalPlanStatus.accepted（计划被接受执行）无关。

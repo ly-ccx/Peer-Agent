@@ -1,5 +1,5 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { formatDuration } from '../../chat/state/format';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -21,7 +21,7 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
  * 结果待验收：卡片叠放展示全部未验收 completed（不限条数）；
- * 主按钮「确认验收」一键落库，次按钮「查看结果」可选进会话。
+ * 主按钮「查看结果」。确认验收和还不行只出现在看过结果之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
@@ -45,6 +45,7 @@ interface TaskOverviewPageProps {
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
   /** 工作台一键确认验收（仅 goal_plan）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan（仅 goal_plan）。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
 }
@@ -107,6 +108,7 @@ function workItemMetaParts(item: TaskOverviewItem, fallbackWhenEmpty = 'LIVE'): 
   const parts: string[] = [];
   const providerLabel = safeDisplayLabel(item.providerLabel);
   const modelLabel = safeDisplayLabel(item.modelLabel);
+  if (item.deliveryRoute) parts.push(item.deliveryRoute);
   if (providerLabel) parts.push(providerLabel);
   if (modelLabel) parts.push(modelLabel);
   if (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0) {
@@ -289,6 +291,7 @@ export function TaskOverviewPage({
   onNewTask,
   onOpenItem,
   onAcceptResult,
+  acceptHandlerRef,
   onCancelItem,
 }: TaskOverviewPageProps) {
   const items = useTaskOverview({ enabled, workspacePath, includeTerminal });
@@ -481,6 +484,16 @@ function HeroLayout({
       });
     }
   };
+
+  useEffect(() => {
+    if (!acceptHandlerRef) return;
+    acceptHandlerRef.current = handleAccept;
+    return () => {
+      if (acceptHandlerRef.current === handleAccept) {
+        acceptHandlerRef.current = null;
+      }
+    };
+  }, [acceptHandlerRef, handleAccept]);
 
   const displayedResults = mergeAcceptanceTransitionItems({
     currentItems: resultReady,
@@ -685,7 +698,6 @@ function HeroLayout({
                 item={item}
                 phase={phase ?? null}
                 onOpenItem={onOpenItem}
-                onAcceptResult={handleAccept}
               />
             ))}
           </div>
@@ -752,7 +764,7 @@ function HandoffRow({
         <strong>{item.title}</strong>
         <div className="task-overview-handoff-reason">{reasonTitle(item)}</div>
         <div className="task-overview-handoff-context">
-          <span>{item.workspaceLabel ?? 'workspace'}</span>
+          <span>{item.deliveryRoute ?? item.workspaceLabel ?? 'workspace'}</span>
           <span aria-hidden="true">·</span>
           <span>{formatRelativeTime(item.lastActiveAt)}</span>
           {item.planProgress ? (
@@ -801,7 +813,7 @@ function DiscussionCard({
       </div>
       <h3>{item.title}</h3>
       <div className="task-overview-discussion-card__footer">
-        <span>{item.workspaceLabel ?? '当前 Workspace'}</span>
+        <span>{item.deliveryRoute ?? item.workspaceLabel ?? '当前 Workspace'}</span>
         <strong>{item.actionLabel || '打开'}</strong>
       </div>
     </article>
@@ -898,18 +910,15 @@ function ResultCard({
   item,
   phase,
   onOpenItem,
-  onAcceptResult,
 }: {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
-  readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const summary = item.planProgress
     ? `${item.planProgress.total} 项标准通过 · ${item.planProgress.completed} 项完成 · 无已知风险`
     : 'Peer 已完成并带回 Evidence · 无已知风险';
-  const canAccept = item.source === 'goal_plan' && typeof onAcceptResult === 'function';
   const pct = progressPercent(item);
   const celebrating = phase === 'celebrating' || phase === 'exiting';
   const shattering = celebrating;
@@ -936,34 +945,24 @@ function ResultCard({
         </div>
       ) : null}
       <div className="result-card-actions">
-        {onOpenItem ? (
+        {phase === 'submitting' ? (
+          <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
+            <span className="result-card-spinner" aria-hidden="true" />
+            正在验收…
+          </button>
+        ) : celebrating ? (
+          <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
+            已验收 ✓
+          </button>
+        ) : (
           <button
             type="button"
-            className="task-overview-btn task-overview-btn--secondary"
-            disabled={Boolean(phase)}
-            onClick={() => onOpenItem(item)}
+            className="task-overview-btn task-overview-btn--primary"
+            onClick={() => onOpenItem?.(item)}
           >
             查看结果
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="task-overview-btn task-overview-btn--primary result-card-accept"
-          disabled={!canAccept || Boolean(phase)}
-          onClick={() => {
-            if (canAccept) void onAcceptResult?.(item);
-            else onOpenItem?.(item);
-          }}
-        >
-          {phase === 'submitting' ? (
-            <>
-              <span className="result-card-spinner" aria-hidden="true" />
-              正在验收…
-            </>
-          ) : null}
-          {celebrating ? '已验收 ✓' : null}
-          {phase === null ? '确认验收' : null}
-        </button>
+        )}
       </div>
     </article>
       <ParticleShatterOverlay active={shattering} targetRef={cardRef} />

@@ -419,6 +419,126 @@ test('upsertGoalContract: 可在知识仓发起后绑定目标代码仓，且后
   assert.equal(revised.targetWorkspacePath, targetWorkspacePath);
 });
 
+test('createPlan: 有目标仓且能读到 HEAD 时才绑定，并标明未隔离执行', () => {
+  const boundStore = createGoalPlanStore({
+    readWorkspaceHead: (root) => {
+      assert.equal(root, '/repo/peer_agent');
+      return { branch: 'PeerAgent/0.0.4', commit: '6d98092' };
+    },
+  });
+  const plan = boundStore.createPlan({
+    ...draftWithTasks(),
+    originWorkspacePath: '/repo/peer-knowledge',
+    targetWorkspacePath: '/repo/peer_agent',
+  });
+  assert.equal(plan.targetRepoId, 'peer_agent');
+  assert.equal(plan.targetBranch, 'PeerAgent/0.0.4');
+  assert.equal(plan.targetBranchSource, 'workspace_head');
+  assert.equal(plan.deliveryBinding?.executionIsolation, 'none');
+  assert.notEqual(plan.targetBranch, 'main');
+});
+
+test('createIntakeContract: intake 不绑定目标分支', () => {
+  const boundStore = createGoalPlanStore({
+    readWorkspaceHead: () => ({ branch: 'PeerAgent/0.0.4', commit: '6d98092' }),
+  });
+  const plan = boundStore.createIntakeContract({
+    conversationId: 'conv-intake',
+    title: '先判别是不是目标',
+    goal: '这可能只是问答',
+    originWorkspacePath: '/repo/peer-knowledge',
+    targetWorkspacePath: '/repo/peer_agent',
+    createdBy: 'user',
+  });
+  assert.equal(plan.activation?.kind, 'intake');
+  assert.equal(plan.deliveryBinding, undefined);
+  assert.equal(plan.targetBranch, undefined);
+});
+
+test('recordQualityReview: 有目标仓的完成结果必须先记下自检过线', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    targetWorkspacePath: '/repo/peer_agent',
+  });
+  assert.equal(plan.qualityReview, undefined);
+  const reviewed = store.recordQualityReview(plan.planId, {
+    status: 'passed',
+    reviewedAt: '2026-08-13T07:00:00.000Z',
+    checks: [
+      { id: 'intent', label: '对照你的目标', status: 'passed' },
+      { id: 'mechanical', label: '测试', status: 'passed' },
+    ],
+  });
+  assert.equal(reviewed.qualityReview?.status, 'passed');
+  assert.equal(reviewed.qualityReview?.checks?.[0]?.label, '对照你的目标');
+});
+
+test('createPlan: 未给出目标分支时不静默写成 main', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    originWorkspacePath: '/repo/peer-knowledge',
+    targetWorkspacePath: '/repo/peer_agent',
+  });
+  assert.equal(plan.targetWorkspacePath, '/repo/peer_agent');
+  assert.equal(plan.targetBranch, undefined);
+  assert.equal(plan.targetBranchSource, undefined);
+  assert.equal(plan.deliveryBinding, undefined);
+});
+
+test('createPlan: 只在有确认来源时记下目标分支，不把知识仓分支当代码仓目标', () => {
+  const plan = store.upsertGoalContract('conv-delivery', {
+    title: '实现跨仓 Goal 绑定',
+    goal: '从知识仓读取上下文，在代码仓完成实现',
+    originWorkspacePath: '/repo/peer-knowledge',
+    targetWorkspacePath: '/repo/peer_agent',
+    targetRepoId: 'peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    targetBranchSource: 'workspace_head',
+    baseCommit: '6d98092',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetWorkspacePath: '/repo/peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      executionIsolation: 'none',
+      baseCommit: '6d98092',
+      boundAt: '2026-08-13T06:40:00.000Z',
+    },
+    createdBy: 'user',
+  });
+  assert.equal(plan.targetRepoId, 'peer_agent');
+  assert.equal(plan.targetBranch, 'PeerAgent/0.0.4');
+  assert.equal(plan.targetBranchSource, 'workspace_head');
+  assert.equal(plan.deliveryBinding?.executionIsolation, 'none');
+  assert.notEqual(plan.targetBranch, 'main');
+
+  const rebound = store.upsertGoalContract('conv-delivery', {
+    title: plan.title,
+    goal: plan.goal,
+    originWorkspacePath: '/repo/peer-knowledge',
+    createdBy: 'user',
+  });
+  assert.equal(rebound.planId, plan.planId);
+  assert.equal(rebound.targetBranch, 'PeerAgent/0.0.4');
+  assert.equal(rebound.targetBranchSource, 'workspace_head');
+  assert.equal(rebound.deliveryBinding?.repoId, 'peer_agent');
+});
+
+test('createPlan: 只有分支名没有确认来源时不当成已绑定，也不补 main', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    targetWorkspacePath: '/repo/peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+    },
+  });
+  assert.equal(plan.targetBranch, 'PeerAgent/0.0.4');
+  assert.equal(plan.targetBranchSource, undefined);
+  assert.equal(plan.deliveryBinding, undefined);
+});
+
 test('recordTaskEvidence: 批准后把子任务标 running，计划自动推进为 executing', () => {
   const created = approvedPlanWithTasks();
   assert.equal(created.status, 'approved');
@@ -2122,5 +2242,32 @@ test('setRunnerState blocked pauses active segment while plan stays executing', 
   });
   assert.equal(resumed.timing.activeAccumulatedMs, pausedAccum);
   assert.ok(resumed.timing.activeSegmentStartedAt);
+});
+
+test('getUnacceptedCompletedPlanByConversation keeps the latest unaccepted result', () => {
+  const conversationId = 'conv-unaccepted-latest';
+  const accepted = store.createPlan({
+    ...draftWithTasks(),
+    conversationId,
+    title: '已验收旧任务',
+    goal: '已验收旧任务',
+  });
+  store.setPlanStatus(accepted.planId, 'completed', { changedBy: 'system:test' });
+  store.revisePlan(accepted.planId, {
+    resultAcceptance: { acceptedAt: '2026-08-08T00:00:00.000Z', acceptedBy: 'user' },
+  }, { reason: 'accept old result', changedBy: 'user' });
+
+  const unaccepted = store.createPlan({
+    ...draftWithTasks(),
+    conversationId,
+    title: '待验收任务',
+    goal: '待验收任务',
+  });
+  store.setPlanStatus(unaccepted.planId, 'completed', { changedBy: 'system:test' });
+
+  assert.equal(store.getActivePlanByConversation(conversationId), null);
+  const found = store.getUnacceptedCompletedPlanByConversation(conversationId);
+  assert.equal(found?.planId, unaccepted.planId);
+  assert.equal(found?.status, 'completed');
 });
 

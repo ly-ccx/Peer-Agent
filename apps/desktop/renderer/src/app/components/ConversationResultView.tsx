@@ -12,7 +12,7 @@ import type { ChatMsg } from '../../chat/state/types';
  *
  * - Markdown：复用会话主路径 MarkdownMessage
  * - 相关消息：用 is-task-target 高亮，打开时不自动滚动定位（避免侧栏整体上滚）
- * - 操作区（继续讨论 / 确认验收）已移至 Drawer footer，本组件只渲染结果内容
+ * - 操作区（还不行 / 确认验收）已移至 Drawer footer，本组件只渲染结果内容
  */
 export function ConversationResultView({
   item,
@@ -87,11 +87,24 @@ export function ConversationResultView({
         <div className="conversation-result-view__kicker">执行结果</div>
         <h3 className="conversation-result-view__title">{item.title}</h3>
         <p className="conversation-result-view__meta">
-          {item.workspaceLabel ? `${item.workspaceLabel} · ` : ''}
+          {item.deliveryRoute ? `${item.deliveryRoute} · ` : item.workspaceLabel ? `${item.workspaceLabel} · ` : ''}
           {item.statusLabel}
           {summaryProgress ? ` · ${summaryProgress.completed}/${summaryProgress.total}` : ''}
         </p>
       </header>
+      {item.qualityChecks && item.qualityChecks.length > 0 ? (
+        <section className="conversation-result-view__section">
+          <div className="conversation-result-view__section-title">{isZh ? '交卷前查过' : 'Checked before handoff'}</div>
+          <ul className="conversation-result-view__checks">
+            {item.qualityChecks.map((check) => (
+              <li key={check.id} className="conversation-result-view__check">
+                <span>{check.label}</span>
+                <b>{check.note || (check.status === 'passed' ? (isZh ? '已通过' : 'Passed') : check.status === 'skipped' ? (isZh ? '未做' : 'Skipped') : (isZh ? '未通过' : 'Failed'))}</b>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {summaryProgress ? (
         <section className="conversation-result-view__section">

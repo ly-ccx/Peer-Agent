@@ -127,6 +127,7 @@ import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
 import {
   applyGoalMessageRoute,
   consumesRequestedUserInput,
+  resolveContinuableGoalPlan,
   routeGoalMessage,
 } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
@@ -2723,7 +2724,11 @@ function handleChatSend({
     if (goal) {
       try {
         const activePlan = goalPlanStore.getActivePlanByConversation(conversationId);
-        const activeGoal = activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null;
+        const activeGoal = resolveContinuableGoalPlan({
+          activeGoalPlan: activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null,
+          goalPlanStore,
+          conversationId,
+        });
         const route = routeGoalMessage({ messageText: goal, activeGoalPlan: activeGoal });
         if (route.type === 'append_goal_event') {
           const answersRequestedUserInput = consumesRequestedUserInput({

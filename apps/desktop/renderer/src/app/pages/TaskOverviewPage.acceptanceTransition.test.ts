@@ -29,8 +29,20 @@ test('acceptance transitions freeze the complete taskId order instead of collidi
 test('a failed acceptance returns the card to a retryable idle state', async () => {
   const [source, app] = await Promise.all([readPage(), readApp()]);
   assert.match(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
-  assert.match(source, /disabled=\{!canAccept \|\| Boolean\(phase\)\}/);
+  assert.match(app, /disabled=\{resultAcceptancePhase !== null\}/);
   assert.match(app, /accept result failed'[\s\S]*throw error/);
+});
+
+test('third-bucket card only offers 查看结果; accept and reject stay off the card', async () => {
+  const source = await readPage();
+  assert.match(source, /主按钮「查看结果」/);
+  assert.match(source, /确认验收和还不行只出现在看过结果之后/);
+  assert.match(source, />\s*查看结果\s*</);
+  assert.doesNotMatch(source, /disabled=\{!canAccept \|\| Boolean\(phase\)\}/);
+  const card = source.slice(source.indexOf('function ResultCard'));
+  assert.match(card, /查看结果/);
+  assert.doesNotMatch(card, /确认验收/);
+  assert.doesNotMatch(card, /还不行/);
 });
 
 test('acceptance celebration has smoother timing and a reduced-motion fallback', async () => {

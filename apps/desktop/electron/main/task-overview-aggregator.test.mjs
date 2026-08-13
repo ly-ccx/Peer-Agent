@@ -257,6 +257,71 @@ test('toGoalPlanSnapshot 组装 workspace 标签 / progress / runner.status', ()
   assert.equal(snapshot.accepted, false);
 });
 
+test('toGoalPlanSnapshot 只有交付绑定才标出需要质量自检', () => {
+  const workspaceOnly = toGoalPlanSnapshot({
+    planId: 'p-workspace-only',
+    status: 'completed',
+    title: '实现跨仓交付',
+    targetWorkspacePath: '/Users/x/peer_agent',
+  });
+  assert.equal(workspaceOnly.requiresQualityReview, undefined);
+
+  const reviewing = toGoalPlanSnapshot({
+    planId: 'p-reviewing',
+    status: 'completed',
+    title: '实现跨仓交付',
+    targetWorkspacePath: '/Users/x/peer_agent',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      isolation: 'none',
+    },
+  });
+  assert.equal(reviewing.requiresQualityReview, true);
+  assert.equal(reviewing.qualityReviewStatus, undefined);
+
+  const passed = toGoalPlanSnapshot({
+    planId: 'p-passed',
+    status: 'completed',
+    title: '实现跨仓交付',
+    targetWorkspacePath: '/Users/x/peer_agent',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      isolation: 'none',
+    },
+    qualityReview: { status: 'passed', reviewedAt: '2026-08-13T07:00:00.000Z' },
+  });
+  assert.equal(passed.requiresQualityReview, true);
+  assert.equal(passed.qualityReviewStatus, 'passed');
+});
+
+test('toGoalPlanSnapshot 带上来源仓、交付仓和目标分支，不补 main', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-route',
+    status: 'executing',
+    title: '实现跨仓交付',
+    originWorkspacePath: '/Users/x/peer-knowledge',
+    targetWorkspacePath: '/Users/x/peer_agent',
+    targetRepoId: 'peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    targetBranchSource: 'workspace_head',
+  });
+  assert.equal(snapshot.deliveryRoute, '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4');
+  assert.equal(snapshot.deliveryRoute?.includes('main'), false);
+
+  const unbound = toGoalPlanSnapshot({
+    planId: 'p-unbound',
+    status: 'executing',
+    title: '尚未确认目标分支',
+    originWorkspacePath: '/Users/x/peer-knowledge',
+    targetWorkspacePath: '/Users/x/peer_agent',
+  });
+  assert.equal(unbound.deliveryRoute, '来源 peer-knowledge · 交付 peer_agent · 目标分支未确认');
+});
+
 test('toGoalPlanSnapshot classifies renderer unavailability as a system-owned blocker', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-system-blocked',

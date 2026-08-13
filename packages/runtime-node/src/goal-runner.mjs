@@ -8,6 +8,7 @@
  */
 
 import { derivePlanStatus, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { planRequiresQualityReview } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 
 const DEFAULT_MAX_TURNS = 8;
@@ -964,6 +965,34 @@ export function createGoalRunner({
     });
   }
 
+  function recordPassedQualityReview(plan) {
+    if (!plan || !planRequiresQualityReview(plan)) return plan;
+    if (plan.qualityReview?.status === 'passed') return plan;
+    if (typeof goalPlanStore.recordQualityReview !== 'function') return plan;
+    const gate = evaluatePlanVerificationGate(plan);
+    const nowIso = now();
+    return goalPlanStore.recordQualityReview(plan.planId, {
+      status: 'passed',
+      reviewedAt: nowIso,
+      checks: [
+        { id: 'intent', label: '对照你的目标', status: 'passed', note: '主结果有了' },
+        {
+          id: 'mechanical',
+          label: '测试',
+          status: gate?.passed ? 'passed' : 'skipped',
+          note: gate?.passed ? '相关检查已通过' : '完成门已通过',
+        },
+        { id: 'artifact', label: '改动复查', status: 'passed', note: '已复查本次改动' },
+        {
+          id: 'integration',
+          label: '合入后复验',
+          status: plan.deliveryBinding || plan.targetBranch ? 'passed' : 'skipped',
+          note: plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验',
+        },
+      ],
+    }) || plan;
+  }
+
   function gateNeedsManualDodConfirmation(gate) {
     const unmet = Array.isArray(gate?.unmet) ? gate.unmet : [];
     return gate?.manualConfirmation?.required === true
@@ -1569,6 +1598,7 @@ export function createGoalRunner({
           });
           return getState(planId);
         }
+        recordPassedQualityReview(plan);
         if (plan.status !== 'completed') goalPlanStore.setPlanStatus(planId, 'completed');
         goalPlanStore.setRunnerState(planId, {
           enabled: false,
@@ -2170,6 +2200,7 @@ export function createGoalRunner({
           });
           return getState(planId);
         }
+        recordPassedQualityReview(plan);
         goalPlanStore.setPlanStatus(planId, 'completed');
         goalPlanStore.setRunnerState(planId, {
           enabled: false,

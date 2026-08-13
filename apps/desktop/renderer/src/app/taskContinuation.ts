@@ -43,11 +43,18 @@ export function getTaskContinuationAction(
   const conversationId = item.conversationId?.trim();
   if (!conversationId) return null;
 
+  const isRejectingResult = item.actionRight === 'result_ready';
   return {
     conversationId,
-    label: isZh ? '继续讨论' : 'Continue discussion',
-    description: isZh
-      ? '打开原会话；发送消息后才会创建新的用户回合'
-      : 'Open the original conversation; a new user turn starts only after you send a message',
+    label: isRejectingResult
+      ? (isZh ? '还不行' : 'Not yet')
+      : (isZh ? '继续讨论' : 'Continue discussion'),
+    description: isRejectingResult
+      ? (isZh
+        ? '打开对应会话并聚焦输入框；在对话里说明哪里不对'
+        : 'Open the original conversation and focus the input so you can say what is wrong')
+      : (isZh
+        ? '打开原会话；发送消息后才会创建新的用户回合'
+        : 'Open the original conversation; a new user turn starts only after you send a message'),
   };
 }
