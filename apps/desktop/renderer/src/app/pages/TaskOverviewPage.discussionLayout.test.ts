@@ -96,3 +96,33 @@ test('discussion grid has explicit spacing and responsive 3-2-1 columns', async 
   );
   assert.match(styles, /-webkit-line-clamp: 2;/);
 });
+
+test('advancing cards keep route meta in the top bar and put runtime meta on the cancel row', async () => {
+  const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
+  const workItem = source.slice(source.indexOf('/** 推进中工作卡'), source.indexOf('/** 结果待验收卡片'));
+
+  assert.match(workItem, /<WorkItemMeta item=\{item\} group="route" \/>/);
+  assert.match(workItem, /<div className="result-card-actions work-item-actions">/);
+  assert.match(workItem, /<WorkItemMeta item=\{item\} group="runtime" \/>/);
+  assert.match(workItem, /<div className="work-item-actions__buttons">/);
+  assert.match(workItem, />\s*取消\s*</);
+  assert.doesNotMatch(workItem, /<WorkItemMeta item=\{item\} \/>/);
+
+  assert.match(styles, /\.work-item-actions \{[\s\S]*?justify-between/);
+  assert.match(styles, /\.work-item-actions \{[\s\S]*?text-xs/);
+  assert.match(styles, /\.work-item-actions__buttons \{/);
+  assert.match(styles, /\.task-overview-work-meta--runtime \{[\s\S]*?justify-start/);
+  assert.match(styles, /\.task-overview-work-meta--runtime \{[\s\S]*?text-xs/);
+});
+
+test('acceptance cards keep route meta in the top bar and put runtime meta on the result row', async () => {
+  const source = await readPageSource();
+  const resultCard = source.slice(source.indexOf('/** 结果待验收卡片'));
+
+  assert.match(resultCard, /<WorkItemMeta item=\{item\} group="route" fallbackWhenEmpty="READY" \/>/);
+  assert.match(resultCard, /<div className="result-card-actions work-item-actions">/);
+  assert.match(resultCard, /<WorkItemMeta item=\{item\} group="runtime" fallbackWhenEmpty="READY" \/>/);
+  assert.match(resultCard, /<div className="work-item-actions__buttons">/);
+  assert.match(resultCard, />\s*查看结果\s*</);
+  assert.doesNotMatch(resultCard, /<WorkItemMeta item=\{item\} fallbackWhenEmpty="READY" \/>/);
+});

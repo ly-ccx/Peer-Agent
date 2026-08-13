@@ -25,3 +25,14 @@ test('keeps running and acceptance cards on the light shared surface', async () 
   assert.match(primaryButton, /background:\s*var\(--za-text\)/);
   assert.match(primaryButton, /color:\s*var\(--za-surface-0\)/);
 });
+
+test('keeps cancel-row runtime meta on the left and actions on the right', async () => {
+  const css = await readFile(new URL('./task-overview.css', import.meta.url), 'utf8');
+  const actions = ruleBody(css, '.work-item-actions');
+  const runtimeMeta = ruleBody(css, '.task-overview-work-meta--runtime');
+
+  assert.match(actions, /justify-between/);
+  assert.match(actions, /text-xs/);
+  assert.match(runtimeMeta, /justify-start/);
+  assert.match(runtimeMeta, /text-xs/);
+});

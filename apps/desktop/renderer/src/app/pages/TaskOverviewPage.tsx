@@ -103,41 +103,62 @@ function safeDisplayLabel(value: string | undefined): string | undefined {
   return raw;
 }
 
-/** 卡片右上角：提供商 · 模型 · 时长 · 相对时间（完成时间优先于最近活跃）。 */
-function workItemMetaParts(item: TaskOverviewItem, fallbackWhenEmpty = 'LIVE'): string[] {
+/** 任务卡元信息：来源/交付与渠道/模型/时长/相对时间可分组。 */
+type WorkItemMetaGroup = 'all' | 'route' | 'runtime';
+
+function workItemMetaParts(
+  item: TaskOverviewItem,
+  fallbackWhenEmpty = 'LIVE',
+  group: WorkItemMetaGroup = 'all',
+): string[] {
   const parts: string[] = [];
   const providerLabel = safeDisplayLabel(item.providerLabel);
   const modelLabel = safeDisplayLabel(item.modelLabel);
-  if (item.deliveryRoute) parts.push(item.deliveryRoute);
-  if (providerLabel) parts.push(providerLabel);
-  if (modelLabel) parts.push(modelLabel);
-  if (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0) {
-    parts.push(formatDuration(item.durationMs));
+  const includeRoute = group !== 'runtime';
+  const includeRuntime = group !== 'route';
+  if (includeRoute && item.deliveryRoute) parts.push(item.deliveryRoute);
+  if (includeRuntime) {
+    if (providerLabel) parts.push(providerLabel);
+    if (modelLabel) parts.push(modelLabel);
+    if (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0) {
+      parts.push(formatDuration(item.durationMs));
+    }
+    // 结果待验收：优先 completedAt，文案为「N 分钟前完成」；其它卡片仍用 lastActiveAt。
+    if (item.completedAt) {
+      parts.push(formatRelativeTime(item.completedAt, { completed: true }));
+    } else if (item.lastActiveAt) {
+      parts.push(formatRelativeTime(item.lastActiveAt));
+    }
   }
-  // 结果待验收：优先 completedAt，文案为「N 分钟前完成」；其它卡片仍用 lastActiveAt。
-  if (item.completedAt) {
-    parts.push(formatRelativeTime(item.completedAt, { completed: true }));
-  } else if (item.lastActiveAt) {
-    parts.push(formatRelativeTime(item.lastActiveAt));
-  } else if (parts.length === 0) {
+  if (parts.length === 0 && group === 'all') {
     parts.push(fallbackWhenEmpty);
   }
   return parts;
 }
 
-/** 推进中 / 等待验收卡片共用的右上角元信息（提供商 · 模型 · 时长 · 相对时间）。 */
+/** 任务卡元信息。route = 来源/交付；runtime = 渠道/模型/时长/相对时间。 */
 function WorkItemMeta({
   item,
   fallbackWhenEmpty = 'LIVE',
+  group = 'all',
 }: {
   readonly item: TaskOverviewItem;
   readonly fallbackWhenEmpty?: string;
+  readonly group?: WorkItemMetaGroup;
 }) {
+  const parts = workItemMetaParts(item, fallbackWhenEmpty, group);
+  if (parts.length === 0) return null;
   const providerLabel = safeDisplayLabel(item.providerLabel);
   const modelLabel = safeDisplayLabel(item.modelLabel);
+  const className =
+    group === 'runtime'
+      ? 'task-overview-work-meta task-overview-work-meta--runtime'
+      : group === 'route'
+        ? 'task-overview-work-meta task-overview-work-meta--route'
+        : 'task-overview-work-meta';
   return (
-    <div className="task-overview-work-meta" aria-label="任务元信息">
-      {workItemMetaParts(item, fallbackWhenEmpty).map((part, index) => {
+    <div className={className} aria-label="任务元信息">
+      {parts.map((part, index) => {
         const isProvider = Boolean(providerLabel && part === providerLabel);
         const isModel = Boolean(modelLabel && part === modelLabel);
         const isDuration =
@@ -858,7 +879,7 @@ function WorkItem({
           ) : null}
           {item.actionRight === 'paused' ? item.statusLabel : advancingStateLabel(item)}
         </span>
-        <WorkItemMeta item={item} />
+        <WorkItemMeta item={item} group="route" />
       </div>
       <h3>{item.title}</h3>
       {item.currentGoalTitle ? (
@@ -886,8 +907,10 @@ function WorkItem({
           <i style={{ width: `${pct}%` }} />
         </div>
       ) : null}
-      {actionSlot || canCancel ? (
+      {actionSlot || canCancel || workItemMetaParts(item, 'LIVE', 'runtime').length > 0 ? (
         <div className="result-card-actions work-item-actions">
+          <WorkItemMeta item={item} group="runtime" />
+          <div className="work-item-actions__buttons">
           {actionSlot}
           {canCancel ? (
             <button
@@ -901,6 +924,7 @@ function WorkItem({
               取消
             </button>
           ) : null}
+          </div>
         </div>
       ) : null}
     </article>
@@ -938,7 +962,7 @@ function ResultCard({
           </i>
           {celebrating ? '验收完成，任务已圆满结束' : '等待验收'}
         </span>
-        <WorkItemMeta item={item} fallbackWhenEmpty="READY" />
+        <WorkItemMeta item={item} group="route" fallbackWhenEmpty="READY" />
       </div>
       <h3>{item.title}</h3>
       <p>{summary}</p>
@@ -947,7 +971,9 @@ function ResultCard({
           <i style={{ width: `${pct}%` }} />
         </div>
       ) : null}
-      <div className="result-card-actions">
+      <div className="result-card-actions work-item-actions">
+        <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
+        <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
             <span className="result-card-spinner" aria-hidden="true" />
@@ -966,6 +992,7 @@ function ResultCard({
             查看结果
           </button>
         )}
+        </div>
       </div>
     </article>
       <ParticleShatterOverlay active={shattering} targetRef={cardRef} />

@@ -579,6 +579,15 @@
     text-align: right;
   }
 
+  .task-overview-work-meta--route {
+    @apply max-w-[70%];
+  }
+
+  .task-overview-work-meta--runtime {
+    @apply max-w-none min-w-0 flex-1 justify-start text-xs;
+    text-align: left;
+  }
+
   .task-overview-work-meta-part {
     @apply inline-flex items-center gap-x-1;
   }
@@ -855,8 +864,12 @@
   }
 
   .work-item-actions {
-    /* 卡片高度随内容；按钮组贴内容末尾即可，不再依赖 grid 拉伸 */
-    @apply mt-3 flex flex-wrap items-center justify-end gap-2 pt-0;
+    /* 左边渠道/模型/时长，右边取消；字号与顶栏来源信息同级 */
+    @apply mt-3 flex flex-nowrap items-center justify-between gap-3 pt-0 text-xs;
+  }
+
+  .work-item-actions__buttons {
+    @apply ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2;
   }
 
   /* 兼容旧类名，避免残留引用 */
