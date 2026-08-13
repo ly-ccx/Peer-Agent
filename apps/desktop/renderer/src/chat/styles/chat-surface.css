@@ -1184,7 +1184,7 @@
 .reasoning-effort-channel-badge {
   width: 10px;
   height: 10px;
-  margin-left: 1px;
+  margin-right: 1px;
   color: color-mix(in srgb, var(--azure-seal) 88%, var(--composer-addon-color));
   opacity: 0.88;
 }

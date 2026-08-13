@@ -290,7 +290,6 @@ function ReasoningEffortSlider({
         onClick={() => setOpen((value) => !value)}
       >
         <span className="reasoning-effort-trigger-content" aria-hidden="true">
-          {label}
           {fastAvailable && fastMode ? (
             <svg className="reasoning-effort-channel-badge" viewBox="0 0 16 16" fill="none">
               <path
@@ -302,6 +301,7 @@ function ReasoningEffortSlider({
               />
             </svg>
           ) : null}
+          {label}
         </span>
       </button>
       {panel}
