@@ -102,8 +102,14 @@ export function createGoalWorktreeAdapter({
       branch,
       baseline: { commit: plan.deliveryBinding?.baseCommit || plan.baseCommit },
     });
-    const changes = await worktreeAdapter.retainOrCleanup(run, execution);
-    if (changes?.retained === false && typeof goalPlanStore?.recordDeliveryIsolation === 'function') {
+    const collected = typeof worktreeAdapter.collect === 'function'
+      ? await worktreeAdapter.collect(run, execution)
+      : null;
+    const changes = typeof worktreeAdapter.retainOrCleanup === 'function'
+      ? await worktreeAdapter.retainOrCleanup(run, execution, collected)
+      : collected;
+    const retained = changes?.retained === true || Boolean(changes?.changedFiles?.length);
+    if (!retained && typeof goalPlanStore?.recordDeliveryIsolation === 'function') {
       return goalPlanStore.recordDeliveryIsolation(plan.planId, {
         executionIsolation: 'worktree',
         taskBranch: undefined,

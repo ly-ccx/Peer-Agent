@@ -92,9 +92,15 @@ test('做完没有改动就清掉 Worktree', async () => {
   const recorded = [];
   const adapter = createGoalWorktreeAdapter({
     worktreeAdapter: {
-      async retainOrCleanup(run, execution) {
+      async collect(run, execution) {
         assert.equal(run.runId, 'plan-1');
         assert.equal(execution.worktreePath, '/tmp/peer-goal-worktrees/plan-1');
+        return { changedFiles: [] };
+      },
+      async retainOrCleanup(run, execution, changes) {
+        assert.equal(run.runId, 'plan-1');
+        assert.equal(execution.worktreePath, '/tmp/peer-goal-worktrees/plan-1');
+        assert.deepEqual(changes, { changedFiles: [] });
         return { retained: false, changedFiles: [] };
       },
     },
