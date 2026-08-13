@@ -6,6 +6,8 @@
 export const PARTICLE_SHATTER_SWEEP_MS = 360;
 export const PARTICLE_SHATTER_MAX_MS = 1700;
 export const PARTICLE_SHATTER_GRAVITY = 0.09;
+/** 大图/超高抽屉采样硬上限，超出后自动加大间距。 */
+export const PARTICLE_SHATTER_MAX_PARTICLES = 2400;
 
 export type ShatterParticle = {
   x: number;
@@ -30,6 +32,8 @@ export type SampleParticlesOptions = {
   readonly alphaThreshold?: number;
   readonly originX?: number;
   readonly originY?: number;
+  /** 粒子数量硬上限；超出后加大采样间距。 */
+  readonly maxParticles?: number;
   /** 可注入的随机源，便于单测。 */
   readonly random?: () => number;
 };
@@ -68,13 +72,19 @@ export function sampleParticlesFromImageData(
     alphaThreshold = 14,
     originX = 0,
     originY = 0,
+    maxParticles = PARTICLE_SHATTER_MAX_PARTICLES,
     random = defaultRandom,
   } = options;
 
   const { data, width: sw, height: sh } = imageData;
   const scaleX = cssWidth / Math.max(1, sw);
   const scaleY = cssHeight / Math.max(1, sh);
-  const gapPx = Math.max(2, Math.round(gapCss / Math.max(scaleX, 1e-6)));
+  const requestedGapPx = Math.max(2, Math.round(gapCss / Math.max(scaleX, 1e-6)));
+  const estimatedCells = Math.ceil(sw / requestedGapPx) * Math.ceil(sh / requestedGapPx);
+  const densityScale = estimatedCells > maxParticles
+    ? Math.sqrt(estimatedCells / Math.max(1, maxParticles))
+    : 1;
+  const gapPx = Math.max(requestedGapPx, Math.ceil(requestedGapPx * densityScale));
   const particles: ShatterParticle[] = [];
 
   for (let py = 0; py < sh; py += gapPx) {
@@ -276,6 +286,47 @@ function collectDocumentCssText(): string {
 }
 
 /**
+ * 克隆时裁掉不可见滚动内容，避免超高正文被整页编进 SVG。
+ */
+function clipCloneToVisibleViewport(source: HTMLElement, clone: HTMLElement): void {
+  const sourceNodes = [source, ...Array.from(source.querySelectorAll<HTMLElement>('*'))];
+  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+  const count = Math.min(sourceNodes.length, cloneNodes.length);
+
+  for (let i = 0; i < count; i += 1) {
+    const live = sourceNodes[i];
+    const cloned = cloneNodes[i];
+    if (!live || !cloned) continue;
+
+    const style = window.getComputedStyle(live);
+    const overflowY = style.overflowY;
+    const overflowX = style.overflowX;
+    const scrollsY = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden')
+      && live.scrollHeight > live.clientHeight + 1;
+    const scrollsX = (overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden')
+      && live.scrollWidth > live.clientWidth + 1;
+    if (!scrollsY && !scrollsX) continue;
+
+    cloned.style.overflow = 'hidden';
+    if (scrollsY) {
+      cloned.style.height = `${Math.max(1, live.clientHeight)}px`;
+      cloned.style.maxHeight = `${Math.max(1, live.clientHeight)}px`;
+    }
+    if (scrollsX) {
+      cloned.style.width = `${Math.max(1, live.clientWidth)}px`;
+      cloned.style.maxWidth = `${Math.max(1, live.clientWidth)}px`;
+    }
+
+    if (cloned.scrollTo) {
+      cloned.scrollTo(live.scrollLeft, live.scrollTop);
+    } else {
+      cloned.scrollLeft = live.scrollLeft;
+      cloned.scrollTop = live.scrollTop;
+    }
+  }
+}
+
+/**
  * 尝试用 SVG foreignObject 截取元素像素；失败返回 null。
  */
 export async function captureElementImageData(
@@ -288,6 +339,7 @@ export async function captureElementImageData(
 
   try {
     const clone = element.cloneNode(true) as HTMLElement;
+    clipCloneToVisibleViewport(element, clone);
     clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
     clone.style.margin = '0';
     clone.style.width = `${cssWidth}px`;
@@ -449,17 +501,12 @@ export function runParticleShatter(options: RunParticleShatterOptions): Particle
       p.vy *= 0.995;
       p.x += p.vx;
       p.y += p.vy;
-      p.rot += p.vr;
 
       const fade = 1 - t / p.maxLife;
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot);
+      const s = p.size * (0.85 + fade * 0.25);
       ctx.globalAlpha = Math.max(0, p.a * fade);
       ctx.fillStyle = `rgb(${p.r},${p.g},${p.b})`;
-      const s = p.size * (0.85 + fade * 0.25);
-      ctx.fillRect(-s / 2, -s / 2, s, s);
-      ctx.restore();
+      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
     }
 
     if (alive > 0 && timestamp - start < maxDurationMs) {

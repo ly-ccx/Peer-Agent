@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  PARTICLE_SHATTER_MAX_PARTICLES,
   PARTICLE_SHATTER_SWEEP_MS,
   sampleParticlesFromImageData,
 } from './particleShatter.ts';
@@ -58,6 +59,28 @@ test('sampleParticlesFromImageData skips fully transparent pixels', () => {
     random: () => 0,
   });
   assert.equal(particles.length, 0);
+});
+
+test('sampleParticlesFromImageData caps oversized captures by widening the grid', () => {
+  const image = makeOpaqueImageData(800, 800);
+  const particles = sampleParticlesFromImageData(image, 800, 800, {
+    gapCss: 2.6,
+    random: () => 0,
+  });
+  assert.ok(
+    particles.length <= PARTICLE_SHATTER_MAX_PARTICLES,
+    `expected <= ${PARTICLE_SHATTER_MAX_PARTICLES} particles, got ${particles.length}`,
+  );
+  assert.ok(particles.length > 200, `expected a visible shatter field, got ${particles.length}`);
+});
+
+test('capture path clips overflowing clone content to the visible viewport', async () => {
+  const source = await readSource();
+  assert.match(source, /clipCloneToVisibleViewport/);
+  assert.match(source, /scrollHeight > live\.clientHeight/);
+  assert.match(source, /cloned\.style\.height = `\$\{Math\.max\(1, live\.clientHeight\)\}px`/);
+  assert.doesNotMatch(source, /ctx\.save\(\)/);
+  assert.doesNotMatch(source, /ctx\.rotate\(p\.rot\)/);
 });
 
 test('capture path rehydrates document theme attrs into foreignObject wrapper', async () => {
