@@ -322,6 +322,35 @@ test('toGoalPlanSnapshot 带上来源仓、交付仓和目标分支，不补 mai
   assert.equal(unbound.deliveryRoute, '来源 peer-knowledge · 交付 peer_agent · 目标分支未确认');
 });
 
+test('toGoalPlanSnapshot 隔离执行时写独立执行环境，不再写未隔离执行', () => {
+  const snapshot = toGoalPlanSnapshot({
+    planId: 'p-isolated',
+    status: 'executing',
+    title: '隔离执行',
+    originWorkspacePath: '/Users/x/peer-knowledge',
+    targetWorkspacePath: '/Users/x/peer_agent',
+    targetRepoId: 'peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    targetBranchSource: 'workspace_head',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetWorkspacePath: '/Users/x/peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      executionIsolation: 'worktree',
+      taskBranch: 'peer-goal/p-isolated',
+      worktreePath: '/tmp/peer-goal-worktrees/p-isolated',
+      boundAt: '2026-08-13T08:40:00.000Z',
+    },
+  });
+  assert.equal(
+    snapshot.deliveryRoute,
+    '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4 · 独立执行环境',
+  );
+  assert.equal(snapshot.deliveryRoute?.includes('未隔离执行'), false);
+});
+
+
 test('toGoalPlanSnapshot classifies renderer unavailability as a system-owned blocker', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-system-blocked',

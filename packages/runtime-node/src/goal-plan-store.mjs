@@ -1277,6 +1277,10 @@ function normalizeDeliveryBinding(value, fallbacks = {}) {
   if (targetWorkspacePath) binding.targetWorkspacePath = targetWorkspacePath;
   const baseCommit = normalizeOptionalName(value.baseCommit) ?? normalizeOptionalName(fallbacks.baseCommit);
   if (baseCommit) binding.baseCommit = baseCommit;
+  const taskBranch = normalizeOptionalName(value.taskBranch);
+  if (taskBranch) binding.taskBranch = taskBranch;
+  const worktreePath = normalizeWorkspacePath(value.worktreePath);
+  if (worktreePath) binding.worktreePath = worktreePath;
   return binding;
 }
 
@@ -3231,6 +3235,36 @@ export function createGoalPlanStore({
     });
   }
 
+  function recordDeliveryIsolation(planId, isolation = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const nextBinding = normalizeDeliveryBinding({
+      ...(plan.deliveryBinding && typeof plan.deliveryBinding === 'object' ? plan.deliveryBinding : {}),
+      repoId: isolation.repoId ?? plan.deliveryBinding?.repoId ?? plan.targetRepoId,
+      targetBranch: isolation.targetBranch ?? plan.deliveryBinding?.targetBranch ?? plan.targetBranch,
+      targetBranchSource: isolation.targetBranchSource
+        ?? plan.deliveryBinding?.targetBranchSource
+        ?? plan.targetBranchSource,
+      targetWorkspacePath: isolation.targetWorkspacePath
+        ?? plan.deliveryBinding?.targetWorkspacePath
+        ?? plan.targetWorkspacePath,
+      baseCommit: isolation.baseCommit ?? plan.deliveryBinding?.baseCommit ?? plan.baseCommit,
+      executionIsolation: isolation.executionIsolation ?? 'worktree',
+      taskBranch: isolation.taskBranch,
+      worktreePath: isolation.worktreePath,
+      boundAt: plan.deliveryBinding?.boundAt,
+    }, {
+      targetWorkspacePath: plan.targetWorkspacePath,
+      baseCommit: plan.baseCommit,
+    });
+    if (!nextBinding) return plan;
+    return persist({
+      ...plan,
+      deliveryBinding: nextBinding,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   /**
    * 记录 Manual DoD 的人工确认事实。
    *
@@ -3759,6 +3793,7 @@ export function createGoalPlanStore({
     recordTaskEvidence,
     recordCriterionResults,
     recordQualityReview,
+    recordDeliveryIsolation,
     recordManualConfirmation,
     deletePlan,
     deletePlanByConversation,

@@ -709,6 +709,7 @@ export function createLlmChatService({
   // main 注入的带 onChange 的 goalPlanStore 单例。AI 工具(goal_create_plan/
   // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
   goalPlanStore = null,
+  goalWorktreeAdapter = null,
   // main 注入的 Browser 工作现场 reveal 桥；Agent 工具路径创建 LocalToolHost 时需要它。
   ensureBrowserReady = null,
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
@@ -969,6 +970,16 @@ export function createLlmChatService({
     // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
     const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
     // Agent 默认（chat）与 legacy goal 均可绑定 active Goal 的 target workspace。
+    if ((mode === 'goal' || mode === 'chat') && typeof goalWorktreeAdapter?.prepareForPlan === 'function') {
+      try {
+        const activePlan = typeof goalPlanStore?.getActivePlanByConversation === 'function'
+          ? goalPlanStore.getActivePlanByConversation(conversationId)
+          : null;
+        if (activePlan) await goalWorktreeAdapter.prepareForPlan(activePlan);
+      } catch (error) {
+        console.warn('[goal-worktree] prepare failed; writing to bound workspace:', error?.message || error);
+      }
+    }
     const goalWorkspaceBinding = (mode === 'goal' || mode === 'chat')
       ? resolveActiveGoalExecutionBinding(conversationId, conversationWorkspacePath, goalPlanStore)
       : null;

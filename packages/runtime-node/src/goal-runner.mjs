@@ -713,6 +713,7 @@ function summarizeVerificationGate(gate) {
  *   verifierRunner?: { runVerifier: Function } | null,
  *   emitEvent?: Function | null,
  *   canRunPlan?: Function | null,
+ *   prepareIsolation?: Function | null,
  *   now?: () => string,
  *   logger?: { info?: Function, warn?: Function, error?: Function },
  * }} options
@@ -724,6 +725,7 @@ export function createGoalRunner({
   verifierRunner = null,
   emitEvent = null,
   canRunPlan = null,
+  prepareIsolation = null,
   now = () => new Date().toISOString(),
   logger = console,
   maxRecoverableInterruptionRetries = DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
@@ -997,7 +999,9 @@ export function createGoalRunner({
           id: 'integration',
           label: '合入后复验',
           status: plan.deliveryBinding || plan.targetBranch ? 'passed' : 'skipped',
-          note: plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验',
+          note: plan.deliveryBinding?.executionIsolation === 'worktree'
+            ? '已按独立执行环境复查'
+            : (plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验'),
         },
       ],
     }) || plan;
@@ -1290,6 +1294,13 @@ export function createGoalRunner({
     // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
     // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    if (typeof prepareIsolation === 'function') {
+      try {
+        await prepareIsolation(plan);
+      } catch (error) {
+        logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
+      }
+    }
     // 已完成且无需再跑的计划不能再开泵：否则 pump 开头会把 runner 写回 running，
     // 首页就会继续显示「正在执行 / Peer 正在自检」。
     if (plan.status === 'completed' && !shouldRerunCompletedPlan(plan)) {
@@ -1328,6 +1339,13 @@ export function createGoalRunner({
     if (!plan) return null;
     // resume 与 start 一样是执行入口，必须在改写共享 runner 状态前校验宿主归属。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    if (typeof prepareIsolation === 'function') {
+      try {
+        await prepareIsolation(plan);
+      } catch (error) {
+        logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
+      }
+    }
     const canResumeVerificationBlock =
       plan.status === 'completed'
       && plan.runner?.status === 'blocked'

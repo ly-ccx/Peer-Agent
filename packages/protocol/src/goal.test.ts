@@ -62,6 +62,32 @@ test('有代码副作用时 deliveryBinding 必须带确认来源，并允许标
   assert.notEqual(plan.deliveryBinding?.targetBranch, 'main');
 });
 
+test('deliveryBinding 能记下任务分支和 Worktree 路径，并把隔离标成 worktree', () => {
+  const binding: GoalDeliveryBinding = {
+    repoId: 'peer_agent',
+    targetWorkspacePath: '/repo/peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    targetBranchSource: 'workspace_head',
+    executionIsolation: 'worktree',
+    taskBranch: 'peer-goal/plan-delivery',
+    worktreePath: '/tmp/peer-goal-worktrees/plan-delivery',
+    boundAt: '2026-08-13T08:40:00.000Z',
+  };
+  const plan = planWithDelivery({
+    targetRepoId: binding.repoId,
+    targetBranch: binding.targetBranch,
+    targetBranchSource: binding.targetBranchSource,
+    deliveryBinding: binding,
+  });
+  assert.equal(plan.deliveryBinding?.taskBranch, 'peer-goal/plan-delivery');
+  assert.equal(plan.deliveryBinding?.worktreePath, '/tmp/peer-goal-worktrees/plan-delivery');
+  assert.equal(plan.deliveryBinding?.executionIsolation, 'worktree');
+  assert.equal(
+    formatGoalDeliveryRoute(plan),
+    '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4 · 独立执行环境',
+  );
+});
+
 test('formatGoalDeliveryRoute 展示来源仓、交付仓和目标分支，不补 main', () => {
   assert.equal(
     formatGoalDeliveryRoute({

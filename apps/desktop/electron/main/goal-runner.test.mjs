@@ -42,6 +42,7 @@ function createRunner({
   verifierRunner = null,
   events = [],
   logger = null,
+  prepareIsolation = null,
   maxRecoverableInterruptionRetries,
 } = {}) {
   return createGoalRunner({
@@ -52,6 +53,7 @@ function createRunner({
     emitEvent: (event) => events.push(event),
     now: () => '2026-01-01T00:00:00.000Z',
     logger: logger ?? { warn() {} },
+    ...(prepareIsolation ? { prepareIsolation } : {}),
     ...(maxRecoverableInterruptionRetries === undefined
       ? {}
       : { maxRecoverableInterruptionRetries }),
@@ -1666,5 +1668,36 @@ test('start: 已完成计划不再被拉回 running，并补写 qualityReview', 
   assert.equal(got.status, 'completed');
   assert.equal(got.qualityReview?.status, 'passed');
   assert.equal(got.runner.status, 'completed');
+});
+
+test('start: 有交付绑定的 Goal 启动时会准备隔离环境', async () => {
+  const plan = createApprovedPlan({
+    targetWorkspacePath: '/repo/peer_agent',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetWorkspacePath: '/repo/peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      executionIsolation: 'none',
+      boundAt: '2026-01-01T00:00:00.000Z',
+    },
+  });
+  const prepared = [];
+  const runtime = {
+    async runGoalTurn() {
+      return {};
+    },
+  };
+  const runner = createRunner({
+    runtime,
+    prepareIsolation: async (current) => {
+      prepared.push(current.planId);
+      return current;
+    },
+  });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  assert.deepEqual(prepared, [plan.planId]);
 });
 

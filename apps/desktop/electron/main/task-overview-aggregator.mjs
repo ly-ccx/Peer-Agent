@@ -83,7 +83,9 @@ function backfillCompletedPlanQualityReview(goalPlanStore, plan) {
         id: 'integration',
         label: '合入后复验',
         status: plan.deliveryBinding || plan.targetBranch ? 'passed' : 'skipped',
-        note: plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验',
+        note: plan.deliveryBinding?.executionIsolation === 'worktree'
+          ? '已按独立执行环境复查'
+          : (plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验'),
       },
     ],
   });

@@ -119,6 +119,7 @@ import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
+import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -406,6 +407,8 @@ const automationProposalService = createAutomationChatProposalService({
   createAutomation: (definition) => automationApplicationService.create(definition),
 });
 
+let goalWorktreeAdapter = null;
+
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
@@ -427,6 +430,21 @@ const goalPlanStore = createGoalPlanStore({
         console.error('[main] plan-change auto-start failed:', error?.message || error);
       }
     });
+    const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+    if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
+      queueMicrotask(() => {
+        try {
+          const plan = goalPlanStore.getPlan(planId);
+          if (!plan) return;
+          if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
+          void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
+            console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+          });
+        } catch (error) {
+          console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+        }
+      });
+    }
   },
 });
 let goalRunner = null;
@@ -1054,6 +1072,8 @@ function parseExplorerReport(rawText, fallback = {}) {
   };
 }
 
+goalWorktreeAdapter = createGoalWorktreeAdapter({ goalPlanStore });
+
 const llmChatService = createLlmChatService({
   llmConfigStore,
   conversationStore,
@@ -1067,6 +1087,7 @@ const llmChatService = createLlmChatService({
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
+  goalWorktreeAdapter,
   // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
   ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
@@ -1084,6 +1105,10 @@ const chatStreamApplicationService = createChatStreamApplicationService({
 
 goalRunner = createGoalRunner({
   goalPlanStore,
+  prepareIsolation: async (plan) => {
+    if (!plan || typeof goalWorktreeAdapter?.prepareForPlan !== 'function') return plan;
+    return goalWorktreeAdapter.prepareForPlan(plan);
+  },
   chatRuntime: {
     async runGoalTurn({ plan, turnNumber }) {
       const webContents = getRunnerWebContents();

@@ -438,6 +438,26 @@ test('createPlan: 有目标仓且能读到 HEAD 时才绑定，并标明未隔�
   assert.notEqual(plan.targetBranch, 'main');
 });
 
+test('recordDeliveryIsolation: 交付绑定能记下任务分支和 Worktree 路径', () => {
+  const boundStore = createGoalPlanStore({
+    readWorkspaceHead: () => ({ branch: 'PeerAgent/0.0.4', commit: '6d98092' }),
+  });
+  const plan = boundStore.createPlan({
+    ...draftWithTasks(),
+    originWorkspacePath: '/repo/peer-knowledge',
+    targetWorkspacePath: '/repo/peer_agent',
+  });
+  const isolated = boundStore.recordDeliveryIsolation(plan.planId, {
+    executionIsolation: 'worktree',
+    taskBranch: 'peer-goal/plan-delivery',
+    worktreePath: '/tmp/peer-goal-worktrees/plan-delivery',
+  });
+  assert.equal(isolated.deliveryBinding?.executionIsolation, 'worktree');
+  assert.equal(isolated.deliveryBinding?.taskBranch, 'peer-goal/plan-delivery');
+  assert.equal(isolated.deliveryBinding?.worktreePath, '/tmp/peer-goal-worktrees/plan-delivery');
+  assert.equal(isolated.deliveryBinding?.targetBranch, 'PeerAgent/0.0.4');
+});
+
 test('createIntakeContract: intake 不绑定目标分支', () => {
   const boundStore = createGoalPlanStore({
     readWorkspaceHead: () => ({ branch: 'PeerAgent/0.0.4', commit: '6d98092' }),

@@ -42,7 +42,7 @@ export type GoalTargetBranchSource =
   | 'workspace_head'
   | 'preconfigured';
 
-/** P0 不做 Worktree；有代码副作用时必须标明未隔离执行。 */
+/** 有代码副作用时：未隔离执行，或独立 Worktree。 */
 export type GoalExecutionIsolation = 'none' | 'worktree';
 
 /**
@@ -56,6 +56,10 @@ export interface GoalDeliveryBinding {
   readonly baseCommit?: string;
   readonly targetBranchSource: GoalTargetBranchSource;
   readonly executionIsolation: GoalExecutionIsolation;
+  /** 隔离执行用的任务分支；未建 Worktree 时可缺省。 */
+  readonly taskBranch?: string;
+  /** 隔离执行目录；未建 Worktree 时可缺省。 */
+  readonly worktreePath?: string;
   readonly boundAt: string;
 }
 
@@ -104,7 +108,9 @@ export function formatGoalDeliveryRoute(
   } else if (target || origin) {
     parts.push(locale === 'zh' ? '目标分支未确认' : 'target branch unconfirmed');
   }
-  if (isolation === 'none' && (branch || target)) {
+  if (isolation === 'worktree' && (branch || target)) {
+    parts.push(locale === 'zh' ? '独立执行环境' : 'isolated worktree');
+  } else if (isolation === 'none' && (branch || target)) {
     parts.push(locale === 'zh' ? '未隔离执行' : 'not isolated');
   }
   return parts.length > 0 ? parts.join(' · ') : undefined;
@@ -842,7 +848,8 @@ export interface GoalPlan {
   /** 目标分支的确认来源；缺字段表示尚未确认，不能当已绑定。 */
   readonly targetBranchSource?: GoalTargetBranchSource;
   /**
-   * 有代码副作用时才物化。P0 不创建 Worktree，isolation 应为 `none` 并在界面标明未隔离执行。
+   * 有代码副作用时才物化。有交付绑定后可记下 taskBranch / worktreePath；
+   * isolation 为 `worktree` 时界面写独立执行环境，否则仍标明未隔离执行。
    */
   readonly deliveryBinding?: GoalDeliveryBinding;
   /** 派生目标关系；全部可选以兼容历史计划。 */

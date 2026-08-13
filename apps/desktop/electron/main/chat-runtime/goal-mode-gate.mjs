@@ -270,9 +270,22 @@ export function resolveActiveGoalExecutionBinding(
     fallbackWorkspacePath ||
     null;
   const targetWorkspacePath = normalizeWorkspacePath(plan?.targetWorkspacePath);
-  const executionWorkspacePath = targetWorkspacePath || fallbackWorkspacePath || originWorkspacePath || null;
-  const writableRoots = normalizeWorkspaceRoots([targetWorkspacePath || fallbackWorkspacePath || originWorkspacePath]);
-  const readableRoots = normalizeWorkspaceRoots([originWorkspacePath, targetWorkspacePath || fallbackWorkspacePath]);
+  const isolatedWorktreePath = plan?.deliveryBinding?.executionIsolation === 'worktree'
+    ? normalizeWorkspacePath(plan.deliveryBinding?.worktreePath)
+    : null;
+  const executionWorkspacePath = isolatedWorktreePath
+    || targetWorkspacePath
+    || fallbackWorkspacePath
+    || originWorkspacePath
+    || null;
+  const writableRoots = normalizeWorkspaceRoots([
+    isolatedWorktreePath || targetWorkspacePath || fallbackWorkspacePath || originWorkspacePath,
+  ]);
+  const readableRoots = normalizeWorkspaceRoots([
+    originWorkspacePath,
+    targetWorkspacePath || fallbackWorkspacePath,
+    isolatedWorktreePath,
+  ]);
   return {
     planId: typeof plan?.planId === 'string' ? plan.planId : null,
     originWorkspacePath,

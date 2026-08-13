@@ -564,6 +564,30 @@ describe('resolveActiveGoalExecutionBinding', () => {
     assert.deepEqual(binding.boundaries, { inScope: ['src/*'], outOfScope: [] });
   });
 
+  it('writes only into the isolated worktree when delivery isolation is worktree', () => {
+    const store = {
+      getActivePlanByConversation: () => ({
+        planId: 'plan-1',
+        originWorkspacePath: '/repo/peer-knowledge',
+        targetWorkspacePath: '/repo/peer_agent',
+        deliveryBinding: {
+          repoId: 'peer_agent',
+          targetWorkspacePath: '/repo/peer_agent',
+          targetBranch: 'PeerAgent/0.0.4',
+          targetBranchSource: 'workspace_head',
+          executionIsolation: 'worktree',
+          taskBranch: 'peer-goal/plan-1',
+          worktreePath: '/tmp/peer-goal-worktrees/plan-1',
+        },
+      }),
+    };
+    const binding = resolveActiveGoalExecutionBinding('c1', '/repo/peer-knowledge', store);
+    assert.equal(binding.executionWorkspacePath, '/tmp/peer-goal-worktrees/plan-1');
+    assert.deepEqual(binding.writableRoots, ['/tmp/peer-goal-worktrees/plan-1']);
+    assert.ok(binding.readableRoots.includes('/repo/peer-knowledge'));
+    assert.ok(binding.readableRoots.includes('/tmp/peer-goal-worktrees/plan-1'));
+  });
+
   it('falls back to the conversation workspace when no active target is bound', () => {
     const binding = resolveActiveGoalExecutionBinding('c1', '/repo/current', {
       getActivePlanByConversation: () => null,
