@@ -56,9 +56,13 @@
   .workbench-resizer[data-active='true']::after {
     background: var(--za-accent, #4c8dff);
   }
-  /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。 */
+  /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。
+     高度与 .chat-header 同为 40px（border-box），底部分隔线必须画在同一条 Y 上。
+     不要跟「当前问题」条加高——那会把这条线压下去。 */
   .workbench-tab-rail {
+    box-sizing: border-box;
     flex: 0 0 40px;
+    height: 40px;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -66,8 +70,8 @@
     padding: 4px 8px;
     /* 外壳已是毛玻璃；tab rail 透明以免叠两层 blur。 */
     background: transparent;
-    /* Tab 栏与内容区之间的底部分隔线。 */
-    border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    /* 与 .chat-header.has-scroll 同一条 hairline，避免左右底边错位。 */
+    border-bottom: 1px solid var(--chrome-hairline);
   }
 
   .workbench-tab {

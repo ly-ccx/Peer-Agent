@@ -3064,19 +3064,23 @@
   left: 0;
   right: 0;
   z-index: 30;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 40px;
+  /* flex 容器默认 min-height:auto = 内容最小高度，会把 40px 撑到 44px。 */
+  min-height: 0;
+  max-height: 40px;
   padding: 0 var(--space-5);
-  /* 与下方当前问题条同层的局部玻璃：半透明 tint + 局部 blur + 边缘高光。 */
+  /* 贴 hiddenInset 窗口顶：半透明 tint + 局部 blur。
+     不叠 glass-edge-highlight：顶部 inset 高光会压在窗框上，变成一条偏粗亮线。 */
   background:
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--glass-chrome-hover) 92%, transparent),
       color-mix(in srgb, var(--glass-chrome-hover) 76%, transparent)
     );
-  box-shadow: var(--glass-edge-highlight);
   -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
   backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.22);
   border-bottom: 1px solid transparent;
@@ -3105,6 +3109,11 @@
 }
 
 .chat-header.has-scroll {
+  border-bottom-color: var(--chrome-hairline);
+}
+
+/* 工作台打开时左右顶栏共用一条 40px 底边，不依赖滚动才显色。 */
+:root[data-workbench-open='true'] .chat-header {
   border-bottom-color: var(--chrome-hairline);
 }
 

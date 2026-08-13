@@ -1472,9 +1472,10 @@
   @apply h-full min-h-0;
 }
 
-/* Drawer 内主栏 + 当前问题条：略收占高，避免再显第三层面板感 */
+/* Drawer 内主栏跟主窗口同一条 40px 合同，不再另抬 44px。 */
 .conversation-chat-drawer .chat-header {
-  min-height: 44px;
+  min-height: 0;
+  max-height: 40px;
 }
 
 .conversation-chat-drawer .current-turn-context {
