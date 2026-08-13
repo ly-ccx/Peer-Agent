@@ -563,9 +563,10 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: true,
         paramStyle: 'openai-effort',
-        // Grok 4.5：仅 low/medium/high，默认 high，不可关闭 Thinking。
+        // Grok 官方档位：low/medium/high/xhigh，默认 high，不可关闭 Thinking。
+        // grok-4.6+ 原生支持 xhigh；grok-4.5 按官方规则把 xhigh 当 high。
         // effortMap 兜底把 UI 历史 default/off 投影为 high，避免编码层落到 OpenAI 通用 medium。
-        effortLevels: ['low', 'medium', 'high'],
+        effortLevels: ['low', 'medium', 'high', 'xhigh'],
         defaultEffort: 'high',
         effortMap: {
           off: 'high',
@@ -573,6 +574,7 @@ const CHANNEL_DESCRIPTORS = {
           medium: 'medium',
           default: 'high',
           high: 'high',
+          xhigh: 'xhigh',
         },
       },
       promptCache: false,

@@ -103,6 +103,27 @@ describe('Provider message encoders', () => {
     assert.equal(body.reasoning_effort, 'medium');
   });
 
+  it('passes Grok xhigh effort through OpenAI Responses reasoning.effort', () => {
+    const grokMap = {
+      off: 'high',
+      low: 'low',
+      medium: 'medium',
+      default: 'high',
+      high: 'high',
+      xhigh: 'xhigh',
+    };
+    const body = encodeOpenAIResponsesRequest({
+      model: 'grok-4.6',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort: 'xhigh',
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+      reasoningEffortMap: grokMap,
+    });
+    assert.equal(body.reasoning?.effort, 'xhigh');
+  });
+
   it('maps Kimi K3 effort levels through OpenAI-compatible reasoning_effort', () => {
     const kimiMap = {
       off: 'none',

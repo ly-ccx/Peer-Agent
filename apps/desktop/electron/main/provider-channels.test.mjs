@@ -82,13 +82,15 @@ describe('provider channel registry', () => {
     assert.equal(resolved.headers['X-XAI-Token-Auth'], 'xai-grok-cli');
     assert.equal(resolved.headers['x-grok-client-surface'], 'grok-build');
     assert.equal(resolved.supportsReasoning, true);
-    assert.deepEqual(resolved.reasoningEffortLevels, ['low', 'medium', 'high']);
+    assert.deepEqual(resolved.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
     assert.equal(resolved.reasoningDefaultEffort, 'high');
     assert.equal(resolved.reasoningParamStyle, 'openai-effort');
     // default/off 必须投影到 high，避免编码层落到 OpenAI 通用 medium。
+    // xhigh 对 grok-4.6+ 直通；grok-4.5 由官方把 xhigh 当 high。
     assert.equal(resolved.reasoningEffortMap?.default, 'high');
     assert.equal(resolved.reasoningEffortMap?.off, 'high');
     assert.equal(resolved.reasoningEffortMap?.medium, 'medium');
+    assert.equal(resolved.reasoningEffortMap?.xhigh, 'xhigh');
   });
 
   it('rejects OAuth wire override to chat completions', () => {
