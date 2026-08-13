@@ -42,6 +42,10 @@ test('shared Goal runtime owns store, pump, intake, and data-home behavior', () 
       shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'goal-accepted' }, plan),
       true,
     );
+    assert.equal(
+      shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'persist' }, plan),
+      false,
+    );
     assert.equal(decideIntakeConvergence(plan, { terminalStatus: 'done' }), 'skip');
     assert.equal(typeof createGoalRunner, 'function');
 
@@ -50,6 +54,59 @@ test('shared Goal runtime owns store, pump, intake, and data-home behavior', () 
     assert.ok(Array.isArray(explorePlan.questions));
     assert.ok(Array.isArray(explorePlan.exitCriteria));
     assert.equal(typeof explorePlan.generatedAt, 'string');
+  } finally {
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('reusing an unaccepted completed Goal emits goal-accepted and allows auto-start', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-goal-handoff-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = path.join(root, '.peer-agent');
+
+  try {
+    const events = [];
+    const store = createGoalPlanStore({ onChange: (event) => events.push(event) });
+    const created = store.createGoalContract({
+      conversationId: 'conv-shared-unaccepted',
+      title: 'Continue after handoff',
+      goal: 'Continue after handoff',
+      tasks: [
+        { taskId: 'trace', title: 'Trace the stop', status: 'completed', evidenceRefs: ['e1'] },
+        { taskId: 'fix', title: 'Fix the handoff', status: 'completed', evidenceRefs: ['e2'] },
+      ],
+    });
+    store.setPlanStatus(created.planId, 'completed', { changedBy: 'system:test' });
+    events.length = 0;
+
+    const continued = store.upsertGoalContract(created.conversationId, {
+      title: 'Continue after handoff',
+      goal: 'Continue after handoff',
+      tasks: [
+        { taskId: 'trace', title: 'Trace the stop', status: 'completed', evidenceRefs: ['e1'] },
+        { taskId: 'fix', title: 'Fix the handoff', status: 'pending', evidenceRefs: [] },
+      ],
+    });
+
+    assert.equal(continued.planId, created.planId);
+    assert.notEqual(continued.status, 'completed');
+    assert.equal(events.at(-1)?.changeKind, 'goal-accepted');
+    assert.equal(
+      shouldAutoStartAcceptedGoalRunnerFromChange(events.at(-1), continued),
+      true,
+    );
+
+    store.appendRunEvent(created.planId, {
+      type: 'action_started',
+      summary: 'Goal Runner started',
+    });
+    assert.equal(events.at(-1)?.changeKind, 'persist');
+    assert.equal(
+      shouldAutoStartAcceptedGoalRunnerFromChange(events.at(-1), store.getPlan(created.planId)),
+      false,
+    );
   } finally {
     if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
     else process.env.PEER_AGENT_HOME = previousHome;

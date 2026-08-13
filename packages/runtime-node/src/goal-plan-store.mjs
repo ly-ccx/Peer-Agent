@@ -2472,6 +2472,11 @@ export function createGoalPlanStore({
     // intake → accepted_goal 原地升级时，确保 activation 与 resolution 与 promote 一致。
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
+    // 待验收 completed 被 goal_create_plan 原地续接时，也必须发出 goal-accepted。
+    // 否则 intake 回合已被 goal_handoff 停掉，plan-change auto-start 只认这条边沿，
+    // 计划会永久卡在 0/N。普通 persist 仍不能自激，避免 Runner 写盘递归启动。
+    const reactivatingUnacceptedCompleted = isUnacceptedCompletedPlan(activeGoal);
+    const shouldEmitGoalAccepted = upgradingFromIntake || reactivatingUnacceptedCompleted;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
@@ -2502,7 +2507,7 @@ export function createGoalPlanStore({
     }, {
       reason: revisionReason || (upgradingFromIntake ? 'intake:goal_confirmed' : '更新了目标内容'),
       changedBy: changedBy || createdBy || 'agent',
-      changeKind: upgradingFromIntake ? 'goal-accepted' : 'persist',
+      changeKind: shouldEmitGoalAccepted ? 'goal-accepted' : 'persist',
     });
   }
 

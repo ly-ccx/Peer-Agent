@@ -203,6 +203,19 @@ test('plan change auto-start: 只接受 goal-accepted，拒绝 Runner 自身 per
     shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'runner-state' }, acceptedGoal),
     false,
   );
+
+  const reactivatedUnaccepted = {
+    ...acceptedGoal,
+    status: 'accepted',
+  };
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'goal-accepted' }, reactivatedUnaccepted),
+    true,
+  );
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'persist' }, reactivatedUnaccepted),
+    false,
+  );
 });
 
 test('goal handoff: 原 intake turn 释放前绝不启动 Runner', async () => {

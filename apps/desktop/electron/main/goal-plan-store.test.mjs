@@ -2325,3 +2325,39 @@ test('upsertGoalContract continues the same unaccepted Goal instead of opening a
   assert.notEqual(siblings[0].status, 'cancelled');
 });
 
+
+test('upsertGoalContract: 复用未验收已完成计划时发出 goal-accepted，后续 Runner persist 不自激', () => {
+  const events = [];
+  const watched = createGoalPlanStore({ onChange: (event) => events.push(event) });
+  const conversationId = 'conv-continue-unaccepted-handoff';
+  const created = watched.createGoalContract({
+    conversationId,
+    title: '修好 Goal 交棒',
+    goal: '修好 Goal 交棒',
+    tasks: [
+      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
+      { taskId: 'fix', title: '修正续接', status: 'completed', evidenceRefs: ['e2'] },
+    ],
+  });
+  watched.setPlanStatus(created.planId, 'completed', { changedBy: 'system:test' });
+  events.length = 0;
+
+  const continued = watched.upsertGoalContract(conversationId, {
+    title: '修好 Goal 交棒',
+    goal: '修好 Goal 交棒',
+    tasks: [
+      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
+      { taskId: 'fix', title: '修正续接', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+
+  assert.equal(continued.planId, created.planId);
+  assert.notEqual(continued.status, 'completed');
+  assert.equal(events.at(-1)?.changeKind, 'goal-accepted');
+
+  watched.appendRunEvent(created.planId, {
+    type: 'action_started',
+    summary: 'Goal Runner started',
+  });
+  assert.equal(events.at(-1)?.changeKind, 'persist');
+});
