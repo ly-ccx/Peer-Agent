@@ -263,6 +263,19 @@ test('completed 且质量自检过线后才进入待验收', () => {
   assert.equal(item.qualityChecks?.[0]?.label, '对照你的目标');
 });
 
+test('completed 且质量自检过线后，即使 runner 仍残留 running 也进入待验收', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: false,
+    runnerStatus: 'running',
+    requiresQualityReview: true,
+    qualityReviewStatus: 'passed',
+  }));
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.statusLabel, '待用户验收');
+  assert.notEqual(item.statusLabel, 'Peer 正在自检');
+});
+
 test('rule 16a: completed 已验收 → terminal', () => {
   const item = projectGoalPlan(goalSnapshot({ status: 'completed', accepted: true }));
   assert.equal(item.actionRight, 'terminal');

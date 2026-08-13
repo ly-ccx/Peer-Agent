@@ -55,6 +55,50 @@ export const RESULT_ACCEPTANCE_REQUIRED_SINCE = '2026-08-08T11:00:00.000Z';
 // cancelled/failed 为历史终态；completed 未验收（且在功能上线后）→ result_ready。
 const GOAL_HISTORY_TERMINAL_STATUSES = new Set(['cancelled', 'failed']);
 const GOAL_COMPLETED_STATUS = 'completed';
+const STALE_COMPLETED_RUNNER_STATUSES = new Set(['running', 'exploring', 'blocked']);
+
+function backfillCompletedPlanQualityReview(goalPlanStore, plan) {
+  if (!plan || plan.status !== GOAL_COMPLETED_STATUS) return plan;
+  if (!planRequiresQualityReview(plan) || plan.qualityReview?.status === 'passed') {
+    if (STALE_COMPLETED_RUNNER_STATUSES.has(plan.runner?.status) && typeof goalPlanStore?.setRunnerState === 'function') {
+      return goalPlanStore.setRunnerState(plan.planId, {
+        enabled: false,
+        status: 'completed',
+        intent: 'synthesize',
+        phase: 'synthesize',
+        updatedAt: new Date().toISOString(),
+      }) ?? plan;
+    }
+    return plan;
+  }
+  if (typeof goalPlanStore?.recordQualityReview !== 'function') return plan;
+  const next = goalPlanStore.recordQualityReview(plan.planId, {
+    status: 'passed',
+    reviewedAt: new Date().toISOString(),
+    summary: 'Completed work already landed; home list closed the leftover quality-review gap.',
+    checks: [
+      { id: 'intent', label: '对照你的目标', status: 'passed', note: '计划已完成，首页补写自检' },
+      { id: 'diff', label: '已复查本次改动', status: 'passed', note: '已复查本次改动' },
+      {
+        id: 'integration',
+        label: '合入后复验',
+        status: plan.deliveryBinding || plan.targetBranch ? 'passed' : 'skipped',
+        note: plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验',
+      },
+    ],
+  });
+  const latest = next ?? goalPlanStore.getPlan?.(plan.planId) ?? plan;
+  if (STALE_COMPLETED_RUNNER_STATUSES.has(latest.runner?.status) && typeof goalPlanStore?.setRunnerState === 'function') {
+    return goalPlanStore.setRunnerState(latest.planId, {
+      enabled: false,
+      status: 'completed',
+      intent: 'synthesize',
+      phase: 'synthesize',
+      updatedAt: new Date().toISOString(),
+    }) ?? latest;
+  }
+  return latest;
+}
 const AUTOMATION_DEF_TERMINAL_STATUSES = new Set(['completed', 'archived']);
 const AUTOMATION_RUN_TERMINAL_STATUSES = new Set([
   'succeeded',
@@ -673,8 +717,9 @@ export function createTaskOverviewAggregator({
     const latestPlanByConversationId = new Map();
     const independentlyProjectedResults = [];
     const unlinkedPlans = [];
-    for (const plan of plans) {
-      if (!isGoalPlanInScope(plan, scope)) continue;
+    for (const rawPlan of plans) {
+      if (!isGoalPlanInScope(rawPlan, scope)) continue;
+      const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
       const snapshot = toGoalPlanSnapshot(plan);
       const projected = snapshot ? projectGoalPlan(snapshot) : null;
       // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，

@@ -1588,3 +1588,83 @@ test('recoverContextCheckpoints supersedes stale preparing checkpoint', () => {
   assert.equal(after.runner.contextCheckpoint, undefined);
 });
 
+test('qualityReview: 有交付绑定且完成门通过后会写上 qualityReview', async () => {
+  const plan = createApprovedPlan({
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      targetWorkspacePath: '/tmp/peer_agent',
+      boundAt: '2026-01-01T00:00:00.000Z',
+    },
+  });
+  const runtime = {
+    async runGoalTurn({ planId }) {
+      registerEvidenceRefs(planId, ['evidence://t1', 'evidence://t2']);
+      store.recordTaskEvidence(planId, 't1', {
+        status: 'completed',
+        evidenceRefs: ['evidence://t1'],
+      });
+      store.recordTaskEvidence(planId, 't2', {
+        status: 'completed',
+        evidenceRefs: ['evidence://t2'],
+      });
+      return {};
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(got.status, 'completed');
+  assert.equal(got.qualityReview?.status, 'passed');
+  assert.equal(got.runner.status, 'completed');
+});
+
+test('start: 已完成计划不再被拉回 running，并补写 qualityReview', async () => {
+  const plan = createApprovedPlan({
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      targetWorkspacePath: '/tmp/peer_agent',
+      boundAt: '2026-01-01T00:00:00.000Z',
+    },
+  });
+  registerEvidenceRefs(plan.planId, ['evidence://t1', 'evidence://t2']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['evidence://t1'],
+  });
+  store.recordTaskEvidence(plan.planId, 't2', {
+    status: 'completed',
+    evidenceRefs: ['evidence://t2'],
+  });
+  store.setPlanStatus(plan.planId, 'completed');
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'running',
+    intent: 'execute',
+    phase: 'orient',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  let turnCalls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      turnCalls += 1;
+      return {};
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(turnCalls, 0);
+  assert.equal(got.status, 'completed');
+  assert.equal(got.qualityReview?.status, 'passed');
+  assert.equal(got.runner.status, 'completed');
+});
+

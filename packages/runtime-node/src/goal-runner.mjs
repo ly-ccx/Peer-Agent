@@ -328,6 +328,15 @@ function hasCompletedProgress(plan) {
   return progress && progress.total > 0 && progress.completed === progress.total;
 }
 
+function planNeedsQualityReview(plan) {
+  return planRequiresQualityReview(plan) && plan?.qualityReview?.status !== 'passed';
+}
+
+function shouldRerunCompletedPlan(plan) {
+  if (!plan || plan.status !== 'completed') return false;
+  return plan.runner?.status === 'blocked' && plan.runner?.intent === 'verify';
+}
+
 /**
  * 统计计划内所有叶子任务（无 subtasks）的 evidenceRefs 总数。
  * 作为 no-progress 双信号之一：Evidence 增长视为有进展。
@@ -970,6 +979,7 @@ export function createGoalRunner({
     if (plan.qualityReview?.status === 'passed') return plan;
     if (typeof goalPlanStore.recordQualityReview !== 'function') return plan;
     const gate = evaluatePlanVerificationGate(plan);
+    if (!gate.passed) return plan;
     const nowIso = now();
     return goalPlanStore.recordQualityReview(plan.planId, {
       status: 'passed',
@@ -1280,6 +1290,22 @@ export function createGoalRunner({
     // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
     // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    // 已完成且无需再跑的计划不能再开泵：否则 pump 开头会把 runner 写回 running，
+    // 首页就会继续显示「正在执行 / Peer 正在自检」。
+    if (plan.status === 'completed' && !shouldRerunCompletedPlan(plan)) {
+      if (planNeedsQualityReview(plan)) recordPassedQualityReview(plan);
+      const latest = goalPlanStore.getPlan(planId) ?? plan;
+      if (latest.runner?.status === 'running' || latest.runner?.status === 'exploring') {
+        goalPlanStore.setRunnerState(planId, {
+          enabled: false,
+          status: 'completed',
+          intent: 'synthesize',
+          phase: 'synthesize',
+          updatedAt: now(),
+        });
+      }
+      return getState(planId);
+    }
     const initialized = initializeRunner(planId, options);
     if (!initialized) return null;
     appendRunEvent(planId, {
@@ -1574,6 +1600,7 @@ export function createGoalRunner({
             warnings: gate.warnings,
           });
         }
+        recordPassedQualityReview(plan);
         const verifier = await runVerifierIfAvailable(plan, gate);
         if (!verifier.passed) {
           if (plan.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
@@ -2182,6 +2209,7 @@ export function createGoalRunner({
             warnings: gate.warnings,
           });
         }
+        recordPassedQualityReview(latest);
         const verifier = await runVerifierIfAvailable(latest, gate);
         if (!verifier.passed) {
           if (latest.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');

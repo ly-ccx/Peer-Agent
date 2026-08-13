@@ -1266,3 +1266,66 @@ test('workspace-scoped TaskOverview uses the indexed workspace query instead of 
   assert.equal(fullListCalls, 0);
   assert.equal(workspaceListCalls, 1);
 });
+
+test('listTaskOverview 会补写已完成计划缺失的 qualityReview，并收成 runner 终态', () => {
+  const plan = {
+    planId: 'plan-stuck-review',
+    conversationId: 'conversation-stuck',
+    title: '提交质量环与路由',
+    status: 'completed',
+    accepted: false,
+    updatedAt: '2026-08-13T08:28:04.881Z',
+    timing: { completedAt: '2026-08-13T08:28:04.881Z' },
+    targetWorkspacePath: '/x/peer_agent',
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.4',
+      targetBranchSource: 'workspace_head',
+      targetWorkspacePath: '/x/peer_agent',
+      boundAt: '2026-08-13T08:13:37.976Z',
+    },
+    runner: {
+      enabled: true,
+      status: 'blocked',
+      intent: 'verify',
+      phase: 'repair',
+    },
+    progress: { completed: 4, total: 4 },
+    tasks: [
+      { taskId: 'audit', title: '核对将提交的文件，排除无关改动', status: 'completed' },
+      { taskId: 'stage', title: '只暂存本轮质量环和交付路由文件', status: 'completed' },
+      { taskId: 'commit', title: '写提交说明并提交', status: 'completed' },
+      { taskId: 'verify', title: '确认提交后工作区不再含本轮文件', status: 'completed' },
+    ],
+  };
+  let recordedReview = null;
+  let runnerPatch = null;
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [plan],
+      recordQualityReview: (planId, review) => {
+        recordedReview = { planId, review };
+        plan.qualityReview = review;
+        return plan;
+      },
+      setRunnerState: (planId, patch) => {
+        runnerPatch = { planId, patch };
+        plan.runner = { ...plan.runner, ...patch };
+        return plan;
+      },
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  const items = agg.listTaskOverview({ includeTerminal: true, activeWithinMs: 0 });
+
+  assert.equal(recordedReview?.planId, 'plan-stuck-review');
+  assert.equal(recordedReview?.review?.status, 'passed');
+  assert.equal(runnerPatch?.planId, 'plan-stuck-review');
+  assert.equal(runnerPatch?.patch?.status, 'completed');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].actionRight, 'result_ready');
+  assert.equal(items[0].statusLabel, '待用户验收');
+  assert.equal(items[0].qualityReviewStatus, 'passed');
+});
