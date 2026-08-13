@@ -12,7 +12,7 @@ const FALLBACK_MODELS = [
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: true,
-    reasoningEffortLevels: ['low', 'medium', 'high'],
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh'],
     defaultReasoningEffort: 'high',
   },
 ];

@@ -247,6 +247,49 @@ test('Grok OAuth records migrate to the official display name', () => withStore(
   assert.equal(persisted.name, 'Grok 官方');
 }));
 
+test('Grok official channel wins over stale low/medium/high effort cache', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'grok-group',
+      groupId: 'grok-group',
+      provider: 'openai',
+      channelId: 'grok',
+      authMethod: 'oauth_grok',
+      name: 'Grok 官方',
+      baseUrl: 'https://cli-chat-proxy.grok.com/v1',
+      oauthConfigured: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'grok-46',
+      groupId: 'grok-group',
+      provider: 'openai',
+      channelId: 'grok',
+      authMethod: 'oauth_grok',
+      name: 'Grok 官方',
+      baseUrl: 'https://cli-chat-proxy.grok.com/v1',
+      model: 'grok-4.6',
+      enabled: true,
+      isDefault: true,
+      supportsReasoning: true,
+      reasoningEffortLevels: ['low', 'medium', 'high'],
+      reasoningDefaultEffort: 'high',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
+  assert.equal(provider.reasoningDefaultEffort, 'high');
+  assert.equal(provider.reasoningParamStyle, 'openai-effort');
+  assert.equal(provider.reasoningEffortMap?.xhigh, 'xhigh');
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
+}));
+
 test('Google OAuth records migrate away from the openai display name', () => withStore(({ configFile }) => {
   writeFileSync(configFile, JSON.stringify([
     {

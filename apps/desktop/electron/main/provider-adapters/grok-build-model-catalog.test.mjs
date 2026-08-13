@@ -30,6 +30,27 @@ describe('Grok Build model catalog', () => {
     assert.equal(result.source, 'remote');
     assert.equal(result.models[0].id, 'grok-4.5');
     assert.equal(result.models[0].contextWindow, 500000);
+    assert.deepEqual(result.models[0].reasoningEffortLevels, ['low', 'medium', 'high']);
+  });
+
+  it('keeps remote xhigh and falls back to four official effort levels', async () => {
+    const remote = await listGrokBuildModels('access-token', {
+      fetchImpl: async () => new Response(JSON.stringify({ data: [{
+        id: 'grok-4.6',
+        display_name: 'Grok 4.6',
+        context_window: 500000,
+        supports_reasoning: true,
+        supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+      }] }), { status: 200 }),
+    });
+    assert.equal(remote.models[0].id, 'grok-4.6');
+    assert.deepEqual(remote.models[0].reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
+
+    const fallback = await listGrokBuildModels('access-token', {
+      fetchImpl: async () => { throw new Error('offline'); },
+    });
+    assert.equal(fallback.source, 'builtin');
+    assert.deepEqual(fallback.models[0].reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
   });
 
   it('returns the built-in Grok model when live catalog fails', async () => {

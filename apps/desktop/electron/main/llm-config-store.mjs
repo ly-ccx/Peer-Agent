@@ -611,6 +611,33 @@ export function createLlmConfigStore({
         changed = true;
       }
     }
+    // Grok 官方：旧配置可能仍是 4.5 时代的 low/medium/high。
+    // UI 优先读模型持久化字段，会把渠道新声明的 xhigh 挡住。
+    if (item.channelId === 'grok') {
+      const targetLevels = ['low', 'medium', 'high', 'xhigh'];
+      const currentLevels = Array.isArray(item.reasoningEffortLevels)
+        ? item.reasoningEffortLevels
+        : null;
+      const levelsStale = !currentLevels
+        || currentLevels.length !== targetLevels.length
+        || currentLevels.some((level, index) => level !== targetLevels[index]);
+      if (levelsStale) {
+        item.reasoningEffortLevels = [...targetLevels];
+        changed = true;
+      }
+      if (item.reasoningDefaultEffort !== 'high') {
+        item.reasoningDefaultEffort = 'high';
+        changed = true;
+      }
+      if (item.supportsReasoning !== true) {
+        item.supportsReasoning = true;
+        changed = true;
+      }
+      if (item.reasoningParamStyle !== 'openai-effort') {
+        item.reasoningParamStyle = 'openai-effort';
+        changed = true;
+      }
+    }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
         validateCustomHeaders(item.customHeaders);
@@ -890,12 +917,14 @@ export function createLlmConfigStore({
       supportsVision: item.supportsVision ?? undefined,
       supportsReasoning: item.supportsReasoning ?? undefined,
       supportsPromptCaching: item.supportsPromptCaching ?? undefined,
-      // DeepSeek：渠道级思考契约优先于模型历史缓存，避免 off/default / 空 paramStyle 盖住新能力。
+      // DeepSeek / Kimi / Grok：渠道级思考契约优先于模型历史缓存。
+      // 避免旧档位（DeepSeek off/default、Grok 三档）盖住渠道新声明。
       // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
       reasoningParamStyle: (
         item.channelId === 'deepseek'
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
+        || item.channelId === 'grok'
       )
         ? (resolved?.reasoningParamStyle ?? item.reasoningParamStyle ?? undefined)
         : (item.reasoningParamStyle ?? undefined),
@@ -903,6 +932,7 @@ export function createLlmConfigStore({
         item.channelId === 'deepseek'
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
+        || item.channelId === 'grok'
       )
         ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
         : (item.reasoningEffortMap ?? undefined),
@@ -910,6 +940,7 @@ export function createLlmConfigStore({
         item.channelId === 'deepseek'
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
+        || item.channelId === 'grok'
           ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
           : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
       ) ?? undefined,
@@ -917,6 +948,7 @@ export function createLlmConfigStore({
         item.channelId === 'deepseek'
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
+        || item.channelId === 'grok'
           ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
           : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
       ) ?? undefined,
