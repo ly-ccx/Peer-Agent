@@ -1570,7 +1570,7 @@ const PlanCard = memo(function PlanCard({
     && (plan.status === 'executing' || plan.status === 'paused' || Boolean(plan.timing?.activeSegmentStartedAt)),
   );
   const nowMs = useLiveNowMs(timingLive);
-  const timingLabel = formatGoalTimingLabel(plan, isZh, nowMs);
+  const elapsedLabel = formatGoalTimingLabel(plan, isZh, nowMs);
 
   return (
     <section
@@ -1594,17 +1594,14 @@ const PlanCard = memo(function PlanCard({
             {planStatusLabel(plan.status, isZh)}
           </span>
           <span className="goal-plan-title">{title}</span>
-          {deliveryRoute ? (
-            <span className="goal-plan-head-route">{deliveryRoute}</span>
-          ) : null}
-          {timingLabel ? (
+          {elapsedLabel ? (
             <span
               className={`goal-plan-head-timing${timingLive ? ' goal-plan-head-timing--live' : ''}`}
               title={timingLive
                 ? (isZh ? '有效运行时间（暂停/等人时停表）' : 'Active runtime (pauses while waiting)')
                 : (isZh ? '有效运行用时' : 'Active runtime')}
             >
-              {timingLabel}
+              {elapsedLabel}
             </span>
           ) : null}
           <span className="goal-plan-head-progress">
@@ -1637,6 +1634,9 @@ const PlanCard = memo(function PlanCard({
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
+          {deliveryRoute ? (
+            <p className="goal-plan-delivery-route">{deliveryRoute}</p>
+          ) : null}
           {parentPlan ? (
             <div className="goal-plan-origin" data-goal-plan-origin>
               <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>

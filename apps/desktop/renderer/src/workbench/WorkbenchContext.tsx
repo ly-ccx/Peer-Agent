@@ -166,10 +166,20 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
 interface WorkbenchProviderProps {
   readonly conversationId: string | null;
   readonly isPageActive: boolean;
+  /**
+   * 嵌套工作台（会话抽屉）只把开合写到自己的面板，不投影到 :root。
+   * 否则会和主会话第三列抢 `--za-workbench-width` / `data-workbench-open`。
+   */
+  readonly layoutHost?: 'root' | 'local';
   readonly children: ReactNode;
 }
 
-export function WorkbenchProvider({ conversationId, isPageActive, children }: WorkbenchProviderProps) {
+export function WorkbenchProvider({
+  conversationId,
+  isPageActive,
+  layoutHost = 'root',
+  children,
+}: WorkbenchProviderProps) {
   const initial = readWorkbenchSettings(clientApi.initialSettings);
   const legacyOpenDefault = initial.open === true;
   const [openByConversation, setOpenByConversation] = useState<WorkbenchOpenMap>(
@@ -463,21 +473,25 @@ export function WorkbenchProvider({ conversationId, isPageActive, children }: Wo
 
   // 同步 CSS 变量：右栏宽度
   useEffect(() => {
+    if (layoutHost !== 'root') return;
     document.documentElement.style.setProperty('--za-workbench-width', `${width}px`);
-  }, [width]);
+  }, [width, layoutHost]);
 
   // 同步 CSS 变量：左栏当前宽度（拖拽态由 Resizer 直接覆盖此变量，松手后回落到 state）
   useEffect(() => {
+    if (layoutHost !== 'root') return;
     document.documentElement.style.setProperty('--za-sidebar-current-width', `${sidebarWidth}px`);
-  }, [sidebarWidth]);
+  }, [sidebarWidth, layoutHost]);
 
   // 根布局只投影当前可见的 Workbench；离开 Chat 时保留 open 状态但释放第三列。
   useEffect(() => {
+    if (layoutHost !== 'root') return;
     document.documentElement.dataset.workbenchOpen = workbenchIsLayoutVisible(open, isPageActive) ? 'true' : 'false';
-  }, [open, isPageActive]);
+  }, [open, isPageActive, layoutHost]);
   useEffect(() => {
+    if (layoutHost !== 'root') return;
     document.documentElement.dataset.sidebarCollapsed = sidebarCollapsed ? 'true' : 'false';
-  }, [sidebarCollapsed]);
+  }, [sidebarCollapsed, layoutHost]);
 
   // 窗口缩放时重新夹紧
   useEffect(() => {

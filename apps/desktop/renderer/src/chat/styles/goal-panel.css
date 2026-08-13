@@ -568,6 +568,17 @@
   color: var(--za-text-soft);
 }
 
+.goal-plan-delivery-route {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.45;
+  color: var(--za-text-soft);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;
