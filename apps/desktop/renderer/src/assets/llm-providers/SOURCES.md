@@ -2,7 +2,7 @@
 
 These files are unmodified brand images published by each provider on a provider-controlled website or official GitHub organization. Peer Agent does not trace, redraw, recolor, or synthesize these marks.
 
-Downloaded: 2026-08-03 (base set); third-party coding-plan brands added 2026-08-04.
+Downloaded: 2026-08-03 (base set); third-party coding-plan brands added 2026-08-04; OpenRouter added 2026-08-14.
 
 | Brand | Local file used by UI | Publisher-controlled source | Publisher identity evidence | SHA-256 |
 | --- | --- | --- | --- | --- |
@@ -20,6 +20,7 @@ Downloaded: 2026-08-03 (base set); third-party coding-plan brands added 2026-08-
 | Xiaomi MiMo | `xiaomi.png` | `https://avatars.githubusercontent.com/u/1309360?s=256` | `https://github.com/XiaoMi` identifies itself as XiaoMi and links to `http://mi.com/` | `7910fce177f5106ec763fcd49f6a448b650380337e67a4311b324ed8bb23de2b` |
 | Aliyun Bailian | `bailian.png` | `https://avatars.githubusercontent.com/u/1961952?s=256` | `https://github.com/alibaba` is Alibaba's official GitHub org; used for Bailian / Model Studio cards | `1c6a24d10ef34a6f255c75e0ecf47b5138e681c31eb47c846f0bf80601d1a04f` |
 | OpenCode | `opencode.png` | `https://avatars.githubusercontent.com/u/208539476?s=256` | `https://github.com/anomalyco` publishes OpenCode and links to `https://opencode.ai` | `3352825928f7ae69503c80852d593d204e24bbea48f0036c892aa04985eadee5` |
+| OpenRouter | `openrouter.jpg` | `https://github.com/OpenRouterTeam.png?size=256` | `https://github.com/OpenRouterTeam` is OpenRouter's official GitHub org and links to `https://openrouter.ai` | `ac3b00d75e56467c444df1afbfbd12bcde380a51f4710ba0d995a82e43aa88ae` |
 | Qwen | `qwen.png` | `https://avatars.githubusercontent.com/u/141221163?s=256` | `https://github.com/QwenLM` identifies itself as Qwen and links to `https://qwen.ai/` | `9b67ba50ca7f5ff338bee347cf454f87891e5c525585ea2f659938ab29d94e8e` |
 | Meta Llama | `meta.png` | `https://avatars.githubusercontent.com/u/153379578?s=256` | `https://github.com/meta-llama` identifies itself as Meta Llama and links to `https://llama.meta.com/` | `bbb79831877fea12041592faa8275afcfe41ee9f0cf005752be23122ce4d9976` |
 | Mistral AI | `mistral.png` | `https://avatars.githubusercontent.com/u/132372032?s=256` | `https://github.com/mistralai` identifies itself as Mistral AI and links to `https://mistral.ai/` | `8a1c91c5df671d58c3b3219885511860e5c77144c9acec97b8d58415628805ba` |

@@ -348,6 +348,40 @@ describe('service templates', () => {
     }
   });
 
+  it('registers OpenRouter as a third-party OpenAI Chat channel', () => {
+    assert.equal(CHANNEL_IDS.OPENROUTER, 'openrouter');
+    const descriptor = listChannelDescriptors().find((channel) => channel.id === CHANNEL_IDS.OPENROUTER);
+    assert.ok(descriptor);
+    assert.equal(descriptor?.label, 'OpenRouter');
+    assert.equal(descriptor?.defaultWire, 'openai-chat');
+    assert.deepEqual(descriptor?.allowedWires, ['openai-chat']);
+    assert.equal(descriptor?.defaults.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(descriptor?.defaults.model, 'openai/gpt-4o');
+
+    const templates = listServiceTemplates();
+    const template = templates.find((item) => item.id === 'openrouter-api');
+    assert.ok(template);
+    assert.equal(template?.accessCategory, 'third_party');
+    assert.equal(template?.channelId, CHANNEL_IDS.OPENROUTER);
+    assert.equal(template?.defaults.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(resolveServiceTemplateId({
+      channelId: CHANNEL_IDS.OPENROUTER,
+      authMethod: 'api_key',
+    }), 'openrouter-api');
+
+    const resolved = resolveChannel({
+      channelId: CHANNEL_IDS.OPENROUTER,
+      authMethod: 'api_key',
+      apiKey: 'or-key',
+    });
+    assert.equal(resolved.wire, 'openai-chat');
+    assert.equal(resolved.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(resolved.endpoint, 'https://openrouter.ai/api/v1/chat/completions');
+    assert.equal(resolved.headers.Authorization, `Bearer ${'or-key'}`);
+    assert.equal(resolved.headers['HTTP-Referer'], 'https://github.com/ly-ccx/Peer-Agent');
+    assert.equal(resolved.headers['X-Title'], 'Peer Agent');
+  });
+
   it('exposes MiniMax CN and Global coding templates with distinct endpoints', () => {
     const templates = listServiceTemplates();
     const cn = templates.find((item) => item.id === 'minimax-cn');

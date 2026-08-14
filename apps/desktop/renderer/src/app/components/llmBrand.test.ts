@@ -23,6 +23,7 @@ const officialAssets = [
   'xiaomi.png',
   'bailian.png',
   'opencode.png',
+  'openrouter.jpg',
   'qwen.png',
   'meta.png',
   'mistral.png',
@@ -50,6 +51,8 @@ describe('LLM brand icon resolution', () => {
     assert.equal(resolveLlmBrand({ brand: 'OpenCode', channelId: 'opencode-go' }), 'opencode');
     assert.equal(resolveLlmBrand({ brand: 'OpenCode', channelId: 'opencode-go-openai' }), 'opencode');
     assert.equal(resolveLlmBrand({ channelId: 'opencode-go-anthropic' }), 'opencode');
+    assert.equal(resolveLlmBrand({ brand: 'OpenRouter', channelId: 'openrouter' }), 'openrouter');
+    assert.equal(resolveLlmBrand({ serviceTemplateId: 'openrouter-api' }), 'openrouter');
   });
 
   it('uses model family before a generic provider brand', () => {

@@ -26,6 +26,7 @@ export const CHANNEL_IDS = {
   /** @deprecated legacy dual-entry ids — normalized to OPENCODE_GO */
   OPENCODE_GO_OPENAI: 'opencode-go-openai',
   OPENCODE_GO_ANTHROPIC: 'opencode-go-anthropic',
+  OPENROUTER: 'openrouter',
   OPENAI_COMPATIBLE: 'openai-compatible',
   ANTHROPIC_COMPATIBLE: 'anthropic-compatible',
   GOOGLE_AI: 'google-ai',
@@ -88,6 +89,8 @@ export const OPENCODE_GO_DEFAULT_MODEL = 'gpt-5.6-luna';
 export const OPENCODE_GO_OPENAI_DEFAULT_MODEL = OPENCODE_GO_DEFAULT_MODEL;
 /** @deprecated legacy dual-entry default */
 export const OPENCODE_GO_ANTHROPIC_DEFAULT_MODEL = 'minimax-m2.5';
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+export const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o';
 const PROTECTED_HEADER_NAMES = new Set([
   'authorization',
   'x-api-key',
@@ -472,6 +475,43 @@ const CHANNEL_DESCRIPTORS = {
         paramStyle: 'openai-effort',
         effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
+      },
+      promptCache: true,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
+  [CHANNEL_IDS.OPENROUTER]: {
+    id: CHANNEL_IDS.OPENROUTER,
+    label: 'OpenRouter',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { api_key: { wire: 'openai-chat' } },
+    defaults: {
+      baseUrl: OPENROUTER_BASE_URL,
+      model: OPENROUTER_DEFAULT_MODEL,
+    },
+    headers: {
+      'HTTP-Referer': 'https://github.com/ly-ccx/Peer-Agent',
+      'X-Title': 'Peer Agent',
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'openai-effort',
+        effortLevels: ['off', 'low', 'default', 'max'],
+        defaultEffort: 'default',
+        effortMap: {
+          off: 'none',
+          low: 'low',
+          medium: 'high',
+          default: 'high',
+          high: 'high',
+          xhigh: 'max',
+          max: 'max',
+        },
       },
       promptCache: true,
       vision: true,
@@ -1016,6 +1056,25 @@ const SERVICE_TEMPLATES = [
     },
     searchAliases: ['qoder', 'local'],
     tags: ['本地 / 私有'],
+  },
+  {
+    id: 'openrouter-api',
+    brand: 'OpenRouter',
+    title: 'OpenRouter',
+    description: 'OpenRouter 官方 API，一个 Key 路由多家模型',
+    accessCategory: 'third_party',
+    supportTier: 'verified',
+    channelId: CHANNEL_IDS.OPENROUTER,
+    authMethod: 'api_key',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    defaults: {
+      baseUrl: OPENROUTER_BASE_URL,
+      model: OPENROUTER_DEFAULT_MODEL,
+      hideBaseUrlByDefault: true,
+    },
+    searchAliases: ['openrouter', 'open router'],
+    tags: ['第三方'],
   },
   {
     id: 'openai-compatible',

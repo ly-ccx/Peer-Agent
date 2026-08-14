@@ -9,6 +9,7 @@ import mistralIcon from '../../assets/llm-providers/mistral.png';
 import moonshotIcon from '../../assets/llm-providers/moonshot.png';
 import openaiIcon from '../../assets/llm-providers/openai.png';
 import opencodeIcon from '../../assets/llm-providers/opencode.png';
+import openrouterIcon from '../../assets/llm-providers/openrouter.jpg';
 import qoderIcon from '../../assets/llm-providers/qoder.svg';
 import qwenIcon from '../../assets/llm-providers/qwen.png';
 import volcengineIcon from '../../assets/llm-providers/volcengine.png';
@@ -33,6 +34,7 @@ const OFFICIAL_ASSETS: Readonly<Partial<Record<LlmBrandId, string>>> = {
   xiaomi: xiaomiIcon,
   bailian: bailianIcon,
   opencode: opencodeIcon,
+  openrouter: openrouterIcon,
   qwen: qwenIcon,
   meta: metaIcon,
   mistral: mistralIcon,

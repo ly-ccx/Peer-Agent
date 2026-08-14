@@ -13,6 +13,7 @@ export type LlmBrandId =
   | 'xiaomi'
   | 'bailian'
   | 'opencode'
+  | 'openrouter'
   | 'qwen'
   | 'meta'
   | 'mistral'
@@ -41,6 +42,7 @@ const BRAND_LABELS: Readonly<Record<LlmBrandId, string>> = {
   xiaomi: 'Xiaomi MiMo',
   bailian: 'Aliyun Bailian',
   opencode: 'OpenCode',
+  openrouter: 'OpenRouter',
   qwen: 'Qwen',
   meta: 'Meta',
   mistral: 'Mistral AI',
@@ -67,6 +69,7 @@ function matchBrand(value: string): LlmBrandId | null {
   if (/qwen|tongyi/.test(value)) return 'qwen';
   if (/\bmeta\b|llama/.test(value)) return 'meta';
   if (/mistral|mixtral|codestral/.test(value)) return 'mistral';
+  if (/openrouter/.test(value)) return 'openrouter';
   if (/\b(openai|chatgpt|codex|gpt(?:-|\b)|o[134](?:-|\b))/.test(value)) return 'openai';
   return null;
 }
