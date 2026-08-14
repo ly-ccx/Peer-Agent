@@ -1201,12 +1201,6 @@
     @apply absolute right-0 top-0 z-10 flex items-center justify-end gap-3;
     margin-bottom: 0;
   }
-  /* 工具栏搜索 / 分类 / 同步：同一圆角 token，避免 pill / xl / lg 混用 */
-  .skill-marketplace-toolbar input,
-  .skill-marketplace-category-select .pa-dropdown-trigger,
-  .skill-marketplace-toolbar .skill-marketplace-install {
-    border-radius: var(--ui-radius-round);
-  }
   .skill-marketplace-toolbar input {
     @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
     color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
@@ -1384,7 +1378,7 @@
   }
   .skill-marketplace-category-select .pa-dropdown-trigger {
     @apply px-3 py-2 text-[12px];
-    border-radius: var(--ui-radius-round);
+    border-radius: var(--ui-radius-control);
     min-height: 34px;
     color: var(--za-text);
     background: var(--za-surface);
@@ -1463,4 +1457,12 @@
     .skill-detail-content { margin: 0 10px 10px; padding: 20px; }
     .skill-detail-meta { padding-inline: 20px; }
   }
+}
+
+/* 未分层覆盖：全局 .pa-dropdown-trigger 的 --radius-md(8px) 不在 @layer 内，
+   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步共用控件圆角，不是胶囊。 */
+.skill-marketplace-toolbar input,
+.skill-marketplace-category-select .pa-dropdown-trigger,
+.skill-marketplace-toolbar .skill-marketplace-install {
+  border-radius: var(--ui-radius-control);
 }
