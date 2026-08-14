@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -7,7 +8,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
@@ -36,11 +38,48 @@ const SEARCH_IGNORED_DIRS = new Set([
   '.cache',
   '.idea',
   '.vscode',
+  '.pnpm',
+  '__pycache__',
+  '.venv',
+  'venv',
+  'target',
 ]);
 const SEARCH_MAX_FILE_BYTES = 1_000_000;
 const SEARCH_DEFAULT_MAX_RESULTS = 50;
 const SEARCH_MAX_RESULTS_CAP = 200;
 const SEARCH_MAX_FILES_SCANNED = 5_000;
+const SEARCH_YIELD_EVERY_FILES = 16;
+const SEARCH_SKIP_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico',
+  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.7z',
+  '.woff', '.woff2', '.ttf', '.eot', '.otf',
+  '.mp4', '.mp3', '.wav', '.mov',
+  '.wasm', '.dylib', '.so', '.dll', '.bin',
+]);
+
+let ripgrepResolved = null;
+
+function yieldEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('search aborted');
+  error.name = 'AbortError';
+  throw error;
+}
+
+async function hasRipgrep() {
+  if (process.env.PEER_AGENT_DISABLE_RIPGREP === '1') return false;
+  if (ripgrepResolved !== null) return ripgrepResolved;
+  ripgrepResolved = await new Promise((resolvePromise) => {
+    const child = spawn('rg', ['--version'], { stdio: 'ignore' });
+    child.once('error', () => resolvePromise(false));
+    child.once('exit', (code) => resolvePromise(code === 0));
+  });
+  return ripgrepResolved;
+}
 
 function previewText(value, maxChars = MAX_TOOL_CONTEXT_CHARS) {
   const text = String(value ?? '');
@@ -295,18 +334,141 @@ function materializeFileRead({ filePath, content, readState }) {
   };
 }
 
-function* walkSearchFiles(rootDir) {
+function formatSearchSuccess({ query, cwd, searchRoot, matches, filesWithMatches, truncated }) {
+  const summaryLines = matches.map((m) => `${m.path}:${m.line}: ${m.text}`);
+  const headline = matches.length === 0
+    ? `No matches for "${query}".`
+    : `Found ${matches.length} match(es) in ${filesWithMatches} file(s)${truncated ? ' (truncated)' : ''}.`;
+  return {
+    success: true,
+    output: formatContextResult({
+      status: 'success',
+      tool: 'search_files',
+      query,
+      root: relative(cwd, searchRoot) || '.',
+      matchCount: matches.length,
+      fileCount: filesWithMatches,
+      truncated,
+      matches,
+      preview: [headline, ...summaryLines].join('\n'),
+    }),
+  };
+}
+
+async function searchWithRipgrep({ query, searchRoot, cwd, caseSensitive, maxResults, signal }) {
+  const args = [
+    '--json',
+    '--hidden',
+    '--color', 'never',
+    '--fixed-strings',
+    '--max-filesize', String(SEARCH_MAX_FILE_BYTES),
+  ];
+  if (!caseSensitive) args.push('-i');
+  for (const dir of SEARCH_IGNORED_DIRS) {
+    args.push('--glob', `!${dir}/**`);
+  }
+  args.push('--', query, searchRoot);
+
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn('rg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let settled = false;
+    const matches = [];
+    const matchedFiles = new Set();
+    let truncated = false;
+
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolvePromise({
+        matches,
+        filesWithMatches: matchedFiles.size,
+        truncated,
+      });
+    };
+
+    const onAbort = () => {
+      child.kill('SIGTERM');
+      const error = new Error('search aborted');
+      error.name = 'AbortError';
+      finish(error);
+    };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      const lines = stdout.split('\n');
+      stdout = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (parsed?.type !== 'match') continue;
+        const absPath = parsed.data?.path?.text;
+        const lineNumber = parsed.data?.line_number;
+        const text = String(parsed.data?.lines?.text ?? '').replace(/\n$/, '');
+        if (!absPath || !Number.isFinite(lineNumber)) continue;
+        matches.push({
+          path: relative(cwd, absPath) || absPath,
+          line: lineNumber,
+          text: truncateText(text.trim(), 240),
+        });
+        matchedFiles.add(absPath);
+        if (matches.length >= maxResults) {
+          truncated = true;
+          child.kill('SIGTERM');
+          finish(null);
+          return;
+        }
+      }
+    });
+    child.once('error', (error) => finish(error));
+    child.once('exit', (code, sig) => {
+      if (settled) return;
+      if (code === 0 || code === 1 || code === null || sig === 'SIGTERM' || sig === 'SIGKILL') {
+        finish(null);
+        return;
+      }
+      const error = new Error(`rg exited with code ${code}`);
+      error.code = 'RG_EXIT';
+      finish(error);
+    });
+  });
+}
+
+async function searchByWalkingFiles({ query, searchRoot, cwd, caseSensitive, maxResults, signal }) {
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const matches = [];
+  const stack = [searchRoot];
   let scanned = 0;
-  const stack = [rootDir];
+  let filesWithMatches = 0;
+  let truncated = false;
+
   while (stack.length > 0) {
+    throwIfAborted(signal);
     const dir = stack.pop();
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = await readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const entry of entries) {
+      throwIfAborted(signal);
       const entryPath = resolve(dir, entry.name);
       if (entry.isDirectory()) {
         if (SEARCH_IGNORED_DIRS.has(entry.name)) continue;
@@ -314,14 +476,62 @@ function* walkSearchFiles(rootDir) {
         continue;
       }
       if (!entry.isFile()) continue;
+      if (SEARCH_SKIP_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
       scanned += 1;
-      if (scanned > SEARCH_MAX_FILES_SCANNED) return;
-      yield entryPath;
+      if (scanned > SEARCH_MAX_FILES_SCANNED) {
+        truncated = truncated || matches.length >= maxResults;
+        return { matches, filesWithMatches, truncated: true };
+      }
+      if (scanned % SEARCH_YIELD_EVERY_FILES === 0) {
+        await yieldEventLoop();
+        throwIfAborted(signal);
+      }
+      if (matches.length >= maxResults) {
+        truncated = true;
+        return { matches, filesWithMatches, truncated };
+      }
+
+      let fileStat;
+      try {
+        fileStat = await statAsync(entryPath);
+      } catch {
+        continue;
+      }
+      if (fileStat.size > SEARCH_MAX_FILE_BYTES) continue;
+
+      let content;
+      try {
+        content = await readFile(entryPath, 'utf8');
+      } catch {
+        continue;
+      }
+      if (content.includes('\u0000')) continue;
+
+      const lines = content.split('\n');
+      let fileMatched = false;
+      for (let i = 0; i < lines.length; i += 1) {
+        const haystack = caseSensitive ? lines[i] : lines[i].toLowerCase();
+        if (!haystack.includes(needle)) continue;
+        fileMatched = true;
+        matches.push({
+          path: relative(cwd, entryPath) || entryPath,
+          line: i + 1,
+          text: truncateText(lines[i].trim(), 240),
+        });
+        if (matches.length >= maxResults) {
+          truncated = true;
+          break;
+        }
+      }
+      if (fileMatched) filesWithMatches += 1;
+      if (truncated) return { matches, filesWithMatches, truncated };
     }
   }
+
+  return { matches, filesWithMatches, truncated };
 }
 
-export async function runFileSearch({ args, cwd, requestPermission }) {
+export async function runFileSearch({ args = {}, cwd, requestPermission, signal } = {}) {
   const query = typeof args.query === 'string' ? args.query : '';
   if (query.length === 0) {
     return formatToolFailure('search_files', 'blocked', 'query must be a non-empty string');
@@ -353,71 +563,26 @@ export async function runFileSearch({ args, cwd, requestPermission }) {
     SEARCH_MAX_RESULTS_CAP,
   );
   const caseSensitive = args.case_sensitive === true;
-  const needle = caseSensitive ? query : query.toLowerCase();
+  throwIfAborted(signal);
 
-  const matches = [];
-  let filesWithMatches = 0;
-  let truncated = false;
-
-  for (const filePath of walkSearchFiles(searchRoot)) {
-    if (matches.length >= maxResults) {
-      truncated = true;
-      break;
-    }
-    let stat;
-    try {
-      stat = statSync(filePath);
-    } catch {
-      continue;
-    }
-    if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
-
-    let content;
-    try {
-      content = readFileSync(filePath, 'utf8');
-    } catch {
-      continue;
-    }
-    if (content.includes('\u0000')) continue;
-
-    const lines = content.split('\n');
-    let fileMatched = false;
-    for (let i = 0; i < lines.length; i += 1) {
-      const haystack = caseSensitive ? lines[i] : lines[i].toLowerCase();
-      if (!haystack.includes(needle)) continue;
-      fileMatched = true;
-      matches.push({
-        path: relative(cwd, filePath) || filePath,
-        line: i + 1,
-        text: truncateText(lines[i].trim(), 240),
-      });
-      if (matches.length >= maxResults) {
-        truncated = true;
-        break;
-      }
-    }
-    if (fileMatched) filesWithMatches += 1;
+  let scanned;
+  try {
+    scanned = await hasRipgrep()
+      ? await searchWithRipgrep({ query, searchRoot, cwd, caseSensitive, maxResults, signal })
+      : await searchByWalkingFiles({ query, searchRoot, cwd, caseSensitive, maxResults, signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    scanned = await searchByWalkingFiles({ query, searchRoot, cwd, caseSensitive, maxResults, signal });
   }
 
-  const summaryLines = matches.map((m) => `${m.path}:${m.line}: ${m.text}`);
-  const headline = matches.length === 0
-    ? `No matches for "${query}".`
-    : `Found ${matches.length} match(es) in ${filesWithMatches} file(s)${truncated ? ' (truncated)' : ''}.`;
-
-  return {
-    success: true,
-    output: formatContextResult({
-      status: 'success',
-      tool: 'search_files',
-      query,
-      root: relative(cwd, searchRoot) || '.',
-      matchCount: matches.length,
-      fileCount: filesWithMatches,
-      truncated,
-      matches,
-      preview: [headline, ...summaryLines].join('\n'),
-    }),
-  };
+  return formatSearchSuccess({
+    query,
+    cwd,
+    searchRoot,
+    matches: scanned.matches,
+    filesWithMatches: scanned.filesWithMatches,
+    truncated: scanned.truncated,
+  });
 }
 
 async function runFileTool({ name, args, cwd, toolContext, requestPermission }) {

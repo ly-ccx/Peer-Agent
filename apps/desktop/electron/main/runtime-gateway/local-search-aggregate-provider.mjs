@@ -97,7 +97,7 @@ function emitLane(context, payload) {
 }
 
 /**
- * 执行单条子路。runFileSearch 为同步阻塞计算，这里用 Promise 包裹以便并发调度，
+ * 执行单条子路。runFileSearch 会检查 AbortSignal，超时/取消可中断扫描。
  * 并在 signal 已 abort 时短路。返回 lane 终态描述（永不抛出，失败被收敛）。
  */
 async function runLane(lane, { cwd, signal, context }) {
@@ -115,7 +115,7 @@ async function runLane(lane, { cwd, signal, context }) {
   const startedAt = Date.now();
   try {
     const fileResult = await withTimeout(
-      () =>
+      (searchSignal) =>
         runFileSearch({
           args: {
             query: lane.query,
@@ -125,6 +125,7 @@ async function runLane(lane, { cwd, signal, context }) {
           },
           cwd,
           requestPermission: context.requestPermission,
+          signal: searchSignal,
         }),
       DEFAULT_LANE_TIMEOUT_MS,
       signal,
@@ -204,16 +205,19 @@ const TIMEOUT = Symbol('lane-timeout');
 const ABORTED = Symbol('lane-aborted');
 
 /**
- * 为单条同步检索附加超时与取消语义。runFileSearch 同步执行，无法真正中断
- * CPU 计算，这里在调用前后检查 signal/超时，提供 best-effort 隔离。
+ * 为单条检索附加超时与取消语义。runFileSearch 会检查 AbortSignal 并在
+ * 文件之间让出事件循环，因此超时可以真正打断扫描。
  */
 async function withTimeout(fn, timeoutMs, signal) {
   if (signal?.aborted) return ABORTED;
-  return await new Promise((resolvePromise) => {
-    let settled = false;
+  const inner = new AbortController();
+  let settled = false;
+
+  return await new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      inner.abort();
       resolvePromise(TIMEOUT);
     }, timeoutMs);
 
@@ -221,31 +225,31 @@ async function withTimeout(fn, timeoutMs, signal) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      inner.abort();
       resolvePromise(ABORTED);
     };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
-    // 让出事件循环一拍，使 timeout/abort 有机会先于同步计算生效。
-    setImmediate(() => {
-      if (settled) {
-        if (signal) signal.removeEventListener('abort', onAbort);
-        return;
-      }
-      let result;
-      try {
-        result = fn();
-      } catch (error) {
+    Promise.resolve()
+      .then(() => fn(inner.signal))
+      .then((result) => {
+        if (settled) return;
         settled = true;
         clearTimeout(timer);
         if (signal) signal.removeEventListener('abort', onAbort);
-        throw error;
-      }
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolvePromise(result);
-    });
+        resolvePromise(result);
+      })
+      .catch((error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        if (error?.name === 'AbortError' || inner.signal.aborted) {
+          resolvePromise(signal?.aborted ? ABORTED : TIMEOUT);
+          return;
+        }
+        reject(error);
+      });
   });
 }
 

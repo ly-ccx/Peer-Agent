@@ -931,15 +931,15 @@ test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收�
   );
 });
 
-test('workspace overview 使用按工作区读取接口，全局 overview 保持全量读取', () => {
+test('workspace overview 使用按工作区读取接口，全局 overview 传入 candidateFilter', () => {
   const calls = [];
   const goalPlanStore = {
-    listPlanDetails: () => {
-      calls.push(['all']);
+    listPlanDetails: (options) => {
+      calls.push(['all', typeof options?.candidateFilter]);
       return [];
     },
-    listPlanDetailsByWorkspace: (workspacePath) => {
-      calls.push(['workspace', workspacePath]);
+    listPlanDetailsByWorkspace: (workspacePath, options) => {
+      calls.push(['workspace', workspacePath, typeof options?.candidateFilter]);
       return [];
     },
   };
@@ -953,9 +953,46 @@ test('workspace overview 使用按工作区读取接口，全局 overview 保持
   agg.listTaskOverview({ includeTerminal: false });
 
   assert.deepEqual(calls, [
-    ['workspace', '/tmp/workspace-a'],
-    ['all'],
+    ['workspace', '/tmp/workspace-a', 'function'],
+    ['all', 'function'],
   ]);
+});
+
+test('global TaskOverview candidateFilter skips grandfathered completed before hydrate', () => {
+  const hydrated = [];
+  const metas = [
+    {
+      planId: 'old-done',
+      status: 'completed',
+      title: '存量完成',
+      updatedAt: STALE,
+      targetWorkspacePath: '/x/peer_agent',
+    },
+    {
+      planId: 'live',
+      status: 'executing',
+      title: '执行中',
+      updatedAt: POST_CUTOFF,
+      targetWorkspacePath: '/x/peer_agent',
+      runner: { status: 'running' },
+    },
+  ];
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: ({ candidateFilter } = {}) => metas
+        .filter((meta) => !candidateFilter || candidateFilter(meta))
+        .map((meta) => {
+          hydrated.push(meta.planId);
+          return meta;
+        }),
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  assert.deepEqual(hydrated, ['live']);
+  assert.deepEqual(items.map((item) => item.taskId), ['live']);
 });
 
 test('isPlanResultAccepted：显式验收与存量祖父化', () => {

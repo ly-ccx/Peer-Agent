@@ -189,6 +189,40 @@ describe('local file provider', () => {
     assert.equal(output.fileCount, 2);
   });
 
+  it('search_files yields the event loop while scanning files', async () => {
+    const previous = process.env.PEER_AGENT_DISABLE_RIPGREP;
+    process.env.PEER_AGENT_DISABLE_RIPGREP = '1';
+    try {
+      for (let i = 0; i < 40; i += 1) {
+        writeFileSync(path.join(tmpDir, `bulk-${i}.txt`), `${'x'.repeat(4000)}\n`, 'utf8');
+      }
+      writeFileSync(path.join(tmpDir, 'hit.txt'), 'NEEDLE\n', 'utf8');
+
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks += 1;
+      }, 1);
+      const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+      const execution = await provider.executeCapability(
+        { call: createCall('local.file.search', { query: 'NEEDLE' }) },
+        {
+          workspaceRoot: tmpDir,
+          toolContext: { conversationId: 'c1', readFiles: new Map() },
+          locale: 'zh-CN',
+        },
+      );
+      clearInterval(timer);
+
+      assert.equal(execution.result.status, 'success');
+      assert.ok(ticks > 0, `event loop should tick during search, got ${ticks}`);
+      const output = JSON.parse(execution.result.outputPreview.fileResult.output);
+      assert.equal(output.matchCount, 1);
+    } finally {
+      if (previous === undefined) delete process.env.PEER_AGENT_DISABLE_RIPGREP;
+      else process.env.PEER_AGENT_DISABLE_RIPGREP = previous;
+    }
+  });
+
   it('search_files blocks paths outside the workspace', async () => {
     const workspaceDir = path.join(tmpDir, 'workspace');
     const outsideDir = path.join(tmpDir, 'outside');

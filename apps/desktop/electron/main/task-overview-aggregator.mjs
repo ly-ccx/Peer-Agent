@@ -466,25 +466,6 @@ export function toAutomationSnapshot(definition, latestRun) {
  * - workspacePath 过滤（target/origin 任一匹配）。
  * - 展示名固定使用 plan.title（核对后的 plan 名字）。
  */
-export function isGoalPlanMetaCandidate(plan, options = {}) {
-  if (!plan || typeof plan !== 'object') return false;
-  const {
-    includeTerminal = false,
-    activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
-    nowMs = Date.now(),
-  } = options;
-  const status = typeof plan.status === 'string' ? plan.status : null;
-  if (!status) return false;
-  if (status === GOAL_COMPLETED_STATUS) {
-    return !isPlanResultAccepted(plan);
-  }
-  if (!GOAL_HISTORY_TERMINAL_STATUSES.has(status)) {
-    return true;
-  }
-  if (!includeTerminal) return false;
-  return isWithinActiveWindow(plan.updatedAt, activeWithinMs, nowMs);
-}
-
 export function isGoalPlanInScope(plan, options = {}) {
   if (!plan || typeof plan !== 'object') return false;
   const {
@@ -531,7 +512,6 @@ export function isGoalPlanInScope(plan, options = {}) {
   return true;
 }
 
-/** 用户是否已在工作台一键确认过结果（与 GoalPlanStatus.accepted 无关）。 */
 /**
  * 用户是否已验收结果（与 GoalPlanStatus.accepted 无关）。
  * - 显式 resultAcceptance / resultAccepted* → 已验收
@@ -562,6 +542,22 @@ export function isPlanResultAccepted(plan) {
     }
   }
   return false;
+}
+
+/**
+ * Index meta 候选筛选：只根据轻量字段决定要不要 hydrate `${planId}.json`。
+ * 不套用 activeWithinMs——执行中计划的 index.updatedAt 可能落后于 runner overlay。
+ */
+export function isGoalPlanMetaCandidate(plan, options = {}) {
+  if (!plan || typeof plan !== 'object') return false;
+  const includeTerminal = options.includeTerminal === true;
+  const status = typeof plan.status === 'string' ? plan.status : null;
+  if (!status) return false;
+  if (status === GOAL_COMPLETED_STATUS) {
+    return !isPlanResultAccepted(plan) || includeTerminal;
+  }
+  if (GOAL_HISTORY_TERMINAL_STATUSES.has(status)) return includeTerminal;
+  return true;
 }
 
 /**
@@ -700,6 +696,7 @@ export function createTaskOverviewAggregator({
 
     let plans = [];
     try {
+      const candidateFilter = (meta) => isGoalPlanMetaCandidate(meta, scope);
       if (
         conversationId &&
         typeof goalPlanStore.listPlanDetailsByConversation === 'function'
@@ -710,10 +707,11 @@ export function createTaskOverviewAggregator({
         typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
       ) {
         plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, {
-          candidateFilter: (meta) => isGoalPlanMetaCandidate(meta, scope),
+          candidateFilter,
         }) ?? [];
       } else {
-        plans = goalPlanStore.listPlanDetails() ?? [];
+        // 总工作台也必须先用 index meta 筛候选，禁止为历史 completed 全量 hydrate。
+        plans = goalPlanStore.listPlanDetails({ candidateFilter }) ?? [];
       }
     } catch {
       plans = [];
