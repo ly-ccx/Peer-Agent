@@ -271,9 +271,14 @@ export function createTrayController({
     }
   }
 
-  function scheduleRefresh(delayMs = 120) {
+  // 性能治理（§12，multi-task-ui-performance-remediation.md）：tray 菜单重建包含
+  // listRecentConversations 等同步 IO，订阅驱动的刷新从 120ms 提升到 2s 退避，
+  // 避免在多任务变更风暴中参与 ~300ms 自激循环；点击/右键路径仍调用 refresh() 即时刷新。
+  const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 2_000;
+
+  function scheduleRefresh(delayMs = TRAY_SUBSCRIPTION_REFRESH_DELAY_MS) {
     if (destroyed) return;
-    if (refreshTimer) clearTimeout(refreshTimer);
+    if (refreshTimer) return; // 已有排队刷新：不提前、不重置（风暴退避）
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       void refresh();

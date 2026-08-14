@@ -39,6 +39,26 @@ function areTaskOverviewItemsEqual(
   return true;
 }
 
+/**
+ * 广播 payload 的相关性判定（性能治理，见知识库 multi-task-ui-performance-remediation §12）：
+ * main 进程 taskOverview:changed 现已节流（最小 2s）并携带合并 scope；
+ * 当 payload 声明 scoped 且与当前 hook 的查询条件无交集时，跳过重拉。
+ * 兼容旧 payload（无 scoped 字段）：一律视为相关，保持行为不变。
+ */
+function isRelevantTaskOverviewChange(
+  payload: unknown,
+  opts: { conversationId: string | null },
+): boolean {
+  if (payload === null || typeof payload !== 'object') return true;
+  const scope = payload as { scoped?: unknown; conversationIds?: unknown; planIds?: unknown };
+  if (scope.scoped !== true) return true; // 未声明 scope（旧版/风暴退化）：保守重拉
+  const ids = Array.isArray(scope.conversationIds) ? scope.conversationIds : null;
+  if (!ids || ids.length === 0) return true; // scoped 但无会话粒度：重拉
+  // 查询本身是全局视图（无 conversationId 过滤）：任何变更都可能影响列表。
+  if (!opts.conversationId) return true;
+  return ids.some((id) => typeof id === 'string' && id === opts.conversationId);
+}
+
 export function useTaskOverview(
   options: UseTaskOverviewOptions | boolean = true,
 ): readonly TaskOverviewItem[] {
@@ -56,6 +76,8 @@ export function useTaskOverview(
   const inFlightRef = useRef<Promise<void> | null>(null);
   const reloadQueuedRef = useRef(false);
   const requestIdRef = useRef(0);
+  // document.hidden 期间收到广播时置位；恢复可见立即同步一次（§12 性能治理）。
+  const pendingVisibleReloadRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!enabled) {
@@ -104,17 +126,39 @@ export function useTaskOverview(
 
   // main 在 goalPlans:changed / automations:changed 时 fan-out 广播
   // taskOverview:changed，这里据此重拉，保持三页面与后端事实同步。
+  // 性能治理（§12）：按 payload scope 过滤无关变更；document.hidden 时暂存不重拉，
+  // 恢复可见立即同步一次，避免后台窗口参与广播风暴。
   useEffect(() => {
     if (!enabled) return undefined;
-    const unsubscribe = clientApi.onTaskOverviewChanged(() => {
+    const unsubscribe = clientApi.onTaskOverviewChanged((payload: unknown) => {
+      if (document.hidden) {
+        pendingVisibleReloadRef.current = true;
+        return;
+      }
+      if (!isRelevantTaskOverviewChange(payload, { conversationId })) return;
       void reload();
     });
     return unsubscribe;
-  }, [enabled, reload]);
+  }, [enabled, conversationId, reload]);
 
   // 后台 shell 线程目前没有 changed 广播；轻量轮询保证工作台「Peer 正在推进」及时出现/消失。
+  // 性能治理（§12）：document.hidden 时暂停轮询（后台窗口不做同步 IO），
+  // 恢复可见时立即同步一次补上后台期间的变更。
   useEffect(() => {
     if (!enabled) return undefined;
+    const onVisibilityChange = () => {
+      if (!document.hidden && pendingVisibleReloadRef.current) {
+        pendingVisibleReloadRef.current = false;
+        void reload();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [enabled, reload]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (document.hidden) return () => {};
     const timer = window.setInterval(() => {
       void reload();
     }, 4000);

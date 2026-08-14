@@ -7,6 +7,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  statSync,
   writeFileSync,
   unlinkSync,
   renameSync,
@@ -55,6 +56,45 @@ function readJsonl(filePath) {
       }
     })
     .filter(Boolean);
+}
+
+/**
+ * JSONL 文件级读缓存（性能治理 §12，multi-task-ui-performance-remediation.md）。
+ *
+ * 背景：多任务高并发时 listPlans() 以 ~300ms 周期被调用，每次全量
+ * readFileSync + JSON.parse×N + normalizePlan×N（trace 实测 activeMeta 热点 4.7s/7.2s）。
+ * 索引文件仅在写入时变化，且写入路径统一走 writeJsonl/appendJsonl（同进程）或
+ * 外部进程写入（subscribeChanges 的 watcher 会感知）。
+ *
+ * 契约：statSync 命中（mtimeMs+size 一致）时复用解析结果，绝不复用可变对象引用——
+ * 调用方（normalizePlan/filter/sort）可能产生新数组，但缓存返回的是同一份原始记录数组，
+ * 因此读缓存返回浅拷贝数组，避免调用方 sort() 原地修改缓存。
+ */
+const jsonlReadCache = new Map(); // filePath -> { mtimeMs, size, records }
+
+function readJsonlCached(filePath) {
+  let stat = null;
+  try {
+    stat = statSync(filePath);
+  } catch {
+    jsonlReadCache.delete(filePath);
+    return [];
+  }
+  const cached = jsonlReadCache.get(filePath);
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size
+  ) {
+    return cached.records.slice(); // 浅拷贝：调用方可安全 sort/splice
+  }
+  const records = readJsonl(filePath);
+  jsonlReadCache.set(filePath, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    records,
+  });
+  return records.slice();
 }
 
 function appendJsonl(filePath, obj) {
@@ -1787,7 +1827,8 @@ export function createGoalPlanStore({
   }
 
   function readIndex() {
-    return readJsonl(indexFile);
+    // §12 性能治理：listPlans 热路径走 stat 缓存（mtimeMs+size 未变时复用解析结果）。
+    return readJsonlCached(indexFile);
   }
 
   function readEvidenceIndex() {

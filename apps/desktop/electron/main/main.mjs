@@ -17,6 +17,7 @@ import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
+import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
@@ -373,8 +374,17 @@ function waitForMcpOAuthCallback(expectedState) {
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+// taskOverview:changed 节流调度器：合并 conversations/automations/goalPlans 三类变更的
+// fan-out 广播（最小间隔 2s，payload 携带合并 scope）。治理 ~300ms 自激循环，详见
+// task-overview-broadcast.mjs 头注释与知识库 multi-task-ui-performance-remediation.md §12。
+const taskOverviewBroadcast = createTaskOverviewBroadcastScheduler({
+  broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
+});
 const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
-  broadcastToAllWindows('taskOverview:changed', { reason: 'conversations:changed' });
+  taskOverviewBroadcast.request({
+    reason: 'conversations:changed',
+    conversationId: event?.conversationId ?? null,
+  });
   if (event.writerPid === process.pid) return;
 
   const workspacePath = typeof event.workspacePath === 'string' ? event.workspacePath : null;
@@ -389,7 +399,7 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
 const automationStore = createAutomationStore({
   onChange: (payload) => {
     broadcastToAllWindows('automations:changed', payload);
-    broadcastToAllWindows('taskOverview:changed', { reason: 'automations:changed' });
+    taskOverviewBroadcast.request({ reason: 'automations:changed' });
   },
 });
 let automationRuntimeOwner = null;
@@ -418,7 +428,10 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
-    broadcastToAllWindows('taskOverview:changed', { reason: 'goalPlans:changed' });
+    taskOverviewBroadcast.request({
+      reason: 'goalPlans:changed',
+      planId: payload?.planId ?? null,
+    });
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
@@ -3628,6 +3641,7 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
   logger: console,
   initialOwners: [
     { name: 'conversation-change-subscription', dispose: stopConversationChangeSubscription },
+    { name: 'task-overview-broadcast', dispose: () => taskOverviewBroadcast.dispose() },
     { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
     { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
