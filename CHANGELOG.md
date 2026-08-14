@@ -4,6 +4,41 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.4-beta.3 - 2026-08-14
+
+### Notes
+
+- Run bound Goals in an isolated Git worktree, land accepted changes back into the original workspace, and close the delivery-routing plus quality-review loop.
+- Expose Grok Fast / xhigh and replace workspace-close with project folders.
+- Refresh app and docs brand assets, and keep the docs changelog in sync with this release.
+
+### Added
+
+- Isolated Goal landing with a visible delivery handoff after acceptance.
+- Delivery-type routing and a quality-review loop that starts after the result is viewed.
+- Grok Fast mode and a higher xhigh reasoning effort.
+- Project-folder sidebar entry instead of closing the workspace.
+- A result-drawer scroll button for long results.
+
+### Changed
+
+- Shorten the sidebar wordmark to Peer and refresh Desktop / docs brand assets.
+- Drop the result-drawer subtitle, move home-card runtime meta onto the action row, lock the chat header height, and cap acceptance shatter particles.
+- Keep Goal progress compact and isolate the drawer workbench from the main one.
+
+### Fixed
+
+- Abort in-flight file search and skip stale home hydrates.
+- Start the first runner turn after intake handoff, keep the old plan when a new Goal starts in the same conversation, and preserve unaccepted plans across follow-ups.
+- Treat vanished worktrees as already cleaned, collect worktree changes before cleanup, and reconcile foreground runner state.
+- Close the result drawer before card shatter, open project folders from the workspace context menu, and keep Grok xhigh above a stale effort cache.
+- Render markdown links, draw the decision arrow as SVG, and show the total discussion count.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.4-beta.3` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@beta` or `npm i -g @peer-agent/cli@0.0.4-beta.3`.
+
 ## 0.0.2 - 2026-08-10
 
 ### Notes
