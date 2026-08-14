@@ -27,15 +27,32 @@ const cargoPackages = [
 
 const errors = [];
 
-const readme = readFileSync(join(root, 'README.md'), 'utf8');
-const currentReleasePattern = /Current release: \*\*`([^`]+)`\*\* \(`latest`\)/g;
-const currentReleaseMatches = [...readme.matchAll(currentReleasePattern)];
-if (currentReleaseMatches.length !== 1) {
-  errors.push(
-    `README.md: expected exactly one current release marker, found ${currentReleaseMatches.length}`,
-  );
-} else if (currentReleaseMatches[0][1] !== expected) {
-  errors.push(`README.md: expected current release ${expected}, got ${currentReleaseMatches[0][1]}`);
+const isPrerelease = /-(?:alpha|beta|rc)\.\d+$/.test(expected);
+const readmeMarkers = [
+  {
+    file: 'README.md',
+    pattern: isPrerelease
+      ? /beta channel \*\*`([^`]+)`\*\*/g
+      : /Current stable release: \*\*`([^`]+)`\*\* \(npm `latest`\)/g,
+    label: isPrerelease ? 'beta channel' : 'stable release',
+  },
+  {
+    file: 'README.zh-CN.md',
+    pattern: isPrerelease
+      ? /beta 通道 \*\*`([^`]+)`\*\*/g
+      : /当前正式版：\*\*`([^`]+)`\*\*（npm `latest`）/g,
+    label: isPrerelease ? 'beta 通道' : '正式版',
+  },
+];
+
+for (const { file, pattern, label } of readmeMarkers) {
+  const readme = readFileSync(join(root, file), 'utf8');
+  const matches = [...readme.matchAll(pattern)];
+  if (matches.length !== 1) {
+    errors.push(`${file}: expected exactly one ${label} marker, found ${matches.length}`);
+  } else if (matches[0][1] !== expected) {
+    errors.push(`${file}: expected ${label} ${expected}, got ${matches[0][1]}`);
+  }
 }
 
 for (const file of packageJsonFiles) {

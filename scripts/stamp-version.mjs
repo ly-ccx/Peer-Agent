@@ -66,17 +66,39 @@ const changed = [];
 writeFileSync(join(root, 'VERSION'), `${version}\n`);
 changed.push('VERSION');
 
-// 2) README 当前正式版本摘要
-{
-  const file = 'README.md';
+// 2) README 当前版本摘要：正式版改 stable，预发布改 beta 通道。
+const isPrerelease = /-(?:alpha|beta|rc)\.\d+$/.test(version);
+const readmeMarkers = [
+  {
+    file: 'README.md',
+    pattern: isPrerelease
+      ? /beta channel \*\*`[^`]+`\*\*/g
+      : /Current stable release: \*\*`[^`]+`\*\* \(npm `latest`\)/g,
+    replacement: isPrerelease
+      ? `beta channel **\`${version}\`**`
+      : `Current stable release: **\`${version}\`** (npm \`latest\`)`,
+    label: isPrerelease ? 'beta channel' : 'stable release',
+  },
+  {
+    file: 'README.zh-CN.md',
+    pattern: isPrerelease
+      ? /beta 通道 \*\*`[^`]+`\*\*/g
+      : /当前正式版：\*\*`[^`]+`\*\*（npm `latest`）/g,
+    replacement: isPrerelease
+      ? `beta 通道 **\`${version}\`**`
+      : `当前正式版：**\`${version}\`**（npm \`latest\`）`,
+    label: isPrerelease ? 'beta 通道' : '正式版',
+  },
+];
+
+for (const { file, pattern, replacement, label } of readmeMarkers) {
   const abs = join(root, file);
   const readme = readFileSync(abs, 'utf8');
-  const pattern = /Current release: \*\*`[^`]+`\*\* \(`latest`\)/g;
   const matches = readme.match(pattern) ?? [];
   if (matches.length !== 1) {
-    throw new Error(`${file}: expected exactly one current release marker, found ${matches.length}`);
+    throw new Error(`${file}: expected exactly one ${label} marker, found ${matches.length}`);
   }
-  const next = readme.replace(pattern, `Current release: **\`${version}\`** (\`latest\`)`);
+  const next = readme.replace(pattern, replacement);
   if (next !== readme) {
     writeFileSync(abs, next);
     changed.push(file);

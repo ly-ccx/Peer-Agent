@@ -4,6 +4,37 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.4-beta.4 - 2026-08-14
+
+### Notes
+
+- Collapse follow-up Goals into one Goal Thread and keep a single workbench card.
+- Add OpenRouter as a first-class official API channel.
+- Keep workbench discussions and the full pending-result queue visible, and throttle refresh storms.
+- Align README and docs narrative around fully open source plus task flow.
+
+### Added
+
+- Goal Thread grouping for related acceptance cards, including follow-ups that omit `parentPlanId`.
+- One result card per thread, bound to the latest pending round, with a compact parent/child tree.
+- Official OpenRouter API as a third-party OpenAI Chat channel with a prefilled base URL and API key.
+
+### Changed
+
+- Keep the home discussion section even when nothing is unread, and show the full result-ready queue.
+- Merge workbench broadcasts, skip hidden reloads, back off tray rebuilds, and cache unchanged plan indexes.
+- Rewrite README and docs landing copy around fully open source (MIT) and task-flow handoff / continuity / follow-up.
+
+### Fixed
+
+- Unify SkillHub toolbar control radius.
+- Restore the open-sky cat brand icons instead of the full-bleed day and night illustrations.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.4-beta.4` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@beta` or `npm i -g @peer-agent/cli@0.0.4-beta.4`.
+
 ## 0.0.4-beta.3 - 2026-08-14
 
 ### Notes

@@ -1,6 +1,6 @@
 {
   "name": "peer-agent",
-  "version": "0.0.4-beta.3",
+  "version": "0.0.4-beta.4",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
