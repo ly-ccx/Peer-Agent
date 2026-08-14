@@ -13,7 +13,9 @@ import test from 'node:test';
  * 1. 无 rootPlanId 的卡片逐张平铺、一张不丢；
  * 2. 同 rootPlanId ≥2 张归组为 thread，组内按 round 排序；
  * 3. 单张线归属卡降级为 single；
- * 4. thread / single / 无关系卡混合时输出完整、无重复无遗漏。
+ * 4. thread / single / 无关系卡混合时输出完整、无重复无遗漏；
+ * 5. 一格一线：thread 只渲染一张 ResultCard，卡内嵌压缩树；
+ * 6. 同线但未进验收队列的节点可作为上下文出现在树里。
  */
 
 const readPage = async () => {
@@ -23,13 +25,90 @@ const readPage = async () => {
 
 // ---- 与页面实现保持同一语义的纯逻辑镜像（结构断言保证两者同步）----
 type Phase = 'submitting' | null;
-interface Item { taskId: string; rootPlanId?: string; rootPlanTitle?: string; round?: number; relationType?: string }
+interface Item {
+  taskId: string;
+  rootPlanId?: string;
+  rootPlanTitle?: string;
+  parentPlanId?: string;
+  round?: number;
+  relationType?: string;
+  actionRight?: string;
+}
 type Entry = { item: Item; phase?: Phase };
 type Group =
-  | { kind: 'thread'; rootPlanId: string; items: { item: Item; phase: Phase }[] }
+  | {
+      kind: 'thread';
+      rootPlanId: string;
+      items: { item: Item; phase: Phase }[];
+      latest: { item: Item; phase: Phase };
+      nodes: { item: Item; isContext: boolean }[];
+      pendingCount: number;
+    }
   | { kind: 'single'; item: Item; phase: Phase };
 
-function mirror(entries: readonly Entry[]): Group[] {
+function compareItems(a: Item, b: Item): number {
+  const ar = a.round ?? Number.POSITIVE_INFINITY;
+  const br = b.round ?? Number.POSITIVE_INFINITY;
+  if (ar !== br) return ar - br;
+  return String(a.taskId).localeCompare(String(b.taskId));
+}
+
+function compareEntries(a: { item: Item }, b: { item: Item }): number {
+  return compareItems(a.item, b.item);
+}
+
+function pickLatestPending(items: readonly { item: Item; phase: Phase }[]) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].item.actionRight === 'result_ready') return items[index];
+  }
+  return items[items.length - 1];
+}
+
+function buildNodes(rootPlanId: string, pending: readonly { item: Item; phase: Phase }[], contextItems: readonly Item[]) {
+  const pendingIds = new Set(pending.map((entry) => entry.item.taskId));
+  const latestPending = pickLatestPending(pending)?.item.taskId;
+  const byId = new Map<string, Item>();
+  for (const item of contextItems) {
+    if (item.rootPlanId === rootPlanId || item.taskId === rootPlanId) byId.set(item.taskId, item);
+  }
+  for (const entry of pending) byId.set(entry.item.taskId, entry.item);
+
+  const children = new Map<string, Item[]>();
+  for (const item of byId.values()) {
+    const parentId = item.parentPlanId && byId.has(item.parentPlanId)
+      ? item.parentPlanId
+      : item.taskId === rootPlanId
+        ? null
+        : rootPlanId;
+    if (!parentId || parentId === item.taskId) continue;
+    const bucket = children.get(parentId) ?? [];
+    bucket.push(item);
+    children.set(parentId, bucket);
+  }
+  for (const bucket of children.values()) bucket.sort(compareItems);
+
+  const nodes: { item: Item; isContext: boolean; isCurrent: boolean }[] = [];
+  const walk = (item: Item) => {
+    nodes.push({
+      item,
+      isContext: !pendingIds.has(item.taskId),
+      isCurrent: item.taskId === latestPending,
+    });
+    for (const child of children.get(item.taskId) ?? []) walk(child);
+  };
+  const root = byId.get(rootPlanId)
+    ?? pending.find((entry) => !entry.item.parentPlanId)?.item
+    ?? pending[0]?.item;
+  if (!root) return nodes;
+  walk(root);
+  for (const item of [...byId.values()].sort(compareItems)) {
+    if (nodes.some((node) => node.item.taskId === item.taskId)) continue;
+    walk(item);
+  }
+  return nodes;
+}
+
+function mirror(entries: readonly Entry[], contextItems: readonly Item[] = []): Group[] {
   const threads = new Map<string, { rootPlanId: string; items: { item: Item; phase: Phase }[] }>();
   for (const entry of entries) {
     const phase = entry.phase ?? null;
@@ -52,27 +131,44 @@ function mirror(entries: readonly Entry[]): Group[] {
     emitted.add(rootPlanId);
     const thread = threads.get(rootPlanId);
     if (!thread) continue;
-    if (thread.items.length < 2) {
+    thread.items.sort(compareEntries);
+    const nodes = buildNodes(rootPlanId, thread.items, contextItems);
+    if (thread.items.length < 2 && nodes.length < 2) {
       result.push({ kind: 'single', item: thread.items[0].item, phase: thread.items[0].phase });
       continue;
     }
-    thread.items.sort((a, b) => (a.item.round ?? Infinity) - (b.item.round ?? Infinity));
-    result.push({ kind: 'thread', ...thread });
+    result.push({
+      kind: 'thread',
+      ...thread,
+      latest: pickLatestPending(thread.items),
+      nodes,
+      pendingCount: thread.items.filter((item) => item.item.actionRight === 'result_ready').length,
+    });
   }
   return result;
 }
 
-test('源码结构：singles 不再被收集后丢弃（回归锚点）', async () => {
+test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段 continue 吞掉', async () => {
   const source = await readPage();
-  // 第一段循环对无 rootPlanId 直接 continue（不进任何数组）
-  assert.match(source, /if \(!rootPlanId\) continue;/);
-  // 第二段循环对无 rootPlanId 逐张 push single
+  // 无 rootPlanId 的卡必须在扫描循环里立刻 push single 并 continue
   assert.match(
     source,
-    /if \(!rootPlanId\) \{[\s\S]*?result\.push\(\{ kind: 'single', item: entry\.item, phase \}\);[\s\S]*?continue;\n    \}/,
+    /if \(!rootPlanId\) \{\n\s+result\.push\(\{ kind: 'single', item: entry\.item, phase \}\);\n\s+continue;\n\s+\}/,
   );
   // 死代码 singles 数组已移除
   assert.doesNotMatch(source, /const singles:/);
+  assert.match(source, /thread-tree/);
+  assert.match(source, /goal-thread-card/);
+  assert.match(source, /function buildThreadTreeNodes/);
+  assert.match(source, /function compareThreadItems/);
+  assert.doesNotMatch(source, /className="goal-thread-group"/);
+  // 回归：compareThreadEntries 读 a.item.round。树节点是 TaskOverviewItem，
+  // 若直接 bucket.sort(compareThreadEntries) 会抛
+  // Cannot read properties of undefined (reading 'round')，整页白屏。
+  assert.doesNotMatch(source, /bucket\.sort\(compareThreadEntries\)/);
+  assert.doesNotMatch(source, /byId\.values\(\)\]\.sort\(compareThreadEntries\)/);
+  assert.match(source, /bucket\.sort\(compareThreadItems\)/);
+  assert.match(source, /byId\.values\(\)\]\.sort\(compareThreadItems\)/);
 });
 
 test('纯逻辑：12 张无关系旧卡全部平铺输出（截图回归场景）', () => {
@@ -88,8 +184,8 @@ test('纯逻辑：12 张无关系旧卡全部平铺输出（截图回归场景�
 
 test('纯逻辑：同 root 两张卡归组为 thread 并按轮次排序', () => {
   const entries: Entry[] = [
-    { item: { taskId: 'r2', rootPlanId: 'root', round: 2, relationType: 'derived', rootPlanTitle: '统一工具栏圆角' } },
-    { item: { taskId: 'r1', rootPlanId: 'root', round: 1, rootPlanTitle: '统一工具栏圆角' } },
+    { item: { taskId: 'r2', rootPlanId: 'root', round: 2, relationType: 'derived', rootPlanTitle: '统一工具栏圆角', actionRight: 'result_ready' } },
+    { item: { taskId: 'r1', rootPlanId: 'root', round: 1, rootPlanTitle: '统一工具栏圆角', actionRight: 'result_ready' } },
     { item: { taskId: 'solo' } },
   ];
   const groups = mirror(entries);
@@ -98,6 +194,8 @@ test('纯逻辑：同 root 两张卡归组为 thread 并按轮次排序', () => 
   assert.ok(thread && thread.kind === 'thread');
   assert.equal(thread.items[0].item.taskId, 'r1');
   assert.equal(thread.items[1].item.taskId, 'r2');
+  assert.equal(thread.latest.item.taskId, 'r2');
+  assert.equal(thread.pendingCount, 2);
   const solo = groups.find((g) => g.kind === 'single');
   assert.ok(solo && solo.kind === 'single' && solo.item.taskId === 'solo');
 });
@@ -117,4 +215,35 @@ test('纯逻辑：单张线归属卡降级 single；混合场景无重复无遗�
   assert.equal(count, 5);
   const allIds = groups.flatMap((g) => (g.kind === 'thread' ? g.items.map((i) => i.item.taskId) : [g.item.taskId]));
   assert.deepEqual([...allIds].sort(), ['a', 'b', 'c', 'plain-1', 'plain-2']);
+});
+
+test('纯逻辑：未进队列的同线节点作为上下文出现在树里', () => {
+  const entries: Entry[] = [
+    { item: { taskId: 'root', rootPlanId: 'root', round: 1, actionRight: 'result_ready' } },
+    { item: { taskId: 'latest', rootPlanId: 'root', parentPlanId: 'submit', round: 3, actionRight: 'result_ready' } },
+  ];
+  const context = [
+    { taskId: 'submit', rootPlanId: 'root', parentPlanId: 'root', round: 2, actionRight: 'terminal' },
+  ];
+  const groups = mirror(entries, context);
+  assert.equal(groups.length, 1);
+  const thread = groups[0];
+  assert.ok(thread.kind === 'thread');
+  assert.equal(thread.latest.item.taskId, 'latest');
+  assert.deepEqual(thread.nodes.map((node) => node.item.taskId), ['root', 'submit', 'latest']);
+  assert.equal(thread.nodes.find((node) => node.item.taskId === 'submit')?.isContext, true);
+});
+
+test('纯逻辑：同父节点的兄弟按 round 排序，且不会把 TaskOverviewItem 当成 { item }', () => {
+  const entries: Entry[] = [
+    { item: { taskId: 'root', rootPlanId: 'root', round: 1, actionRight: 'result_ready' } },
+    { item: { taskId: 'late', rootPlanId: 'root', parentPlanId: 'root', round: 3, actionRight: 'result_ready' } },
+    { item: { taskId: 'early', rootPlanId: 'root', parentPlanId: 'root', round: 2, actionRight: 'result_ready' } },
+  ];
+  const groups = mirror(entries);
+  assert.equal(groups.length, 1);
+  const thread = groups[0];
+  assert.ok(thread.kind === 'thread');
+  assert.deepEqual(thread.nodes.map((node) => node.item.taskId), ['root', 'early', 'late']);
+  assert.equal(thread.latest.item.taskId, 'late');
 });

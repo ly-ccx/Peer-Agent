@@ -681,6 +681,101 @@ export function isPlanResultAccepted(plan) {
   return false;
 }
 
+function planIdOf(plan) {
+  return typeof plan?.planId === 'string' && plan.planId.trim() ? plan.planId : null;
+}
+
+function conversationIdOf(plan) {
+  return typeof plan?.conversationId === 'string' && plan.conversationId.trim()
+    ? plan.conversationId
+    : null;
+}
+
+/**
+ * 把同线但未进工作台队列的节点补进本轮 plans。
+ * 先沿 parentPlanId 补祖先，再按会话补兄弟；只 hydrate 已在队列里的线，不做全量历史扫描。
+ */
+export function expandGoalThreadRelatives(goalPlanStore, plans, options = {}) {
+  const byId = new Map();
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    const planId = planIdOf(plan);
+    if (planId) byId.set(planId, plan);
+  }
+
+  const getPlan = typeof goalPlanStore?.getPlan === 'function'
+    ? (planId) => goalPlanStore.getPlan(planId)
+    : null;
+  const hydrate = (planId, depth = 0) => {
+    if (!getPlan || !planId || byId.has(planId) || depth > 8) return;
+    let extra = null;
+    try {
+      extra = getPlan(planId);
+    } catch {
+      return;
+    }
+    const extraId = planIdOf(extra);
+    if (!extraId) return;
+    byId.set(extraId, extra);
+    const parentId = typeof extra.parentPlanId === 'string' ? extra.parentPlanId : null;
+    if (parentId) hydrate(parentId, depth + 1);
+  };
+
+  for (const plan of [...byId.values()]) {
+    const parentId = typeof plan.parentPlanId === 'string' ? plan.parentPlanId : null;
+    if (parentId) hydrate(parentId);
+  }
+
+  const listByConversation = options.includeConversationSiblings !== false
+    && typeof goalPlanStore?.listPlanDetailsByConversation === 'function'
+    ? (conversationId) => goalPlanStore.listPlanDetailsByConversation(conversationId)
+    : null;
+  if (listByConversation) {
+    const seenConversations = new Set();
+    for (const plan of [...byId.values()]) {
+      const conversationId = conversationIdOf(plan);
+      if (!conversationId || seenConversations.has(conversationId)) continue;
+      seenConversations.add(conversationId);
+      let extras = [];
+      try {
+        extras = listByConversation(conversationId) ?? [];
+      } catch {
+        extras = [];
+      }
+      for (const extra of extras) {
+        const extraId = planIdOf(extra);
+        if (!extraId || byId.has(extraId)) continue;
+        byId.set(extraId, extra);
+        const parentId = typeof extra.parentPlanId === 'string' ? extra.parentPlanId : null;
+        if (parentId) hydrate(parentId);
+      }
+    }
+  }
+
+  return [...byId.values()];
+}
+
+export function collectInScopeThreadRoots(plans, scope, relationIndex) {
+  const roots = new Set();
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    if (!isGoalPlanInScope(plan, scope)) continue;
+    const planId = planIdOf(plan);
+    if (!planId) continue;
+    const rootPlanId = relationIndex?.rootPlanIdOf?.(planId) || plan.rootPlanId || planId;
+    if (rootPlanId) roots.add(rootPlanId);
+  }
+  return roots;
+}
+
+/** 同线谱系上下文：不单独占验收格，但要投影进压缩树。 */
+export function isGoalThreadContextPlan(plan, relationIndex, inScopeRootIds) {
+  const planId = planIdOf(plan);
+  if (!planId || !(inScopeRootIds instanceof Set) || inScopeRootIds.size === 0) return false;
+  const rootPlanId = relationIndex?.rootPlanIdOf?.(planId)
+    || (typeof plan.rootPlanId === 'string' ? plan.rootPlanId : null)
+    || (typeof plan.parentPlanId === 'string' ? null : planId);
+  return Boolean(rootPlanId && inScopeRootIds.has(rootPlanId));
+}
+
 /**
  * Index meta 候选筛选：只根据轻量字段决定要不要 hydrate `${planId}.json`。
  * 不套用 activeWithinMs——执行中计划的 index.updatedAt 可能落后于 runner overlay。
@@ -853,13 +948,19 @@ export function createTaskOverviewAggregator({
     } catch {
       plans = [];
     }
+    plans = expandGoalThreadRelatives(goalPlanStore, plans, {
+      includeConversationSiblings: !conversationId,
+    });
     const latestPlanByConversationId = new Map();
     const independentlyProjectedResults = [];
     const unlinkedPlans = [];
     // 目标线（Goal Thread）关系索引：从这批 plans 建一次，供两处 snapshot 组装共用。
     const relationIndex = buildGoalThreadRelationIndex(plans);
+    const inScopeRootIds = collectInScopeThreadRoots(plans, scope, relationIndex);
     for (const rawPlan of plans) {
-      if (!isGoalPlanInScope(rawPlan, scope)) continue;
+      if (!isGoalPlanInScope(rawPlan, scope) && !isGoalThreadContextPlan(rawPlan, relationIndex, inScopeRootIds)) {
+        continue;
+      }
       const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
       const snapshot = toGoalPlanSnapshot(plan, { relationIndex });
       const projected = snapshot ? projectGoalPlan(snapshot) : null;

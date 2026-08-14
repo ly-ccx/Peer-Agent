@@ -326,6 +326,7 @@ export function TaskOverviewPage({
         title={title}
         subtitle={subtitle}
         items={filtered}
+        allItems={items}
         emptyLabel={emptyLabel}
         scopeLabel={scopeLabel}
         onOpenTasks={onOpenTasks}
@@ -384,6 +385,7 @@ function HeroLayout({
   title: _title,
   subtitle,
   items,
+  allItems,
   emptyLabel,
   scopeLabel,
   onOpenTasks,
@@ -397,6 +399,8 @@ function HeroLayout({
   readonly title: string;
   readonly subtitle?: string;
   readonly items: readonly TaskOverviewItem[];
+  /** 未按首页 filter 剔除的全量投影，供压缩树补同线上下文。 */
+  readonly allItems?: readonly TaskOverviewItem[];
   readonly emptyLabel: string;
   readonly scopeLabel: string;
   readonly onOpenTasks?: () => void;
@@ -719,41 +723,18 @@ function HeroLayout({
               <span className="task-overview-section-meta">Peer 已完成并带回 Evidence</span>
             )}
           </div>
-          {/* 与「Peer 正在推进」同款双列卡片网格，不再一排一条。
-              目标线（Goal Thread）：同 rootPlanId 的卡片归组为一条线，
-              组内按轮次排序并显示派生徽标；无关系字段的旧数据仍平铺。 */}
+          {/* 一格一线：同 rootPlanId 只占一张结果卡，卡内用压缩树表达父子。 */}
           <div className="task-overview-work-stream goal-thread-stream">
-            {groupResultCardsByGoalThread(displayedResults).map((group) =>
+            {groupResultCardsByGoalThread(displayedResults, allItems ?? items).map((group) =>
               group.kind === 'thread' ? (
-                <div
+                <ResultCard
                   key={`thread-${group.rootPlanId}`}
-                  className="goal-thread-group"
-                  data-root-plan-id={group.rootPlanId}
-                >
-                  <div className="goal-thread-group__head">
-                    <i className="goal-thread-group__line" aria-hidden="true" />
-                    <div className="goal-thread-group__title">
-                      <span className="goal-thread-group__name">
-                        {group.rootPlanTitle ?? group.items[0].item.rootPlanTitle ?? '目标线'}
-                      </span>
-                      <span className="goal-thread-group__meta">
-                        目标线 · {group.items.length} 轮
-                      </span>
-                    </div>
-                  </div>
-                  <div className="goal-thread-group__runs">
-                    {group.items.map(({ item, phase }) => (
-                      <ResultCard
-                        key={item.taskId}
-                        item={item}
-                        phase={phase ?? null}
-                        onOpenItem={onOpenItem}
-                        threadRound={item.round ?? null}
-                        threadDerived={item.relationType === 'derived'}
-                      />
-                    ))}
-                  </div>
-                </div>
+                  item={group.latest.item}
+                  phase={group.latest.phase ?? null}
+                  onOpenItem={onOpenItem}
+                  threadNodes={group.nodes}
+                  pendingCount={group.pendingCount}
+                />
               ) : (
                 <ResultCard
                   key={group.item.taskId}
@@ -783,8 +764,17 @@ function groupResultCardsByGoalThread(
     item: TaskOverviewItem;
     phase?: AcceptancePhase | null;
   }[],
+  contextItems: readonly TaskOverviewItem[] = [],
 ): (
-  | { kind: 'thread'; rootPlanId: string; rootPlanTitle?: string; items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[] }
+  | {
+      kind: 'thread';
+      rootPlanId: string;
+      rootPlanTitle?: string;
+      items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[];
+      latest: { item: TaskOverviewItem; phase: AcceptancePhase | null };
+      nodes: ThreadTreeNode[];
+      pendingCount: number;
+    }
   | { kind: 'single'; item: TaskOverviewItem; phase: AcceptancePhase | null }
 )[] {
   const threads = new Map<
@@ -821,21 +811,115 @@ function groupResultCardsByGoalThread(
     emitted.add(rootPlanId);
     const thread = threads.get(rootPlanId);
     if (!thread) continue;
-    if (thread.items.length < 2) {
-      // 单张线归属卡：不套分组壳，直接平铺（标题已能自述）。
+    thread.items.sort(compareThreadEntries);
+    const latest = pickLatestPending(thread.items) ?? thread.items[thread.items.length - 1];
+    const nodes = buildThreadTreeNodes(thread.rootPlanId, thread.items, contextItems);
+    if (thread.items.length < 2 && nodes.length < 2) {
+      // 单张线归属卡：没有同线上下文时不套树，直接平铺。
       const solo = thread.items[0];
       result.push({ kind: 'single', item: solo.item, phase: solo.phase });
       continue;
     }
-    thread.items.sort((a, b) => {
-      const ar = a.item.round ?? Number.POSITIVE_INFINITY;
-      const br = b.item.round ?? Number.POSITIVE_INFINITY;
-      if (ar !== br) return ar - br;
-      return 0;
+    const pendingCount = thread.items.filter((entry) => entry.item.actionRight === 'result_ready').length;
+    result.push({
+      kind: 'thread',
+      ...thread,
+      latest,
+      nodes,
+      pendingCount,
     });
-    result.push({ kind: 'thread', ...thread });
   }
   return result;
+}
+
+type ThreadTreeNode = {
+  readonly item: TaskOverviewItem;
+  readonly depth: number;
+  readonly isChild: boolean;
+  readonly isCurrent: boolean;
+  readonly isContext: boolean;
+};
+
+function compareThreadItems(a: TaskOverviewItem, b: TaskOverviewItem): number {
+  const ar = a.round ?? Number.POSITIVE_INFINITY;
+  const br = b.round ?? Number.POSITIVE_INFINITY;
+  if (ar !== br) return ar - br;
+  return String(a.taskId).localeCompare(String(b.taskId));
+}
+
+function compareThreadEntries(
+  a: { item: TaskOverviewItem },
+  b: { item: TaskOverviewItem },
+): number {
+  return compareThreadItems(a.item, b.item);
+}
+
+function pickLatestPending(
+  items: readonly { item: TaskOverviewItem; phase: AcceptancePhase | null }[],
+): { item: TaskOverviewItem; phase: AcceptancePhase | null } | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].item.actionRight === 'result_ready') return items[index];
+  }
+  return undefined;
+}
+
+function buildThreadTreeNodes(
+  rootPlanId: string,
+  pendingEntries: readonly { item: TaskOverviewItem; phase: AcceptancePhase | null }[],
+  contextItems: readonly TaskOverviewItem[],
+): ThreadTreeNode[] {
+  const pendingIds = new Set(pendingEntries.map((entry) => entry.item.taskId));
+  const latestPending = pickLatestPending(pendingEntries)?.item.taskId;
+  const byId = new Map<string, TaskOverviewItem>();
+  for (const item of contextItems) {
+    if (item.rootPlanId === rootPlanId || item.taskId === rootPlanId) {
+      byId.set(item.taskId, item);
+    }
+  }
+  for (const entry of pendingEntries) {
+    byId.set(entry.item.taskId, entry.item);
+  }
+
+  const children = new Map<string, TaskOverviewItem[]>();
+  for (const item of byId.values()) {
+    const parentId = item.parentPlanId && byId.has(item.parentPlanId)
+      ? item.parentPlanId
+      : item.taskId === rootPlanId
+        ? null
+        : rootPlanId;
+    if (!parentId || parentId === item.taskId) continue;
+    const bucket = children.get(parentId) ?? [];
+    bucket.push(item);
+    children.set(parentId, bucket);
+  }
+  for (const bucket of children.values()) {
+    bucket.sort(compareThreadItems);
+  }
+
+  const nodes: ThreadTreeNode[] = [];
+  const walk = (item: TaskOverviewItem, depth: number) => {
+    nodes.push({
+      item,
+      depth,
+      isChild: depth > 0,
+      isCurrent: item.taskId === latestPending,
+      isContext: !pendingIds.has(item.taskId),
+    });
+    for (const child of children.get(item.taskId) ?? []) {
+      walk(child, depth + 1);
+    }
+  };
+
+  const root = byId.get(rootPlanId)
+    ?? pendingEntries.find((entry) => !entry.item.parentPlanId)?.item
+    ?? pendingEntries[0]?.item;
+  if (!root) return nodes;
+  walk(root, 0);
+  for (const item of [...byId.values()].sort(compareThreadItems)) {
+    if (nodes.some((node) => node.item.taskId === item.taskId)) continue;
+    walk(item, item.parentPlanId && byId.has(item.parentPlanId) ? 1 : 0);
+  }
+  return nodes;
 }
 
 function ListLayout({
@@ -1040,20 +1124,79 @@ function WorkItem({
 
 
 /** 结果待验收卡片 —— 与推进中同款双列卡片：顶栏状态 + 标题 + 摘要 + 操作 */
+function threadRowStatus(item: TaskOverviewItem, isContext: boolean): string {
+  if (item.actionRight === 'result_ready') return '等待验收';
+  if (item.actionRight === 'peer_advancing') return item.statusLabel || '推进中';
+  if (item.actionRight === 'needs_you') return item.statusLabel || '需要你';
+  if (item.actionRight === 'paused') return item.statusLabel || '已暂停';
+  if (isContext) return item.statusLabel || '已完成';
+  return item.statusLabel || '已完成';
+}
+
+function threadRowFraction(item: TaskOverviewItem): string | null {
+  if (!item.planProgress || !item.planProgress.total) return null;
+  return `${item.planProgress.completed}/${item.planProgress.total}`;
+}
+
+function ThreadTree({
+  nodes,
+  currentId,
+  onOpenItem,
+}: {
+  readonly nodes: readonly ThreadTreeNode[];
+  readonly currentId?: string;
+  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+}) {
+  return (
+    <div className="thread-tree" role="tree" aria-label="目标线">
+      {nodes.map((node) => {
+        const fraction = threadRowFraction(node.item);
+        const duration = typeof node.item.durationMs === 'number'
+          ? formatDuration(node.item.durationMs)
+          : null;
+        const current = node.isCurrent || node.item.taskId === currentId;
+        return (
+          <button
+            key={node.item.taskId}
+            type="button"
+            role="treeitem"
+            className={`thread-tree-row${node.isChild ? ' is-child' : ''}${current ? ' is-current' : ''}${node.isContext ? ' is-context' : ''}`}
+            style={node.depth > 1 ? { marginLeft: `${Math.min(node.depth, 4) * 14}px` } : undefined}
+            aria-current={current ? 'true' : undefined}
+            onClick={() => onOpenItem?.(node.item)}
+          >
+            <span className={`thread-tree-pill${node.item.actionRight === 'result_ready' ? ' is-wait' : ''}`}>
+              {threadRowStatus(node.item, node.isContext)}
+            </span>
+            <span className="thread-tree-title">{node.item.title}</span>
+            {node.isContext && node.item.actionRight !== 'result_ready' ? (
+              <span className="thread-tree-note">未进队列</span>
+            ) : duration ? (
+              <span className="thread-tree-meta">用时 {duration}</span>
+            ) : (
+              <span className="thread-tree-meta" />
+            )}
+            {fraction ? <span className="thread-tree-frac">{fraction}</span> : <span className="thread-tree-frac" />}
+            <span className="thread-tree-chevron" aria-hidden="true">›</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultCard({
   item,
   phase,
   onOpenItem,
-  threadRound,
-  threadDerived,
+  threadNodes,
+  pendingCount,
 }: {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
-  /** 目标线轮次（R2、R3…）；独立卡片为 null。 */
-  readonly threadRound?: number | null;
-  /** 是否为追问派生轮；显示「↳ 追问派生」徽标。 */
-  readonly threadDerived?: boolean;
+  readonly threadNodes?: readonly ThreadTreeNode[];
+  readonly pendingCount?: number;
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const summary = item.planProgress
@@ -1066,7 +1209,7 @@ function ResultCard({
     <div className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}>
     <article
       ref={cardRef}
-      className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}
+      className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${threadNodes && threadNodes.length > 0 ? ' goal-thread-card' : ''}${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}
     >
       <div className="task-overview-work-top">
         <span className="task-overview-work-state result-card-state">
@@ -1075,22 +1218,24 @@ function ResultCard({
           </i>
           {celebrating ? '验收完成，任务已圆满结束' : '等待验收'}
         </span>
-        <WorkItemMeta item={item} group="route" fallbackWhenEmpty="READY" />
+        {threadNodes && threadNodes.length > 0 ? (
+          <span className="goal-thread-route">
+            目标线 · {threadNodes.length} 轮
+            {pendingCount && pendingCount > 0 ? ` · ${pendingCount} 项待签` : ''}
+          </span>
+        ) : (
+          <WorkItemMeta item={item} group="route" fallbackWhenEmpty="READY" />
+        )}
       </div>
-      <h3>
-        {item.title}
-        {threadRound && threadRound > 1 ? (
-          <span className="goal-thread-badge">R{threadRound}</span>
-        ) : null}
-        {threadDerived ? (
-          <span className="goal-thread-badge goal-thread-badge--derived">↳ 追问派生</span>
-        ) : null}
-      </h3>
+      <h3>{item.title}</h3>
       <p>{summary}</p>
       {item.planProgress ? (
         <div className="task-overview-progress" aria-hidden="true">
           <i style={{ width: `${pct}%` }} />
         </div>
+      ) : null}
+      {threadNodes && threadNodes.length > 0 ? (
+        <ThreadTree nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />

@@ -7,6 +7,7 @@ import {
   createTaskOverviewAggregator,
   currentStepTitleFromItem,
   displayConversationTitle,
+  expandGoalThreadRelatives,
   extractPlanSteps,
   looksLikeOpaqueId,
   modelLabelFromConversation,
@@ -16,6 +17,7 @@ import {
   toAutomationSnapshot,
   toGoalPlanSnapshot,
   isGoalPlanInScope,
+  isGoalThreadContextPlan,
   isPlanResultAccepted,
   RESULT_ACCEPTANCE_REQUIRED_SINCE,
   isAutomationInScope,
@@ -1570,4 +1572,35 @@ test('listTaskOverview 会补写已完成计划缺失的 qualityReview，并收�
   assert.equal(items[0].actionRight, 'result_ready');
   assert.equal(items[0].statusLabel, '待用户验收');
   assert.equal(items[0].qualityReviewStatus, 'passed');
+});
+
+test('expandGoalThreadRelatives 会补同线已验收祖先', () => {
+  const parent = {
+    planId: 'root',
+    title: '实测 OpenRouter 连通性',
+    status: 'completed',
+    conversationId: 'conv-or',
+    resultAcceptance: { acceptedAt: '2026-08-14T01:00:00.000Z' },
+  };
+  const child = {
+    planId: 'latest',
+    title: '对接 OpenRouter 渠道',
+    status: 'completed',
+    conversationId: 'conv-or',
+    parentPlanId: 'root',
+    rootPlanId: 'root',
+  };
+  const expanded = expandGoalThreadRelatives(
+    {
+      getPlan: (planId) => (planId === 'root' ? parent : null),
+      listPlanDetailsByConversation: (conversationId) => (
+        conversationId === 'conv-or' ? [parent, child] : []
+      ),
+    },
+    [child],
+  );
+  assert.deepEqual(expanded.map((plan) => plan.planId).sort(), ['latest', 'root']);
+  const relationIndex = buildGoalThreadRelationIndex(expanded);
+  const inScopeRoots = new Set(['root']);
+  assert.equal(isGoalThreadContextPlan(parent, relationIndex, inScopeRoots), true);
 });

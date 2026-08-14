@@ -141,6 +141,6 @@ test('home result-ready section renders the full queue and keeps the real total 
 
   assert.doesNotMatch(source, /RESULT_PREVIEW_LIMIT/);
   assert.doesNotMatch(source, /previewedResults/);
-  assert.match(source, /groupResultCardsByGoalThread\(displayedResults\)/);
+  assert.match(source, /groupResultCardsByGoalThread\(displayedResults, allItems \?\? items\)/);
   assert.match(source, /<small>\{resultReady\.length\}<\/small>/);
 });
