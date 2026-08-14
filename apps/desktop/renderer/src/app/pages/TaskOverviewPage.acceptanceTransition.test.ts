@@ -57,7 +57,7 @@ test('acceptance celebration has smoother timing and a reduced-motion fallback',
   assert.match(styles, /\.result-card--exiting/);
 });
 
-test('continue discussion only navigates; plan state changes remain behind real message submission', async () => {
+test('continue discussion only navigates; a later new Goal stays in the same conversation', async () => {
   const app = await readApp();
   const handler = app.match(/const handleContinueTask = useCallback\([\s\S]*?\n  \}, \[\]\);/)?.[0] ?? '';
   assert.match(handler, /continueTaskInConversation/);

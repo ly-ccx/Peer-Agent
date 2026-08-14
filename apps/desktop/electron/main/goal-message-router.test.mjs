@@ -262,7 +262,7 @@ test('applyGoalMessageRoute restores a failed Goal on follow_up (not only resume
   assert.equal(calls[0][1], 'goal-1');
 });
 
-test('resolveContinuableGoalPlan reopens the unaccepted plan instead of starting intake', () => {
+test('resolveContinuableGoalPlan does not reopen a completed plan so a new Goal can start', () => {
   const unaccepted = {
     planId: 'goal-unaccepted',
     status: 'completed',
@@ -274,13 +274,9 @@ test('resolveContinuableGoalPlan reopens the unaccepted plan instead of starting
       calls.push(['lookup', conversationId]);
       return conversationId === 'conv-1' ? unaccepted : null;
     },
-    markRequestedUserInput(planId, payload) {
-      calls.push(['reopen', planId, payload.question]);
-      return {
-        ...unaccepted,
-        status: 'executing',
-        runner: { status: 'waiting_user', blockedReason: 'requested_user_input' },
-      };
+    markRequestedUserInput(planId) {
+      calls.push(['reopen', planId]);
+      return { ...unaccepted, status: 'executing' };
     },
   };
 
@@ -289,20 +285,15 @@ test('resolveContinuableGoalPlan reopens the unaccepted plan instead of starting
     goalPlanStore: store,
     conversationId: 'conv-1',
   });
-  assert.equal(continued.planId, 'goal-unaccepted');
-  assert.equal(continued.status, 'executing');
-  assert.deepEqual(calls, [
-    ['lookup', 'conv-1'],
-    ['reopen', 'goal-unaccepted', '用户继续当前未验收任务'],
-  ]);
+  assert.equal(continued, null);
+  assert.deepEqual(calls, []);
 
   const route = routeGoalMessage({
-    messageText: 'commit',
+    messageText: '新开一个目标：补一份发布说明',
     activeGoalPlan: continued,
   });
-  assert.equal(route.type, 'append_goal_event');
-  assert.equal(route.goalPlanId, 'goal-unaccepted');
-  assert.notEqual(route.type, 'start_intake');
+  assert.equal(route.type, 'start_intake');
+  assert.equal(route.intent, 'new_goal_implicit');
 });
 
 test('resolveContinuableGoalPlan keeps an already-active plan untouched', () => {
@@ -323,5 +314,33 @@ test('resolveContinuableGoalPlan keeps an already-active plan untouched', () => 
   });
   assert.equal(continued, activeGoalPlan);
   assert.deepEqual(calls, []);
+});
+
+test('applyGoalMessageRoute: running 但 0 回合的继续会改成 kick_stalled_runner', () => {
+  const stalledPlan = {
+    planId: 'goal-stalled',
+    status: 'executing',
+    workflowKind: 'goal_self_driven',
+    runner: { enabled: true, status: 'running', turnCount: 0 },
+  };
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan: stalledPlan });
+  const calls = [];
+  const result = applyGoalMessageRoute({
+    route,
+    activeGoalPlan: stalledPlan,
+    goalPlanStore: {
+      appendRunEvent(planId, event) {
+        calls.push(['append', planId, event.type]);
+        return event;
+      },
+      resumeRunner() {
+        calls.push(['resume']);
+        return null;
+      },
+    },
+  });
+  assert.equal(result.type, 'kick_stalled_runner');
+  assert.equal(result.goalPlanId, 'goal-stalled');
+  assert.deepEqual(calls, [['append', 'goal-stalled', 'goal_resumed']]);
 });
 

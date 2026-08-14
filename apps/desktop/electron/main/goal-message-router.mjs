@@ -135,25 +135,13 @@ export function consumesRequestedUserInput({ route, activeGoalPlan } = {}) {
 }
 
 /**
- * 待验收结果仍属于同一任务。用户后续指令（例如 commit / 还不行后再说哪里不对）
- * 应先把同一计划重开，而不是另开 intake 把验收卡冲掉。
+ * 只续接当前仍在飞的自驱 Goal。
+ * 已完成（含未验收）计划是同会话下的旧 Goal：后续新开 Goal 应另建，不能把它重开或冲掉。
  */
 export function resolveContinuableGoalPlan({
   activeGoalPlan,
-  goalPlanStore,
-  conversationId,
 } = {}) {
-  if (activeGoalPlan) return activeGoalPlan;
-  const unaccepted = typeof goalPlanStore?.getUnacceptedCompletedPlanByConversation === 'function'
-    ? goalPlanStore.getUnacceptedCompletedPlanByConversation(conversationId)
-    : null;
-  if (!unaccepted?.planId) return null;
-  if (typeof goalPlanStore?.markRequestedUserInput === 'function') {
-    return goalPlanStore.markRequestedUserInput(unaccepted.planId, {
-      question: '用户继续当前未验收任务',
-    }) ?? unaccepted;
-  }
-  return unaccepted;
+  return activeGoalPlan || null;
 }
 
 export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, source = 'chat:send' } = {}) {
@@ -200,7 +188,30 @@ export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, so
     });
   }
 
-  return goalPlanStore?.appendRunEvent?.(route.goalPlanId, event) ?? null;
+  // running 但还没开过回合：面板以为在跑，泵其实没转。把「继续」升级成显式 kick，
+  // 让 chat:send 重新走 Runner，而不是只记日志再吐空回复。
+  const turnCount = Number(activeGoalPlan?.runner?.turnCount);
+  const stalledWithoutTurn = continuesCurrentGoal
+    && route.intent === 'resume'
+    && activeGoalPlan?.status === 'executing'
+    && activeGoalPlan?.runner?.enabled === true
+    && (activeGoalPlan?.runner?.status === 'running' || activeGoalPlan?.runner?.status === 'exploring')
+    && (!Number.isFinite(turnCount) || turnCount <= 0);
+  const appended = goalPlanStore?.appendRunEvent?.(route.goalPlanId, event) ?? null;
+  if (stalledWithoutTurn) {
+    return {
+      type: 'kick_stalled_runner',
+      goalPlanId: route.goalPlanId,
+      intent: route.intent,
+      eventType: route.eventType,
+      summaryCode: route.summaryCode,
+      summary: route.summary,
+      messageText: route.messageText,
+      appended,
+    };
+  }
+
+  return appended;
 }
 
 export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {

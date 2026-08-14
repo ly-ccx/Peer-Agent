@@ -1237,6 +1237,28 @@ function normalizeQualityReview(value) {
   return review;
 }
 
+const DELIVERY_HANDOFF_STATUSES = new Set(['idle', 'delivering', 'delivered', 'stopped']);
+
+function normalizeDeliveryHandoff(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  if (!DELIVERY_HANDOFF_STATUSES.has(value.status)) return undefined;
+  const handoff = { status: value.status };
+  const repoId = normalizeOptionalName(value.repoId);
+  if (repoId) handoff.repoId = repoId;
+  const targetBranch = normalizeOptionalName(value.targetBranch);
+  if (targetBranch) handoff.targetBranch = targetBranch;
+  const taskBranch = normalizeOptionalName(value.taskBranch);
+  if (taskBranch) handoff.taskBranch = taskBranch;
+  const commitSha = normalizeOptionalName(value.commitSha);
+  if (commitSha) handoff.commitSha = commitSha;
+  const stoppedReason = normalizeOptionalName(value.stoppedReason);
+  if (stoppedReason) handoff.stoppedReason = stoppedReason;
+  if (typeof value.updatedAt === 'string' && value.updatedAt.trim()) {
+    handoff.updatedAt = value.updatedAt.trim();
+  }
+  return handoff;
+}
+
 function normalizeOptionalName(value) {
   if (value === undefined || value === null) return undefined;
   const normalized = String(value).trim();
@@ -1467,6 +1489,7 @@ function normalizePlan(plan) {
     criterionResults: normalizeCriterionResults(plan.criterionResults),
     manualConfirmations: normalizeManualConfirmations(plan.manualConfirmations),
     qualityReview: normalizeQualityReview(plan.qualityReview),
+    deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
@@ -1997,8 +2020,22 @@ export function createGoalPlanStore({
     return { ...plan, progress: aggregateProgress(plan.tasks) };
   }
 
-  function listPlanDetails() {
-    return listPlans().map(hydratePlanMeta).filter(Boolean);
+  function listPlanDetails(options = {}) {
+    const candidateFilter = typeof options?.candidateFilter === 'function'
+      ? options.candidateFilter
+      : null;
+    const metas = listPlans();
+    const selected = candidateFilter
+      ? metas.filter((meta) => {
+          try {
+            return candidateFilter(meta) === true;
+          } catch {
+            // 筛选器异常时宁可多 hydrate，也不能把工作台任务漏掉。
+            return true;
+          }
+        })
+      : metas;
+    return selected.map(hydratePlanMeta).filter(Boolean);
   }
 
   /**
@@ -2012,7 +2049,7 @@ export function createGoalPlanStore({
       ? value.trim().replace(/[/\\]+$/, '').toLowerCase()
       : '';
     const wanted = normalizePath(workspacePath);
-    if (!wanted) return listPlanDetails();
+    if (!wanted) return listPlanDetails(options);
     const candidateFilter = typeof options?.candidateFilter === 'function'
       ? options.candidateFilter
       : null;
@@ -2030,7 +2067,13 @@ export function createGoalPlanStore({
         meta.originWorkspacePath ?? meta.targetWorkspacePath,
       );
       if (hasWorkspaceIndex && indexedWorkspacePath !== wanted) return rawMeta;
-      if (hasWorkspaceIndex && candidateFilter && !candidateFilter(meta)) return rawMeta;
+      if (hasWorkspaceIndex && candidateFilter) {
+        try {
+          if (candidateFilter(meta) !== true) return rawMeta;
+        } catch {
+          // 筛选器异常时继续 hydrate，避免漏掉工作区任务。
+        }
+      }
 
       const plan = hydratePlanMeta(meta);
       if (!plan) return rawMeta;
@@ -2078,8 +2121,8 @@ export function createGoalPlanStore({
   }
 
   /**
-   * 同会话最近一条未验收 completed 计划。待验收结果仍属于同一任务，
-   * 后续指令应续接它，而不是另开 intake。
+   * 同会话最近一条未验收 completed 计划。新开 Goal 时它应作为旧计划留下，
+   * 不能被自动取消。
    */
   function getUnacceptedCompletedPlanByConversation(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId);
@@ -2115,8 +2158,8 @@ export function createGoalPlanStore({
    * - 走 persist 正规写盘 + onChange 广播（不旁路），并向 revisionHistory 追加一条
    *   supersede 审计，保留可追溯事实。
    * - 活跃态计划照旧收尾/作废。
-   * - 额外：同会话「completed 但未验收」也要离开待验收队列，避免续接纠偏后再开新计划时
-   *   工作台叠出「旧待验收卡 + 新执行卡」。
+   * - 已完成（含未验收）计划是同会话下的既有 Goal：新开 Goal 时必须留下，
+   *   不能标成 cancelled 从面板上抹掉。
    *
    * @param {string|null|undefined} conversationId
    * @param {string|null|undefined} exceptPlanId
@@ -2132,25 +2175,14 @@ export function createGoalPlanStore({
       const plan = getPlan(meta.planId);
       if (!plan) continue;
 
-      const isUnacceptedCompleted =
-        plan.status === 'completed'
-        && !(
-          plan.resultAcceptance
-          && typeof plan.resultAcceptance.acceptedAt === 'string'
-          && plan.resultAcceptance.acceptedAt.trim()
-        );
-
-      // 活跃态 + 未验收 completed 都要处理；已验收 / failed / cancelled 不触碰。
-      if (!isActivePlan(plan) && !isUnacceptedCompleted) continue;
+      // 已完成（含未验收）计划是同会话下的既有 Goal，新开 Goal 时必须留下。
+      if (isUnacceptedCompletedPlan(plan) || plan.status === 'completed') continue;
+      // 仅处理仍在飞的活跃态；failed / cancelled 不触碰。
+      if (!isActivePlan(plan)) continue;
 
       let nextStatus;
       let reasonText;
-      if (isUnacceptedCompleted) {
-        // 未验收结果被同会话新计划取代：归档出待验收队列，不谎报用户已验收。
-        nextStatus = 'cancelled';
-        reasonText =
-          reason || 'superseded before user accepted the previous result in the same conversation';
-      } else if (plan.status === 'awaiting_approval') {
+      if (plan.status === 'awaiting_approval') {
         // 未批准草稿：保持既有行为，直接作废。
         nextStatus = 'cancelled';
         reasonText = reason || 'superseded by a newer plan in the same conversation';
@@ -2185,10 +2217,6 @@ export function createGoalPlanStore({
         ],
         updatedAt: new Date().toISOString(),
       };
-      if (isUnacceptedCompleted) {
-        // 清掉验收字段，避免 cancelled 仍被当成 result_ready 数据残留。
-        delete nextPlan.resultAcceptance;
-      }
       persist(nextPlan);
       superseded.push(meta.planId);
     }
@@ -2448,14 +2476,6 @@ export function createGoalPlanStore({
       .filter((plan) => isActivePlan(plan) && isSelfDrivenGoal(plan))
       .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
       || null;
-    // 待验收 completed 仍属于同一任务。goal_create_plan 应原地续接，
-    // 不能另开新计划再 supersede 掉验收卡。
-    if (!activeGoal) {
-      activeGoal = conversationPlans
-        .filter((plan) => isUnacceptedCompletedPlan(plan) && isSelfDrivenGoal(plan))
-        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
-        || null;
-    }
     if (!activeGoal) {
       return createGoalContract({ ...draft, conversationId: normalizedConversationId ?? draft.conversationId });
     }
@@ -2472,11 +2492,7 @@ export function createGoalPlanStore({
     // intake → accepted_goal 原地升级时，确保 activation 与 resolution 与 promote 一致。
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
-    // 待验收 completed 被 goal_create_plan 原地续接时，也必须发出 goal-accepted。
-    // 否则 intake 回合已被 goal_handoff 停掉，plan-change auto-start 只认这条边沿，
-    // 计划会永久卡在 0/N。普通 persist 仍不能自激，避免 Runner 写盘递归启动。
-    const reactivatingUnacceptedCompleted = isUnacceptedCompletedPlan(activeGoal);
-    const shouldEmitGoalAccepted = upgradingFromIntake || reactivatingUnacceptedCompleted;
+    const shouldEmitGoalAccepted = upgradingFromIntake;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
@@ -3240,6 +3256,21 @@ export function createGoalPlanStore({
     });
   }
 
+  function recordDeliveryHandoff(planId, handoff = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const deliveryHandoff = normalizeDeliveryHandoff({
+      ...handoff,
+      updatedAt: handoff.updatedAt || new Date().toISOString(),
+    });
+    if (!deliveryHandoff) return plan;
+    return persist({
+      ...plan,
+      deliveryHandoff,
+      updatedAt: deliveryHandoff.updatedAt,
+    });
+  }
+
   function recordDeliveryIsolation(planId, isolation = {}) {
     const plan = getPlan(planId);
     if (!plan) return null;
@@ -3798,6 +3829,7 @@ export function createGoalPlanStore({
     recordTaskEvidence,
     recordCriterionResults,
     recordQualityReview,
+    recordDeliveryHandoff,
     recordDeliveryIsolation,
     recordManualConfirmation,
     deletePlan,

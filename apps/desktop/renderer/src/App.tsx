@@ -898,6 +898,7 @@ function MainApp() {
   const handleContinueTask = useCallback((conversationId: string, options?: { readonly closeResult?: boolean }) => {
     // §14 继续讨论仅恢复会话现场：导航和聚焦都不是用户发言，不能改变任务状态。
     // 真正的新回合只由 ChatSurface.submitMessage → chatSend 创建。
+    // 若用户随后新开 Goal，那是同会话下的新计划，原 Plan 应留下。
     if (options?.closeResult) {
       setResultDrawerItem(null);
       setCollectionDrawer(null);

@@ -595,6 +595,23 @@ test('listPlanDetails 返回完整计划而不是轻量 index meta', () => {
   assert.equal(details[0].tasks.length, 2);
 });
 
+test('listPlanDetails candidateFilter 只返回命中的计划', () => {
+  const keep = store.createPlan({
+    ...draftWithTasks(),
+    title: 'Keep',
+  });
+  store.createPlan({
+    ...draftWithTasks(),
+    title: 'Skip',
+  });
+
+  const details = store.listPlanDetails({
+    candidateFilter: (meta) => meta.planId === keep.planId,
+  });
+  assert.deepEqual(details.map((plan) => plan.planId), [keep.planId]);
+  assert.equal(details[0].tasks.length, 2);
+});
+
 test('listPlanDetailsByWorkspace 先按索引工作区筛选再返回完整计划', () => {
   const alpha = store.createPlan({
     ...draftWithTasks(),
@@ -1149,14 +1166,14 @@ test('单活跃计划: 未验收 completed 旧结果在新建计划时离开待�
   assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
   assert.equal(store.getPlan(executingOld.planId)?.resultAcceptance, undefined);
 
-  // 同会话再开新计划：未验收 completed 必须离开 result_ready 队列，避免叠卡
-  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  // 同会话再开新计划：未验收 completed 作为旧 Goal 留下，不能被自动取消
+  const created = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   const after = store.getPlan(executingOld.planId);
-  assert.equal(after?.status, 'cancelled');
-  assert.equal(after?.resultAcceptance, undefined);
-  const lastRev = after.revisionHistory[after.revisionHistory.length - 1];
-  assert.equal(lastRev.changedBy, 'system:supersede');
-  assert.match(lastRev.reason, /accepted|验收|superseded before user accepted/i);
+  assert.equal(after?.status, 'completed');
+  assert.notEqual(created.planId, executingOld.planId);
+  const siblings = store.listPlansByConversation('conv-A');
+  assert.equal(siblings.some((plan) => plan.planId === executingOld.planId && plan.status === 'completed'), true);
+  assert.equal(siblings.some((plan) => plan.planId === created.planId), true);
 });
 
 test('单活跃计划: 已验收 completed 旧结果在新建计划时保持 completed 不被误伤', () => {
@@ -2291,7 +2308,37 @@ test('getUnacceptedCompletedPlanByConversation keeps the latest unaccepted resul
   assert.equal(found?.status, 'completed');
 });
 
-test('upsertGoalContract continues the same unaccepted Goal instead of opening a new one', () => {
+test('createIntakeContract opens a new Goal in the same conversation without cancelling the old one', () => {
+  const conversationId = 'conv-intake-continue-unaccepted';
+  const created = store.createGoalContract({
+    conversationId,
+    title: '修好续接取消原计划',
+    goal: '修好续接取消原计划',
+    tasks: [
+      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
+      { taskId: 'fix', title: '修正续接', status: 'completed', evidenceRefs: ['e2'] },
+    ],
+  });
+  store.setPlanStatus(created.planId, 'completed', { changedBy: 'system:test' });
+  assert.equal(store.getPlan(created.planId)?.status, 'completed');
+  assert.equal(store.getActivePlanByConversation(conversationId), null);
+
+  const next = store.createIntakeContract({
+    conversationId,
+    goal: '新开一个目标：补一份发布说明',
+    createdBy: 'user',
+  });
+
+  assert.notEqual(next.planId, created.planId);
+  assert.equal(store.getPlan(created.planId)?.status, 'completed');
+  assert.notEqual(store.getPlan(created.planId)?.status, 'cancelled');
+  const siblings = store.listPlansByConversation(conversationId);
+  assert.equal(siblings.length, 2);
+  assert.equal(siblings.some((plan) => plan.planId === created.planId && plan.status === 'completed'), true);
+  assert.equal(siblings.some((plan) => plan.planId === next.planId), true);
+});
+
+test('upsertGoalContract opens a new Goal beside an unaccepted completed plan', () => {
   const conversationId = 'conv-continue-unaccepted';
   const created = store.createGoalContract({
     conversationId,
@@ -2306,27 +2353,24 @@ test('upsertGoalContract continues the same unaccepted Goal instead of opening a
   assert.equal(store.getPlan(created.planId)?.status, 'completed');
   assert.equal(store.getActivePlanByConversation(conversationId), null);
 
-  const continued = store.upsertGoalContract(conversationId, {
-    title: '修好验收卡被冲掉',
-    goal: '修好验收卡被冲掉',
+  const next = store.upsertGoalContract(conversationId, {
+    title: '补一份发布说明',
+    goal: '补一份发布说明',
     tasks: [
-      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
-      { taskId: 'fix', title: '修正续接', status: 'running', evidenceRefs: [] },
-      { taskId: 'test', title: '补测试', status: 'pending', evidenceRefs: [] },
+      { taskId: 'draft', title: '起草说明', status: 'pending', evidenceRefs: [] },
     ],
   });
 
-  assert.equal(continued.planId, created.planId);
-  assert.notEqual(continued.status, 'completed');
-  assert.equal(store.getPlan(created.planId)?.status, continued.status);
+  assert.notEqual(next.planId, created.planId);
+  assert.equal(store.getPlan(created.planId)?.status, 'completed');
   const siblings = store.listPlansByConversation(conversationId);
-  assert.equal(siblings.length, 1);
-  assert.equal(siblings[0].planId, created.planId);
-  assert.notEqual(siblings[0].status, 'cancelled');
+  assert.equal(siblings.length, 2);
+  assert.equal(siblings.some((plan) => plan.planId === created.planId && plan.status === 'completed'), true);
+  assert.equal(siblings.some((plan) => plan.planId === next.planId), true);
+  assert.notEqual(store.getPlan(created.planId)?.status, 'cancelled');
 });
 
-
-test('upsertGoalContract: 复用未验收已完成计划时发出 goal-accepted，后续 Runner persist 不自激', () => {
+test('upsertGoalContract: 同会话新开 Goal 不改写未验收旧计划', () => {
   const events = [];
   const watched = createGoalPlanStore({ onChange: (event) => events.push(event) });
   const conversationId = 'conv-continue-unaccepted-handoff';
@@ -2342,22 +2386,23 @@ test('upsertGoalContract: 复用未验收已完成计划时发出 goal-accepted�
   watched.setPlanStatus(created.planId, 'completed', { changedBy: 'system:test' });
   events.length = 0;
 
-  const continued = watched.upsertGoalContract(conversationId, {
-    title: '修好 Goal 交棒',
-    goal: '修好 Goal 交棒',
+  const next = watched.upsertGoalContract(conversationId, {
+    title: '补一份发布说明',
+    goal: '补一份发布说明',
     tasks: [
-      { taskId: 'trace', title: '核对链路', status: 'completed', evidenceRefs: ['e1'] },
-      { taskId: 'fix', title: '修正续接', status: 'pending', evidenceRefs: [] },
+      { taskId: 'draft', title: '起草说明', status: 'pending', evidenceRefs: [] },
     ],
   });
 
-  assert.equal(continued.planId, created.planId);
-  assert.notEqual(continued.status, 'completed');
+  assert.notEqual(next.planId, created.planId);
+  assert.equal(watched.getPlan(created.planId)?.status, 'completed');
+  assert.notEqual(watched.getPlan(created.planId)?.status, 'cancelled');
   assert.equal(events.at(-1)?.changeKind, 'goal-accepted');
 
-  watched.appendRunEvent(created.planId, {
+  watched.appendRunEvent(next.planId, {
     type: 'action_started',
     summary: 'Goal Runner started',
   });
   assert.equal(events.at(-1)?.changeKind, 'persist');
 });
+
