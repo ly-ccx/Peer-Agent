@@ -14,7 +14,7 @@ import type {
   GoalTask,
   GoalVerifierRun,
 } from '@peer-agent/protocol';
-import { formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
+import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
@@ -1564,6 +1564,7 @@ const PlanCard = memo(function PlanCard({
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
+  const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1636,6 +1637,9 @@ const PlanCard = memo(function PlanCard({
         <div className="goal-plan-body">
           {deliveryRoute ? (
             <p className="goal-plan-delivery-route">{deliveryRoute}</p>
+          ) : null}
+          {deliveryHandoffLabel ? (
+            <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
           ) : null}
           {parentPlan ? (
             <div className="goal-plan-origin" data-goal-plan-origin>

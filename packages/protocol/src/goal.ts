@@ -116,6 +116,63 @@ export function formatGoalDeliveryRoute(
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
+function handoffTargetLabel(handoff: GoalDeliveryHandoff): string | undefined {
+  const repo = typeof handoff.repoId === 'string' ? handoff.repoId.trim() : '';
+  const branch = typeof handoff.targetBranch === 'string' ? handoff.targetBranch.trim() : '';
+  if (repo && branch) return `${repo} / ${branch}`;
+  if (branch) return branch;
+  if (repo) return repo;
+  return undefined;
+}
+
+function handoffStoppedReasonLabel(
+  reason: string | undefined,
+  locale: 'zh' | 'en',
+): string {
+  switch (reason) {
+    case 'target_branch_moved':
+      return locale === 'zh' ? '目标分支已更新' : 'target branch moved';
+    case 'same_target_busy':
+      return locale === 'zh' ? '同一目标正在交回' : 'same target is delivering';
+    case 'merge_conflict':
+      return locale === 'zh' ? '交回时发生冲突' : 'delivery conflicted';
+    default:
+      return locale === 'zh' ? '交回已停止' : 'delivery stopped';
+  }
+}
+
+/**
+ * 用户可见的交回状态。没隔离或没验收时不展示。
+ */
+export function formatGoalDeliveryHandoff(
+  input: {
+    readonly deliveryHandoff?: GoalDeliveryHandoff | null;
+    readonly resultAcceptance?: { readonly acceptedAt?: string | null } | null;
+    readonly deliveryBinding?: GoalDeliveryBinding | null;
+  },
+  options?: { readonly locale?: 'zh' | 'en' },
+): string | undefined {
+  const locale = options?.locale === 'en' ? 'en' : 'zh';
+  const acceptedAt = input.resultAcceptance?.acceptedAt;
+  if (typeof acceptedAt !== 'string' || !acceptedAt.trim()) return undefined;
+  if (input.deliveryBinding?.executionIsolation !== 'worktree') return undefined;
+  const handoff = input.deliveryHandoff;
+  if (!handoff?.status || handoff.status === 'idle') return undefined;
+  const target = handoffTargetLabel(handoff);
+  if (handoff.status === 'delivering') {
+    return locale === 'zh' ? '正在交回目标分支' : 'delivering to target branch';
+  }
+  if (handoff.status === 'delivered') {
+    return target
+      ? (locale === 'zh' ? `已交回 ${target}` : `delivered to ${target}`)
+      : (locale === 'zh' ? '已交回目标分支' : 'delivered to target branch');
+  }
+  if (handoff.status === 'stopped') {
+    return handoffStoppedReasonLabel(handoff.stoppedReason, locale);
+  }
+  return undefined;
+}
+
 /**
  * Goal/Plan 的执行准入事实。
  *

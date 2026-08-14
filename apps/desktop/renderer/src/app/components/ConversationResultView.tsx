@@ -88,6 +88,7 @@ export function ConversationResultView({
         <h3 className="conversation-result-view__title">{item.title}</h3>
         <p className="conversation-result-view__meta">
           {item.deliveryRoute ? `${item.deliveryRoute} · ` : item.workspaceLabel ? `${item.workspaceLabel} · ` : ''}
+          {item.deliveryHandoffLabel ? `${item.deliveryHandoffLabel} · ` : ''}
           {item.statusLabel}
           {summaryProgress ? ` · ${summaryProgress.completed}/${summaryProgress.total}` : ''}
         </p>

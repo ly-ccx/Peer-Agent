@@ -138,6 +138,11 @@ export interface TaskOverviewItem {
    * 缺目标分支时写「未确认」，不得补 main。
    */
   readonly deliveryRoute?: string;
+  /**
+   * 用户可见的交回状态：已交回 / 正在交回 / 停止原因。
+   * 没隔离或没验收时不出现。
+   */
+  readonly deliveryHandoffLabel?: string;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -220,6 +225,8 @@ export interface GoalPlanProjectionSnapshot {
   readonly workspaceLabel?: string;
   /** 用户可见的交付路由；缺目标分支时写「未确认」。 */
   readonly deliveryRoute?: string;
+  /** 用户可见的交回状态；没隔离或没验收时省略。 */
+  readonly deliveryHandoffLabel?: string;
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -420,6 +427,7 @@ export function projectGoalPlan(
     title: snapshot.title,
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
+    ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
     ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
     ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
     ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),

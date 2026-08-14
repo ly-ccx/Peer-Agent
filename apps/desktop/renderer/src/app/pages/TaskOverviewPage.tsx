@@ -117,6 +117,7 @@ function workItemMetaParts(
   const includeRoute = group !== 'runtime';
   const includeRuntime = group !== 'route';
   if (includeRoute && item.deliveryRoute) parts.push(item.deliveryRoute);
+  if (includeRoute && item.deliveryHandoffLabel) parts.push(item.deliveryHandoffLabel);
   if (includeRuntime) {
     if (providerLabel) parts.push(providerLabel);
     if (modelLabel) parts.push(modelLabel);

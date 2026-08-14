@@ -21,6 +21,7 @@
 
 import {
   formatGoalDeliveryRoute,
+  formatGoalDeliveryHandoff,
   planRequiresQualityReview,
   projectAutomationRun,
   projectConversation,
@@ -398,6 +399,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     title: typeof plan.title === 'string' && plan.title.trim() !== '' ? plan.title.trim() : planId,
     workspaceLabel: workspaceLabelFromPath(workspacePath),
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
+    ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,

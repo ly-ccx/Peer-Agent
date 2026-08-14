@@ -565,6 +565,15 @@ test('projectGoalPlan 透传交付路由，不把缺分支补成 main', () => {
   assert.notEqual(item.deliveryRoute, 'main');
 });
 
+test('projectGoalPlan 透传交回状态，没隔离或没验收时不显示', () => {
+  const shown = projectGoalPlan(goalSnapshot({
+    deliveryHandoffLabel: '已交回 peer_agent / PeerAgent/0.0.4',
+  }));
+  assert.equal(shown.deliveryHandoffLabel, '已交回 peer_agent / PeerAgent/0.0.4');
+  const hidden = projectGoalPlan(goalSnapshot({}));
+  assert.equal(hidden.deliveryHandoffLabel, undefined);
+});
+
 test('shell_background cancelled → terminal', () => {
   const item = projectShellBackgroundTask({
     taskId: 'task-bg-2',
