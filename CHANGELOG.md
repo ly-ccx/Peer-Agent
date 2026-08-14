@@ -4,6 +4,49 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.4 - 2026-08-14
+
+### Notes
+
+- Stable Task Flow release that gathers Goal landing, workbench collaboration, and channel expansion since 0.0.3.
+- Collapse follow-up Goals into one Goal Thread and keep a single workbench card.
+- Run bound Goals in an isolated Git worktree, land accepted changes back into the original workspace, and close the delivery-routing plus quality-review loop.
+- Add OpenRouter as a first-class official API channel, and expose Grok Fast / xhigh.
+- Keep workbench discussions, read state, search, and refresh steadier, and open project folders from the sidebar.
+
+### Added
+
+- Goal Thread grouping for related acceptance cards, including follow-ups that omit `parentPlanId`.
+- One result card per thread, bound to the latest pending round, with a compact parent/child tree.
+- Isolated Goal landing with a visible delivery handoff after acceptance.
+- Delivery-type routing and a quality-review loop that starts after the result is viewed.
+- Official OpenRouter API as a third-party OpenAI Chat channel with a prefilled base URL and API key.
+- Grok Fast mode and a higher xhigh reasoning effort.
+- Project-folder sidebar entry instead of closing the workspace.
+- Running-task sidebar markers, unread project discussions, workspace-grouped conversation search, and a result-drawer scroll button.
+
+### Changed
+
+- Query task overview from the current session or workspace index, merge scroll probes, and pause background refresh under drawers.
+- Keep the home discussion section even when nothing is unread, and show the full result-ready queue.
+- Merge workbench broadcasts, skip hidden reloads, back off tray rebuilds, and cache unchanged plan indexes.
+- Persist task-overview read state, unify running / interrupted card hierarchy, and reduce refresh flicker.
+- Keep continuing an existing task separate from submitting new input, and preserve reasoning effort when restoring a session.
+- Rewrite README and docs landing copy around fully open source (MIT) and task-flow handoff / continuity / follow-up.
+
+### Fixed
+
+- Fix drawer, scroll, and input jank when multiple tasks run in parallel.
+- Preserve interrupted Goal state, and stop unread task progress events from slowing the current page.
+- Treat vanished worktrees as already cleaned, collect worktree changes before cleanup, reconcile the foreground runner, and keep unaccepted plans across follow-ups.
+- Unify SkillHub toolbar control radius.
+- Restore the open-sky cat brand icons instead of the full-bleed day and night illustrations.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.4` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.4`.
+
 ## 0.0.4-beta.4 - 2026-08-14
 
 ### Notes
