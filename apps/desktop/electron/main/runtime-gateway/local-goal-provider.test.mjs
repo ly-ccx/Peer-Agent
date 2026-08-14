@@ -10,7 +10,11 @@ import {
 } from '@peer-agent/runtime-core';
 
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
-import { createLocalGoalProvider } from './local-goal-provider.mjs';
+import {
+  createLocalGoalProvider,
+  looksLikeExplicitNewRequest,
+  resolveDerivedPlanRelation,
+} from './local-goal-provider.mjs';
 
 let tmpRoot;
 let store;
@@ -389,5 +393,187 @@ describe('local goal provider', () => {
     assert.equal(execution.result.status, 'failed');
     const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
     assert.equal(payload.ok, false);
+  });
+
+  it('creates a derived follow-up plan when parentPlanId and sourceTaskId are paired', async () => {
+    const parent = store.createPlan({
+      conversationId: 'conv-thread',
+      title: '统一工具栏圆角',
+      goal: '统一工具栏圆角',
+      tasks: [{ taskId: 't1', order: 0, title: '改样式', status: 'pending', evidenceRefs: [] }],
+    });
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create_plan:derived',
+          capabilityId: 'local.goal.create_plan',
+          arguments: {
+            title: '截图验收工具栏圆角',
+            goal: '把截图验收工具栏圆角对齐',
+            tasks: [{ title: '改圆角' }],
+            parentPlanId: parent.planId,
+            sourceTaskId: parent.tasks[0].taskId,
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-thread', mode: 'chat' } },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    const child = store.getPlan(payload.planId);
+    assert.equal(child.parentPlanId, parent.planId);
+    assert.equal(child.sourceTaskId, parent.tasks[0].taskId);
+    assert.equal(child.rootPlanId, parent.planId);
+    assert.equal(child.relationType, 'derived');
+    assert.equal(child.depth, 1);
+  });
+
+  it('auto-attaches a follow-up when the model omits relation fields', async () => {
+    const parent = store.createPlan({
+      conversationId: 'conv-autofill',
+      title: '统一工具栏圆角',
+      goal: '统一工具栏圆角',
+      tasks: [{ taskId: 't1', order: 0, title: '改样式', status: 'pending', evidenceRefs: [] }],
+    });
+    store.setPlanStatus(parent.planId, 'completed');
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create_plan:autofill',
+          capabilityId: 'local.goal.create_plan',
+          arguments: {
+            title: '把圆角再调小一点',
+            goal: '把工具栏圆角从 12px 调到 10px',
+            tasks: [{ title: '改数值' }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-autofill', mode: 'chat' } },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    const child = store.getPlan(payload.planId);
+    assert.equal(child.parentPlanId, parent.planId);
+    assert.equal(child.sourceTaskId, store.getPlan(parent.planId).tasks[0].taskId);
+    assert.equal(child.relationType, 'derived');
+  });
+
+  it('keeps explicit parentPlanId and sourceTaskId over the recent completed plan', async () => {
+    const older = store.createPlan({
+      conversationId: 'conv-explicit',
+      title: '旧的完成计划',
+      goal: '旧的完成计划',
+      tasks: [{ taskId: 'old-1', order: 0, title: '旧任务', status: 'pending', evidenceRefs: [] }],
+    });
+    store.setPlanStatus(older.planId, 'completed');
+    const chosen = store.createPlan({
+      conversationId: 'conv-explicit',
+      title: '统一工具栏圆角',
+      goal: '统一工具栏圆角',
+      tasks: [{ taskId: 'chosen-1', order: 0, title: '改样式', status: 'pending', evidenceRefs: [] }],
+    });
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create_plan:explicit',
+          capabilityId: 'local.goal.create_plan',
+          arguments: {
+            title: '截图验收工具栏圆角',
+            goal: '把截图验收工具栏圆角对齐',
+            tasks: [{ title: '改圆角' }],
+            parentPlanId: chosen.planId,
+            sourceTaskId: chosen.tasks[0].taskId,
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-explicit', mode: 'chat' } },
+    );
+
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    const child = store.getPlan(payload.planId);
+    assert.equal(child.parentPlanId, chosen.planId);
+    assert.equal(child.sourceTaskId, chosen.tasks[0].taskId);
+    assert.notEqual(child.parentPlanId, older.planId);
+  });
+
+  it('does not auto-attach when the new plan is an explicit new request', async () => {
+    const parent = store.createPlan({
+      conversationId: 'conv-new-request',
+      title: '统一工具栏圆角',
+      goal: '统一工具栏圆角',
+      tasks: [{ taskId: 't1', order: 0, title: '改样式', status: 'pending', evidenceRefs: [] }],
+    });
+    store.setPlanStatus(parent.planId, 'completed');
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create_plan:new-request',
+          capabilityId: 'local.goal.create_plan',
+          arguments: {
+            title: '新需求：修复 CLI 冷启动白屏',
+            goal: '这是一个无关的新任务，不要挂到上一轮圆角目标上',
+            tasks: [{ title: '查白屏' }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-new-request', mode: 'chat' } },
+    );
+
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    const child = store.getPlan(payload.planId);
+    assert.equal(child.parentPlanId, undefined);
+    assert.equal(child.sourceTaskId, undefined);
+    assert.equal(child.relationType, undefined);
+  });
+});
+
+describe('resolveDerivedPlanRelation', () => {
+  const recentCompleted = {
+    planId: 'plan-root',
+    tasks: [{ taskId: 'task-1' }],
+  };
+
+  it('fills missing relation fields from the recent completed plan', () => {
+    const relation = resolveDerivedPlanRelation({
+      title: '把圆角再调小一点',
+      goal: '继续改工具栏圆角',
+      recentCompleted,
+    });
+    assert.deepEqual(relation, {
+      parentPlanId: 'plan-root',
+      sourceTaskId: 'task-1',
+      attached: true,
+    });
+  });
+
+  it('prefers explicit relation fields', () => {
+    const relation = resolveDerivedPlanRelation({
+      parentPlanId: 'plan-chosen',
+      sourceTaskId: 'task-chosen',
+      title: '把圆角再调小一点',
+      recentCompleted,
+    });
+    assert.equal(relation.parentPlanId, 'plan-chosen');
+    assert.equal(relation.sourceTaskId, 'task-chosen');
+    assert.equal(relation.attached, false);
+  });
+
+  it('skips auto-attach for an explicit new request', () => {
+    assert.equal(looksLikeExplicitNewRequest('新需求：修白屏'), true);
+    const relation = resolveDerivedPlanRelation({
+      title: '新需求：修白屏',
+      goal: 'unrelated new request',
+      recentCompleted,
+    });
+    assert.equal(relation.parentPlanId, undefined);
+    assert.equal(relation.sourceTaskId, undefined);
+    assert.equal(relation.attached, false);
   });
 });

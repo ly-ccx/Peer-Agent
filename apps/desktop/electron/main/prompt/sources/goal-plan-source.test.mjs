@@ -69,16 +69,53 @@ describe('goal-plan prompt source', () => {
     assert.deepEqual(source.render(observation), []);
   });
 
-  it('skips terminal (completed/cancelled) plans', () => {
+  it('skips cancelled plans and does not treat them as a follow-up parent', () => {
     const source = createGoalPlanPromptSource();
     const observation = source.observe({
       mode: 'goal',
       conversationId: 'conv-2',
       goalPlanStore: fakeStore({
-        'conv-2': [{ ...ACTIVE_PLAN, status: 'completed' }],
+        'conv-2': [{ ...ACTIVE_PLAN, status: 'cancelled' }],
       }),
     });
     assert.deepEqual(source.render(observation), []);
+  });
+
+  it('injects the most recent completed plan so a follow-up can pass parentPlanId', () => {
+    const source = createGoalPlanPromptSource();
+    const observation = source.observe({
+      mode: 'chat',
+      conversationId: 'conv-follow',
+      goalPlanStore: fakeStore({
+        'conv-follow': [
+          {
+            planId: 'plan-old',
+            title: '统一工具栏圆角',
+            status: 'completed',
+            completedAt: '2026-08-13T10:00:00.000Z',
+            updatedAt: '2026-08-13T10:00:00.000Z',
+          },
+          {
+            planId: 'plan-new',
+            title: '截图验收工具栏圆角',
+            status: 'completed',
+            completedAt: '2026-08-14T08:00:00.000Z',
+            updatedAt: '2026-08-14T08:00:00.000Z',
+            tasks: [{ taskId: 'task-r2', title: '改圆角', status: 'completed' }],
+          },
+        ],
+      }),
+    });
+    const sections = source.render(observation);
+    assert.equal(sections.length, 1);
+    assert.equal(observation.recentCompleted.planId, 'plan-new');
+    assert.match(sections[0].content, /parentPlanId/);
+    assert.match(sections[0].content, /plan-new/);
+    assert.match(sections[0].content, /截图验收工具栏圆角/);
+    assert.match(sections[0].content, /sourceTaskId=task-r2/);
+    assert.doesNotMatch(sections[0].content, /plan-old/);
+    assert.equal(sections[0].source.recentCompleted.planId, 'plan-new');
+    assert.equal(sections[0].source.recentCompleted.sourceTaskId, 'task-r2');
   });
 
   it('is resilient when the store throws', () => {

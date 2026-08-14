@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildGoalThreadRelationIndex,
+  capTaskOverviewByBucket,
   createTaskOverviewAggregator,
   currentStepTitleFromItem,
   displayConversationTitle,
@@ -255,6 +257,110 @@ test('toGoalPlanSnapshot 组装 workspace 标签 / progress / runner.status', ()
   assert.equal(snapshot.workspaceLabel, 'peer_agent');
   assert.deepEqual(snapshot.progress, { completed: 7, total: 9 });
   assert.equal(snapshot.accepted, false);
+});
+
+test('分桶截断：result_ready 洪峰不再挤掉 peer_advancing 与 discussion', () => {
+  const mk = (id, actionRight) => ({
+    taskId: id,
+    actionRight,
+    title: `t-${id}`,
+    lastActiveAt: '2026-08-14T00:00:00.000Z',
+  });
+  const flood = Array.from({ length: 500 }, (_, i) => mk(`r${i}`, 'result_ready'));
+  const mixed = [
+    mk('needs-1', 'needs_you'),
+    ...flood,
+    mk('adv-1', 'peer_advancing'),
+    mk('adv-2', 'peer_advancing'),
+    { ...mk('disc-1', 'discussion'), actionRight: 'discussion' },
+  ];
+  const sorted = mixed; // 排序已由 sortTaskOverview 保证；此处直接验证截断契约
+  const capped = capTaskOverviewByBucket(sorted, 200);
+  const byBucket = {};
+  for (const item of capped) byBucket[item.actionRight] = (byBucket[item.actionRight] ?? 0) + 1;
+  // result_ready 不限条（500 全保留）；行动权/讨论桶不被挤掉。
+  assert.equal(byBucket.result_ready, 500);
+  assert.equal(byBucket.needs_you, 1);
+  assert.equal(byBucket.peer_advancing, 2);
+  assert.equal(byBucket.discussion, 1);
+  // 显式小配额仍然生效。
+  const tight = capTaskOverviewByBucket(sorted, 200, 50);
+  const tightResult = tight.filter((i) => i.actionRight === 'result_ready').length;
+  assert.equal(tightResult, 50);
+  assert.ok(tight.some((i) => i.actionRight === 'peer_advancing'));
+});
+
+test('目标线：带 parentPlanId 的 plan 投影出 rootPlanId/relationType/depth/round/rootPlanTitle', () => {
+  const root = {
+    planId: 'plan-root',
+    status: 'completed',
+    title: '统一工具栏圆角',
+    createdAt: '2026-08-13T10:00:00.000Z',
+    updatedAt: '2026-08-13T10:30:00.000Z',
+    targetWorkspacePath: '/Users/x/peer-knowledge',
+  };
+  const derived = {
+    planId: 'plan-r2',
+    parentPlanId: 'plan-root',
+    rootPlanId: 'plan-root',
+    relationType: 'derived',
+    depth: 1,
+    status: 'completed',
+    title: '截图验收工具栏圆角',
+    createdAt: '2026-08-13T11:00:00.000Z',
+    updatedAt: '2026-08-13T11:20:00.000Z',
+    targetWorkspacePath: '/Users/x/peer-knowledge',
+  };
+  const relationIndex = buildGoalThreadRelationIndex([root, derived]);
+  const snapshot = toGoalPlanSnapshot(derived, { relationIndex });
+  assert.equal(snapshot.rootPlanId, 'plan-root');
+  assert.equal(snapshot.parentPlanId, 'plan-root');
+  assert.equal(snapshot.relationType, 'derived');
+  assert.equal(snapshot.depth, 1);
+  assert.equal(snapshot.round, 2);
+  assert.equal(snapshot.rootPlanTitle, '统一工具栏圆角');
+  // 根自身也投影出线归属，轮次为 1。
+  const rootSnapshot = toGoalPlanSnapshot(root, { relationIndex });
+  assert.equal(rootSnapshot.rootPlanId, 'plan-root');
+  assert.equal(rootSnapshot.round, 1);
+  assert.equal(rootSnapshot.parentPlanId, undefined);
+});
+
+test('目标线：sourceTaskId 兜底链也能解析出关系；旧数据无关系字段则缺键', () => {
+  const parent = {
+    planId: 'plan-a',
+    status: 'completed',
+    title: '第一轮目标',
+    createdAt: '2026-08-13T09:00:00.000Z',
+    updatedAt: '2026-08-13T09:10:00.000Z',
+  };
+  const child = {
+    // 旧链路：store 校验过 sourceTaskId 指向父计划，但没有显式 parentPlanId。
+    planId: 'plan-b',
+    sourceTaskId: 'plan-a',
+    status: 'completed',
+    title: '追问派生轮',
+    createdAt: '2026-08-13T09:30:00.000Z',
+    updatedAt: '2026-08-13T09:40:00.000Z',
+  };
+  const relationIndex = buildGoalThreadRelationIndex([parent, child]);
+  const snapshot = toGoalPlanSnapshot(child, { relationIndex });
+  assert.equal(snapshot.rootPlanId, 'plan-a');
+  assert.equal(snapshot.parentPlanId, 'plan-a');
+  assert.equal(snapshot.relationType, 'derived');
+  assert.equal(snapshot.round, 2);
+  // 完全无关系事实的旧计划：四类字段全部缺键，UI 降级平铺。
+  const legacy = toGoalPlanSnapshot({
+    planId: 'plan-legacy',
+    status: 'completed',
+    title: '历史孤立计划',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  }, { relationIndex });
+  assert.equal(legacy.rootPlanId, undefined);
+  assert.equal(legacy.parentPlanId, undefined);
+  assert.equal(legacy.relationType, undefined);
+  assert.equal(legacy.round, undefined);
+  assert.equal(legacy.rootPlanTitle, undefined);
 });
 
 test('toGoalPlanSnapshot 只有交付绑定才标出需要质量自检', () => {

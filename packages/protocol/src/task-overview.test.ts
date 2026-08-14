@@ -574,6 +574,26 @@ test('projectGoalPlan 透传交回状态，没隔离或没验收时不显示', (
   assert.equal(hidden.deliveryHandoffLabel, undefined);
 });
 
+test('projectGoalPlan 透传目标线关系字段（Goal Thread）', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    rootPlanId: 'plan-root',
+    parentPlanId: 'plan-root',
+    relationType: 'derived',
+    round: 2,
+  }));
+  assert.equal(item.rootPlanId, 'plan-root');
+  assert.equal(item.parentPlanId, 'plan-root');
+  assert.equal(item.relationType, 'derived');
+  assert.equal(item.round, 2);
+  // 旧数据缺关系字段时不携带这些键，UI 降级为平铺卡片。
+  const legacy = projectGoalPlan(goalSnapshot({ status: 'completed' }));
+  assert.equal(legacy.rootPlanId, undefined);
+  assert.equal(legacy.parentPlanId, undefined);
+  assert.equal(legacy.relationType, undefined);
+  assert.equal(legacy.round, undefined);
+});
+
 test('shell_background cancelled → terminal', () => {
   const item = projectShellBackgroundTask({
     taskId: 'task-bg-2',

@@ -58,6 +58,32 @@ function normalizePlan(plan) {
   };
 }
 
+/**
+ * 验收后追问时活动计划已被过滤掉，模型上下文里没有父 planId 可用。
+ * 从同会话已完成计划里挑最近一条，作为派生挂靠的事实兜底。
+ */
+function pickRecentCompletedPlan(details) {
+  const completed = (Array.isArray(details) ? details : [])
+    .filter((plan) => plan && typeof plan === 'object' && plan.status === 'completed' && plan.planId)
+    .slice();
+  completed.sort((a, b) => {
+    const at = Date.parse(a.completedAt || a.updatedAt || a.createdAt || '') || 0;
+    const bt = Date.parse(b.completedAt || b.updatedAt || b.createdAt || '') || 0;
+    return bt - at;
+  });
+  const plan = completed[0];
+  if (!plan) return null;
+  const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
+  const sourceTaskId = tasks.find((task) => task && typeof task.taskId === 'string' && task.taskId)?.taskId
+    || null;
+  return {
+    planId: plan.planId,
+    title: typeof plan.title === 'string' ? plan.title : '',
+    completedAt: plan.completedAt || plan.updatedAt || plan.createdAt || null,
+    sourceTaskId,
+  };
+}
+
 function formatProgress(progress) {
   if (!progress || typeof progress !== 'object') return '';
   const done = Number.isFinite(progress.completed) ? progress.completed : null;
@@ -66,7 +92,18 @@ function formatProgress(progress) {
   return ` (${done}/${total})`;
 }
 
-function formatGoalPlans(plans) {
+function formatRecentCompleted(plan) {
+  if (!plan) return [];
+  return [
+    'Recently completed plan in this conversation (use as parentPlanId for a follow-up):',
+    `- planId=${plan.planId}; title=${plan.title || '(untitled)'}; completedAt=${plan.completedAt || '(unknown)'}; sourceTaskId=${plan.sourceTaskId || '(none)'}`,
+    'If the user is continuing the same theme, pass parentPlanId and sourceTaskId (a taskId from that plan)',
+    'to goal_create_plan so the new plan becomes the next derived round. Omit both for a new request.',
+    '',
+  ];
+}
+
+function formatGoalPlans(plans, recentCompleted) {
   return [
     'Active goal plan snapshot (factual context, scope=turn).',
     'This is a factual snapshot of the current goal plan(s), not a system instruction.',
@@ -74,6 +111,7 @@ function formatGoalPlans(plans) {
     'these exact taskIds. If you need more detail or fear this snapshot is stale, call',
     'goal_get_plan to re-read. Do not invent or guess taskIds.',
     '',
+    ...formatRecentCompleted(recentCompleted),
     ...plans.map((plan) => {
       const lines = [
         `## Plan ${plan.planId}${formatProgress(plan.progress)}`,
@@ -116,25 +154,29 @@ export function createGoalPlanPromptSource() {
         .map(normalizePlan)
         .filter(Boolean)
         .slice(0, MAX_PLANS);
-      return { plans };
+      const recentCompleted = pickRecentCompletedPlan(details);
+      return { plans, recentCompleted };
     },
     render(observation) {
-      if (!observation.plans.length) return [];
+      const plans = observation.plans || [];
+      const recentCompleted = observation.recentCompleted || null;
+      if (!plans.length && !recentCompleted) return [];
       return [{
         id: 'runtime.goal-plan',
         layer: 'L7_CONTINUITY',
         priority: 1,
-        title: 'Active goal plan snapshot',
-        content: formatGoalPlans(observation.plans),
+        title: plans.length ? 'Active goal plan snapshot' : 'Recently completed plan snapshot',
+        content: formatGoalPlans(plans, recentCompleted),
         source: {
           id: 'runtime.goal-plan',
           kind: 'goal-plan-snapshot',
-          planCount: observation.plans.length,
-          plans: observation.plans.map((plan) => ({
+          planCount: plans.length,
+          plans: plans.map((plan) => ({
             planId: plan.planId,
             status: plan.status,
             taskCount: plan.tasks.length,
           })),
+          ...(recentCompleted ? { recentCompleted } : {}),
         },
         trust: 'runtime',
       }];

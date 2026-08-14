@@ -1794,3 +1794,90 @@
   font-size: 0.95em;
   font-weight: 500;
 }
+
+/* ---------------------------------------------------------------------------
+ * 目标线（Goal Thread）—— 结果待验收区按 rootPlanId 归组。
+ * 设计依据：peer-knowledge design/product/goal-thread-acceptance-demo.html。
+ * 颜色只走 --za-* token；徽标同时用文字（R2 / ↳ 追问派生）表达关系，
+ * 不单靠颜色区分（CONTRACT.md 红线 6）。
+ * ------------------------------------------------------------------------- */
+.goal-thread-stream {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.goal-thread-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.75rem 0.75rem 0.875rem;
+  border: 1px solid var(--za-line);
+  border-radius: var(--radius-lg, 1rem);
+  background: color-mix(in srgb, var(--za-surface-0) 82%, transparent);
+}
+
+.goal-thread-group__head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0 0.25rem;
+}
+
+.goal-thread-group__line {
+  flex: none;
+  width: 3px;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--za-accent);
+  opacity: 0.85;
+}
+
+.goal-thread-group__title {
+  display: flex;
+  flex-basis: min-content;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.goal-thread-group__name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--za-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-thread-group__meta {
+  font-size: 0.6875rem;
+  color: var(--za-text-muted);
+}
+
+.goal-thread-group__runs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.goal-thread-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.5rem;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  vertical-align: 1px;
+  background: color-mix(in srgb, var(--za-text) 8%, transparent);
+  color: var(--za-text-soft);
+}
+
+.goal-thread-badge--derived {
+  background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+  color: var(--za-accent);
+}
+

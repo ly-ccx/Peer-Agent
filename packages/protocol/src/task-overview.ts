@@ -181,6 +181,28 @@ export interface TaskOverviewItem {
   /** 动作按钮标签（原型「处理 →」「查看结果」「继续 →」）。 */
   readonly actionLabel: string;
   /**
+   * 目标线（Goal Thread）关系 —— 仅 source === 'goal_plan' 且计划携带
+   * 关系字段时出现。UI 依据 rootPlanId 把多条 result_ready 归组为一条
+   * 目标线；缺字段的历史计划无这些键，仍按单卡平铺（向后兼容）。
+   */
+  readonly rootPlanId?: string;
+  readonly parentPlanId?: string;
+  readonly relationType?: 'derived';
+  /** 目标线内派生深度；顶层计划为 0。 */
+  readonly depth?: number;
+  /** 目标线内轮次序号，从 1 开始。 */
+  readonly round?: number;
+  /** 根目标标题；根卡片已移出列表时分组头仍可显示。 */
+  readonly rootPlanTitle?: string;
+  /** 质量自检状态；接口此前漏声明（实现与测试已在用），随目标线一并补齐。 */
+  readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
+  readonly qualityChecks?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly status: 'passed' | 'failed' | 'skipped';
+    readonly note?: string;
+  }[];
+  /**
    * 是否存在用户尚未查看的新动态。
    * 该值由主进程依据任务最近活跃时间与持久化阅读水位投影，renderer 不自行推断。
    */
@@ -256,6 +278,24 @@ export interface GoalPlanProjectionSnapshot {
   /** 有代码副作用时，完成门之后还要质量自检过线才能待验收。 */
   readonly requiresQualityReview?: boolean;
   readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
+  /**
+   * 目标线（Goal Thread）关系字段 —— 追问派生出的新 plan 不再平铺，
+   * 而是挂进同一 rootPlanId 的目标线成为新一轮（demo：
+   * design/product/goal-thread-acceptance-demo.html）。
+   * 全部可选：历史数据缺字段时 UI 自然降级为单卡平铺。
+   */
+  /** 所在目标线的根 planId；顶层计划等于自身 planId。 */
+  readonly rootPlanId?: string;
+  /** 根目标标题；根卡片已被验收移出列表时，分组头仍可显示。 */
+  readonly rootPlanTitle?: string;
+  /** 直接父计划；顶层计划省略。 */
+  readonly parentPlanId?: string;
+  /** 关系类型；当前仅有 derived（追问派生）。 */
+  readonly relationType?: 'derived';
+  /** 在目标线内的派生深度；顶层计划为 0。 */
+  readonly depth?: number;
+  /** 在目标线内的轮次序号，从 1 开始；顶层计划为 1。 */
+  readonly round?: number;
   readonly qualityChecks?: readonly {
     readonly id: string;
     readonly label: string;
@@ -425,6 +465,17 @@ export function projectGoalPlan(
     ...(decision.needsYouReason ? { needsYouReason: decision.needsYouReason } : {}),
     nextAction: decision.nextAction,
     title: snapshot.title,
+    // 目标线关系透传：缺字段的旧计划不携带这些键，UI 自然降级为平铺。
+    ...(snapshot.rootPlanId ? { rootPlanId: snapshot.rootPlanId } : {}),
+    ...(snapshot.parentPlanId ? { parentPlanId: snapshot.parentPlanId } : {}),
+    ...(snapshot.relationType ? { relationType: snapshot.relationType } : {}),
+    ...(typeof snapshot.depth === 'number' && Number.isFinite(snapshot.depth)
+      ? { depth: snapshot.depth }
+      : {}),
+    ...(typeof snapshot.round === 'number' && Number.isFinite(snapshot.round)
+      ? { round: snapshot.round }
+      : {}),
+    ...(snapshot.rootPlanTitle ? { rootPlanTitle: snapshot.rootPlanTitle } : {}),
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),

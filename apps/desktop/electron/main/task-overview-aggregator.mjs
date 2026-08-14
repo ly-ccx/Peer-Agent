@@ -357,12 +357,139 @@ export function extractPlanSteps(plan) {
   return steps.length > 0 ? steps : undefined;
 }
 
+/**
+ * 目标线（Goal Thread）关系索引 —— 一次遍历 plans 建立三个查询：
+ * rootPlanIdOf / parentPlanIdOf / roundOf，外加根标题表。
+ * 关系事实优先读 plan 自带字段（store 水合产物），缺字段时回退
+ * sourceTaskId 链（sourceTask.taskId 指向父 plan 的 taskId 投影身份）。
+ * 旧数据两者皆无 → 查询返回 undefined，UI 降级为平铺卡片。
+ */
+export function buildGoalThreadRelationIndex(plans) {
+  const byPlanId = new Map();
+  const bySourceTaskId = new Map();
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    if (!plan || typeof plan !== 'object') continue;
+    if (typeof plan.planId === 'string' && plan.planId) byPlanId.set(plan.planId, plan);
+    if (typeof plan.sourceTaskId === 'string' && plan.sourceTaskId) {
+      bySourceTaskId.set(plan.sourceTaskId, plan);
+    }
+  }
+  // taskId 投影身份（protocol projectGoalPlan）对 goal_plan 来源恒等于 planId，
+  // 因此 sourceTaskId 既可能存父 plan 的 planId，也可能存其 taskId；两者都在 byPlanId 命中。
+  const childCountByParent = new Map();
+  const noteChild = (parentId) => {
+    if (!parentId) return;
+    childCountByParent.set(parentId, (childCountByParent.get(parentId) ?? 0) + 1);
+  };
+  for (const plan of byPlanId.values()) {
+    if (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId)) {
+      noteChild(plan.parentPlanId);
+    } else if (
+      typeof plan.sourceTaskId === 'string'
+      && byPlanId.has(plan.sourceTaskId)
+      && plan.sourceTaskId !== plan.planId
+    ) {
+      noteChild(plan.sourceTaskId);
+    }
+  }
+  const rootOf = (plan, seen = new Set()) => {
+    if (!plan || seen.has(plan.planId)) return null;
+    seen.add(plan.planId);
+    const parentId = typeof plan.parentPlanId === 'string' && plan.parentPlanId
+      ? plan.parentPlanId
+      : (typeof plan.sourceTaskId === 'string' && plan.sourceTaskId && byPlanId.has(plan.sourceTaskId)
+        ? plan.sourceTaskId
+        : null);
+    if (!parentId) return plan;
+    const parent = byPlanId.get(parentId);
+    if (!parent) return plan;
+    return rootOf(parent, seen);
+  };
+  const inThread = (planId) => {
+    const plan = byPlanId.get(planId);
+    if (!plan) return false;
+    const hasParent =
+      (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId))
+      || (typeof plan.sourceTaskId === 'string' && byPlanId.has(plan.sourceTaskId) && plan.sourceTaskId !== planId);
+    return hasParent || childCountByParent.has(planId);
+  };
+  // rootPlanIdOf：仅当 plan 参与目标线（有父或有子）才返回线根 id；
+  // 根自身返回自己的 planId（分组时根卡与派生轮同组）；孤立计划返回 undefined（平铺）。
+  const rootPlanIdOf = (planId) => {
+    if (!inThread(planId)) return undefined;
+    return rootOf(byPlanId.get(planId))?.planId;
+  };
+  const parentPlanIdOf = (planId) => {
+    const plan = byPlanId.get(planId);
+    if (!plan) return undefined;
+    if (typeof plan.parentPlanId === 'string' && plan.parentPlanId && plan.parentPlanId !== planId) {
+      return plan.parentPlanId;
+    }
+    const sourceId = typeof plan.sourceTaskId === 'string' ? plan.sourceTaskId : null;
+    if (sourceId && sourceId !== planId && byPlanId.has(sourceId)) return sourceId;
+    return undefined;
+  };
+  // 轮次：同根下按 createdAt 升序的序号（1 起）。根自身也参与排序，
+  // 保证 R1 是最早一轮；时间缺失时按数组顺序稳定兜底。
+  const roundsByRoot = new Map();
+  const indexRound = (planId) => {
+    const plan = byPlanId.get(planId);
+    const root = rootOf(plan);
+    const rootId = root?.planId;
+    if (!rootId) return undefined;
+    if (!roundsByRoot.has(rootId)) {
+      const members = [];
+      for (const candidate of byPlanId.values()) {
+        if (rootOf(candidate)?.planId === rootId) members.push(candidate);
+      }
+      members.sort((a, b) => {
+        const at = Date.parse(a.createdAt ?? '');
+        const bt = Date.parse(b.createdAt ?? '');
+        const aT = Number.isFinite(at) ? at : 0;
+        const bT = Number.isFinite(bt) ? bt : 0;
+        if (aT !== bT) return aT - bT;
+        return String(a.planId).localeCompare(String(b.planId));
+      });
+      roundsByRoot.set(rootId, new Map(members.map((m, i) => [m.planId, i + 1])));
+    }
+    return roundsByRoot.get(rootId)?.get(planId);
+  };
+  return {
+    rootPlanIdOf,
+    parentPlanIdOf,
+    roundOf: indexRound,
+    rootTitleOf: (rootId) => {
+      const root = byPlanId.get(rootId);
+      return typeof root?.title === 'string' && root.title ? root.title : undefined;
+    },
+  };
+}
+
 /** 组装 GoalPlan 投影快照。plan 为 goal-plan-store.listPlanDetails() 的水合形态。 */
 export function toGoalPlanSnapshot(plan, options = {}) {
   if (!plan || typeof plan !== 'object') return null;
   const planId = typeof plan.planId === 'string' ? plan.planId : null;
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (!planId || !status) return null;
+  // 目标线（Goal Thread）关系：仅当 store 已带关系事实时透传，旧数据保持缺键。
+  const relationSource = typeof options.relationIndex === 'object' && options.relationIndex !== null
+    ? options.relationIndex
+    : null;
+  const rootPlanId = typeof plan.rootPlanId === 'string' && plan.rootPlanId && plan.rootPlanId !== planId
+    ? plan.rootPlanId
+    : (relationSource?.rootPlanIdOf?.(planId) ?? undefined);
+  const parentPlanId = typeof plan.parentPlanId === 'string' && plan.parentPlanId && plan.parentPlanId !== planId
+    ? plan.parentPlanId
+    : (relationSource?.parentPlanIdOf?.(planId) ?? undefined);
+  const relationType = plan.relationType === 'derived' || (parentPlanId && rootPlanId)
+    ? 'derived'
+    : undefined;
+  const depth = typeof plan.depth === 'number' && Number.isFinite(plan.depth)
+    ? plan.depth
+    : (parentPlanId ? 1 : undefined);
+  // 轮次 = 同目标线内按创建时间的序号；无关系事实时缺省，UI 按平铺处理。
+  const round = relationSource?.roundOf?.(planId);
+  const rootPlanTitle = rootPlanId ? relationSource?.rootTitleOf?.(rootPlanId) : undefined;
   const workspacePath = planWorkspacePath(plan);
   const progress =
     plan.progress && Number.isFinite(plan.progress.completed) && Number.isFinite(plan.progress.total)
@@ -414,6 +541,13 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(Array.isArray(plan.qualityReview?.checks) && plan.qualityReview.checks.length > 0
       ? { qualityChecks: plan.qualityReview.checks }
       : {}),
+    // 目标线关系字段：缺事实时保持缺键，renderer 降级平铺。
+    ...(rootPlanId ? { rootPlanId } : {}),
+    ...(parentPlanId ? { parentPlanId } : {}),
+    ...(relationType ? { relationType } : {}),
+    ...(typeof depth === 'number' && Number.isFinite(depth) ? { depth } : {}),
+    ...(typeof round === 'number' && Number.isFinite(round) ? { round } : {}),
+    ...(rootPlanTitle ? { rootPlanTitle } : {}),
   };
 }
 
@@ -529,13 +663,16 @@ export function isPlanResultAccepted(plan) {
   if (plan.resultAccepted === true) return true;
   if (typeof plan.resultAcceptedAt === 'string' && plan.resultAcceptedAt.trim() !== '') return true;
 
-  // 存量祖父化：功能上线前的 completed 视为已结束，不进「结果待验收」
+  // 存量祖父化：功能上线前的 completed 视为已结束，不进「结果待验收」。
+  // 判定时间取 completedAt ?? createdAt（完成事实发生时刻），**不能用 updatedAt**：
+  // 2026-08-14 回归 —— 批量迁移/治理脚本刷新了历史 plan 的 updatedAt，
+  // 导致 7 月完成的 779 个旧任务穿透 cutoff 涌入待验收。
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (status === GOAL_COMPLETED_STATUS) {
     const when =
-      (typeof plan.updatedAt === 'string' && plan.updatedAt) ||
       (typeof plan.completedAt === 'string' && plan.completedAt) ||
       (typeof plan.createdAt === 'string' && plan.createdAt) ||
+      (typeof plan.updatedAt === 'string' && plan.updatedAt) ||
       null;
     if (when && when < RESULT_ACCEPTANCE_REQUIRED_SINCE) {
       return true;
@@ -719,10 +856,12 @@ export function createTaskOverviewAggregator({
     const latestPlanByConversationId = new Map();
     const independentlyProjectedResults = [];
     const unlinkedPlans = [];
+    // 目标线（Goal Thread）关系索引：从这批 plans 建一次，供两处 snapshot 组装共用。
+    const relationIndex = buildGoalThreadRelationIndex(plans);
     for (const rawPlan of plans) {
       if (!isGoalPlanInScope(rawPlan, scope)) continue;
       const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
-      const snapshot = toGoalPlanSnapshot(plan);
+      const snapshot = toGoalPlanSnapshot(plan, { relationIndex });
       const projected = snapshot ? projectGoalPlan(snapshot) : null;
       // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，
       // 不能混入 conversation 级去重后形成用户看不见的验收队列。
@@ -750,7 +889,7 @@ export function createTaskOverviewAggregator({
       const conversationId =
         typeof plan?.conversationId === 'string' ? plan.conversationId : undefined;
       const conversation = conversationId ? conversationById.get(conversationId) : undefined;
-      const snapshot = toGoalPlanSnapshot(plan, { conversation, providerIndex });
+      const snapshot = toGoalPlanSnapshot(plan, { conversation, providerIndex, relationIndex });
       if (!snapshot) continue;
       // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。
       const projected = projectGoalPlan(snapshot, { nowMs });
@@ -851,8 +990,15 @@ export function createTaskOverviewAggregator({
       ? items.filter((item) => item?.conversationId === conversationId)
       : items;
     const sorted = sortTaskOverview(scopedItems);
-    // result_ready 不单独限流；仅受首页合计 limit 约束（默认放宽到 200）。
-    return sorted.slice(0, limit);
+    // 分桶截断（2026-08-14 修复）：result_ready 单独配额，不再挤占
+    // peer_advancing / discussion 的空间；其余桶共享 limit。
+    return capTaskOverviewByBucket(
+      sorted,
+      limit,
+      Number.isFinite(query?.resultReadyLimit) && query.resultReadyLimit > 0
+        ? Math.floor(query.resultReadyLimit)
+        : DEFAULT_RESULT_READY_LIMIT,
+    );
   }
 
   function markTasksRead(params = {}) {
@@ -925,6 +1071,42 @@ const ACTION_RIGHT_ORDER = {
   paused: 3,
   terminal: 4,
 };
+
+/**
+ * 按行动权分桶截断 —— 取代单一全局 slice，保证任何一桶不会被另一桶挤空。
+ *
+ * 回归背景（2026-08-14）：历史积压的 result_ready（无验收记录的 completed）
+ * 一次性涌入时，ACTION_RIGHT_ORDER 中 result_ready 排在 peer_advancing /
+ * discussion 之前，旧的全局 `sorted.slice(0, limit)` 会先截满 result_ready，
+ * 把「Peer 正在推进」「讨论」整桶挤掉，工作台只剩待验收卡。
+ *
+ * 契约：needs_you / peer_advancing / paused / discussion 共享主配额 limit
+ * （按排序原样保留）；result_ready 单独配额（产品语义：不限条，用极大值），
+ * 只有显式传入较小 resultReadyLimit 时才截断。
+ */
+export function capTaskOverviewByBucket(items, limit, resultReadyLimit = Number.MAX_SAFE_INTEGER) {
+  const shareBudget = new Map();
+  const resultBudget = Number.isFinite(resultReadyLimit) && resultReadyLimit > 0
+    ? Math.floor(resultReadyLimit)
+    : Number.MAX_SAFE_INTEGER;
+  const capped = [];
+  for (const item of items) {
+    if (item?.actionRight === 'result_ready') {
+      const used = shareBudget.get('result_ready') ?? 0;
+      if (used >= resultBudget) continue;
+      shareBudget.set('result_ready', used + 1);
+      capped.push(item);
+      continue;
+    }
+    // discussion 等无 ACTION_RIGHT_ORDER 键的桶与行动权桶共享主配额，
+    // 但不再被 result_ready 抢占空间。
+    const used = shareBudget.get('shared') ?? 0;
+    if (used >= limit) continue;
+    shareBudget.set('shared', used + 1);
+    capped.push(item);
+  }
+  return capped;
+}
 
 /** 行动权分组排序 + 组内最近活跃倒序（稳定，不破坏相等元素相对顺序）。 */
 export function sortTaskOverview(items) {

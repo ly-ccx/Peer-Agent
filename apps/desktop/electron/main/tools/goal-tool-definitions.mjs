@@ -41,6 +41,15 @@ const GOAL_CREATE_PLAN_PROMPT = [
   'After the tool succeeds, end the user-facing reply with the available next steps in plain language:',
   'start execution, adjust the plan, or cancel the plan. The plan panel provides the same governed',
   'actions as clickable controls; do not replace these choices with a vague confirmation-only reply.',
+  // 目标线（Goal Thread）派生路由 —— 验收后追问必须挂靠父计划，否则首页平铺成孤立卡片。
+  'If the user is following up on a recently completed plan in this conversation (same theme,',
+  'a refinement, a fix, or another round of the same goal), do NOT create a new top-level plan.',
+  'Pass parentPlanId (the completed plan\'s planId) AND sourceTaskId (a taskId that exists on that',
+  'parent plan — typically the last listed task). The store requires the pair and rejects a',
+  'sourceTaskId that is not on the parent. This makes the new plan the next derived round of the',
+  'same Goal Thread. Only omit both fields when the user is clearly starting a new, unrelated',
+  'request. If the conversation context lists a recently completed plan, use that planId and one',
+  'of its taskIds.',
 ].join(' ');
 
 const GOAL_TOOL_PROMPT = [
@@ -111,6 +120,20 @@ export const GOAL_TOOL_DEFINITIONS = [
             + 'driving changes in a separate code repo). If the workspace AGENTS.md documents a '
             + 'linked/associated repository path, extract and pass it here so explorers can locate '
             + 'the target code across repositories. Omit when the goal targets the current workspace.',
+        },
+        parentPlanId: {
+          type: 'string',
+          description:
+            'Optional parent plan id when this is a follow-up / derived round of an existing Goal Thread. '
+            + 'Must be paired with sourceTaskId (a taskId that exists on that parent plan). '
+            + 'Omit both when the user is clearly starting an unrelated new request.',
+        },
+        sourceTaskId: {
+          type: 'string',
+          description:
+            'Required together with parentPlanId. Pass a taskId from the parent plan (typically the task '
+            + 'that triggered this follow-up). The store rejects either field without the other, and '
+            + 'rejects a sourceTaskId that is not on the parent plan.',
         },
         tasks: {
           type: 'array',

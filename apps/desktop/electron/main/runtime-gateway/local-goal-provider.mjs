@@ -63,6 +63,66 @@ function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+const EXPLICIT_NEW_REQUEST_RE = /(?:新需求|新任务|新目标|另开|另外做|换个|无关|unrelated|new request|new goal|separate task|different topic)/i;
+
+export function looksLikeExplicitNewRequest(text) {
+  return EXPLICIT_NEW_REQUEST_RE.test(String(text || ''));
+}
+
+function pickSourceTaskId(plan) {
+  const tasks = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  const match = tasks.find((task) => task && typeof task.taskId === 'string' && task.taskId.trim());
+  return match ? match.taskId.trim() : null;
+}
+
+function pickRecentCompletedPlan(details) {
+  const completed = (Array.isArray(details) ? details : [])
+    .filter((plan) => plan && typeof plan === 'object' && plan.status === 'completed' && plan.planId)
+    .slice();
+  completed.sort((a, b) => {
+    const at = Date.parse(a.completedAt || a.updatedAt || a.createdAt || '') || 0;
+    const bt = Date.parse(b.completedAt || b.updatedAt || b.createdAt || '') || 0;
+    return bt - at;
+  });
+  return completed[0] || null;
+}
+
+/**
+ * 验收后追问时，模型可能漏填关系字段。同会话有最近完成计划、且文案不像明确新需求时，
+ * 自动补 parentPlanId + 父计划上真实存在的 sourceTaskId。
+ * 显式传入的字段优先；只补缺失的那一侧，避免覆盖模型选择。
+ */
+export function resolveDerivedPlanRelation({
+  parentPlanId,
+  sourceTaskId,
+  title,
+  goal,
+  recentCompleted,
+} = {}) {
+  const explicitParent = nonEmptyString(parentPlanId);
+  const explicitSource = nonEmptyString(sourceTaskId);
+  if (explicitParent && explicitSource) {
+    return { parentPlanId: explicitParent, sourceTaskId: explicitSource, attached: false };
+  }
+  if (looksLikeExplicitNewRequest(`${title || ''} ${goal || ''}`)) {
+    return {
+      ...(explicitParent ? { parentPlanId: explicitParent } : {}),
+      ...(explicitSource ? { sourceTaskId: explicitSource } : {}),
+      attached: false,
+    };
+  }
+  const parentId = explicitParent || nonEmptyString(recentCompleted?.planId);
+  const sourceId = explicitSource || pickSourceTaskId(recentCompleted);
+  if (!parentId || !sourceId) {
+    return {
+      ...(explicitParent ? { parentPlanId: explicitParent } : {}),
+      ...(explicitSource ? { sourceTaskId: explicitSource } : {}),
+      attached: false,
+    };
+  }
+  return { parentPlanId: parentId, sourceTaskId: sourceId, attached: !explicitParent || !explicitSource };
+}
+
 /** 把模型给的精简子任务规范化为完整 GoalTask（补齐协议必填字段）。 */
 function normalizeTasks(rawTasks) {
   const list = Array.isArray(rawTasks) ? rawTasks : [];
@@ -149,12 +209,28 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
       };
     } else {
       try {
+        const recentCompleted = conversationId
+          && typeof goalPlanStore.listPlanDetailsByConversation === 'function'
+          ? pickRecentCompletedPlan(goalPlanStore.listPlanDetailsByConversation(conversationId))
+          : (conversationId && typeof goalPlanStore.getUnacceptedCompletedPlanByConversation === 'function'
+            ? goalPlanStore.getUnacceptedCompletedPlanByConversation(conversationId)
+            : null);
+        const relation = resolveDerivedPlanRelation({
+          parentPlanId: args.parentPlanId,
+          sourceTaskId: args.sourceTaskId,
+          title: args.title,
+          goal: args.goal,
+          recentCompleted,
+        });
         const draft = {
           conversationId,
           title: deriveTitle(args.title, args.goal),
           goal: args.goal,
           ...(originWorkspacePath ? { originWorkspacePath } : {}),
           ...(targetWorkspacePath ? { targetWorkspacePath } : {}),
+          // 目标线派生：模型成对传入，或执行器按最近完成计划补挂。
+          ...(relation.parentPlanId ? { parentPlanId: relation.parentPlanId } : {}),
+          ...(relation.sourceTaskId ? { sourceTaskId: relation.sourceTaskId } : {}),
           tasks: normalizeTasks(args.tasks),
           // 可选的结构化成功标准（DoD）。store 层会规范化（字符串→manual 向后兼容），
           // 缺省时归一为空数组，不影响既有仅传 goal/tasks 的调用。
