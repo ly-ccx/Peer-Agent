@@ -2,28 +2,29 @@
   <!--
     Peer Agent macOS menu-bar master.
 
+    Cat head looking up — matches the day/night app icon silhouette.
     Keep this artwork monochrome: Electron marks the rendered PNG as a macOS
     Template Image, so the system supplies the final light/dark appearance.
   -->
-  <mask id="face-cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16">
-    <rect width="16" height="16" fill="white"/>
-    <circle cx="5.35" cy="6.55" r="0.9" fill="black"/>
-    <circle cx="10.65" cy="6.55" r="0.9" fill="black"/>
-    <path
-      d="M5.35 9.4C6.05 10.55 6.9 11.1 8 11.1C9.1 11.1 9.95 10.55 10.65 9.4"
-      fill="none"
-      stroke="black"
-      stroke-width="1.35"
-      stroke-linecap="round"
-    />
-  </mask>
-  <rect
-    x="1.25"
-    y="1.25"
-    width="13.5"
-    height="13.5"
-    rx="4.25"
+  <path
     fill="black"
-    mask="url(#face-cutouts)"
+    fill-rule="evenodd"
+    d="M3.05 7.15
+       L4.45 2.2
+       C4.62 1.68 5.28 1.62 5.55 2.1
+       L6.95 5.2
+       H9.05
+       L10.45 2.1
+       C10.72 1.62 11.38 1.68 11.55 2.2
+       L12.95 7.15
+       C13.65 8.25 13.6 10.7 11.5 12.45
+       C10.3 13.45 9.1 13.9 8 13.9
+       C6.9 13.9 5.7 13.45 4.5 12.45
+       C2.4 10.7 2.35 8.25 3.05 7.15
+       Z
+       M9.55 6.15
+       A0.85 0.85 0 1 0 9.55 7.85
+       A0.85 0.85 0 1 0 9.55 6.15
+       Z"
   />
 </svg>
