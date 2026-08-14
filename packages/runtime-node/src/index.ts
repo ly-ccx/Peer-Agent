@@ -215,6 +215,7 @@ export {
 export {
   decideIntakeConvergence,
   isIntakeContract,
+  isStalledAcceptedGoalRunner,
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,

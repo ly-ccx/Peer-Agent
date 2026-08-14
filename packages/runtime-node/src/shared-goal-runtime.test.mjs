@@ -15,6 +15,7 @@ import {
 } from './goal-runner.mjs';
 import {
   decideIntakeConvergence,
+  isStalledAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
 } from './goal-intake-convergence.mjs';
 
@@ -90,7 +91,8 @@ test('reusing an unaccepted completed Goal emits goal-accepted and allows auto-s
       ],
     });
 
-    assert.equal(continued.planId, created.planId);
+    // 已完成计划不再被 upsert 原地改写；后续 goal_create_plan 会开一条新契约。
+    assert.notEqual(continued.planId, created.planId);
     assert.notEqual(continued.status, 'completed');
     assert.equal(events.at(-1)?.changeKind, 'goal-accepted');
     assert.equal(
@@ -98,13 +100,13 @@ test('reusing an unaccepted completed Goal emits goal-accepted and allows auto-s
       true,
     );
 
-    store.appendRunEvent(created.planId, {
+    store.appendRunEvent(continued.planId, {
       type: 'action_started',
       summary: 'Goal Runner started',
     });
     assert.equal(events.at(-1)?.changeKind, 'persist');
     assert.equal(
-      shouldAutoStartAcceptedGoalRunnerFromChange(events.at(-1), store.getPlan(created.planId)),
+      shouldAutoStartAcceptedGoalRunnerFromChange(events.at(-1), store.getPlan(continued.planId)),
       false,
     );
   } finally {
@@ -127,4 +129,21 @@ test('runtime-node source has no Desktop dependency and Desktop files are compat
     assert.doesNotMatch(sharedSource, /apps\/desktop|desktop\/electron\/main/);
     assert.match(desktopSource, /from '@peer-agent\/runtime-node'/);
   }
+});
+
+test('isStalledAcceptedGoalRunner distinguishes a running-but-zero-turn Goal', () => {
+  const plan = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'executing',
+    runner: { enabled: true, status: 'running', turnCount: 0 },
+  };
+  assert.equal(isStalledAcceptedGoalRunner(plan), true);
+  assert.equal(
+    isStalledAcceptedGoalRunner({
+      ...plan,
+      runner: { ...plan.runner, turnCount: 2 },
+    }),
+    false,
+  );
 });

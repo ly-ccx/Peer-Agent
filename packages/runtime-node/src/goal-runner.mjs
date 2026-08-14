@@ -739,6 +739,7 @@ export function createGoalRunner({
   }
 
   const sessions = new Map();
+  const starting = new Set();
   const recoverableRetryLimit = toPositiveInteger(
     maxRecoverableInterruptionRetries,
     DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
@@ -1294,44 +1295,54 @@ export function createGoalRunner({
     // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
     // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
-    if (typeof prepareIsolation === 'function') {
-      try {
-        await prepareIsolation(plan);
-      } catch (error) {
-        logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
+    // 在 await 之前占住 starting 锁，避免 plan-change / sendDone 并发 kick
+    // 在 prepareIsolation 让出后各自 initializeRunner，留下 running 但 0 回合。
+    // 不能占用 sessions：schedulePump 看到已有 session 会直接复用其 promise。
+    if (starting.has(planId)) return getState(planId);
+    starting.add(planId);
+    try {
+      if (typeof prepareIsolation === 'function') {
+        try {
+          await prepareIsolation(plan);
+        } catch (error) {
+          logger?.warn?.('[goal-runner] prepareIsolation failed; writing to bound workspace:', error?.message || error);
+        }
       }
-    }
-    // 已完成且无需再跑的计划不能再开泵：否则 pump 开头会把 runner 写回 running，
-    // 首页就会继续显示「正在执行 / Peer 正在自检」。
-    if (plan.status === 'completed' && !shouldRerunCompletedPlan(plan)) {
-      if (planNeedsQualityReview(plan)) recordPassedQualityReview(plan);
-      const latest = goalPlanStore.getPlan(planId) ?? plan;
-      if (latest.runner?.status === 'running' || latest.runner?.status === 'exploring') {
-        goalPlanStore.setRunnerState(planId, {
-          enabled: false,
-          status: 'completed',
-          intent: 'synthesize',
-          phase: 'synthesize',
-          updatedAt: now(),
-        });
+      if (getSession(planId)) return getState(planId);
+      // 已完成且无需再跑的计划不能再开泵：否则 pump 开头会把 runner 写回 running，
+      // 首页就会继续显示「正在执行 / Peer 正在自检」。
+      if (plan.status === 'completed' && !shouldRerunCompletedPlan(plan)) {
+        if (planNeedsQualityReview(plan)) recordPassedQualityReview(plan);
+        const latest = goalPlanStore.getPlan(planId) ?? plan;
+        if (latest.runner?.status === 'running' || latest.runner?.status === 'exploring') {
+          goalPlanStore.setRunnerState(planId, {
+            enabled: false,
+            status: 'completed',
+            intent: 'synthesize',
+            phase: 'synthesize',
+            updatedAt: now(),
+          });
+        }
+        return getState(planId);
       }
+      const initialized = initializeRunner(planId, options);
+      if (!initialized) return null;
+      appendRunEvent(planId, {
+        type: 'action_started',
+        summary: 'Goal Runner started',
+        payload: {
+          summaryCode: 'runner_started',
+          intent: initialized.runner?.intent ?? null,
+          phase: initialized.runner?.phase ?? null,
+        },
+      });
+      emit('goalRunner:started', { planId });
+      const promise = schedulePump(planId);
+      if (options.awaitIdle) await promise;
       return getState(planId);
+    } finally {
+      starting.delete(planId);
     }
-    const initialized = initializeRunner(planId, options);
-    if (!initialized) return null;
-    appendRunEvent(planId, {
-      type: 'action_started',
-      summary: 'Goal Runner started',
-      payload: {
-        summaryCode: 'runner_started',
-        intent: initialized.runner?.intent ?? null,
-        phase: initialized.runner?.phase ?? null,
-      },
-    });
-    emit('goalRunner:started', { planId });
-    const promise = schedulePump(planId);
-    if (options.awaitIdle) await promise;
-    return getState(planId);
   }
 
   async function resume(planId, options = {}) {

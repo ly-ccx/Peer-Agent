@@ -1701,3 +1701,39 @@ test('start: 有交付绑定的 Goal 启动时会准备隔离环境', async () =
   assert.deepEqual(prepared, [plan.planId]);
 });
 
+test('start: 并发 kick 在 prepareIsolation 让出时只开一次泵', async () => {
+  const plan = createApprovedPlan();
+  let releaseIsolation;
+  let resolveIsolationStarted;
+  const isolationStarted = new Promise((resolve) => {
+    resolveIsolationStarted = resolve;
+  });
+  let turns = 0;
+  const events = [];
+  const runner = createRunner({
+    events,
+    prepareIsolation: async () => {
+      resolveIsolationStarted();
+      await new Promise((resolve) => {
+        releaseIsolation = resolve;
+      });
+    },
+    runtime: {
+      async runGoalTurn() {
+        turns += 1;
+        return { continue: false, intent: 'verify' };
+      },
+    },
+  });
+
+  const first = runner.start(plan.planId);
+  const second = runner.start(plan.planId);
+  await isolationStarted;
+  releaseIsolation();
+  await Promise.all([first, second]);
+  await runner.waitForIdle(plan.planId);
+
+  assert.equal(turns, 1);
+  assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
+});
+

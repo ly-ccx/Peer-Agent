@@ -9,6 +9,7 @@ import {
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
+  isStalledAcceptedGoalRunner,
 } from './goal-intake-convergence.mjs';
 
 const intakePlan = { planId: 'p1', activation: { kind: 'intake' } };
@@ -294,4 +295,22 @@ test('conversation open recovery: 只恢复磁盘上仍为 running 的 accepted 
     }),
     false,
   );
+});
+
+test('isStalledAcceptedGoalRunner: running 但还没开过回合才算空转', () => {
+  const stalled = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'executing',
+    runner: { enabled: true, status: 'running', turnCount: 0 },
+  };
+  assert.equal(isStalledAcceptedGoalRunner(stalled), true);
+  assert.equal(isStalledAcceptedGoalRunner({
+    ...stalled,
+    runner: { enabled: true, status: 'running', turnCount: 1 },
+  }), false);
+  assert.equal(isStalledAcceptedGoalRunner({
+    ...stalled,
+    runner: { enabled: true, status: 'paused', turnCount: 0 },
+  }), false);
 });

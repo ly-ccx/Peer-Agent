@@ -88,6 +88,19 @@ export function shouldResumeGoalRunnerAfterUserDecision(plan) {
 }
 
 /**
+ * 磁盘上标成 running，但还没有真正开过回合。
+ * start() 会先写 running，再 await prepareIsolation；若这段时间被二次 kick
+ * 或泵没转起来，就会留下「面板在跑、turnCount=0、没有 action_started」。
+ */
+export function isStalledAcceptedGoalRunner(plan) {
+  if (!shouldAutoStartAcceptedGoalRunner(plan)) return false;
+  if (plan?.runner?.enabled !== true) return false;
+  if (plan?.runner?.status !== 'running' && plan?.runner?.status !== 'exploring') return false;
+  const turnCount = Number(plan?.runner?.turnCount);
+  return !Number.isFinite(turnCount) || turnCount <= 0;
+}
+
+/**
  * 串行完成 intake -> Runner 交接。forceComplete 必须返回一个 release Promise，
  * 它只在原 sendMessage 的 finally 已释放 Runtime turn 后 resolve；不能仅凭 UI 流已
  * 标记 done 就启动下一轮，否则同一 conversation session 会撞上 active turn。

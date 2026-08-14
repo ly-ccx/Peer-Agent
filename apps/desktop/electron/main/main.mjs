@@ -90,6 +90,7 @@ import {
   importBundle,
   migrateFromLegacy,
   removeConversationToolArtifacts,
+  isStalledAcceptedGoalRunner,
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
@@ -2788,6 +2789,21 @@ function handleChatSend({
             activeGoalPlan: activeGoal,
             goalPlanStore,
           });
+          if (route.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
+            void serializeAcceptedGoalRunnerHandoff({
+              forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+                conversationId,
+                { reason: 'goal_handoff' },
+              ) ?? { released: Promise.resolve() },
+              isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
+                goalPlanStore.getPlan?.(activeGoal.planId),
+              ),
+              startRunner: () => goalRunner.start(activeGoal.planId),
+            }).catch((error) => {
+              console.error('[main] stalled goal runner kick failed:', error?.message || error);
+            });
+            return { ok: true, kickedStalledRunner: true, planId: activeGoal.planId };
+          }
           if (answersRequestedUserInput) {
             answeredRequestedUserInputPlanId = activeGoal.planId;
           }
@@ -2882,10 +2898,19 @@ function handleChatSend({
       } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
         // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
         // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
-        queueMicrotask(() => {
-          void goalRunner?.start(acceptedGoal.planId).catch((error) => {
-            console.error('[main] auto-start goal runner failed:', error?.message || error);
-          });
+        // 不能 queueMicrotask(start)：intake 回合可能还没释放 Runtime turn，
+        // start() 会先把磁盘写成 running，第一回合却撞上 active session。
+        void serializeAcceptedGoalRunnerHandoff({
+          forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+            conversationId,
+            { reason: 'goal_handoff' },
+          ) ?? { released: Promise.resolve() },
+          isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
+            goalPlanStore.getPlan?.(acceptedGoal.planId),
+          ),
+          startRunner: () => goalRunner.start(acceptedGoal.planId),
+        }).catch((error) => {
+          console.error('[main] auto-start goal runner failed:', error?.message || error);
         });
       }
       return outcome;
