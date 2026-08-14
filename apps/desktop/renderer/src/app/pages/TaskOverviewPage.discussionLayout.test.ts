@@ -126,3 +126,21 @@ test('acceptance cards keep route meta in the top bar and put runtime meta on th
   assert.match(resultCard, />\s*查看结果\s*</);
   assert.doesNotMatch(resultCard, /<WorkItemMeta item=\{item\} fallbackWhenEmpty="READY" \/>/);
 });
+
+test('discussion section stays visible when there are no unread conversations', async () => {
+  const source = await readPageSource();
+
+  assert.doesNotMatch(source, /\{discussions\.length > 0 \? \(/);
+  assert.match(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /\{visibleDiscussions\.length > 0 \? \(/);
+  assert.match(source, /暂无未读讨论/);
+});
+
+test('home result-ready section renders the full queue and keeps the real total on the badge', async () => {
+  const source = await readPageSource();
+
+  assert.doesNotMatch(source, /RESULT_PREVIEW_LIMIT/);
+  assert.doesNotMatch(source, /previewedResults/);
+  assert.match(source, /groupResultCardsByGoalThread\(displayedResults\)/);
+  assert.match(source, /<small>\{resultReady\.length\}<\/small>/);
+});

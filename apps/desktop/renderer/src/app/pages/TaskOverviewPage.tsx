@@ -15,12 +15,12 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  *
  * 工作台：topline（面包屑 + 范围标签）+ hero（说明 + 统计）
  * + 需要你处理（四列交接卡）+ Peer 正在推进（双列 + 进度条）
- * + 结果待验收。
+ * + 正在讨论 + 结果待验收。
  *
  * 任务/历史页：统一列表（也可由 Drawer 承载）。
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
- * 结果待验收：卡片叠放展示全部未验收 completed（不限条数）；
+ * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
  * 主按钮「查看结果」。确认验收和还不行只出现在看过结果之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
@@ -676,38 +676,42 @@ function HeroLayout({
         </section>
       ) : null}
 
-      {discussions.length > 0 ? (
-        <section className="task-overview-section task-overview-section--discussion">
-          <div className="task-overview-section-head">
-            <div className="task-overview-section-title">
-              <h2>正在讨论</h2>
-              <small>{discussions.length}</small>
-            </div>
-            {onOpenTasks ? (
-              <SectionLink
-                label="查看全部"
-                count={discussions.length}
-                countHint={`共 ${discussions.length} 条`}
-                onClick={onOpenTasks}
-              />
-            ) : (
-              <span className="task-overview-section-meta">未读沟通</span>
-            )}
+      <section className="task-overview-section task-overview-section--discuss">
+        <div className="task-overview-section-head">
+          <div className="task-overview-section-title">
+            <h2>正在讨论</h2>
+            <small>{discussions.length}</small>
           </div>
+          {onOpenTasks ? (
+            <SectionLink
+              label="查看全部"
+              count={discussions.length}
+              countHint={`共 ${discussions.length} 条`}
+              onClick={onOpenTasks}
+            />
+          ) : (
+            <span className="task-overview-section-hint">未读沟通</span>
+          )}
+        </div>
+        {visibleDiscussions.length > 0 ? (
           <div className="task-overview-discussion-grid">
             {visibleDiscussions.map((item) => (
               <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
             ))}
           </div>
-        </section>
-      ) : null}
+        ) : (
+          <div className="task-overview-empty">
+            <p>暂无未读讨论。新的沟通会先出现在这里。</p>
+          </div>
+        )}
+      </section>
 
       {displayedResults.length > 0 ? (
         <section className="task-overview-section result-section">
           <div className="task-overview-section-head">
             <div className="task-overview-section-title">
               <h2>结果待验收</h2>
-              <small>{displayedResults.length}</small>
+              <small>{resultReady.length}</small>
             </div>
             {onOpenHistory ? (
               <SectionLink label="查看历史" onClick={onOpenHistory} />
@@ -715,21 +719,123 @@ function HeroLayout({
               <span className="task-overview-section-meta">Peer 已完成并带回 Evidence</span>
             )}
           </div>
-          {/* 与「Peer 正在推进」同款双列卡片网格，不再一排一条 */}
-          <div className="task-overview-work-stream">
-            {displayedResults.map(({ item, phase }) => (
-              <ResultCard
-                key={item.taskId}
-                item={item}
-                phase={phase ?? null}
-                onOpenItem={onOpenItem}
-              />
-            ))}
+          {/* 与「Peer 正在推进」同款双列卡片网格，不再一排一条。
+              目标线（Goal Thread）：同 rootPlanId 的卡片归组为一条线，
+              组内按轮次排序并显示派生徽标；无关系字段的旧数据仍平铺。 */}
+          <div className="task-overview-work-stream goal-thread-stream">
+            {groupResultCardsByGoalThread(displayedResults).map((group) =>
+              group.kind === 'thread' ? (
+                <div
+                  key={`thread-${group.rootPlanId}`}
+                  className="goal-thread-group"
+                  data-root-plan-id={group.rootPlanId}
+                >
+                  <div className="goal-thread-group__head">
+                    <i className="goal-thread-group__line" aria-hidden="true" />
+                    <div className="goal-thread-group__title">
+                      <span className="goal-thread-group__name">
+                        {group.rootPlanTitle ?? group.items[0].item.rootPlanTitle ?? '目标线'}
+                      </span>
+                      <span className="goal-thread-group__meta">
+                        目标线 · {group.items.length} 轮
+                      </span>
+                    </div>
+                  </div>
+                  <div className="goal-thread-group__runs">
+                    {group.items.map(({ item, phase }) => (
+                      <ResultCard
+                        key={item.taskId}
+                        item={item}
+                        phase={phase ?? null}
+                        onOpenItem={onOpenItem}
+                        threadRound={item.round ?? null}
+                        threadDerived={item.relationType === 'derived'}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <ResultCard
+                  key={group.item.taskId}
+                  item={group.item}
+                  phase={group.phase ?? null}
+                  onOpenItem={onOpenItem}
+                />
+              ),
+            )}
           </div>
         </section>
       ) : null}
     </div>
   );
+}
+
+/**
+ * 目标线（Goal Thread）分组 —— 结果待验收区的归组规则：
+ * - 同 rootPlanId 的卡片归为一条线（≥2 张才成组；单张线归属卡与普通卡无异，
+ *   避免给独立目标套一层空壳分组）。
+ * - 组内按 round 升序（round 缺省排最后），线头标题用 rootPlanTitle。
+ * - 无 rootPlanId 的旧数据按单卡平铺，渲染路径与现状完全一致（向后兼容）。
+ * 输入顺序即投影层排序，组间顺序保持稳定。
+ */
+function groupResultCardsByGoalThread(
+  entries: readonly {
+    item: TaskOverviewItem;
+    phase?: AcceptancePhase | null;
+  }[],
+): (
+  | { kind: 'thread'; rootPlanId: string; rootPlanTitle?: string; items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[] }
+  | { kind: 'single'; item: TaskOverviewItem; phase: AcceptancePhase | null }
+)[] {
+  const threads = new Map<
+    string,
+    { rootPlanId: string; rootPlanTitle?: string; items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[] }
+  >();
+  for (const entry of entries) {
+    const phase = entry.phase ?? null;
+    const rootPlanId = entry.item.rootPlanId;
+    if (!rootPlanId) continue;
+    const existing = threads.get(rootPlanId);
+    if (existing) {
+      existing.items.push({ item: entry.item, phase });
+    } else {
+      threads.set(rootPlanId, {
+        rootPlanId,
+        rootPlanTitle: entry.item.rootPlanTitle,
+        items: [{ item: entry.item, phase }],
+      });
+    }
+  }
+  const result: ReturnType<typeof groupResultCardsByGoalThread> = [];
+  const emitted = new Set<string>();
+  for (const entry of entries) {
+    const phase = entry.phase ?? null;
+    const rootPlanId = entry.item.rootPlanId;
+    // 无关系字段的旧数据：逐张平铺，绝不能丢（2026-08-14 回归：
+    // 旧实现把 singles 收集后从未 emit，12 张无 rootPlanId 的卡全部消失）。
+    if (!rootPlanId) {
+      result.push({ kind: 'single', item: entry.item, phase });
+      continue;
+    }
+    if (emitted.has(rootPlanId)) continue;
+    emitted.add(rootPlanId);
+    const thread = threads.get(rootPlanId);
+    if (!thread) continue;
+    if (thread.items.length < 2) {
+      // 单张线归属卡：不套分组壳，直接平铺（标题已能自述）。
+      const solo = thread.items[0];
+      result.push({ kind: 'single', item: solo.item, phase: solo.phase });
+      continue;
+    }
+    thread.items.sort((a, b) => {
+      const ar = a.item.round ?? Number.POSITIVE_INFINITY;
+      const br = b.item.round ?? Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      return 0;
+    });
+    result.push({ kind: 'thread', ...thread });
+  }
+  return result;
 }
 
 function ListLayout({
@@ -938,10 +1044,16 @@ function ResultCard({
   item,
   phase,
   onOpenItem,
+  threadRound,
+  threadDerived,
 }: {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  /** 目标线轮次（R2、R3…）；独立卡片为 null。 */
+  readonly threadRound?: number | null;
+  /** 是否为追问派生轮；显示「↳ 追问派生」徽标。 */
+  readonly threadDerived?: boolean;
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const summary = item.planProgress
@@ -965,7 +1077,15 @@ function ResultCard({
         </span>
         <WorkItemMeta item={item} group="route" fallbackWhenEmpty="READY" />
       </div>
-      <h3>{item.title}</h3>
+      <h3>
+        {item.title}
+        {threadRound && threadRound > 1 ? (
+          <span className="goal-thread-badge">R{threadRound}</span>
+        ) : null}
+        {threadDerived ? (
+          <span className="goal-thread-badge goal-thread-badge--derived">↳ 追问派生</span>
+        ) : null}
+      </h3>
       <p>{summary}</p>
       {item.planProgress ? (
         <div className="task-overview-progress" aria-hidden="true">
