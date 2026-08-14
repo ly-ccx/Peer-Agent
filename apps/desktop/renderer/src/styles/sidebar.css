@@ -134,9 +134,7 @@
   inset: 0;
   width: 32px;
   height: 32px;
-  border-radius: var(--ui-radius-row);
-  object-fit: cover;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
+  object-fit: contain;
 }
 .sidebar-brand-icon.dark {
   display: none;
@@ -151,7 +149,7 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  flex: 0 1 136px;
+  flex: 0 1 46px;
 }
 /* Compact search entry beside brand wordmark (⌘K still opens search). */
 .sidebar-search-icon-btn {
@@ -183,19 +181,13 @@
 }
 .brand-wordmark {
   display: block;
-  width: 136px;
+  width: 46px;
   height: 32px;
   min-width: 0;
   overflow: visible;
 }
 .brand-wordmark-text {
   fill: var(--graphite-base);
-}
-[data-theme="dark"] .brand-wordmark-peer-arc {
-  stroke: #e18a75;
-}
-[data-theme="dark"] .brand-wordmark-agent-dot {
-  fill: #829bd4;
 }
 .sidebar-runtime-badge {
   display: inline-flex;
