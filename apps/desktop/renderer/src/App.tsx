@@ -1351,11 +1351,6 @@ function MainApp() {
                           <div className="conversation-result-drawer__head">
                             <div>
                               <h2>{isZh ? '查看结果' : 'View result'}</h2>
-                              <p>
-                                {isZh
-                                  ? '留在工作台，从右侧查看执行具体内容'
-                                  : 'Stay on workbench; inspect execution details on the right'}
-                              </p>
                             </div>
                             <button
                               type="button"
