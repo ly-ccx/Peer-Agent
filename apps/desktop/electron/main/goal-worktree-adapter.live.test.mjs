@@ -164,4 +164,24 @@ describe('goal worktree live isolation', () => {
     assert.equal(existsSync(path.join(repository, 'kept.txt')), false);
     assert.equal(git(['status', '--porcelain']), '');
   });
+
+  it('clears isolation when the recorded worktree is already gone', async () => {
+    const store = createStore(boundPlan({ planId: 'plan-stale' }));
+    const adapter = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await adapter.prepareForPlan(store.getPlan('plan-stale'));
+    const worktreePath = prepared.deliveryBinding.worktreePath;
+    rmSync(worktreePath, { recursive: true, force: true });
+
+    const [first, second] = await Promise.all([
+      adapter.retainOrCleanupPlan(store.getPlan('plan-stale')),
+      adapter.retainOrCleanupPlan(store.getPlan('plan-stale')),
+    ]);
+
+    assert.equal(existsSync(worktreePath), false);
+    assert.equal(first.deliveryBinding.worktreePath, undefined);
+    assert.equal(second.deliveryBinding.worktreePath, undefined);
+  });
 });

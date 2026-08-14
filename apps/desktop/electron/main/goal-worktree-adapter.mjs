@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathOf } from '@peer-agent/runtime-node';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
@@ -22,6 +23,27 @@ function hasDeliveryTarget(plan) {
 function planNeedsIsolatedWorktree(plan) {
   if (!hasDeliveryTarget(plan)) return false;
   return plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed';
+}
+
+function isUnusableWorkspaceError(error) {
+  const message = String(error?.message || error);
+  return message === 'automation_workspace_missing'
+    || message === 'automation_workspace_not_git'
+    || message === 'automation_workspace_not_directory'
+    || /ENOENT/.test(message)
+    || /cannot read current working directory/i.test(message)
+    || /不能读取当前工作目录/.test(message);
+}
+
+async function worktreeStillPresent(worktreePath) {
+  try {
+    const info = await stat(worktreePath);
+    if (!info.isDirectory()) return false;
+    await stat(path.join(worktreePath, '.git'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function toAdapterRun(plan) {
@@ -59,14 +81,27 @@ export function createGoalWorktreeAdapter({
   }),
   goalPlanStore = null,
 } = {}) {
+  const retainLocks = new Map();
+
   async function prepareForPlan(plan) {
     if (!planNeedsIsolatedWorktree(plan)) return plan;
     const existingPath = trimPath(plan.deliveryBinding?.worktreePath);
     const existingBranch = trimPath(plan.deliveryBinding?.taskBranch);
-    if (existingPath && existingBranch && plan.deliveryBinding?.executionIsolation === 'worktree') {
+    if (
+      existingPath
+      && existingBranch
+      && plan.deliveryBinding?.executionIsolation === 'worktree'
+      && await worktreeStillPresent(existingPath)
+    ) {
       return plan;
     }
-    const prepared = await worktreeAdapter.prepare(toAdapterRun(plan));
+    let prepared;
+    try {
+      prepared = await worktreeAdapter.prepare(toAdapterRun(plan));
+    } catch (error) {
+      if (isUnusableWorkspaceError(error)) return plan;
+      throw error;
+    }
     if (prepared?.kind !== 'worktree' || !prepared.worktreePath || !prepared.branch) {
       return plan;
     }
@@ -88,35 +123,63 @@ export function createGoalWorktreeAdapter({
     }) || plan;
   }
 
+  async function clearIsolation(plan) {
+    if (typeof goalPlanStore?.recordDeliveryIsolation !== 'function') {
+      return {
+        ...plan,
+        deliveryBinding: {
+          ...plan.deliveryBinding,
+          executionIsolation: 'worktree',
+          taskBranch: undefined,
+          worktreePath: undefined,
+        },
+      };
+    }
+    return goalPlanStore.recordDeliveryIsolation(plan.planId, {
+      executionIsolation: 'worktree',
+      taskBranch: undefined,
+      worktreePath: undefined,
+    }) || plan;
+  }
+
   async function retainOrCleanupPlan(plan) {
     if (!hasDeliveryTarget(plan)) return plan;
     if (plan.deliveryBinding?.executionIsolation !== 'worktree') return plan;
     const worktreePath = trimPath(plan.deliveryBinding?.worktreePath);
     const branch = trimPath(plan.deliveryBinding?.taskBranch);
     if (!worktreePath || !branch) return plan;
-    const run = toAdapterRun(plan);
-    const execution = toExecution(plan, {
-      workspacePath: worktreePath,
-      worktreePath,
-      repositoryRoot: trimPath(plan.deliveryBinding?.targetWorkspacePath) || trimPath(plan.targetWorkspacePath),
-      branch,
-      baseline: { commit: plan.deliveryBinding?.baseCommit || plan.baseCommit },
+    const lockKey = plan.planId;
+    const pending = retainLocks.get(lockKey);
+    if (pending) return pending;
+    let task;
+    task = (async () => {
+      const run = toAdapterRun(plan);
+      const execution = toExecution(plan, {
+        workspacePath: worktreePath,
+        worktreePath,
+        repositoryRoot: trimPath(plan.deliveryBinding?.targetWorkspacePath) || trimPath(plan.targetWorkspacePath),
+        branch,
+        baseline: { commit: plan.deliveryBinding?.baseCommit || plan.baseCommit },
+      });
+      try {
+        const collected = typeof worktreeAdapter.collect === 'function'
+          ? await worktreeAdapter.collect(run, execution)
+          : null;
+        const changes = typeof worktreeAdapter.retainOrCleanup === 'function'
+          ? await worktreeAdapter.retainOrCleanup(run, execution, collected)
+          : collected;
+        const retained = changes?.retained === true || Boolean(changes?.changedFiles?.length);
+        if (!retained) return clearIsolation(plan);
+        return plan;
+      } catch (error) {
+        if (isUnusableWorkspaceError(error)) return clearIsolation(plan);
+        throw error;
+      }
+    })().finally(() => {
+      if (retainLocks.get(lockKey) === task) retainLocks.delete(lockKey);
     });
-    const collected = typeof worktreeAdapter.collect === 'function'
-      ? await worktreeAdapter.collect(run, execution)
-      : null;
-    const changes = typeof worktreeAdapter.retainOrCleanup === 'function'
-      ? await worktreeAdapter.retainOrCleanup(run, execution, collected)
-      : collected;
-    const retained = changes?.retained === true || Boolean(changes?.changedFiles?.length);
-    if (!retained && typeof goalPlanStore?.recordDeliveryIsolation === 'function') {
-      return goalPlanStore.recordDeliveryIsolation(plan.planId, {
-        executionIsolation: 'worktree',
-        taskBranch: undefined,
-        worktreePath: undefined,
-      }) || plan;
-    }
-    return plan;
+    retainLocks.set(lockKey, task);
+    return task;
   }
 
   return Object.freeze({

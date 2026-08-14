@@ -53,6 +53,52 @@ function parseNumstat(output) {
   return { additions, deletions };
 }
 
+function errorText(error) {
+  return [error?.stderr, error?.message, error?.code].filter(Boolean).join('\n');
+}
+
+function isMissingPathError(error) {
+  const text = errorText(error);
+  return error?.code === 'ENOENT'
+    || /no such file or directory/i.test(text)
+    || /cannot read current working directory/i.test(text)
+    || /不能读取当前工作目录/.test(text);
+}
+
+function isMissingGitWorktreeError(error) {
+  const text = errorText(error);
+  return isMissingPathError(error)
+    || /not a git repository/i.test(text)
+    || /不是 git 仓库/.test(text)
+    || /not a working tree/i.test(text)
+    || /不是一个工作区/.test(text)
+    || /validation failed/i.test(text)
+    || /验证失败/.test(text)
+    || /\.git['’`]? does not exist/i.test(text)
+    || /\.git['’`]? 不存在/.test(text);
+}
+
+function isMissingBranchError(error) {
+  const text = errorText(error);
+  return isMissingPathError(error)
+    || /not found/i.test(text)
+    || /未发现/.test(text)
+    || /does not exist/i.test(text)
+    || /不存在/.test(text);
+}
+
+function emptyWorktreeChanges(execution) {
+  return {
+    worktreePath: execution.worktreePath,
+    branch: execution.branch,
+    changedFiles: [],
+    additions: 0,
+    deletions: 0,
+    diffArtifactRefs: [],
+    retained: false,
+  };
+}
+
 /** Owns Git worktree creation, evidence collection, retention and cleanup for Automation Runs. */
 export function createAutomationWorktreeAdapter({
   rootDir = path.join(pathOf('automations'), 'worktrees'),
@@ -62,24 +108,42 @@ export function createAutomationWorktreeAdapter({
   const prepared = new Map();
 
   async function inspectWorkspace(workspacePath) {
-    const info = await stat(workspacePath);
+    let info;
+    try {
+      info = await stat(workspacePath);
+    } catch (error) {
+      if (isMissingPathError(error)) throw new Error('automation_workspace_missing');
+      throw error;
+    }
     if (!info.isDirectory()) throw new Error('automation_workspace_not_directory');
     let repositoryRoot;
     try {
       repositoryRoot = (await runGit(['rev-parse', '--show-toplevel'], { cwd: workspacePath })).stdout.trim();
-    } catch {
+    } catch (error) {
+      if (isMissingPathError(error)) throw new Error('automation_workspace_missing');
       throw new Error('automation_workspace_not_git');
     }
-    const commit = (await runGit(['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim();
-    if (!commit) throw new Error('automation_git_baseline_invalid');
-    const branch = (await runGit(['branch', '--show-current'], { cwd: repositoryRoot })).stdout.trim() || undefined;
-    const dirty = Boolean((await runGit(['status', '--porcelain'], { cwd: repositoryRoot })).stdout.trim());
-    return { repositoryRoot, commit, branch, dirty };
+    try {
+      const commit = (await runGit(['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim();
+      if (!commit) throw new Error('automation_git_baseline_invalid');
+      const branch = (await runGit(['branch', '--show-current'], { cwd: repositoryRoot })).stdout.trim() || undefined;
+      const dirty = Boolean((await runGit(['status', '--porcelain'], { cwd: repositoryRoot })).stdout.trim());
+      return { repositoryRoot, commit, branch, dirty };
+    } catch (error) {
+      if (error?.message === 'automation_git_baseline_invalid') throw error;
+      if (isMissingPathError(error)) throw new Error('automation_workspace_missing');
+      throw error;
+    }
   }
 
   async function prepare(run) {
     if (run.snapshot.grant.preset === 'observe') {
-      await stat(run.snapshot.workspacePath);
+      try {
+        await stat(run.snapshot.workspacePath);
+      } catch (error) {
+        if (isMissingPathError(error)) throw new Error('automation_workspace_missing');
+        throw error;
+      }
       return {
         kind: 'workspace',
         workspacePath: run.snapshot.workspacePath,
@@ -118,51 +182,64 @@ export function createAutomationWorktreeAdapter({
 
   async function collect(run, execution = prepared.get(run.runId)) {
     if (!execution || execution.kind !== 'worktree') return null;
-    const status = await runGit(['status', '--porcelain=v1', '-z'], { cwd: execution.worktreePath });
-    const changedFiles = parsePorcelainZ(status.stdout);
-    if (!changedFiles.length) {
+    try {
+      const status = await runGit(['status', '--porcelain=v1', '-z'], { cwd: execution.worktreePath });
+      const changedFiles = parsePorcelainZ(status.stdout);
+      if (!changedFiles.length) return emptyWorktreeChanges(execution);
+
+      // Intent-to-add makes untracked files visible to git diff without creating a commit.
+      await runGit(['add', '--intent-to-add', '--all'], { cwd: execution.worktreePath });
+      const [diff, numstat] = await Promise.all([
+        runGit(['diff', '--binary', '--no-ext-diff', 'HEAD'], { cwd: execution.worktreePath }),
+        runGit(['diff', '--numstat', 'HEAD'], { cwd: execution.worktreePath }),
+      ]);
+      const runArtifactDir = path.join(artifactDir, safeSegment(run.runId, 'run'));
+      const diffPath = path.join(runArtifactDir, 'changes.patch');
+      await mkdir(runArtifactDir, { recursive: true });
+      await writeFile(diffPath, diff.stdout, 'utf8');
+      const totals = parseNumstat(numstat.stdout);
       return {
         worktreePath: execution.worktreePath,
         branch: execution.branch,
-        changedFiles: [],
-        additions: 0,
-        deletions: 0,
-        diffArtifactRefs: [],
-        retained: false,
+        changedFiles,
+        ...totals,
+        diffArtifactRefs: [`automation-artifact://${encodeURIComponent(run.runId)}/changes.patch`],
+        retained: true,
       };
+    } catch (error) {
+      if (isMissingGitWorktreeError(error)) return emptyWorktreeChanges(execution);
+      throw error;
     }
-
-    // Intent-to-add makes untracked files visible to git diff without creating a commit.
-    await runGit(['add', '--intent-to-add', '--all'], { cwd: execution.worktreePath });
-    const [diff, numstat] = await Promise.all([
-      runGit(['diff', '--binary', '--no-ext-diff', 'HEAD'], { cwd: execution.worktreePath }),
-      runGit(['diff', '--numstat', 'HEAD'], { cwd: execution.worktreePath }),
-    ]);
-    const runArtifactDir = path.join(artifactDir, safeSegment(run.runId, 'run'));
-    const diffPath = path.join(runArtifactDir, 'changes.patch');
-    await mkdir(runArtifactDir, { recursive: true });
-    await writeFile(diffPath, diff.stdout, 'utf8');
-    const totals = parseNumstat(numstat.stdout);
-    return {
-      worktreePath: execution.worktreePath,
-      branch: execution.branch,
-      changedFiles,
-      ...totals,
-      diffArtifactRefs: [`automation-artifact://${encodeURIComponent(run.runId)}/changes.patch`],
-      retained: true,
-    };
   }
 
   async function cleanup(run, execution = prepared.get(run.runId), { force = false } = {}) {
     if (!execution || execution.kind !== 'worktree') return false;
     if (!force) {
-      const status = await runGit(['status', '--porcelain'], { cwd: execution.worktreePath });
-      if (status.stdout.trim()) return false;
+      try {
+        const status = await runGit(['status', '--porcelain'], { cwd: execution.worktreePath });
+        if (status.stdout.trim()) return false;
+      } catch (error) {
+        if (!isMissingGitWorktreeError(error)) throw error;
+      }
     }
-    await runGit(['worktree', 'remove', '--force', execution.worktreePath], {
-      cwd: execution.repositoryRoot,
-    });
-    await runGit(['branch', '-D', execution.branch], { cwd: execution.repositoryRoot });
+    try {
+      await runGit(['worktree', 'remove', '--force', execution.worktreePath], {
+        cwd: execution.repositoryRoot,
+      });
+    } catch (error) {
+      if (!isMissingGitWorktreeError(error)) throw error;
+      await rm(execution.worktreePath, { recursive: true, force: true });
+      try {
+        await runGit(['worktree', 'prune'], { cwd: execution.repositoryRoot });
+      } catch (pruneError) {
+        if (!isMissingGitWorktreeError(pruneError)) throw pruneError;
+      }
+    }
+    try {
+      await runGit(['branch', '-D', execution.branch], { cwd: execution.repositoryRoot });
+    } catch (error) {
+      if (!isMissingBranchError(error)) throw error;
+    }
     prepared.delete(run.runId);
     return true;
   }

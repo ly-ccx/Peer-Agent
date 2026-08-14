@@ -129,3 +129,56 @@ test('做完没有改动就清掉 Worktree', async () => {
   assert.equal(recorded[0].isolation.taskBranch, undefined);
   assert.equal(recorded[0].isolation.worktreePath, undefined);
 });
+
+test('记录的 Worktree 目录已经不在时会重新 prepare', async () => {
+  let prepared = 0;
+  const adapter = createGoalWorktreeAdapter({
+    worktreeAdapter: {
+      async prepare() {
+        prepared += 1;
+        return {
+          kind: 'worktree',
+          workspacePath: '/tmp/peer-goal-worktrees/plan-1-recreated',
+          worktreePath: '/tmp/peer-goal-worktrees/plan-1-recreated',
+          repositoryRoot: '/repo/peer_agent',
+          branch: 'peer-goal/plan-1-recreated',
+          baseline: { commit: '6d98092' },
+        };
+      },
+    },
+    goalPlanStore: {
+      recordDeliveryIsolation(planId, isolation) {
+        return boundPlan({
+          deliveryBinding: {
+            ...boundPlan().deliveryBinding,
+            ...isolation,
+          },
+        });
+      },
+    },
+  });
+
+  const next = await adapter.prepareForPlan(boundPlan({
+    deliveryBinding: {
+      ...boundPlan().deliveryBinding,
+      executionIsolation: 'worktree',
+      taskBranch: 'peer-goal/plan-1',
+      worktreePath: '/tmp/peer-goal-worktrees/does-not-exist',
+    },
+  }));
+  assert.equal(prepared, 1);
+  assert.equal(next.deliveryBinding.worktreePath, '/tmp/peer-goal-worktrees/plan-1-recreated');
+});
+
+test('目标仓库已经消失时 prepare 不抛，沿用原计划', async () => {
+  const adapter = createGoalWorktreeAdapter({
+    worktreeAdapter: {
+      async prepare() {
+        throw new Error('automation_workspace_missing');
+      },
+    },
+  });
+  const plan = boundPlan();
+  const next = await adapter.prepareForPlan(plan);
+  assert.equal(next, plan);
+});

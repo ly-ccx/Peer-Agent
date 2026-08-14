@@ -96,4 +96,63 @@ describe('automation worktree adapter', () => {
       /automation_workspace_not_git/,
     );
   });
+
+  it('treats a vanished workspace as missing instead of leaking ENOENT', async () => {
+    const adapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
+    await assert.rejects(
+      adapter.inspectWorkspace(path.join(root, 'already-gone')),
+      /automation_workspace_missing/,
+    );
+    await assert.rejects(
+      adapter.prepare({
+        ...createRun(),
+        snapshot: { workspacePath: path.join(root, 'already-gone'), grant: { preset: 'work_in_workspace' } },
+      }),
+      /automation_workspace_missing/,
+    );
+  });
+
+  it('collects and cleans an already-removed worktree without throwing', async () => {
+    const adapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
+    const run = createRun();
+    const execution = await adapter.prepare(run);
+    rmSync(execution.worktreePath, { recursive: true, force: true });
+
+    const changes = await adapter.collect(run, execution);
+    assert.deepEqual(changes.changedFiles, []);
+    assert.equal(changes.retained, false);
+
+    const result = await adapter.retainOrCleanup(run, execution, changes);
+    assert.equal(result.retained, false);
+    assert.equal(existsSync(execution.worktreePath), false);
+    assert.throws(() => git(['show-ref', '--verify', `refs/heads/${execution.branch}`]));
+  });
+
+  it('cleans a leftover directory whose .git is already gone', async () => {
+    const adapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
+    const run = createRun();
+    const execution = await adapter.prepare(run);
+    rmSync(path.join(execution.worktreePath, '.git'), { recursive: true, force: true });
+    writeFileSync(path.join(execution.worktreePath, 'orphan.txt'), 'left behind\n');
+
+    const changes = await adapter.collect(run, execution);
+    const result = await adapter.retainOrCleanup(run, execution, changes);
+
+    assert.deepEqual(changes.changedFiles, []);
+    assert.equal(result.retained, false);
+    assert.equal(existsSync(execution.worktreePath), false);
+    assert.throws(() => git(['show-ref', '--verify', `refs/heads/${execution.branch}`]));
+  });
+
+  it('can retainOrCleanup the same vanished worktree twice', async () => {
+    const adapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
+    const run = createRun();
+    const execution = await adapter.prepare(run);
+    const first = await adapter.retainOrCleanup(run, execution, { changedFiles: [] });
+    const second = await adapter.retainOrCleanup(run, execution, { changedFiles: [] });
+
+    assert.equal(first.retained, false);
+    assert.equal(second.retained, false);
+    assert.equal(existsSync(execution.worktreePath), false);
+  });
 });
