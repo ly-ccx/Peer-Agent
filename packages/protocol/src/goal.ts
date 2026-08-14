@@ -393,6 +393,19 @@ export type GoalRunnerPhase =
 
 export type GoalQualityReviewStatus = 'reviewing' | 'passed' | 'failed';
 
+/** 验收后把隔离改动交回目标分支的结果；不做排队 UI。 */
+export type GoalDeliveryHandoffStatus = 'idle' | 'delivering' | 'delivered' | 'stopped';
+
+export interface GoalDeliveryHandoff {
+  readonly status: GoalDeliveryHandoffStatus;
+  readonly repoId?: string;
+  readonly targetBranch?: string;
+  readonly taskBranch?: string;
+  readonly commitSha?: string;
+  readonly stoppedReason?: string;
+  readonly updatedAt: string;
+}
+
 export type GoalQualityCheckStatus = 'passed' | 'failed' | 'skipped';
 
 /** 用户可见的通俗检查记录；内部四层检查名不进界面。 */
@@ -907,6 +920,8 @@ export interface GoalPlan {
     readonly acceptedAt: string;
     readonly acceptedBy?: 'user' | string;
   };
+  /** 验收后交回目标分支的结果；缺字段表示尚未交回。 */
+  readonly deliveryHandoff?: GoalDeliveryHandoff;
   /** 对齐 system-context.ts 的 epoch */
   readonly promptContextEpochId?: string;
   readonly createdAt: string;

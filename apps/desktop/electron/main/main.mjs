@@ -120,6 +120,7 @@ import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
+import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -408,6 +409,7 @@ const automationProposalService = createAutomationChatProposalService({
 });
 
 let goalWorktreeAdapter = null;
+let goalDeliveryHandoff = null;
 
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
@@ -431,12 +433,32 @@ const goalPlanStore = createGoalPlanStore({
       }
     });
     const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+    if (planId && typeof goalDeliveryHandoff?.handoffPlan === 'function') {
+      queueMicrotask(() => {
+        try {
+          const plan = goalPlanStore.getPlan(planId);
+          if (!plan) return;
+          void goalDeliveryHandoff.handoffPlan(plan).then((next) => {
+            const delivered = next?.deliveryHandoff?.status === 'delivered';
+            if (delivered && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
+              return goalWorktreeAdapter.retainOrCleanupPlan(next);
+            }
+            return next;
+          }).catch((error) => {
+            console.warn('[goal-handoff] deliver failed:', error?.message || error);
+          });
+        } catch (error) {
+          console.warn('[goal-handoff] deliver failed:', error?.message || error);
+        }
+      });
+    }
     if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
       queueMicrotask(() => {
         try {
           const plan = goalPlanStore.getPlan(planId);
           if (!plan) return;
           if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
+          if (plan.resultAcceptance?.acceptedAt && plan.deliveryHandoff?.status !== 'delivered') return;
           void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
             console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
           });
@@ -1073,6 +1095,7 @@ function parseExplorerReport(rawText, fallback = {}) {
 }
 
 goalWorktreeAdapter = createGoalWorktreeAdapter({ goalPlanStore });
+goalDeliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
 
 const llmChatService = createLlmChatService({
   llmConfigStore,
