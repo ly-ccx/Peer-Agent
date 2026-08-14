@@ -871,10 +871,11 @@
 
     <section class="hero">
       <div class="hero-inner">
-        <p class="kicker" data-i18n="hero.eyebrow">Desktop + CLI</p>
+        <p class="kicker" data-i18n="hero.eyebrow">Fully open source · MIT</p>
         <h1 data-i18n="hero.title">Local hands for your AI</h1>
         <p class="subhead" data-i18n="hero.lede">
-          Authorized. Executed on your machine. Backed by Evidence.
+          Fully open source (MIT). Work flows through tasks — handoff, continuity, follow-up —
+          authorized and executed on your machine, closed with Evidence.
           Desktop and `peer` CLI share one local Runtime.
         </p>
         <div class="cta">
@@ -1020,30 +1021,52 @@
 
     <section class="section" id="mechanisms">
       <div class="section-inner">
-        <h2 data-i18n="mechanisms.title">Designed around control.</h2>
+        <h2 data-i18n="mechanisms.title">Designed around task flow.</h2>
         <p class="lead" data-i18n="mechanisms.subtitle">
-          Not another chat shell. A local executive surface with two first-class entries.
+          Fully open source (MIT). Not another chat shell — work moves through tasks:
+          handoff, continuity, and follow-up, closed with Evidence.
         </p>
         <div class="features">
           <article class="feature">
+            <div class="icon">⇄</div>
+            <h3 data-i18n="mechanisms.handoffTitle">Task handoff</h3>
+            <p data-i18n="mechanisms.handoffBody">
+              Goals are accepted with boundaries, clarified, planned (L0–L3), executed, and closed against success criteria.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="icon">⇉</div>
+            <h3 data-i18n="mechanisms.continuityTitle">Continuity</h3>
+            <p data-i18n="mechanisms.continuityBody">
+              Persistent Goal state with pause, resume, and waiting-for-you — tasks survive sessions and interruptions.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="icon">?</div>
+            <h3 data-i18n="mechanisms.followupTitle">Follow-up, not guessing</h3>
+            <p data-i18n="mechanisms.followupBody">
+              On critical ambiguity, risky trade-offs, or missing permissions, it asks with clickable options — never guesses.
+            </p>
+          </article>
+          <article class="feature">
             <div class="icon">⌘</div>
-            <h3 data-i18n="mechanisms.channelTitle">Desktop + CLI</h3>
+            <h3 data-i18n="mechanisms.channelTitle">Multi-channel access</h3>
             <p data-i18n="mechanisms.channelBody">
-              Electron Desktop and `peer` TUI. Install via npm or Release — terminal work needs no GUI.
+              Desktop, TUI/CLI, Quick Chat, Automation, and MCP — one machine, one config, one permission chain.
             </p>
           </article>
           <article class="feature">
             <div class="icon">◎</div>
-            <h3 data-i18n="mechanisms.threadTitle">One local Runtime</h3>
-            <p data-i18n="mechanisms.threadBody">
-              Both shells share ~/.peer-agent: settings, conversations, credentials, same capabilities.
+            <h3 data-i18n="mechanisms.pluginTitle">Rich pluggability</h3>
+            <p data-i18n="mechanisms.pluginBody">
+              MCP servers, plugin & skill marketplace, and declarative capability manifests — all through one governed pipeline.
             </p>
           </article>
           <article class="feature">
             <div class="icon">✦</div>
-            <h3 data-i18n="mechanisms.evidenceTitle">Evidence, not vibes</h3>
-            <p data-i18n="mechanisms.evidenceBody">
-              Authorization, tools, and results expand as Evidence you can replay — in GUI or TUI.
+            <h3 data-i18n="mechanisms.dispatchTitle">Dispatch & acceptance</h3>
+            <p data-i18n="mechanisms.dispatchBody">
+              Dispatch needs your consent; results walk an explicit state chain, pass a self-check, then wait for your acceptance.
             </p>
           </article>
         </div>
@@ -1134,10 +1157,10 @@
             "cli.hintSlash": "commands",
             "cli.hintTab": "complete",
             "cli.hintShared": "same ~/.peer-agent as Desktop",
-            "hero.eyebrow": "Desktop + CLI",
+            "hero.eyebrow": "Fully open source · MIT",
             "hero.title": "Local hands for your AI",
             "hero.lede":
-              "Authorized. Executed on your machine. Backed by Evidence. Desktop and `peer` CLI share one local Runtime.",
+              "Fully open source (MIT). Work flows through tasks — handoff, continuity, follow-up — authorized and executed on your machine, closed with Evidence. Desktop and `peer` CLI share one local Runtime.",
             "hero.ctaPrimary": "Download desktop",
             "hero.ctaCli": "Install CLI →",
             "hero.ctaSecondary": "View source",
@@ -1158,18 +1181,27 @@
             "demo.chipMode": "Agent",
             "demo.chipAccess": "Ask first",
             "demo.chipModel": "GPT-5.2",
-            "mechanisms.title": "Designed around control.",
+            "mechanisms.title": "Designed around task flow.",
             "mechanisms.subtitle":
-              "Not another chat shell. A local executive surface with two first-class entries.",
-            "mechanisms.channelTitle": "Desktop + CLI",
+              "Fully open source (MIT). Not another chat shell — work moves through tasks: handoff, continuity, and follow-up, closed with Evidence.",
+            "mechanisms.handoffTitle": "Task handoff",
+            "mechanisms.handoffBody":
+              "Goals are accepted with boundaries, clarified, planned (L0–L3), executed, and closed against success criteria.",
+            "mechanisms.continuityTitle": "Continuity",
+            "mechanisms.continuityBody":
+              "Persistent Goal state with pause, resume, and waiting-for-you — tasks survive sessions and interruptions.",
+            "mechanisms.followupTitle": "Follow-up, not guessing",
+            "mechanisms.followupBody":
+              "On critical ambiguity, risky trade-offs, or missing permissions, it asks with clickable options — never guesses.",
+            "mechanisms.channelTitle": "Multi-channel access",
             "mechanisms.channelBody":
-              "Electron Desktop and `peer` TUI. Install via npm or Release — terminal work needs no GUI.",
-            "mechanisms.threadTitle": "One local Runtime",
-            "mechanisms.threadBody":
-              "Both shells share ~/.peer-agent: settings, conversations, credentials, same capabilities.",
-            "mechanisms.evidenceTitle": "Evidence, not vibes",
-            "mechanisms.evidenceBody":
-              "Authorization, tools, and results expand as Evidence you can replay — in GUI or TUI.",
+              "Desktop, TUI/CLI, Quick Chat, Automation, and MCP — one machine, one config, one permission chain.",
+            "mechanisms.pluginTitle": "Rich pluggability",
+            "mechanisms.pluginBody":
+              "MCP servers, plugin & skill marketplace, and declarative capability manifests — all through one governed pipeline.",
+            "mechanisms.dispatchTitle": "Dispatch & acceptance",
+            "mechanisms.dispatchBody":
+              "Dispatch needs your consent; results walk an explicit state chain, pass a self-check, then wait for your acceptance.",
             "trust.localLabel": "Local-first",
             "trust.localBody": " Data & keys stay on device",
             "trust.authLabel": "Authorized",
@@ -1226,10 +1258,10 @@
             "cli.hintSlash": "命令",
             "cli.hintTab": "补全",
             "cli.hintShared": "与 Desktop 共用 ~/.peer-agent",
-            "hero.eyebrow": "Desktop + CLI",
+            "hero.eyebrow": "完全开源 · MIT",
             "hero.title": "你的 AI，本地双手",
             "hero.lede":
-              "本地授权。本机执行。Evidence 可回放。Desktop 与 `peer` CLI 共享同一本地 Runtime。",
+              "完全开源（MIT）。工作以任务流转 —— 签收、继承、追问 —— 在你的机器上授权执行，用 Evidence 收尾。Desktop 与 `peer` CLI 共享同一本地 Runtime。",
             "hero.ctaPrimary": "下载桌面版",
             "hero.ctaCli": "安装 CLI →",
             "hero.ctaSecondary": "查看源码",
@@ -1250,17 +1282,27 @@
             "demo.chipMode": "Agent",
             "demo.chipAccess": "先询问",
             "demo.chipModel": "GPT-5.2",
-            "mechanisms.title": "为掌控而设计。",
-            "mechanisms.subtitle": "不是又一个聊天壳。本地执行面，两个一等入口。",
-            "mechanisms.channelTitle": "Desktop + CLI",
+            "mechanisms.title": "为任务流而设计。",
+            "mechanisms.subtitle":
+              "完全开源（MIT）。不是又一个聊天壳 —— 工作以任务流转：签收、继承、追问，用 Evidence 收尾。",
+            "mechanisms.handoffTitle": "任务流转",
+            "mechanisms.handoffBody":
+              "目标带边界被签收，经澄清、规划（L0–L3）、执行，最终对照成功标准关闭。",
+            "mechanisms.continuityTitle": "任务继承",
+            "mechanisms.continuityBody":
+              "Goal 状态持久化，支持暂停、恢复与等待你回复 —— 任务跨会话、跨中断存活。",
+            "mechanisms.followupTitle": "追问，而不是猜",
+            "mechanisms.followupBody":
+              "遇到关键歧义、高风险取舍或缺权限时，以可点选的选项提问 —— 绝不瞎猜。",
+            "mechanisms.channelTitle": "多渠道接入",
             "mechanisms.channelBody":
-              "Electron Desktop 与 `peer` TUI。npm 或 Release 安装，终端场景不必装 GUI。",
-            "mechanisms.threadTitle": "同一本地 Runtime",
-            "mechanisms.threadBody":
-              "共享 ~/.peer-agent：设置、会话、凭证，同一套能力语义。",
-            "mechanisms.evidenceTitle": "Evidence，不是感觉",
-            "mechanisms.evidenceBody":
-              "授权、工具与结果可展开回放 —— GUI 与 TUI 皆然。",
+              "Desktop、TUI/CLI、Quick Chat、Automation 与 MCP —— 同一台机器，同一套配置，同一条权限链。",
+            "mechanisms.pluginTitle": "丰富的插件化",
+            "mechanisms.pluginBody":
+              "MCP 服务器、插件与技能 marketplace、声明式能力清单 —— 全部经同一条受治理管线。",
+            "mechanisms.dispatchTitle": "任务派发与验收",
+            "mechanisms.dispatchBody":
+              "派发需你同意；结果走显式状态链、先过质量自检，再等你验收才算交付。",
             "trust.localLabel": "本地优先",
             "trust.localBody": " 数据与密钥留在本机",
             "trust.authLabel": "按需授权",

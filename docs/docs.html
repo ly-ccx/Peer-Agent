@@ -376,31 +376,31 @@
           </div>
           <h1 data-i18n="welcome.title">Welcome to Peer Agent</h1>
           <p class="lede" data-i18n="welcome.lede">
-            Peer Agent is a privacy-first local agent platform with a desktop shell and a first-class CLI (<code>peer</code>).
-            Cloud models can reason; local owns capability execution, authorization, and Evidence.
+            Peer Agent is a fully open-source (MIT) local task-flow agent platform with a desktop shell and a first-class CLI (<code>peer</code>).
+            Work moves through tasks — handoff, continuity, follow-up — while cloud models reason and local owns capability execution, authorization, and Evidence.
           </p>
 
           <h2 id="welcome-what" data-i18n="welcome.whatTitle">What it is</h2>
           <p data-i18n="welcome.whatBody">
-            Not a chat wrapper. Peer Agent is a governed executive surface: the model proposes work; the local Runtime decides
-            whether a capability may run, executes it on your machine, and returns Evidence you can inspect.
+            Not a chat wrapper. Peer Agent is a fully open-source, governed executive surface: work is accepted as tasks with objectives, boundaries, and success criteria;
+            the local Runtime decides whether a capability may run, executes it on your machine, and closes tasks only on Evidence you can inspect.
           </p>
           <div class="grid-2">
             <div class="card">
-              <h3 data-i18n="welcome.card1Title">Privacy by architecture</h3>
-              <p data-i18n="welcome.card1Body">Files, shell, and local tools execute on your machine — not on a third-party tool server.</p>
+              <h3 data-i18n="welcome.card1Title">Fully open source (MIT)</h3>
+              <p data-i18n="welcome.card1Body">Desktop, TUI, CLI, runtime, protocol, and capability manifests — one MIT license. Auditable, forkable, embeddable.</p>
             </div>
             <div class="card">
-              <h3 data-i18n="welcome.card2Title">PermissionGrant, not polite prompts</h3>
-              <p data-i18n="welcome.card2Body">No tool runs without an authorization decision enforced by the Runtime.</p>
+              <h3 data-i18n="welcome.card2Title">Task flow: handoff, continuity, follow-up</h3>
+              <p data-i18n="welcome.card2Body">Goals are accepted with boundaries, planned by depth, resumed after interruption, and clarified by asking — never guessing.</p>
             </div>
             <div class="card">
-              <h3 data-i18n="welcome.card3Title">Evidence, not vibes</h3>
-              <p data-i18n="welcome.card3Body">Capability calls return structured artifacts/logs/metadata you can audit after the fact.</p>
+              <h3 data-i18n="welcome.card3Title">Dispatch & acceptance</h3>
+              <p data-i18n="welcome.card3Body">Dispatching needs your consent; results walk an explicit state chain and count only after your acceptance.</p>
             </div>
             <div class="card">
-              <h3 data-i18n="welcome.card4Title">One chain for every capability</h3>
-              <p data-i18n="welcome.card4Body">Bash, files, web fetch, MCP, plugins, and skills all flow through the same governed path.</p>
+              <h3 data-i18n="welcome.card4Title">Multi-channel & pluggable</h3>
+              <p data-i18n="welcome.card4Body">Desktop, TUI/CLI, Quick Chat, Automation, and MCP as entries; plugins, skills, and manifests extend capabilities through one governed chain.</p>
             </div>
           </div>
 
@@ -415,7 +415,7 @@
             This is how model intent, local execution, user authorization, and factual results stay separate and traceable.
           </p>
 
-          <h2 id="welcome-entries" data-i18n="welcome.entriesTitle">Two first-class entries</h2>
+          <h2 id="welcome-entries" data-i18n="welcome.entriesTitle">Where work enters</h2>
           <div class="table-wrap">
             <table>
               <thead>
@@ -442,11 +442,12 @@
 
           <h2 id="welcome-cando" data-i18n="welcome.canTitle">What you can do today</h2>
           <ul>
-            <li data-i18n="welcome.can1"><strong>Files</strong> — read, search, edit workspace files under scoped permissions.</li>
-            <li data-i18n="welcome.can2"><strong>Shell</strong> — run builds/tests/scripts; results return as inspectable artifacts.</li>
-            <li data-i18n="welcome.can3"><strong>Web fetch & search</strong> — pull pages/results as governed context (not hidden browsing).</li>
+            <li data-i18n="welcome.can1"><strong>Task flow</strong> — hand work over as tasks with boundaries; resume after interruption; answer follow-ups with clicks.</li>
+            <li data-i18n="welcome.can2"><strong>Files & Shell</strong> — read, search, edit, run builds/tests/scripts under scoped permissions, results as inspectable artifacts.</li>
+            <li data-i18n="welcome.can3"><strong>Dispatch & acceptance</strong> — send tasks to scheduled runs with your consent; accept results only after checking them.</li>
             <li data-i18n="welcome.can4"><strong>MCP</strong> — load Model Context Protocol servers from the local registry.</li>
             <li data-i18n="welcome.can5"><strong>Plugins & Skills</strong> — extend capabilities via manifests instead of patching core.</li>
+            <li data-i18n="welcome.can6"><strong>Multi-channel</strong> — Desktop, TUI/CLI, Quick Chat, Automation, and MCP entries share one machine, one permission chain.</li>
           </ul>
 
           <h2 id="welcome-quick" data-i18n="welcome.quickTitle">5-minute path</h2>
@@ -1361,31 +1362,32 @@ Evidence owns governance.</code></pre>
             "group.getStarted": "开始使用", "group.concepts": "核心概念", "group.capabilities": "能力", "group.help": "帮助",
             "toc.title": "本页目录", "action.copy": "复制全文", "action.copied": "已复制",
             "welcome.title": "欢迎使用 Peer Agent",
-            "welcome.lede": "Peer Agent 是隐私优先的本地 Agent 平台，提供 Desktop 壳与一等 CLI（peer）。云端模型可以负责推理；本地负责能力执行、授权与 Evidence。",
+            "welcome.lede": "Peer Agent 是完全开源（MIT）的本地任务流 Agent 平台，提供 Desktop 壳与一等 CLI（peer）。工作以任务流转 —— 签收、继承、追问 —— 云端模型负责推理；本地负责能力执行、授权与 Evidence。",
             "welcome.whatTitle": "它是什么",
-            "welcome.whatBody": "不是聊天套壳。Peer Agent 是可治理的执行面：模型提出工作；本地 Runtime 决定能力能否运行、在本机执行，并返回可检查的 Evidence。",
-            "welcome.card1Title": "架构级隐私",
-            "welcome.card1Body": "文件、Shell 与本地工具在你的机器上执行，而不是送到第三方工具服务器。",
-            "welcome.card2Title": "PermissionGrant，不是客套提示",
-            "welcome.card2Body": "没有 Runtime 授权决策，工具不得执行。",
-            "welcome.card3Title": "Evidence，不是感觉",
-            "welcome.card3Body": "能力调用返回可审计的结构化产物 / 日志 / 元数据。",
-            "welcome.card4Title": "所有能力同一条链",
-            "welcome.card4Body": "Bash、文件、web fetch、MCP、插件与 Skills 都走同一套治理路径。",
+            "welcome.whatBody": "不是聊天套壳。Peer Agent 是完全开源、可治理的执行面：工作以任务被签收，带目标、边界与成功标准；本地 Runtime 决定能力能否运行、在本机执行，并只在 Evidence 可检查时关闭任务。",
+            "welcome.card1Title": "完全开源（MIT）",
+            "welcome.card1Body": "Desktop、TUI、CLI、运行时、协议与能力清单 —— 同一个 MIT 许可。可审计、可 fork、可嵌入。",
+            "welcome.card2Title": "任务流：流转、继承、追问",
+            "welcome.card2Body": "目标带边界被签收，按复杂度规划，中断后可恢复，歧义时追问 —— 绝不瞎猜。",
+            "welcome.card3Title": "派发与验收",
+            "welcome.card3Body": "派发需你同意；结果走显式状态链，经你验收才算交付。",
+            "welcome.card4Title": "多渠道与插件化",
+            "welcome.card4Body": "Desktop、TUI/CLI、Quick Chat、Automation 与 MCP 是入口；插件、技能与清单经同一条治理链扩展能力。",
             "welcome.chainTitle": "不可绕过的能力链",
             "welcome.chainBody": "这样模型意图、本地执行、用户授权与事实结果才能保持分离且可追踪。",
-            "welcome.entriesTitle": "两个一等入口",
+            "welcome.entriesTitle": "工作从哪里进来",
             "welcome.thEntry": "入口", "welcome.thUse": "适合", "welcome.thNotes": "说明",
             "welcome.desktopUse": "可视化 Thread / Workbench / Evidence 审查",
             "welcome.desktopNotes": "Electron 壳；macOS + Windows 走 Releases",
             "welcome.cliUse": "终端 / headless 会话",
             "welcome.cliNotes": "不必装 Desktop；共享 ~/.peer-agent",
             "welcome.canTitle": "今天能做什么",
-            "welcome.can1": "文件 — 在作用域权限下读取 / 搜索 / 编辑工作区文件。",
-            "welcome.can2": "Shell — 跑构建 / 测试 / 脚本；结果作为可检查产物返回。",
-            "welcome.can3": "Web fetch & search — 把页面 / 搜索结果作为受治理上下文接入。",
+            "welcome.can1": "任务流 — 把工作以带边界的任务交出去；中断后恢复；用点选回答追问。",
+            "welcome.can2": "文件与 Shell — 在作用域权限下读取 / 搜索 / 编辑、跑构建 / 测试 / 脚本；结果作为可检查产物返回。",
+            "welcome.can3": "派发与验收 — 经你同意把任务交给调度运行；检查结果后才验收。",
             "welcome.can4": "MCP — 从本地 registry 加载 MCP 服务器。",
             "welcome.can5": "Plugins & Skills — 用 manifest 扩展能力，而不是改核心旁路。",
+            "welcome.can6": "多渠道 — Desktop、TUI/CLI、Quick Chat、Automation 与 MCP 共享同一台机器、同一条权限链。",
             "welcome.quickTitle": "5 分钟路径",
             "welcome.s1": "从 Releases 装 Desktop，或 npm install -g @peer-agent/cli（Node 20+）。",
             "welcome.s2": "启动 Desktop 应用，或运行 peer。",

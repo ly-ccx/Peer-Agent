@@ -5,11 +5,11 @@
 <h1 align="center">Peer Agent</h1>
 
 <p align="center">
-  <strong>A local-first Task Flow Agent — authorized, planned, and proven on your machine.</strong>
+  <strong>A fully open-source, local-first Task Flow Agent — work moves through task handoff, continuity, and follow-up questions; authorized, planned, and proven on your machine.</strong>
 </p>
 
 <p align="center">
-  Local-first · Permission-gated · Evidence-backed · Task flow by default
+  Fully open source (MIT) · Local-first · Permission-gated · Evidence-backed · Task flow by default
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-why-peer-agent">Why</a> ·
   <a href="#-design-philosophy">Philosophy</a> ·
-  <a href="#-task-flow">Task Flow</a> ·
+  <a href="#-task-flow-handoff-continuity-follow-up">Task Flow</a> ·
   <a href="#-what-you-can-do">Features</a> ·
   <a href="#-architecture-at-a-glance">Architecture</a> ·
   <a href="#-product-vision">Vision</a> ·
@@ -38,6 +38,8 @@
 ---
 
 Many coding agents already run tools on your machine. That alone is no longer a differentiator.
+
+**Peer Agent is fully open source (MIT)** — not an "open shell around a closed core": Desktop, TUI, CLI, the runtime, the protocol, and every capability manifest ship under the same [LICENSE](LICENSE). Audit every line of permission code, fork your own branch, or embed the runtime in your own host.
 
 **Peer Agent is about what happens after local execution:** goals are accepted with boundaries, ambiguity is clarified instead of guessed, work is planned by complexity, and completion is proven with Evidence — under one permissioned capability chain across Desktop, TUI, and CLI.
 
@@ -50,7 +52,7 @@ Three first-class shells share one unified core runtime:
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current release: **`0.0.4-beta.3`** (`latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
+> Current stable release: **`0.0.3`** (npm `latest`), beta channel **`0.0.4-beta.3`**. Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 
@@ -58,6 +60,7 @@ Three first-class shells share one unified core runtime:
 
 | | |
 | --- | --- |
+| 📜 **Fully open source (MIT)** | The entire chain — Desktop, TUI, CLI, runtime, protocol, capability manifests — ships under one MIT license. Auditable, forkable, embeddable; no "open shell around a closed core". |
 | 🎯 **Task flow, not tool chat** | Goals are accepted with boundaries, clarified when needed, planned by complexity, and closed against explicit success criteria. |
 | ✅ **Definition of Done as code** | `successCriteria`, `criterionResults`, and `evidenceRefs` turn “done” into a verifiable gate — not an assistant claim. |
 | 🔒 **Local execution, explicit trust** | Tools run on *your* machine under `PermissionGrant`. Cognition can come from any model provider — capability power stays local and auditable. |
@@ -96,69 +99,86 @@ These ideas shape both the product surface (Agent / Plan / Goal) and the enginee
 
 ---
 
-## 🧠 Task Flow
+## 🧠 Task Flow: Handoff, Continuity, Follow-up
 
-Peer Agent treats multi-step work as a **task**, not a free-form chat turn.
+Peer Agent treats multi-step work as a **task**, not a free-form chat turn. Tasks are first-class citizens — each with its own objective, boundaries, success criteria, and lifecycle.
 
-Before acting, it turns your request into an objective, boundaries, and success criteria you can review. If something material is missing — a product choice, a risky trade-off, or a permission — it asks instead of guessing. Planning depth scales with complexity:
+### Handoff — a task has a lifecycle
 
-| Depth | When | Behavior |
-| --- | --- | --- |
-| **L0** | Simple Q&A | Answer directly |
-| **L1** | Small scoped change | Short plan, then act |
-| **L2** | Multi-step work | Self-driven GoalPlan with trackable subtasks |
-| **L3** | High-risk / irreversible | Explicit **Plan** review before side effects |
+From acceptance to closure, a task walks an explicit chain:
 
-**Agent** is the default. **Plan** is the brake when you want review first. Subtasks and success criteria close only with real tool results and Evidence — not “done” prose.
+```text
+Accept (objective + boundaries + success criteria) → Clarify → Plan (L0–L3 depth) → Execute → Verify → Acceptance & close
+```
 
-For longer work, the Goal runner persists the plan graph and supports pause, resume, and `waiting_user`. Auto-verifiable criteria can run as commands, tests, or file checks; their results must be attached before the goal can close. Read-only Explorer workers may investigate in parallel, while the lead task flow retains scope, budget, and completion ownership.
+- **Planning depth scales with complexity**: L0 answers directly; L1 runs a short plan before acting; L2 drives a self-directed GoalPlan with trackable subtasks; L3 high-risk / irreversible work goes through an explicit **Plan** review before any side effect.
+- **Agent is the default**; **Plan** is the brake when you want review first.
+- **Dispatch–acceptance loop**: tasks can be dispatched (e.g. cloud-scheduled execution) — but only after you approve or reject the dispatch. The dispatched run walks an explicit `dispatching → acked → running → result_received` state chain; results pass a quality self-check, then wait for **your acceptance** before they count as delivered — not "the model says it's done".
+- Subtasks and success criteria close only with real tool results and Evidence — not "done" prose.
 
-Local execution still goes through one chain:
+### Continuity — interruption is not the end
+
+Real work gets interrupted: contexts fill up, processes restart, you step away for lunch. Peer Agent treats these as first-class scenarios:
+
+- **Persistent Goal state**: the plan graph, subtask status, success criteria, and Evidence are all persisted — tasks survive across sessions.
+- **Pause / resume / `waiting_user`**: a task can park on "waiting for your reply" and continue from the breakpoint when you return, without losing context.
+- **Compact summaries + context checksums**: long-task context is compacted into a continuity summary to keep going — but a summary is **continuity context, not proof**. Closing a task always requires real tool results.
+- Read-only Explorer workers may investigate in parallel, while the lead task flow retains scope, budget, and completion ownership.
+
+### Follow-up — ask when stuck, never guess
+
+When material information is missing, Peer Agent's rule is **ask, don't guess**:
+
+- **Structured follow-up**: the `request_user_input` tool asks with clickable options — you pick instead of typing a paragraph. Your reply is recorded as a persistent state transition.
+- **Ask at the right moment**: only critical ambiguity, risky trade-offs, or missing permissions interrupt you; routine execution stays quiet.
+- **Answers belong to the task**: follow-up replies attach to the task itself — on the next resume or the next dispatch, the answer is still there.
+
+Task flow and the capability chain each govern their own half: task flow decides *what work is accepted and when it's finished*; local execution always goes through one chain:
 
 ```text
 Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence
 ```
 
-Task flow decides *what* work is accepted and when it is finished. The capability chain decides *how* local power is authorized and proven.
+The capability chain decides *how* local power is authorized and proven.
 
 ---
 
 ## 🚀 What You Can Do
 
-### Work the way that fits
+### 📡 Multi-channel access — any entry point, same machine
 
-- 🖥️ **Desktop app** — Task threads, composer, review cards, Workbench, tray/lifecycle, glass-style shell
-- ⌨️ **TUI / CLI (`peer`)** — Full terminal agent; install via `@peer-agent/cli` or build from source
-- ⚡ **Quick Chat** — Lightweight global chat without opening a full task thread
-- 🎯 **Agent & Plan modes** — Agent auto-plans and executes (L0–L3); Plan requires review before side effects
-- 📋 **Goal runner** — Trackable subtasks, clarification when blocked, evidence-backed completion
+It doesn't matter where work enters — config, permissions, and Evidence are always the same:
 
-### Connect tools and knowledge
-
-- 🔌 **MCP** — Connect external MCP servers (stdio / HTTP / SSE) as first-class capabilities
-- 🧩 **Plugins & Skills** — Marketplace-style install, enable/disable, and skill-triggered workflows
-- 📎 **Attachments & context** — Files and other context admitted through governed paths (not free-form prompt injection)
-- 🌐 **Web & browser** — Fetch, navigate, and interact under the same permission + Evidence model
-- ⏰ **Automation** — Scheduled / recurring agent runs with run-result viewing
-- 🌿 **Isolated automation runs** — Repository jobs can run in a dedicated Git worktree, then return commit/diff artifact refs and a receipt instead of mutating your active checkout invisibly
-- 🧭 **Workbench + embedded Browser** — Keep task status, artifacts, diffs, terminal output, and visible browser actions beside the conversation
-
-### Build on the runtime
-
-- 🔌 **Open Runtime SDK** — Embed the governed capability pipeline in another Node host via `@peer-agent/protocol`, `@peer-agent/runtime-core`, and `@peer-agent/runtime-sdk`
-- 🧱 **Host-neutral by construction** — Public contracts and orchestration do not depend on Electron, renderer state, concrete Shell/file adapters, or secret storage
-- 🧠 **Canonical System Context** — Desktop and TUI share source registration, layering, checksums, prompt snapshots, and continuity rules so provider formatting and product instructions do not drift
-
-### Own your model stack
-
-- 🔐 **One secure credential vault** — macOS Keychain, Windows Credential Manager, or Linux Secret Service protects a random 32-byte master key; Provider secrets are encrypted locally with AES-256-GCM
-- 🔄 **One machine, one model setup** — Desktop, TUI, and CLI reuse the same Provider catalog, default model selection, and credential helper under `~/.peer-agent`
-- 🌐 **Provider freedom** — Mix official APIs, OAuth/subscription sign-in, Coding Plan templates, and custom OpenAI / Anthropic-compatible endpoints; configure model IDs, headers, reasoning, vision, cache, context, and pricing metadata
-- 🧑‍🏫 **Main + fallback vision** — Choose any main model for reasoning and optionally pair it with a vision-capable fallback; image recognition stays a supporting role and the main model continues the task
+| Channel | What it covers |
+| --- | --- |
+| **Surface channels** | 🖥️ Desktop (task threads, review cards, Workbench + embedded Browser) · ⌨️ TUI / `peer` CLI · ⚡ Quick Chat lightweight global chat |
+| **Model channels** | Official APIs · OAuth / subscription sign-in · Coding Plan templates · custom OpenAI / Anthropic-compatible endpoints — freely mixed; model IDs, headers, reasoning, vision, cache, and pricing metadata are all configurable |
+| **Integration channels** | ⏰ Automation scheduled / recurring runs · 🔌 MCP servers (stdio / HTTP / SSE) · 🌐 web fetch and browser interaction |
 
 > “Shared across surfaces” means the same user and data home on one machine. Peer does not claim cloud synchronization of secrets across devices.
 
-### Control the machine (safely)
+### 🧩 Rich pluggability — capabilities snap into one contract
+
+- 🔌 **MCP as a first-class citizen** — external MCP servers plug straight in and go through the same permission + Evidence pipeline as built-ins; no side door
+- 🏪 **Plugin & skill marketplace** — Marketplace-style install, enable/disable, and updates; skills trigger workflows on demand
+- 🧱 **Declarative capability manifests** — every capability is described by a manifest (permissions, entry points, parameters) and projected uniformly into model-visible tools
+- 🔌 **Open Runtime SDK** — `@peer-agent/protocol` / `runtime-core` / `runtime-sdk` let any Node host embed the same governed capability pipeline; host-neutral, not tied to Electron
+- 📎 **Governed context admission** — attachments, files, and web content enter context through explicit admission paths, not free-form prompt injection
+
+### 📋 Task dispatch & acceptance — work can be delegated, the accountability chain cannot
+
+- ✅ **Dispatch needs your consent** — dispatching a task (e.g. cloud-scheduled execution) requires your approve/reject first; nothing ships out silently
+- 🔗 **Explicit state chain** — `dispatching → acked → running → result_received`, every step observable
+- 🧪 **Quality self-check + user acceptance** — results pass a quality self-check, then wait in a pending-acceptance state; it counts as delivered only after you accept
+- 🌿 **Isolated runs** — repository jobs can run in a dedicated Git worktree and return commit / diff artifact refs and a receipt, never silently mutating your active checkout
+- 🗣️ **Roundtable** — multi-participant sessions under a governance mode; interject into the current roundtable at any time
+
+### 🔐 Own your model stack & credentials
+
+- 🔐 **One secure credential vault** — macOS Keychain, Windows Credential Manager, or Linux Secret Service protects a random 32-byte master key; Provider secrets are encrypted locally with AES-256-GCM
+- 🧑‍🏫 **Main + fallback vision** — Choose any main model for reasoning and optionally pair it with a vision-capable fallback; image recognition stays a supporting role and the main model continues the task
+
+### 🛡️ Control the machine (safely)
 
 - 📁 Files · 💻 Shell · 🔍 Search · 🧰 Local tooling — always via Runtime Projection + PermissionGrant + Evidence
 
@@ -205,35 +225,64 @@ Workspace packages live under `apps/` (product shells) and `packages/` (runtime,
 
 ## 🏗️ Architecture at a Glance
 
+The architecture starts from a single point: the **agent runtime**. Everything else is a layer peeled off it.
+
+### Layer 1: The runtime core — capability, authorization, evidence
+
+The bottom layer answers one question: *when the model wants a local capability, on what authority does it run, and how is it proven?*
+
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│  Desktop / TUI / CLI  (expression + interaction only)         │
-└────────────────────────────┬────────────────────────────────┘
-                             │ protocol / IPC
-┌────────────────────────────▼────────────────────────────────┐
-│  Local runtime                                              │
-│  · Capability discovery & Runtime Projection                │
-│  · PermissionGrant enforcement                              │
-│  · Tool execution + Evidence                                │
-│  · Agent / Plan / Goal runner (task flow)                   │
-│  · MCP · Plugins · Skills · Automation                      │
-│  · Shared Provider catalog + encrypted credential vault     │
-└────────────────────────────┬────────────────────────────────┘
-                             │ provider routing / model API
-┌────────────────────────────▼────────────────────────────────┐
-│  Cognition (your model stack)                               │
-│  Official · OAuth/subscription · Coding Plan · custom API   │
-│  Main model · optional fallback vision model                │
-└─────────────────────────────────────────────────────────────┘
+Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence
+```
+
+`@peer-agent/runtime-core` is the pure implementation of this core: capability registry, manifests, projection, authorization, and Evidence primitives, plus context compaction and accounting. It knows nothing of Electron, terminals, or any product shape — only contracts. `@peer-agent/protocol` defines the contracts themselves (chat, execution, goal, system-context, automation, compaction — 13 domains) as cross-layer types, so every layer speaks the same language.
+
+**No side doors.** Bash, files, search, MCP, plugins, skills — every capability flows through the same chain. That is the non-negotiable part of this architecture.
+
+### Layer 2: System Context — what the model sees
+
+The runtime executes capabilities, but the model first needs *context*. `@peer-agent/system-context` is the canonical assembler for System Context: prompt-source registration, layering, checksums, and snapshots. Project instructions, mode reminders, tool prompts, and compact summaries enter through explicit Context Sources — not scattered string concatenation. Tool output and file content are factual context and are never promoted into system instructions.
+
+### Layer 3: The task-flow kernel — how work moves
+
+Above capability and context sits the machinery of tasks: `@peer-agent/chat-kernel` (reducer-driven conversation state machine) and `@peer-agent/task-thread` (task-thread event model) carry handoff, continuity, and follow-up; the goal contract defines GoalPlans, subtasks, and success criteria; `@peer-agent/conversation-store` persists it all so tasks survive across sessions.
+
+### Layer 4: The Node host — landing on a real machine
+
+`@peer-agent/runtime-node` lands the core in a Node environment: MCP server integration, the Automation scheduler, the chat runtime, and encrypted credentials (with `@peer-agent/credential-helper` and the system Secret Service). `@peer-agent/runtime-sdk` opens the same orchestration to any Node host for embedding.
+
+### The surface layer: expression and interaction
+
+Desktop (`apps/desktop`), TUI, and CLI (`apps/tui` + `@peer-agent/cli`) do expression and interaction only — they hold no execution truth. Host-neutrality is not a slogan, it is a dependency fact: the TUI depends on no UI packages, only on `protocol + runtime-core + runtime-node + runtime-sdk + system-context`; Desktop additionally uses `chat-kernel / task-thread / ui / i18n`. One machine, one `~/.peer-agent` — different surfaces, one truth.
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│  Desktop / TUI / CLI        (expression + interaction)  │
+└───────────────────────────┬──────────────────────────────┘
+                            │ protocol / IPC
+┌───────────────────────────▼──────────────────────────────┐
+│  Agent Runtime                                            │
+│  ① runtime-core + protocol   capability chain · auth · Evidence │
+│  ② system-context            Context Sources · assembly  │
+│  ③ chat-kernel + task-thread task flow · goal · persistence │
+│  ④ runtime-node              MCP · Automation · credentials │
+│  ⑤ runtime-sdk               host embedding              │
+└───────────────────────────┬──────────────────────────────┘
+                            │ provider routing / model API
+┌───────────────────────────▼──────────────────────────────┐
+│  Cognition (your model stack)  Official · OAuth/subscription · Coding Plan · custom │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### Repository layout
 
 ```text
 peer_agent/
-├── apps/            # Desktop, CLI/TUI product shells
-├── packages/        # Shared runtime, protocol, UI, providers, CLI publish package
-├── capabilities/    # Capability packs / manifests
+├── apps/            # Desktop, TUI/CLI product shells
+├── packages/        # protocol · runtime-core/node/sdk · system-context
+│                    # chat-kernel · task-thread · conversation-store
+│                    # credential-helper · i18n · ui · npm-cli
+├── capabilities/    # Capability manifests (local.shell.* / local.web.* / …)
 ├── crates/          # Rust native components
 ├── marketplace/     # Plugin / skill marketplace assets
 ├── skills/          # Bundled skills
@@ -279,6 +328,7 @@ Philosophy stays fixed while the surface grows: **cognition is pluggable; author
 | Main model + fallback vision routing | ✅ Available |
 | MCP · Plugins · Skills | ✅ Available |
 | Automation (scheduled agents) | ✅ Available |
+| Task dispatch & acceptance (cloud scheduling + user acceptance) | ✅ Available |
 
 ### In progress
 
