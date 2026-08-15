@@ -1281,6 +1281,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly appshotOpenScreenSettings: () => Promise<{ ok: boolean; url?: string; error?: string }>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
+  /** 打开应用关于页的白名单外链（源仓库 / 反馈 / 发布说明）。Renderer 只传 kind。 */
+  readonly openProductLink: (kind: 'github' | 'feedback' | 'releaseNotes') => Promise<{
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly reason?: string;
+  }>;
   // ── Updater ──（主进程负责能力，渲染层只表达）
   readonly updaterGetStatus: () => Promise<UpdaterStatus>;
   readonly updaterCheck: () => Promise<UpdaterStatus>;

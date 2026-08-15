@@ -246,6 +246,30 @@
   font-size: 0.78rem;
 }
 
+.settings-help-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.settings-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--za-line-strong);
+  border-radius: var(--ui-radius-row);
+  background: transparent;
+  color: var(--pa-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--za-motion-fast);
+}
+
+.settings-help-link:hover {
+  background: var(--pa-surface-hover);
+}
+
 /* ── 已归档会话 · 设置内管理分区 ── */
 .archived-conversations-panel {
   display: flex;

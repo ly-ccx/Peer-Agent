@@ -1,15 +1,27 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdateChannelPreference } from '@peer-agent/protocol';
+import { clientApi } from '../../clientApi';
 import { useUpdater } from '../state/useUpdater';
 import { Dropdown } from './Dropdown';
 
+function ExternalLinkIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+    </svg>
+  );
+}
+
 /**
- * UpdatesPanel —— 设置中的独立「更新」分区（表达层）。
+ * UpdatesPanel —— 设置中的独立「更新与关于」分区（表达层）。
  *
  * 提供：
  *   - 当前版本号展示
  *   - 更新通道选择（auto / beta / stable），写回 settings 并触发主进程切换
  *   - 「检查更新」入口
+ *   - 源仓库 / 反馈 / 发布说明外链（kind 交给主进程白名单打开）
  *
  * 能力真相在主进程，通过 useUpdater 共享同一份状态（与侧边栏徽标一致）。
  */
@@ -109,6 +121,39 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
         {!status?.enabled ? (
           <p className="general-setting-error">{i18n.t('updater.settings.disabledHint')}</p>
         ) : null}
+      </section>
+
+      <section className="llm-instructions-card general-card">
+        <div className="general-setting-copy">
+          <h3>{i18n.t('updater.settings.help.title')}</h3>
+          <p>{i18n.t('updater.settings.help.description')}</p>
+        </div>
+        <div className="settings-help-links">
+          <button
+            type="button"
+            className="settings-help-link"
+            onClick={() => { void clientApi.openProductLink('github'); }}
+          >
+            <ExternalLinkIcon />
+            {i18n.t('updater.settings.help.github')}
+          </button>
+          <button
+            type="button"
+            className="settings-help-link"
+            onClick={() => { void clientApi.openProductLink('feedback'); }}
+          >
+            <ExternalLinkIcon />
+            {i18n.t('updater.settings.help.feedback')}
+          </button>
+          <button
+            type="button"
+            className="settings-help-link"
+            onClick={() => { void clientApi.openProductLink('releaseNotes'); }}
+          >
+            <ExternalLinkIcon />
+            {i18n.t('updater.settings.help.releaseNotes')}
+          </button>
+        </div>
       </section>
     </div>
   );

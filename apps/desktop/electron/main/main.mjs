@@ -153,6 +153,7 @@ import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
 import { createConversationSessionIpcRegistrations } from './ipc/register-conversation-session-ipc.mjs';
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
+import { createProductLinkService } from './product-links.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
 import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
 import { createTaskOverviewIpcRegistrations } from './ipc/register-task-overview-ipc.mjs';
@@ -1971,10 +1972,16 @@ const goalApplicationService = createGoalApplicationService({
 });
 
 function registerDesktopIpcHost() {
+  const productLinkService = createProductLinkService({
+    openExternal: (url) => shell.openExternal(url),
+  });
   return registerIpcOwners({
   ipc: ipcMain,
   registrations: [
     ...createDesktopIpcRegistrations({
+    about: {
+      openLink: (kind) => productLinkService.open(kind),
+    },
     appshot: {
       capture: () => handleAppshotHotkey('settings-test'),
       getPermissionStatus: () => buildAppshotPermissionPreflight({

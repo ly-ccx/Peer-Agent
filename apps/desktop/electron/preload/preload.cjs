@@ -427,6 +427,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   mcpReadResource: (params) => ipcRenderer.invoke('mcp:read-resource', params),
   mcpGetPrompt: (params) => ipcRenderer.invoke('mcp:get-prompt', params),
   mcpConnectAndRegister: (params) => ipcRenderer.invoke('mcp:connect-and-register', params),
+  openProductLink: (kind) => ipcRenderer.invoke('about:open-link', { kind }),
   // ── Updater ──
   updaterGetStatus: () => ipcRenderer.invoke('updater:get-status'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),

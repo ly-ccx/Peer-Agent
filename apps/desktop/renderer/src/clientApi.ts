@@ -236,6 +236,7 @@ const unavailableApi: ClientApi = {
   appshotOpenScreenSettings: unavailableMethod('appshotOpenScreenSettings'),
   exportConfig: unavailableMethod('exportConfig'),
   importConfig: unavailableMethod('importConfig'),
+  openProductLink: unavailableMethod('openProductLink'),
   updaterGetStatus: unavailableMethod('updaterGetStatus'),
   updaterCheck: unavailableMethod('updaterCheck'),
   updaterDownload: unavailableMethod('updaterDownload'),
