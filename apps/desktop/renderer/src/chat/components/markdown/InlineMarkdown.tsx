@@ -6,7 +6,7 @@ import {
   isLocalImagePath,
   loadLocalImageDataUrl,
 } from '../../state/localImagePreview';
-import { findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
+import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -100,7 +100,7 @@ function resolveAbsolutePath(
   return `${root}/${rel}`;
 }
 
-function FilePathCode({ raw, children }: { raw: string; children?: ReactNode }) {
+function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; children?: ReactNode }) {
   const workspacePath = useContext(WorkspacePathContext);
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
@@ -195,7 +195,7 @@ function FilePathCode({ raw, children }: { raw: string; children?: ReactNode }) 
           title={title}
           onClick={() => setPreviewOpen(true)}
         >
-          <img src={previewDataUrl} alt={raw} loading="lazy" />
+          <img src={previewDataUrl} alt={alt || raw} loading="lazy" />
         </button>
         <code
           className="markdown-file-path"
@@ -315,8 +315,10 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
 
   while (cursor < text.length) {
     const fontToken = findFontToken(text, cursor);
+    const imageToken = findMarkdownImage(text, cursor);
     const linkToken = findMarkdownLink(text, cursor);
     const candidates = [
+      ...(imageToken ? [{ type: 'image' as const, ...imageToken }] : []),
       ...(linkToken ? [{ type: 'link' as const, ...linkToken }] : []),
       { type: 'code' as const, start: text.indexOf('`', cursor), marker: '`' },
       { type: 'strong' as const, start: text.indexOf('**', cursor), marker: '**' },
@@ -332,6 +334,29 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
 
     if (next.start > cursor) {
       tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor, next.start), keyPrefix, tokenIndex);
+    }
+    if (next.type === 'image') {
+      const key = `${keyPrefix}-inline-${tokenIndex}`;
+      const alt = next.alt.trim() || next.destination;
+      const externalHref = safeExternalHref(next.destination);
+      if (externalHref) {
+        nodes.push(
+          <span key={key} className="markdown-local-image">
+            <img src={externalHref} alt={alt} />
+          </span>,
+        );
+      } else if (parseFilePathToken(next.destination) || isLocalImagePath(next.destination)) {
+        nodes.push(
+          <FilePathCode key={key} raw={next.destination} alt={alt}>
+            {alt}
+          </FilePathCode>,
+        );
+      } else {
+        nodes.push(<span key={key}>{alt}</span>);
+      }
+      tokenIndex += 1;
+      cursor = next.end;
+      continue;
     }
     if (next.type === 'link') {
       const key = `${keyPrefix}-inline-${tokenIndex}`;

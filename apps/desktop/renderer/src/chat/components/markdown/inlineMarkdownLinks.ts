@@ -5,6 +5,13 @@ export type MarkdownLinkToken = {
   destination: string;
 };
 
+export type MarkdownImageToken = {
+  start: number;
+  end: number;
+  alt: string;
+  destination: string;
+};
+
 function findClosingBracket(text: string, openingIndex: number): number {
   let depth = 0;
   let codeFenceLength = 0;
@@ -113,6 +120,47 @@ export function findMarkdownLink(text: string, from = 0): MarkdownLinkToken | nu
       label: text.slice(openingIndex + 1, closingIndex),
       destination: parsedDestination.destination.replace(/\\([\\`()\[\]])/g, '$1'),
     };
+  }
+
+  return null;
+}
+
+export function findMarkdownImage(text: string, fromIndex = 0): MarkdownImageToken | null {
+  let bangIndex = text.indexOf('![', fromIndex);
+
+  while (bangIndex >= 0) {
+    if (bangIndex > 0 && text[bangIndex - 1] === '\\') {
+      bangIndex = text.indexOf('![', bangIndex + 2);
+      continue;
+    }
+
+    const openingIndex = bangIndex + 1;
+    const closingIndex = findClosingBracket(text, openingIndex);
+    if (closingIndex < 0) {
+      bangIndex = text.indexOf('![', bangIndex + 2);
+      continue;
+    }
+
+    let destinationOpening = closingIndex + 1;
+    while (destinationOpening < text.length && /[ \t]/.test(text[destinationOpening])) {
+      destinationOpening += 1;
+    }
+    if (text[destinationOpening] !== '(') {
+      bangIndex = text.indexOf('![', bangIndex + 2);
+      continue;
+    }
+
+    const parsedDestination = readDestination(text, destinationOpening);
+    if (parsedDestination && parsedDestination.destination) {
+      return {
+        start: bangIndex,
+        end: parsedDestination.end,
+        alt: text.slice(openingIndex + 1, closingIndex),
+        destination: parsedDestination.destination.replace(/\\([\\`()\[\]])/g, '$1'),
+      };
+    }
+
+    bangIndex = text.indexOf('![', bangIndex + 2);
   }
 
   return null;
