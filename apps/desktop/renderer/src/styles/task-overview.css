@@ -524,6 +524,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
     gap: 0.75rem;
+    align-items: start;
   }
 
   .task-overview-work-stream:has(> :only-child) {
@@ -531,6 +532,17 @@
   }
 
   .task-overview-work-stream > * {
+    min-width: 0;
+  }
+
+  .task-overview-work-stream.is-waterfall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-overview-work-stream__column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     min-width: 0;
   }
 
@@ -720,20 +732,8 @@
   }
 
   .result-card-stack {
-    /* 兼容旧类名：等同 work-stream 稳定双列 */
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 768px) {
-    .result-card-stack {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  .result-card-stack > * {
-    min-width: 0;
+    /* 旧类名保留：列数交给 WorkStream，不再按 viewport 硬切双列。 */
+    display: contents;
   }
 
   .result-card-state {
@@ -1802,10 +1802,7 @@
  * 不单靠颜色区分（CONTRACT.md 红线 6）。
  * ------------------------------------------------------------------------- */
 .goal-thread-stream {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
-  gap: 0.75rem;
-  align-items: start;
+  /* Marker only. Column packing lives on `.task-overview-work-stream`. */
 }
 
 .goal-thread-card {

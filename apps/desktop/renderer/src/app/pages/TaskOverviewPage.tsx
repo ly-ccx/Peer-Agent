@@ -9,6 +9,8 @@ import {
 } from '../state/acceptanceTransition';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import { WorkStream } from './WorkStream';
+import { resultCardWeight } from './workStreamLayout';
 
 /**
  * TaskOverview 页面 —— 对齐 peer-2-0 高保真原型工作台结构。
@@ -628,8 +630,8 @@ function HeroLayout({
             </div>
             <span className="task-overview-section-hint">中断原因与恢复入口已保留</span>
           </div>
-          <div className="task-overview-work-stream">
-            {paused.map((item) => (
+          <WorkStream items={paused}>
+            {(item) => (
               <WorkItem
                 key={item.taskId}
                 item={item}
@@ -649,8 +651,8 @@ function HeroLayout({
                   ) : undefined
                 }
               />
-            ))}
-          </div>
+            )}
+          </WorkStream>
         </section>
       ) : null}
 
@@ -667,16 +669,16 @@ function HeroLayout({
               <span className="task-overview-section-meta">Peer 会在完成后带回结果</span>
             )}
           </div>
-          <div className="task-overview-work-stream">
-            {advancing.map((item) => (
+          <WorkStream items={advancing}>
+            {(item) => (
               <WorkItem
                 key={item.taskId}
                 item={item}
                 onOpenItem={onOpenItem}
                 onCancelItem={onCancelItem}
               />
-            ))}
-          </div>
+            )}
+          </WorkStream>
         </section>
       ) : null}
 
@@ -724,8 +726,12 @@ function HeroLayout({
             )}
           </div>
           {/* 一格一线：同 rootPlanId 只占一张结果卡，卡内用压缩树表达父子。 */}
-          <div className="task-overview-work-stream goal-thread-stream">
-            {groupResultCardsByGoalThread(displayedResults, allItems ?? items).map((group) =>
+          <WorkStream
+            className="goal-thread-stream"
+            items={groupResultCardsByGoalThread(displayedResults, allItems ?? items)}
+            weightOf={(group) => resultCardWeight(group.kind === 'thread' ? group.nodes.length : 0)}
+          >
+            {(group) =>
               group.kind === 'thread' ? (
                 <ResultCard
                   key={`thread-${group.rootPlanId}`}
@@ -742,9 +748,9 @@ function HeroLayout({
                   phase={group.phase ?? null}
                   onOpenItem={onOpenItem}
                 />
-              ),
-            )}
-          </div>
+              )
+            }
+          </WorkStream>
         </section>
       ) : null}
     </div>
