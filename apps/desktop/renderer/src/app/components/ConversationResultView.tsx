@@ -2,16 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import type { GoalPlan, TaskOverviewItem } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { ChatTurn } from '../../chat/components/thread/ChatTurn';
+import { ImagePreviewOverlay } from '../../chat/components/thread/AttachmentStrip';
 import { groupMessagesIntoTurns } from '../../chat/state/chatTurns';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
-import type { ChatMsg } from '../../chat/state/types';
+import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 
 /**
  * 工作台「查看结果」用的只读会话/执行内容展示。
  *
  * - 消息：复用主聊天 ChatTurn / AssistantContent，不再压成另一套 Markdown
  * - 相关消息：用 is-task-target 高亮，打开时不自动滚动定位（避免侧栏整体上滚）
- * - 操作区（还不行 / 确认验收）已移至 Drawer footer，本组件只渲染结果内容
+ * - 操作区（确认验收）已移至 Drawer footer，本组件只渲染结果内容
  */
 export function ConversationResultView({
   item,
@@ -24,6 +25,7 @@ export function ConversationResultView({
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly ChatMsg[]>([]);
   const [plan, setPlan] = useState<GoalPlan | null>(null);
+  const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,6 +33,7 @@ export function ConversationResultView({
     setError(null);
     setMessages([]);
     setPlan(null);
+    setImagePreview(null);
 
     void (async () => {
       try {
@@ -161,11 +164,15 @@ export function ConversationResultView({
                 turnIndex={turnIndex}
                 readOnly
                 highlightedMessageId={targetMessageId}
+                onPreviewImage={setImagePreview}
               />
             ))}
           </div>
         )}
       </section>
+      {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
+        <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
+      ) : null}
     </div>
   );
 }
