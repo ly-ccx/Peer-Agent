@@ -114,5 +114,6 @@ export function buildSessionReferenceAttachment(params: {
     size: bytes,
     kind: 'text',
     text,
+    sourceKind: 'session_reference',
   };
 }

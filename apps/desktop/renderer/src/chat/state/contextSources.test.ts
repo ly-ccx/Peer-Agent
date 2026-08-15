@@ -34,6 +34,24 @@ describe('buildAttachmentContext', () => {
     assert.equal(text.lifecycle, 'ephemeral');
     assert.equal(text.scope, 'conversation');
   });
+
+  it('preserves session_reference and workspace_file sourceKind', () => {
+    const [session, file] = buildAttachmentContext([
+      att({ id: 's', sourceKind: 'session_reference' }),
+      att({
+        id: 'f',
+        kind: 'unsupported',
+        sourceKind: 'workspace_file',
+        workspaceRelPath: 'apps/desktop/renderer/src/chat/state/types.ts',
+      }),
+    ]);
+    assert.equal(session.sourceKind, 'session_reference');
+    assert.equal(session.scope, 'session');
+    assert.equal(file.sourceKind, 'workspace_file');
+    assert.equal(file.contentRef, 'apps/desktop/renderer/src/chat/state/types.ts');
+    assert.equal(file.transport, 'metadata_only');
+    assert.equal(file.contentIncluded, false);
+  });
 });
 
 describe('buildConversationAttachmentContext', () => {

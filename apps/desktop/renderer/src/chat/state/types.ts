@@ -10,12 +10,30 @@
 // ConfigInstructionContextItem）仍来自 @peer-agent/protocol，不在此重复定义。
 
 /** 单条消息携带的附件（图片 / 文本 / 不支持）。 */
+export type ChatAttachmentSourceKind =
+  | 'user_upload'
+  | 'session_reference'
+  | 'workspace_file'
+  | 'workspace_dir'
+  | 'git_diff'
+  | 'clipboard';
+
 export interface ChatAttachment {
   id: string;
   name: string;
   mimeType: string;
   size: number;
   kind: 'image' | 'text' | 'unsupported';
+  /**
+   * 附件来源。上传/拖拽默认 user_upload；@ 会话引用是 session_reference；
+   * @ 工作区文件是 workspace_file。装配进 System Context 时原样透传，
+   * 不得一律写成 user_upload。
+   */
+  sourceKind?: ChatAttachmentSourceKind;
+  /**
+   * 工作区相对路径（@ 文件引用）。只钉路径、默认不内联全文时用它让模型自己读。
+   */
+  workspaceRelPath?: string;
   dataUrl?: string;
   text?: string;
   /**

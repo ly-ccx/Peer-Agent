@@ -52,6 +52,12 @@ export function buildAttachmentText(attachments: readonly ChatAttachment[]): str
         attachment.text || '',
         '```',
       ].join('\n'));
+    } else if (attachment.sourceKind === 'workspace_file' && attachment.workspaceRelPath) {
+      blocks.push([
+        `Workspace file mention: @${attachment.workspaceRelPath}`,
+        `Name: ${attachment.name}`,
+        'Content is not inlined. Read this workspace-relative path with local tools when needed.',
+      ].join('\n'));
     } else if (attachment.kind === 'unsupported') {
       blocks.push([
         `Attached file: ${attachment.name}`,

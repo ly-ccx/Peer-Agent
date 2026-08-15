@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
   mkdir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:mkdir', { absPath, workspaceRoot, relPath }),
   readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
+  searchWorkspaceFiles: (workspacePath, query, limit) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit }),
   /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
   watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
   /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */
@@ -184,6 +185,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('quick-chat:popover-closed', handler);
   },
   workspaceEnsureDefault: () => ipcRenderer.invoke('workspace:ensure-default'),
+  workspacePreviewDefault: () => ipcRenderer.invoke('workspace:preview-default'),
   workspaceAdd: () => ipcRenderer.invoke('workspace:add'),
   workspaceSetActive: (params) => ipcRenderer.invoke('workspace:set-active', params),
   workspaceRemove: (params) => ipcRenderer.invoke('workspace:remove', params),

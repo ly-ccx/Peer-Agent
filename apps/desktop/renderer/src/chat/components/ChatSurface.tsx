@@ -110,6 +110,10 @@ import {
   buildSessionReferenceAttachment,
   type SessionReferenceHit,
 } from '../state/sessionReference';
+import {
+  buildWorkspaceFileAttachment,
+  type WorkspaceFileHit,
+} from '../state/contextMention';
 import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
@@ -1673,6 +1677,14 @@ export function ChatSurface({
     setAttachmentError(null);
   }, []);
 
+  const attachWorkspaceFile = useCallback((hit: WorkspaceFileHit) => {
+    const attachment = buildWorkspaceFileAttachment(hit);
+    setAttachments((prev) => {
+      const filtered = prev.filter((item) => item.workspaceRelPath !== attachment.workspaceRelPath);
+      return [...filtered, attachment];
+    });
+  }, []);
+
   const attachSessionReference = useCallback(async (hit: SessionReferenceHit) => {
     try {
       const loaded = await loadConversationMessages(hit.id);
@@ -2666,6 +2678,8 @@ export function ChatSurface({
           onPaste={handlePaste}
           onAddFiles={addFiles}
           onAttachSessionReference={attachSessionReference}
+          onAttachWorkspaceFile={attachWorkspaceFile}
+          workspacePath={workspacePath}
           onPrimaryAction={stableHandlePrimaryAction}
           editingMessage={editingMessage}
           onCancelEdit={stableCancelComposerEdit}

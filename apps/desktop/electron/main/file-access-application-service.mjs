@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { searchWorkspaceFiles } from './workspace-file-search.mjs';
 
 const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
 /** Chat image preview: same ceiling as renderer attachment intake (8 MiB). */
@@ -642,6 +643,9 @@ export function createFileAccessApplicationService(options = {}) {
     readImageDataUrl,
     writeFile,
     mkdir,
+    searchWorkspaceFiles: ({ workspacePath, query, limit } = {}) => (
+      searchWorkspaceFiles(workspacePath, { query, limit })
+    ),
     dispose,
   });
 }

@@ -43,6 +43,17 @@ describe('buildAttachmentText', () => {
     const out = buildAttachmentText([textAtt({ kind: 'unsupported', name: 'x.bin', text: undefined })]);
     assert.match(out, /not inlined/);
   });
+  it('pins workspace file mentions as a path, not inlined content', () => {
+    const out = buildAttachmentText([textAtt({
+      kind: 'unsupported',
+      name: 'types.ts',
+      sourceKind: 'workspace_file',
+      workspaceRelPath: 'apps/desktop/renderer/src/chat/state/types.ts',
+      text: undefined,
+    })]);
+    assert.match(out, /Workspace file mention: @apps\/desktop\/renderer\/src\/chat\/state\/types\.ts/);
+    assert.doesNotMatch(out, /```/);
+  });
   it('ignores image attachments (handled as parts)', () => {
     assert.equal(buildAttachmentText([imgAtt()]), '');
   });

@@ -546,6 +546,25 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * Composer @ 菜单用的工作区文件搜索：只扫当前 workspace，尊重忽略目录，
+   * 返回相对路径，不读文件内容。
+   */
+  readonly searchWorkspaceFiles?: (
+    workspacePath: string,
+    query?: string,
+    limit?: number,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
+    readonly files: readonly {
+      readonly relPath: string;
+      readonly name: string;
+      readonly kind: 'file' | 'directory';
+    }[];
+    readonly workspacePath?: string;
+    readonly error?: string;
+  }>;
+  /**
    * 同步文件树轻量监听目录集合（根 + 已展开）。传空数组清空。
    * main 侧按 webContents 维护 fs.watch，不递归整仓。
    */
@@ -851,6 +870,7 @@ export interface BootstrapPreloadApi {
   readonly onQuickChatPopoverSelected: (listener: (payload: { kind: QuickChatPopoverKind; value: string }) => void) => () => void;
   readonly onQuickChatPopoverClosed: (listener: () => void) => () => void;
   readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
+  readonly workspacePreviewDefault: () => Promise<{ path: string; name: string; exists: boolean }>;
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;

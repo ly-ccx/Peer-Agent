@@ -1,3 +1,5 @@
+import { searchWorkspaceFiles } from '../workspace-file-search.mjs';
+
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
   return value;
@@ -13,6 +15,10 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
     ensureDefault: assertFunction(
       workspace?.ensureDefaultWorkspace,
       'workspace.ensureDefaultWorkspace',
+    ),
+    previewDefault: assertFunction(
+      workspace?.previewDefaultWorkspace,
+      'workspace.previewDefaultWorkspace',
     ),
     add: assertFunction(workspace?.addWorkspace, 'workspace.addWorkspace'),
     setActive: assertFunction(
@@ -31,6 +37,7 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
     owner('workspace-ipc', (ipc) => {
       ipc.handle('workspace:list', () => ports.list());
       ipc.handle('workspace:ensure-default', () => ports.ensureDefault());
+      ipc.handle('workspace:preview-default', () => ports.previewDefault());
       ipc.handle('workspace:add', (event) => ports.add(event.sender));
       ipc.handle('workspace:set-active', (_event, { path } = {}) => ports.setActive(path));
       ipc.handle('workspace:remove', (_event, { path } = {}) => ports.remove(path));
@@ -39,6 +46,10 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
       ipc.handle('workspace:remove-linked-folder', (_event, payload = {}) => ports.removeLinkedFolder(payload));
       ipc.handle('workspace:set-primary', (_event, payload = {}) => ports.setPrimary(payload));
       ipc.handle('workspace:info', (_event, { path } = {}) => ports.getInfo(path));
+      ipc.handle('workspace:search-files', (_event, payload = {}) => searchWorkspaceFiles(
+        payload.workspacePath,
+        { query: payload.query, limit: payload.limit },
+      ));
     }),
   ]);
 }
