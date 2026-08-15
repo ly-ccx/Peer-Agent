@@ -115,8 +115,12 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     conversationId,
     browserSession,
     setBrowserSession,
+    setBrowserSessionFor,
+    resolveBrowserSession,
     documentSession,
     setDocumentSession,
+    layoutHost,
+    preparedBrowserConversations,
   } = useWorkbench();
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -287,8 +291,29 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             conversationId={conversationId}
             session={browserSession}
             onSessionChange={setBrowserSession}
+            claimForeground
           />
         </div>
+        {layoutHost === 'root'
+          ? preparedBrowserConversations
+            .filter((id) => id && id !== conversationId)
+            .map((id) => (
+              <div
+                key={`prepared-browser-${id}`}
+                className="workbench-view workbench-view--browser workbench-view--prepared-browser"
+                data-active="false"
+                aria-hidden="true"
+              >
+                <BrowserView
+                  isZh={isZh}
+                  conversationId={id}
+                  session={resolveBrowserSession(id)}
+                  onSessionChange={(next) => setBrowserSessionFor(id, next)}
+                  claimForeground={false}
+                />
+              </div>
+            ))
+          : null}
         <div
           className="workbench-view workbench-view--files"
           data-active={activeTab === 'files'}

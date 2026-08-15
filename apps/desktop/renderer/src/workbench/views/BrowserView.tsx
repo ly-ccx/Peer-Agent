@@ -65,6 +65,8 @@ interface BrowserViewProps {
   readonly onSessionChange: (
     next: BrowserSessionState | ((current: BrowserSessionState) => BrowserSessionState),
   ) => void;
+  /** 只有前台可见会话才能改窗口菜单绑定的 Browser 目标。 */
+  readonly claimForeground?: boolean;
 }
 
 interface BrowserFailure {
@@ -87,6 +89,7 @@ interface BrowserPageProps {
   readonly tab: BrowserTabSession;
   readonly active: boolean;
   readonly conversationId: string | null;
+  readonly claimForeground?: boolean;
   readonly onHandleChange: (tabId: string, handle: WebviewElement | null) => void;
   readonly onMetadataChange: (
     tabId: string,
@@ -212,6 +215,7 @@ function BrowserPage({
   tab,
   active,
   conversationId,
+  claimForeground = true,
   onHandleChange,
   onMetadataChange,
   onRuntimeChange,
@@ -237,13 +241,14 @@ function BrowserPage({
         conversationId,
         browserTabId: tab.id,
         active: isActive,
+        claimForeground,
         url: wv.getURL(),
         title: wv.getTitle(),
       }).catch(() => {});
     } catch {
       // 非 Electron 环境或 guest 尚未就绪，dom-ready 后会再次发布。
     }
-  }, [conversationId, onRuntimeChange, tab.id]);
+  }, [claimForeground, conversationId, onRuntimeChange, tab.id]);
 
   useEffect(() => {
     const wv = webviewRef.current;
@@ -354,6 +359,7 @@ export function BrowserView({
   conversationId,
   session,
   onSessionChange,
+  claimForeground = true,
 }: BrowserViewProps) {
   const handlesRef = useRef(new Map<string, WebviewElement>());
   const sessionTabsRef = useRef(session.tabs);
@@ -688,6 +694,7 @@ export function BrowserView({
             tab={tab}
             active={tab.id === session.activeTabId}
             conversationId={conversationId}
+            claimForeground={claimForeground}
             onHandleChange={handleHandleChange}
             onMetadataChange={handleMetadataChange}
             onRuntimeChange={handleRuntimeChange}

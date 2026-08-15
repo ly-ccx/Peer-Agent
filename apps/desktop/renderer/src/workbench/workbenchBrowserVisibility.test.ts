@@ -24,4 +24,13 @@ describe('workbench view visibility', () => {
       /\.workbench-view--browser\[data-active='false'\]\s*\{\s*display:\s*none;/,
     );
   });
+
+  it('keeps a prepared background Browser guest mounted off-screen instead of display:none', () => {
+    assert.match(panelSource, /workbench-view--prepared-browser/);
+    assert.match(panelSource, /claimForeground=\{false\}/);
+    assert.match(
+      workbenchStyles,
+      /\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,
+    );
+  });
 });

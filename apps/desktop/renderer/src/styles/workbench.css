@@ -151,6 +151,20 @@
     display: none;
   }
 
+  /* 后台 Task 拉起的会话浏览器必须保持 guest 可初始化，但不能抢前台画面。
+   * display:none 会阻止 Electron webview 进入就绪态，所以改成离屏挂载。 */
+  .workbench-view--prepared-browser[data-active='false'] {
+    display: flex;
+    visibility: hidden;
+    pointer-events: none;
+    position: fixed;
+    inset: auto auto 0 0;
+    width: 960px;
+    height: 720px;
+    transform: translate(-200vw, -200vh);
+    overflow: hidden;
+  }
+
   .workbench-view[data-active='true'] {
     visibility: visible;
     pointer-events: auto;

@@ -160,7 +160,7 @@ export function createLocalBrowserControlProvider({
     // reveal ack 后再解析/等待同会话 WebContents，保持可见语义与控制目标一致。
     await ensureBrowserReady?.({
       conversationId,
-      focus: true,
+      focus: false,
       timeoutMs: browserReadyTimeoutMs,
     });
     const immediate = resolveRegisteredTarget(conversationId);

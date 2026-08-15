@@ -43,6 +43,7 @@ function findEntryKeyByWebContentsId(webContentsId) {
  *   conversationId?: string | null,
  *   browserTabId: string,
  *   active?: boolean,
+ *   claimForeground?: boolean,
  *   url?: string,
  *   title?: string
  * }} entry
@@ -72,7 +73,9 @@ export function registerBrowserWebContents(entry = {}) {
 
   if (registered.active) {
     activeEntryKeyByConversation.set(convKey, key);
-    foregroundEntryKey = key;
+    if (entry.claimForeground !== false) {
+      foregroundEntryKey = key;
+    }
   } else if (activeEntryKeyByConversation.get(convKey) === key) {
     activeEntryKeyByConversation.delete(convKey);
     if (foregroundEntryKey === key) foregroundEntryKey = null;

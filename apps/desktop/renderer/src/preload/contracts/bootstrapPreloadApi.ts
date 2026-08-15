@@ -589,6 +589,7 @@ export interface BootstrapPreloadApi {
     readonly conversationId: string | null;
     readonly browserTabId: string;
     readonly active: boolean;
+    readonly claimForeground?: boolean;
     readonly url?: string;
     readonly title?: string;
   }) => Promise<{
