@@ -4,6 +4,13 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.5-beta.1 - 2026-08-15
+
+### Notes
+
+- Open the `0.0.5` development line from the published `0.0.4` / `origin/main`.
+- Stamp the in-repo development version to `0.0.5-beta.1`. The current stable release remains `0.0.4`.
+
 ## 0.0.4 - 2026-08-14
 
 ### Notes
