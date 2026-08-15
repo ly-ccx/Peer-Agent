@@ -23,6 +23,17 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.doesNotMatch(source, /Finding|第 N 轮|第\s*\d+\s*轮/);
 });
 
+test('result view reuses the live chat turn renderer instead of flattening markdown', async () => {
+  const source = await readView();
+  assert.match(source, /from '\.\.\/\.\.\/chat\/components\/thread\/ChatTurn'/);
+  assert.match(source, /<ChatTurn[\s\S]*?readOnly/);
+  assert.match(source, /highlightedMessageId=\{targetMessageId\}/);
+  assert.match(source, /AssistantContent/);
+  assert.doesNotMatch(source, /function messageMarkdown/);
+  assert.doesNotMatch(source, /from '\.\.\/\.\.\/chat\/components\/markdown\/MarkdownMessage'/);
+  assert.doesNotMatch(source, /conversation-result-view__msg/);
+});
+
 test('result drawer keeps 确认验收 and routes 还不行 back to the conversation', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
   assert.match(app, /closeResult: item\.actionRight === 'result_ready'/);

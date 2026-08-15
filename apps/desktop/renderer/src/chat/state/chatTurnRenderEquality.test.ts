@@ -28,6 +28,8 @@ function identity(turn: ChatTurnRenderIdentity['turn']): ChatTurnRenderIdentity 
     onPreviewImage: callback,
     turnIndex: 0,
     onMeasure: callback,
+    readOnly: false,
+    highlightedMessageId: null,
   };
 }
 
@@ -69,5 +71,20 @@ describe('chat turn render equality', () => {
     const next = { ...identity(turn), onMessageAction: () => undefined };
 
     assert.equal(areChatTurnRenderPropsEqual(previous, next), false);
+  });
+
+  it('rerenders when read-only viewing or the highlighted task message changes', () => {
+    const [turn] = groupMessagesIntoTurns([message('user', 'user')]);
+    assert.ok(turn);
+    const previous = identity(turn);
+
+    assert.equal(
+      areChatTurnRenderPropsEqual(previous, { ...previous, readOnly: true }),
+      false,
+    );
+    assert.equal(
+      areChatTurnRenderPropsEqual(previous, { ...previous, highlightedMessageId: 'user' }),
+      false,
+    );
   });
 });

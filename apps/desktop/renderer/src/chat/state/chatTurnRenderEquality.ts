@@ -14,6 +14,8 @@ export interface ChatTurnRenderIdentity {
   readonly onPreviewImage: unknown;
   readonly turnIndex: number;
   readonly onMeasure: unknown;
+  readonly readOnly?: boolean;
+  readonly highlightedMessageId?: string | null;
 }
 
 /**
@@ -38,6 +40,8 @@ export function areChatTurnRenderPropsEqual(
     || previous.onPreviewImage !== next.onPreviewImage
     || previous.turnIndex !== next.turnIndex
     || previous.onMeasure !== next.onMeasure
+    || previous.readOnly !== next.readOnly
+    || previous.highlightedMessageId !== next.highlightedMessageId
   ) {
     return false;
   }
