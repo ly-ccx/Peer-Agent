@@ -13,6 +13,8 @@
 
   .task-overview-scroll-region {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
+    /* 末卡离开外壳圆角裁切，避免底角被 page-layer / primary-page-shell 剃掉 */
+    padding-bottom: var(--radius-lg);
   }
 
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::before,
