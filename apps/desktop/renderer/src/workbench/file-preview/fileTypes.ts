@@ -6,11 +6,13 @@ export type WorkbenchFileKind =
   | 'code'
   | 'text'
   | 'image'
+  | 'html'
   | 'unknown';
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd']);
 const JSON_EXTENSIONS = new Set(['json', 'jsonc', 'jsonl']);
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
+const HTML_EXTENSIONS = new Set(['html', 'htm']);
 const TEXT_EXTENSIONS = new Set(['txt', 'log', 'csv', 'tsv', 'yml', 'yaml', 'toml', 'ini', 'env']);
 const CODE_EXTENSIONS = new Set([
   'c',
@@ -23,7 +25,6 @@ const CODE_EXTENSIONS = new Set([
   'graphql',
   'h',
   'hpp',
-  'html',
   'java',
   'js',
   'jsx',
@@ -63,13 +64,14 @@ export function detectFileKind(path: string): WorkbenchFileKind {
   if (MARKDOWN_EXTENSIONS.has(ext)) return 'markdown';
   if (JSON_EXTENSIONS.has(ext)) return 'json';
   if (IMAGE_EXTENSIONS.has(ext)) return 'image';
+  if (HTML_EXTENSIONS.has(ext)) return 'html';
   if (CODE_EXTENSIONS.has(ext)) return 'code';
   if (TEXT_EXTENSIONS.has(ext)) return 'text';
   return 'unknown';
 }
 
 export function defaultModeForKind(kind: WorkbenchFileKind): WorkbenchFileMode {
-  if (kind === 'markdown' || kind === 'json') return 'preview';
+  if (kind === 'markdown' || kind === 'json' || kind === 'image' || kind === 'html') return 'preview';
   return 'source';
 }
 
