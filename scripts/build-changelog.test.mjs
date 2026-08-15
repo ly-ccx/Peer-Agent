@@ -46,3 +46,9 @@ test('web changelog renders original section titles and nested subsections', asy
   assert.match(html, /h4\.textContent = subsection\.title/);
   assert.doesNotMatch(html, /h3\.textContent = \(LABELS\[state\.lang\]/);
 });
+
+test('changelog manifest carries a real generatedAt, never the epoch placeholder', async () => {
+  const manifest = await readJson('docs/changelog-data/manifest.json');
+  assert.notEqual(manifest.generatedAt, '1970-01-01T00:00:00.000Z');
+  assert.ok(!Number.isNaN(Date.parse(manifest.generatedAt)), `generatedAt is not a valid timestamp: ${manifest.generatedAt}`);
+});

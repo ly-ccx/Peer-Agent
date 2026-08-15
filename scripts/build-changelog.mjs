@@ -1,6 +1,10 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const root = path.resolve(import.meta.dirname, "..");
 const notesDir = path.join(root, "release-notes");
@@ -10,6 +14,7 @@ const dataDir = path.join(docsDir, "changelog-data");
 const manifestPath = path.join(dataDir, "manifest.json");
 const embeddedDataPattern = /\n\s*var ENTRIES = \[[\s\S]*?\];\n/;
 const localeMarker = /^(?:<!--\s*)?locale:(zh-CN|en-US)(?:\s*-->)?$/;
+const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
 
 const sectionKeys = {
   zh: [
@@ -127,12 +132,39 @@ function json(value) {
   return `${JSON.stringify(value)}\n`;
 }
 
-async function expectedOutputs(entries) {
+/**
+ * Deterministic, meaningful generation stamp: the committer date of the latest
+ * commit touching release-notes/. Falls back to the newest note file mtime
+ * (no git available), then to "now" (empty notes dir). Never the epoch placeholder.
+ */
+async function computeGeneratedAt() {
+  try {
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%cI", "--", "release-notes"], { cwd: root });
+    const stamp = stdout.trim();
+    if (stamp && !Number.isNaN(Date.parse(stamp))) return stamp;
+  } catch {
+    // no git — fall through to file-mtime fallback
+  }
+  try {
+    const files = (await readdir(notesDir)).filter((name) => /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.md$/.test(name));
+    let newest = 0;
+    for (const name of files) {
+      const { mtimeMs } = await stat(path.join(notesDir, name));
+      if (mtimeMs > newest) newest = mtimeMs;
+    }
+    if (newest > 0) return new Date(newest).toISOString();
+  } catch {
+    // fall through to "now"
+  }
+  return new Date().toISOString();
+}
+
+async function expectedOutputs(entries, generatedAt) {
   const versions = entries.map(({ sort: _sort, zh: _zh, en: _en, ...metadata }) => metadata);
   const stable = versions.filter((entry) => entry.channel === "stable");
   const beta = versions.filter((entry) => entry.channel === "beta");
   const manifest = {
-    generatedAt: new Date(0).toISOString(),
+    generatedAt,
     latest: { stable: stable[0]?.version ?? null, beta: beta[0]?.version ?? null },
     channels: { stable, beta },
   };
@@ -142,7 +174,30 @@ async function expectedOutputs(entries) {
 }
 
 async function checkOutputs(outputs) {
+  // Manifest gets a special-case check: generatedAt is environment-derived
+  // (git date / mtime), so it is validated by shape, not byte-compared.
+  let manifestActual;
+  try {
+    manifestActual = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch {
+    throw new Error(`${path.relative(root, manifestPath)} is missing or invalid; run pnpm build:changelog`);
+  }
+  if (manifestActual.generatedAt === EPOCH_ISO) {
+    throw new Error(`${path.relative(root, manifestPath)} generatedAt is the epoch placeholder (${EPOCH_ISO}); run pnpm build:changelog`);
+  }
+  if (!manifestActual.generatedAt || Number.isNaN(Date.parse(manifestActual.generatedAt))) {
+    throw new Error(`${path.relative(root, manifestPath)} generatedAt is not a valid ISO timestamp; run pnpm build:changelog`);
+  }
+  const expectedManifest = JSON.parse(outputs.get(manifestPath));
+  delete expectedManifest.generatedAt;
+  const actualComparable = { ...manifestActual };
+  delete actualComparable.generatedAt;
+  if (JSON.stringify(actualComparable) !== JSON.stringify(expectedManifest)) {
+    throw new Error(`${path.relative(root, manifestPath)} is stale; run pnpm build:changelog`);
+  }
+
   for (const [file, expected] of outputs) {
+    if (file === manifestPath) continue;
     let actual;
     try { actual = await readFile(file, "utf8"); } catch { throw new Error(`${path.relative(root, file)} is missing; run pnpm build:changelog`); }
     if (actual !== expected) throw new Error(`${path.relative(root, file)} is stale; run pnpm build:changelog`);
@@ -154,7 +209,8 @@ async function checkOutputs(outputs) {
 }
 
 const entries = await buildEntries();
-const outputs = await expectedOutputs(entries);
+const generatedAt = await computeGeneratedAt();
+const outputs = await expectedOutputs(entries, generatedAt);
 
 if (process.argv.includes("--check")) {
   await checkOutputs(outputs);
