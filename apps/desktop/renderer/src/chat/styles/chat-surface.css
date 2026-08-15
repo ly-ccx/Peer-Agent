@@ -1654,6 +1654,16 @@
 
 .session-mention-item {
   align-items: flex-start;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: auto;
+  overflow: visible;
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+.session-mention-item.session-mention-nav .session-mention-title {
+  font-weight: 600;
 }
 
 .session-mention-main {
