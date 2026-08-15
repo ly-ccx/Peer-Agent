@@ -1,5 +1,8 @@
+import { createI18n } from '@peer-agent/i18n';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { ChatHeaderCapabilities } from '../../chat/components/thread/ChatHeaderCapabilities';
+import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPreference';
 import { formatDuration } from '../../chat/state/format';
 import { PeerIcon } from '../../ui/icons';
 import {
@@ -51,6 +54,8 @@ interface TaskOverviewPageProps {
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan（仅 goal_plan）。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  /** 区级摘要跳到侧栏「插件」页。 */
+  readonly onOpenTools?: () => void;
 }
 
 function workspaceLabelFromPath(workspacePath: string | null | undefined): string {
@@ -318,6 +323,7 @@ export function TaskOverviewPage({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
 }: TaskOverviewPageProps) {
   const items = useTaskOverview({ enabled, workspacePath, includeTerminal });
   const filtered = items.filter(filter);
@@ -339,6 +345,7 @@ export function TaskOverviewPage({
         onAcceptResult={onAcceptResult}
         acceptHandlerRef={acceptHandlerRef}
         onCancelItem={onCancelItem}
+        onOpenTools={onOpenTools}
       />
     );
   }
@@ -359,11 +366,16 @@ function TopLine({
   pageTitle,
   crumbExtra,
   scopeLabel,
+  onOpenTools,
 }: {
   readonly pageTitle: string;
   readonly crumbExtra: string;
   readonly scopeLabel: string;
+  readonly onOpenTools?: () => void;
 }) {
+  const i18n = useMemo(() => createI18n(), []);
+  const { localAccessLevel } = useLocalAccessPreference();
+
   return (
     <div className="task-overview-topline">
       <div className="task-overview-crumb">
@@ -371,9 +383,18 @@ function TopLine({
         <span>/</span>
         <span>{crumbExtra}</span>
       </div>
-      <div className="task-overview-scope">
-        <i className="task-overview-scope-dot" aria-hidden="true" />
-        {scopeLabel}
+      <div className="task-overview-topline-end">
+        {onOpenTools ? (
+          <ChatHeaderCapabilities
+            i18n={i18n}
+            localAccessLevel={localAccessLevel}
+            onOpenTools={onOpenTools}
+          />
+        ) : null}
+        <div className="task-overview-scope">
+          <i className="task-overview-scope-dot" aria-hidden="true" />
+          {scopeLabel}
+        </div>
       </div>
     </div>
   );
@@ -398,6 +419,7 @@ function HeroLayout({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
 }: {
   readonly title: string;
   readonly subtitle?: string;
@@ -413,6 +435,7 @@ function HeroLayout({
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly onOpenTools?: () => void;
 }) {
   const discussions = items.filter((i) => i.source === 'conversation');
   const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
@@ -563,6 +586,7 @@ function HeroLayout({
         pageTitle="工作台"
         crumbExtra={formatTodayCrumb()}
         scopeLabel={scopeLabel}
+        onOpenTools={onOpenTools}
       />
 
       <header className="task-overview-hero">

@@ -115,6 +115,14 @@
     @apply mb-5 flex items-center justify-between gap-4;
   }
 
+  .task-overview-topline-end {
+    @apply flex items-center gap-2;
+  }
+
+  .task-overview-topline-end .chat-header-cap {
+    flex: none;
+  }
+
   .task-overview-crumb {
     @apply flex items-center gap-2 text-sm;
     color: var(--za-text-muted);

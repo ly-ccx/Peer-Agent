@@ -1130,6 +1130,10 @@ function MainApp() {
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}
                       onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
+                      onOpenTools={() => {
+                        setConversationDrawerOpen(false);
+                        setActivePage('tools');
+                      }}
                     />
                   )}
                   </div>

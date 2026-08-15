@@ -20,6 +20,7 @@ export function HomePage({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
   enabled = true,
 }: {
   /** null = 全部工作区；有 path = 仅该工作区。 */
@@ -34,6 +35,8 @@ export function HomePage({
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  /** 区级工作台右上角能力入口跳到插件页。 */
+  readonly onOpenTools?: () => void;
   readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
@@ -75,6 +78,7 @@ export function HomePage({
       onAcceptResult={onAcceptResult}
       acceptHandlerRef={acceptHandlerRef}
       onCancelItem={onCancelItem}
+      onOpenTools={onOpenTools}
     />
   );
 }
