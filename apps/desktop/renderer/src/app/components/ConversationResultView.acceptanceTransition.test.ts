@@ -74,7 +74,9 @@ test('result drawer closes first and leaves shatter to the workbench card', asyn
   assert.match(source, /setResultAcceptancePending\(item\)/);
   assert.match(source, /requestClose\(\)/);
   assert.match(source, /acceptHandlerRef=\{workbenchAcceptRef\}/);
+  assert.match(source, /resolveResultDrawerAcceptanceTargets\(pending, acceptTogether\)/);
   assert.match(source, /workbenchAcceptRef\.current\?\.\(pending\)/);
+  assert.match(source, /void acceptResultFromWorkbench\(target\)/);
 });
 
 test('result drawer no longer mounts a fullscreen shatter layer', async () => {

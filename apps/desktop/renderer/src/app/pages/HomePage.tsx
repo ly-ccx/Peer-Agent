@@ -1,6 +1,7 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
+import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
@@ -29,7 +30,7 @@ export function HomePage({
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页（与侧栏新建任务一致）。 */
   readonly onNewTask?: () => void;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（落库 resultAcceptance）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
@@ -42,7 +43,7 @@ export function HomePage({
   const workbench = useWorkbenchOptional();
   const isGlobal = !workspacePath;
 
-  const handleOpenItem = useCallback((item: TaskOverviewItem) => {
+  const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
     // 后台 shell 线程：打开右侧「后台线程」Tab，不跳会话。
     if (
       item.source === 'shell_background' ||
@@ -51,7 +52,7 @@ export function HomePage({
       workbench?.openBackgroundThread(item.taskId);
       return;
     }
-    onOpenItem?.(item);
+    onOpenItem?.(item, options);
   }, [onOpenItem, workbench]);
 
   return (

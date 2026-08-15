@@ -11,6 +11,10 @@ import {
   mergeAcceptanceTransitionItems,
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
+import {
+  collectPendingAcceptanceItems,
+  type OpenTaskOverviewItem,
+} from '../state/resultDrawerAcceptance';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 import { WorkStream } from './WorkStream';
@@ -47,8 +51,8 @@ interface TaskOverviewPageProps {
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页。 */
   readonly onNewTask?: () => void;
-  /** 打开对应会话（决策 / 查看结果）。 */
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  /** 打开对应会话（决策 / 查看结果）。归组卡可带上同线待签项。 */
+  readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（仅 goal_plan）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
@@ -431,7 +435,7 @@ function HeroLayout({
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
   readonly onNewTask?: () => void;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
@@ -765,6 +769,9 @@ function HeroLayout({
                   onOpenItem={onOpenItem}
                   threadNodes={group.nodes}
                   pendingCount={group.pendingCount}
+                  acceptTogether={collectPendingAcceptanceItems(
+                    group.items.map((entry) => entry.item),
+                  )}
                 />
               ) : (
                 <ResultCard
@@ -1221,12 +1228,14 @@ function ResultCard({
   onOpenItem,
   threadNodes,
   pendingCount,
+  acceptTogether,
 }: {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   readonly threadNodes?: readonly ThreadTreeNode[];
   readonly pendingCount?: number;
+  readonly acceptTogether?: readonly TaskOverviewItem[];
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const summary = item.planProgress
@@ -1283,7 +1292,7 @@ function ResultCard({
           <button
             type="button"
             className="task-overview-btn task-overview-btn--primary"
-            onClick={() => onOpenItem?.(item)}
+            onClick={() => onOpenItem?.(item, acceptTogether?.length ? { acceptTogether } : undefined)}
           >
             查看结果
           </button>

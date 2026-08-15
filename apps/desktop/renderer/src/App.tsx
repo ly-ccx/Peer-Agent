@@ -12,6 +12,10 @@ import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import {
+  resolveResultDrawerAcceptanceTargets,
+  type OpenResultOptions,
+} from './app/state/resultDrawerAcceptance';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -137,6 +141,7 @@ function MainApp() {
   /** 二级会话 Drawer 独立于一级结果 Drawer，避免“继续讨论”替换并卸载父级。 */
   const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
+  const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const resultBodyRef = useRef<HTMLDivElement | null>(null);
   const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
@@ -188,8 +193,9 @@ function MainApp() {
     setCollectionDrawer(kind);
   }, []);
 
-  const openResultDrawer = useCallback((item: TaskOverviewItem) => {
+  const openResultDrawer = useCallback((item: TaskOverviewItem, options?: OpenResultOptions) => {
     setResultDrawerItem(item);
+    setResultDrawerAcceptTogether(options?.acceptTogether ?? []);
     setCollectionDrawer('result');
     setResultAcceptancePending(null);
   }, []);
@@ -198,6 +204,7 @@ function MainApp() {
     setConversationDrawerOpen(false);
     setCollectionDrawer(null);
     setResultDrawerItem(null);
+    setResultDrawerAcceptTogether([]);
   }, []);
 
   const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
@@ -215,6 +222,9 @@ function MainApp() {
         changedBy: 'user',
       });
       setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
+      setResultDrawerAcceptTogether((currentTogether) => (
+        currentTogether.some((entry) => entry.taskId === item.taskId) ? [] : currentTogether
+      ));
       setCollectionDrawer((current) => (current === 'result' ? null : current));
     } catch (error) {
       console.error('[workbench] accept result failed', error);
@@ -258,6 +268,7 @@ function MainApp() {
   const closeCollectionDrawer = useCallback(() => {
     setCollectionDrawer(null);
     setResultDrawerItem(null);
+    setResultDrawerAcceptTogether([]);
   }, []);
   const [automationRunTarget, setAutomationRunTarget] = useState<{ automationId: string; runId: string } | null>(null);
   const openAutomationRun = useCallback((target: { automationId: string; runId: string }) => {
@@ -901,6 +912,7 @@ function MainApp() {
     // 若用户随后新开 Goal，那是同会话下的新计划，原 Plan 应留下。
     if (options?.closeResult) {
       setResultDrawerItem(null);
+      setResultDrawerAcceptTogether([]);
       setCollectionDrawer(null);
     }
     continueTaskInConversation(conversationId, {
@@ -1081,9 +1093,9 @@ function MainApp() {
                       onNewTask={() => {
                         void handleNewChat();
                       }}
-                      onOpenItem={(item: TaskOverviewItem) => {
+                      onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
                         if (item.actionRight === 'result_ready') {
-                          openResultDrawer(item);
+                          openResultDrawer(item, options);
                           return;
                         }
                         const conversationId = item.conversationId;
@@ -1113,10 +1125,10 @@ function MainApp() {
                       onNewTask={() => {
                         void handleNewChat();
                       }}
-                      onOpenItem={(item: TaskOverviewItem) => {
+                      onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
                         // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
                         if (item.actionRight === 'result_ready') {
-                          openResultDrawer(item);
+                          openResultDrawer(item, options);
                           return;
                         }
                         // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
@@ -1260,10 +1272,17 @@ function MainApp() {
                 <Drawer
                   onClose={() => {
                     const pending = resultAcceptancePending;
+                    const acceptTogether = resultDrawerAcceptTogether;
                     closeResultDrawer();
                     if (pending) {
                       setResultAcceptancePending(null);
+                      const targets = resolveResultDrawerAcceptanceTargets(pending, acceptTogether);
+                      // 归组卡只占一张：动画打在当前打开的那张上，其余待签项直接落库。
                       void workbenchAcceptRef.current?.(pending);
+                      for (const target of targets) {
+                        if (target.taskId === pending.taskId) continue;
+                        void acceptResultFromWorkbench(target);
+                      }
                     }
                   }}
                   ariaLabel={

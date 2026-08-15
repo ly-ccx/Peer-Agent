@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
@@ -43,7 +44,7 @@ export function GlobalWorkbenchPage({
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
   readonly onNewTask?: () => void;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
@@ -55,7 +56,7 @@ export function GlobalWorkbenchPage({
   // 全局拉数：不传 workspacePath。Drawer 覆盖时暂停底页刷新。
   const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
-  const handleOpenItem = useCallback((item: TaskOverviewItem) => {
+  const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
     if (
       item.source === 'shell_background' ||
       item.nextAction === 'open_background_thread'
@@ -63,7 +64,7 @@ export function GlobalWorkbenchPage({
       workbench?.openBackgroundThread(item.taskId);
       return;
     }
-    onOpenItem?.(item);
+    onOpenItem?.(item, options);
   }, [onOpenItem, workbench]);
 
   // 脉搏行只暴露 workspaceLabel（basename）。点击时用 workspaceList 反查 path，

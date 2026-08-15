@@ -173,6 +173,14 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   assert.doesNotMatch(source, /byId\.values\(\)\]\.sort\(compareThreadEntries\)/);
   assert.match(source, /bucket\.sort\(compareThreadItems\)/);
   assert.match(source, /byId\.values\(\)\]\.sort\(compareThreadItems\)/);
+  // 归组卡「查看结果」带上这条线全部待签项；点某一行仍只传 node.item。
+  assert.match(source, /acceptTogether=\{collectPendingAcceptanceItems\(/);
+  assert.match(source, /onOpenItem\?\.\(item, acceptTogether\?\.length \? \{ acceptTogether \} : undefined\)/);
+  assert.match(source, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);
+  assert.doesNotMatch(
+    source,
+    /onClick=\{\(\) => onOpenItem\?\.\(node\.item, acceptTogether/,
+  );
 });
 
 test('纯逻辑：12 张无关系旧卡全部平铺输出（截图回归场景）', () => {
