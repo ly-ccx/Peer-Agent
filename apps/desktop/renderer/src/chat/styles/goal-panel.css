@@ -1256,6 +1256,49 @@
   word-break: break-all;
 }
 
+.goal-task-child-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.goal-task-child-plan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: var(--ui-font-meta, 12px);
+}
+
+.goal-task-child-plan:focus-visible {
+  outline: none;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+}
+
+.goal-task-child-plan-title {
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
+  color: var(--za-text);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.goal-task-child-plan-progress {
+  flex: none;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-faint);
+}
+
 .goal-plan-empty-tasks {
   font-size: var(--ui-font-meta, 12px);
   color: var(--za-text-muted);
