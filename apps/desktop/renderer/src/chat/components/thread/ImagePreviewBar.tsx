@@ -1,3 +1,5 @@
+import { PeerIcon } from '../../../ui/icons';
+
 export function ImagePreviewBar({
   images,
   uploadingCount,
@@ -42,7 +44,7 @@ export function ImagePreviewBar({
           onClick={onAdd}
           aria-label="添加图片"
         >
-          ＋
+          <PeerIcon name="plus" size={16} />
         </button>
       )}
     </div>

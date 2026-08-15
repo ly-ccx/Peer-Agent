@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 
 export function SkillUploadDialog({
     onClose,
@@ -74,7 +75,7 @@ export function SkillUploadDialog({
                                 className="skill-upload-file-btn"
                                 onClick={() => inputRef.current?.click()}
                             >
-                                {file ? file.name : '＋ 上传技能'}
+                                {file ? file.name : <><PeerIcon name="plus" size={14} /> 上传技能</>}
                             </button>
                             <span className="skill-upload-tip">.zip格式，且解压后必须包含 SKILL.md</span>
                         </div>

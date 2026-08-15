@@ -1,6 +1,7 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { formatDuration } from '../../chat/state/format';
+import { PeerIcon } from '../../ui/icons';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
@@ -1182,7 +1183,7 @@ function ThreadTree({
               <span className="thread-tree-meta" />
             )}
             {fraction ? <span className="thread-tree-frac">{fraction}</span> : <span className="thread-tree-frac" />}
-            <span className="thread-tree-chevron" aria-hidden="true">›</span>
+            <span className="thread-tree-chevron" aria-hidden="true"><PeerIcon name="chevronRight" size={12} /></span>
           </button>
         );
       })}

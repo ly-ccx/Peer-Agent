@@ -176,6 +176,9 @@
 
 .llm-add-channel-btn,
 .llm-empty button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   background: var(--paper-sheet);
@@ -1670,7 +1673,11 @@
 }
 
 .llm-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 28px;
+  min-height: 28px;
   padding: 0;
   border-color: transparent;
   background: transparent;
@@ -2358,6 +2365,9 @@
 }
 
 .llm-catalog-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   background: var(--paper-sheet);

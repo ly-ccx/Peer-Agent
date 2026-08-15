@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import { useWorkbench } from '../WorkbenchContext';
 import {
   collectDirPathsToRefresh,
@@ -227,8 +228,12 @@ function TreeNode({
           }
         }}
       >
-        <span className={`workbench-tree-chevron${entry.isDir ? '' : ' is-leaf'}${isOpen ? ' is-open' : ''}`} aria-hidden>
-          {entry.isDir ? '›' : ''}
+        <span
+          className={`workbench-tree-twisty${entry.isDir ? ' workbench-tree-twisty--dir' : ''}`}
+          data-open={entry.isDir && isOpen ? 'true' : undefined}
+          aria-hidden
+        >
+          {entry.isDir ? <PeerIcon name="chevronRight" size={12} /> : null}
         </span>
         <FileTreeIcon kind={kind} open={isOpen} />
         <span className="workbench-tree-name">{entry.name}</span>
@@ -237,7 +242,7 @@ function TreeNode({
         <div className="workbench-tree-children" role="group">
           {showDraftHere && draft ? (
             <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: depth + 1 }}>
-              <span className="workbench-tree-chevron is-leaf" aria-hidden />
+              <span className="workbench-tree-twisty" aria-hidden />
               <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
               <input
                 className="workbench-tree-draft-input"
@@ -741,7 +746,7 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
         <div className="workbench-tree-children workbench-tree-children--root" role="group">
           {draft && draft.parentPath === rootPath ? (
             <div className="workbench-tree-draft" style={{ ['--tree-depth' as string]: 0 }}>
-              <span className="workbench-tree-chevron is-leaf" aria-hidden />
+              <span className="workbench-tree-twisty" aria-hidden />
               <FileTreeIcon kind={draft.kind === 'dir' ? 'folder' : 'file'} />
               <input
                 className="workbench-tree-draft-input"

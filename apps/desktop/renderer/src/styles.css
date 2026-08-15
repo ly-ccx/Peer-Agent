@@ -3,6 +3,7 @@
 @import "./styles/motion.css";
 @import "./styles/base.css";
 @import "./ui/boolean-controls/boolean-controls.css";
+@import "./ui/icons/icons.css";
 @import "./styles/shell.css";
 @import "./styles/task-overview.css";
 @import "./styles/global-workbench.css";

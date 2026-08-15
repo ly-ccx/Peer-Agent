@@ -16,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
@@ -2379,7 +2380,7 @@ export function ChatSurface({
       {isFileDropActive ? (
         <div className="chat-file-drop-overlay" aria-hidden="true">
           <div className="chat-file-drop-card">
-            <div className="chat-file-drop-icon">＋</div>
+            <div className="chat-file-drop-icon"><PeerIcon name="plus" size={22} /></div>
             <div className="chat-file-drop-title">{isZh ? '松手添加到当前对话' : 'Drop to attach to this chat'}</div>
             <div className="chat-file-drop-subtitle">{isZh ? '文件会复用现有附件规则加入输入区' : 'Files will be added with the existing attachment rules'}</div>
           </div>

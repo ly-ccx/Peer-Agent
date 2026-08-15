@@ -6,6 +6,7 @@ import {
   type LlmReasoningParamStyle,
 } from '@peer-agent/protocol';
 import { useState } from 'react';
+import { PeerIcon } from '../../ui/icons';
 import { Dropdown } from './Dropdown';
 import { Overlay } from './Overlay';
 import {
@@ -127,7 +128,7 @@ export function ModelSettingsDialog({
               <h3>{zh ? '模型设置' : 'Model settings'}</h3>
               <p><code>{model.model}</code></p>
             </div>
-            <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}>✕</button>
+            <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}><PeerIcon name="close" size={14} /></button>
           </header>
 
           <div className="llm-model-settings-body">
