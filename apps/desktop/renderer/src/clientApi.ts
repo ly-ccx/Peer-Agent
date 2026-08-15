@@ -115,6 +115,7 @@ const unavailableApi: ClientApi = {
   onQuickChatPopoverSelected: unavailableMethod('onQuickChatPopoverSelected'),
   onQuickChatPopoverClosed: unavailableMethod('onQuickChatPopoverClosed'),
   workspaceEnsureDefault: unavailableMethod('workspaceEnsureDefault'),
+  workspacePreviewDefault: unavailableMethod('workspacePreviewDefault'),
   workspaceAdd: unavailableMethod('workspaceAdd'),
   workspaceSetActive: unavailableMethod('workspaceSetActive'),
   workspaceRemove: unavailableMethod('workspaceRemove'),
