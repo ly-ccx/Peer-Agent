@@ -1167,7 +1167,6 @@ function ThreadTree({
             type="button"
             role="treeitem"
             className={`thread-tree-row${node.isChild ? ' is-child' : ''}${current ? ' is-current' : ''}${node.isContext ? ' is-context' : ''}`}
-            style={node.depth > 1 ? { marginLeft: `${Math.min(node.depth, 4) * 14}px` } : undefined}
             aria-current={current ? 'true' : undefined}
             onClick={() => onOpenItem?.(node.item)}
           >

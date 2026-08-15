@@ -1847,6 +1847,7 @@
   background: var(--za-surface-hover, color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0)));
 }
 
+/* 线性追问共用一条左边距/脊线，不按 depth 叠台阶。 */
 .thread-tree-row.is-child {
   margin-left: 1.375rem;
 }

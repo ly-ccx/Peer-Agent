@@ -161,6 +161,10 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   assert.match(source, /goal-thread-card/);
   assert.match(source, /function buildThreadTreeNodes/);
   assert.match(source, /function compareThreadItems/);
+  assert.match(source, /function ThreadTree\(/);
+  // 线性追问共用一条左边距：禁止再按 depth 写 inline marginLeft。
+  assert.doesNotMatch(source, /marginLeft:\s*`\$\{Math\.min\(node\.depth/);
+  assert.doesNotMatch(source, /node\.depth > 1 \? \{ marginLeft/);
   assert.doesNotMatch(source, /className="goal-thread-group"/);
   // 回归：compareThreadEntries 读 a.item.round。树节点是 TaskOverviewItem，
   // 若直接 bucket.sort(compareThreadEntries) 会抛
