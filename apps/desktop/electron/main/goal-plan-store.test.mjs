@@ -1836,6 +1836,21 @@ test('createPlan: 派生目标从父目标和来源任务计算并持久化关�
   assert.equal(reread.depth, 1);
 });
 
+test('createPlan: 拒绝把自己填成父节点', () => {
+  const planId = 'self-parent-plan';
+  assert.throws(
+    () => store.createPlan({
+      planId,
+      title: '自指根',
+      parentPlanId: planId,
+      sourceTaskId: 'orient',
+      tasks: [{ taskId: 'orient', title: '起步' }],
+    }),
+    /parentPlanId cannot be its own parent/,
+  );
+  assert.equal(store.getPlan(planId), null);
+});
+
 test('createPlan: 拒绝不存在的父目标或来源任务', () => {
   assert.throws(
     () => store.createPlan({ parentPlanId: 'missing', sourceTaskId: 'task', tasks: [] }),

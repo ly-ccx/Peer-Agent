@@ -365,6 +365,44 @@ test('目标线：sourceTaskId 兜底链也能解析出关系；旧数据无关�
   assert.equal(legacy.rootPlanTitle, undefined);
 });
 
+test('目标线：根计划自指 parentPlanId 仍能求出线根并与子计划归组', () => {
+  const rootId = 'plan-self-root';
+  const root = {
+    planId: rootId,
+    parentPlanId: rootId,
+    sourceTaskId: 'orient',
+    status: 'completed',
+    title: '开 0.0.5 开发线',
+    createdAt: '2026-08-15T04:20:00.000Z',
+    updatedAt: '2026-08-15T04:32:00.000Z',
+  };
+  const child = {
+    planId: 'plan-self-child',
+    parentPlanId: rootId,
+    sourceTaskId: 'commit',
+    status: 'completed',
+    title: '落地 @ 文件与会话',
+    createdAt: '2026-08-15T04:40:00.000Z',
+    updatedAt: '2026-08-15T04:58:00.000Z',
+  };
+  const relationIndex = buildGoalThreadRelationIndex([root, child]);
+  assert.equal(relationIndex.rootPlanIdOf(rootId), rootId);
+  assert.equal(relationIndex.parentPlanIdOf(rootId), undefined);
+  assert.equal(relationIndex.roundOf(rootId), 1);
+  assert.equal(relationIndex.rootPlanIdOf(child.planId), rootId);
+  assert.equal(relationIndex.parentPlanIdOf(child.planId), rootId);
+  assert.equal(relationIndex.roundOf(child.planId), 2);
+
+  const rootSnapshot = toGoalPlanSnapshot(root, { relationIndex });
+  const childSnapshot = toGoalPlanSnapshot(child, { relationIndex });
+  assert.equal(rootSnapshot.rootPlanId, rootId);
+  assert.equal(rootSnapshot.parentPlanId, undefined);
+  assert.equal(rootSnapshot.round, 1);
+  assert.equal(childSnapshot.rootPlanId, rootId);
+  assert.equal(childSnapshot.parentPlanId, rootId);
+  assert.equal(childSnapshot.round, 2);
+});
+
 test('toGoalPlanSnapshot 只有交付绑定才标出需要质量自检', () => {
   const workspaceOnly = toGoalPlanSnapshot({
     planId: 'p-workspace-only',
@@ -1327,7 +1365,7 @@ test('listTaskOverview 默认 limit 截断', () => {
     planId: `p${i}`,
     status: 'executing',
     title: `t${i}`,
-    updatedAt: RECENT,
+    updatedAt: new Date().toISOString(),
     targetWorkspacePath: '/x/peer_agent',
     runner: { status: 'running' },
     progress: { completed: 1, total: 2 },

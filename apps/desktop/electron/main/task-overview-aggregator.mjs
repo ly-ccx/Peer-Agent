@@ -381,25 +381,41 @@ export function buildGoalThreadRelationIndex(plans) {
     if (!parentId) return;
     childCountByParent.set(parentId, (childCountByParent.get(parentId) ?? 0) + 1);
   };
-  for (const plan of byPlanId.values()) {
-    if (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId)) {
-      noteChild(plan.parentPlanId);
-    } else if (
-      typeof plan.sourceTaskId === 'string'
-      && byPlanId.has(plan.sourceTaskId)
+  /**
+   * 解析 plan 真正的上级 planId；没有上级时返回 null。
+   *
+   * parentPlanId 指向自身一律视作「没有父节点」：存量脏数据会把线根写成
+   * parentPlanId === 自身 planId，若当成真父节点，rootOf 沿这条自环走回起点
+   * 会被判成环并返回 null，整条目标线的线根随之算空，待验收区就把同一条线
+   * 的卡片降级成平铺。线根必须是它自己，而不是「无根」。
+   *
+   * mustExist=true 时只认已加载的父计划（用于子节点计数与是否成线判断）；
+   * mustExist=false 保留「父计划不在本次快照内则自身即线根」的既有语义。
+   */
+  const parentIdOf = (plan, { mustExist = false } = {}) => {
+    if (!plan) return null;
+    const declared = typeof plan.parentPlanId === 'string'
+      && plan.parentPlanId
+      && plan.parentPlanId !== plan.planId
+      ? plan.parentPlanId
+      : null;
+    if (declared && (!mustExist || byPlanId.has(declared))) return declared;
+    const sourceId = typeof plan.sourceTaskId === 'string'
+      && plan.sourceTaskId
       && plan.sourceTaskId !== plan.planId
-    ) {
-      noteChild(plan.sourceTaskId);
-    }
+      ? plan.sourceTaskId
+      : null;
+    if (sourceId && byPlanId.has(sourceId)) return sourceId;
+    return null;
+  };
+  for (const plan of byPlanId.values()) {
+    const parentId = parentIdOf(plan, { mustExist: true });
+    if (parentId) noteChild(parentId);
   }
   const rootOf = (plan, seen = new Set()) => {
     if (!plan || seen.has(plan.planId)) return null;
     seen.add(plan.planId);
-    const parentId = typeof plan.parentPlanId === 'string' && plan.parentPlanId
-      ? plan.parentPlanId
-      : (typeof plan.sourceTaskId === 'string' && plan.sourceTaskId && byPlanId.has(plan.sourceTaskId)
-        ? plan.sourceTaskId
-        : null);
+    const parentId = parentIdOf(plan);
     if (!parentId) return plan;
     const parent = byPlanId.get(parentId);
     if (!parent) return plan;
@@ -408,10 +424,7 @@ export function buildGoalThreadRelationIndex(plans) {
   const inThread = (planId) => {
     const plan = byPlanId.get(planId);
     if (!plan) return false;
-    const hasParent =
-      (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId))
-      || (typeof plan.sourceTaskId === 'string' && byPlanId.has(plan.sourceTaskId) && plan.sourceTaskId !== planId);
-    return hasParent || childCountByParent.has(planId);
+    return Boolean(parentIdOf(plan, { mustExist: true })) || childCountByParent.has(planId);
   };
   // rootPlanIdOf：仅当 plan 参与目标线（有父或有子）才返回线根 id；
   // 根自身返回自己的 planId（分组时根卡与派生轮同组）；孤立计划返回 undefined（平铺）。
@@ -419,16 +432,7 @@ export function buildGoalThreadRelationIndex(plans) {
     if (!inThread(planId)) return undefined;
     return rootOf(byPlanId.get(planId))?.planId;
   };
-  const parentPlanIdOf = (planId) => {
-    const plan = byPlanId.get(planId);
-    if (!plan) return undefined;
-    if (typeof plan.parentPlanId === 'string' && plan.parentPlanId && plan.parentPlanId !== planId) {
-      return plan.parentPlanId;
-    }
-    const sourceId = typeof plan.sourceTaskId === 'string' ? plan.sourceTaskId : null;
-    if (sourceId && sourceId !== planId && byPlanId.has(sourceId)) return sourceId;
-    return undefined;
-  };
+  const parentPlanIdOf = (planId) => parentIdOf(byPlanId.get(planId)) ?? undefined;
   // 轮次：同根下按 createdAt 升序的序号（1 起）。根自身也参与排序，
   // 保证 R1 是最早一轮；时间缺失时按数组顺序稳定兜底。
   const roundsByRoot = new Map();

@@ -2301,6 +2301,9 @@ export function createGoalPlanStore({
     const requestedSourceTaskId = typeof draft.sourceTaskId === 'string' && draft.sourceTaskId.trim()
       ? draft.sourceTaskId.trim()
       : undefined;
+    if (requestedParentPlanId && requestedParentPlanId === planId) {
+      throw new Error('parentPlanId cannot be its own parent');
+    }
     const parentPlan = requestedParentPlanId ? getPlan(requestedParentPlanId) : null;
     const sourceTask = parentPlan && requestedSourceTaskId
       ? parentPlan.tasks?.find((task) => task.taskId === requestedSourceTaskId)
