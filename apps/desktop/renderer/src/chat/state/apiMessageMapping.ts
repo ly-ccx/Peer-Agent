@@ -52,11 +52,17 @@ export function buildAttachmentText(attachments: readonly ChatAttachment[]): str
         attachment.text || '',
         '```',
       ].join('\n'));
-    } else if (attachment.sourceKind === 'workspace_file' && attachment.workspaceRelPath) {
+    } else if (
+      (attachment.sourceKind === 'workspace_file' || attachment.sourceKind === 'workspace_dir')
+      && attachment.workspaceRelPath
+    ) {
+      const mentionKind = attachment.sourceKind === 'workspace_dir' ? 'directory' : 'file';
       blocks.push([
-        `Workspace file mention: @${attachment.workspaceRelPath}`,
+        `Workspace ${mentionKind} mention: @${attachment.workspaceRelPath}`,
         `Name: ${attachment.name}`,
-        'Content is not inlined. Read this workspace-relative path with local tools when needed.',
+        mentionKind === 'directory'
+          ? 'Content is not inlined. Inspect this workspace-relative directory with local tools when needed.'
+          : 'Content is not inlined. Read this workspace-relative path with local tools when needed.',
       ].join('\n'));
     } else if (attachment.kind === 'unsupported') {
       blocks.push([

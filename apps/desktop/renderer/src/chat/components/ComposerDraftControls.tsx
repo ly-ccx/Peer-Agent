@@ -10,9 +10,11 @@ import {
   type SessionReferenceHit,
 } from '../state/sessionReference';
 import {
+  fileMentionSubtitle,
   insertFileMention,
   mergeContextMentionHits,
   type ContextMentionHit,
+  type MentionScope,
   type WorkspaceFileHit,
 } from '../state/contextMention';
 import { clientApi } from '../../clientApi';
@@ -212,7 +214,9 @@ const ComposerDraftField = memo(function ComposerDraftField({
   const [sessionHits, setSessionHits] = useState<readonly SessionReferenceHit[]>([]);
   const [fileHits, setFileHits] = useState<readonly WorkspaceFileHit[]>([]);
   const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionScope, setMentionScope] = useState<MentionScope>('all');
   const mentionQueryRef = useRef<string | null>(null);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
   const hydrationReadyConversationRef = useRef<string | null>(null);
@@ -231,10 +235,10 @@ const ComposerDraftField = memo(function ComposerDraftField({
   const showContextMentions = Boolean(atQuery) && !isBusy;
   const mentionHits = useMemo(() => mergeContextMentionHits({
     query: atQuery?.query ?? '',
+    mentionScope,
     files: fileHits,
     sessions: sessionHits,
-    includeCategories: true,
-  }), [atQuery?.query, fileHits, sessionHits]);
+  }), [atQuery?.query, fileHits, mentionScope, sessionHits]);
   const hasComposerContent = draft.trim().length > 0 || hasAttachments;
 
   // 只在 slash 候选列表变化时重置高亮，避免每个字符 setState 二次渲染。
@@ -244,7 +248,17 @@ const ComposerDraftField = memo(function ComposerDraftField({
 
   useEffect(() => {
     setActiveMentionIndex(0);
-  }, [atQuery?.query, showContextMentions]);
+  }, [atQuery?.query, mentionScope, showContextMentions]);
+
+  useEffect(() => {
+    if (!showContextMentions) setMentionScope('all');
+  }, [showContextMentions]);
+
+  useEffect(() => {
+    if (!showContextMentions) return;
+    const active = mentionMenuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [activeMentionIndex, mentionHits, showContextMentions]);
 
   useEffect(() => {
     if (!showContextMentions || !atQuery) {
@@ -317,7 +331,12 @@ const ComposerDraftField = memo(function ComposerDraftField({
         };
 
         try {
-          const [nextSessions, nextFiles] = await Promise.all([loadSessions(), loadFiles()]);
+          const shouldLoadFiles = mentionScope !== 'chats' && (Boolean(query) || mentionScope === 'files');
+          const shouldLoadSessions = mentionScope !== 'files' && (Boolean(query) || mentionScope === 'chats');
+          const [nextSessions, nextFiles] = await Promise.all([
+            shouldLoadSessions ? loadSessions() : Promise.resolve([]),
+            shouldLoadFiles ? loadFiles() : Promise.resolve([]),
+          ]);
           if (!cancelled && mentionQueryRef.current === query) {
             setSessionHits(nextSessions);
             setFileHits(nextFiles);
@@ -338,7 +357,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [atQuery, conversationId, showContextMentions, workspacePath]);
+  }, [atQuery, conversationId, mentionScope, showContextMentions, workspacePath]);
 
   // 草稿与队列仍沿用既有表达层持久化缝；仅把订阅移入输入叶子。
   // 切会话时：先把「离开的会话」当前桶态同步写入持久化镜像，避免入队后立刻切走导致
@@ -425,6 +444,16 @@ const ComposerDraftField = memo(function ComposerDraftField({
   };
 
   const applyMentionHit = (hit: ContextMentionHit) => {
+    if (hit.type === 'category') {
+      setMentionScope(hit.id);
+      setActiveMentionIndex(0);
+      return;
+    }
+    if (hit.type === 'back') {
+      setMentionScope('all');
+      setActiveMentionIndex(0);
+      return;
+    }
     if (hit.type === 'file') {
       applyFileMention(hit.file);
       return;
@@ -457,35 +486,38 @@ const ComposerDraftField = memo(function ComposerDraftField({
         </div>
       ) : null}
       {showContextMentions ? (
-        <div className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '引用文件或会话' : 'Mention files or chats'}>
-          {mentionLoading && mentionHits.length === 0 ? (
-            <div className="slash-command-empty">{isZh ? '搜索文件与会话…' : 'Searching files and chats…'}</div>
-          ) : mentionHits.length === 0 ? (
-            <div className="slash-command-empty">{isZh ? '没有匹配的文件或会话' : 'No matching files or chats'}</div>
-          ) : (
-            mentionHits.map((hit, index) => {
+        <div ref={mentionMenuRef} className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '引用文件或会话' : 'Mention files or chats'}>
+          {mentionHits.map((hit, index) => {
               const key = hit.type === 'file'
                 ? `file:${hit.file.relPath}`
                 : hit.type === 'session'
                   ? `session:${hit.id}`
-                  : `category:${hit.id}`;
+                  : hit.type === 'back'
+                    ? `back:${hit.from}`
+                    : `category:${hit.id}`;
               const title = hit.type === 'file'
-                ? hit.file.name
+                ? (hit.file.kind === 'directory' ? `${hit.file.name}/` : hit.file.name)
                 : hit.type === 'session'
                   ? (hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session'))
-                  : hit.id === 'files' ? 'Files' : 'Chats';
+                  : hit.type === 'back'
+                    ? (isZh ? '返回' : 'Back')
+                    : hit.id === 'files' ? 'Files' : 'Chats';
               const subtitle = hit.type === 'file'
-                ? hit.file.relPath
+                ? fileMentionSubtitle(hit.file.relPath)
                 : hit.type === 'session'
                   ? hit.id
-                  : (isZh ? '类别' : 'Category');
+                  : hit.type === 'back'
+                    ? (isZh ? '全部类别' : 'All categories')
+                    : (hit.id === 'files'
+                      ? (isZh ? '搜索当前工作区文件' : 'Search workspace files')
+                      : (isZh ? '引用另一段会话' : 'Reference another chat'));
               return (
                 <button
                   key={key}
                   type="button"
                   role="option"
                   aria-selected={index === activeMentionIndex}
-                  className={`slash-command-item session-mention-item${index === activeMentionIndex ? ' active' : ''}`}
+                  className={`slash-command-item session-mention-item${hit.type === 'category' || hit.type === 'back' ? ' session-mention-nav' : ''}${index === activeMentionIndex ? ' active' : ''}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     applyMentionHit(hit);
@@ -493,12 +525,26 @@ const ComposerDraftField = memo(function ComposerDraftField({
                 >
                   <span className="session-mention-main">
                     <span className="session-mention-title">{title}</span>
-                    <span className="session-mention-id">{subtitle}</span>
+                    {subtitle ? <span className="session-mention-id">{subtitle}</span> : null}
                   </span>
                 </button>
               );
-            })
-          )}
+            })}
+          {mentionLoading && mentionHits.every((hit) => hit.type === 'back' || hit.type === 'category') ? (
+            <div className="slash-command-empty">
+              {mentionScope === 'chats'
+                ? (isZh ? '搜索会话…' : 'Searching chats…')
+                : mentionScope === 'files'
+                  ? (isZh ? '搜索文件…' : 'Searching files…')
+                  : (isZh ? '搜索文件与会话…' : 'Searching files and chats…')}
+            </div>
+          ) : mentionHits.every((hit) => hit.type === 'back' || hit.type === 'category') && mentionScope !== 'all' ? (
+            <div className="slash-command-empty">
+              {mentionScope === 'chats'
+                ? (isZh ? '没有匹配的会话' : 'No matching chats')
+                : (isZh ? '没有匹配的文件' : 'No matching files')}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <textarea

@@ -29,6 +29,18 @@ export function shouldSkipDirName(name) {
   return name.startsWith('.');
 }
 
+export function shouldSkipFileName(name) {
+  if (!name) return true;
+  if (name === '.' || name === '..') return true;
+  return name.startsWith('.') || isFinderPlaceholderName(name);
+}
+
+export function isFinderPlaceholderName(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return true;
+  return /^(新建文件|新建文件夹|未命名文件夹|未命名的文件夹|未命名|untitled(?: folder| file)?)$/iu.test(trimmed);
+}
+
 export function scoreWorkspaceFile(relPath, query) {
   const normalized = relPath.replaceAll('\\', '/');
   const fileName = path.posix.basename(normalized);
@@ -97,12 +109,14 @@ function collectWorkspaceFiles(workspaceRoot, {
       const childRel = current.relPath ? `${current.relPath}/${name}` : name;
       const childAbs = path.join(current.absPath, name);
       if (entry.isDirectory()) {
-        if (shouldSkipDirName(name)) continue;
+        if (shouldSkipDirName(name) || isFinderPlaceholderName(name)) continue;
+        collected.push({ relPath: childRel, kind: 'directory' });
         if (!needle && current.depth >= emptyDepth) continue;
         stack.push({ absPath: childAbs, relPath: childRel, depth: current.depth + 1 });
         continue;
       }
       if (!entry.isFile()) continue;
+      if (shouldSkipFileName(name)) continue;
       collected.push({ relPath: childRel, kind: 'file' });
     }
   }

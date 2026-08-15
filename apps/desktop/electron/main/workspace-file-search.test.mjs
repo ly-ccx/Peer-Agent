@@ -4,16 +4,31 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  isFinderPlaceholderName,
   rankWorkspaceFiles,
   scoreWorkspaceFile,
   searchWorkspaceFiles,
   shouldSkipDirName,
+  shouldSkipFileName,
 } from './workspace-file-search.mjs';
 
 test('skips hidden and build directories', () => {
   assert.equal(shouldSkipDirName('node_modules'), true);
   assert.equal(shouldSkipDirName('.git'), true);
   assert.equal(shouldSkipDirName('src'), false);
+});
+
+test('skips hidden dotfiles', () => {
+  assert.equal(shouldSkipFileName('.DS_Store'), true);
+  assert.equal(shouldSkipFileName('.gitignore'), true);
+  assert.equal(shouldSkipFileName('AGENTS.md'), false);
+});
+
+test('skips Finder placeholder names', () => {
+  assert.equal(isFinderPlaceholderName('新建文件'), true);
+  assert.equal(isFinderPlaceholderName('Untitled Folder'), true);
+  assert.equal(shouldSkipFileName('新建文件'), true);
+  assert.equal(shouldSkipFileName('src'), false);
 });
 
 test('ranks exact file names above path substring matches', () => {
@@ -33,6 +48,8 @@ test('empty query still returns shallow files and ignores deep noise', () => {
     fs.mkdirSync(path.join(root, 'src', 'deep', 'nested'), { recursive: true });
     fs.mkdirSync(path.join(root, 'node_modules', 'pkg'), { recursive: true });
     fs.writeFileSync(path.join(root, 'README.md'), 'hi');
+    fs.writeFileSync(path.join(root, '新建文件'), '');
+    fs.writeFileSync(path.join(root, '.DS_Store'), 'junk');
     fs.writeFileSync(path.join(root, 'src', 'index.ts'), 'export {}');
     fs.writeFileSync(path.join(root, 'src', 'deep', 'nested', 'secret.ts'), 'nope');
     fs.writeFileSync(path.join(root, 'node_modules', 'pkg', 'index.js'), 'skip');
@@ -42,6 +59,9 @@ test('empty query still returns shallow files and ignores deep noise', () => {
     const rels = result.files.map((hit) => hit.relPath);
     assert.ok(rels.includes('README.md'));
     assert.ok(rels.includes('src/index.ts'));
+    assert.ok(result.files.some((hit) => hit.relPath === 'src' && hit.kind === 'directory'));
+    assert.equal(rels.includes('新建文件'), false);
+    assert.equal(rels.includes('.DS_Store'), false);
     assert.equal(rels.includes('src/deep/nested/secret.ts'), false);
     assert.equal(rels.some((rel) => rel.includes('node_modules')), false);
   } finally {

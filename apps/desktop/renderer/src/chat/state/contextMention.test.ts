@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildWorkspaceFileAttachment,
+  fileMentionSubtitle,
   insertFileMention,
   mergeContextMentionHits,
 } from './contextMention.ts';
@@ -31,16 +32,56 @@ test('workspace file attachment is a path pin, not inlined text', () => {
   assert.equal(item.contentRef, 'apps/desktop/renderer/src/chat/state/types.ts');
 });
 
-test('empty query starts with Files and Chats categories', () => {
+test('empty query in all scope only shows Files and Chats', () => {
   const hits = mergeContextMentionHits({
     query: '',
+    mentionScope: 'all',
     files: [{ relPath: 'README.md', name: 'README.md' }],
     sessions: [{ id: 'c1', title: 'Demo' }],
   });
-  assert.deepEqual(hits.slice(0, 2), [
+  assert.deepEqual(hits, [
     { type: 'category', id: 'files' },
     { type: 'category', id: 'chats' },
   ]);
+});
+
+test('files scope lists a back row then files only', () => {
+  const hits = mergeContextMentionHits({
+    query: '',
+    mentionScope: 'files',
+    files: [{ relPath: 'src/index.ts', name: 'index.ts' }],
+    sessions: [{ id: 'c1', title: 'Demo' }],
+  });
+  assert.deepEqual(hits[0], { type: 'back', to: 'all', from: 'files' });
+  assert.equal(hits.some((hit) => hit.type === 'session'), false);
   assert.equal(hits.some((hit) => hit.type === 'file'), true);
-  assert.equal(hits.some((hit) => hit.type === 'session'), true);
+});
+
+test('fileMentionSubtitle always shows a path, including the workspace root', () => {
+  assert.equal(fileMentionSubtitle('AGENTS.md'), '.');
+  assert.equal(
+    fileMentionSubtitle('apps/desktop/renderer/src/chat/state/types.ts'),
+    'apps/desktop/renderer/src/chat/state',
+  );
+});
+
+test('workspace directory attachment is a path pin', () => {
+  const attachment = buildWorkspaceFileAttachment({
+    relPath: 'apps/desktop',
+    name: 'desktop',
+    kind: 'directory',
+  });
+  assert.equal(attachment.sourceKind, 'workspace_dir');
+  assert.equal(attachment.workspaceRelPath, 'apps/desktop');
+  assert.equal(attachment.text, undefined);
+});
+
+test('chat scope keeps the session id for the subtitle', () => {
+  const hits = mergeContextMentionHits({
+    query: '',
+    mentionScope: 'chats',
+    sessions: [{ id: 'sess-123', title: 'Demo session' }],
+  });
+  const session = hits.find((hit) => hit.type === 'session');
+  assert.equal(session?.type === 'session' && session.id, 'sess-123');
 });
