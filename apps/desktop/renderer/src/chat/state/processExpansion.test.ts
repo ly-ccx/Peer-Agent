@@ -9,9 +9,9 @@ import {
 import type { SegmentGroup } from './types.ts';
 
 describe('process expansion state', () => {
-  it('keeps an active process visible by default and auto-collapses when it completes', () => {
+  it('keeps the process collapsed by default while active and stays collapsed when it completes', () => {
     const active = createProcessExpansionState(true);
-    assert.equal(active.expanded, true);
+    assert.equal(active.expanded, false);
 
     const completed = updateProcessActivity(active, false);
     assert.equal(completed.expanded, false);
@@ -19,17 +19,24 @@ describe('process expansion state', () => {
 
   it('does not reopen a process the user collapsed when streaming activity resumes', () => {
     const active = createProcessExpansionState(true);
-    const collapsed = toggleProcessExpansion(active);
-    assert.equal(collapsed.expanded, false);
+    assert.equal(active.expanded, false);
 
-    const temporarilyInactive = updateProcessActivity(collapsed, false);
-    const streamingAgain = updateProcessActivity(temporarilyInactive, true);
-    assert.equal(streamingAgain.expanded, false);
+    // 用户展开后又手动收起 → 后续流式活跃度变化不得把它自动展开。
+    const opened = toggleProcessExpansion(active);
+    assert.equal(opened.expanded, true);
+    const collapsedAgain = toggleProcessExpansion(opened);
+    assert.equal(collapsedAgain.expanded, false);
+
+    const resumed = updateProcessActivity(collapsedAgain, true);
+    assert.equal(resumed.expanded, false);
   });
 
-  it('opens a newly active process when the user has not overridden it', () => {
+  it('keeps a user-opened process open while streaming stays active', () => {
     const inactive = createProcessExpansionState(false);
-    const active = updateProcessActivity(inactive, true);
+    const opened = toggleProcessExpansion(inactive);
+    assert.equal(opened.expanded, true);
+
+    const active = updateProcessActivity(opened, true);
     assert.equal(active.expanded, true);
   });
 
@@ -51,12 +58,12 @@ describe('process expansion state', () => {
     const commentaryActive = isProcessTimelineActive(commentaryBetweenTools, true);
     expansion = updateProcessActivity(expansion, commentaryActive);
     assert.equal(commentaryActive, true);
-    assert.equal(expansion.expanded, true);
+    assert.equal(expansion.expanded, false);
 
     const nextRoundActive = isProcessTimelineActive(nextToolRound, true);
     expansion = updateProcessActivity(expansion, nextRoundActive);
     assert.equal(nextRoundActive, true);
-    assert.equal(expansion.expanded, true);
+    assert.equal(expansion.expanded, false);
 
     expansion = updateProcessActivity(
       expansion,

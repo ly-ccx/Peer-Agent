@@ -8,7 +8,7 @@ export interface ProcessExpansionState {
 
 export function createProcessExpansionState(isActive: boolean): ProcessExpansionState {
   return {
-    expanded: isActive,
+    expanded: false,
     isActive,
     userOverrodeActiveExpansion: false,
   };
@@ -28,8 +28,10 @@ export function updateProcessActivity(
     };
   }
 
+  // 进行中默认也收起：单行状态栏已承担“正在思考”的实时反馈，
+  // 完整过程只在用户手动展开时显示，避免工具调用出现时整段突然铺开。
   return {
-    expanded: state.userOverrodeActiveExpansion ? state.expanded : true,
+    expanded: state.userOverrodeActiveExpansion ? state.expanded : false,
     isActive,
     userOverrodeActiveExpansion: state.userOverrodeActiveExpansion,
   };
@@ -39,9 +41,9 @@ export function toggleProcessExpansion(state: ProcessExpansionState): ProcessExp
   return {
     ...state,
     expanded: !state.expanded,
-    userOverrodeActiveExpansion: state.isActive
-      ? state.expanded
-      : state.userOverrodeActiveExpansion,
+    // 默认收起语义下，任何手动切换（无论开/关）都视为用户接管展开状态：
+    // 之后流式活跃度变化不再自动改写，仅完成（isActive→false）时统一收口。
+    userOverrodeActiveExpansion: true,
   };
 }
 

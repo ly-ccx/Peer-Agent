@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useState } from 'react';
+import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
@@ -21,6 +21,8 @@ import type {
   CompactionMeta,
   ToolProgress,
   SegmentGroup,
+  TextGroup,
+  ToolCallGroup,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
@@ -30,6 +32,10 @@ import { parseSkillToolView } from '../../state/skillToolView';
 import { InteractionAnsweredContext } from './interactionContext';
 import { InteractionToolCard } from './InteractionToolCard';
 import { SkillCapsuleCard } from './SkillCapsuleCard';
+
+/** thinking 状态栏 ticker 的尾部字符窗口（UTF-16 code unit）：
+ *  取够宽（160）保证溢出任意容器宽度实现尾部跟随，同时限制单行 DOM 体积。 */
+const LIVE_THINKING_TAIL_LIMIT = 160;
 
 function toolProgressLabel(
   progress: ToolProgress,
@@ -152,9 +158,79 @@ function AssistantContentImpl({
   }
 
   const processingSummary = buildProcessingSummary(groups, durationMs, isStreaming, isZh);
-  // 过程进行中展示完整时间线；过程结束后（含最终正文仍在流式输出时）：
-  // - 默认把最后一段非空正文留在折叠区外（即使其后还有 tool-call）；
-  // - 有未完成交互卡时，该轮所有 text 都外露（选项依赖的决策上下文）。
+  // 过程进行中：按「思考段(可折叠) ↔ 工具卡(外露) ↔ 正文(外露)」交错渲染，
+  // 保持思考→工具→正文→思考的原始顺序；只有末尾思考段是 live 状态栏，
+  // 之前的思考段收起为「已思考」摘要；工具卡片始终可见，不被折进思考块。
+  if (processingIsActive) {
+    type StreamRun =
+      | { kind: 'thinking'; groups: SegmentGroup[] }
+      | { kind: 'tools'; group: ToolCallGroup }
+      | { kind: 'text'; group: TextGroup };
+    const runs: StreamRun[] = [];
+    for (const group of groups) {
+      const prev = runs[runs.length - 1];
+      if (group.type === 'text') {
+        runs.push({ kind: 'text', group });
+      } else if (group.type === 'thinking') {
+        if (prev?.kind === 'thinking') prev.groups.push(group);
+        else runs.push({ kind: 'thinking', groups: [group] });
+      } else {
+        runs.push({ kind: 'tools', group });
+      }
+    }
+    const lastRun = runs[runs.length - 1];
+    const lastRunHasActiveIndicator = Boolean(lastRun && (
+      lastRun.kind === 'thinking'
+      || lastRun.kind === 'text'
+      || lastRun.group.calls.some((c) => c.result === undefined)
+    ));
+
+    return (
+      <div className="assistant-segments">
+        {runs.map((run, idx) => {
+          if (run.kind === 'text') {
+            return (
+              <div key={`stream-text-${idx}`} className="segment-text-after-tools">
+                <MarkdownMessage content={run.group.content} />
+              </div>
+            );
+          }
+          if (run.kind === 'tools') {
+            // 工具卡片外露（交互卡在下方统一渲染）。
+            return (
+              <div key={`stream-tools-${idx}`} className="tool-calls-list">
+                {run.group.calls
+                  .filter((tc) => !parseToolCallInteractionView(tc))
+                  .map((tc, callIdx) => (
+                    <ToolCallCard key={`stream-tool-${idx}-${callIdx}`} tc={tc} isZh={isZh} />
+                  ))}
+              </div>
+            );
+          }
+          // 思考段：仅末尾一段（仍在流式输出 thinking）是 live 状态栏；
+          // 之前的思考段视为已完成，收起为「已思考」摘要。
+          const isLive = run === lastRun;
+          return (
+            <ProcessingDetailsSection
+              key={`stream-think-${idx}`}
+              groups={run.groups}
+              isActive={isLive}
+              label={isZh ? '已思考' : 'Thought'}
+              isZh={isZh}
+            />
+          );
+        })}
+        {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}
+        {interactionCalls.map((tc, idx) => (
+          <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
+        ))}
+        {!lastRunHasActiveIndicator ? (
+          <LiveToolProgress conversationId={conversationId} showCursor isZh={isZh} />
+        ) : null}
+      </div>
+    );
+  }
+
   const timelineGroups = completedSplit?.historyGroups ?? groups;
   const finalTextGroups = completedSplit?.finalTextGroups ?? [];
   // 折叠区只展示「过程噪音」。纯交互工具组已在外面单独渲染，不在折叠区占空壳。
@@ -228,10 +304,41 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
     ? (isZh ? '正在思考' : 'Thinking')
     : completedLabel;
 
+  // 末尾组仍是 thinking 且过程活跃 → 头部为「标识 + 尾部跟随」状态栏；
+  // 整行仍是折叠开关，点击可展开完整时间线。一旦出现工具调用或正文组，
+  // 这里退化为普通摘要行（isActive 仍可能为 true）。
+  // ticker 只保留尾部 160 字窗口：足够溢出任何容器宽度（尾部跟随语义不变），
+  // 同时避免长思考时全量文本进入单行 DOM。
+  const lastGroup = groups[groups.length - 1];
+  const liveThinkingContent = isActive && lastGroup?.type === 'thinking'
+    ? windowProcessingText(
+      neutralizeToolCallSyntaxForDisplay(lastGroup.content).replace(/\s+/g, ' ').trim(),
+      LIVE_THINKING_TAIL_LIMIT,
+    ).content
+    : null;
+  const ticker = useThinkingTicker(liveThinkingContent);
+
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
-      <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
-        <span className="thinking-label">{label}</span>
+      <button
+        type="button"
+        className={`thinking-toggle${liveThinkingContent !== null ? ' thinking-toggle--live' : ''}`}
+        onClick={toggleExpanded}
+        aria-expanded={expanded}
+      >
+        {liveThinkingContent !== null ? (
+          <>
+            <span className="thinking-live-label">{label}</span>
+            <span
+              ref={ticker.ref}
+              className={`thinking-live-ticker${ticker.overflowing ? ' is-overflowing' : ''}`}
+            >
+              {liveThinkingContent}
+            </span>
+          </>
+        ) : (
+          <span className="thinking-label">{label}</span>
+        )}
         <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -256,6 +363,26 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
       ) : null}
     </div>
   );
+}
+
+/** ticker 溢出检测：内容宽度超过容器时切换为右贴（尾部跟随）+ 左缘淡出。 */
+function useThinkingTicker(text: string | null) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      setOverflowing(false);
+      return;
+    }
+    const update = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+  return { ref, overflowing };
 }
 
 function ThinkingTextGroup({ content, isZh }: {
