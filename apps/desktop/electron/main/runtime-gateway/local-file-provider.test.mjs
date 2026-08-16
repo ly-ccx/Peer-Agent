@@ -48,6 +48,55 @@ describe('local file provider', () => {
     assert.equal(toolContext.readFiles.get(filePath)?.fullRead, true);
   });
 
+  it('write_file and edit_file emit structured user artifacts while read_file does not', async () => {
+    const filePath = path.join(tmpDir, 'artifact.txt');
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const toolContext = { conversationId: 'c1', readFiles: new Map() };
+
+    const writeExecution = await provider.executeCapability(
+      { call: createCall('local.file.write', { path: filePath, content: 'before\n' }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    assert.deepEqual(writeExecution.result.evidence.userArtifacts, [{
+      kind: 'file',
+      ref: `file://${filePath}`,
+      path: filePath,
+      label: '新建文件',
+    }]);
+
+    const readExecution = await provider.executeCapability(
+      { call: createCall('local.file.read', { path: filePath }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    assert.equal(readExecution.result.evidence.userArtifacts, undefined);
+
+    const editExecution = await provider.executeCapability(
+      { call: createCall('local.file.edit', { path: filePath, old_string: 'before', new_string: 'after' }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    assert.deepEqual(editExecution.result.evidence.userArtifacts, [{
+      kind: 'code-change',
+      ref: `file://${filePath}`,
+      path: filePath,
+      label: '代码变更',
+      preview: {
+        kind: 'code',
+        additions: 1,
+        deletions: 1,
+        diffLines: [
+          `--- a/${filePath}`,
+          `+++ b/${filePath}`,
+          '@@ -1,2 +1,2 @@',
+          '-before',
+          '+after',
+          ' ',
+        ],
+      },
+    }]);
+    assert.ok(editExecution.result.evidence.userArtifacts[0].preview.diffLines.length <= 41);
+    assert.ok(editExecution.result.evidence.userArtifacts[0].preview.diffLines.every((line) => line.length <= 240));
+  });
+
   it('lists directory entries through the governed file provider', async () => {
     const directoryPath = path.join(tmpDir, 'docs');
     mkdirSync(directoryPath);

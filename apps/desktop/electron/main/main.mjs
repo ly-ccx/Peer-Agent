@@ -497,6 +497,10 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
+  artifactRoots: {
+    shell: path.join(dataHome, 'shell-artifacts'),
+    browser: path.join(dataHome, 'browser-artifacts'),
+  },
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,

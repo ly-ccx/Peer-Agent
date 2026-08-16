@@ -40,6 +40,8 @@ const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, S
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
+const MAX_IMAGE_PREVIEW_EDGE = 640;
+const MAX_IMAGE_PREVIEW_DATA_URL_CHARS = 512 * 1024;
 
 function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
@@ -57,6 +59,24 @@ function hostOf(url) {
   } catch {
     return 'unknown';
   }
+}
+
+function buildImagePreview(image) {
+  if (!image || typeof image.getSize !== 'function' || typeof image.toDataURL !== 'function') return null;
+  const sourceSize = image.getSize();
+  const sourceWidth = Number.isFinite(sourceSize?.width) ? Math.max(0, Math.floor(sourceSize.width)) : 0;
+  const sourceHeight = Number.isFinite(sourceSize?.height) ? Math.max(0, Math.floor(sourceSize.height)) : 0;
+  if (sourceWidth === 0 || sourceHeight === 0) return null;
+  const scale = Math.min(1, MAX_IMAGE_PREVIEW_EDGE / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const previewImage = scale < 1 && typeof image.resize === 'function'
+    ? image.resize({ width, height, quality: 'good' })
+    : image;
+  const dataUrl = previewImage.toDataURL();
+  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(dataUrl)) return null;
+  if (dataUrl.length > MAX_IMAGE_PREVIEW_DATA_URL_CHARS) return null;
+  return { kind: 'image', dataUrl, width, height };
 }
 
 /**
@@ -105,6 +125,7 @@ function createBrowserArtifactStore({ userDataPath }) {
         `local-browser-artifact://${actionId}/metadata`,
       ],
       localPath: dir,
+      screenshotPath: path.join(dir, 'screenshot.png'),
       bytes: pngBuffer.length,
     };
   }
@@ -344,6 +365,7 @@ export function createLocalBrowserControlProvider({
       let output;
       let evidenceSummary;
       let evidenceArtifactRefs = [];
+      let userArtifacts = [];
       let returnedToCloud = true;
       let visualObservations = [];
 
@@ -426,6 +448,14 @@ export function createLocalBrowserControlProvider({
           metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
+        const preview = buildImagePreview(image);
+        userArtifacts = [{
+          kind: 'image',
+          ref: `${artifact.artifactRef}/screenshot`,
+          path: artifact.screenshotPath,
+          label: '界面截图',
+          ...(preview ? { preview } : {}),
+        }];
         visualObservations = [{
           kind: 'browser_screenshot',
           mediaType: 'image/png',
@@ -499,6 +529,7 @@ export function createLocalBrowserControlProvider({
             dataLevel: 'D2_sensitive',
             redactions: [],
             artifactRefs: evidenceArtifactRefs,
+            ...(userArtifacts.length > 0 ? { userArtifacts } : {}),
             origin: {
               providerId: 'local.browser.control',
               capabilityId,

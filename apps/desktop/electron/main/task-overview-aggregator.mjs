@@ -19,6 +19,8 @@
  * goalPlanStore / automationStore，便于单测。
  */
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import {
   formatGoalDeliveryRoute,
   formatGoalDeliveryHandoff,
@@ -323,7 +325,123 @@ const PLAN_STEP_STATUSES = new Set([
  * 从 GoalPlan 任务树抽取叶子步骤（与 progress 叶子计数对齐）。
  * 供「Peer 正在推进」卡片展示具体步骤标题与状态。
  */
-export function extractPlanSteps(plan) {
+export const MAX_TASK_OVERVIEW_ARTIFACTS = 8;
+
+export function resolveArtifactOpenPath(ref, artifactRoots = {}, createdAt) {
+  if (typeof ref !== 'string' || !ref.trim()) return undefined;
+  const value = ref.trim();
+  if (value.startsWith('file://')) {
+    try {
+      const target = decodeURIComponent(new URL(value).pathname);
+      return path.isAbsolute(target) && existsSync(target) ? target : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const date = typeof createdAt === 'string' ? createdAt.slice(0, 10) : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  const match = /^(local-(?:shell|browser)-artifact):\/\/([^/]+)(?:\/(.+))?$/.exec(value);
+  if (!match) return undefined;
+  const [, scheme, artifactId, suffix] = match;
+  const root = scheme === 'local-shell-artifact' ? artifactRoots.shell : artifactRoots.browser;
+  if (!root) return undefined;
+  const names = scheme === 'local-shell-artifact'
+    ? { stdout: 'stdout.txt', stderr: 'stderr.txt', metadata: 'metadata.json' }
+    : { screenshot: 'screenshot.png', content: 'content.txt', metadata: 'metadata.json' };
+  const directory = path.join(root, date, artifactId);
+  const name = suffix ? names[suffix] : undefined;
+  const target = name ? path.join(directory, name) : directory;
+  return existsSync(target) ? target : undefined;
+}
+
+const USER_ARTIFACT_PRESENTATION = Object.freeze({
+  'code-change': { kind: 'code', actionLabel: '查看变更' },
+  file: { kind: 'file', actionLabel: '打开文件' },
+  image: { kind: 'image', actionLabel: '预览截图' },
+});
+
+const MAX_CODE_PREVIEW_LINES = 41;
+const MAX_CODE_PREVIEW_LINE_CHARS = 240;
+const MAX_IMAGE_PREVIEW_EDGE = 640;
+const MAX_IMAGE_PREVIEW_DATA_URL_CHARS = 512 * 1024;
+const SAFE_IMAGE_PREVIEW_URL = /^data:image\/(?:png|jpeg|webp);base64,/;
+
+function normalizeArtifactPreview(kind, preview) {
+  if (kind === 'code' && preview?.kind === 'code') {
+    if (!Number.isSafeInteger(preview.additions) || preview.additions < 0
+      || !Number.isSafeInteger(preview.deletions) || preview.deletions < 0
+      || !Array.isArray(preview.diffLines)) return undefined;
+    const diffLines = preview.diffLines
+      .filter((line) => typeof line === 'string')
+      .slice(0, MAX_CODE_PREVIEW_LINES)
+      .map((line) => line.slice(0, MAX_CODE_PREVIEW_LINE_CHARS));
+    return { kind: 'code', additions: preview.additions, deletions: preview.deletions, diffLines };
+  }
+  if (kind === 'image' && preview?.kind === 'image') {
+    const dataUrl = typeof preview.dataUrl === 'string' ? preview.dataUrl : '';
+    if (!SAFE_IMAGE_PREVIEW_URL.test(dataUrl) || dataUrl.length > MAX_IMAGE_PREVIEW_DATA_URL_CHARS
+      || !Number.isSafeInteger(preview.width) || preview.width < 1 || preview.width > MAX_IMAGE_PREVIEW_EDGE
+      || !Number.isSafeInteger(preview.height) || preview.height < 1 || preview.height > MAX_IMAGE_PREVIEW_EDGE) {
+      return undefined;
+    }
+    return { kind: 'image', dataUrl, width: preview.width, height: preview.height };
+  }
+  return undefined;
+}
+
+export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRoots = {}) {
+  const records = new Map(
+    (Array.isArray(evidenceIndex) ? evidenceIndex : [])
+      .filter((record) => record && typeof record.evidenceRef === 'string')
+      .map((record) => [record.evidenceRef, record]),
+  );
+  const artifacts = [];
+  const seen = new Set();
+  for (const evidenceRef of Array.isArray(evidenceRefs) ? evidenceRefs : []) {
+    if (artifacts.length >= MAX_TASK_OVERVIEW_ARTIFACTS) break;
+    if (typeof evidenceRef !== 'string' || !evidenceRef.trim()) continue;
+    const record = records.get(evidenceRef.trim());
+    for (const userArtifact of Array.isArray(record?.userArtifacts) ? record.userArtifacts : []) {
+      if (artifacts.length >= MAX_TASK_OVERVIEW_ARTIFACTS) break;
+      const ref = typeof userArtifact?.ref === 'string' ? userArtifact.ref.trim() : '';
+      const presentation = USER_ARTIFACT_PRESENTATION[userArtifact?.kind];
+      if (!ref || !presentation || seen.has(ref)) continue;
+      seen.add(ref);
+      const declaredPath = typeof userArtifact.path === 'string' && path.isAbsolute(userArtifact.path)
+        && existsSync(userArtifact.path)
+        ? userArtifact.path
+        : undefined;
+      const openPath = declaredPath ?? resolveArtifactOpenPath(ref, artifactRoots, record?.createdAt);
+      const label = typeof userArtifact.label === 'string' && userArtifact.label.trim()
+        ? userArtifact.label.trim()
+        : presentation.kind === 'code' ? '代码变更'
+          : presentation.kind === 'image' ? '界面截图'
+            : openPath ? path.basename(openPath) : '结果文件';
+      const artifact = { ref, kind: presentation.kind, label, actionLabel: presentation.actionLabel };
+      const preview = normalizeArtifactPreview(presentation.kind, userArtifact.preview);
+      if (preview) artifact.preview = preview;
+      if (openPath) artifact.openPath = openPath;
+      artifacts.push(artifact);
+    }
+  }
+  return artifacts;
+}
+
+function collectPlanEvidenceRefs(plans) {
+  const refs = new Set();
+  const walk = (tasks) => {
+    for (const task of Array.isArray(tasks) ? tasks : []) {
+      for (const ref of Array.isArray(task?.evidenceRefs) ? task.evidenceRefs : []) {
+        if (typeof ref === 'string' && ref.trim()) refs.add(ref.trim());
+      }
+      walk(task?.subtasks);
+    }
+  };
+  for (const plan of Array.isArray(plans) ? plans : []) walk(plan?.tasks);
+  return [...refs];
+}
+
+export function extractPlanSteps(plan, evidenceIndex = [], artifactRoots = {}) {
   if (!plan || typeof plan !== 'object') return undefined;
   const currentTaskId =
     typeof plan.runner?.currentTaskId === 'string'
@@ -350,6 +468,8 @@ export function extractPlanSteps(plan) {
       const status = PLAN_STEP_STATUSES.has(rawStatus) ? rawStatus : 'pending';
       const step = { taskId, title, status };
       if (currentTaskId && taskId === currentTaskId) step.current = true;
+      const artifacts = deriveTaskArtifacts(task.evidenceRefs, evidenceIndex, artifactRoots);
+      if (artifacts.length > 0) step.artifacts = artifacts;
       steps.push(step);
     }
   };
@@ -499,7 +619,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     plan.progress && Number.isFinite(plan.progress.completed) && Number.isFinite(plan.progress.total)
       ? { completed: plan.progress.completed, total: plan.progress.total }
       : undefined;
-  const planSteps = extractPlanSteps(plan);
+  const planSteps = extractPlanSteps(plan, options.evidenceIndex, options.artifactRoots);
   const timing =
     plan.timing && typeof plan.timing === 'object' ? plan.timing : undefined;
   const resolved = resolveConversationModelLabels(
@@ -858,6 +978,7 @@ export function createTaskOverviewAggregator({
   listShellTasks,
   listProviders,
   markTaskRead,
+  artifactRoots = {},
 } = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
@@ -955,6 +1076,10 @@ export function createTaskOverviewAggregator({
     plans = expandGoalThreadRelatives(goalPlanStore, plans, {
       includeConversationSiblings: !conversationId,
     });
+    const evidenceRefs = collectPlanEvidenceRefs(plans);
+    const evidenceIndex = typeof goalPlanStore.findEvidenceIndexRecords === 'function'
+      ? goalPlanStore.findEvidenceIndexRecords(evidenceRefs)
+      : [];
     const latestPlanByConversationId = new Map();
     const independentlyProjectedResults = [];
     const unlinkedPlans = [];
@@ -966,7 +1091,7 @@ export function createTaskOverviewAggregator({
         continue;
       }
       const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
-      const snapshot = toGoalPlanSnapshot(plan, { relationIndex });
+      const snapshot = toGoalPlanSnapshot(plan, { relationIndex, evidenceIndex, artifactRoots });
       const projected = snapshot ? projectGoalPlan(snapshot) : null;
       // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，
       // 不能混入 conversation 级去重后形成用户看不见的验收队列。
@@ -994,7 +1119,13 @@ export function createTaskOverviewAggregator({
       const conversationId =
         typeof plan?.conversationId === 'string' ? plan.conversationId : undefined;
       const conversation = conversationId ? conversationById.get(conversationId) : undefined;
-      const snapshot = toGoalPlanSnapshot(plan, { conversation, providerIndex, relationIndex });
+      const snapshot = toGoalPlanSnapshot(plan, {
+        conversation,
+        providerIndex,
+        relationIndex,
+        evidenceIndex,
+        artifactRoots,
+      });
       if (!snapshot) continue;
       // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。
       const projected = projectGoalPlan(snapshot, { nowMs });

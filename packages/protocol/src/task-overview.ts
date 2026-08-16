@@ -108,12 +108,47 @@ export type TaskOverviewPlanStepStatus =
   | 'cancelled'
   | 'waiting_user';
 
+export type TaskOverviewArtifactKind = 'code' | 'file' | 'image';
+
+export interface TaskOverviewCodePreview {
+  readonly kind: 'code';
+  readonly additions: number;
+  readonly deletions: number;
+  readonly diffLines: readonly string[];
+}
+
+export interface TaskOverviewImagePreview {
+  readonly kind: 'image';
+  readonly dataUrl: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type TaskOverviewArtifactPreview = TaskOverviewCodePreview | TaskOverviewImagePreview;
+
+/** 由 GoalTask.evidenceRefs / EvidenceIndex 派生的用户可浏览产物。 */
+export interface TaskOverviewArtifact {
+  /** 原始 Artifact 引用；仅用于追溯与列表 key，不直接展示给用户。 */
+  readonly ref: string;
+  readonly kind: TaskOverviewArtifactKind;
+  /** 用户可理解的产物名称，不得包含内部 UUID 或协议引用。 */
+  readonly label: string;
+  /** 与产物类型匹配的动作文案，例如“预览截图”“查看结果”。 */
+  readonly actionLabel: string;
+  /** Provider 产生、main 规范化后的有界 hover 内容。 */
+  readonly preview?: TaskOverviewArtifactPreview;
+  /** main 进程确认可安全打开后才提供。 */
+  readonly openPath?: string;
+}
+
 export interface TaskOverviewPlanStep {
   readonly taskId: string;
   readonly title: string;
   readonly status: TaskOverviewPlanStepStatus;
   /** 当前 Runner 正在推进的步骤。 */
   readonly current?: boolean;
+  /** 仅属于该叶子任务的 Evidence 派生产物。 */
+  readonly artifacts?: readonly TaskOverviewArtifact[];
 }
 
 export interface TaskOverviewItem {

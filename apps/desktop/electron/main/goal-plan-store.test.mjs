@@ -77,6 +77,79 @@ function registerEvidenceRefs(planId, refs) {
   return registerEvidenceRefsFor(store, planId, refs);
 }
 
+test('recordEvidenceRefs 不让 goal_update_task 包装记录覆盖原工具元数据', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.recordEvidenceRefs({
+    planId: plan.planId,
+    evidenceRefs: ['tool-result://original'],
+    artifactRefs: ['local-browser-artifact://shot-1/screenshot'],
+    toolCallId: 'call-original',
+    capabilityId: 'browser.screenshot',
+    toolName: 'browser_screenshot',
+    userArtifacts: [{
+      kind: 'image',
+      ref: 'local-browser-artifact://shot-1/screenshot',
+      path: '/tmp/shot-1/screenshot.png',
+      label: '界面截图',
+      preview: {
+        kind: 'image',
+        dataUrl: 'data:image/png;base64,dGh1bWI=',
+        width: 640,
+        height: 480,
+      },
+    }],
+  });
+  store.recordEvidenceRefs({
+    planId: plan.planId,
+    conversationId: 'conversation-owner',
+    evidenceRefs: ['tool-result://original'],
+    artifactRefs: [],
+    toolCallId: 'call-wrapper',
+    toolName: 'goal_update_task',
+  });
+
+  const [record] = store.findEvidenceIndexRecords(['tool-result://original']);
+  assert.equal(record.toolName, 'browser_screenshot');
+  assert.equal(record.capabilityId, 'browser.screenshot');
+  assert.equal(record.toolCallId, 'call-original');
+  assert.equal(record.conversationId, 'conversation-owner');
+  assert.deepEqual(record.artifactRefs, ['local-browser-artifact://shot-1/screenshot']);
+  const expectedUserArtifacts = [{
+    kind: 'image',
+    ref: 'local-browser-artifact://shot-1/screenshot',
+    path: '/tmp/shot-1/screenshot.png',
+    label: '界面截图',
+    preview: {
+      kind: 'image',
+      dataUrl: 'data:image/png;base64,dGh1bWI=',
+      width: 640,
+      height: 480,
+    },
+  }];
+  assert.deepEqual(record.userArtifacts, expectedUserArtifacts);
+
+  const reloadedStore = createGoalPlanStore();
+  const [reloadedRecord] = reloadedStore.findEvidenceIndexRecords(['tool-result://original']);
+  assert.equal(reloadedRecord.toolName, 'browser_screenshot');
+  assert.deepEqual(reloadedRecord.artifactRefs, ['local-browser-artifact://shot-1/screenshot']);
+  assert.deepEqual(reloadedRecord.userArtifacts, expectedUserArtifacts);
+});
+
+test('findEvidenceIndexRecords 按引用读取追加式索引并复用内存缓存', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const [record] = store.recordEvidenceRefs({
+    planId: plan.planId,
+    evidenceRefs: ['tool-result://wanted'],
+    artifactRefs: ['local-shell-artifact://shell-wanted/stdout'],
+    toolCallId: 'call-wanted',
+    toolName: 'bash',
+  });
+  const reopened = createGoalPlanStore();
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://wanted']), [record]);
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://wanted']), [record]);
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://missing']), []);
+});
+
 test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   const { tasks } = draftWithTasks();
   const p = aggregateProgress(tasks);

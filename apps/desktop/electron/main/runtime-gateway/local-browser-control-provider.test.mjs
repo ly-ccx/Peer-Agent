@@ -281,6 +281,10 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
       toPNG: () => Buffer.from('png-bytes'),
       toDataURL: () => dataUrl,
       getSize: () => ({ width: 800, height: 600 }),
+      resize: ({ width, height }) => ({
+        toDataURL: () => 'data:image/png;base64,dGh1bWI=',
+        getSize: () => ({ width, height }),
+      }),
     }),
   };
   registerBrowserWebContents({
@@ -299,6 +303,7 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
           'local-browser-artifact://shot-1/screenshot',
           'local-browser-artifact://shot-1/metadata',
         ],
+        screenshotPath: '/tmp/peer-agent-browser-provider-test/shot-1/screenshot.png',
         bytes: 9,
       }),
     },
@@ -330,4 +335,17 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
   assert.equal(JSON.stringify(execution.result.outputPreview).includes('base64'), false);
   assert.equal(JSON.stringify(execution.result.output).includes('base64'), false);
   assert.equal(execution.result.output.visualObservation.artifactRef, 'local-browser-artifact://shot-1');
+  assert.deepEqual(execution.result.evidence.userArtifacts, [{
+    kind: 'image',
+    ref: 'local-browser-artifact://shot-1/screenshot',
+    path: '/tmp/peer-agent-browser-provider-test/shot-1/screenshot.png',
+    label: '界面截图',
+    preview: {
+      kind: 'image',
+      dataUrl: 'data:image/png;base64,dGh1bWI=',
+      width: 640,
+      height: 480,
+    },
+  }]);
+  assert.ok(execution.result.evidence.userArtifacts[0].preview.dataUrl.length <= 512 * 1024);
 });

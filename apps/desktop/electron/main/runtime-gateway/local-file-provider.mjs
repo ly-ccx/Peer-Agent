@@ -13,6 +13,8 @@ import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
+const MAX_USER_CODE_PREVIEW_LINES = 40;
+const MAX_USER_CODE_PREVIEW_LINE_CHARS = 240;
 /** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
 export const MAX_WRITE_FILE_BYTES = 32 * 1024;
 
@@ -772,12 +774,48 @@ function statusFromFileResult(fileResult) {
   }
 }
 
+function buildCodePreview(diffPreview) {
+  const lines = String(diffPreview ?? '').split('\n');
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  const diffLines = lines
+    .slice(0, MAX_USER_CODE_PREVIEW_LINES)
+    .map((line) => line.slice(0, MAX_USER_CODE_PREVIEW_LINE_CHARS));
+  if (lines.length > MAX_USER_CODE_PREVIEW_LINES) diffLines.push('… diff preview truncated …');
+  return { kind: 'code', additions, deletions, diffLines };
+}
+
+function userArtifactsFromFileResult(name, fileResult) {
+  if (!fileResult?.success || (name !== 'write_file' && name !== 'edit_file')) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(fileResult.output || '{}');
+  } catch {
+    return [];
+  }
+  if (typeof parsed.path !== 'string' || !parsed.path) return [];
+  return [{
+    kind: name === 'edit_file' ? 'code-change' : 'file',
+    ref: `file://${parsed.path}`,
+    path: parsed.path,
+    label: name === 'edit_file' ? '代码变更' : '新建文件',
+    ...(name === 'edit_file' && parsed.diffPreview
+      ? { preview: buildCodePreview(parsed.diffPreview) }
+      : {}),
+  }];
+}
+
 function buildFileCapabilityResult({ call, name, locale, fileResult }) {
   const status = statusFromFileResult(fileResult);
   const dataLevel =
     name === 'read_file' || name === 'list_files' || name === 'search_files'
       ? 'D1_internal'
       : 'D2_sensitive';
+  const userArtifacts = userArtifactsFromFileResult(name, fileResult);
   return {
     toolCallId: call.toolCallId,
     status,
@@ -798,6 +836,7 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
       dataLevel,
       redactions: [],
       artifactRefs: [],
+      ...(userArtifacts.length > 0 ? { userArtifacts } : {}),
     },
     completedAt: nowIso(),
   };

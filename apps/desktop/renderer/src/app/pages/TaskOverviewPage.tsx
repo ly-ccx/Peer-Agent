@@ -1,9 +1,11 @@
 import { createI18n } from '@peer-agent/i18n';
-import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ChatHeaderCapabilities } from '../../chat/components/thread/ChatHeaderCapabilities';
 import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPreference';
 import { formatDuration } from '../../chat/state/format';
+import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -20,10 +22,12 @@ import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 import { WorkStream } from './WorkStream';
 import { resultCardWeight } from './workStreamLayout';
+import { projectTaskOverviewArtifacts } from './taskOverviewArtifacts';
+import { availablePreviewSize, positionTaskArtifactPreview } from './taskArtifactPreviewPosition';
 import {
   groupResultCardsByGoalThread,
-  ThreadTree,
-  type ThreadTreeNode,
+  ThreadList,
+  type ThreadListNode,
 } from './goalThreadGrouping';
 
 /**
@@ -999,6 +1003,176 @@ function WorkItem({
 }
 
 
+const ARTIFACT_KIND_LABELS = {
+  code: '代码',
+  file: '文件',
+  image: '截图',
+} as const;
+
+const ARTIFACT_PREVIEW_CHROME_STYLE = {
+  background: 'transparent',
+} as const;
+
+function ArtifactHoverPreview({ artifact }: { readonly artifact: TaskOverviewArtifact }) {
+  const preview = artifact.preview;
+  if (!preview) return null;
+  if (preview.kind === 'image') {
+    return (
+      <div className="task-artifact-preview task-artifact-preview--image" role="tooltip" style={ARTIFACT_PREVIEW_CHROME_STYLE}>
+        <img
+          src={preview.dataUrl}
+          width={preview.width}
+          height={preview.height}
+          alt={`${artifact.label}缩略图`}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="task-artifact-preview task-artifact-preview--code" role="tooltip" style={ARTIFACT_PREVIEW_CHROME_STYLE}>
+      <div className="task-artifact-preview-header">
+        <strong>{artifact.label}</strong>
+        <span className="task-artifact-preview-stats">
+          <span className="task-artifact-preview-additions">+{preview.additions}</span>
+          <span className="task-artifact-preview-deletions">−{preview.deletions}</span>
+        </span>
+      </div>
+      <pre className="task-artifact-diff">
+        {preview.diffLines.map((line, index) => (
+          <code
+            className={line.startsWith('+') && !line.startsWith('+++')
+              ? 'task-artifact-diff-line task-artifact-diff-line--added'
+              : line.startsWith('-') && !line.startsWith('---')
+                ? 'task-artifact-diff-line task-artifact-diff-line--deleted'
+                : 'task-artifact-diff-line'}
+            key={`${index}:${line}`}
+          >
+            {line || ' '}
+          </code>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+interface ActiveArtifactPreview {
+  readonly artifact: TaskOverviewArtifact;
+  readonly anchor: HTMLElement;
+}
+
+function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPreview }) {
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
+
+  useLayoutEffect(() => {
+    const updatePosition = () => {
+      const previewElement = previewRef.current;
+      if (!previewElement || !active.anchor.isConnected) return;
+      const triggerRect = active.anchor.getBoundingClientRect();
+      const previewRect = previewElement.getBoundingClientRect();
+      setPosition(positionTaskArtifactPreview(
+        triggerRect,
+        { width: previewRect.width, height: previewRect.height },
+        { width: window.innerWidth, height: window.innerHeight },
+      ));
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [active]);
+
+  return createPortal(
+    <div
+      ref={previewRef}
+      id={`artifact-preview-${encodeURIComponent(active.artifact.ref)}`}
+      className={`task-artifact-preview-portal task-artifact-preview-portal--${active.artifact.preview?.kind ?? 'code'} is-${position?.placement ?? 'below'}`}
+      style={{
+        position: 'fixed',
+        zIndex: 2147483000,
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        maxWidth: availablePreviewSize({ width: window.innerWidth, height: window.innerHeight }).width,
+        visibility: position ? 'visible' : 'hidden',
+      }}
+    >
+      <ArtifactHoverPreview artifact={active.artifact} />
+    </div>,
+    document.body,
+  );
+}
+
+function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
+  const [activePreview, setActivePreview] = useState<ActiveArtifactPreview | null>(null);
+  const projection = projectTaskOverviewArtifacts(item);
+  if (projection.total === 0) return null;
+  return (
+    <>
+    <details className="task-artifacts">
+      <summary className="task-artifacts-summary" onClick={(event) => event.stopPropagation()}>
+        <span>主要产物</span>
+        <span className="task-artifacts-count">{projection.summary}</span>
+        <span className="task-artifacts-chevron" aria-hidden="true" />
+      </summary>
+      <div className="task-artifacts-content" aria-label="主要产物">
+        {projection.groups.map((group) => (
+          <section className="task-artifacts-group" key={group.kind}>
+            <div className="task-artifacts-group-title">
+              <span>{group.label}</span>
+              <span>{group.total}</span>
+            </div>
+            <ul className="task-artifacts-list">
+              {group.artifacts.map((artifact) => (
+                <li
+                  className="task-artifact-shell"
+                  key={`${artifact.kind}:${artifact.ref}`}
+                  onPointerEnter={(event) => {
+                    if (artifact.preview) setActivePreview({ artifact, anchor: event.currentTarget });
+                  }}
+                  onPointerLeave={() => setActivePreview(null)}
+                  onFocus={(event) => {
+                    if (artifact.preview) setActivePreview({ artifact, anchor: event.currentTarget });
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setActivePreview(null);
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`task-artifact task-artifact--${artifact.kind}`}
+                    aria-describedby={activePreview?.artifact.ref === artifact.ref
+                      ? `artifact-preview-${encodeURIComponent(artifact.ref)}`
+                      : undefined}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void clientApi.openPath(artifact.openPath!);
+                    }}
+                  >
+                    <span className="task-artifact-icon" aria-hidden="true" />
+                    <span className="task-artifact-copy">
+                      <strong>{ARTIFACT_KIND_LABELS[artifact.kind]}</strong>
+                      <span>{artifact.label}</span>
+                    </span>
+                    <span className="task-artifact-action">{artifact.actionLabel}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+        {projection.hiddenTotal > 0 ? (
+          <p className="task-artifacts-limit-note">仅显示前 {projection.visibleTotal} 项主要产物</p>
+        ) : null}
+      </div>
+    </details>
+    {activePreview ? <ArtifactPreviewPortal active={activePreview} /> : null}
+    </>
+  );
+}
+
 /** 结果待验收卡片 —— 与推进中同款双列卡片：顶栏状态 + 标题 + 摘要 + 操作 */
 function ResultCard({
   item,
@@ -1011,7 +1185,7 @@ function ResultCard({
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
   readonly onOpenItem?: OpenTaskOverviewItem;
-  readonly threadNodes?: readonly ThreadTreeNode[];
+  readonly threadNodes?: readonly ThreadListNode[];
   readonly pendingCount?: number;
   readonly acceptTogether?: readonly TaskOverviewItem[];
 }) {
@@ -1057,8 +1231,9 @@ function ResultCard({
         </div>
       ) : null}
       {threadNodes && threadNodes.length > 0 ? (
-        <ThreadTree nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
+        <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
+      <ArtifactList item={item} />
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
         <div className="work-item-actions__buttons">

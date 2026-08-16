@@ -873,6 +873,220 @@
     }
   }
 
+  .task-artifacts {
+    @apply mt-3 rounded-xl border;
+    border-color: color-mix(in srgb, var(--za-border) 78%, transparent);
+    background: color-mix(in srgb, var(--za-card) 72%, transparent);
+    interpolate-size: allow-keywords;
+  }
+
+  .task-artifacts::details-content {
+    height: 0;
+    overflow: hidden;
+    transition:
+      height var(--za-motion-medium) var(--za-ease-out),
+      content-visibility var(--za-motion-medium) allow-discrete;
+  }
+
+  .task-artifacts[open]::details-content {
+    height: auto;
+  }
+
+  .task-artifacts-summary {
+    @apply flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifacts-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .task-artifacts-count {
+    @apply font-normal;
+    color: var(--za-text-muted);
+  }
+
+  .task-artifacts-chevron {
+    @apply ml-auto h-1.5 w-1.5 border-b border-r;
+    border-color: currentColor;
+    transform: scaleY(1) translateY(-25%) rotate(45deg);
+    transition: transform var(--za-motion-medium) var(--za-ease-out);
+  }
+
+  .task-artifacts[open] .task-artifacts-chevron {
+    transform: scaleY(-1) translateY(-25%) rotate(45deg);
+  }
+
+  .task-artifacts-content {
+    @apply space-y-3 border-t px-3 pb-3 pt-2;
+    border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
+  }
+
+  .task-artifacts-group-title {
+    @apply mb-2 flex items-center justify-between text-[0.6875rem] font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifacts-group-title span:last-child {
+    @apply font-normal tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-artifacts-list {
+    @apply space-y-1.5;
+  }
+
+  .task-artifact {
+    @apply flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors;
+    color: var(--za-text);
+  }
+
+  .task-artifact:not(:disabled):hover {
+    background: color-mix(in srgb, var(--za-accent) 10%, transparent);
+  }
+
+  .task-artifact:disabled {
+    @apply cursor-default opacity-70;
+  }
+
+  .task-artifact-icon {
+    @apply relative h-4 w-4 shrink-0;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifact--image .task-artifact-icon {
+    @apply rounded-sm;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+  }
+
+  .task-artifact--image .task-artifact-icon::after {
+    content: '';
+    @apply absolute bottom-0.5 left-0.5 h-1.5 w-3 rounded-sm;
+    background: currentColor;
+    clip-path: polygon(0 100%, 30% 20%, 52% 68%, 70% 40%, 100% 100%);
+  }
+
+  .task-artifact--code .task-artifact-icon::after {
+    content: '</>';
+    @apply absolute inset-0 flex items-center justify-center text-[0.55rem] font-bold tracking-tighter;
+  }
+
+  .task-artifact--file .task-artifact-icon::before {
+    content: '';
+    @apply absolute inset-x-0.5 bottom-0 top-0 rounded-sm;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+  }
+
+  .task-artifact--file .task-artifact-icon::after {
+    content: '';
+    @apply absolute left-1 top-1 h-0.5 w-2;
+    background: currentColor;
+    box-shadow: 0 3px 0 currentColor, 0 6px 0 currentColor;
+  }
+
+  .task-artifact-copy {
+    @apply flex min-w-0 flex-1 items-baseline gap-2;
+  }
+
+  .task-artifact-copy strong {
+    @apply shrink-0 text-[0.6875rem] font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifact-copy span {
+    @apply truncate text-xs;
+  }
+
+  .task-artifact-action {
+    @apply shrink-0 text-[0.6875rem] font-medium;
+    color: var(--za-accent);
+  }
+
+  .task-artifact-preview {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    max-height: min(22rem, calc(100vh - 1.5rem));
+    overflow: hidden;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .task-artifact-preview--code {
+    width: 100%;
+  }
+
+  .task-artifact-preview-header {
+    @apply flex items-center justify-between gap-3 border-b px-3 py-2 text-xs;
+    border-color: var(--za-line);
+  }
+
+  .task-artifact-preview-header strong {
+    @apply min-w-0 truncate;
+    color: var(--za-text);
+  }
+
+  .task-artifact-preview-stats {
+    @apply flex shrink-0 items-center gap-2 font-mono font-semibold;
+  }
+
+  .task-artifact-preview-additions,
+  .task-artifact-diff-line--added {
+    color: var(--za-success, #238636);
+  }
+
+  .task-artifact-preview-deletions,
+  .task-artifact-diff-line--deleted {
+    color: var(--za-danger, #cf222e);
+  }
+
+  .task-artifact-diff {
+    max-height: 18rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0.5rem 0;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    text-align: left;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifact-diff-line {
+    display: block;
+    min-width: 0;
+    padding: 0 0.75rem;
+    white-space: pre;
+    overflow-wrap: anywhere;
+  }
+
+  .task-artifact-diff-line--added {
+    background: color-mix(in srgb, var(--za-success, #238636) 10%, transparent);
+  }
+
+  .task-artifact-diff-line--deleted {
+    background: color-mix(in srgb, var(--za-danger, #cf222e) 10%, transparent);
+  }
+
+  .task-artifact-preview--image {
+    width: 100%;
+    padding: 0.5rem;
+  }
+
+  .task-artifact-preview--image img {
+    display: block;
+    width: 100%;
+    max-height: 20rem;
+    border-radius: 0.5rem;
+    object-fit: contain;
+    background: color-mix(in srgb, var(--za-text) 4%, transparent);
+  }
+
+  .task-artifacts-limit-note {
+    @apply m-0 text-center text-[0.6875rem];
+    color: var(--za-text-muted);
+  }
+
   .work-item-actions {
     /* 左边渠道/模型/时长，右边取消；字号与顶栏来源信息同级 */
     @apply mt-3 flex flex-nowrap items-center justify-between gap-3 pt-0 text-xs;
@@ -1804,7 +2018,7 @@
   color: var(--za-text-fade, var(--za-text-soft));
 }
 
-.thread-tree {
+.thread-list {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
@@ -1813,12 +2027,12 @@
   border-top: 1px solid var(--za-line);
 }
 
-.thread-tree-row {
-  position: relative;
+.thread-list-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
   min-height: 2.375rem;
   padding: 0.375rem 0.625rem;
   border: 0;
@@ -1830,33 +2044,23 @@
   cursor: pointer;
 }
 
-.thread-tree-row:hover {
+.thread-list-row:hover {
   background: var(--za-surface-hover, color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0)));
 }
 
-/* 线性追问共用一条左边距/脊线，不按 depth 叠台阶。 */
-.thread-tree-row.is-child {
-  margin-left: 1.375rem;
+.thread-list-round {
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--za-text-fade, var(--za-text-soft));
 }
 
-.thread-tree-row.is-child::before {
-  content: "";
-  position: absolute;
-  left: -0.875rem;
-  top: -0.75rem;
-  width: 0.75rem;
-  height: 1.875rem;
-  border-left: 1.5px solid var(--za-line);
-  border-bottom: 1.5px solid var(--za-line);
-  border-radius: 0 0 0 6px;
-}
-
-.thread-tree-row.is-current {
+.thread-list-row.is-current {
   background: var(--za-surface-0);
   box-shadow: inset 0 0 0 1px var(--za-line);
 }
 
-.thread-tree-row.is-context {
+.thread-list-row.is-context {
   opacity: 0.82;
 }
 
@@ -1973,4 +2177,7 @@
   background: color-mix(in srgb, var(--za-accent) 12%, transparent);
   color: var(--za-accent);
 }
+
+/* Hover preview chrome lives in task-artifact-preview-overlay.css so
+   body-portaled cards keep radius/shadow after later styles load. */
 
