@@ -12,6 +12,7 @@ import {
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
+import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 
 function workspaceBasename(workspacePath: string): string {
   const normalized = workspacePath.replace(/[/\\]+$/, '');
@@ -455,6 +456,8 @@ function InboxRow({
   readonly onAccept?: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  useShatterExitCollapse(kind === 'accept' ? phase : null, hostRef);
   const submitting = phase === 'submitting';
   const celebrating = phase === 'celebrating' || phase === 'exiting';
   const shattering = kind === 'accept' && celebrating;
@@ -501,6 +504,7 @@ function InboxRow({
 
   return (
     <div
+      ref={hostRef}
       className={`particle-shatter-host${kind === 'accept' && phase ? ` gwb-item-host--${phase}` : ''}${
         kind === 'accept' && phase === 'exiting' ? ' is-exiting' : ''
       }`}

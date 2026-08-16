@@ -2,7 +2,8 @@
 .particle-shatter-host {
   position: relative;
   overflow: hidden;
-  /* 静止态高度跟卡片走；exiting 时塌到 0，让下方卡片平滑顶上 */
+  /* 静止态高度跟卡片走；exiting 时塌到 0，让下方卡片平滑顶上。
+     可插值起点由 useShatterExitCollapse 在进入 exiting 时用内联 px 冻结。 */
   max-height: none;
   transition:
     max-height 280ms cubic-bezier(0.33, 0, 0.2, 1),
@@ -29,7 +30,8 @@
   pointer-events: none;
 }
 
-/* 粉碎主体结束后：宿主高度塌缩，列表其余卡片平滑上移 */
+/* 粉碎主体结束后：宿主高度塌缩，列表其余卡片平滑上移。
+   塌缩结束时残留的列 gap 槽位（移除瞬间的 12px 差）由 WorkStream 的 FLIP 兜底。 */
 .particle-shatter-host.is-exiting {
   max-height: 0;
   margin-top: 0 !important;

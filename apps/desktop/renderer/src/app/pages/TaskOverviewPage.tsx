@@ -16,6 +16,7 @@ import {
   type OpenTaskOverviewItem,
 } from '../state/resultDrawerAcceptance';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
+import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 import { WorkStream } from './WorkStream';
 import { resultCardWeight } from './workStreamLayout';
@@ -759,6 +760,9 @@ function HeroLayout({
             className="goal-thread-stream"
             items={groupResultCardsByGoalThread(displayedResults, allItems ?? items)}
             weightOf={(group) => resultCardWeight(group.kind === 'thread' ? group.nodes.length : 0)}
+            keyOf={(group) =>
+              group.kind === 'thread' ? `thread-${group.rootPlanId}` : group.item.taskId
+            }
           >
             {(group) =>
               group.kind === 'thread' ? (
@@ -1238,6 +1242,8 @@ function ResultCard({
   readonly acceptTogether?: readonly TaskOverviewItem[];
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  useShatterExitCollapse(phase, hostRef);
   const summary = item.planProgress
     ? `${item.planProgress.total} 项标准通过 · ${item.planProgress.completed} 项完成 · 无已知风险`
     : 'Peer 已完成并带回 Evidence · 无已知风险';
@@ -1245,7 +1251,10 @@ function ResultCard({
   const celebrating = phase === 'celebrating' || phase === 'exiting';
   const shattering = celebrating;
   return (
-    <div className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}>
+    <div
+      ref={hostRef}
+      className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}
+    >
     <article
       ref={cardRef}
       className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${threadNodes && threadNodes.length > 0 ? ' goal-thread-card' : ''}${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}
