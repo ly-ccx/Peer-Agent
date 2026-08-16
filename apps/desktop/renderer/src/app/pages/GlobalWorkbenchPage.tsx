@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
+import { collectPendingAcceptanceItems } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import { groupResultCardsByGoalThread, ThreadTree, type ThreadTreeNode } from './goalThreadGrouping';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
@@ -203,6 +205,14 @@ export function GlobalWorkbenchPage({
     [acceptanceOrderSnapshot, acceptanceTransitions, resultReady],
   );
 
+  // 一格一线：与区级 TaskOverviewPage 共用 Goal Thread 分组 —— 同 rootPlanId
+  // 的待验收卡合并为一张（卡内压缩树），无 rootPlanId 的旧数据保持单卡平铺。
+  // contextItems 传全量 items，让已完结的同线计划也能作为树上下文出现。
+  const resultGroups = useMemo(
+    () => groupResultCardsByGoalThread(displayedResults, items),
+    [displayedResults, items],
+  );
+
   const advancing = useMemo(
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing'),
     [items],
@@ -293,7 +303,7 @@ export function GlobalWorkbenchPage({
                 <div className="gwb-panel-head gwb-side-head">
                   <div className="gwb-side-head-left">
                     <span className="gwb-side-label">待验收</span>
-                    <span className="gwb-side-count">{displayedResults.length} 项</span>
+                    <span className="gwb-side-count">{resultGroups.length} 项</span>
                   </div>
                   {onOpenHistory ? (
                     <button type="button" className="gwb-link" onClick={onOpenHistory}>
@@ -302,22 +312,58 @@ export function GlobalWorkbenchPage({
                   ) : null}
                 </div>
                 <div className="gwb-list">
-                  {displayedResults.map(({ item, phase }) => (
-                    <InboxRow
-                      key={item.taskId}
-                      item={item}
-                      kind="accept"
-                      phase={phase}
-                      onOpen={() => handleOpenItem(item)}
-                      onAccept={
-                        onAcceptResult && item.source === 'goal_plan'
-                          ? () => {
-                              void handleAccept(item);
-                            }
-                          : undefined
-                      }
-                    />
-                  ))}
+                  {resultGroups.map((group) =>
+                    group.kind === 'thread' ? (
+                      <div className="gwb-thread-card" key={`thread-${group.rootPlanId}`}>
+                        <InboxRow
+                          item={group.latest.item}
+                          kind="accept"
+                          phase={group.latest.phase}
+                          threadNodes={group.nodes}
+                          threadPendingCount={group.pendingCount}
+                          onOpenThreadNode={(node) => handleOpenItem(node)}
+                          onOpen={() =>
+                            handleOpenItem(
+                              group.latest.item,
+                              collectPendingAcceptanceItems(group.items.map((entry) => entry.item)).length
+                                ? {
+                                    acceptTogether: collectPendingAcceptanceItems(
+                                      group.items.map((entry) => entry.item),
+                                    ),
+                                  }
+                                : undefined,
+                            )
+                          }
+                          onAccept={
+                            onAcceptResult && group.latest.item.source === 'goal_plan'
+                              ? () => {
+                                  for (const pending of collectPendingAcceptanceItems(
+                                    group.items.map((threadEntry) => threadEntry.item),
+                                  )) {
+                                    void handleAccept(pending);
+                                  }
+                                }
+                              : undefined
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <InboxRow
+                        key={group.item.taskId}
+                        item={group.item}
+                        kind="accept"
+                        phase={group.phase}
+                        onOpen={() => handleOpenItem(group.item)}
+                        onAccept={
+                          onAcceptResult && group.item.source === 'goal_plan'
+                            ? () => {
+                                void handleAccept(group.item);
+                              }
+                            : undefined
+                        }
+                      />
+                    ),
+                  )}
                 </div>
               </section>
             ) : null}
@@ -448,12 +494,18 @@ function InboxRow({
   phase = null,
   onOpen,
   onAccept,
+  threadNodes,
+  threadPendingCount,
+  onOpenThreadNode,
 }: {
   readonly item: TaskOverviewItem;
   readonly kind: 'need' | 'accept';
   readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
   readonly onAccept?: () => void;
+  readonly threadNodes?: readonly ThreadTreeNode[];
+  readonly threadPendingCount?: number;
+  readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -480,7 +532,9 @@ function InboxRow({
         ? '验收完成'
         : submitting
           ? '提交中'
-          : item.statusLabel || '等待验收'
+          : threadPendingCount && threadPendingCount > 1
+            ? `${item.statusLabel || '等待验收'} · ${threadPendingCount} 项待签`
+            : item.statusLabel || '等待验收'
       : item.statusLabel;
 
   const cta =
@@ -538,6 +592,9 @@ function InboxRow({
             ) : null}
             <span className="gwb-chip">{timeLabel}</span>
           </div>
+          {threadNodes && threadNodes.length > 0 ? (
+            <ThreadTree nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenThreadNode} />
+          ) : null}
         </div>
         <div className="gwb-actions">
           {kind === 'accept' && onAccept ? (

@@ -22,6 +22,10 @@ const readPage = async () => {
   const { readFile } = await import('node:fs/promises');
   return readFile(new URL('./TaskOverviewPage.tsx', import.meta.url), 'utf8');
 };
+const readGrouping = async () => {
+  const { readFile } = await import('node:fs/promises');
+  return readFile(new URL('./goalThreadGrouping.tsx', import.meta.url), 'utf8');
+};
 
 // ---- 与页面实现保持同一语义的纯逻辑镜像（结构断言保证两者同步）----
 type Phase = 'submitting' | null;
@@ -149,7 +153,7 @@ function mirror(entries: readonly Entry[], contextItems: readonly Item[] = []): 
 }
 
 test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段 continue 吞掉', async () => {
-  const source = await readPage();
+  const source = await readGrouping();
   // 无 rootPlanId 的卡必须在扫描循环里立刻 push single 并 continue
   assert.match(
     source,
@@ -158,7 +162,6 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   // 死代码 singles 数组已移除
   assert.doesNotMatch(source, /const singles:/);
   assert.match(source, /thread-tree/);
-  assert.match(source, /goal-thread-card/);
   assert.match(source, /function buildThreadTreeNodes/);
   assert.match(source, /function compareThreadItems/);
   assert.match(source, /function ThreadTree\(/);
@@ -173,12 +176,17 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   assert.doesNotMatch(source, /byId\.values\(\)\]\.sort\(compareThreadEntries\)/);
   assert.match(source, /bucket\.sort\(compareThreadItems\)/);
   assert.match(source, /byId\.values\(\)\]\.sort\(compareThreadItems\)/);
+});
+
+test('源码：区级页面归组卡带上同线待签项，树行点击只开单个节点', async () => {
+  const source = await readPage();
   // 归组卡「查看结果」带上这条线全部待签项；点某一行仍只传 node.item。
   assert.match(source, /acceptTogether=\{collectPendingAcceptanceItems\(/);
   assert.match(source, /onOpenItem\?\.\(item, acceptTogether\?\.length \? \{ acceptTogether \} : undefined\)/);
-  assert.match(source, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);
+  const grouping = await readGrouping();
+  assert.match(grouping, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);
   assert.doesNotMatch(
-    source,
+    grouping,
     /onClick=\{\(\) => onOpenItem\?\.\(node\.item, acceptTogether/,
   );
 });
