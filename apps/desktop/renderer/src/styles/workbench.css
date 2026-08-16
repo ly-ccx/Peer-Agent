@@ -26,6 +26,21 @@
     border-left: none;
   }
 
+  /* 根 Workbench 最大化：三栏网格只保留 Workbench，左栏与聊天栏让位但保持挂载。 */
+  :root[data-workbench-maximized='true'] .app-layout {
+    grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
+  }
+
+  :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .workbench-panel--maximized {
+    width: 100% !important;
+    max-width: none;
+  }
+
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
   .workbench-resizer {
     position: absolute;
@@ -74,6 +89,32 @@
     background: transparent;
     /* 与 .chat-header.has-scroll 同一条 hairline，避免左右底边错位。 */
     border-bottom: 1px solid var(--chrome-hairline);
+  }
+
+  .workbench-maximize-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    border-radius: var(--ui-radius-control, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+  }
+
+  .workbench-maximize-button:hover,
+  .workbench-maximize-button[aria-pressed='true'] {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--graphite-base);
+  }
+
+  .workbench-maximize-button:focus-visible {
+    outline: 2px solid var(--za-accent, #4c8dff);
+    outline-offset: 1px;
   }
 
   .workbench-tab {

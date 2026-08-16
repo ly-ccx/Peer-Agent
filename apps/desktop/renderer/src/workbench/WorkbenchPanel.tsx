@@ -30,6 +30,22 @@ const ICON_PROPS = {
   'aria-hidden': true,
 };
 
+function MaximizeIcon() {
+  return (
+    <svg width="16" height="16" {...ICON_PROPS}>
+      <path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" />
+    </svg>
+  );
+}
+
+function RestoreIcon() {
+  return (
+    <svg width="16" height="16" {...ICON_PROPS}>
+      <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />
+    </svg>
+  );
+}
+
 const TABS: readonly TabDef[] = [
   {
     id: 'plan',
@@ -102,9 +118,11 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   const {
     open,
     width,
+    maximized,
     activeTab,
     setActiveTab,
     setWidth,
+    setMaximized,
     focusThreadTaskId,
     hasGoalPlan,
     registerGoalSlot,
@@ -227,11 +245,11 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   // 收起态：组件保持挂载用于 Goal portal target，整体不可见。
   return (
     <aside
-      className={`workbench-panel${open ? ' workbench-panel--open' : ''}`}
+      className={`workbench-panel${open ? ' workbench-panel--open' : ''}${maximized ? ' workbench-panel--maximized' : ''}`}
       aria-hidden={!open}
-      style={{ width: open ? `${width}px` : 0 }}
+      style={{ width: open ? (maximized ? '100%' : `${width}px`) : 0 }}
     >
-      {open ? (
+      {open && !maximized ? (
         <div
           className="workbench-resizer"
           role="separator"
@@ -273,6 +291,16 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             </button>
           );
         })}
+        <button
+          type="button"
+          className="workbench-maximize-button"
+          aria-label={maximized ? (isZh ? '恢复 Workbench' : 'Restore Workbench') : (isZh ? '放大 Workbench' : 'Maximize Workbench')}
+          aria-pressed={maximized}
+          title={maximized ? (isZh ? '恢复' : 'Restore') : (isZh ? '放大' : 'Maximize')}
+          onClick={() => setMaximized(!maximized)}
+        >
+          <span aria-hidden="true">{maximized ? <RestoreIcon /> : <MaximizeIcon />}</span>
+        </button>
       </div>
 
       <div className="workbench-view-slot">

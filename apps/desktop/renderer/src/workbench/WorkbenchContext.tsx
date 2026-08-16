@@ -91,6 +91,8 @@ interface WorkbenchSettingsShape {
 interface WorkbenchState {
   open: boolean;
   width: number;
+  /** 临时铺满当前布局宿主；不持久化，恢复后继续使用原 width。 */
+  maximized: boolean;
   activeTab: WorkbenchTabId;
   goalSlot: HTMLElement | null;
   hasGoalPlan: boolean;
@@ -125,6 +127,7 @@ interface WorkbenchActions {
   toggleOpen: () => void;
   setActiveTab: (tab: WorkbenchTabId) => void;
   setWidth: (width: number) => void;
+  setMaximized: (maximized: boolean) => void;
   registerGoalSlot: (el: HTMLElement | null) => void;
   setHasGoalPlan: (has: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
@@ -196,6 +199,7 @@ export function WorkbenchProvider({
     normalizeWorkbenchOpenMap(initial.openByConversation),
   );
   const [width, setWidthState] = useState<number>(clampWidth(initial.width ?? WORKBENCH_DEFAULT_WIDTH));
+  const [maximized, setMaximizedState] = useState(false);
   const [activeTabMap, setActiveTabMap] = useState<Record<string, WorkbenchTabId>>(
     normalizeWorkbenchTabMap(initial.activeTab),
   );
@@ -282,11 +286,14 @@ export function WorkbenchProvider({
 
   const setOpen = useCallback((next: boolean) => {
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, next));
+    if (!next) setMaximizedState(false);
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
   const toggleOpen = useCallback(() => {
-    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, !openRef.current));
+    const next = !openRef.current;
+    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, next));
+    if (!next) setMaximizedState(false);
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
@@ -295,6 +302,10 @@ export function WorkbenchProvider({
     setWidthState((prev) => (prev === clamped ? prev : clamped));
     schedulePersist();
   }, [schedulePersist]);
+
+  const setMaximized = useCallback((next: boolean) => {
+    setMaximizedState(next);
+  }, []);
 
   const setActiveTab = useCallback((tab: WorkbenchTabId) => {
     const key = workbenchSessionKey(conversationId);
@@ -532,8 +543,13 @@ export function WorkbenchProvider({
   // 根布局只投影当前可见的 Workbench；离开 Chat 时保留 open 状态但释放第三列。
   useEffect(() => {
     if (layoutHost !== 'root') return;
-    document.documentElement.dataset.workbenchOpen = workbenchIsLayoutVisible(open, isPageActive) ? 'true' : 'false';
-  }, [open, isPageActive, layoutHost]);
+    const visible = workbenchIsLayoutVisible(open, isPageActive);
+    document.documentElement.dataset.workbenchOpen = visible ? 'true' : 'false';
+    document.documentElement.dataset.workbenchMaximized = visible && maximized ? 'true' : 'false';
+    return () => {
+      delete document.documentElement.dataset.workbenchMaximized;
+    };
+  }, [open, maximized, isPageActive, layoutHost]);
   useEffect(() => {
     if (layoutHost !== 'root') return;
     document.documentElement.dataset.sidebarCollapsed = sidebarCollapsed ? 'true' : 'false';
@@ -583,6 +599,7 @@ export function WorkbenchProvider({
   const value = useMemo<WorkbenchContextValue>(() => ({
     open,
     width,
+    maximized,
     activeTab,
     goalSlot,
     hasGoalPlan,
@@ -601,6 +618,7 @@ export function WorkbenchProvider({
     toggleOpen,
     setActiveTab,
     setWidth,
+    setMaximized,
     registerGoalSlot,
     setHasGoalPlan,
     setSidebarAutoCollapsed,
@@ -616,9 +634,9 @@ export function WorkbenchProvider({
     resolveBrowserSession,
     setDocumentSession,
   }), [
-    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
+    open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
     filesTarget, browserSession, documentSession, focusThreadTaskId, layoutHost, preparedBrowserConversations, conversationId,
-    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
+    setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, openBackgroundThread,
     setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,
   ]);

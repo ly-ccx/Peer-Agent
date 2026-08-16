@@ -1410,33 +1410,36 @@
 }
 
 
-.conversation-result-drawer__head {
-  @apply flex flex-none items-start justify-between gap-3 border-b px-5 py-4;
-  border-color: var(--za-line);
-}
-
-.conversation-result-drawer__head h2 {
-  @apply m-0 text-base font-semibold;
-  color: var(--za-text);
-}
-
-.conversation-result-drawer__head p {
-  @apply m-0 mt-1 text-xs;
-  color: var(--za-text-muted);
-}
-
-.conversation-result-drawer__close {
-  @apply rounded-full border px-3 py-1 text-xs;
-  border-color: var(--za-line);
-  color: var(--za-text-muted);
-  background: transparent;
-}
-
 /* body 必须吃掉 head/footer 之外的全部剩余高度；flex-basis:0 防止按内容高度参与分配，
  * 否则空白会落到 footer 下方，看起来像「操作区 + 再一段空白」。 */
 .conversation-result-drawer__body {
   @apply min-h-0 overflow-y-auto px-5 py-4;
   flex: 1 1 0;
+}
+
+.conversation-result-drawer__standalone {
+  @apply relative min-h-full;
+}
+
+.conversation-result-drawer__icon-close {
+  @apply absolute right-0 top-0 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border-0 p-0;
+  color: var(--za-text-muted);
+  background: transparent;
+}
+
+.conversation-result-drawer__icon-close:hover {
+  color: var(--za-text);
+  background: var(--za-hover);
+}
+
+.conversation-result-drawer__icon-close:focus-visible {
+  outline: 2px solid var(--za-accent);
+  outline-offset: 1px;
+}
+
+.conversation-result-drawer__icon-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .conversation-result-drawer.conversation-chat-drawer .conversation-result-drawer__body {
@@ -1478,6 +1481,15 @@
 .conversation-chat-drawer-shell > .workbench-panel {
   flex: 0 0 auto;
   height: 100%;
+}
+
+/* Drawer 内的 Workbench 使用同一个最大化状态：聊天体让位，面板占满宿主。 */
+.conversation-chat-drawer-shell:has(> .workbench-panel--maximized) > .conversation-chat-drawer__body {
+  display: none;
+}
+
+.conversation-chat-drawer-shell > .workbench-panel--maximized {
+  flex: 1 1 100%;
 }
 
 .conversation-chat-drawer__body .thread,

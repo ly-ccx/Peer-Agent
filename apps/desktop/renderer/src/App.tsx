@@ -83,6 +83,7 @@ type ConversationView = 'active' | 'archived';
 interface ConversationMeta {
   id: string;
   title: string;
+  workspacePath?: string | null;
   messageCount: number;
   updatedAt: string;
   status?: ConversationStatus;
@@ -1301,19 +1302,6 @@ function MainApp() {
                       </div>
                     ) : resultDrawerItem ? (
                       <>
-                          <div className="conversation-result-drawer__head">
-                            <div>
-                              <h2>{isZh ? '查看结果' : 'View result'}</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="conversation-result-drawer__close"
-                              onClick={requestClose}
-                              disabled={Boolean(resultAcceptancePending)}
-                            >
-                              {isZh ? '关闭' : 'Close'}
-                            </button>
-                          </div>
                           <div className="conversation-result-drawer__body">
                             {resultDrawerItem.conversationId ? (
                               <WorkbenchProvider
@@ -1367,6 +1355,7 @@ function MainApp() {
                                       }}
                                       isPageActive={collectionDrawer === 'result'}
                                       messageTarget={notificationMessageTarget}
+                                      onClose={requestClose}
                                     />
                                   </div>
                                   <WorkbenchPanel
@@ -1379,7 +1368,22 @@ function MainApp() {
                                 </div>
                               </WorkbenchProvider>
                             ) : (
-                              <ConversationResultView item={resultDrawerItem} isZh={isZh} />
+                              <div className="conversation-result-drawer__standalone">
+                                <button
+                                  type="button"
+                                  className="conversation-result-drawer__icon-close"
+                                  onClick={requestClose}
+                                  disabled={Boolean(resultAcceptancePending)}
+                                  aria-label={isZh ? '关闭' : 'Close'}
+                                  title={isZh ? '关闭' : 'Close'}
+                                >
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                  </svg>
+                                </button>
+                                <ConversationResultView item={resultDrawerItem} isZh={isZh} />
+                              </div>
                             )}
                           </div>
                           {(() => {
