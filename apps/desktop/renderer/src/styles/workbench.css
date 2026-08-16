@@ -63,6 +63,8 @@
     box-sizing: border-box;
     flex: 0 0 40px;
     height: 40px;
+    min-height: 0;
+    max-height: 40px;
     display: flex;
     flex-direction: row;
     align-items: center;
