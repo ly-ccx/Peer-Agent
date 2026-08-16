@@ -6,7 +6,7 @@ import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { useTaskOverview } from '../hooks/useTaskOverview';
-import { groupResultCardsByGoalThread, ThreadTree, type ThreadTreeNode } from './goalThreadGrouping';
+import { groupResultCardsByGoalThread, ThreadList, type ThreadListNode } from './goalThreadGrouping';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
@@ -503,7 +503,7 @@ function InboxRow({
   readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
   readonly onAccept?: () => void;
-  readonly threadNodes?: readonly ThreadTreeNode[];
+  readonly threadNodes?: readonly ThreadListNode[];
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
@@ -593,7 +593,7 @@ function InboxRow({
             <span className="gwb-chip">{timeLabel}</span>
           </div>
           {threadNodes && threadNodes.length > 0 ? (
-            <ThreadTree nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenThreadNode} />
+            <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenThreadNode} />
           ) : null}
         </div>
         <div className="gwb-actions">

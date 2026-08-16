@@ -161,21 +161,19 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   );
   // 死代码 singles 数组已移除
   assert.doesNotMatch(source, /const singles:/);
-  assert.match(source, /thread-tree/);
-  assert.match(source, /function buildThreadTreeNodes/);
+  assert.match(source, /thread-list/);
+  assert.match(source, /function buildThreadListNodes/);
   assert.match(source, /function compareThreadItems/);
-  assert.match(source, /function ThreadTree\(/);
-  // 线性追问共用一条左边距：禁止再按 depth 写 inline marginLeft。
-  assert.doesNotMatch(source, /marginLeft:\s*`\$\{Math\.min\(node\.depth/);
-  assert.doesNotMatch(source, /node\.depth > 1 \? \{ marginLeft/);
+  assert.match(source, /function ThreadList\(/);
+  assert.match(source, /role="list"/);
+  // 同线 Goal 只按 round 排序，禁止恢复树语义、深度或子级投影。
+  assert.doesNotMatch(source, /role="tree"|isChild|depth:|marginLeft/);
   assert.doesNotMatch(source, /className="goal-thread-group"/);
-  // 回归：compareThreadEntries 读 a.item.round。树节点是 TaskOverviewItem，
-  // 若直接 bucket.sort(compareThreadEntries) 会抛
-  // Cannot read properties of undefined (reading 'round')，整页白屏。
-  assert.doesNotMatch(source, /bucket\.sort\(compareThreadEntries\)/);
+  // 回归：byId 列表节点是 TaskOverviewItem，必须使用 item 比较器；
+  // 待验收 entries 自身仍可合法使用 compareThreadEntries。
   assert.doesNotMatch(source, /byId\.values\(\)\]\.sort\(compareThreadEntries\)/);
-  assert.match(source, /bucket\.sort\(compareThreadItems\)/);
-  assert.match(source, /byId\.values\(\)\]\.sort\(compareThreadItems\)/);
+  assert.match(source, /function compareThreadItems/);
+  assert.match(source, /byId\.values\(\)\]\s*\.sort\(compareThreadItems\)/);
 });
 
 test('源码：区级页面归组卡带上同线待签项，树行点击只开单个节点', async () => {

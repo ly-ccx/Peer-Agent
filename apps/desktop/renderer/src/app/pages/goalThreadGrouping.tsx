@@ -10,10 +10,8 @@ import { PeerIcon } from '../../ui/icons';
  * 逻辑与提取前逐行等价，见 TaskOverviewPage.goalThread.test.ts 的回归约束。
  */
 
-export type ThreadTreeNode = {
+export type ThreadListNode = {
   readonly item: TaskOverviewItem;
-  readonly depth: number;
-  readonly isChild: boolean;
   readonly isCurrent: boolean;
   readonly isContext: boolean;
 };
@@ -30,7 +28,7 @@ export type GoalThreadGroup =
       rootPlanTitle?: string;
       items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[];
       latest: { item: TaskOverviewItem; phase: AcceptancePhase | null };
-      nodes: ThreadTreeNode[];
+      nodes: ThreadListNode[];
       pendingCount: number;
     }
   | {
@@ -114,7 +112,7 @@ export function groupResultCardsByGoalThread(
     if (!thread) continue;
     thread.items.sort(compareThreadEntries);
     const latest = pickLatestPending(thread.items) ?? thread.items[thread.items.length - 1];
-    const nodes = buildThreadTreeNodes(thread.rootPlanId, thread.items, contextItems);
+    const nodes = buildThreadListNodes(thread.rootPlanId, thread.items, contextItems);
     if (thread.items.length < 2 && nodes.length < 2) {
       // 单张线归属卡：没有同线上下文时不套树，直接平铺。
       const solo = thread.items[0];
@@ -133,11 +131,11 @@ export function groupResultCardsByGoalThread(
   return result;
 }
 
-export function buildThreadTreeNodes(
+export function buildThreadListNodes(
   rootPlanId: string,
   pendingEntries: readonly { item: TaskOverviewItem; phase: AcceptancePhase | null }[],
   contextItems: readonly TaskOverviewItem[],
-): ThreadTreeNode[] {
+): ThreadListNode[] {
   const pendingIds = new Set(pendingEntries.map((entry) => entry.item.taskId));
   const latestPending = pickLatestPending(pendingEntries)?.item.taskId;
   const byId = new Map<string, TaskOverviewItem>();
@@ -150,46 +148,13 @@ export function buildThreadTreeNodes(
     byId.set(entry.item.taskId, entry.item);
   }
 
-  const children = new Map<string, TaskOverviewItem[]>();
-  for (const item of byId.values()) {
-    const parentId = item.parentPlanId && byId.has(item.parentPlanId)
-      ? item.parentPlanId
-      : item.taskId === rootPlanId
-        ? null
-        : rootPlanId;
-    if (!parentId || parentId === item.taskId) continue;
-    const bucket = children.get(parentId) ?? [];
-    bucket.push(item);
-    children.set(parentId, bucket);
-  }
-  for (const bucket of children.values()) {
-    bucket.sort(compareThreadItems);
-  }
-
-  const nodes: ThreadTreeNode[] = [];
-  const walk = (item: TaskOverviewItem, depth: number) => {
-    nodes.push({
+  return [...byId.values()]
+    .sort(compareThreadItems)
+    .map((item) => ({
       item,
-      depth,
-      isChild: depth > 0,
       isCurrent: item.taskId === latestPending,
       isContext: !pendingIds.has(item.taskId),
-    });
-    for (const child of children.get(item.taskId) ?? []) {
-      walk(child, depth + 1);
-    }
-  };
-
-  const root = byId.get(rootPlanId)
-    ?? pendingEntries.find((entry) => !entry.item.parentPlanId)?.item
-    ?? pendingEntries[0]?.item;
-  if (!root) return nodes;
-  walk(root, 0);
-  for (const item of [...byId.values()].sort(compareThreadItems)) {
-    if (nodes.some((node) => node.item.taskId === item.taskId)) continue;
-    walk(item, item.parentPlanId && byId.has(item.parentPlanId) ? 1 : 0);
-  }
-  return nodes;
+    }));
 }
 
 export function threadRowStatus(item: TaskOverviewItem, isContext: boolean): string {
@@ -206,18 +171,18 @@ export function threadRowFraction(item: TaskOverviewItem): string | null {
   return `${item.planProgress.completed}/${item.planProgress.total}`;
 }
 
-export function ThreadTree({
+export function ThreadList({
   nodes,
   currentId,
   onOpenItem,
 }: {
-  readonly nodes: readonly ThreadTreeNode[];
+  readonly nodes: readonly ThreadListNode[];
   readonly currentId?: string;
   readonly onOpenItem?: (item: TaskOverviewItem) => void;
 }) {
   return (
-    <div className="thread-tree" role="tree" aria-label="目标线">
-      {nodes.map((node) => {
+    <div className="thread-list" role="list" aria-label="目标线 Goal 列表">
+      {nodes.map((node, index) => {
         const fraction = threadRowFraction(node.item);
         const duration = typeof node.item.durationMs === 'number'
           ? formatDuration(node.item.durationMs)
@@ -227,11 +192,12 @@ export function ThreadTree({
           <button
             key={node.item.taskId}
             type="button"
-            role="treeitem"
-            className={`thread-tree-row${node.isChild ? ' is-child' : ''}${current ? ' is-current' : ''}${node.isContext ? ' is-context' : ''}`}
+            role="listitem"
+            className={`thread-list-row${current ? ' is-current' : ''}${node.isContext ? ' is-context' : ''}`}
             aria-current={current ? 'true' : undefined}
             onClick={() => onOpenItem?.(node.item)}
           >
+            <span className="thread-list-round">第 {index + 1} 轮</span>
             <span className={`thread-tree-pill${node.item.actionRight === 'result_ready' ? ' is-wait' : ''}`}>
               {threadRowStatus(node.item, node.isContext)}
             </span>
