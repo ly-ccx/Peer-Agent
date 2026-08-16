@@ -431,6 +431,7 @@ function runnerPhaseLabel(phase: GoalRunnerPhase | undefined, isZh: boolean): st
     act: '执行',
     verify: '验证',
     repair: '修复',
+    quality_review: '质量复核',
     synthesize: '收束',
     blocked: '阻塞',
   };
@@ -441,6 +442,7 @@ function runnerPhaseLabel(phase: GoalRunnerPhase | undefined, isZh: boolean): st
     act: 'Act',
     verify: 'Verify',
     repair: 'Repair',
+    quality_review: 'Quality review',
     synthesize: 'Synthesize',
     blocked: 'Blocked',
   };

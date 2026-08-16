@@ -108,7 +108,6 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
 }
 
-
 function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
   return readGitBranchPrefixFromSettings(settings);
 }
@@ -129,7 +128,7 @@ function MainApp() {
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activePage, setActivePage] = useState<AppPage>('home');
+  const [activePage, setActivePage] = useState<AppPage>('chat');
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
   const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
@@ -298,6 +297,18 @@ function MainApp() {
     readReplyLanguage(clientApi.initialSettings));
   const [gitBranchPrefix, setGitBranchPrefix] = useState(() =>
     readGitBranchPrefix(clientApi.initialSettings));
+
+  useEffect(() => {
+    if (activeWorkspace || draftWorkspacePath) return;
+    let cancelled = false;
+    void clientApi.workspacePreviewDefault().then((preview) => {
+      if (cancelled || !preview.path) return;
+      setDraftWorkspacePath(preview.path);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace, draftWorkspacePath]);
 
   const refreshProviders = useCallback(async () => {
     // 表达层只展示用户明确配置的模型。远程/本机目录是设置页的候选来源，不能在聊天菜单里
@@ -486,8 +497,8 @@ function MainApp() {
     setSettingsInitialSection(section);
     setActivePage('settings');
   }, []);
-
-
+  // setupModelAutoOpened used to auto-open Settings once. First-run now stays
+  // on the empty chat path and no longer uses that preference to steal focus.
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -743,12 +754,10 @@ function MainApp() {
   }, [activeWorkspace, conversationView, refreshConversations]);
 
   const handleNewChat = useCallback(async () => {
-    // 没有工作区时不允许把对话落到根目录:先确保有一个工作区(必要时默认初始化)。
     let ws = activeWorkspace;
     if (!ws) {
-      const ensured = await clientApi.workspaceEnsureDefault();
-      ws = ensured.path;
-      setActiveWorkspace(ws);
+      const preview = await clientApi.workspacePreviewDefault();
+      ws = preview.path;
     }
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
@@ -763,9 +772,8 @@ function MainApp() {
     // Jump to the same new-task home as sidebar "新建任务", but prefill a GPT/Codex-style scheduled-task draft.
     let ws = activeWorkspace;
     if (!ws) {
-      const ensured = await clientApi.workspaceEnsureDefault();
-      ws = ensured.path;
-      setActiveWorkspace(ws);
+      const preview = await clientApi.workspacePreviewDefault();
+      ws = preview.path;
     }
     const zh = (session?.locale ?? '').toLowerCase().startsWith('zh');
     const template = getAutomationCopy(zh).chatDraftTemplate;
@@ -1123,7 +1131,7 @@ function MainApp() {
                     setConversationView('active');
                     setActiveConversationId(conversationId);
                     setCollectionDrawer(null);
-                    setActivePage('home');
+                    setActivePage('chat');
                     void refreshConversations(draftWorkspacePath, 'active');
                   }}
                   onRenameConversation={handleRenameConversation}
@@ -1132,7 +1140,14 @@ function MainApp() {
                   onOpenTaskDetails={() => openCollectionDrawer('task_details')}
                   workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                   workspaces={workspaces}
-                  onWorkspaceChange={setDraftWorkspacePath}
+                  onWorkspaceChange={async (workspacePath) => {
+                    setDraftWorkspacePath(workspacePath);
+                    if (!activeWorkspace && workspacePath) {
+                      setActiveWorkspace(workspacePath);
+                      const listed = await clientApi.workspaceList();
+                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                    }
+                  }}
                   isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
                   messageTarget={notificationMessageTarget}
                   />
@@ -1342,7 +1357,14 @@ function MainApp() {
                                         ?? draftWorkspacePath
                                       }
                                       workspaces={workspaces}
-                                      onWorkspaceChange={setDraftWorkspacePath}
+                                      onWorkspaceChange={async (workspacePath) => {
+                                        setDraftWorkspacePath(workspacePath);
+                                        if (!activeWorkspace && workspacePath) {
+                                          setActiveWorkspace(workspacePath);
+                                          const listed = await clientApi.workspaceList();
+                                          setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                                        }
+                                      }}
                                       isPageActive={collectionDrawer === 'result'}
                                       messageTarget={notificationMessageTarget}
                                     />
@@ -1439,7 +1461,14 @@ function MainApp() {
                       onClose={() => setConversationDrawerOpen(false)}
                       workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                       workspaces={workspaces}
-                      onWorkspaceChange={setDraftWorkspacePath}
+                      onWorkspaceChange={async (workspacePath) => {
+                    setDraftWorkspacePath(workspacePath);
+                    if (!activeWorkspace && workspacePath) {
+                      setActiveWorkspace(workspacePath);
+                      const listed = await clientApi.workspaceList();
+                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                    }
+                  }}
                       isPageActive={conversationDrawerOpen}
                       messageTarget={notificationMessageTarget}
                     />

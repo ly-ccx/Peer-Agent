@@ -36,7 +36,7 @@ export function HomePage({
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
-  /** 区级工作台右上角能力入口跳到插件页。 */
+  /** 区级摘要跳到侧栏「插件」页。 */
   readonly onOpenTools?: () => void;
   readonly enabled?: boolean;
 }) {
@@ -60,14 +60,14 @@ export function HomePage({
       title="工作台"
       subtitle={
         isGlobal
-          ? 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。跨工作区待办汇总在此。'
-          : 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。当前工作区待办。'
+          ? '有任务时再回来看。现在只需要发出第一条任务。'
+          : '当前工作区还没有待办。先发出一条任务。'
       }
       filter={(item) => item.actionRight !== 'terminal'}
       emptyLabel={
         isGlobal
-          ? '全部工作区都没有需要处理的任务'
-          : '当前工作区没有需要处理的任务'
+          ? '还没有任务。发出第一条后，这里会显示需要你处理的事项。'
+          : '当前工作区还没有任务。发出第一条后会显示在这里。'
       }
       hero
       enabled={enabled}
