@@ -4,12 +4,39 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-## 0.0.5-beta.1 - 2026-08-15
+## 0.0.5-beta.1 - 2026-08-16
 
 ### Notes
 
-- Open the `0.0.5` development line from the published `0.0.4` / `origin/main`.
-- Stamp the in-repo development version to `0.0.5-beta.1`. The current stable release remains `0.0.4`.
+- First published beta on the `0.0.5` line after stable `0.0.4`.
+- Bring Goal Threads onto the global workbench, reuse live chat in the result drawer, and fold primary artifacts into task overview.
+- First-run lands in chat; thinking stays on a single live line.
+
+### Added
+
+- Goal Thread grouping on the global workbench, flattened into a sibling list instead of a nested tree.
+- Result drawer that reuses the live chat surface, with maximize and accept-all on a thread.
+- Foldable primary artifacts on task overview, with hover previews for code diffs and image thumbnails.
+- Single-line live thinking bar that follows the latest tail.
+- Workbench-header entry to open the current workspace's capability panel.
+- Composer `@` mentions for workspace files, without false attachment errors.
+- First-run landing directly in chat.
+
+### Changed
+
+- Result view reuses chat turn rendering and can preview images and HTML.
+- Workbench cards pack by the shortest column; character icons become linear SVGs.
+- Empty home hides the composer when no provider is configured.
+- Accepting a result card refills the list more smoothly.
+
+### Fixed
+
+- Render Markdown image syntax in chat.
+- Keep self-parent Goal Threads grouped on one card.
+- Make `@` picker rows usable, pin folders, and keep highlight around session ids.
+- Enlarge images in the result view and stop clipping result-card corners.
+- Let background tasks schedule the in-conversation browser.
+- Stamp changelog `generatedAt` with a real time so docs-site drift gates stay honest.
 
 ## 0.0.4 - 2026-08-14
 
