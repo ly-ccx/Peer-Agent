@@ -386,7 +386,6 @@ export function ChatSurface({
   onOpenAutomationRun,
   onOpenTaskDetails,
   onClose,
-  hideComposer = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -422,8 +421,6 @@ export function ChatSurface({
   readonly onOpenTaskDetails?: (conversationId: string) => void;
   /** Drawer host close action; surfaces as a close control in ChatHeader. */
   readonly onClose?: () => void;
-  /** Hide the composer (result review first, reveal after 继续追问). */
-  readonly hideComposer?: boolean;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   readonly workspaces?: readonly { path: string; name: string }[];
@@ -2658,7 +2655,7 @@ export function ChatSurface({
           />
         ) : null}
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
-        {!hideComposer && !(showEmptyHome && !hasProvider) ? (
+        {!(showEmptyHome && !hasProvider) ? (
         <>
         <ComposerDraftControls
           conversationId={conversationId}

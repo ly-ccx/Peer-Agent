@@ -34,10 +34,12 @@ test('result view reuses the live chat turn renderer instead of flattening markd
   assert.doesNotMatch(source, /conversation-result-view__msg/);
 });
 
-test('result drawer keeps 确认验收 and routes 还不行 back to the conversation', async () => {
+test('result drawer keeps 确认验收 and shows the conversation composer by default', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
-  assert.match(app, /closeResult: item\.actionRight === 'result_ready'/);
-  assert.match(app, /continuation\.label/);
+  assert.doesNotMatch(app, /revealComposer/);
+  assert.doesNotMatch(app, /hideComposer/);
+  assert.doesNotMatch(app, /resultComposerVisible/);
+  assert.doesNotMatch(app, /getTaskContinuationAction/);
   assert.match(app, /\? '确认验收'/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
@@ -49,18 +51,13 @@ test('result drawer places actions in a separate footer sibling of the body', as
   // 三区：head / body / footer 是抽屉的直接子节点，footer 在 body 之后。
   assert.match(source, /conversation-result-drawer__head/);
   assert.match(source, /conversation-result-drawer__body/);
-  assert.match(
-    source,
-    /<div(?:\s+ref=\{resultBodyRef\})?\s+className="conversation-result-drawer__body">[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<footer className="conversation-result-drawer__footer">/,
-  );
-  assert.match(source, /conversation-result-drawer__scroll-bottom/);
-  assert.match(source, /chat-scroll-bottom-btn/);
-  assert.match(source, /M12 5v14/);
-  assert.match(source, /resultBodyRef/);
-  assert.match(source, /showResultScrollToBottom/);
-  assert.match(source, /scrollResultToBottom/);
+  assert.match(source, /<ChatSurface[\s\S]*?isPageActive=\{collectionDrawer === 'result'\}/);
+  assert.match(source, /<footer className="conversation-result-drawer__footer">/);
+  assert.doesNotMatch(source, /resultBodyRef/);
+  assert.doesNotMatch(source, /showResultScrollToBottom/);
+  assert.doesNotMatch(source, /scrollResultToBottom/);
   assert.match(styles, /\.conversation-result-drawer__footer \{/);
-  assert.match(styles, /\.conversation-result-drawer__scroll-bottom\.chat-scroll-bottom-btn \{/);
+  assert.match(styles, /\.conversation-result-drawer\.conversation-chat-drawer \.conversation-result-drawer__body/);
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
@@ -104,10 +101,10 @@ test('result drawer splits into head, scrolling body and independent footer', as
     styles,
     /\.conversation-result-drawer__body \{[\s\S]*?@apply min-h-0 overflow-y-auto px-5 py-4;[\s\S]*?flex: 1 1 0;/,
   );
-  // footer 是 flex-none 的独立底部区域，并用 margin-top:auto 贴底。
+  // footer 是 flex-none 的独立底部区域，用 margin-top:auto 贴底，动作右对齐（确认验收在右下角）。
   assert.match(
     styles,
-    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
+    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
   );
   // 抽屉本体自己吃满 panel，不再依赖粉碎包裹层撑高度。
   assert.match(

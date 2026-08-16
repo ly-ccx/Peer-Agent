@@ -6,7 +6,7 @@ import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
-import { continueTaskInConversation, getTaskContinuationAction } from './app/taskContinuation';
+import { continueTaskInConversation } from './app/taskContinuation';
 import { HomePage } from './app/pages/HomePage';
 import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
@@ -108,11 +108,6 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
 }
 
-function readSetupModelAutoOpened(settings: Record<string, unknown> | null | undefined): boolean {
-  const onboarding = settings?.onboarding;
-  if (!onboarding || typeof onboarding !== 'object' || Array.isArray(onboarding)) return false;
-  return Boolean((onboarding as { setupModelAutoOpened?: unknown }).setupModelAutoOpened);
-}
 
 function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
   return readGitBranchPrefixFromSettings(settings);
@@ -143,51 +138,8 @@ function MainApp() {
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
   const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
-  const resultBodyRef = useRef<HTMLDivElement | null>(null);
-  const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
-
-  const updateResultScrollButton = useCallback((container: HTMLDivElement | null) => {
-    if (!container) {
-      setShowResultScrollToBottom((previous) => (previous ? false : previous));
-      return;
-    }
-    const overflowed = container.scrollHeight > container.clientHeight + 1;
-    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const next = overflowed && remaining > 64;
-    setShowResultScrollToBottom((previous) => (previous === next ? previous : next));
-  }, []);
-
-  useEffect(() => {
-    if (!resultDrawerItem) {
-      setShowResultScrollToBottom(false);
-      return;
-    }
-    const container = resultBodyRef.current;
-    if (!container) return;
-    container.scrollTop = 0;
-    const onScroll = () => updateResultScrollButton(container);
-    container.addEventListener('scroll', onScroll, { passive: true });
-    const observer =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => updateResultScrollButton(container));
-    observer?.observe(container);
-    if (container.firstElementChild) observer?.observe(container.firstElementChild);
-    updateResultScrollButton(container);
-    return () => {
-      container.removeEventListener('scroll', onScroll);
-      observer?.disconnect();
-    };
-  }, [resultDrawerItem, updateResultScrollButton]);
-
-  const scrollResultToBottom = useCallback(() => {
-    const container = resultBodyRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    setShowResultScrollToBottom(false);
-  }, []);
 
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
     setCollectionDrawer(kind);
@@ -198,6 +150,7 @@ function MainApp() {
     setResultDrawerAcceptTogether(options?.acceptTogether ?? []);
     setCollectionDrawer('result');
     setResultAcceptancePending(null);
+    if (item.conversationId) setActiveConversationId(item.conversationId);
   }, []);
 
   const closeResultDrawer = useCallback(() => {
@@ -282,11 +235,6 @@ function MainApp() {
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [providersReady, setProvidersReady] = useState(false);
-  const [setupModelAutoOpened, setSetupModelAutoOpened] = useState(() =>
-    readSetupModelAutoOpened(clientApi.initialSettings),
-  );
-  const setupModelAutoOpenAttemptedRef = useRef(false);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
@@ -358,8 +306,6 @@ function MainApp() {
       setProviders(await clientApi.llmListProviders());
     } catch {
       // Keep previous providers on transient list failures.
-    } finally {
-      setProvidersReady(true);
     }
   }, []);
 
@@ -541,40 +487,7 @@ function MainApp() {
     setActivePage('settings');
   }, []);
 
-  const markSetupModelAutoOpened = useCallback(() => {
-    if (setupModelAutoOpened) return;
-    setSetupModelAutoOpened(true);
-    void (async () => {
-      try {
-        const current = await clientApi.getSettings();
-        const prev = current?.onboarding;
-        const nextOnboarding = {
-          ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
-          setupModelAutoOpened: true,
-        };
-        await clientApi.updateSettings({ onboarding: nextOnboarding });
-      } catch {
-        // Preference write failure must not block opening settings.
-      }
-    })();
-  }, [setupModelAutoOpened]);
 
-  // Gate A：未配置服务时，首启自动进入 Settings/服务商 一次（可返回；之后只靠空态 CTA）。
-  useEffect(() => {
-    if (!showMainShell || !providersReady) return;
-    if (setupModelAutoOpened || setupModelAutoOpenAttemptedRef.current) return;
-    if (providers.some((p) => p.apiKeyConfigured)) return;
-    setupModelAutoOpenAttemptedRef.current = true;
-    markSetupModelAutoOpened();
-    openSettings('providers');
-  }, [
-    markSetupModelAutoOpened,
-    openSettings,
-    providers,
-    providersReady,
-    setupModelAutoOpened,
-    showMainShell,
-  ]);
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -1220,7 +1133,7 @@ function MainApp() {
                   workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                   workspaces={workspaces}
                   onWorkspaceChange={setDraftWorkspacePath}
-                  isPageActive={activePage === 'chat' && !conversationDrawerOpen}
+                  isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
                   messageTarget={notificationMessageTarget}
                   />
                 </section>
@@ -1305,6 +1218,8 @@ function MainApp() {
                   panelClassName={
                     collectionDrawer === 'result' || collectionDrawer === 'task_details'
                       ? `conversation-result-drawer${
+                          collectionDrawer === 'result' ? ' conversation-chat-drawer' : ''
+                        }${
                           collectionDrawer === 'result' && conversationDrawerOpen
                             ? ' conversation-result-drawer--pushed'
                             : ''
@@ -1384,75 +1299,93 @@ function MainApp() {
                               {isZh ? '关闭' : 'Close'}
                             </button>
                           </div>
-                          <div ref={resultBodyRef} className="conversation-result-drawer__body">
-                            <ConversationResultView item={resultDrawerItem} isZh={isZh} />
-                          </div>
-                          {showResultScrollToBottom ? (
-                            <button
-                              type="button"
-                              className="chat-scroll-bottom-btn conversation-result-drawer__scroll-bottom"
-                              onClick={scrollResultToBottom}
-                              aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
-                              title={isZh ? '滚动到底部' : 'Scroll to bottom'}
-                            >
-                              <svg
-                                aria-hidden="true"
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                          <div className="conversation-result-drawer__body">
+                            {resultDrawerItem.conversationId ? (
+                              <WorkbenchProvider
+                                conversationId={resultDrawerItem.conversationId}
+                                isPageActive
+                                layoutHost="local"
                               >
-                                <path d="M12 5v14" />
-                                <path d="m19 12-7 7-7-7" />
-                              </svg>
-                            </button>
-                          ) : null}
+                                <div className="conversation-chat-drawer-shell">
+                                  <div className="conversation-chat-drawer__body">
+                                    <ChatSurface
+                                      i18n={i18n}
+                                      providers={providers}
+                                      conversationId={resultDrawerItem.conversationId}
+                                      conversationRevision={conversationRevision}
+                                      conversationTitle={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.title
+                                        ?? resultDrawerItem.title
+                                      }
+                                      automationOrigin={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.automationOrigin
+                                        ?? null
+                                      }
+                                      systemInstructions={systemInstructions}
+                                      replyLanguage={replyLanguage}
+                                      gitBranchPrefix={gitBranchPrefix}
+                                      onOpenSettings={() => openSettings('providers')}
+                                      onProvidersRefresh={refreshProviders}
+                                      onConversationUpdated={() => { void refreshConversations(); }}
+                                      onBranch={(id) => {
+                                        setConversationView('active');
+                                        setActiveConversationId(id);
+                                        void refreshConversations(activeWorkspace, 'active');
+                                      }}
+                                      onRenameConversation={handleRenameConversation}
+                                      onArchiveConversation={handleArchiveConversation}
+                                      onOpenAutomationRun={openAutomationRun}
+                                      onOpenTaskDetails={() => openCollectionDrawer('task_details')}
+                                      workspacePath={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.workspacePath
+                                        ?? activeWorkspace
+                                        ?? draftWorkspacePath
+                                      }
+                                      workspaces={workspaces}
+                                      onWorkspaceChange={setDraftWorkspacePath}
+                                      isPageActive={collectionDrawer === 'result'}
+                                      messageTarget={notificationMessageTarget}
+                                    />
+                                  </div>
+                                  <WorkbenchPanel
+                                    isZh={isZh}
+                                    workspacePath={
+                                      conversations.find((c) => c.id === resultDrawerItem.conversationId)?.workspacePath
+                                      ?? activeWorkspace
+                                    }
+                                  />
+                                </div>
+                              </WorkbenchProvider>
+                            ) : (
+                              <ConversationResultView item={resultDrawerItem} isZh={isZh} />
+                            )}
+                          </div>
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;
                             const canAccept =
                               item.source === 'goal_plan' && Boolean(item.taskId);
-                            const continuation = getTaskContinuationAction(item, isZh);
-                            if (!continuation && !canAccept) return null;
+                            if (!canAccept) return null;
                             return (
                               <footer className="conversation-result-drawer__footer">
-                                {continuation ? (
-                                  <div className="conversation-result-view__continue">
-                                    <button
-                                      type="button"
-                                      className="task-overview-btn task-overview-btn--secondary"
-                                      onClick={() => handleContinueTask(continuation.conversationId, {
-                                        closeResult: item.actionRight === 'result_ready',
-                                      })}
-                                    >
-                                      {continuation.label}
-                                    </button>
-                                  </div>
-                                ) : null}
-                                {canAccept ? (
-                                  <button
-                                    type="button"
-                                    className="task-overview-btn task-overview-btn--primary"
-                                    disabled={Boolean(resultAcceptancePending)}
-                                    onClick={() => {
-                                      if (resultAcceptancePending) return;
-                                      setResultAcceptancePending(item);
-                                      requestClose();
-                                    }}
-                                  >
-                                    {resultAcceptancePending
-                                      ? isZh
-                                        ? '正在验收…'
-                                        : 'Accepting…'
-                                      : isZh
-                                        ? '确认验收'
-                                        : 'Accept result'}
-                                  </button>
-                                ) : null}
+                                <button
+                                  type="button"
+                                  className="task-overview-btn task-overview-btn--primary"
+                                  disabled={Boolean(resultAcceptancePending)}
+                                  onClick={() => {
+                                    if (resultAcceptancePending) return;
+                                    setResultAcceptancePending(item);
+                                    requestClose();
+                                  }}
+                                >
+                                  {resultAcceptancePending
+                                    ? isZh
+                                      ? '正在验收…'
+                                      : 'Accepting…'
+                                    : isZh
+                                      ? '确认验收'
+                                      : 'Accept result'}
+                                </button>
                               </footer>
                             );
                           })()}

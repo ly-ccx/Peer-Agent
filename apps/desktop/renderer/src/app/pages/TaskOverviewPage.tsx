@@ -32,7 +32,7 @@ import { resultCardWeight } from './workStreamLayout';
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
  * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
- * 主按钮「查看结果」。确认验收和还不行只出现在看过结果之后。
+ * 主按钮「查看结果」。确认验收只出现在看过结果之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
