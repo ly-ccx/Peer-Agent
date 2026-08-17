@@ -1,6 +1,6 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CSSProperties, ReactElement, ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
@@ -23,7 +23,7 @@ import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
-import { buildGoalPlanTreeRows, goalPlanTreeDepth } from './goal/goalPlanTree';
+import { orderGoalPlansByLineage } from './goal/goalPlanOrder';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -2068,13 +2068,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         childPlans: childrenByParentId.get(plan.planId) ?? EMPTY_CHILD_PLANS,
       });
     }
-    const listPlanRows = mainPlan
-      ? buildGoalPlanTreeRows(listPlans).map(({ plan }) => ({
-          plan,
-          depth: goalPlanTreeDepth(plan, plansById),
-        }))
-      : buildGoalPlanTreeRows(listPlans);
-    return { activePlan, mainPlan, listPlans, listPlanRows, relations };
+    // 历史清单按父子链推导顺序，但渲染为完全对齐的平铺列表，不做层级缩进。
+    const orderedListPlans = orderGoalPlansByLineage(listPlans);
+    return { activePlan, mainPlan, listPlans, orderedListPlans, relations };
   }, [plans]);
 
   const navigateToPlan = useCallback((planId: string, taskId?: string) => {
@@ -2097,7 +2093,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   }
   // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
   const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
-  const { activePlan, mainPlan, listPlans, listPlanRows } = planViewModel;
+  const { activePlan, mainPlan, listPlans, orderedListPlans } = planViewModel;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
@@ -2244,27 +2240,20 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                 ? `目标计划 ${listPlans.length}`
                 : `Plans ${listPlans.length}`}
           </div>
-          {listPlanRows.map(({ plan, depth }) => (
-            <div
-              className="goal-plan-tree-row"
-              data-goal-tree-depth={depth}
+          {orderedListPlans.map((plan) => (
+            <PlanCard
               key={plan.planId}
-              style={{ '--goal-tree-depth': depth } as CSSProperties}
-            >
-              {depth > 0 ? <span className="goal-plan-tree-branch" aria-hidden="true" /> : null}
-              <PlanCard
-                plan={plan}
-                defaultExpanded={shouldDefaultExpandGoalPlan(plan)}
-                isZh={isZh}
-                isStreaming={isStreaming}
-                busy={effectiveBusyPlanId === plan.planId}
-                {...relationFor(plan)}
-                onNavigateToPlan={navigateToPlan}
-                onNextAction={handleNextAction}
-                onRunnerControl={controlRunner}
-                onManualConfirm={recordManualDodConfirmation}
-              />
-            </div>
+              plan={plan}
+              defaultExpanded={shouldDefaultExpandGoalPlan(plan)}
+              isZh={isZh}
+              isStreaming={isStreaming}
+              busy={effectiveBusyPlanId === plan.planId}
+              {...relationFor(plan)}
+              onNavigateToPlan={navigateToPlan}
+              onNextAction={handleNextAction}
+              onRunnerControl={controlRunner}
+              onManualConfirm={recordManualDodConfirmation}
+            />
           ))}
         </div>
       ) : null}

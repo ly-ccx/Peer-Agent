@@ -988,27 +988,6 @@
   gap: 6px;
 }
 
-.goal-plan-tree-row {
-  position: relative;
-  margin-left: calc(min(var(--goal-tree-depth), 4) * 16px);
-}
-
-.goal-plan-tree-row > .goal-plan-card {
-  position: relative;
-  z-index: 1;
-}
-
-.goal-plan-tree-branch {
-  position: absolute;
-  top: -6px;
-  bottom: 50%;
-  left: -10px;
-  width: 9px;
-  border-left: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
-  border-bottom-left-radius: 6px;
-}
-
 .goal-plan-history-title {
   font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
