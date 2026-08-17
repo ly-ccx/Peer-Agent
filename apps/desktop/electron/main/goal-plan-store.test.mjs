@@ -709,6 +709,34 @@ test('listPlanDetailsByWorkspace 先按索引工作区筛选再返回完整计�
   assert.equal(details[0].tasks.length, 2);
 });
 
+test('listPlanDetails / listPlanDetailsByWorkspace 在 hydrate 前按索引截断', () => {
+  const older = store.createPlan({
+    ...draftWithTasks(),
+    title: '较旧',
+    originWorkspacePath: '/tmp/workspaces/alpha',
+  });
+  const newer = store.createPlan({
+    ...draftWithTasks(),
+    title: '较新',
+    originWorkspacePath: '/tmp/workspaces/alpha',
+  });
+  store.createPlan({
+    ...draftWithTasks(),
+    title: '别的工作区',
+    originWorkspacePath: '/tmp/workspaces/beta',
+  });
+
+  const limited = store.listPlanDetails({
+    candidateFilter: (meta) => meta.originWorkspacePath?.includes('alpha'),
+    limit: 1,
+  });
+  assert.deepEqual(limited.map((plan) => plan.planId), [newer.planId]);
+  assert.notEqual(limited[0].planId, older.planId);
+
+  const workspaceLimited = store.listPlanDetailsByWorkspace('/tmp/workspaces/alpha', { limit: 1 });
+  assert.deepEqual(workspaceLimited.map((plan) => plan.planId), [newer.planId]);
+});
+
 test('listPlanDetailsByWorkspace 首次读取补齐旧索引的工作区字段', () => {
   const alpha = store.createPlan({
     ...draftWithTasks(),

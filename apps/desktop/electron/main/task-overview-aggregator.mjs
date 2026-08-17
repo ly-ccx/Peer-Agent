@@ -747,7 +747,8 @@ export function toAutomationSnapshot(definition, latestRun) {
  * - 默认排除 cancelled/failed，除非 includeTerminal（历史页）。
  * - completed：
  *   - 已验收 / 存量祖父化 → 仅 includeTerminal 时纳入（历史）
- *   - 功能上线后未验收 → 工作台纳入（result_ready），不限条数；历史页也纳入（列表可再滤 terminal）
+ *   - 已验收但真实交回中 / 交回失败 → 工作台仍纳入
+ *   - 功能上线后未验收 → 工作台纳入（result_ready），不限条数；历史页不 hydrate
  * - 其他活跃状态要求在 activeWithinMs 窗口内（activeWithinMs<=0 表示不限时）。
  * - workspacePath 过滤（target/origin 任一匹配）。
  * - 展示名固定使用 plan.title（核对后的 plan 名字）。
@@ -771,14 +772,9 @@ export function isGoalPlanInScope(plan, options = {}) {
   // cancelled/failed：只在历史页
   if (isHistoryTerminal && !includeTerminal) return false;
 
-  // 已验收且已交回：工作台不展示。交回中 / 交回失败 / 刚验收待交回仍留在首页。
+  // 已验收：工作台只留真实交回中 / 交回失败。仅有 deliveryBinding 不算正在交回。
   if (isCompleted && isResultAccepted && !includeTerminal) {
-    const handoffStatus = plan.deliveryHandoff?.status;
-    const pendingHandoff = handoffStatus === 'delivering'
-      || handoffStatus === 'stopped'
-      || handoffStatus === 'idle'
-      || (plan.deliveryBinding && handoffStatus !== 'delivered');
-    if (!pendingHandoff) return false;
+    if (!hasPendingDeliveryHandoff(plan)) return false;
   }
 
   const wanted = normalizeWorkspacePath(workspacePath);
@@ -803,6 +799,17 @@ export function isGoalPlanInScope(plan, options = {}) {
   }
 
   return true;
+}
+
+/**
+ * 已验收后是否仍有真实交回进行中 / 交回失败。
+ * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在交回。
+ */
+export function hasPendingDeliveryHandoff(plan) {
+  const handoffStatus = plan?.deliveryHandoff?.status;
+  return handoffStatus === 'delivering'
+    || handoffStatus === 'idle'
+    || handoffStatus === 'stopped';
 }
 
 /**
@@ -945,7 +952,8 @@ export function isGoalPlanMetaCandidate(plan, options = {}) {
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (!status) return false;
   if (status === GOAL_COMPLETED_STATUS) {
-    return !isPlanResultAccepted(plan) || includeTerminal;
+    if (!isPlanResultAccepted(plan)) return !includeTerminal;
+    return includeTerminal || hasPendingDeliveryHandoff(plan);
   }
   if (GOAL_HISTORY_TERMINAL_STATUSES.has(status)) return includeTerminal;
   return true;
@@ -1089,6 +1097,9 @@ export function createTaskOverviewAggregator({
     let plans = [];
     try {
       const candidateFilter = (meta) => isGoalPlanMetaCandidate(meta, scope);
+      const hydrateOptions = includeTerminal
+        ? { candidateFilter, limit }
+        : { candidateFilter };
       if (
         conversationId &&
         typeof goalPlanStore.listPlanDetailsByConversation === 'function'
@@ -1098,18 +1109,16 @@ export function createTaskOverviewAggregator({
         workspacePath &&
         typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
       ) {
-        plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, {
-          candidateFilter,
-        }) ?? [];
+        plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, hydrateOptions) ?? [];
       } else {
         // 总工作台也必须先用 index meta 筛候选，禁止为历史 completed 全量 hydrate。
-        plans = goalPlanStore.listPlanDetails({ candidateFilter }) ?? [];
+        plans = goalPlanStore.listPlanDetails(hydrateOptions) ?? [];
       }
     } catch {
       plans = [];
     }
     plans = expandGoalThreadRelatives(goalPlanStore, plans, {
-      includeConversationSiblings: !conversationId,
+      includeConversationSiblings: !conversationId && !includeTerminal,
     });
     const evidenceRefs = collectPlanEvidenceRefs(plans);
     const evidenceIndex = typeof goalPlanStore.findEvidenceIndexRecords === 'function'

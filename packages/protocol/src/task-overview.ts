@@ -457,6 +457,8 @@ export function projectConversation(
  * 13. runner paused → paused
  * 14. runner idle 且 plan executing → paused（异常态，提示诊断）
  * 16. plan completed（已验收）/cancelled/failed → terminal
+ *      已验收但交回仍在进行（delivering / idle）或失败（stopped）时
+ *      暂不进终态；仅有 deliveryRoute 不算正在交回。
  *
  * 注意 rule 14 在 rule 8 之前不会命中（executing 已被 rule 8 拦截），
  * 因此实现时将 rule 14 放在 rule 8 之后、仅当 runner 显式 idle 时生效。
@@ -596,11 +598,8 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
         actionLabel: '查看结果',
       };
     }
-    if (
-      deliveryHandoffStatus === 'delivering'
-      || deliveryHandoffStatus === 'idle'
-      || Boolean(snapshot.deliveryRoute)
-    ) {
+    // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
+    if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
       return {
         actionRight: 'result_ready',
         nextAction: 'none',

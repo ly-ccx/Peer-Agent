@@ -2081,6 +2081,8 @@ export function createGoalPlanStore({
       resultAcceptance: plan.resultAcceptance ?? null,
       resultAcceptedAt: plan.resultAcceptedAt ?? null,
       resultAcceptedBy: plan.resultAcceptedBy ?? null,
+      // 候选筛要在 hydrate 前看见真实交回态，避免交回中的已验收被提前丢掉。
+      deliveryHandoff: plan.deliveryHandoff ?? null,
     };
   }
 
@@ -2214,22 +2216,29 @@ export function createGoalPlanStore({
     return { ...plan, progress: aggregateProgress(plan.tasks) };
   }
 
-  function listPlanDetails(options = {}) {
+  function selectPlanMetas(metas, options = {}) {
     const candidateFilter = typeof options?.candidateFilter === 'function'
       ? options.candidateFilter
       : null;
-    const metas = listPlans();
-    const selected = candidateFilter
-      ? metas.filter((meta) => {
-          try {
-            return candidateFilter(meta) === true;
-          } catch {
-            // 筛选器异常时宁可多 hydrate，也不能把工作台任务漏掉。
-            return true;
-          }
-        })
-      : metas;
-    return selected.map(hydratePlanMeta).filter(Boolean);
+    const limit = Number.isFinite(options?.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : 0;
+    const selected = [];
+    for (const meta of metas) {
+      if (candidateFilter) {
+        try {
+          if (candidateFilter(meta) !== true) continue;
+        } catch {
+          // 筛选器异常时宁可多 hydrate，也不能把工作台任务漏掉。
+        }
+      }
+      selected.push(meta);
+    }
+    return limit > 0 ? selected.slice(0, limit) : selected;
+  }
+
+  function listPlanDetails(options = {}) {
+    return selectPlanMetas(listPlans(), options).map(hydratePlanMeta).filter(Boolean);
   }
 
   /**
@@ -2247,9 +2256,13 @@ export function createGoalPlanStore({
     const candidateFilter = typeof options?.candidateFilter === 'function'
       ? options.candidateFilter
       : null;
+    const limit = Number.isFinite(options?.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : 0;
 
     const index = readIndex();
     let indexChanged = false;
+    const indexedMatches = [];
     const details = [];
     const nextIndex = index.map((rawMeta) => {
       const meta = normalizePlan(rawMeta);
@@ -2261,22 +2274,26 @@ export function createGoalPlanStore({
         meta.originWorkspacePath ?? meta.targetWorkspacePath,
       );
       if (hasWorkspaceIndex && indexedWorkspacePath !== wanted) return rawMeta;
-      if (hasWorkspaceIndex && candidateFilter) {
+      if (candidateFilter) {
         try {
           if (candidateFilter(meta) !== true) return rawMeta;
         } catch {
-          // 筛选器异常时继续 hydrate，避免漏掉工作区任务。
+          // 筛选器异常时继续，避免漏掉工作区任务。
         }
       }
 
+      if (hasWorkspaceIndex) {
+        indexedMatches.push(meta);
+        return rawMeta;
+      }
+
+      // 旧索引没有工作区字段时才回退读详情，用来补齐并判断归属。
       const plan = hydratePlanMeta(meta);
       if (!plan) return rawMeta;
       const planWorkspacePath = normalizePath(
         plan.originWorkspacePath ?? plan.targetWorkspacePath,
       );
       if (planWorkspacePath === wanted) details.push(plan);
-
-      if (hasWorkspaceIndex) return rawMeta;
       indexChanged = true;
       return {
         ...rawMeta,
@@ -2284,6 +2301,20 @@ export function createGoalPlanStore({
         targetWorkspacePath: plan.targetWorkspacePath ?? null,
       };
     });
+
+    indexedMatches.sort((a, b) =>
+      String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+    );
+    const remaining = limit > 0 ? Math.max(0, limit - details.length) : indexedMatches.length;
+    const selectedIndexed = limit > 0 ? indexedMatches.slice(0, remaining) : indexedMatches;
+    for (const meta of selectedIndexed) {
+      const plan = hydratePlanMeta(meta);
+      if (!plan) continue;
+      const planWorkspacePath = normalizePath(
+        plan.originWorkspacePath ?? plan.targetWorkspacePath,
+      );
+      if (planWorkspacePath === wanted) details.push(plan);
+    }
 
     // 旧索引只在首次按工作区读取时补齐一次，后续切换即可直接跳过无关详情文件。
     if (indexChanged) writeJsonl(indexFile, nextIndex);

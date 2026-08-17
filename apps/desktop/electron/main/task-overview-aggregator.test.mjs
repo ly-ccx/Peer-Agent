@@ -19,6 +19,7 @@ import {
   toAutomationSnapshot,
   toGoalPlanSnapshot,
   isGoalPlanInScope,
+  isGoalPlanMetaCandidate,
   isGoalThreadContextPlan,
   isPlanResultAccepted,
   RESULT_ACCEPTANCE_REQUIRED_SINCE,
@@ -1311,6 +1312,103 @@ test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收�
     ),
     false,
   );
+});
+
+test('已验收仅有 deliveryBinding 不进工作台，真实交回中仍进工作台', () => {
+  const acceptedOnly = {
+    planId: 'accepted-route-only',
+    status: 'completed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.5',
+      executionIsolation: 'worktree',
+    },
+  };
+  const delivering = {
+    ...acceptedOnly,
+    planId: 'accepted-delivering',
+    deliveryHandoff: { status: 'delivering', updatedAt: POST_CUTOFF },
+  };
+
+  assert.equal(isGoalPlanInScope(acceptedOnly, { nowMs: NOW }), false);
+  assert.equal(isGoalPlanInScope(acceptedOnly, { nowMs: NOW, includeTerminal: true }), true);
+  assert.equal(isGoalPlanMetaCandidate(acceptedOnly, { includeTerminal: false }), false);
+  assert.equal(isGoalPlanMetaCandidate(acceptedOnly, { includeTerminal: true }), true);
+
+  assert.equal(isGoalPlanInScope(delivering, { nowMs: NOW }), true);
+  assert.equal(isGoalPlanMetaCandidate(delivering, { includeTerminal: false }), true);
+});
+
+test('历史 includeTerminal 不把未验收 completed 当作 hydrate 候选', () => {
+  const unaccepted = {
+    planId: 'unaccepted-done',
+    status: 'completed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+  };
+  const accepted = {
+    ...unaccepted,
+    planId: 'accepted-done',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+  };
+  const failed = {
+    planId: 'failed-done',
+    status: 'failed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+  };
+
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: false }), true);
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: true }), false);
+  assert.equal(isGoalPlanMetaCandidate(accepted, { includeTerminal: true }), true);
+  assert.equal(isGoalPlanMetaCandidate(failed, { includeTerminal: true }), true);
+});
+
+test('历史列表先把 limit 传给详情读取，且不展开同会话亲戚', () => {
+  const calls = [];
+  const siblingCalls = [];
+  const recentAccepted = {
+    planId: 'accepted-recent',
+    status: 'completed',
+    title: '最近验收',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+    conversationId: 'conv-hist',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+  };
+  const goalPlanStore = {
+    listPlanDetails: (options) => {
+      calls.push({ kind: 'all', limit: options?.limit, filter: typeof options?.candidateFilter });
+      return [recentAccepted];
+    },
+    listPlanDetailsByConversation: (conversationId) => {
+      siblingCalls.push(conversationId);
+      return [{
+        planId: 'sibling-old',
+        status: 'completed',
+        title: '同会话旧计划',
+        conversationId,
+        updatedAt: STALE,
+        targetWorkspacePath: '/x/peer_agent',
+        resultAcceptance: { acceptedAt: STALE, acceptedBy: 'user' },
+      }];
+    },
+    getPlan: () => null,
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore,
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  const items = agg.listTaskOverview({ includeTerminal: true, limit: 12 });
+  assert.deepEqual(calls, [{ kind: 'all', limit: 12, filter: 'function' }]);
+  assert.deepEqual(siblingCalls, []);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].taskId, 'accepted-recent');
 });
 
 test('workspace overview 使用按工作区读取接口，全局 overview 传入 candidateFilter', () => {

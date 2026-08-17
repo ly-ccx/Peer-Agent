@@ -282,6 +282,16 @@ test('rule 16a: completed 已验收 → terminal', () => {
   assert.equal(item.statusLabel, '已验收');
 });
 
+test('accepted with only deliveryRoute is terminal, not delivering', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: true,
+    deliveryRoute: '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.5',
+  }));
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '已验收');
+});
+
 test('accepted but still delivering stays visible as result_ready', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
