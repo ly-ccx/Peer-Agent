@@ -119,6 +119,10 @@ Before implementing a non-trivial change, classify it:
 - B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces. Explain the architecture impact.
 - C-level: local UI, styles, copy, tests, or small bug fixes. Keep it scoped, but upgrade to A/B if it touches capability, permission, Evidence, protocol, or prompt boundaries.
 
+## Git Sync
+
+Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
+
 ## Implementation Expectations
 
 - Prefer existing protocol types, reducers, registries, providers, and stores.
