@@ -807,7 +807,9 @@ export function ChatSurface({
     setIsThreadAtBottom((previous) => (previous ? previous : true));
     saveThreadScrollSnapshot(conversationIdRef.current, container);
     updateCurrentTurnContext(container);
-  }, [saveThreadScrollSnapshot, updateCurrentTurnContext]);
+    // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
+    updateVirtualViewport();
+  }, [saveThreadScrollSnapshot, updateCurrentTurnContext, updateVirtualViewport]);
 
   const threadScrollCoalescerRef = useRef(createFrameCoalescer({
     request: (callback) => requestAnimationFrame(callback),
