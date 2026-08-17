@@ -1627,6 +1627,8 @@
   flex: 1 1 0;
   align-self: stretch;
   max-height: 100%;
+  /* 与会话抽屉同一条 Overlay 链路：覆盖基座直角，只露出左侧圆角。 */
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
   transition:
     translate var(--za-motion-medium) var(--za-ease-decelerate),
     filter var(--za-motion-medium) var(--za-ease-decelerate);
@@ -1679,6 +1681,8 @@
   --pa-drawer-width: min(1320px, 96vw);
   @apply flex h-full min-h-0 flex-col;
   background: var(--za-surface-0);
+  /* Overlay drawer 基座强制直角贴边；会话抽屉只恢复左侧可见圆角，右侧仍贴窗。 */
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
 }
 
 /* Ant Design 风格多级 Drawer：父级保留挂载并左推，子级独立覆盖右侧。 */

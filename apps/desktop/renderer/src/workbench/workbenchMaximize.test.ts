@@ -35,4 +35,15 @@ describe('workbench maximize behavior', () => {
     assert.match(drawerStyles, /conversation-chat-drawer__body[\s\S]*display:\s*none/);
     assert.match(drawerStyles, /\.workbench-panel--maximized[\s\S]*flex:\s*1 1 100%/);
   });
+
+  it('keeps a visible left radius on the conversation drawer outline', () => {
+    assert.match(
+      drawerStyles,
+      /\.conversation-chat-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+    );
+    assert.match(
+      drawerStyles,
+      /\.conversation-result-drawer \{[\s\S]*?border-radius:\s*var\(--radius-xl\) 0 0 var\(--radius-xl\);/,
+    );
+  });
 });
