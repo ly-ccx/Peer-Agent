@@ -5,6 +5,7 @@ import {
   basename,
   detectFileKind,
   formatJsonForPreview,
+  highlightLanguageForPath,
   type WorkbenchFileKind,
 } from '../file-preview/fileTypes';
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
@@ -311,6 +312,10 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
   }, [active, mode, isImage, image.loading, image.result, image.error, loadImage]);
 
   const fileName = basename(fileTarget.absPath);
+  const highlightLanguage = useMemo(
+    () => highlightLanguageForPath(fileTarget.absPath),
+    [fileTarget.absPath],
+  );
   const statusBadge = mode === 'diff'
     ? (diff.result?.ok ? statusLabel(diff.result.status, isZh) : '')
     : modeBadge(mode, kind, isZh);
@@ -456,6 +461,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
         ) : null}
         <SourceViewer
           content={content.result.content}
+          language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
       </>
@@ -526,6 +532,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
           <SourceViewer
             className="workbench-json-preview"
             content={formatted ?? content.result.content}
+            language={highlightLanguage}
             emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
           />
           {!formatted && content.result.content !== '' ? (
@@ -542,6 +549,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
         {resolved}
         <SourceViewer
           content={content.result.content}
+          language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
       </>

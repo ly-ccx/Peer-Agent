@@ -82,3 +82,67 @@ export function formatJsonForPreview(content: string): string | null {
     return null;
   }
 }
+
+/**
+ * 把文件扩展名映射到 highlight.js 语言 id / 已注册别名。
+ * 未覆盖的扩展名返回 null，调用方应回退纯文本。
+ */
+const HIGHLIGHT_LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  css: 'css',
+  go: 'go',
+  graphql: 'plaintext',
+  gd: 'plaintext',
+  html: 'html',
+  htm: 'html',
+  ini: 'ini',
+  java: 'java',
+  js: 'javascript',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  json: 'json',
+  jsonc: 'json',
+  jsonl: 'json',
+  kt: 'kotlin',
+  less: 'less',
+  lua: 'lua',
+  md: 'markdown',
+  markdown: 'markdown',
+  mdown: 'markdown',
+  mkd: 'markdown',
+  php: 'php',
+  py: 'python',
+  rb: 'ruby',
+  rs: 'rust',
+  scss: 'scss',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  sql: 'sql',
+  swift: 'swift',
+  toml: 'ini',
+  ts: 'typescript',
+  tsx: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  vue: 'xml',
+  xml: 'xml',
+  svg: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  env: 'ini',
+  txt: 'plaintext',
+  log: 'plaintext',
+};
+
+export function highlightLanguageForPath(path: string): string | null {
+  const ext = extension(path);
+  if (!ext) return null;
+  return HIGHLIGHT_LANGUAGE_BY_EXTENSION[ext] ?? null;
+}

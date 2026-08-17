@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { basename, defaultModeForKind, detectFileKind, extension, formatJsonForPreview } from './fileTypes.ts';
+import { basename, defaultModeForKind, detectFileKind, extension, formatJsonForPreview, highlightLanguageForPath } from './fileTypes.ts';
 
 test('detects previewable file kinds from common extensions', () => {
   assert.equal(detectFileKind('/tmp/readme.md'), 'markdown');
@@ -29,6 +29,16 @@ test('extracts portable path names and extensions', () => {
   assert.equal(basename('C:\\repo\\src\\index.ts'), 'index.ts');
   assert.equal(extension('/Users/demo/.gitignore'), '');
   assert.equal(extension('/Users/demo/project/archive.tar.gz'), 'gz');
+});
+
+test('maps common source extensions to highlight languages', () => {
+  assert.equal(highlightLanguageForPath('/tmp/MergedStartDemo.jsx'), 'javascript');
+  assert.equal(highlightLanguageForPath('/tmp/app.tsx'), 'typescript');
+  assert.equal(highlightLanguageForPath('/tmp/index.ts'), 'typescript');
+  assert.equal(highlightLanguageForPath('/tmp/package.json'), 'json');
+  assert.equal(highlightLanguageForPath('/tmp/notes.txt'), 'plaintext');
+  assert.equal(highlightLanguageForPath('/tmp/unknown.xyz'), null);
+  assert.equal(highlightLanguageForPath('/tmp/Makefile'), null);
 });
 
 test('formats valid json and keeps invalid json unavailable', () => {
