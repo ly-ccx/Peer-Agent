@@ -211,6 +211,8 @@ const INVOKE_CHANNELS = Object.freeze([
   'settings:get',
   'settings:import',
   'settings:update',
+  'shell:editors:list',
+  'shell:editors:set-default',
   'shell:open-path',
   'shell:permissions:add',
   'shell:permissions:list',

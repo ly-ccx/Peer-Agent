@@ -33,6 +33,8 @@ const unavailableApi: ClientApi = {
   denyLocalAction: unavailableMethod('denyLocalAction'),
   executeClientToolCall: unavailableMethod('executeClientToolCall'),
   openPath: unavailableMethod('openPath'),
+  listEditors: unavailableMethod('listEditors'),
+  setDefaultEditor: unavailableMethod('setDefaultEditor'),
   gitDiff: unavailableMethod('gitDiff'),
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),

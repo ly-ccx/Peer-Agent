@@ -58,7 +58,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   approveLocalAction: (toolCallId, options) => ipcRenderer.invoke('permission:approve', { toolCallId, ...(options || {}) }),
   denyLocalAction: (toolCallId) => ipcRenderer.invoke('permission:deny', { toolCallId }),
   executeClientToolCall: (call, grant) => ipcRenderer.invoke('client-tool:execute', { call, grant }),
-  openPath: (absPath, workspaceRoot) => ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot }),
+  openPath: (absPath, workspaceRoot, options) =>
+    ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot, ...(options || {}) }),
+  listEditors: () => ipcRenderer.invoke('shell:editors:list'),
+  setDefaultEditor: (editorId) => ipcRenderer.invoke('shell:editors:set-default', { editorId }),
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),

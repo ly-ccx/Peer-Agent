@@ -381,12 +381,45 @@ export interface BootstrapPreloadApi {
   readonly openPath: (
     absPath: string,
     workspaceRoot?: string,
+    options?: {
+      /** 'self'（默认）打开 absPath 本身；'parent' 打开其所在目录。 */
+      readonly target?: 'self' | 'parent';
+      /** 'auto'（默认）系统默认程序；'editor' 指定编辑器；'reveal' 在文件管理器中定位。 */
+      readonly mode?: 'auto' | 'editor' | 'reveal';
+      /** mode='editor' 时生效；省略则由主进程用记住的默认编辑器。 */
+      readonly editorId?: string;
+    },
   ) => Promise<{
     readonly ok: boolean;
     readonly fallback?: string;
     readonly reason?: string;
     readonly message?: string;
+    readonly kind?: 'file' | 'directory';
+    readonly mode?: 'editor' | 'reveal';
+    readonly editorId?: string;
+    readonly path?: string;
   }>;
+  /**
+   * 本机可用的编辑器候选 + 当前生效的默认值。
+   * - defaultEditorId 一定是 editors 中真实存在的项；若记住的编辑器已被卸载则回退候选首项。
+   * - stale=true 表示此前记住的 stored 已不可用，UI 可据此提示。
+   */
+  readonly listEditors: () => Promise<{
+    readonly editors: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly bundleId?: string | null;
+      /** 本机 App 真实图标（data URL）；读失败为 null，UI 不得用字符冒充。 */
+      readonly iconDataUrl?: string | null;
+    }[];
+    readonly defaultEditorId: string | null;
+    readonly stored: string | null;
+    readonly stale: boolean;
+  }>;
+  /** 记住默认编辑器；只接受本机真实可用的 editorId。 */
+  readonly setDefaultEditor: (
+    editorId: string,
+  ) => Promise<{ readonly ok: boolean; readonly editorId?: string; readonly reason?: string }>;
   /**
    * 计算并返回指定文件的 git diff（点击聊天消息中的文件路径时，在 Workbench 的 Diff 视图展示）。
    * - absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录推断）。

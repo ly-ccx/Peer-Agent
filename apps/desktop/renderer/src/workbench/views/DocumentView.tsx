@@ -10,6 +10,12 @@ import {
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
 import { ResourceTabStrip } from '../ResourceTabStrip';
+import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
+import {
+  buildOpenTargetMenu,
+  type InstalledEditor,
+  type OpenTargetAction,
+} from '../openTargetMenu';
 import {
   activateDocumentTab,
   closeDocumentTab,
@@ -309,8 +315,58 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
     ? (diff.result?.ok ? statusLabel(diff.result.status, isZh) : '')
     : modeBadge(mode, kind, isZh);
 
+  const [editors, setEditors] = useState<readonly InstalledEditor[]>([]);
+  const [defaultEditorId, setDefaultEditorId] = useState<string | null>(null);
+
+  const refreshEditors = useCallback(async () => {
+    try {
+      const listed = await clientApi.listEditors();
+      setEditors(listed.editors);
+      setDefaultEditorId(listed.defaultEditorId);
+    } catch {
+      setEditors([]);
+      setDefaultEditorId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshEditors();
+  }, [refreshEditors]);
+
+  const openTargetMenu = useMemo(
+    () => buildOpenTargetMenu({ editors, defaultEditorId, isZh }),
+    [defaultEditorId, editors, isZh],
+  );
+
   const openInEditor = () => {
-    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot);
+    const editorId = openTargetMenu.defaultEditorId;
+    void clientApi.openPath(
+      fileTarget.absPath,
+      fileTarget.workspaceRoot,
+      editorId ? { mode: 'editor', editorId } : undefined,
+    );
+  };
+
+  const handleOpenTarget = (action: OpenTargetAction) => {
+    if (action.kind === 'reveal') {
+      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, { mode: 'reveal' });
+      return;
+    }
+    if (action.kind === 'open-parent') {
+      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
+        mode: 'editor',
+        target: 'parent',
+        editorId: action.editorId,
+      });
+      return;
+    }
+    void clientApi.setDefaultEditor(action.editorId).then((result) => {
+      if (result.ok) setDefaultEditorId(action.editorId);
+    });
+    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
+      mode: 'editor',
+      editorId: action.editorId,
+    });
   };
 
   const refresh = () => {
@@ -624,14 +680,13 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
           >
             {isZh ? '刷新' : 'Refresh'}
           </button>
-          <button
-            type="button"
-            className="workbench-diff-btn"
-            onClick={openInEditor}
-            title={isZh ? '在编辑器中打开' : 'Open in editor'}
-          >
-            {isZh ? '在编辑器中打开' : 'Open in editor'}
-          </button>
+          <OpenTargetSplitButton
+            isZh={isZh}
+            defaultEditorName={openTargetMenu.defaultEditorName}
+            defaultEditorIconDataUrl={openTargetMenu.defaultEditorIconDataUrl}
+            items={openTargetMenu.items}
+            onAction={handleOpenTarget}
+          />
         </div>
       </div>
 

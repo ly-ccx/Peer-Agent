@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fs
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 
@@ -187,6 +187,9 @@ import { createConversationSessionApplicationService } from './conversation-sess
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
+import { createEditorLaunchService } from './editor-launch-service.mjs';
+import { createEditorPreferenceService } from './editor-preference-service.mjs';
+import { resolveMacAppIconPath } from './mac-app-icon.mjs';
 import { createPasswordVaultFillApplicationService } from './password-vault-fill-application-service.mjs';
 import { createWorkspaceApplicationService } from './workspace-application-service.mjs';
 import {
@@ -1912,9 +1915,72 @@ const conversationSessionApplicationService = createConversationSessionApplicati
   },
 });
 
+const editorLaunchService = createEditorLaunchService({
+  spawnDetached: (command, args) =>
+    new Promise((resolve) => {
+      try {
+        const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+        child.once('error', (error) => resolve({ ok: false, message: error?.message || '' }));
+        child.unref();
+        // 编辑器是长驻进程：spawn 成功即视为已拉起，不等待其退出。
+        resolve({ ok: true });
+      } catch (error) {
+        resolve({ ok: false, message: error?.message || String(error) });
+      }
+    }),
+  readBundleId: (appPath) => {
+    try {
+      return (
+        execFileSync('defaults', ['read', `${appPath}/Contents/Info`, 'CFBundleIdentifier'], {
+          encoding: 'utf8',
+          timeout: 2000,
+        }).trim() || null
+      );
+    } catch {
+      return null;
+    }
+  },
+  // 先读 .app 自己的 icns；getFileIcon 对着包目录经常返回空图。
+  readAppIcon: async (appOrExePath) => {
+    if (!appOrExePath) return null;
+    const toDataUrl = (image) => {
+      if (!image || typeof image.isEmpty !== 'function' || image.isEmpty()) return null;
+      return image.resize({ width: 32, height: 32 }).toDataURL();
+    };
+    try {
+      const icnsPath = resolveMacAppIconPath(appOrExePath);
+      if (icnsPath) {
+        const fromIcns = nativeImage.createFromPath(icnsPath);
+        const dataUrl = toDataUrl(fromIcns);
+        if (dataUrl) return dataUrl;
+      }
+    } catch {
+      // 继续回退 getFileIcon
+    }
+    try {
+      const icon = await app.getFileIcon(appOrExePath, { size: 'normal' });
+      return toDataUrl(icon);
+    } catch {
+      return null;
+    }
+  },
+});
+
+const editorPreferenceService = createEditorPreferenceService({
+  getSettings: () => settingsStore.getAll(),
+  mergeSettings: (patch) => settingsStore.merge(patch),
+  detectEditors: () => editorLaunchService.detect(),
+});
+
 const openPathApplicationService = createOpenPathApplicationService({
   openPath: (target) => shell.openPath(target),
   showItemInFolder: (target) => shell.showItemInFolder(target),
+  // 未显式指定 editorId 时用「记住的默认程序」，该值已保证在本机可用。
+  launchEditor: ({ editorId, absPath }) =>
+    editorLaunchService.launch({
+      editorId: editorId || editorPreferenceService.resolve().defaultEditorId,
+      absPath,
+    }),
 });
 
 const workspaceApplicationService = createWorkspaceApplicationService({
@@ -2146,6 +2212,12 @@ function registerDesktopIpcHost() {
     ...createRuntimeHostIpcRegistrations({
       shell: {
         openPath: (payload) => openPathApplicationService.open(payload),
+        listEditors: async () => {
+          const preference = editorPreferenceService.resolve();
+          const editors = await editorLaunchService.detectWithIcons();
+          return { ...preference, editors };
+        },
+        setDefaultEditor: (editorId) => editorPreferenceService.setDefault(editorId),
         listTasks: () => localToolHost?.listShellTasks() ?? [],
         stopActiveTask: () => localToolHost?.stopActiveShellTask() ?? false,
         stopTask: (taskId) => localToolHost?.stopShellTask(taskId) ?? false,

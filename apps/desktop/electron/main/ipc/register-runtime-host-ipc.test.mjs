@@ -11,6 +11,8 @@ function createHarness() {
   const registrations = createRuntimeHostIpcRegistrations({
     shell: {
       openPath: port('open-path'),
+      listEditors: port('list-editors'),
+      setDefaultEditor: port('set-default-editor'),
       listTasks: port('list-tasks'),
       stopActiveTask: port('stop-active-task'),
       stopTask: port('stop-task'),
@@ -35,11 +37,13 @@ function createHarness() {
   return { calls, handlers, owners };
 }
 
-test('runtime host owners register the exact seven invoke channels', () => {
+test('runtime host owners register the exact nine invoke channels', () => {
   const { handlers, owners } = createHarness();
   assert.deepEqual(owners, ['shell-ipc', 'client-tool-ipc']);
   assert.deepEqual([...handlers.keys()].sort(), [
     'client-tool:execute',
+    'shell:editors:list',
+    'shell:editors:set-default',
     'shell:open-path',
     'shell:permissions:add',
     'shell:permissions:list',
@@ -54,6 +58,13 @@ test('runtime host handlers preserve payload mapping and defaults', async () => 
   const payload = { taskId: 'task-1', call: { name: 'bash' } };
 
   assert.equal(await handlers.get('shell:open-path')({}, undefined), 'open-path');
+  assert.equal(handlers.get('shell:editors:list')({}), 'list-editors');
+  // set-default 只把 editorId 透给端口，而不是整个 payload。
+  assert.equal(
+    handlers.get('shell:editors:set-default')({}, { editorId: 'vscode' }),
+    'set-default-editor',
+  );
+  assert.equal(handlers.get('shell:editors:set-default')({}, undefined), 'set-default-editor');
   assert.equal(handlers.get('shell:tasks:list')({}), 'list-tasks');
   assert.equal(handlers.get('shell:tasks:stop-active')({}), 'stop-active-task');
   assert.equal(handlers.get('shell:tasks:stop')({}, payload), 'stop-task');
@@ -64,6 +75,9 @@ test('runtime host handlers preserve payload mapping and defaults', async () => 
 
   assert.deepEqual(calls, [
     ['open-path', {}],
+    ['list-editors'],
+    ['set-default-editor', 'vscode'],
+    ['set-default-editor', undefined],
     ['list-tasks'],
     ['stop-active-task'],
     ['stop-task', 'task-1'],
