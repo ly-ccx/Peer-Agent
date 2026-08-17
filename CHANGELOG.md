@@ -4,6 +4,31 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.5-beta.2 - 2026-08-17
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.1`.
+- Open workbench files in the remembered editor, highlight source previews, and keep accept cards until delivery actually lands.
+- Clicking a Goal Thread round jumps to the matching message; long chats no longer open as a blank spacer.
+
+### Added
+
+- Split-open control on preview headers: open the current file in the remembered editor, pick another installed app, or open/reveal the containing folder.
+- Source-mode highlighting via the existing highlight.js highlighter for common languages such as jsx/tsx; unknown languages and files over the 20k-character cap stay as plain text.
+
+### Changed
+
+- Task artifacts show real filenames and +N/−M, with line numbers aligned to unified-diff hunks instead of generic “code change / new file” labels.
+- Goal plan history renders as aligned sibling cards instead of an indented tree.
+
+### Fixed
+
+- Keep virtual turns aligned with the live viewport so a long thread no longer opens as a blank spacer.
+- Keep accept cards visible until delivery actually finishes, then celebrate and dismiss; rebase when the target branch moved, and keep conflicts visible with a retry path.
+- Clicking a Goal Thread round scrolls to the matching message instead of only opening the conversation at the default position.
+- Stop appending the same streaming delta twice.
+
 ## 0.0.5-beta.1 - 2026-08-16
 
 ### Notes

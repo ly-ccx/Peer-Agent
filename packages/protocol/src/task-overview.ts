@@ -312,7 +312,6 @@ export interface GoalPlanProjectionSnapshot {
    * result_ready，由用户在 Result Review 页手动归档）。
    */
   readonly accepted?: boolean;
-  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   /** 有代码副作用时，完成门之后还要质量自检过线才能待验收。 */
   readonly requiresQualityReview?: boolean;
   readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';

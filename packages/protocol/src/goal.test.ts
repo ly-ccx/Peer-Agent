@@ -16,7 +16,7 @@ function planWithDelivery(overrides: Partial<GoalPlan> = {}): GoalPlan {
     createdAt: '2026-08-13T00:00:00.000Z',
     updatedAt: '2026-08-13T00:00:00.000Z',
     ...overrides,
-  };
+  } as GoalPlan;
 }
 
 test('GoalPlan 用 targetBranch 表达交付分支，不把 workspace 路径当唯一路由', () => {

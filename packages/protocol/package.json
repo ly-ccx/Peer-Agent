@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/protocol",
-  "version": "0.0.5-beta.1",
+  "version": "0.0.5-beta.2",
   "description": "Shared host-neutral protocol contracts for Peer Agent runtimes and clients.",
   "type": "module",
   "license": "MIT",
