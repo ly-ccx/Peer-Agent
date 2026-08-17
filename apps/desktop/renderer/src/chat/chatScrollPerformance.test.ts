@@ -25,3 +25,17 @@ test('one animation-frame scroll pass reuses a single current turn probe', async
     'current turn must be computed once and shared by snapshot/sticky consumers',
   );
 });
+
+test('messageTarget navigation applies each requestId once so sending a message does not replay scrollToMessage', async () => {
+  const source = await readChatSurface();
+  assert.match(source, /lastAppliedMessageTargetRequestId = useRef<number \| null>\(null\)/);
+
+  const effect = source.match(
+    /useEffect\(\(\) => \{\n    if \(!messageTarget[\s\S]*?\}, \[conversationId, messageTarget, scrollToMessage\]\);/,
+  )?.[0];
+
+  assert.ok(effect, 'ChatSurface should consume messageTarget through one navigation effect');
+  assert.match(effect, /lastAppliedMessageTargetRequestId\.current === messageTarget\.requestId/);
+  assert.match(effect, /if \(scrollToMessage\(messageTarget\.messageId\)\)/);
+  assert.match(effect, /lastAppliedMessageTargetRequestId\.current = messageTarget\.requestId/);
+});

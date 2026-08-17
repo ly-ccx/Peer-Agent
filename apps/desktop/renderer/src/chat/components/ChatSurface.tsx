@@ -725,6 +725,7 @@ export function ChatSurface({
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
   const messageNavigationRequestRef = useRef(0);
+  const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
 
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentRef.current = true;
@@ -852,9 +853,9 @@ export function ChatSurface({
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
   const scrollToMessage = useCallback((id: string) => {
     const container = threadRef.current;
-    if (!container) return;
+    if (!container) return false;
     const turnIndex = messageTurnIndex.get(id);
-    if (turnIndex == null) return;
+    if (turnIndex == null) return false;
 
     const requestId = messageNavigationRequestRef.current + 1;
     messageNavigationRequestRef.current = requestId;
@@ -877,11 +878,15 @@ export function ChatSurface({
       target.classList.add('chat-msg-flash');
       window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
     });
+    return true;
   }, [messageTurnIndex, scrollToTurn]);
 
   useEffect(() => {
     if (!messageTarget || messageTarget.conversationId !== conversationId) return;
-    scrollToMessage(messageTarget.messageId);
+    if (lastAppliedMessageTargetRequestId.current === messageTarget.requestId) return;
+    if (scrollToMessage(messageTarget.messageId)) {
+      lastAppliedMessageTargetRequestId.current = messageTarget.requestId;
+    }
   }, [conversationId, messageTarget, scrollToMessage]);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
