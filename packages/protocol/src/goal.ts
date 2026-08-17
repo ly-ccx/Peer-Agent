@@ -136,6 +136,14 @@ function handoffStoppedReasonLabel(
       return locale === 'zh' ? '同一目标正在交回' : 'same target is delivering';
     case 'merge_conflict':
       return locale === 'zh' ? '交回时发生冲突' : 'delivery conflicted';
+    case 'target_checkout_dirty':
+      return locale === 'zh'
+        ? '你正在目标分支上，还有未提交改动，交回已暂停'
+        : 'target checkout is dirty; delivery paused';
+    case 'git_timeout':
+      return locale === 'zh' ? '交回超时，可重试' : 'delivery timed out; retry available';
+    case 'git_lock':
+      return locale === 'zh' ? '仓库正被占用，可重试' : 'repository is locked; retry available';
     default:
       return locale === 'zh' ? '交回已停止' : 'delivery stopped';
   }

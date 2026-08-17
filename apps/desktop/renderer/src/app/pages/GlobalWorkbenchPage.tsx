@@ -147,32 +147,7 @@ export function GlobalWorkbenchPage({
 
       try {
         await onAcceptResult(item);
-        setAcceptanceTransitions((prev) => {
-          const current = prev[item.taskId];
-          if (!current) return prev;
-          return {
-            ...prev,
-            [item.taskId]: { ...current, phase: 'celebrating' },
-          };
-        });
-        scheduleTransition(() => {
-          setAcceptanceTransitions((prev) => {
-            const current = prev[item.taskId];
-            if (!current) return prev;
-            return {
-              ...prev,
-              [item.taskId]: { ...current, phase: 'exiting' },
-            };
-          });
-          scheduleTransition(() => {
-            setAcceptanceTransitions((prev) => {
-              if (!(item.taskId in prev)) return prev;
-              const next = { ...prev };
-              delete next[item.taskId];
-              return next;
-            });
-          }, ACCEPTANCE_EXIT_MS);
-        }, ACCEPTANCE_CELEBRATION_MS);
+        // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
       } catch {
         setAcceptanceTransitions((prev) => {
           if (!(item.taskId in prev)) return prev;
@@ -182,8 +157,56 @@ export function GlobalWorkbenchPage({
         });
       }
     },
-    [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition],
+    [acceptanceTransitions, onAcceptResult, resultReady],
   );
+
+  useEffect(() => {
+    const submittingIds = Object.entries(acceptanceTransitions)
+      .filter(([, transition]) => transition.phase === 'submitting')
+      .map(([taskId]) => taskId);
+    if (submittingIds.length === 0) return;
+
+    for (const taskId of submittingIds) {
+      const live = resultReady.find((item) => item.taskId === taskId);
+      if (live?.deliveryHandoffStatus === 'stopped') {
+        setAcceptanceTransitions((prev) => {
+          if (!(taskId in prev)) return prev;
+          const next = { ...prev };
+          delete next[taskId];
+          return next;
+        });
+        continue;
+      }
+      const delivered = live?.deliveryHandoffStatus === 'delivered' || !live;
+      if (!delivered) continue;
+      setAcceptanceTransitions((prev) => {
+        const current = prev[taskId];
+        if (!current || current.phase !== 'submitting') return prev;
+        return {
+          ...prev,
+          [taskId]: { ...current, phase: 'celebrating' },
+        };
+      });
+      scheduleTransition(() => {
+        setAcceptanceTransitions((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [taskId]: { ...current, phase: 'exiting' },
+          };
+        });
+        scheduleTransition(() => {
+          setAcceptanceTransitions((prev) => {
+            if (!(taskId in prev)) return prev;
+            const next = { ...prev };
+            delete next[taskId];
+            return next;
+          });
+        }, ACCEPTANCE_EXIT_MS);
+      }, ACCEPTANCE_CELEBRATION_MS);
+    }
+  }, [acceptanceTransitions, resultReady, scheduleTransition]);
 
   useEffect(() => {
     if (!acceptHandlerRef) return;
@@ -542,7 +565,7 @@ function InboxRow({
       ? phase == null
         ? '确认验收'
         : submitting
-          ? '正在验收…'
+          ? '正在交回…'
           : '已验收 ✓'
       : item.actionLabel || '去处理';
 

@@ -1039,6 +1039,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     reason: string;
     changedBy?: string;
   }) => Promise<GoalPlan>;
+  readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
   /**

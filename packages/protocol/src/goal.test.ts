@@ -169,6 +169,18 @@ test('formatGoalDeliveryHandoff 只在已隔离且已验收时展示交回状态
   );
   assert.equal(
     formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      resultAcceptance: accepted,
+      deliveryHandoff: {
+        status: 'stopped',
+        stoppedReason: 'target_checkout_dirty',
+        updatedAt: '2026-08-14T01:01:00.000Z',
+      },
+    }),
+    '你正在目标分支上，还有未提交改动，交回已暂停',
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
       deliveryBinding: { ...binding, executionIsolation: 'none' },
       resultAcceptance: accepted,
       deliveryHandoff: {

@@ -18,6 +18,10 @@ function git(args, cwd = repository) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+function checkoutDetachedFromTarget() {
+  git(['switch', '-c', 'user-wip']);
+}
+
 function createStore(initialPlan) {
   const plans = new Map([[initialPlan.planId, structuredClone(initialPlan)]]);
   return {
@@ -104,6 +108,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('goal delivery handoff', () => {
   it('lands isolated changes onto the target branch without touching the user checkout', async () => {
+    checkoutDetachedFromTarget();
     writeFileSync(path.join(repository, 'user-dirty.txt'), 'leave me\n');
     const store = createStore(boundPlan());
     const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
@@ -126,15 +131,16 @@ describe('goal delivery handoff', () => {
     assert.equal(existsSync(path.join(repository, 'delivered.txt')), false);
   });
 
-  it('stops when the target branch moved and does not change the user checkout', async () => {
+  it('rebases onto a moved target branch and still delivers without changing the user checkout', async () => {
+    checkoutDetachedFromTarget();
     const store = createStore(boundPlan());
     const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
     const isolation = createGoalWorktreeAdapter({ worktreeAdapter, goalPlanStore: store });
     const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
     writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'delivered.txt'), 'from isolation\n');
-    writeFileSync(path.join(repository, 'README.md'), 'moved target\n');
-    git(['add', 'README.md']);
-    git(['commit', '-m', 'move target']);
+    const mainBeforeMove = git(['rev-parse', 'main']);
+    const movedCommit = git(['commit-tree', `${mainBeforeMove}^{tree}`, '-p', mainBeforeMove, '-m', 'move target']);
+    git(['update-ref', 'refs/heads/main', movedCommit]);
     const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
     const checkoutBefore = git(['rev-parse', '--abbrev-ref', 'HEAD']);
     const mainBefore = git(['rev-parse', 'main']);
@@ -142,13 +148,39 @@ describe('goal delivery handoff', () => {
     const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
     const next = await handoff.handoffPlan(accepted);
 
-    assert.equal(next.deliveryHandoff.status, 'stopped');
-    assert.equal(next.deliveryHandoff.stoppedReason, 'target_branch_moved');
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.ok(next.deliveryHandoff.commitSha);
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), checkoutBefore);
-    assert.equal(git(['rev-parse', 'main']), mainBefore);
+    assert.notEqual(git(['rev-parse', 'main']), mainBefore);
+    assert.equal(git(['show', 'main:delivered.txt']), 'from isolation');
+  });
+
+  it('stops on rebase conflict when the target branch moved', async () => {
+    checkoutDetachedFromTarget();
+    const store = createStore(boundPlan());
+    const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
+    const isolation = createGoalWorktreeAdapter({ worktreeAdapter, goalPlanStore: store });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'conflict.txt'), 'from isolation\n');
+    git(['add', 'conflict.txt'], prepared.deliveryBinding.worktreePath);
+    git(['commit', '-m', 'isolation change'], prepared.deliveryBinding.worktreePath);
+    const checkoutBeforeMove = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+    git(['checkout', 'main']);
+    writeFileSync(path.join(repository, 'conflict.txt'), 'from target\n');
+    git(['add', 'conflict.txt']);
+    git(['commit', '-m', 'move target with conflict']);
+    git(['checkout', checkoutBeforeMove === 'HEAD' ? '--detach' : checkoutBeforeMove]);
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const checkoutBefore = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'stopped');
+    assert.equal(next.deliveryHandoff.stoppedReason, 'merge_conflict');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), checkoutBefore);
   });
 
   it('only delivers one accepted Goal to the same target at a time', async () => {
+    checkoutDetachedFromTarget();
     const firstStore = createStore(boundPlan({ planId: 'plan-a' }));
     const secondStore = createStore(boundPlan({ planId: 'plan-b' }));
     const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
@@ -179,5 +211,78 @@ describe('goal delivery handoff', () => {
     const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
     const next = await handoff.handoffPlan(store.getPlan('plan-handoff-1'));
     assert.equal(next.deliveryHandoff, undefined);
+  });
+
+  it('reuses the in-flight handoff for the same plan', async () => {
+    checkoutDetachedFromTarget();
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'once.txt'), 'once\n');
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const first = handoff.handoffPlan(accepted);
+    const second = handoff.handoffPlan(accepted);
+    assert.equal(first, second);
+    const next = await first;
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(git(['rev-list', '--count', 'main']), '2');
+  });
+
+  it('fast-forwards a clean checkout that occupies the target branch', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'landed.txt'), 'from isolation\n');
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(readFileSync(path.join(repository, 'landed.txt'), 'utf8'), 'from isolation\n');
+    assert.equal(git(['status', '--porcelain']), '');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+  });
+
+  it('stops when the occupied target checkout is dirty', async () => {
+    writeFileSync(path.join(repository, 'user-dirty.txt'), 'leave me\n');
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'blocked.txt'), 'should not land\n');
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const mainBefore = git(['rev-parse', 'main']);
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'stopped');
+    assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
+    assert.equal(git(['rev-parse', 'main']), mainBefore);
+    assert.equal(existsSync(path.join(repository, 'blocked.txt')), false);
+    assert.equal(readFileSync(path.join(repository, 'user-dirty.txt'), 'utf8'), 'leave me\n');
+  });
+
+  it('retries an explicitly stopped handoff after the checkout is clean', async () => {
+    writeFileSync(path.join(repository, 'user-dirty.txt'), 'leave me\n');
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'retry.txt'), 'later\n');
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const stopped = await handoff.handoffPlan(accepted);
+    assert.equal(stopped.deliveryHandoff.status, 'stopped');
+    rmSync(path.join(repository, 'user-dirty.txt'));
+    const retried = await handoff.retryHandoff(store.getPlan('plan-handoff-1'));
+    assert.equal(retried.deliveryHandoff.status, 'delivered');
+    assert.equal(readFileSync(path.join(repository, 'retry.txt'), 'utf8'), 'later\n');
   });
 });

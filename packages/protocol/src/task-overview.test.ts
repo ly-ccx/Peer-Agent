@@ -282,6 +282,29 @@ test('rule 16a: completed 已验收 → terminal', () => {
   assert.equal(item.statusLabel, '已验收');
 });
 
+test('accepted but still delivering stays visible as result_ready', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: true,
+    deliveryHandoffStatus: 'delivering',
+    deliveryHandoffLabel: '正在交回目标分支',
+  }));
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.statusLabel, '正在交回目标分支');
+  assert.equal(item.deliveryHandoffStatus, 'delivering');
+});
+
+test('accepted handoff stopped stays visible as result_ready', () => {
+  const item = projectGoalPlan(goalSnapshot({
+    status: 'completed',
+    accepted: true,
+    deliveryHandoffStatus: 'stopped',
+    deliveryHandoffLabel: '目标分支有冲突',
+  }));
+  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.statusLabel, '交回未完成');
+});
+
 test('rule 16b: cancelled / failed → terminal', () => {
   assert.equal(
     projectGoalPlan(goalSnapshot({ status: 'cancelled' })).actionRight,

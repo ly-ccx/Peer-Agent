@@ -451,25 +451,7 @@ const goalPlanStore = createGoalPlanStore({
       }
     });
     const planId = typeof payload?.planId === 'string' ? payload.planId : null;
-    if (planId && typeof goalDeliveryHandoff?.handoffPlan === 'function') {
-      queueMicrotask(() => {
-        try {
-          const plan = goalPlanStore.getPlan(planId);
-          if (!plan) return;
-          void goalDeliveryHandoff.handoffPlan(plan).then((next) => {
-            const delivered = next?.deliveryHandoff?.status === 'delivered';
-            if (delivered && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
-              return goalWorktreeAdapter.retainOrCleanupPlan(next);
-            }
-            return next;
-          }).catch((error) => {
-            console.warn('[goal-handoff] deliver failed:', error?.message || error);
-          });
-        } catch (error) {
-          console.warn('[goal-handoff] deliver failed:', error?.message || error);
-        }
-      });
-    }
+    scheduleGoalDeliveryHandoff(planId);
     if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
       queueMicrotask(() => {
         try {
@@ -2034,6 +2016,10 @@ const goalApplicationService = createGoalApplicationService({
   recordTaskEvidence: (planId, taskId, change) =>
     goalPlanStore.recordTaskEvidence(planId, taskId, change),
   deletePlan: (planId) => goalPlanStore.deletePlan(planId),
+  retryHandoff: (planId) => {
+    scheduleGoalDeliveryHandoff(planId, { retry: true });
+    return goalPlanStore.getPlan(planId) ?? null;
+  },
   startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
   getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,
   pauseRunner: (planId) => goalRunner?.pause(planId) ?? null,
@@ -2688,6 +2674,35 @@ function latestUserTextFromProviderMessages(messages = []) {
 //   - 明确目标：模型调用 goal_create_plan → upsertGoalContract 已把本契约原地升级为
 //     accepted_goal（activation.kind 不再是 intake）→ 本函数直接跳过，落入正常自驱推进。
 //   - 出错/中止的回合不在此误删，保留契约交由既有失败链路处理。
+
+function scheduleGoalDeliveryHandoff(planId, { retry = false } = {}) {
+  if (typeof planId !== 'string' || !planId) return;
+  if (typeof goalDeliveryHandoff?.handoffPlan !== 'function') return;
+  queueMicrotask(() => {
+    try {
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan) return;
+      if (!goalDeliveryHandoff.canHandoff?.(plan)) return;
+      const status = plan.deliveryHandoff?.status;
+      if (status === 'delivered') return;
+      if (status === 'delivering' && !retry) return;
+      if (status === 'stopped' && !retry) return;
+      const run = retry && typeof goalDeliveryHandoff.retryHandoff === 'function'
+        ? goalDeliveryHandoff.retryHandoff(plan)
+        : goalDeliveryHandoff.handoffPlan(plan);
+      void Promise.resolve(run).then((next) => {
+        if (next?.deliveryHandoff?.status === 'delivered') {
+          return goalWorktreeAdapter?.retainOrCleanupPlan?.(next);
+        }
+        return next;
+      }).catch((error) => {
+        console.warn('[goal-handoff] deliver failed:', error?.message || error);
+      });
+    } catch (error) {
+      console.warn('[goal-handoff] deliver failed:', error?.message || error);
+    }
+  });
+}
 
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;

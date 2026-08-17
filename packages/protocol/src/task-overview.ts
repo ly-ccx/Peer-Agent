@@ -19,7 +19,7 @@
  * 且测试无需构造巨型 fixture。
  */
 
-import type { GoalPlanStatus, GoalRunnerStatus, GoalTiming } from './goal.ts';
+import type { GoalDeliveryHandoffStatus, GoalPlanStatus, GoalRunnerStatus, GoalTiming } from './goal.ts';
 import { projectGoalTiming } from './goal.ts';
 import type {
   AutomationLifecycleStatus,
@@ -178,6 +178,7 @@ export interface TaskOverviewItem {
    * 没隔离或没验收时不出现。
    */
   readonly deliveryHandoffLabel?: string;
+  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -284,6 +285,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly deliveryRoute?: string;
   /** 用户可见的交回状态；没隔离或没验收时省略。 */
   readonly deliveryHandoffLabel?: string;
+  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -310,6 +312,7 @@ export interface GoalPlanProjectionSnapshot {
    * result_ready，由用户在 Result Review 页手动归档）。
    */
   readonly accepted?: boolean;
+  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   /** 有代码副作用时，完成门之后还要质量自检过线才能待验收。 */
   readonly requiresQualityReview?: boolean;
   readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
@@ -514,6 +517,7 @@ export function projectGoalPlan(
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
+    ...(snapshot.deliveryHandoffStatus ? { deliveryHandoffStatus: snapshot.deliveryHandoffStatus } : {}),
     ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
     ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
     ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),
@@ -536,7 +540,7 @@ export function projectGoalPlan(
 }
 
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, interrupted, accepted } = snapshot;
+  const { status, runnerStatus, interrupted, accepted, deliveryHandoffStatus } = snapshot;
 
   // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
   // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
@@ -583,6 +587,28 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
       statusLabel: '待用户验收',
       actionLabel: '查看结果',
     };
+  }
+  if (status === 'completed' && accepted === true && deliveryHandoffStatus !== 'delivered') {
+    if (deliveryHandoffStatus === 'stopped') {
+      return {
+        actionRight: 'result_ready',
+        nextAction: 'review_result',
+        statusLabel: '交回未完成',
+        actionLabel: '查看结果',
+      };
+    }
+    if (
+      deliveryHandoffStatus === 'delivering'
+      || deliveryHandoffStatus === 'idle'
+      || Boolean(snapshot.deliveryRoute)
+    ) {
+      return {
+        actionRight: 'result_ready',
+        nextAction: 'none',
+        statusLabel: '正在交回目标分支',
+        actionLabel: '查看 →',
+      };
+    }
   }
   if (status === 'completed' || status === 'cancelled' || status === 'failed') {
     return {

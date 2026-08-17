@@ -519,32 +519,7 @@ function HeroLayout({
 
     try {
       await onAcceptResult(item);
-      setAcceptanceTransitions((prev) => {
-        const current = prev[item.taskId];
-        if (!current) return prev;
-        return {
-          ...prev,
-          [item.taskId]: { ...current, phase: 'celebrating' },
-        };
-      });
-      scheduleTransition(() => {
-        setAcceptanceTransitions((prev) => {
-          const current = prev[item.taskId];
-          if (!current) return prev;
-          return {
-            ...prev,
-            [item.taskId]: { ...current, phase: 'exiting' },
-          };
-        });
-        scheduleTransition(() => {
-          setAcceptanceTransitions((prev) => {
-            if (!(item.taskId in prev)) return prev;
-            const next = { ...prev };
-            delete next[item.taskId];
-            return next;
-          });
-        }, ACCEPTANCE_EXIT_MS);
-      }, ACCEPTANCE_CELEBRATION_MS);
+      // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
     } catch {
       setAcceptanceTransitions((prev) => {
         if (!(item.taskId in prev)) return prev;
@@ -553,7 +528,55 @@ function HeroLayout({
         return next;
       });
     }
-  }, [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition]);
+  }, [acceptanceTransitions, onAcceptResult, resultReady]);
+
+  useEffect(() => {
+    const submittingIds = Object.entries(acceptanceTransitions)
+      .filter(([, transition]) => transition.phase === 'submitting')
+      .map(([taskId]) => taskId);
+    if (submittingIds.length === 0) return;
+
+    for (const taskId of submittingIds) {
+      const live = resultReady.find((item) => item.taskId === taskId);
+      if (live?.deliveryHandoffStatus === 'stopped') {
+        setAcceptanceTransitions((prev) => {
+          if (!(taskId in prev)) return prev;
+          const next = { ...prev };
+          delete next[taskId];
+          return next;
+        });
+        continue;
+      }
+      const delivered = live?.deliveryHandoffStatus === 'delivered' || !live;
+      if (!delivered) continue;
+      setAcceptanceTransitions((prev) => {
+        const current = prev[taskId];
+        if (!current || current.phase !== 'submitting') return prev;
+        return {
+          ...prev,
+          [taskId]: { ...current, phase: 'celebrating' },
+        };
+      });
+      scheduleTransition(() => {
+        setAcceptanceTransitions((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [taskId]: { ...current, phase: 'exiting' },
+          };
+        });
+        scheduleTransition(() => {
+          setAcceptanceTransitions((prev) => {
+            if (!(taskId in prev)) return prev;
+            const next = { ...prev };
+            delete next[taskId];
+            return next;
+          });
+        }, ACCEPTANCE_EXIT_MS);
+      }, ACCEPTANCE_CELEBRATION_MS);
+    }
+  }, [acceptanceTransitions, resultReady, scheduleTransition]);
 
   useEffect(() => {
     if (!acceptHandlerRef) return;
@@ -1230,7 +1253,13 @@ function ResultCard({
           <i className="result-card-seal" aria-hidden="true">
             ✓
           </i>
-          {celebrating ? '验收完成，任务已圆满结束' : '等待验收'}
+          {celebrating
+            ? '验收完成，任务已圆满结束'
+            : phase === 'submitting' || item.deliveryHandoffStatus === 'delivering'
+              ? '正在交回目标分支'
+              : item.deliveryHandoffStatus === 'stopped'
+                ? (item.deliveryHandoffLabel || '交回未完成')
+                : '等待验收'}
         </span>
         {threadNodes && threadNodes.length > 0 ? (
           <span className="goal-thread-route">
@@ -1258,7 +1287,7 @@ function ResultCard({
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
             <span className="result-card-spinner" aria-hidden="true" />
-            正在验收…
+            正在交回…
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>

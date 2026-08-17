@@ -678,6 +678,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     workspaceLabel: workspaceLabelFromPath(workspacePath),
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
+    ...(plan.deliveryHandoff?.status ? { deliveryHandoffStatus: plan.deliveryHandoff.status } : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
@@ -770,8 +771,15 @@ export function isGoalPlanInScope(plan, options = {}) {
   // cancelled/failed：只在历史页
   if (isHistoryTerminal && !includeTerminal) return false;
 
-  // 已验收 completed：工作台不展示，历史页展示
-  if (isCompleted && isResultAccepted && !includeTerminal) return false;
+  // 已验收且已交回：工作台不展示。交回中 / 交回失败 / 刚验收待交回仍留在首页。
+  if (isCompleted && isResultAccepted && !includeTerminal) {
+    const handoffStatus = plan.deliveryHandoff?.status;
+    const pendingHandoff = handoffStatus === 'delivering'
+      || handoffStatus === 'stopped'
+      || handoffStatus === 'idle'
+      || (plan.deliveryBinding && handoffStatus !== 'delivered');
+    if (!pendingHandoff) return false;
+  }
 
   const wanted = normalizeWorkspacePath(workspacePath);
   if (wanted) {

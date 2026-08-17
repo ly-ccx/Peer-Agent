@@ -258,6 +258,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),
+  goalPlansRetryHandoff: (params) => ipcRenderer.invoke('goalPlans:retry-handoff', params),
   goalPlansApprove: (params) => ipcRenderer.invoke('goalPlans:approve', params),
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
   goalPlansMarkRequestedUserInput: (params) =>

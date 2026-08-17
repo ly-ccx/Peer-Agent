@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const locks = new Map();
+const inFlight = new Map();
 
 function trim(value) {
   if (typeof value !== 'string') return null;
@@ -15,13 +16,32 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function classifyGitError(error) {
+  const message = String(error?.stderr || error?.message || error);
+  if (/timed?\s*out|ETIMEDOUT/i.test(message)) return 'git_timeout';
+  if (/index\.lock|unable to create .*lock|Another git process/i.test(message)) return 'git_lock';
+  if (/conflict|CONFLICT|failed/i.test(message)) return 'merge_conflict';
+  return null;
+}
+
 async function git(cwd, args) {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
-  return String(stdout || '').trim();
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    return String(stdout || '').trim();
+  } catch (error) {
+    const reason = classifyGitError(error);
+    if (reason) {
+      const next = new Error(reason);
+      next.handoffReason = reason;
+      next.cause = error;
+      throw next;
+    }
+    throw error;
+  }
 }
 
 function lockKey(plan) {
@@ -67,15 +87,52 @@ async function commitWorktreeIfNeeded(worktreePath, message) {
 
 async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, taskBranch }) {
   const checkout = await git(repositoryRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  const mergeBase = await git(worktreePath, ['merge-base', targetBranch, taskBranch]);
-  const targetTip = await git(worktreePath, ['rev-parse', targetBranch]);
+  const mergeBase = await git(repositoryRoot, ['merge-base', targetBranch, taskBranch]);
+  const targetTip = await git(repositoryRoot, ['rev-parse', targetBranch]);
   if (mergeBase !== targetTip) {
-    return {
-      ok: false,
-      reason: 'target_branch_moved',
-      checkout,
-    };
+    try {
+      await git(worktreePath, ['rebase', targetBranch]);
+    } catch (error) {
+      try {
+        await git(worktreePath, ['rebase', '--abort']);
+      } catch {
+        // rebase may not have started; keep the original failure
+      }
+      return {
+        ok: false,
+        reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
+        checkout,
+      };
+    }
   }
+
+  const occupyingTarget = checkout === targetBranch;
+  if (occupyingTarget) {
+    const dirty = await git(repositoryRoot, ['status', '--porcelain']);
+    if (dirty) {
+      return {
+        ok: false,
+        reason: 'target_checkout_dirty',
+        checkout,
+      };
+    }
+    try {
+      // occupy target: merge --ff-only
+      await git(repositoryRoot, ['merge', '--ff-only', taskBranch]);
+      return {
+        ok: true,
+        commitSha: await git(repositoryRoot, ['rev-parse', 'HEAD']),
+        checkout,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
+        checkout,
+      };
+    }
+  }
+
   try {
     await git(worktreePath, ['update-ref', `refs/heads/${targetBranch}`, taskBranch]);
     return {
@@ -84,11 +141,11 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
       checkout,
     };
   } catch (error) {
-    const message = String(error?.stderr || error?.message || error);
-    if (/conflict|CONFLICT|failed/i.test(message)) {
-      return { ok: false, reason: 'merge_conflict', checkout };
-    }
-    throw error;
+    return {
+      ok: false,
+      reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
+      checkout,
+    };
   }
 }
 
@@ -96,8 +153,21 @@ export function createGoalDeliveryHandoff({
   goalPlanStore = null,
   now = nowIso,
 } = {}) {
-  async function handoffPlan(plan) {
-    if (!canHandoff(plan) || alreadyDelivered(plan) || alreadyStopped(plan)) return plan;
+  function stopPlan(plan, reason, extras = {}) {
+    const binding = plan.deliveryBinding || {};
+    return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
+      status: 'stopped',
+      repoId: binding.repoId,
+      targetBranch: extras.targetBranch || trim(binding.targetBranch),
+      taskBranch: extras.taskBranch || trim(binding.taskBranch),
+      stoppedReason: reason,
+      updatedAt: now(),
+      ...extras,
+    }) || plan;
+  }
+
+  async function runHandoff(plan) {
+    if (!canHandoff(plan) || alreadyDelivered(plan)) return plan;
     const binding = plan.deliveryBinding;
     const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan.targetWorkspacePath);
     const worktreePath = trim(binding.worktreePath);
@@ -107,29 +177,23 @@ export function createGoalDeliveryHandoff({
 
     const key = lockKey(plan);
     if (!key) return plan;
-    if (locks.has(key) && locks.get(key) !== plan.planId) {
-      return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
-        status: 'stopped',
-        repoId: binding.repoId,
-        targetBranch,
-        taskBranch,
-        stoppedReason: 'same_target_busy',
-        updatedAt: now(),
-      }) || plan;
+    const existing = locks.get(key);
+    if (existing && existing.planId !== plan.planId) {
+      return stopPlan(plan, 'same_target_busy', { targetBranch, taskBranch });
     }
 
-    locks.set(key, plan.planId);
+    const delivering = goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
+      status: 'delivering',
+      repoId: binding.repoId,
+      targetBranch,
+      taskBranch,
+      updatedAt: now(),
+    }) || plan;
+
     try {
-      const delivering = goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
-        status: 'delivering',
-        repoId: binding.repoId,
-        targetBranch,
-        taskBranch,
-        updatedAt: now(),
-      }) || plan;
       const commitSha = await commitWorktreeIfNeeded(
         worktreePath,
-        `peer: deliver ${plan.planId} to ${targetBranch}`,
+        `Peer Agent handoff ${plan.planId}`,
       );
       const merged = await mergeIntoTarget({
         repositoryRoot,
@@ -138,14 +202,11 @@ export function createGoalDeliveryHandoff({
         taskBranch,
       });
       if (!merged.ok) {
-        return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
-          status: 'stopped',
-          repoId: binding.repoId,
+        return stopPlan(delivering, merged.reason, {
           targetBranch,
           taskBranch,
-          stoppedReason: merged.reason,
-          updatedAt: now(),
-        }) || delivering;
+          commitSha,
+        });
       }
       return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
         status: 'delivered',
@@ -156,22 +217,53 @@ export function createGoalDeliveryHandoff({
         updatedAt: now(),
       }) || delivering;
     } catch (error) {
-      return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
-        status: 'stopped',
-        repoId: binding.repoId,
+      return stopPlan(delivering, error?.handoffReason || String(error?.message || error), {
         targetBranch,
         taskBranch,
-        stoppedReason: String(error?.message || error),
-        updatedAt: now(),
-      }) || plan;
-    } finally {
-      if (locks.get(key) === plan.planId) locks.delete(key);
+      });
     }
+  }
+
+  function handoffPlan(plan, { retry = false } = {}) {
+    if (!plan || typeof plan !== 'object') return Promise.resolve(plan);
+    if (!canHandoff(plan) || alreadyDelivered(plan)) return Promise.resolve(plan);
+    if (alreadyStopped(plan) && !retry) return Promise.resolve(plan);
+
+    const existing = inFlight.get(plan.planId);
+    if (existing) return existing;
+
+    const key = lockKey(plan);
+    if (key) {
+      const holder = locks.get(key);
+      if (holder && holder.planId !== plan.planId) {
+        return Promise.resolve(stopPlan(plan, 'same_target_busy', {
+          targetBranch: trim(plan.deliveryBinding?.targetBranch),
+          taskBranch: trim(plan.deliveryBinding?.taskBranch),
+        }));
+      }
+      locks.set(key, { planId: plan.planId });
+    }
+    const task = (async () => {
+      try {
+        return await runHandoff(plan);
+      } finally {
+        if (key && locks.get(key)?.planId === plan.planId) locks.delete(key);
+      }
+    })().finally(() => {
+      if (inFlight.get(plan.planId) === task) inFlight.delete(plan.planId);
+    });
+    inFlight.set(plan.planId, task);
+    return task;
+  }
+
+  async function retryHandoff(plan) {
+    return handoffPlan(plan, { retry: true });
   }
 
   return Object.freeze({
     canHandoff,
     lockKey,
     handoffPlan,
+    retryHandoff,
   });
 }

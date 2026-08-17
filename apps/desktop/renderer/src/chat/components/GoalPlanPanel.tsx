@@ -1641,7 +1641,19 @@ const PlanCard = memo(function PlanCard({
             <p className="goal-plan-delivery-route">{deliveryRoute}</p>
           ) : null}
           {deliveryHandoffLabel ? (
-            <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
+            <div className="goal-plan-delivery-handoff-row">
+              <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
+              {plan.deliveryHandoff?.status === 'stopped' ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-retry"
+                  disabled={busy || isStreaming}
+                  onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
+                >
+                  {isZh ? '重试交回' : 'Retry delivery'}
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {parentPlan ? (
             <div className="goal-plan-origin" data-goal-plan-origin>
