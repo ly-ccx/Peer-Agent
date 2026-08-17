@@ -7,6 +7,7 @@ import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
 import { continueTaskInConversation } from './app/taskContinuation';
+import { resolveTaskRelatedMessageId } from './chat/state/taskRelatedMessageResolve';
 import { HomePage } from './app/pages/HomePage';
 import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
@@ -253,6 +254,19 @@ function MainApp() {
     requestId: number;
   } | null>(null);
   const notificationMessageRequestRef = useRef(0);
+  const focusTaskRelatedMessage = useCallback((item: TaskOverviewItem) => {
+    if (!item.conversationId) return;
+    const conversationId = String(item.conversationId);
+    void resolveTaskRelatedMessageId(item).then((messageId) => {
+      if (!messageId) return;
+      notificationMessageRequestRef.current += 1;
+      setNotificationMessageTarget({
+        conversationId,
+        messageId,
+        requestId: notificationMessageRequestRef.current,
+      });
+    });
+  }, []);
   const [conversationRevision, setConversationRevision] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
   // 真值来自 main 的 activeStreams:挂载时经 chatStreamListActive 拉取,之后由
@@ -1026,11 +1040,13 @@ function MainApp() {
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         openCollectionDrawer('tasks');
@@ -1059,12 +1075,14 @@ function MainApp() {
                         // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         openCollectionDrawer('tasks');
@@ -1270,6 +1288,7 @@ function MainApp() {
                               // 任务列表点击只打开会话 Drawer；发送消息后才会创建新回合。
                               if (!item.conversationId) return;
                               handleContinueTask(String(item.conversationId));
+                              focusTaskRelatedMessage(item);
                             }}
                           />
                         </div>

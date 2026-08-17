@@ -44,5 +44,20 @@ test('task row view button opens the matching task details', async () => {
     appSource.match(/<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?\n                            \}\}/)?.[0] ?? '';
   assert.match(openItemHandler, /if \(!item\.conversationId\) return;/);
   assert.match(openItemHandler, /handleContinueTask\(String\(item\.conversationId\)\);/);
+  assert.match(openItemHandler, /focusTaskRelatedMessage\(item\)/);
   assert.doesNotMatch(openItemHandler, /planId|goalPlansMarkRequestedUserInput/);
+});
+
+test('opening a goal-thread round also focuses the matching message', async () => {
+  const appSource = await readAppSource();
+  const openItemHandlers = [...appSource.matchAll(/onOpenItem=\{\(item: TaskOverviewItem, options\?: OpenResultOptions\) => \{[\s\S]*?\n                      \}\}/g)]
+    .map((match) => match[0]);
+  assert.ok(openItemHandlers.length >= 2);
+  for (const handler of openItemHandlers) {
+    assert.match(handler, /openResultDrawer\(item, options\);\s*focusTaskRelatedMessage\(item\)/);
+    assert.match(handler, /handleContinueTask\(String\(conversationId\)\);\s*focusTaskRelatedMessage\(item\)/);
+  }
+  assert.match(appSource, /setNotificationMessageTarget\(\{/);
+  assert.match(appSource, /resolveTaskRelatedMessageId\(item\)/);
+  assert.ok(appSource.includes("from './chat/state/taskRelatedMessageResolve'"));
 });
