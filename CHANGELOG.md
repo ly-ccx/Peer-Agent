@@ -4,6 +4,20 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.5-beta.3 - 2026-08-17
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.2`.
+- Restore left-side rounded corners on the session / result drawer.
+- Accepted completed cards move into history without freezing the drawer; sending after a message jump no longer flashes the old target.
+
+### Fixed
+
+- Restore the left-side rounded corners on the session / result drawer so maximize no longer clips them into a square.
+- Send accepted completed cards into history; opening history no longer freezes the drawer.
+- After a successful jump to a message, keep that one-shot navigation from replaying on send so the view does not scroll back and flash the old target.
+
 ## 0.0.5-beta.2 - 2026-08-17
 
 ### Notes
