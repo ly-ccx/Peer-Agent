@@ -15,12 +15,49 @@ test('验收卡展示卡片级主要产物，并只打开聚合器保留的 open
   const source = await readPage();
   assert.match(source, /function ArtifactList\(/);
   assert.match(source, /projectTaskOverviewArtifacts\(item\)/);
-  assert.match(source, /ARTIFACT_KIND_LABELS = \{[\s\S]*code: '代码'[\s\S]*file: '文件'[\s\S]*image: '截图'/);
   assert.match(source, /void clientApi\.openPath\(artifact\.openPath!\)/);
   assert.match(source, /\{artifact\.actionLabel\}/);
   assert.match(source, /<ArtifactList item=\{item\} \/>/);
   assert.doesNotMatch(source, /clientApi\.openPath\(artifact\.ref\)/);
   assert.doesNotMatch(source, /task-artifacts-step-title/);
+});
+
+test('产物行内直接显示增删行数，不必悬停预览', async () => {
+  const source = await readPage();
+  // 行内徽标必须落在 ArtifactList 的产物按钮里，而不是只存在于 hover 预览。
+  const listStart = source.indexOf('function ArtifactList(');
+  assert.ok(listStart > 0, 'ArtifactList must exist');
+  const listSource = source.slice(listStart);
+  assert.match(listSource, /className="task-artifact-stat"/);
+  assert.match(listSource, /task-artifact-stat-add">\+\{artifact\.preview\.additions\}/);
+  assert.match(listSource, /artifact\.preview\.deletions > 0/);
+  assert.match(listSource, /task-artifact-stat-del">−\{artifact\.preview\.deletions\}/);
+  assert.match(listSource, /artifact\.preview\?\.kind === 'code'/);
+  // 分组标题仍按类型分，行内不再重复「代码/文件」类型词。
+  assert.match(listSource, /<span>\{group\.label\}<\/span>/);
+  assert.doesNotMatch(listSource, /ARTIFACT_KIND_LABELS/);
+  // 行首是文件名，不再用 CSS 伪图标占位。
+  assert.match(listSource, /className="task-artifact-name"/);
+  assert.doesNotMatch(listSource, /task-artifact-icon/);
+
+  const styles = await readStyles();
+  assert.match(styles, /\.task-artifact-stat-add\s*\{[^}]*--za-diff-add-fg/s);
+  assert.match(styles, /\.task-artifact-stat-del\s*\{[^}]*--za-diff-del-fg/s);
+  assert.match(styles, /\.task-artifact-preview-additions[\s\S]*?color:\s*var\(--za-diff-add-fg\)/s);
+  assert.match(styles, /\.task-artifact-preview-deletions[\s\S]*?color:\s*var\(--za-diff-del-fg\)/s);
+  assert.doesNotMatch(
+    styles,
+    /\.task-artifact-stat-add\s*\{[^}]*(?:--za-success|#238636)/s,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.task-artifact-stat-del\s*\{[^}]*(?:#cf222e)/s,
+  );
+  // 长文件名要截断，避免撑破卡片挤掉徽标与操作文案。
+  assert.match(styles, /\.task-artifact-name\s*\{[^}]*truncate/s);
+  // 行距收成列表，不再用伪图标占位。
+  assert.match(styles, /\.task-artifacts-list\s*\{[^}]*space-y-0\.5/s);
+  assert.doesNotMatch(styles, /\.task-artifact-icon\s*\{/);
 });
 
 test('主要产物默认折叠，摘要显示类型统计，展开后按类型分组', async () => {
@@ -40,7 +77,10 @@ test('主要产物默认折叠，摘要显示类型统计，展开后按类型�
 test('代码和图片产物使用受控 preview 渲染 hover 内容，而不是读取 openPath 或 ref', async () => {
   const source = await readPage();
   assert.match(source, /function ArtifactHoverPreview\(/);
-  assert.match(source, /preview\.diffLines\.map/);
+  assert.match(source, /buildDiffLines\(preview\.diffLines\.join\('\\n'\)\)/);
+  assert.match(source, /task-artifact-diff-gutter/);
+  assert.match(source, /\{line\.oldNo \?\? ''\}/);
+  assert.match(source, /\{line\.newNo \?\? ''\}/);
   assert.match(source, /\+\{preview\.additions\}/);
   assert.match(source, /−\{preview\.deletions\}/);
   assert.match(source, /src=\{preview\.dataUrl\}/);
@@ -78,14 +118,11 @@ test('产物列表具有类型样式、折叠摘要和主要产物上限提示',
     '.task-artifacts::details-content',
     '.task-artifacts[open]::details-content',
     '.task-artifacts[open] .task-artifacts-chevron',
-    '.task-artifact--image .task-artifact-icon::after',
-    '.task-artifact--code .task-artifact-icon::after',
-    '.task-artifact--file .task-artifact-icon::before',
-    '.task-artifact--file .task-artifact-icon::after',
     '.task-artifact-preview--code',
     '.task-artifact-preview--image img',
     '.task-artifact-diff-line--added',
     '.task-artifact-diff-line--deleted',
+    '.task-artifact-diff-gutter',
     '.task-artifacts-limit-note',
   ]) {
     assert.ok(styles.includes(selector), `missing ${selector}`);

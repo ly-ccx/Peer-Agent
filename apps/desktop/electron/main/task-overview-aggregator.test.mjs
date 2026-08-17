@@ -906,6 +906,74 @@ test('extractPlanSteps 仅把各叶子任务自己的 Evidence 派生产物挂�
   assert.doesNotMatch(JSON.stringify(steps?.[0].artifacts), /"label":"(?:shell_|stdout|tool-result)/);
 });
 
+test('deriveTaskArtifacts 把存量通用文案回退成真实文件名', () => {
+  const artifacts = deriveTaskArtifacts(
+    ['ev-legacy-code', 'ev-legacy-file'],
+    [
+      {
+        evidenceRef: 'ev-legacy-code',
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/GoalPlanPanel.tsx',
+          path: '/work/src/GoalPlanPanel.tsx',
+          label: '代码变更',
+          preview: { kind: 'code', additions: 14, deletions: 2, diffLines: ['+new'] },
+        }],
+      },
+      {
+        evidenceRef: 'ev-legacy-file',
+        userArtifacts: [{
+          kind: 'file',
+          ref: 'file:///work/src/goalPlanTree.ts',
+          path: '/work/src/goalPlanTree.ts',
+          label: '新建文件',
+          preview: { kind: 'code', additions: 8, deletions: 0, diffLines: ['+ 新建文件，共 8 行'] },
+        }],
+      },
+    ],
+  );
+
+  assert.deepEqual(artifacts.map((artifact) => artifact.label), ['GoalPlanPanel.tsx', 'goalPlanTree.ts']);
+  assert.deepEqual(
+    artifacts.map((artifact) => [artifact.preview?.additions, artifact.preview?.deletions]),
+    [[14, 2], [8, 0]],
+  );
+});
+
+test('deriveTaskArtifacts 缺 label 时退回真实文件名，并保留新建文件的增删统计', () => {
+  const artifacts = deriveTaskArtifacts(
+    ['ev-new-file', 'ev-edit'],
+    [
+      {
+        evidenceRef: 'ev-new-file',
+        // 新建文件：kind='file' 也带 code 预览，不能在归一化时被丢掉。
+        userArtifacts: [{
+          kind: 'file',
+          ref: 'file:///work/src/created.ts',
+          path: '/work/src/created.ts',
+          preview: { kind: 'code', additions: 12, deletions: 0, diffLines: ['+ 新建文件，共 12 行'] },
+        }],
+      },
+      {
+        evidenceRef: 'ev-edit',
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/changed.ts',
+          path: '/work/src/changed.ts',
+          preview: { kind: 'code', additions: 3, deletions: 2, diffLines: ['-old', '+new'] },
+        }],
+      },
+    ],
+  );
+
+  // label 必须是可区分的文件名，而不是「新建文件」「代码变更」这类固定文案。
+  assert.deepEqual(artifacts.map((artifact) => artifact.label), ['created.ts', 'changed.ts']);
+  assert.deepEqual(
+    artifacts.map((artifact) => [artifact.preview?.additions, artifact.preview?.deletions]),
+    [[12, 0], [3, 2]],
+  );
+});
+
 test('deriveTaskArtifacts 丢弃错配或越界的 hover preview，但保留用户产物', () => {
   const artifacts = deriveTaskArtifacts(
     ['bad-code', 'bad-image'],

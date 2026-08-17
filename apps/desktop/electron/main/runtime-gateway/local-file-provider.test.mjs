@@ -57,11 +57,18 @@ describe('local file provider', () => {
       { call: createCall('local.file.write', { path: filePath, content: 'before\n' }) },
       { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
     );
+    // 产物名必须是真实文件名，且新建文件也要带增删统计（整文件计为新增）。
     assert.deepEqual(writeExecution.result.evidence.userArtifacts, [{
       kind: 'file',
       ref: `file://${filePath}`,
       path: filePath,
-      label: '新建文件',
+      label: 'artifact.txt',
+      preview: {
+        kind: 'code',
+        additions: 2,
+        deletions: 0,
+        diffLines: ['+ 新建文件，共 2 行'],
+      },
     }]);
 
     const readExecution = await provider.executeCapability(
@@ -78,7 +85,7 @@ describe('local file provider', () => {
       kind: 'code-change',
       ref: `file://${filePath}`,
       path: filePath,
-      label: '代码变更',
+      label: 'artifact.txt',
       preview: {
         kind: 'code',
         additions: 1,

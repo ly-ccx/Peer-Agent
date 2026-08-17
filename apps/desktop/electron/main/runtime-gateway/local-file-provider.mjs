@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
@@ -752,6 +752,7 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
           mtimeAfter: nextState?.mtimeMs ?? null,
           contentHashBefore: beforeSnapshot?.contentHash ?? null,
           contentHashAfter: nextState?.contentHash ?? hashContent(args.content),
+          linesWritten: countLines(args.content),
           diffPreview: diffPreview || null,
           contextPreviewTruncated: diffPreview.length >= MAX_TOOL_CONTEXT_CHARS,
         }),
@@ -772,6 +773,36 @@ function statusFromFileResult(fileResult) {
   } catch {
     return 'failed';
   }
+}
+
+function countLines(content) {
+  const text = String(content ?? '');
+  if (!text) return 0;
+  return text.split('\n').length;
+}
+
+/**
+ * 产物行的展示名必须能区分不同文件，因此以真实文件名为准，
+ * 而不是「代码变更」「新建文件」这类无法分辨对象的固定文案。
+ */
+function artifactLabelFromPath(filePath) {
+  const name = basename(String(filePath ?? '').trim());
+  return name || '结果文件';
+}
+
+/**
+ * 新建文件没有 diff，但用户仍需要看到写入规模，
+ * 因此按整文件视作全新增行，保证增删统计不会恒为 0。
+ */
+function buildCreatedFilePreview(lineCount) {
+  const additions = Number.isSafeInteger(lineCount) && lineCount > 0 ? lineCount : 0;
+  if (additions <= 0) return undefined;
+  return {
+    kind: 'code',
+    additions,
+    deletions: 0,
+    diffLines: [`+ 新建文件，共 ${additions} 行`],
+  };
 }
 
 function buildCodePreview(diffPreview) {
@@ -798,14 +829,16 @@ function userArtifactsFromFileResult(name, fileResult) {
     return [];
   }
   if (typeof parsed.path !== 'string' || !parsed.path) return [];
+  // write_file 覆盖已有文件时同样有 diff；只有真正新建才退化为「整文件皆新增」。
+  const preview = parsed.diffPreview
+    ? buildCodePreview(parsed.diffPreview)
+    : buildCreatedFilePreview(parsed.linesWritten);
   return [{
     kind: name === 'edit_file' ? 'code-change' : 'file',
     ref: `file://${parsed.path}`,
     path: parsed.path,
-    label: name === 'edit_file' ? '代码变更' : '新建文件',
-    ...(name === 'edit_file' && parsed.diffPreview
-      ? { preview: buildCodePreview(parsed.diffPreview) }
-      : {}),
+    label: artifactLabelFromPath(parsed.path),
+    ...(preview ? { preview } : {}),
   }];
 }
 

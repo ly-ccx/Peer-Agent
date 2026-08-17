@@ -933,11 +933,11 @@
   }
 
   .task-artifacts-list {
-    @apply space-y-1.5;
+    @apply space-y-0.5;
   }
 
   .task-artifact {
-    @apply flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors;
+    @apply flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors;
     color: var(--za-text);
   }
 
@@ -947,41 +947,6 @@
 
   .task-artifact:disabled {
     @apply cursor-default opacity-70;
-  }
-
-  .task-artifact-icon {
-    @apply relative h-4 w-4 shrink-0;
-    color: var(--za-text-soft);
-  }
-
-  .task-artifact--image .task-artifact-icon {
-    @apply rounded-sm;
-    background: color-mix(in srgb, currentColor 14%, transparent);
-  }
-
-  .task-artifact--image .task-artifact-icon::after {
-    content: '';
-    @apply absolute bottom-0.5 left-0.5 h-1.5 w-3 rounded-sm;
-    background: currentColor;
-    clip-path: polygon(0 100%, 30% 20%, 52% 68%, 70% 40%, 100% 100%);
-  }
-
-  .task-artifact--code .task-artifact-icon::after {
-    content: '</>';
-    @apply absolute inset-0 flex items-center justify-center text-[0.55rem] font-bold tracking-tighter;
-  }
-
-  .task-artifact--file .task-artifact-icon::before {
-    content: '';
-    @apply absolute inset-x-0.5 bottom-0 top-0 rounded-sm;
-    background: color-mix(in srgb, currentColor 14%, transparent);
-  }
-
-  .task-artifact--file .task-artifact-icon::after {
-    content: '';
-    @apply absolute left-1 top-1 h-0.5 w-2;
-    background: currentColor;
-    box-shadow: 0 3px 0 currentColor, 0 6px 0 currentColor;
   }
 
   .task-artifact-copy {
@@ -994,7 +959,25 @@
   }
 
   .task-artifact-copy span {
-    @apply truncate text-xs;
+    @apply truncate text-[0.8125rem];
+  }
+
+  /* 行内增删徽标：不依赖 hover 预览就能看到 +N/−M。 */
+  .task-artifact-stat {
+    @apply flex shrink-0 items-center gap-1.5 font-mono text-[0.6875rem] font-semibold;
+  }
+
+  .task-artifact-stat-add {
+    color: var(--za-diff-add-fg);
+  }
+
+  .task-artifact-stat-del {
+    color: var(--za-diff-del-fg);
+  }
+
+  /* 长文件名截断，避免撑破卡片并挤掉右侧徽标与操作文案。 */
+  .task-artifact-name {
+    @apply min-w-0 flex-1 truncate;
   }
 
   .task-artifact-action {
@@ -1034,12 +1017,12 @@
 
   .task-artifact-preview-additions,
   .task-artifact-diff-line--added {
-    color: var(--za-success, #238636);
+    color: var(--za-diff-add-fg);
   }
 
   .task-artifact-preview-deletions,
   .task-artifact-diff-line--deleted {
-    color: var(--za-danger, #cf222e);
+    color: var(--za-diff-del-fg);
   }
 
   .task-artifact-diff {
@@ -1053,11 +1036,37 @@
   }
 
   .task-artifact-diff-line {
-    display: block;
+    display: flex;
+    align-items: flex-start;
     min-width: 0;
-    padding: 0 0.75rem;
+    padding: 0 0.75rem 0 0;
     white-space: pre;
     overflow-wrap: anywhere;
+  }
+
+  .task-artifact-diff-gutter {
+    flex: none;
+    width: 2.25rem;
+    padding-right: 0.375rem;
+    text-align: right;
+    color: var(--za-text-muted);
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .task-artifact-diff-gutter--new {
+    margin-right: 0.5rem;
+    border-right: 1px solid var(--za-line);
+    padding-right: 0.5rem;
+  }
+
+  .task-artifact-diff-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .task-artifact-diff-line--meta .task-artifact-diff-gutter {
+    color: transparent;
   }
 
   .task-artifact-diff-line--added {

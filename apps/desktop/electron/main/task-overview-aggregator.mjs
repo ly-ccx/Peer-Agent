@@ -360,6 +360,25 @@ const USER_ARTIFACT_PRESENTATION = Object.freeze({
   image: { kind: 'image', actionLabel: '预览截图' },
 });
 
+const GENERIC_ARTIFACT_LABELS = new Set([
+  '代码变更',
+  '新建文件',
+  '结果文件',
+  'Code change',
+  'New file',
+  'Result file',
+]);
+
+function isGenericArtifactLabel(label) {
+  return !label || GENERIC_ARTIFACT_LABELS.has(label);
+}
+
+function genericArtifactFallback(kind) {
+  if (kind === 'code') return '代码变更';
+  if (kind === 'image') return '界面截图';
+  return '结果文件';
+}
+
 const MAX_CODE_PREVIEW_LINES = 41;
 const MAX_CODE_PREVIEW_LINE_CHARS = 240;
 const MAX_IMAGE_PREVIEW_EDGE = 640;
@@ -367,7 +386,9 @@ const MAX_IMAGE_PREVIEW_DATA_URL_CHARS = 512 * 1024;
 const SAFE_IMAGE_PREVIEW_URL = /^data:image\/(?:png|jpeg|webp);base64,/;
 
 function normalizeArtifactPreview(kind, preview) {
-  if (kind === 'code' && preview?.kind === 'code') {
+  // 'file' 也可能携带 code 预览（新建文件按整文件计新增行），
+  // 否则新建文件的 +N/−M 会在这一层被丢掉。
+  if ((kind === 'code' || kind === 'file') && preview?.kind === 'code') {
     if (!Number.isSafeInteger(preview.additions) || preview.additions < 0
       || !Number.isSafeInteger(preview.deletions) || preview.deletions < 0
       || !Array.isArray(preview.diffLines)) return undefined;
@@ -412,11 +433,17 @@ export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRo
         ? userArtifact.path
         : undefined;
       const openPath = declaredPath ?? resolveArtifactOpenPath(ref, artifactRoots, record?.createdAt);
-      const label = typeof userArtifact.label === 'string' && userArtifact.label.trim()
-        ? userArtifact.label.trim()
-        : presentation.kind === 'code' ? '代码变更'
-          : presentation.kind === 'image' ? '界面截图'
-            : openPath ? path.basename(openPath) : '结果文件';
+      // 产物行必须能区分对象。存量数据把「代码变更」「新建文件」写成了非空
+      // label，不能再把非空当有效名；这类通用文案一律回退到真实文件名。
+      const fallbackName = openPath
+        ? path.basename(openPath)
+        : (typeof userArtifact.path === 'string' && userArtifact.path.trim()
+          ? path.basename(userArtifact.path.trim())
+          : '');
+      const rawLabel = typeof userArtifact.label === 'string' ? userArtifact.label.trim() : '';
+      const label = isGenericArtifactLabel(rawLabel)
+        ? (fallbackName || rawLabel || genericArtifactFallback(presentation.kind))
+        : (rawLabel || fallbackName || genericArtifactFallback(presentation.kind));
       const artifact = { ref, kind: presentation.kind, label, actionLabel: presentation.actionLabel };
       const preview = normalizeArtifactPreview(presentation.kind, userArtifact.preview);
       if (preview) artifact.preview = preview;

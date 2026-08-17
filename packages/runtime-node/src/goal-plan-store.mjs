@@ -719,7 +719,9 @@ function normalizeEvidenceIndexRecord(value) {
         const normalized = { kind, ref, label };
         const artifactPath = normalizeOptionalString(artifact.path);
         if (artifactPath) normalized.path = artifactPath;
-        if (kind === 'code-change' && artifact.preview?.kind === 'code') {
+        // 新建文件（kind='file'）同样带增删统计，因此不能只放行 code-change，
+        // 否则「新建文件」这一类产物的 +N/−M 会在持久化这一层被丢掉。
+        if ((kind === 'code-change' || kind === 'file') && artifact.preview?.kind === 'code') {
           const additions = Number.isSafeInteger(artifact.preview.additions) && artifact.preview.additions >= 0
             ? artifact.preview.additions
             : 0;

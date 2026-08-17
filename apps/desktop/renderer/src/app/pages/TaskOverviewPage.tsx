@@ -24,6 +24,7 @@ import { WorkStream } from './WorkStream';
 import { resultCardWeight } from './workStreamLayout';
 import { projectTaskOverviewArtifacts } from './taskOverviewArtifacts';
 import { availablePreviewSize, positionTaskArtifactPreview } from './taskArtifactPreviewPosition';
+import { buildDiffLines } from '../../workbench/file-preview/DiffViewer';
 import {
   groupResultCardsByGoalThread,
   ThreadList,
@@ -1003,12 +1004,6 @@ function WorkItem({
 }
 
 
-const ARTIFACT_KIND_LABELS = {
-  code: '代码',
-  file: '文件',
-  image: '截图',
-} as const;
-
 const ARTIFACT_PREVIEW_CHROME_STYLE = {
   background: 'transparent',
 } as const;
@@ -1038,16 +1033,26 @@ function ArtifactHoverPreview({ artifact }: { readonly artifact: TaskOverviewArt
         </span>
       </div>
       <pre className="task-artifact-diff">
-        {preview.diffLines.map((line, index) => (
+        {buildDiffLines(preview.diffLines.join('\n')).map((line, index) => (
           <code
-            className={line.startsWith('+') && !line.startsWith('+++')
-              ? 'task-artifact-diff-line task-artifact-diff-line--added'
-              : line.startsWith('-') && !line.startsWith('---')
-                ? 'task-artifact-diff-line task-artifact-diff-line--deleted'
-                : 'task-artifact-diff-line'}
-            key={`${index}:${line}`}
+            className={
+              line.kind === 'add'
+                ? 'task-artifact-diff-line task-artifact-diff-line--added'
+                : line.kind === 'del'
+                  ? 'task-artifact-diff-line task-artifact-diff-line--deleted'
+                  : line.kind === 'hunk' || line.kind === 'meta'
+                    ? 'task-artifact-diff-line task-artifact-diff-line--meta'
+                    : 'task-artifact-diff-line'
+            }
+            key={`${index}:${line.oldNo ?? ''}:${line.newNo ?? ''}:${line.text}`}
           >
-            {line || ' '}
+            <span className="task-artifact-diff-gutter task-artifact-diff-gutter--old" aria-hidden="true">
+              {line.oldNo ?? ''}
+            </span>
+            <span className="task-artifact-diff-gutter task-artifact-diff-gutter--new" aria-hidden="true">
+              {line.newNo ?? ''}
+            </span>
+            <span className="task-artifact-diff-text">{line.text === '' ? '\u00a0' : line.text}</span>
           </code>
         ))}
       </pre>
@@ -1151,11 +1156,24 @@ function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
                       void clientApi.openPath(artifact.openPath!);
                     }}
                   >
-                    <span className="task-artifact-icon" aria-hidden="true" />
                     <span className="task-artifact-copy">
-                      <strong>{ARTIFACT_KIND_LABELS[artifact.kind]}</strong>
-                      <span>{artifact.label}</span>
+                      <span className="task-artifact-name" title={artifact.label}>{artifact.label}</span>
                     </span>
+                    {artifact.preview?.kind === 'code' ? (
+                      <span
+                        className="task-artifact-stat"
+                        aria-label={
+                          artifact.preview.deletions > 0
+                            ? `新增 ${artifact.preview.additions} 行，删除 ${artifact.preview.deletions} 行`
+                            : `新增 ${artifact.preview.additions} 行`
+                        }
+                      >
+                        <span className="task-artifact-stat-add">+{artifact.preview.additions}</span>
+                        {artifact.preview.deletions > 0 ? (
+                          <span className="task-artifact-stat-del">−{artifact.preview.deletions}</span>
+                        ) : null}
+                      </span>
+                    ) : null}
                     <span className="task-artifact-action">{artifact.actionLabel}</span>
                   </button>
                 </li>
