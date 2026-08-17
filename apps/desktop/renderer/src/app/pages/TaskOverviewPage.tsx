@@ -7,6 +7,7 @@ import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPrefere
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
+import { ActionLabel } from './actionLabelDisplay';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
@@ -901,7 +902,7 @@ function HandoffRow({
         className={primary ? 'task-overview-btn task-overview-btn--primary' : 'task-overview-btn task-overview-btn--secondary'}
         onClick={() => onOpenItem?.(item)}
       >
-        {item.actionLabel}
+        <ActionLabel label={item.actionLabel} />
       </button>
     </article>
   );
@@ -933,7 +934,7 @@ function DiscussionCard({
       <h3>{item.title}</h3>
       <div className="task-overview-discussion-card__footer">
         <span>{item.deliveryRoute ?? item.workspaceLabel ?? '当前 Workspace'}</span>
-        <strong>{item.actionLabel || '打开'}</strong>
+        <strong><ActionLabel label={item.actionLabel || '打开'} /></strong>
       </div>
     </article>
   );

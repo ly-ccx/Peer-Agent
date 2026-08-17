@@ -424,7 +424,7 @@
   }
 
   .task-overview-discussion-card__footer strong {
-    @apply shrink-0 font-semibold;
+    @apply inline-flex shrink-0 items-center gap-0.5 font-semibold;
     color: var(--za-accent);
   }
 
@@ -1377,7 +1377,7 @@
   }
 
   .task-row-open {
-    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center justify-self-end gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
     color: var(--za-text);
     background: transparent;
   }
@@ -1470,7 +1470,7 @@
   }
 
   .history-row-open {
-    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center justify-self-end gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
     color: var(--za-text);
     background: transparent;
   }

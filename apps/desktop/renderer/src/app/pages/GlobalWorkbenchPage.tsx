@@ -15,6 +15,8 @@ import {
 } from '../state/acceptanceTransition';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
+import { PeerIcon } from '../../ui/icons';
+import { ActionLabel } from './actionLabelDisplay';
 
 function workspaceBasename(workspacePath: string): string {
   const normalized = workspacePath.replace(/[/\\]+$/, '');
@@ -330,7 +332,8 @@ export function GlobalWorkbenchPage({
                   </div>
                   {onOpenHistory ? (
                     <button type="button" className="gwb-link" onClick={onOpenHistory}>
-                      查看历史 →
+                      查看历史
+                      <PeerIcon name="chevronRight" size={14} className="gwb-link-arrow" />
                     </button>
                   ) : null}
                 </div>
@@ -401,7 +404,8 @@ export function GlobalWorkbenchPage({
                 </div>
                 {onOpenTasks ? (
                   <button type="button" className="gwb-link" onClick={onOpenTasks}>
-                    查看全部 →
+                    查看全部
+                    <PeerIcon name="chevronRight" size={14} className="gwb-link-arrow" />
                   </button>
                 ) : null}
               </div>
@@ -637,13 +641,13 @@ function InboxRow({
                 disabled={acceptBusy}
               >
                 {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
-                {cta}
+                <ActionLabel label={cta} />
               </button>
             </>
           ) : (
             <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
-              {cta}
-              {item.nextAction === 'decide_blocked' ? <ActionArrowIcon /> : null}
+              <ActionLabel label={cta} />
+              {item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
             </button>
           )}
         </div>

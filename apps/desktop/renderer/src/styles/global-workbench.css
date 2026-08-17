@@ -97,8 +97,19 @@
   }
 
   .gwb-link {
-    @apply text-xs font-semibold;
+    @apply inline-flex items-center gap-0.5 text-xs font-semibold;
     color: var(--za-accent);
+  }
+
+  .gwb-link-arrow {
+    width: 0.875rem;
+    height: 0.875rem;
+    flex: 0 0 auto;
+    transition: transform 160ms ease;
+  }
+
+  .gwb-link:hover .gwb-link-arrow {
+    transform: translateX(2px);
   }
 
   .gwb-list {

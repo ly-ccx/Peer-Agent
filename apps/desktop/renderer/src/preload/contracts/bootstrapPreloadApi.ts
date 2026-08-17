@@ -971,8 +971,8 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
-  // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend → IPC →
-  // mode-source 进入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
+  // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend / IPC
+  // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
   readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
   readonly conversationsUpdateFastMode: (params: { id: string; fastMode: boolean }) => Promise<unknown>;
   // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。effort/modelProviderId

@@ -511,8 +511,8 @@ export function ChatSurface({
     useConversationModelEffort(conversationId);
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
   // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
-  // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
-  // mode-source 进入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
+  // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend / IPC
+  // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const changeFastMode = useCallback((enabled: boolean) => {
