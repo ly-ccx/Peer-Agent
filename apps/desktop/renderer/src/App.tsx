@@ -31,6 +31,7 @@ import {
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
+import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
@@ -361,6 +362,13 @@ function MainApp() {
       applyConversationListPage(page as any, { append: false });
     } catch {}
   }, [activeWorkspace, applyConversationListPage, conversationView]);
+
+  useConversationStreamRouter({
+    activeConversationId,
+    onConversationUpdated: () => {
+      void refreshConversations();
+    },
+  });
 
   const loadMoreConversations = useCallback(async () => {
     if (!conversationHasMore || conversationsLoadingMore || !conversationNextCursor) return;

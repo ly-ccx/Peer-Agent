@@ -146,7 +146,7 @@ import {
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
-import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
+import { registerBrowserToolReveal } from '../state/streamRouterOwnership';
 import {
   planThreadScrollAfterMessagesChange,
   resolveThreadFollowAfterScroll,
@@ -1464,6 +1464,11 @@ export function ChatSurface({
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
 
+  useEffect(() => registerBrowserToolReveal(conversationId, handleBrowserToolActivity), [
+    conversationId,
+    handleBrowserToolActivity,
+  ]);
+
   // 显式 /compact 的 renderer 入口。自动压缩只能发生在 Runtime provider 请求前的
   // 阻塞式 preflight 中，不能从 stream done 旁路启动，否则会与 Goal Runner 下一 tick 并发写会话。
   const runCompaction = useCallback(async (compactConversationId: string): Promise<boolean> => {
@@ -1475,15 +1480,8 @@ export function ChatSurface({
     return result.compacted;
   }, [onConversationUpdated]);
 
-  // 应用级单例流路由器（方案 C / 甲-1）：订阅全部 chatStream 事件，按 streamId→conversationId
-  // 路由到对应会话桶。前台会话（=当前 conversationId）的 delta 走打字机平滑吐字，后台会话的
-  // delta 直接整段写入其桶。因 App 只渲染单个稳定的 ChatSurface 实例（切会话只改 conversationId
-  // 这个 prop、不重挂载），此处挂载即「全应用唯一一份」订阅，终结了旧的 streamIdRef 单流过滤。
-  useConversationStreamRouter({
-    activeConversationId: conversationId,
-    onConversationUpdated,
-    onBrowserToolActivity: handleBrowserToolActivity,
-  });
+  // 流订阅已上移到 App 顶层唯一一份。这里只注册浏览器工具展开副作用，
+  // 避免多个 ChatSurface 同时在世时重复订阅同一条 delta。
 
   useLayoutEffect(() => {
     const pending = pendingThreadScrollRestoreRef.current;
