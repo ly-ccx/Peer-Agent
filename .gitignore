@@ -14,6 +14,9 @@ target/
 .env.*
 !.env.example
 
+# 本机工作区路径（不要提交）
+.peer-workspace.local.json
+
 # 设计文档（本地保留，不提交）
 docs/architecture/*
 

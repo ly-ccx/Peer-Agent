@@ -24,7 +24,31 @@ Architecture knowledge lives in the companion knowledge base `peer-knowledge` (n
 - `peer-knowledge/knowledge/decisions/16-skill-call-lifecycle.md`
 - `peer-knowledge/knowledge/architecture/19-system-prompt-context-architecture.md`
 
-These documents are part of the engineering contract, not background reading. Treat them as read-only reference material by default. When local path resolution is needed, use the associated knowledge workspace (e.g. `/Users/liangyin/Documents/MiaoYan/peer-knowledge`).
+These documents are part of the engineering contract, not background reading. Treat them as read-only reference material by default.
+
+Companion knowledge identity (not a machine path):
+
+- Remote: `https://github.com/ly-ccx/Peer-Knowledge`
+- Local directory aliases: `Peer-Knowledge`, `peer-knowledge`
+
+Resolve the knowledge root in this order. Never commit a user-specific absolute path.
+
+1. Environment variable `PEER_KNOWLEDGE_ROOT` if it points at an existing directory.
+2. Optional gitignored file `.peer-workspace.local.json` in this repo root (`peerKnowledgeRoot`).
+3. A sibling directory of this repo that matches a knowledge alias.
+4. An already-open multi-root workspace folder that is the knowledge repo.
+
+If none resolve, ask. Do not invent a home-directory path or write one into git.
+
+## Workspace Entry
+
+This code repo is the default daily entry. Open it as the primary workspace root. Mount `peer-knowledge` beside it when review or durable knowledge writes are needed.
+
+- C-level: edit this repo directly.
+- B-level: edit this repo and state the architecture impact. Write back to `peer-knowledge` if a boundary actually moved.
+- A-level: review and update the architecture document or ADR in `peer-knowledge` first, then implement here.
+
+Starting a session in the knowledge repo does not make the knowledge repo the delivery target. Commits follow the change: code here, decisions there. The short intake playbook is `peer-knowledge/playbook/change-intake.md`.
 
 ## User Repository Preference: Architecture Docs Live in peer-knowledge
 
