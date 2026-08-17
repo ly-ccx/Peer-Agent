@@ -615,64 +615,6 @@
   overflow-wrap: anywhere;
 }
 
-/* ── Thinking 进行中单行状态栏（融入折叠开关行） ──
-   短文本：ticker 左对齐紧跟标识；溢出时（.is-overflowing）：
-   行内内容右贴容器右缘显示最新尾部，旧文字从左侧溢出被裁剪并淡出。 */
-.thinking-toggle--live {
-  width: 100%;
-}
-.thinking-live-label {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--ui-font-meta, 12px);
-  font-weight: 500;
-  white-space: nowrap;
-  /* 高光滚动：与 .thinking-section.active .thinking-label 同款 shimmer
-     （graphite 基调 + motion-shimmer 流光）。只在 live 时渲染，无需再套 active 选择器。 */
-  background: linear-gradient(
-    100deg,
-    var(--graphite-soft) 0%,
-    var(--graphite-soft) 35%,
-    var(--graphite-base) 50%,
-    var(--graphite-soft) 65%,
-    var(--graphite-soft) 100%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  --motion-shimmer-from: 100%;
-  --motion-shimmer-x: -100%;
-  animation: motion-shimmer 1.8s linear infinite;
-}
-.thinking-live-label::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--azure-seal, #3B82F6);
-  animation: motion-pulse-soft 1.4s ease-in-out infinite;
-}
-.thinking-live-ticker {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: var(--ui-font-meta, 12px);
-  line-height: 1.6;
-  color: var(--graphite-mute);
-  text-align: left;
-}
-.thinking-live-ticker.is-overflowing {
-  text-align: right;
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 18px);
-  mask-image: linear-gradient(to right, transparent 0, #000 18px);
-}
-
-
 /* ── Tool call cards ── */
 .tool-calls-list {
   display: flex;
@@ -2476,16 +2418,6 @@
     background: none;
     -webkit-text-fill-color: currentColor;
     color: var(--graphite-soft);
-  }
-  /* live 状态栏：label shimmer 与呼吸圆点同样降级为静态。 */
-  .thinking-live-label {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
-    color: var(--graphite-soft);
-  }
-  .thinking-live-label::before {
-    animation: none;
   }
 }
 

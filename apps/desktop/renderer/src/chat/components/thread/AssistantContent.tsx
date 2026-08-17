@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
@@ -32,10 +32,6 @@ import { parseSkillToolView } from '../../state/skillToolView';
 import { InteractionAnsweredContext } from './interactionContext';
 import { InteractionToolCard } from './InteractionToolCard';
 import { SkillCapsuleCard } from './SkillCapsuleCard';
-
-/** thinking 状态栏 ticker 的尾部字符窗口（UTF-16 code unit）：
- *  取够宽（160）保证溢出任意容器宽度实现尾部跟随，同时限制单行 DOM 体积。 */
-const LIVE_THINKING_TAIL_LIMIT = 160;
 
 function toolProgressLabel(
   progress: ToolProgress,
@@ -304,41 +300,15 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
     ? (isZh ? '正在思考' : 'Thinking')
     : completedLabel;
 
-  // 末尾组仍是 thinking 且过程活跃 → 头部为「标识 + 尾部跟随」状态栏；
-  // 整行仍是折叠开关，点击可展开完整时间线。一旦出现工具调用或正文组，
-  // 这里退化为普通摘要行（isActive 仍可能为 true）。
-  // ticker 只保留尾部 160 字窗口：足够溢出任何容器宽度（尾部跟随语义不变），
-  // 同时避免长思考时全量文本进入单行 DOM。
-  const lastGroup = groups[groups.length - 1];
-  const liveThinkingContent = isActive && lastGroup?.type === 'thinking'
-    ? windowProcessingText(
-      neutralizeToolCallSyntaxForDisplay(lastGroup.content).replace(/\s+/g, ' ').trim(),
-      LIVE_THINKING_TAIL_LIMIT,
-    ).content
-    : null;
-  const ticker = useThinkingTicker(liveThinkingContent);
-
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
       <button
         type="button"
-        className={`thinking-toggle${liveThinkingContent !== null ? ' thinking-toggle--live' : ''}`}
+        className="thinking-toggle"
         onClick={toggleExpanded}
         aria-expanded={expanded}
       >
-        {liveThinkingContent !== null ? (
-          <>
-            <span className="thinking-live-label">{label}</span>
-            <span
-              ref={ticker.ref}
-              className={`thinking-live-ticker${ticker.overflowing ? ' is-overflowing' : ''}`}
-            >
-              {liveThinkingContent}
-            </span>
-          </>
-        ) : (
-          <span className="thinking-label">{label}</span>
-        )}
+        <span className="thinking-label">{label}</span>
         <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -363,26 +333,6 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
       ) : null}
     </div>
   );
-}
-
-/** ticker 溢出检测：内容宽度超过容器时切换为右贴（尾部跟随）+ 左缘淡出。 */
-function useThinkingTicker(text: string | null) {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) {
-      setOverflowing(false);
-      return;
-    }
-    const update = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
-    update();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text]);
-  return { ref, overflowing };
 }
 
 function ThinkingTextGroup({ content, isZh }: {

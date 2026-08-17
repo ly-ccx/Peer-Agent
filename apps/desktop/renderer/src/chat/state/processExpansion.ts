@@ -28,7 +28,7 @@ export function updateProcessActivity(
     };
   }
 
-  // 进行中默认也收起：单行状态栏已承担“正在思考”的实时反馈，
+  // 进行中默认也收起：折叠条只显示「正在思考」，
   // 完整过程只在用户手动展开时显示，避免工具调用出现时整段突然铺开。
   return {
     expanded: state.userOverrodeActiveExpansion ? state.expanded : false,
