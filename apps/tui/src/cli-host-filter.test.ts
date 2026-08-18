@@ -25,6 +25,7 @@ function host(): TuiHost {
     executeShell: async () => ({ result: { status: 'success' } } as never),
     subscribe: () => () => {},
     subscribeApproval: () => () => {},
+    dispose: async () => {},
   };
 }
 

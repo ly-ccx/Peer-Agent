@@ -9,6 +9,7 @@ Use this tool for:
 Rules:
 - Use read_file instead of bash cat/head/tail when reading a known file path.
 - Use edit_file or write_file instead of shell redirection, heredocs, sed -i, perl -pi, or ad-hoc scripts when changing user files.
+- Foreground bash calls in the same conversation share one persistent shell. cwd, exported variables, and activated environments persist until timeout, abort, or the conversation ends.
 - Prefer the current workspace as the default cwd; absolute paths and outside-workspace cwd are allowed when the task needs them (permission gates still apply).
 - Quote paths that contain spaces.
 - Do not use destructive git or filesystem commands unless the user explicitly requested that exact operation.

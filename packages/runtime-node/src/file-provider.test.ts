@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -153,6 +154,44 @@ test('file provider keeps write approval explicit and supports empty files', asy
   assert.equal(completed.permissionGrant?.decision, 'allow');
   assert.equal(await readFile(path.join(workspaceRoot, 'empty.txt'), 'utf8'), '');
   assert.ok(completed.evidence);
+});
+
+test('file provider returns a numbered slice and still allows edit after a ranged read', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-range-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const filePath = path.join(workspaceRoot, 'note.txt');
+  await writeFile(filePath, 'one\ntwo\nthree\nfour\n', 'utf8');
+  const provider = createNodeFileProvider({
+    workspaceRoot,
+    requestApproval: () => ({ granted: true }),
+  });
+
+  const ranged = await provider.execute(
+    request('local.file.read', { path: 'note.txt', start_line: 2, end_line: 3 }),
+    context(),
+  );
+  assert.equal(ranged.status, 'completed');
+  assert.equal((ranged.output as { content?: string }).content, '2\ttwo\n3\tthree');
+  assert.equal((ranged.output as { start_line?: number }).start_line, 2);
+  assert.equal((ranged.output as { end_line?: number }).end_line, 3);
+  assert.equal((ranged.output as { total_lines?: number }).total_lines, 4);
+  assert.equal(
+    (ranged.output as { contentHash?: string }).contentHash,
+    createHash('sha256').update('one\ntwo\nthree\nfour\n').digest('hex'),
+  );
+
+  const invalid = await provider.execute(
+    request('local.file.read', { path: 'note.txt', start_line: 8 }),
+    context(),
+  );
+  assert.equal(invalid.error?.code, 'start_line_out_of_range');
+
+  const edited = await provider.execute(
+    request('local.file.edit', { path: 'note.txt', old_string: 'two', new_string: 'TWO' }),
+    context(),
+  );
+  assert.equal(edited.status, 'completed');
+  assert.equal(await readFile(filePath, 'utf8'), 'one\nTWO\nthree\nfour\n');
 });
 
 test('file provider allows absolute and relative paths outside the workspace root', async (t) => {

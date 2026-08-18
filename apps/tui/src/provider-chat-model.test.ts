@@ -65,6 +65,7 @@ function host(
       listener(null);
       return () => {};
     },
+    dispose: async () => {},
   };
 }
 

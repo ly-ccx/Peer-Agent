@@ -118,6 +118,7 @@ export async function runPeerExec(
     denyInteractiveTools: true,
   });
 
+  try {
   if (!runtime.modelConfig.configured) {
     writeLine(io.stderr, 'peer exec: model is not configured');
     return CLI_EXIT.auth;
@@ -238,5 +239,8 @@ export async function runPeerExec(
   } finally {
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);
+  }
+  } finally {
+    await runtime.dispose();
   }
 }

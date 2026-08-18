@@ -306,5 +306,11 @@ export function createNodeProviderBundle(
     runtime,
     pipelineToolExecutor,
     events: { subscribe: runtime.subscribe },
+    async dispose() {
+      await Promise.all(providers.map(async (provider) => {
+        const dispose = (provider as { dispose?: () => Promise<void> }).dispose;
+        if (typeof dispose === 'function') await dispose();
+      }));
+    },
   };
 }

@@ -7,11 +7,20 @@ import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 
 import {
   createTuiHost,
+  type CreateTuiHostOptions,
   type PendingApproval,
   type TuiExecutionContext,
+  type TuiHost,
 } from './tui-host.ts';
 
 const workspaces: string[] = [];
+const liveHosts: TuiHost[] = [];
+
+function createHost(options: string | CreateTuiHostOptions): TuiHost {
+  const host = createTuiHost(options);
+  liveHosts.push(host);
+  return host;
+}
 
 async function createWorkspace(): Promise<string> {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-tui-'));
@@ -43,13 +52,14 @@ async function waitFor(
 }
 
 afterEach(async () => {
+  await Promise.all(liveHosts.splice(0).map((host) => host.dispose()));
   await Promise.all(workspaces.splice(0).map((workspaceRoot) => rm(workspaceRoot, { recursive: true, force: true })));
 });
 
 describe('TUI Runtime host', () => {
   test('uses the desktop ask level by default and updates the runtime permission truth', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
 
     expect(host.getAccessLevel()).toBe('ask_before_local');
     expect(host.setAccessLevel('full_local')).toBe('full_local');
@@ -83,7 +93,7 @@ describe('TUI Runtime host', () => {
         tools: [{ name: 'echo', inputSchema: { type: 'object' } }],
       }],
     }));
-    const host = createTuiHost({ workspaceRoot, userDataPath });
+    const host = createHost({ workspaceRoot, userDataPath });
     const capabilities = (
       mode: 'chat' | 'plan' | 'goal' | 'explorer' | 'compact' | 'system',
     ) => host.capabilitiesForMode?.(mode) ?? [];
@@ -157,7 +167,7 @@ describe('TUI Runtime host', () => {
 
   test('rejects non-projected write and shell capabilities before approval in plan and explorer', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) approvalCount += 1;
@@ -186,7 +196,7 @@ describe('TUI Runtime host', () => {
   test('runs a real file capability through the governed Runtime and publishes events', async () => {
     const workspaceRoot = await createWorkspace();
     await writeFile(path.join(workspaceRoot, 'note.txt'), 'hello from Bun', 'utf8');
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const events: RuntimeSdkEvent[] = [];
     const unsubscribe = host.subscribe((event) => events.push(event));
 
@@ -203,7 +213,7 @@ describe('TUI Runtime host', () => {
   test('uses the caller session context for Runtime events and Provider execution', async () => {
     const workspaceRoot = await createWorkspace();
     await writeFile(path.join(workspaceRoot, 'session.txt'), 'session scoped', 'utf8');
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const events: RuntimeSdkEvent[] = [];
     const unsubscribe = host.subscribe((event) => events.push(event));
     const signal = new AbortController().signal;
@@ -230,7 +240,7 @@ describe('TUI Runtime host', () => {
 
   test('runs a read-only shell capability without approval', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const approvals: PendingApproval[] = [];
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) approvals.push(approval);
@@ -247,7 +257,7 @@ describe('TUI Runtime host', () => {
   test('stops a chat background shell from goal through the shared task manager', async () => {
     const workspaceRoot = await createWorkspace();
     const userDataPath = await createWorkspace();
-    const host = createTuiHost({ workspaceRoot, userDataPath, accessLevel: 'full_local' });
+    const host = createHost({ workspaceRoot, userDataPath, accessLevel: 'full_local' });
     const conversationId = 'cross-mode-shell';
     const chatContext: TuiExecutionContext = {
       ...sessionContext(conversationId, 0),
@@ -343,7 +353,7 @@ describe('TUI Runtime host', () => {
 
   test('surfaces shell approval and records an allow decision', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalObserved = false;
     const unsubscribe = host.subscribeApproval((approval: PendingApproval | null) => {
       if (approval) {
@@ -365,7 +375,7 @@ describe('TUI Runtime host', () => {
 
   test('matches desktop approve-for-me behavior for workspace writes and low-risk shell', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost({ workspaceRoot, accessLevel: 'session_local' });
+    const host = createHost({ workspaceRoot, accessLevel: 'session_local' });
     const approvals: PendingApproval[] = [];
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) approvals.push(approval);
@@ -391,7 +401,7 @@ describe('TUI Runtime host', () => {
 
   test('matches desktop full-access behavior without bypassing irreversible hard gates', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost({ workspaceRoot, accessLevel: 'full_local' });
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
     const approvals: PendingApproval[] = [];
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) approvals.push(approval);
@@ -422,7 +432,7 @@ describe('TUI Runtime host', () => {
 
   test('denies a requested shell capability without executing it', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const unsubscribe = host.subscribeApproval((approval) => approval?.resolve('deny'));
 
     const execution = await host.executeShell('touch denied.txt');
@@ -451,7 +461,7 @@ describe('TUI Runtime host', () => {
         },
       }),
     );
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
 
     const execution = await host.executeRead('missing.txt');
 
@@ -491,7 +501,7 @@ describe('TUI Runtime host', () => {
         },
       }),
     );
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
 
     const execution = await host.executeRead('post.txt');
 
@@ -523,7 +533,7 @@ describe('TUI Runtime host', () => {
       }),
     );
     await writeFile(path.join(workspaceRoot, 'approved.txt'), 'approved by hook prompt', 'utf8');
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let promptSource: string | undefined;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) {
@@ -545,7 +555,7 @@ describe('TUI Runtime host', () => {
 
   test('allow once asks again for the next matching call', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const context = sessionContext('once-session');
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
@@ -570,7 +580,7 @@ describe('TUI Runtime host', () => {
 
   test('allow for session reuses a capability grant only in the matching session', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (!approval) return;
@@ -598,7 +608,7 @@ describe('TUI Runtime host', () => {
 
   test('clears session grants when the approval UI unmounts', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const context = sessionContext('remount-session');
     const unsubscribeFirst = host.subscribeApproval((approval) => {
       approval?.resolve('allow-session');
@@ -626,7 +636,7 @@ describe('TUI Runtime host', () => {
 
   test('session allow is isolated by capability within one session', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (!approval) return;
@@ -655,7 +665,7 @@ describe('TUI Runtime host', () => {
 
   test('fails closed when no approval UI is subscribed', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
 
     const execution = await host.executeShell(
       'touch unavailable.txt',
@@ -668,7 +678,7 @@ describe('TUI Runtime host', () => {
 
   test('denies active and queued approvals when the UI unsubscribes', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let firstApproval!: PendingApproval;
     let notify!: () => void;
     const shown = new Promise<void>((resolve) => { notify = resolve; });
@@ -692,7 +702,7 @@ describe('TUI Runtime host', () => {
 
   test('queues concurrent approvals instead of replacing the active card', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const approvals: PendingApproval[] = [];
     let notify!: () => void;
     let nextApproval = new Promise<void>((resolve) => { notify = resolve; });
@@ -721,7 +731,7 @@ describe('TUI Runtime host', () => {
 
   test('keeps concurrent session approval contexts isolated', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     const observedSessions: string[] = [];
     const unsubscribe = host.subscribeApproval((approval) => {
       if (!approval) return;
@@ -742,7 +752,7 @@ describe('TUI Runtime host', () => {
 
   test('session allow cannot loosen an explicit destructive deny', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (!approval) return;
@@ -770,7 +780,7 @@ describe('TUI Runtime host', () => {
   test('session allow cannot loosen a later explicit Hook deny', async () => {
     const workspaceRoot = await createWorkspace();
     let hookCalls = 0;
-    const host = createTuiHost({
+    const host = createHost({
       workspaceRoot,
       hookRunner: {
         runPreToolUse() {
@@ -820,7 +830,7 @@ describe('TUI Runtime host', () => {
         },
       }),
     );
-    const host = createTuiHost(workspaceRoot);
+    const host = createHost(workspaceRoot);
     let approvalCount = 0;
     let promptSource: string | undefined;
     const unsubscribe = host.subscribeApproval((approval) => {
@@ -846,7 +856,7 @@ describe('TUI Runtime host', () => {
     const workspaceRoot = await createWorkspace();
     const userDataPath = path.join(workspaceRoot, '.peer-agent-test');
     await writeFile(path.join(workspaceRoot, 'evidence.txt'), 'governed evidence', 'utf8');
-    const host = createTuiHost({ workspaceRoot, userDataPath });
+    const host = createHost({ workspaceRoot, userDataPath });
     const conversationId = 'evidence-index-session';
     const context = (turnIndex: number): TuiExecutionContext => ({
       ...sessionContext(conversationId, turnIndex),
@@ -894,5 +904,32 @@ describe('TUI Runtime host', () => {
       result: 'read completed',
     });
     expect(plan?.progress).toMatchObject({ total: 1, completed: 1, percent: 100 });
+  });
+
+  test('keeps foreground shell cwd across calls and reads numbered line ranges', async () => {
+    const workspaceRoot = await createWorkspace();
+    await mkdir(path.join(workspaceRoot, 'nested'), { recursive: true });
+    await writeFile(path.join(workspaceRoot, 'note.txt'), 'one\ntwo\nthree\nfour\n', 'utf8');
+    const host = createHost({ workspaceRoot, accessLevel: 'full_local' });
+    const context = sessionContext('persist-session');
+
+    const moved = await host.executeShell('cd nested && export PEER_MARK=kept', context);
+    expect(moved.result.status).toBe('completed');
+    const persisted = await host.execute(
+      'local.shell.exec',
+      { command: 'printf "%s %s" "$PEER_MARK" "$(basename "$(pwd)")"' },
+      context,
+    );
+    expect(persisted.result.status).toBe('completed');
+    expect((persisted.result.output as { stdout?: string }).stdout).toBe('kept nested');
+
+    const ranged = await host.execute(
+      'local.file.read',
+      { path: 'note.txt', start_line: 2, end_line: 3 },
+      context,
+    );
+    expect(ranged.result.status).toBe('completed');
+    expect((ranged.result.output as { content?: string }).content).toBe('2\ttwo\n3\tthree');
+    expect((ranged.result.output as { total_lines?: number }).total_lines).toBe(4);
   });
 });

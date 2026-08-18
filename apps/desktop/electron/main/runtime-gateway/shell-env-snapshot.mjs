@@ -128,6 +128,22 @@ export function buildShellSpawnArgs(command) {
 /**
  * 进程退出时清理快照文件。
  */
+export function buildShellSessionBootstrap() {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const pathPrefix = [
+    join(homeDir, '.local/bin'),
+    join(homeDir, '.qoderwork/bin'),
+    join(homeDir, 'bin'),
+    join(homeDir, '.cargo/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ].filter(Boolean).join(':');
+  const source = snapshotReady && snapshotFilePath
+    ? `source "${snapshotFilePath}" 2>/dev/null || true\n`
+    : '';
+  return `${source}export PATH="${pathPrefix}:$PATH"\n`;
+}
+
 export function cleanupSnapshot() {
   if (snapshotFilePath && existsSync(snapshotFilePath)) {
     try { unlinkSync(snapshotFilePath); } catch { /* ignore */ }

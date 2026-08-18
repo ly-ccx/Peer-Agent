@@ -20,6 +20,14 @@ export type {
   NodeProviderBundle,
   NodeShellProviderOptions,
 } from './provider-contracts.ts';
+export {
+  FileReadRangeError,
+  formatNumberedLines,
+  parseFileReadLineRange,
+  sliceFileReadLines,
+  splitFileLines,
+} from './file-read-range.ts';
+export type { FileReadLineRange, FileReadSlice } from './file-read-range.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
 export {
   enforceConversationArtifactBudget,
@@ -104,6 +112,20 @@ export {
   normalizeNodeShellCwd,
 } from './shell-classifier.ts';
 export { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
+export type { NodeShellProvider } from './shell-provider.ts';
+export {
+  createNodeShellSessionManager,
+  resolvePersistentShellPath,
+  sessionConversationKey,
+  supportsPersistentShellSession,
+} from './shell-session.ts';
+export type {
+  CreateNodeShellSessionManagerOptions,
+  NodeShellSessionCommandResult,
+  NodeShellSessionManager,
+  NodeShellSessionStatus,
+  RunNodeShellSessionCommandOptions,
+} from './shell-session.ts';
 export { createNodeShellArtifactStore } from './shell-artifact-store.ts';
 export type {
   CreateNodeShellArtifactStoreOptions,

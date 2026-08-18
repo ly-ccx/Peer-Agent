@@ -40,13 +40,26 @@ function stopRequest(taskId: string, reason?: string): CapabilityRequest {
   };
 }
 
-function context(signal?: AbortSignal): CapabilityExecutionContext {
+function context(
+  signal?: AbortSignal,
+  conversationId = 'session-1',
+): CapabilityExecutionContext {
   return {
     runId: 'run-1',
     sessionId: 'session-1',
     workspace: { root: '/workspace' },
     signal,
+    metadata: { conversationId },
   };
+}
+
+function createProvider(
+  t: test.TestContext,
+  options: Parameters<typeof createNodeShellProvider>[0],
+) {
+  const provider = createNodeShellProvider(options);
+  t.after(() => provider.dispose());
+  return provider;
 }
 
 test('shell classifier preserves allow, ask, deny, and allows cwd outside workspace', () => {
@@ -66,7 +79,7 @@ test('shell provider auto-allows read-only commands and records Evidence', async
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-'));
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
   let approvalCalls = 0;
-  const provider = createNodeShellProvider({
+  const provider = createProvider(t, {
     workspaceRoot,
     requestApproval() {
       approvalCalls += 1;
@@ -87,7 +100,7 @@ test('shell provider requires capability approval for risky commands', async (t)
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
   const prompts: NodeCapabilityPermissionPrompt[] = [];
   let granted = false;
-  const provider = createNodeShellProvider({
+  const provider = createProvider(t, {
     workspaceRoot,
     requestApproval(prompt) {
       prompts.push(prompt);
@@ -113,7 +126,7 @@ test('shell provider hard-denies destructive commands without asking', async (t)
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-deny-'));
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
   let approvalCalls = 0;
-  const provider = createNodeShellProvider({
+  const provider = createProvider(t, {
     workspaceRoot,
     requestApproval() {
       approvalCalls += 1;
@@ -131,7 +144,7 @@ test('shell provider hard-denies destructive commands without asking', async (t)
 test('shell provider terminates on AbortSignal and timeout', async (t) => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-cancel-'));
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
-  const provider = createNodeShellProvider({
+  const provider = createProvider(t, {
     workspaceRoot,
     defaultTimeoutMs: 5000,
     maxTimeoutMs: 5000,
@@ -169,7 +182,7 @@ test('shell provider starts and stops a background task through one scoped manag
     await Promise.all(taskIds.map((taskId) => taskManager.stopTask(taskId, 'test_cleanup')));
   });
   let approvalCalls = 0;
-  const provider = createNodeShellProvider({
+  const provider = createProvider(t, {
     workspaceRoot,
     taskManager,
     requestApproval() {
@@ -238,10 +251,43 @@ test('shell provider starts and stops a background task through one scoped manag
   assert.equal(missing.error?.code, 'shell_task_not_found');
 });
 
-test('shell provider rejects malformed task ids without exposing process control', async () => {
+test('shell provider rejects malformed task ids without exposing process control', async (t) => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-invalid-stop-'));
-  const provider = createNodeShellProvider({ workspaceRoot });
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const provider = createProvider(t, { workspaceRoot });
   const result = await provider.execute(stopRequest('1234'), context());
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'invalid_task_id');
+});
+
+test('shell provider keeps cwd after a deny and isolates command evidence', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-persist-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(path.join(workspaceRoot, 'nested')));
+  const provider = createProvider(t, {
+    workspaceRoot,
+    requestApproval: () => ({ granted: true }),
+  });
+
+  const moved = await provider.execute(request('cd nested && export PEER_MARK=kept'), context());
+  assert.equal(moved.status, 'completed');
+
+  const denied = await provider.execute(request('rm -rf .'), context());
+  assert.equal(denied.status, 'denied');
+
+  const persisted = await provider.execute(
+    request('printf "%s %s" "$PEER_MARK" "$(basename "$(pwd)")"'),
+    context(),
+  );
+  assert.equal(persisted.status, 'completed');
+  assert.equal((persisted.output as { stdout?: string }).stdout, 'kept nested');
+  assert.equal((persisted.metadata as { persistentSession?: boolean }).persistentSession, true);
+  assert.doesNotMatch(String((moved.output as { stdout?: string }).stdout ?? ''), /kept nested/);
+
+  const other = await provider.execute(
+    request('printf other-conversation'),
+    context(undefined, 'other-conversation'),
+  );
+  assert.equal((other.output as { stdout?: string }).stdout, 'other-conversation');
+  assert.doesNotMatch(String((other.output as { stdout?: string }).stdout ?? ''), /kept nested/);
 });

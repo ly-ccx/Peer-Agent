@@ -11,6 +11,7 @@ import {
 import {
   createConfiguredNodeHookRunner,
   createNodeProviderBundle,
+  createNodeShellSessionManager,
   createNodeShellTaskManager,
   NODE_SHELL_RISK_ORDER,
   type NodeRuntimePermissionPrompt,
@@ -69,6 +70,7 @@ export interface TuiHost {
   executeShell(command: string, context?: TuiExecutionContext): Promise<RuntimeSdkProviderExecution>;
   subscribe(listener: (event: RuntimeSdkEvent) => void): () => void;
   subscribeApproval(listener: (approval: PendingApproval | null) => void): () => void;
+  dispose(): Promise<void>;
 }
 
 export interface CreateTuiHostOptions {
@@ -208,10 +210,12 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     });
   };
 
+  const artifactRoot = path.join(userDataPath, 'shell-artifacts');
   const shellTaskManager = createNodeShellTaskManager({
     workspaceRoot,
-    artifactRoot: path.join(userDataPath, 'shell-artifacts'),
+    artifactRoot,
   });
+  const shellSessionManager = createNodeShellSessionManager({ workspaceRoot });
   const bundles = new Map<TuiRuntimeMode, ReturnType<typeof createNodeProviderBundle>>();
   for (const mode of TUI_RUNTIME_MODES) {
     bundles.set(mode, createNodeProviderBundle({
@@ -219,7 +223,11 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       mode,
       hookRunner,
       requestPermission,
-      shell: { taskManager: shellTaskManager },
+      shell: {
+        taskManager: shellTaskManager,
+        sessionManager: shellSessionManager,
+        artifactRoot,
+      },
     }));
   }
   const bundleForMode = (mode: TuiRuntimeMode) => bundles.get(mode)!;
@@ -416,6 +424,9 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
         sessionApprovals.clear();
         while (activeApproval) activeApproval.resolve('deny');
       };
+    },
+    dispose() {
+      return shellSessionManager.disposeAll();
     },
   };
 }

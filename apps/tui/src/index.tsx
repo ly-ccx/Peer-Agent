@@ -60,6 +60,7 @@ const shutdown = createTuiShutdown({
   unmount: () => root.unmount(),
   destroyRenderer: () => renderer.destroy(),
   exitProcess: (code) => {
+    void runtime.dispose();
     flushTuiPerfSync();
     process.exit(code);
   },

@@ -50,6 +50,7 @@ export interface TuiRuntime {
   readonly modelConfig: TuiModelConfig;
   readonly languageStore: TuiLanguageStore;
   readonly themeStore: TuiThemeStore;
+  dispose(): Promise<void>;
 }
 
 export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
@@ -304,5 +305,6 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     modelConfig,
     languageStore,
     themeStore,
+    dispose: () => host.dispose(),
   };
 }

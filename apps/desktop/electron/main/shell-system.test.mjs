@@ -52,6 +52,7 @@ test('local shell provider auto-runs read-only commands and persists output arti
   assert.equal(existsSync(metadataPath), true);
   assert.match(readFileSync(metadataPath, 'utf8'), /shell-read/);
 
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -80,6 +81,7 @@ test('local shell provider materializes large stdout as an artifact-backed conte
   assert.equal(result.outputPreview.suggestedRetrieval.length > 0, true);
   assert.equal(result.evidence.redactions.includes('context_preview_truncated'), true);
 
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -97,6 +99,7 @@ test('shell permission rule can allow an exact write command without broad shell
   assert.equal(result.status, 'success');
   assert.equal(readFileSync(path.join(tmpDir, 'out.txt'), 'utf8').trim(), 'hello');
 
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -130,6 +133,7 @@ test('background shell tasks can be stopped through the task manager', async () 
   assert.equal(stopped.result.outputPreview.taskId, started.result.outputPreview.backgroundTaskId);
   await new Promise((resolve) => setTimeout(resolve, 80));
 
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -162,10 +166,11 @@ test('foreground shell task stops when execution context signal is aborted', asy
   assert.equal(result.outputPreview.interrupted, true);
   assert.equal(existsSync(markerPath), false);
 
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('permission review rejects overbroad shell allow rules', () => {
+test('permission review rejects overbroad shell allow rules', async () => {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-rule-deny-'));
   const provider = createLocalShellProvider({ workspaceRoot: tmpDir, userDataPath: tmpDir });
 
@@ -193,5 +198,35 @@ test('permission review rejects overbroad shell allow rules', () => {
     scope: { cwd: tmpDir, maxRiskLevel: 'L5_destructive' },
   }), /destructive/);
 
+  await provider.dispose();
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('local shell provider keeps cwd and env across foreground commands', async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-persist-'));
+  const nested = path.join(tmpDir, 'nested');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(nested));
+  const provider = createLocalShellProvider({
+    workspaceRoot: tmpDir,
+    userDataPath: tmpDir,
+    approvalDecider: async () => ({ granted: true, reason: 'approved_for_test' }),
+  });
+
+  const first = await provider.execute(
+    toolCall('shell-cd', 'cd nested && export PEER_MARK=kept'),
+    'zh-CN',
+    { conversationId: 'persist-1' },
+  );
+  assert.equal(first.result.status, 'success');
+
+  const second = await provider.execute(
+    toolCall('shell-pwd', 'printf "%s %s" "$PEER_MARK" "$(basename "$(pwd)")"'),
+    'zh-CN',
+    { conversationId: 'persist-1' },
+  );
+  assert.equal(second.result.status, 'success');
+  assert.equal(String(second.result.outputPreview.stdout).trim(), 'kept nested');
+
+  await provider.dispose();
   rmSync(tmpDir, { recursive: true, force: true });
 });

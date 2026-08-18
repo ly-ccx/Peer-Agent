@@ -10,6 +10,11 @@ import {
 } from 'node:fs';
 import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import {
+  FileReadRangeError,
+  parseFileReadLineRange,
+  sliceFileReadLines,
+} from '@peer-agent/runtime-node';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
@@ -313,8 +318,9 @@ function formatToolFailure(tool, status, reason, extra = {}) {
   };
 }
 
-function materializeFileRead({ filePath, content, readState }) {
-  const snapshot = readState ?? getFileSnapshot(filePath, content);
+function materializeFileRead({ filePath, content, readState, fullContent = null, range = null }) {
+  const source = fullContent ?? content;
+  const snapshot = readState ?? getFileSnapshot(filePath, source);
   const preview = previewText(content, FILE_READ_INLINE_MAX_CHARS);
   return {
     success: true,
@@ -322,14 +328,19 @@ function materializeFileRead({ filePath, content, readState }) {
       kind: 'local_file_ref',
       tool: 'read_file',
       path: filePath,
-      chars: content.length,
-      lines: lineCount(content),
+      chars: source.length,
+      lines: lineCount(source),
       mtimeMs: snapshot.mtimeMs,
       sizeBytes: snapshot.sizeBytes,
       contentHash: snapshot.contentHash,
       fullRead: readState?.fullRead ?? true,
       preview: preview.text,
       contextPreviewTruncated: preview.truncated,
+      ...(range ? {
+        start_line: range.start_line,
+        end_line: range.end_line,
+        total_lines: range.total_lines,
+      } : {}),
       suggestedRetrieval: [
         `sed -n '1,160p' ${quoteShellPath(filePath)}`,
         `rg -n "<pattern>" ${quoteShellPath(filePath)}`,
@@ -594,9 +605,38 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
       if (!existsSync(filePath)) return { success: false, error: `File not found: ${filePath}` };
-      const content = readFileSync(filePath, 'utf8');
-      const readState = recordReadState(toolContext, { cwd, filePath, content, fullRead: true });
-      return materializeFileRead({ filePath, content, readState });
+      const fullContent = readFileSync(filePath, 'utf8');
+      let slice;
+      try {
+        slice = sliceFileReadLines(fullContent, parseFileReadLineRange(args));
+      } catch (error) {
+        if (error instanceof FileReadRangeError) {
+          return formatToolFailure('read_file', 'failed', error.message, {
+            path: filePath,
+            code: error.code,
+          });
+        }
+        throw error;
+      }
+      const readState = recordReadState(toolContext, {
+        cwd,
+        filePath,
+        content: fullContent,
+        fullRead: true,
+      });
+      return materializeFileRead({
+        filePath,
+        content: slice.content,
+        readState,
+        fullContent,
+        range: slice.ranged
+          ? {
+              start_line: slice.startLine,
+              end_line: slice.endLine,
+              total_lines: slice.totalLines,
+            }
+          : null,
+      });
     }
 
     if (name === 'list_files') {

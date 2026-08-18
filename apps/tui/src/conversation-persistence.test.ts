@@ -88,6 +88,7 @@ function inertHost(): TuiHost {
     executeShell: async () => { throw new Error('not used'); },
     subscribe: () => () => {},
     subscribeApproval: () => () => {},
+    dispose: async () => {},
   };
 }
 
