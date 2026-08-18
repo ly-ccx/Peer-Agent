@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  DEFAULT_EXEC_MAX_TURNS,
   formatPeerHelp,
   parsePeerArgv,
   shouldRefuseInteractiveTui,
@@ -40,7 +39,7 @@ describe('parsePeerArgv', () => {
         effort: undefined,
         mode: 'chat',
         workspace: undefined,
-        maxTurns: DEFAULT_EXEC_MAX_TURNS,
+        maxTurns: undefined,
         promptParts: ['list files'],
       },
     });
@@ -116,6 +115,8 @@ describe('formatPeerHelp', () => {
     expect(help).toContain('--provider <id>');
     expect(help).toContain('provider::model');
     expect(help).toContain('Do not join with /');
+    expect(help).toContain('--max-turns <n>');
+    expect(help).toContain('default: none');
   });
 });
 

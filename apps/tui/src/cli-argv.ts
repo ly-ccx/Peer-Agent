@@ -1,8 +1,6 @@
 import { formatPeerVersionLine } from './cli-version.ts';
 import { CLI_EXIT } from './cli-exit.ts';
 
-export const DEFAULT_EXEC_MAX_TURNS = 40;
-
 export type ExecAccess = 'ask' | 'session' | 'full';
 export type ExecOutputFormat = 'text' | 'json';
 export type ExecMode = 'chat' | 'plan' | 'goal';
@@ -16,7 +14,7 @@ export interface PeerExecOptions {
   readonly effort: string | undefined;
   readonly mode: ExecMode;
   readonly workspace: string | undefined;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
   readonly promptParts: readonly string[];
 }
 
@@ -69,7 +67,7 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
   let effort: string | undefined;
   let mode: ExecMode = 'chat';
   let workspace: string | undefined;
-  let maxTurns = DEFAULT_EXEC_MAX_TURNS;
+  let maxTurns: number | undefined;
   const promptParts: string[] = [];
   let endOfFlags = false;
 
@@ -236,7 +234,7 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '  --effort <level>            This-run effort override',
       '  --mode chat|plan|goal       Runtime mode (default: chat)',
       '  --workspace <path>          Workspace root (must exist)',
-      '  --max-turns <n>             Agent-loop cap (default: 40)',
+      '  --max-turns <n>             Optional agent-loop cap (default: none)',
       '  -h, --help                  Show this help',
       '',
       'Prompt is the remaining arguments, or stdin when none are given.',

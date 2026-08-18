@@ -200,7 +200,9 @@ export async function runPeerExec(
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
   try {
-    const sendResult = await controller.send(prompt, { maxTurns: options.maxTurns });
+    const sendResult = await controller.send(prompt, {
+      ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
+    });
     persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
     const resultText = sendResult.output?.trim() || lastAssistantText(snapshot.messages);
