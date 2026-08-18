@@ -20,7 +20,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { materializeToolResultContent } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -125,26 +125,24 @@ function executionContent(execution: RuntimeSdkProviderExecution, conversationId
     toolCallId: result.toolCallId,
     execution,
   });
-  const view = {
-    status: result.status,
-    ...(result.output === undefined ? {} : { output: result.output }),
-    ...(result.outputPreview === undefined ? {} : { outputPreview: result.outputPreview }),
-    ...(result.error === undefined ? {} : { error: result.error }),
-    ...(evidenceRefs.length === 0 ? {} : { evidenceRefs }),
-  };
-  const json = JSON.stringify(view);
-  // Layer 0 材料化(与 Desktop tool-orchestrator 同源):超阈值输出落盘 artifact,
-  // provider 消息只留 ref 骨架;写盘失败降级为原文,交给共享 microcompact 兜底。
+  // Layer 0: one encoded result for provider history. Do not wrap
+  // output + outputPreview and rematerialize. File reads stay inline;
+  // shell logs keep the shell artifact route.
   try {
-    return materializeToolResultContent({
+    return encodeProviderToolResult({
+      result,
+      execution,
       conversationId,
       toolCallId: result.toolCallId,
-      tool: 'tool',
-      content: json,
-      isError: result.status === 'failed',
+      evidenceRefs,
     }).content;
   } catch {
-    return json;
+    return JSON.stringify({
+      status: result.status,
+      ...(result.output === undefined ? {} : { output: result.output }),
+      ...(result.error === undefined ? {} : { error: result.error }),
+      ...(evidenceRefs.length === 0 ? {} : { evidenceRefs }),
+    });
   }
 }
 

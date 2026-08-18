@@ -370,7 +370,6 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         content: JSON.stringify({
           status: 'completed',
           output: { content: 'note contents' },
-          outputPreview: 'note contents',
         }),
       },
     ]);

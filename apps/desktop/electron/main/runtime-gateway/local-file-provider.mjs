@@ -13,6 +13,8 @@ import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
+/** Working-set file reads. Keep in sync with FILE_READ_INLINE_MAX_CHARS. */
+const FILE_READ_INLINE_MAX_CHARS = 32_000;
 const MAX_USER_CODE_PREVIEW_LINES = 40;
 const MAX_USER_CODE_PREVIEW_LINE_CHARS = 240;
 /** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
@@ -313,7 +315,7 @@ function formatToolFailure(tool, status, reason, extra = {}) {
 
 function materializeFileRead({ filePath, content, readState }) {
   const snapshot = readState ?? getFileSnapshot(filePath, content);
-  const preview = previewText(content);
+  const preview = previewText(content, FILE_READ_INLINE_MAX_CHARS);
   return {
     success: true,
     output: formatContextResult({

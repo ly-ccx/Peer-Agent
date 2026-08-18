@@ -31,6 +31,12 @@ export {
 } from './tool-artifact-store.ts';
 export type { MaterializedToolResult, ToolResultArtifact } from './tool-artifact-store.ts';
 export {
+  encodeProviderToolResult,
+  FILE_READ_INLINE_MAX_CHARS,
+  SHELL_CONTEXT_PREVIEW_CHARS,
+} from './tool-result-encoder.ts';
+export type { EncodeProviderToolResultInput } from './tool-result-encoder.ts';
+export {
   createNodeInteractionProvider,
   INTERACTION_CAPABILITY_ID,
   NODE_INTERACTION_CAPABILITY_MANIFESTS,
