@@ -4,6 +4,34 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.5-beta.4 - 2026-08-18
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.3`.
+- Add headless `peer exec` with provider-aware model disambiguation and no default turn cutoff.
+- Persist foreground shell cwd/env across calls, and let `read_file` return a numbered line range.
+- Keep the thinking ticker collapsed until expanded; restore editor menu icons and linear SVG arrows.
+
+### Added
+
+- `peer exec` runs one Agent turn from the current directory without opening the TUI.
+- Provider-aware model disambiguation so same-named models do not collide in `peer exec`.
+- Persistent cwd and env for foreground `local.shell.exec` inside one conversation.
+- Optional `start_line` / `end_line` on `read_file` for numbered slices.
+
+### Changed
+
+- Leave `peer exec` unbounded unless `--max-turns` is set.
+- Keep working-set tool results inline so they stay in the current context.
+
+### Fixed
+
+- Hide the live thinking ticker until the thinking block is expanded.
+- Restore editor menu icons from local icns instead of leaving them blank.
+- Replace character arrows with linear SVG icons.
+- Pass an unbounded turn limit when TUI `exec` omits `--max-turns`.
+
 ## 0.0.5-beta.3 - 2026-08-17
 
 ### Notes

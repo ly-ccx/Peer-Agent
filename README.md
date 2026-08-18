@@ -52,7 +52,7 @@ Three first-class shells share one unified core runtime:
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current stable release: **`0.0.4`** (npm `latest`); latest published beta channel **`0.0.5-beta.3`**. Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
+> Current stable release: **`0.0.4`** (npm `latest`); latest published beta channel **`0.0.5-beta.4`**. Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 
@@ -199,6 +199,7 @@ It doesn't matter where work enters — config, permissions, and Evidence are al
 npm install -g @peer-agent/cli
 peer --version
 peer
+peer exec "summarize this repo"
 ```
 
 The npm package downloads the platform `peer` binary from GitHub Releases on install. macOS arm64 (`peer-darwin-arm64.tar.gz`) is first-class today; other platforms fail clearly in postinstall until multi-platform CLI builds ship.
