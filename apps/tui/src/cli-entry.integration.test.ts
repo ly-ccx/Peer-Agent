@@ -36,6 +36,8 @@ describe('peer CLI entry', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('--access ask|session|full');
     expect(result.stdout).toContain('default: session');
+    expect(result.stdout).toContain('--provider <id>');
+    expect(result.stdout).toContain('provider::model');
   });
 
   test('non-TTY peer refuses to start the TUI', async () => {

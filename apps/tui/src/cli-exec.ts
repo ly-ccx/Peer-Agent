@@ -1,13 +1,14 @@
 import { existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LocalAccessLevel } from '@peer-agent/protocol';
+import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
 import type { ModelReasoningEffort } from '@peer-agent/runtime-node';
 
 import { createChatController } from './chat-controller.ts';
 import type { PeerExecOptions } from './cli-argv.ts';
 import { CLI_EXIT, type CliExitCode } from './cli-exit.ts';
 import { encodeExecJson, isAuthFailureReason } from './cli-output.ts';
+import { resolveExecCatalogEntry } from './cli-model-ref.ts';
 import { resolveExecToolAllowlist } from './cli-tools.ts';
 import { createTuiConversationPersistence } from './conversation-persistence.ts';
 import { createTuiRuntime } from './tui-runtime.ts';
@@ -123,18 +124,29 @@ export async function runPeerExec(
   }
 
   const current = runtime.modelSelection.getSelection();
-  if (options.model) {
-    const match = runtime.modelSelection.catalog.find((entry) => (
-      entry.modelId === options.model && entry.available
-    )) ?? runtime.modelSelection.catalog.find((entry) => entry.modelId === options.model);
-    if (!match) {
-      writeLine(io.stderr, `peer exec: unknown --model ${options.model}`);
+  if (options.provider || options.model) {
+    const resolved = resolveExecCatalogEntry(runtime.modelSelection.catalog, {
+      provider: options.provider,
+      model: options.model,
+    });
+    if (!resolved.ok) {
+      writeLine(io.stderr, resolved.message);
       return CLI_EXIT.usage;
+    }
+    const match = runtime.modelSelection.catalog.find((entry) => (
+      entry.providerId === resolved.entry.providerId
+      && entry.modelId === resolved.entry.modelId
+    ));
+    if (!match?.available) {
+      writeLine(io.stderr, `peer exec: ${resolved.entry.providerId} has no credential for ${resolved.entry.modelId}`);
+      return CLI_EXIT.auth;
     }
     runtime.modelSelection.setSelection({
       providerId: match.providerId,
       modelId: match.modelId,
-      reasoningEffort: current.reasoningEffort,
+      reasoningEffort: match.supportedReasoningEfforts.includes(current.reasoningEffort)
+        ? current.reasoningEffort
+        : match.defaultReasoningEffort,
     });
   }
   if (options.effort) {
@@ -178,7 +190,7 @@ export async function runPeerExec(
     },
     getModelKey: () => {
       const selection = runtime.modelSelection.getSelection();
-      return `${selection.providerId}:${selection.modelId}`;
+      return contextAccountingModelKey(selection.providerId, selection.modelId);
     },
   });
 

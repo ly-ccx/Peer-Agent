@@ -35,6 +35,7 @@ describe('parsePeerArgv', () => {
         access: 'session',
         tools: undefined,
         outputFormat: 'text',
+        provider: undefined,
         model: undefined,
         effort: undefined,
         mode: 'chat',
@@ -53,6 +54,7 @@ describe('parsePeerArgv', () => {
       'bash,file',
       '--output-format',
       'json',
+      '--provider=openai-1',
       '--model',
       'gpt-5.4',
       '--effort=max',
@@ -71,6 +73,7 @@ describe('parsePeerArgv', () => {
         access: 'full',
         tools: ['bash', 'file'],
         outputFormat: 'json',
+        provider: 'openai-1',
         model: 'gpt-5.4',
         effort: 'max',
         mode: 'plan',
@@ -110,6 +113,9 @@ describe('formatPeerHelp', () => {
     expect(help).toContain('--access ask|session|full');
     expect(help).toContain('default: session');
     expect(help).toContain('--access full');
+    expect(help).toContain('--provider <id>');
+    expect(help).toContain('provider::model');
+    expect(help).toContain('Do not join with /');
   });
 });
 

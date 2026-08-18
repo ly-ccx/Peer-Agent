@@ -11,6 +11,7 @@ export interface PeerExecOptions {
   readonly access: ExecAccess;
   readonly tools: readonly string[] | undefined;
   readonly outputFormat: ExecOutputFormat;
+  readonly provider: string | undefined;
   readonly model: string | undefined;
   readonly effort: string | undefined;
   readonly mode: ExecMode;
@@ -63,6 +64,7 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
   let access: ExecAccess = 'session';
   let tools: string[] | undefined;
   let outputFormat: ExecOutputFormat = 'text';
+  let provider: string | undefined;
   let model: string | undefined;
   let effort: string | undefined;
   let mode: ExecMode = 'chat';
@@ -125,6 +127,12 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
       outputFormat = value.value as ExecOutputFormat;
       continue;
     }
+    if (flag.name === '--provider') {
+      const value = readValue('--provider', flag.inline, rest);
+      if (!value.ok) return { kind: 'error', message: value.message, exitCode: CLI_EXIT.usage };
+      provider = value.value;
+      continue;
+    }
     if (flag.name === '--model') {
       const value = readValue('--model', flag.inline, rest);
       if (!value.ok) return { kind: 'error', message: value.message, exitCode: CLI_EXIT.usage };
@@ -183,6 +191,7 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
       access,
       tools,
       outputFormat,
+      provider,
       model,
       effort,
       mode,
@@ -222,7 +231,8 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '  --access ask|session|full   Permission policy (default: session)',
       '  --tools <list>              Projection allowlist, e.g. bash,file',
       '  --output-format text|json   stdout shape (default: text)',
-      '  --model <id>                This-run model override',
+      '  --provider <id>             This-run provider / credential id',
+      '  --model <id>                This-run model id, or provider::model',
       '  --effort <level>            This-run effort override',
       '  --mode chat|plan|goal       Runtime mode (default: chat)',
       '  --workspace <path>          Workspace root (must exist)',
@@ -231,6 +241,8 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '',
       'Prompt is the remaining arguments, or stdin when none are given.',
       '--access ask fails without a TTY. Evaluation containers should pass --access full.',
+      'If two providers share a model id, pass --provider or --model <provider>::<model>.',
+      'Do not join with / — that character is part of some model ids.',
     ].join('\n');
   }
 
