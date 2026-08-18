@@ -189,7 +189,7 @@ import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
 import { createEditorLaunchService } from './editor-launch-service.mjs';
 import { createEditorPreferenceService } from './editor-preference-service.mjs';
-import { resolveMacAppIconPath } from './mac-app-icon.mjs';
+import { planMacAppIconRead } from './mac-app-icon.mjs';
 import { createPasswordVaultFillApplicationService } from './password-vault-fill-application-service.mjs';
 import { createWorkspaceApplicationService } from './workspace-application-service.mjs';
 import {
@@ -1922,25 +1922,23 @@ const editorLaunchService = createEditorLaunchService({
       return null;
     }
   },
-  // 先读 .app 自己的 icns；getFileIcon 对着包目录经常返回空图。
+  // 已经是 .icns/.png 就直接读；getFileIcon 对着图标文件会回系统通用文件图。
   readAppIcon: async (appOrExePath) => {
-    if (!appOrExePath) return null;
+    const plan = planMacAppIconRead(appOrExePath);
+    if (plan.kind === 'none') return null;
     const toDataUrl = (image) => {
       if (!image || typeof image.isEmpty !== 'function' || image.isEmpty()) return null;
       return image.resize({ width: 32, height: 32 }).toDataURL();
     };
-    try {
-      const icnsPath = resolveMacAppIconPath(appOrExePath);
-      if (icnsPath) {
-        const fromIcns = nativeImage.createFromPath(icnsPath);
-        const dataUrl = toDataUrl(fromIcns);
-        if (dataUrl) return dataUrl;
+    if (plan.kind === 'file') {
+      try {
+        return toDataUrl(nativeImage.createFromPath(plan.path));
+      } catch {
+        return null;
       }
-    } catch {
-      // 继续回退 getFileIcon
     }
     try {
-      const icon = await app.getFileIcon(appOrExePath, { size: 'normal' });
+      const icon = await app.getFileIcon(plan.path, { size: 'normal' });
       return toDataUrl(icon);
     } catch {
       return null;

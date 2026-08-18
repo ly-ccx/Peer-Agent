@@ -45,6 +45,24 @@ test('detectWithIcons prefers the CFBundleIconFile icns over the .app bundle pat
   assert.equal(editors[0].iconDataUrl, 'data:image/png;base64,Code.icns');
 });
 
+test('detectWithIcons keeps iconDataUrl null when the host cannot read the icon file', async () => {
+  const icns = '/Applications/Cursor.app/Contents/Resources/Cursor.icns';
+  const service = createEditorLaunchService({
+    platform: 'darwin',
+    env: { HOME: '/Users/tester' },
+    exists: (candidate) =>
+      candidate === '/Applications/Cursor.app' || candidate === icns,
+    readBundleId: () => 'com.todesktop.230313mzl4w4u92',
+    readAppIcon: async () => null,
+    resolveMacAppIconPath: () => icns,
+    spawnDetached: async () => ({ ok: true }),
+  });
+
+  const editors = await service.detectWithIcons();
+  const cursor = editors.find((editor) => editor.id === 'cursor');
+  assert.equal(cursor.iconDataUrl, null);
+});
+
 test('detectWithIcons attaches the host-provided real app icon', async () => {
   const { service } = macService({
     installed: ['/Applications/Visual Studio Code.app'],

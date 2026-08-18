@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveMacAppIconFile, resolveMacAppIconPath } from './mac-app-icon.mjs';
+import {
+  isMacAppIconFile,
+  planMacAppIconRead,
+  resolveMacAppIconFile,
+  resolveMacAppIconPath,
+} from './mac-app-icon.mjs';
 
 test('resolveMacAppIconFile reads CFBundleIconFile and appends .icns', () => {
   const plist = `<?xml version="1.0"?>
@@ -39,4 +44,35 @@ test('resolveMacAppIconPath returns null when the icns is missing', () => {
     readFile: () => `<key>CFBundleIconFile</key><string>Missing</string>`,
   });
   assert.equal(path, null);
+});
+
+test('resolveMacAppIconPath returns an already-resolved icon file as-is', () => {
+  const icns = '/Applications/Visual Studio Code.app/Contents/Resources/Code.icns';
+  const path = resolveMacAppIconPath(icns, {
+    exists: (candidate) => candidate === icns,
+    readFile: () => {
+      throw new Error('should not parse Info.plist for an icon file');
+    },
+  });
+  assert.equal(path, icns);
+});
+
+test('planMacAppIconRead loads resolved icon files instead of getFileIcon', () => {
+  const icns = '/Applications/Cursor.app/Contents/Resources/Cursor.icns';
+  assert.equal(isMacAppIconFile(icns), true);
+  assert.deepEqual(
+    planMacAppIconRead(icns, { exists: (candidate) => candidate === icns }),
+    { kind: 'file', path: icns },
+  );
+  assert.deepEqual(
+    planMacAppIconRead(icns, { exists: () => false }),
+    { kind: 'none' },
+  );
+});
+
+test('planMacAppIconRead only uses getFileIcon for app bundles', () => {
+  assert.deepEqual(
+    planMacAppIconRead('/Applications/Zed.app', { exists: () => false }),
+    { kind: 'file-icon', path: '/Applications/Zed.app' },
+  );
 });
