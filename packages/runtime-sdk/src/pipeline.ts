@@ -1,3 +1,5 @@
+import { isParallelSafeLocalToolBatch } from '@peer-agent/runtime-core';
+
 import type {
   RuntimePipeline,
   RuntimePipelineOptions,
@@ -121,14 +123,26 @@ export function createRuntimePipeline<
           }
 
           const executions: RuntimePipelineToolExecution<TCall, TToolResult>[] = [];
-          for (const [index, call] of outcome.calls.entries()) {
-            throwIfAborted(signal);
-            const execution = await options.tools.execute(call, {
-              ...currentContext,
-              index,
-            });
-            executions.push(execution);
-            toolCalls += 1;
+          if (isParallelSafeLocalToolBatch(outcome.calls)) {
+            const batch = await Promise.all(outcome.calls.map(async (call, index) => {
+              throwIfAborted(signal);
+              return options.tools.execute(call, {
+                ...currentContext,
+                index,
+              });
+            }));
+            executions.push(...batch);
+            toolCalls += batch.length;
+          } else {
+            for (const [index, call] of outcome.calls.entries()) {
+              throwIfAborted(signal);
+              const execution = await options.tools.execute(call, {
+                ...currentContext,
+                index,
+              });
+              executions.push(execution);
+              toolCalls += 1;
+            }
           }
 
           state = await options.model.applyToolResults(state, executions, currentContext);

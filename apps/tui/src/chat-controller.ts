@@ -3,7 +3,7 @@ import type {
   ProviderRequestUsage,
   RuntimeTurnUsage,
 } from '@peer-agent/protocol';
-import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
+import type { ModelMessage, ModelToolCall, ModelToolDefinition, ModelUsage } from '@peer-agent/runtime-node';
 import type { RuntimeUsageAccounting } from '@peer-agent/runtime-core';
 import type { SystemContextInput } from '@peer-agent/system-context';
 import {
@@ -46,7 +46,7 @@ import {
 import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
-import { normalizeTuiMode, normalizeTuiRuntimeMode, type TuiMode } from './tui-mode.ts';
+import { normalizeTuiMode, normalizeTuiRuntimeMode, type TuiMode, type TuiRuntimeMode } from './tui-mode.ts';
 import {
   createToolPresentation,
   formatToolResultSummary,
@@ -203,6 +203,14 @@ export interface ChatModelState {
    * 经 persistence 写入共享 `_compaction` marker。
    */
   readonly midTurnCompactions?: readonly MidTurnCompaction[];
+  /**
+   * UserTurn 内钉死的 provider 前缀。mode 不变时不得重算 System Context 或 tools schema。
+   */
+  readonly pinnedProviderPrefix?: {
+    readonly mode: TuiRuntimeMode;
+    readonly systemMessages: readonly ModelMessage[];
+    readonly tools: readonly ModelToolDefinition[];
+  };
 }
 
 /** turn 内自动压缩记录(优先 LLM 摘要,失败回退 structural;与 Desktop mid-turn 对齐)。 */

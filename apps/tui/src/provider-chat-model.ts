@@ -10,6 +10,7 @@ import {
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
   resolveMaxSummaryChars,
+  shouldSkipExactContextCount,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type {
@@ -101,6 +102,17 @@ function toModelTool(tool: RuntimeToolDefinition): ModelToolDefinition {
  * Invalid JSON / non-object payloads must not crash the whole turn; wrap them so
  * Runtime can reject the tool call with a structured failure instead.
  */
+function trailingToolText(messages: readonly ModelMessage[]): string {
+  const chunks: string[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'tool') break;
+    if (typeof message.content === 'string') chunks.unshift(message.content);
+    else if (message.content != null) chunks.unshift(JSON.stringify(message.content));
+  }
+  return chunks.join('');
+}
+
 function parseArguments(call: ModelToolCall): Record<string, unknown> {
   const raw = call.arguments;
   if (!raw || !raw.trim()) return {};
@@ -343,8 +355,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         systemContextInput: input.input.systemContextInput,
       });
       const userContent = toUserModelContent(input.input.content, input.input.images);
-      // System Context is rebuilt from current host facts every turn. Never retain
-      // a previous host's prompt or accumulate duplicate system messages.
+      // System Context is assembled from current host facts at UserTurn start,
+      // then pinned for inner ModelSteps. Never accumulate duplicate system messages.
       const historyWithoutSystem = input.input.modelMessages.filter(
         (message) => message.role !== 'system',
       );
@@ -353,6 +365,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ...historyWithoutSystem,
         { role: 'user', content: userContent },
       ];
+      const pinnedTools = toolDefinitionsForMode(mode).map(toModelTool);
       return {
         messages: [
           ...input.input.history,
@@ -367,6 +380,11 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ],
         modelMessages,
         toolExecutions: [],
+        pinnedProviderPrefix: {
+          mode,
+          systemMessages,
+          tools: pinnedTools,
+        },
         // A resumed usage value belongs to an earlier runtime turn. Every new
         // turn starts a fresh accumulator while context capacity resumes from
         // contextAccounting only.
@@ -382,7 +400,19 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const mode = normalizeTuiRuntimeMode(context.run.mode);
       const projectedToolDefinitions = toolDefinitionsForMode(mode);
       const toolsByName = new Map(projectedToolDefinitions.map((tool) => [tool.name, tool]));
-      const tools = projectedToolDefinitions.map(toModelTool);
+      const pinnedPrefix = state.pinnedProviderPrefix?.mode === mode
+        ? state.pinnedProviderPrefix
+        : {
+            mode,
+            systemMessages: systemMessagesFor({
+              mode,
+              ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
+              systemContextBlocks: context.run.input.systemContextBlocks,
+              systemContextInput: context.run.input.systemContextInput,
+            }),
+            tools: projectedToolDefinitions.map(toModelTool),
+          };
+      const tools = pinnedPrefix.tools;
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
       const model = options.getModel?.() ?? options.model;
@@ -419,6 +449,11 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             : { kind: 'observed_usage_only' }),
         initialSnapshot: state.contextAccounting,
         countRequest: activeProvider.countInputTokens
+          && !shouldSkipExactContextCount({
+            lastPercent: state.contextAccounting?.percent,
+            contextWindow,
+            appendedText: trailingToolText(state.modelMessages),
+          })
           ? (request) => activeProvider.countInputTokens!(request)
           : undefined,
         onSnapshot(snapshot) {
@@ -485,7 +520,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             return { compacted: false, state: pipelineState };
           }
           const nextMessages: readonly ModelMessage[] = [
-            ...strategy.systemMessages,
+            ...pinnedPrefix.systemMessages,
             { role: 'user', content: strategy.handoffContent },
             ...strategy.keepMessages,
           ];
@@ -555,6 +590,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           kind: 'tool_calls',
           state: {
             ...state,
+            pinnedProviderPrefix: pinnedPrefix,
             modelMessages: [
               ...workingMessages,
               { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
@@ -579,6 +615,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         kind: 'completed',
         state: {
           ...state,
+          pinnedProviderPrefix: pinnedPrefix,
           modelMessages: completedModelMessages,
           usageAccounting,
           usage: turnUsage,

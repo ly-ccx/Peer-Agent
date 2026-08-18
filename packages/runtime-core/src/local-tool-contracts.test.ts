@@ -9,6 +9,7 @@ import {
   SHARED_LOCAL_TOOL_CONTRACTS,
   canonicalizeLocalCapabilityId,
   canonicalizeLocalModelToolName,
+  isParallelSafeLocalToolBatch,
   isSharedLocalCapabilityId,
   isSharedLocalToolName,
 } from './local-tool-contracts.ts';
@@ -90,4 +91,22 @@ test('Desktop-only browser contracts are explicit and excluded from shared parit
     assert.equal(isSharedLocalToolName(contract.toolName), false);
     assert.equal(isSharedLocalCapabilityId(contract.capabilityId), false);
   }
+});
+
+test('only an all-read file batch is parallel-safe', () => {
+  assert.equal(isParallelSafeLocalToolBatch([
+    { capabilityId: 'local.file.read' },
+    { capabilityId: 'local.file.search' },
+  ]), true);
+  assert.equal(isParallelSafeLocalToolBatch([
+    { capabilityId: 'local.file.read' },
+  ]), false);
+  assert.equal(isParallelSafeLocalToolBatch([
+    { capabilityId: 'local.file.read' },
+    { capabilityId: 'local.shell.exec' },
+  ]), false);
+  assert.equal(isParallelSafeLocalToolBatch([
+    { capabilityId: 'local.file.read' },
+    {},
+  ]), false);
 });
