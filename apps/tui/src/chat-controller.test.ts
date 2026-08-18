@@ -474,6 +474,29 @@ describe('chat controller', () => {
     expect(snapshots.some((item) => item.status === 'running' && item.pending && item.content === '')).toBe(true);
   });
 
+  test('honors send maxTurns and returns exhausted', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state) {
+        return {
+          kind: 'tool_calls',
+          state,
+          calls: [{
+            toolCallId: 't1',
+            capabilityId: 'local.file.read',
+            arguments: { path: '.' },
+          }],
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const result = await controller.send('loop', { maxTurns: 2 });
+    expect(result.status).toBe('exhausted');
+    expect(result.turns).toBe(2);
+    expect(controller.getSnapshot().error).toContain('turn limit');
+  });
+
   test('streams reasoning.delta into thinkingContent on the pending assistant', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),

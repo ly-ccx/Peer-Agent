@@ -246,6 +246,13 @@ export interface ChatCompactResult {
   readonly notice: string;
 }
 
+export interface ChatSendResult {
+  readonly status: 'completed' | 'stopped' | 'cancelled' | 'exhausted' | 'failed' | 'skipped';
+  readonly turns: number;
+  readonly output?: string;
+  readonly reason?: string;
+}
+
 export interface ChatController {
   getSnapshot(): ChatSnapshot;
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
@@ -258,7 +265,8 @@ export interface ChatController {
     readonly images?: readonly ChatMessageImage[];
     /** Goal Runner ticks: feed the model without rendering a user bubble (Desktop parity). */
     readonly hideFromUi?: boolean;
-  }): Promise<void>;
+    readonly maxTurns?: number;
+  }): Promise<ChatSendResult>;
   runGoalTurn(content: string): Promise<{
     readonly continued: boolean;
     readonly explorers: readonly TuiExplorerRequest[];
@@ -1048,7 +1056,9 @@ export function createChatController(options: {
       const trimmed = content.trim();
       const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
       const hideFromUi = sendOptions?.hideFromUi === true;
-      if ((!trimmed && images.length === 0) || activeTurn) return;
+      if ((!trimmed && images.length === 0) || activeTurn) {
+        return { status: 'skipped', turns: 0 };
+      }
 
       const pendingContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
@@ -1119,12 +1129,14 @@ export function createChatController(options: {
         ],
       });
 
+      let sendResult: ChatSendResult = { status: 'failed', turns: 0 };
       try {
         const result = await pipeline.run(
           {
             sessionId: turn.sessionId,
             ...(turn.conversationId ? { conversationId: turn.conversationId } : {}),
             ...(turn.streamId ? { streamId: turn.streamId } : {}),
+            ...(sendOptions?.maxTurns ? { maxTurns: sendOptions.maxTurns } : {}),
             mode: turnMode,
             input: {
               content: userContent,
@@ -1254,6 +1266,13 @@ export function createChatController(options: {
           ],
           error: failureDetail,
         });
+        sendResult = {
+          status: result.status,
+          turns: result.turns,
+          ...(typeof result.output === 'string' ? { output: result.output } : {}),
+          ...(result.reason ? { reason: result.reason } : {}),
+          ...(failureDetail && !result.reason ? { reason: failureDetail } : {}),
+        };
       } catch (error) {
         flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
@@ -1278,11 +1297,17 @@ export function createChatController(options: {
           lastRequestUsage,
           contextAccounting: failedAccounting,
         });
+        sendResult = {
+          status: wasCancelled ? 'cancelled' : 'failed',
+          turns: 0,
+          reason: detail,
+        };
       } finally {
         turnAccountingLifecycle = null;
         activeRuntimeTurnUsage = undefined;
         if (activeTurn === turn) activeTurn = null;
       }
+      return sendResult;
     },
     clear() {
       if (activeTurn) return false;

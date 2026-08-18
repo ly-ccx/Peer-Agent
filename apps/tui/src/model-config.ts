@@ -93,7 +93,7 @@ export function resolveTuiModelConfig(
     userDataPath: options.userDataPath,
   });
   // Keep the full Desktop catalog visible and selectable in CLI when credentials
-  // are present. Auth-method-specific request routing lives in index.tsx.
+  // are present. Auth-method-specific request routing lives in tui-runtime.ts.
   const catalog = sharedProviders.map((provider): RuntimeModelCatalogEntry => {
     const available = provider.credentialStored;
     // Prefer Desktop modelLabel (e.g. GLM-5.2) over raw model id (e.g. gm51model).
