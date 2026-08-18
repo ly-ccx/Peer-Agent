@@ -138,3 +138,27 @@ Some existing code may still violate this governance baseline. When touching leg
 - If full cleanup is too large, isolate the change and leave the next seam explicit in docs or tests.
 
 The goal is not abstract purity. The goal is a system where model intent, local execution, user authorization, and factual Evidence stay separate and traceable.
+
+## Cursor Cloud specific instructions
+
+This section captures non-obvious environment/runtime caveats for Cloud Agents. Standard commands live in `README.md` and the `scripts` of the root/`apps/*` `package.json`; this section only adds what is not obvious there. The startup update script only runs `pnpm install --frozen-lockfile`; everything else below is already baked into the VM snapshot or must be run on demand.
+
+### Toolchains (already provisioned in the snapshot)
+
+- Node: use the nvm-managed Node (currently v22.23.2), not the `/exec-daemon/node` (v22.14) that is first on the raw `PATH`. `~/.bashrc` prepends the nvm `node`/`pnpm` (corepack) so a login/interactive shell resolves the right one. Node must be `>= 22.18` because several packages run TypeScript test files directly via `node --test src/*.test.ts` (native type stripping); the exec-daemon Node 22.14 fails these with `ERR_UNKNOWN_FILE_EXTENSION`.
+- `pnpm` (10.22.0, pinned by `packageManager`) is provided through corepack on the nvm Node.
+- Bun is installed (`~/.bun/bin`, on `PATH` via `~/.bashrc`) and is required by `apps/tui` (`pnpm --filter @peer-agent/tui dev|build|test`).
+- Rust: the default toolchain is stable `>= 1.85` (the `peer-credential-helper` crate is `edition = "2024"`). The system lib `libdbus-1-dev` (+ `pkg-config`) is installed because the Linux `keyring`/`dbus-secret-service` crate needs it to compile.
+
+### Building and testing
+
+- Automated tests import each workspace package's built `dist/`, so run a build before `pnpm test` (e.g. `pnpm build`, or the per-package `pnpm --filter <pkg> build` chain). A clean checkout without `dist/` fails tests with `ERR_MODULE_NOT_FOUND` for `@peer-agent/*`.
+- `pnpm test` runs every package's tests in parallel (`pnpm -r`). Timing-sensitive desktop tests (fake timers / readiness timeouts) can flake as `cancelledByParent` ("Promise resolution is still pending…") under that load. Re-run the single file/package in isolation (`node --test <file>`) to get a stable result.
+- Known pre-existing failures on `main` (NOT caused by the environment — do not chase them during setup): 5 desktop tests fail deterministically (`full-disk-access-drag-float`, `goal-plan-store` ×2, `qoder-private-adapter`, `task-overview-aggregator`); `pnpm typecheck` reports one error in `packages/protocol/src/goal.test.ts`; `pnpm architecture:check` reports 2 local `@keyframes` CSS violations.
+
+### Running the apps
+
+- Desktop (primary product): `pnpm dev` (root) → builds the runtime packages + credential helper, then runs Vite (`127.0.0.1:5173`) + Electron. It needs a display: `export DISPLAY=:1` (the same X server used by computer-use). The `dbus/bus.cc … Failed to connect to the bus` and `GpuControl.CreateCommandBuffer` errors in the logs are benign in this headless container.
+- The credential vault relies on the OS Secret Service / keychain, which is unavailable headless. Adding an API-key provider in the UI fails with a credential-store error. For UI flows that need a configured model channel, use the "Qoder (本机 CLI)" local provider, which does not persist a secret.
+- App data lives in `~/.peer-agent`. Remove or rename that directory to reset the app to first-run onboarding (0 channels · 0 models).
+- TUI/CLI: `apps/tui/dist/peer` is the compiled binary (`peer --version`); `pnpm --filter @peer-agent/tui dev` runs it from source via Bun.
