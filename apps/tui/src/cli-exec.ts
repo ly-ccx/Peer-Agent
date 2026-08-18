@@ -201,7 +201,8 @@ export async function runPeerExec(
   process.once('SIGTERM', onSignal);
   try {
     const sendResult = await controller.send(prompt, {
-      ...(options.maxTurns ? { maxTurns: options.maxTurns } : {}),
+      // RuntimePipeline defaults to 64 when maxTurns is omitted.
+      maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
     });
     persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
