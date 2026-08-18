@@ -15,7 +15,9 @@ import { createVerifierPromptSource } from './sources/verifier-source.mjs';
 import { createCorePromptSource } from './sources/core-source.mjs';
 import { createBrainstormingPromptSource } from './sources/brainstorming-source.mjs';
 import { createAdaptivePlanningPromptSource } from './sources/adaptive-planning-source.mjs';
+import { createConstructionFalsificationPromptSource } from './sources/construction-falsification-source.mjs';
 import { createDiagnosisGatePromptSource } from './sources/diagnosis-gate-source.mjs';
+import { createTaskAcceptancePromptSource } from './sources/task-acceptance-source.mjs';
 import { createProviderPromptSource } from './sources/provider-source.mjs';
 import { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
 import { createRuntimePromptSource } from './sources/runtime-source.mjs';
@@ -79,6 +81,7 @@ export function createDefaultPromptSourceRegistry() {
       createCorePromptSource(),
       createBrainstormingPromptSource(),
       createAdaptivePlanningPromptSource(),
+      createConstructionFalsificationPromptSource(),
       createDiagnosisGatePromptSource(),
       createRuntimePromptSource(),
       createProviderPromptSource(),
@@ -90,6 +93,7 @@ export function createDefaultPromptSourceRegistry() {
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),
       createGoalCheckpointPromptSource(),
+      createTaskAcceptancePromptSource(),
       createMcpHostPromptSource(),
       createExplorerPromptSource(),
       createVerifierPromptSource(),

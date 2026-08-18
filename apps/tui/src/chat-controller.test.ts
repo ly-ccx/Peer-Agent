@@ -837,6 +837,25 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().usage).toBeUndefined();
   });
 
+  test('pins the first user task into system context for the whole run', async () => {
+    const observed: Array<unknown> = [];
+    const model: ChatModelPort = {
+      initialize(input) {
+        observed.push(input.input.systemContextInput?.taskAcceptance);
+        return initialState(input.input);
+      },
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const brief = 'IMPORTANT: flatten_rename keys must stay field names.';
+    await controller.send(brief);
+    await controller.send('follow up without repeating the contract');
+    expect(observed).toEqual([brief, brief]);
+  });
+
   test('compacts modelMessages while preserving UI transcript and invalidating old authority', async () => {
     let observedModelMessageCount = 0;
     let observedInputHistoryTokens = 0;

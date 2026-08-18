@@ -18,7 +18,19 @@ export { createAttachmentPromptSource } from './sources/attachment-source.mjs';
 export { createAutomationIntentPromptSource } from './sources/automation-intent-source.mjs';
 export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';
 export { createAdaptivePlanningPromptSource, renderAdaptivePlanningPrompt } from './sources/adaptive-planning-source.mjs';
+export {
+  createConstructionFalsificationPromptSource,
+  renderConstructionFalsificationPrompt,
+} from './sources/construction-falsification-source.mjs';
 export { createDiagnosisGatePromptSource, renderDiagnosisGatePrompt } from './sources/diagnosis-gate-source.mjs';
+export {
+  createTaskAcceptancePromptSource,
+  extractAcceptancePins,
+  extractUserMessageText,
+  firstUserMessageText,
+  normalizeTaskAcceptance,
+  taskAcceptanceFromMessages,
+} from './sources/task-acceptance-source.mjs';
 export { createContinuityPromptSource } from './sources/continuity-source.mjs';
 export { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
 export { createExplorerPromptSource } from './sources/explorer-source.mjs';

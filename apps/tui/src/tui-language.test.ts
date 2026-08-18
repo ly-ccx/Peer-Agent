@@ -186,6 +186,24 @@ describe('reply language prompt', () => {
     expect(context.sections.map((section) => section.id)).not.toContain('runtime.continuity');
   });
 
+  test('injects host-pinned task acceptance as L7 continuity facts', () => {
+    const context = buildTuiSystemContext('en-US', {
+      workspacePath: tempDir(),
+      mode: 'chat',
+      taskAcceptance: [
+        'IMPORTANT: flatten_rename keys must be field names, not serialized aliases.',
+        'Also, serialize_by_alias on a child must keep their own alias for unmapped fields.',
+        'These settings are mutually exclusive for key lookup; validate both axes before you commit.',
+      ].join('\n\n'),
+    });
+    const section = context.sections.find((item) => item.id === 'runtime.task-acceptance');
+    expect(section?.layer).toBe('L7_CONTINUITY');
+    expect(section?.content).toContain('Host-pinned original task');
+    expect(section?.content).toContain('flatten_rename');
+    expect(section?.content).toContain('serialize_by_alias');
+    expect(context.sections.some((item) => item.id === 'agent.construction-falsification')).toBe(true);
+  });
+
   test('keeps Verifier sections in their canonical layers and provenance', () => {
     const context = buildTuiSystemContext('en-US', {
       workspacePath: tempDir(),

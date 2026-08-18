@@ -38,6 +38,15 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly continuityContext?: readonly unknown[];
   readonly explorerContext?: unknown;
   readonly verifierContext?: unknown;
+  readonly taskAcceptance?: string | TaskAcceptanceContext | null;
+}
+
+export interface TaskAcceptanceContext {
+  readonly brief?: string | null;
+  readonly text?: string | null;
+  readonly content?: string | null;
+  readonly pins?: readonly string[];
+  readonly source?: string | null;
 }
 
 export interface ConfigInstructionContextItem {
@@ -131,6 +140,7 @@ export function createAutomationIntentPromptSource(): PromptSource;
 export function createBrainstormingPromptSource(): PromptSource;
 export function createContinuityPromptSource(): PromptSource;
 export function createContextExtensionPromptSource(options?: { readonly maxCharsPerExtension?: number }): PromptSource;
+export function createConstructionFalsificationPromptSource(): PromptSource;
 export function createCorePromptSource(): PromptSource;
 export function createExplorerPromptSource(): PromptSource;
 export function createGoalPlanPromptSource(): PromptSource;
@@ -142,4 +152,17 @@ export function createProjectInstructionsPromptSource(options?: Readonly<Record<
 export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;
+export function createTaskAcceptancePromptSource(): PromptSource;
 export function createVerifierPromptSource(): PromptSource;
+export function renderConstructionFalsificationPrompt(): string;
+export function extractAcceptancePins(brief: string): string[];
+export function extractUserMessageText(message: unknown): string;
+export function firstUserMessageText(messages: readonly unknown[] | null | undefined): string;
+export function normalizeTaskAcceptance(value: unknown): TaskAcceptanceContext & {
+  readonly brief: string;
+  readonly pins: readonly string[];
+  readonly source: string;
+} | null;
+export function taskAcceptanceFromMessages(
+  messages: readonly unknown[] | null | undefined,
+): ReturnType<typeof normalizeTaskAcceptance>;

@@ -154,8 +154,23 @@ export interface ChatSystemContextBlock {
 
 export type ChatSupplementalSystemContextInput = Pick<
   SystemContextInput,
-  'continuityContext' | 'explorerContext' | 'verifierContext'
+  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance'
 >;
+
+function firstPinnedUserText(
+  history: readonly ChatMessage[],
+  current: string,
+  hideFromUi: boolean,
+): string {
+  for (const message of history) {
+    if (message.role !== 'user') continue;
+    if (typeof message.content === 'string' && message.content.trim()) {
+      return message.content.trim();
+    }
+  }
+  if (hideFromUi) return '';
+  return current.trim();
+}
 
 export interface ChatModelInput {
   readonly content: string;
@@ -1090,6 +1105,7 @@ export function createChatController(options: {
       const uiMessages = clearedMessages.filter((message) => !message.pending);
       const userContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
+      const pinnedTaskAcceptance = firstPinnedUserText(history, userContent, hideFromUi);
       if (snapshot.contextAccounting) {
         turnAccountingLifecycle = createContextAccountingLifecycle({
           initialSnapshot: snapshot.contextAccounting,
@@ -1157,6 +1173,9 @@ export function createChatController(options: {
                       trust: 'continuity',
                     }],
                   }
+                : {}),
+              ...(pinnedTaskAcceptance
+                ? { systemContextInput: { taskAcceptance: pinnedTaskAcceptance } }
                 : {}),
               turnId: turn.turnId,
               turnIndex: turn.turnIndex,

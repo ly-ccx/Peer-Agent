@@ -9,6 +9,7 @@ import {
   renderSystemContext,
   renderStableSystemContext,
 } from './llm-prompts.mjs';
+import { firstUserMessageText } from '@peer-agent/system-context';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
 import {
@@ -1158,6 +1159,8 @@ export function createLlmChatService({
         const storedConversation = conversationId
           ? conversationStore?.getConversation?.(conversationId)
           : null;
+        const taskAcceptance = firstUserMessageText(messages)
+          || firstUserMessageText(storedConversation?.messages);
         const accountingIdentity = {
           conversationId: conversationId || streamId,
           contentRevision:
@@ -1197,6 +1200,7 @@ export function createLlmChatService({
           mcpRegistry,
           provider: resolvedChannel.legacyProvider,
           model: provider.model,
+          ...(taskAcceptance ? { taskAcceptance } : {}),
         });
         const systemPrompt = renderSystemContext(systemContext);
         const stableSystemPrompt = renderStableSystemContext(systemContext);
@@ -1239,6 +1243,7 @@ export function createLlmChatService({
             mcpRegistry,
             provider: resolvedChannel.legacyProvider,
             model: provider.model,
+            ...(taskAcceptance ? { taskAcceptance } : {}),
           });
           const rebuiltPrompt = renderSystemContext(rebuiltContext);
           recordPromptSnapshot(promptSnapshotStore, rebuiltContext, {
