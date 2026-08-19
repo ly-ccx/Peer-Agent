@@ -8,6 +8,7 @@ function owner(owner, register) {
 }
 
 export function createDesktopIpcRegistrations({
+  about,
   appshot,
   shortcuts,
   quickChat,
@@ -48,6 +49,7 @@ export function createDesktopIpcRegistrations({
     'bootstrap.getRuntimeProjection',
   );
 
+  const openProductLink = assertFunction(about?.openLink, 'about.openLink');
   const getUpdaterStatus = assertFunction(updater?.getStatus, 'updater.getStatus');
   const checkForUpdates = assertFunction(updater?.check, 'updater.check');
   const downloadUpdate = assertFunction(updater?.download, 'updater.download');
@@ -57,6 +59,12 @@ export function createDesktopIpcRegistrations({
   const setUpdaterChannel = assertFunction(updater?.setChannel, 'updater.setChannel');
 
   return Object.freeze([
+    owner('about-ipc', (ipc) => {
+      ipc.handle('about:open-link', (_event, payload = {}) => {
+        const kind = typeof payload === 'string' ? payload : payload.kind;
+        return openProductLink(kind);
+      });
+    }),
     owner('appshot-ipc', (ipc) => {
       ipc.handle('appshot:capture', () => captureAppshot());
       ipc.handle('appshot:permission-status', () => getAppshotPermissionStatus());

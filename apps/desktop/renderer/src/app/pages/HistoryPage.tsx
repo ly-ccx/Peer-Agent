@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import { ActionLabel } from './actionLabelDisplay';
 
 /**
  * 历史页 —— 对齐 peer-2-0 高保真「Task History」终态列表。
@@ -95,14 +96,18 @@ function evidenceLabel(item: TaskOverviewItem, kind: Exclude<HistoryFilter, 'all
 function rowOpenLabel(kind: Exclude<HistoryFilter, 'all'>): string {
   switch (kind) {
     case 'accepted':
-      return '查看结果 →';
+      return '查看结果';
     case 'archived':
       return '继续讨论';
     case 'cancelled':
-      return '查看记录 →';
+      return '查看记录';
     case 'failed':
       return '重新开始';
   }
+}
+
+function rowOpenShowsArrow(kind: Exclude<HistoryFilter, 'all'>): boolean {
+  return kind === 'accepted' || kind === 'cancelled';
 }
 
 export function HistoryPage({ workspacePath = null }: { readonly workspacePath?: string | null }) {
@@ -212,7 +217,7 @@ export function HistoryPage({ workspacePath = null }: { readonly workspacePath?:
                 <span className={`history-badge history-badge--${kind}`}>{historyBadge(kind)}</span>
                 <span className="history-evidence-count">{evidenceLabel(item, kind)}</span>
                 <button type="button" className="history-row-open">
-                  {rowOpenLabel(kind)}
+                  <ActionLabel label={rowOpenLabel(kind)} forceArrow={rowOpenShowsArrow(kind)} />
                 </button>
               </article>
             );

@@ -36,6 +36,8 @@ function normalizedSize(value: number | undefined, estimateSize: number): number
 /**
  * 计算动态高度轮次的窗口范围。纯函数便于用长会话压力数据做稳定回归。
  * forceIndex 用于消息轨跳转：目标轮次即使尚未进入当前窗口也会被挂载。
+ * 它必须并进当前视口窗口，而不能把窗口收成只挂那一条——否则 scrollTop
+ * 仍停在顶部时，主区域只剩底部 spacer，表现为整片白屏。
  */
 export function calculateVirtualTurnRange({
   count,
@@ -86,9 +88,8 @@ export function calculateVirtualTurnRange({
     && forceIndex < count
     && (forceIndex < startIndex || forceIndex > endIndex)
   ) {
-    // 跳转目标在当前窗口外时只挂载目标本身，不能把中间几十轮全部带入 DOM。
-    startIndex = forceIndex;
-    endIndex = forceIndex;
+    startIndex = Math.min(startIndex, forceIndex);
+    endIndex = Math.max(endIndex, forceIndex);
   }
 
   const items: VirtualTurnItem[] = [];

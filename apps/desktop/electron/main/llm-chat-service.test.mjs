@@ -118,9 +118,26 @@ describe('llm chat service tool materialization', () => {
     assert.equal(parsed.suggestedRetrieval.length > 0, true);
   });
 
-  it('materializes large file reads as a local file ref', async () => {
-    const filePath = path.join(tmpDir, 'large.txt');
+  it('keeps a working-set file read inline in the local file ref', async () => {
+    const filePath = path.join(tmpDir, 'mid.txt');
     writeFileSync(filePath, 'line\n'.repeat(3000), 'utf8');
+    const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
+
+    const result = await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
+
+    assert.equal(result.success, true);
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.kind, 'local_file_ref');
+    assert.equal(parsed.path, filePath);
+    assert.equal(parsed.fullRead, true);
+    assert.equal(parsed.contextPreviewTruncated, false);
+    assert.match(parsed.preview, /line/);
+    assert.equal(parsed.suggestedRetrieval.some((cmd) => cmd.includes(filePath)), true);
+  });
+
+  it('truncates oversized file reads and points retrieval at the workspace path', async () => {
+    const filePath = path.join(tmpDir, 'large.txt');
+    writeFileSync(filePath, 'line\n'.repeat(8000), 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
     const result = await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
@@ -134,8 +151,9 @@ describe('llm chat service tool materialization', () => {
     assert.equal(parsed.sizeBytes > 0, true);
     assert.equal(parsed.contentHash.length, 64);
     assert.equal(parsed.contextPreviewTruncated, true);
-    assert.equal(parsed.preview.length < 5000, true);
+    assert.ok(parsed.preview.length <= 32_000 + 80);
     assert.equal(parsed.suggestedRetrieval.some((cmd) => cmd.includes(filePath)), true);
+    assert.equal(parsed.suggestedRetrieval.every((cmd) => !cmd.includes('tool-tui-tool-')), true);
   });
 
   it('rejects edit_file before the file has been read', async () => {

@@ -27,6 +27,11 @@ import {
 import { conversationStore } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import { shouldRevealBrowserPanel } from '../state/browserToolReveal';
+import {
+  acquireStreamRouterLease,
+  releaseStreamRouterLease,
+} from '../state/conversationStreamRouterSingleton';
+import { dispatchBrowserToolReveal } from '../state/streamRouterOwnership';
 import { reduceCompactionLifecycle } from '../state/compactionLifecycle';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
@@ -41,6 +46,9 @@ import type { ChatMsg, ThinkingKind } from '../state/types';
 import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
+
+let streamRouterOwner: string | null = null;
+let streamRouterOwnerSeq = 0;
 
 /** 路由器需要的、无法下沉到 store 的应用级回调（按会话 id 携带上下文）。 */
 export interface ConversationStreamRouterParams {
@@ -166,6 +174,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   onUpdatedRef.current = onConversationUpdated;
   const onBrowserRef = useRef(onBrowserToolActivity);
   onBrowserRef.current = onBrowserToolActivity;
+  const ownerIdRef = useRef(`stream-router-${++streamRouterOwnerSeq}`);
 
   // 前台打字机：onText 落到「当前前台会话」桶。后台会话不经打字机（直接整段写桶）。
   const appendActiveText = useCallback((chunk: string) => {
@@ -217,6 +226,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   }, [activeConversationId, flushBackgroundStream, flushTextTypewriter, flushThinkingTypewriter]);
 
   useEffect(() => {
+    const ownerId = ownerIdRef.current;
+    const lease = acquireStreamRouterLease(streamRouterOwner, ownerId);
+    if (!lease.acquired) {
+      console.warn(
+        `[stream-router] ignored a second instance; subscription already occupied by ${lease.occupiedBy}`,
+      );
+      return;
+    }
+    streamRouterOwner = lease.occupiedBy;
+
     // 按会话保存「完成后短暂停顿再隐藏」的 timer，并绑定触发它的 streamId。
     // 单例 timer 会让会话 A / 旧压缩流的迟到收尾误清会话 B / 新压缩流。
     const compactionDoneTimers = new Map<
@@ -461,7 +480,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       // 内置浏览器工具：通知上层自动展开 Workbench。仅前台触发，避免后台会话抢占视图。
-      if (shouldRevealBrowserPanel(tool, cid, activeRef.current)) onBrowserRef.current?.(tool);
+      if (shouldRevealBrowserPanel(tool, cid, activeRef.current)) {
+        onBrowserRef.current?.(tool);
+        dispatchBrowserToolReveal(cid, tool);
+      }
       flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         textTypewriter.flush();
@@ -756,6 +778,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     return () => {
+      streamRouterOwner = releaseStreamRouterLease(streamRouterOwner, ownerId);
       for (const { timer } of compactionDoneTimers.values()) clearTimeout(timer);
       compactionDoneTimers.clear();
       backgroundFlushRef.current.cancel();

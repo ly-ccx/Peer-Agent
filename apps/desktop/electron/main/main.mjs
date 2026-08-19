@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fs
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 
@@ -153,6 +153,7 @@ import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
 import { createConversationSessionIpcRegistrations } from './ipc/register-conversation-session-ipc.mjs';
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
+import { createProductLinkService } from './product-links.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
 import { createAutomationIpcRegistrations } from './ipc/register-automation-ipc.mjs';
 import { createTaskOverviewIpcRegistrations } from './ipc/register-task-overview-ipc.mjs';
@@ -186,6 +187,9 @@ import { createConversationSessionApplicationService } from './conversation-sess
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
+import { createEditorLaunchService } from './editor-launch-service.mjs';
+import { createEditorPreferenceService } from './editor-preference-service.mjs';
+import { planMacAppIconRead } from './mac-app-icon.mjs';
 import { createPasswordVaultFillApplicationService } from './password-vault-fill-application-service.mjs';
 import { createWorkspaceApplicationService } from './workspace-application-service.mjs';
 import {
@@ -447,25 +451,7 @@ const goalPlanStore = createGoalPlanStore({
       }
     });
     const planId = typeof payload?.planId === 'string' ? payload.planId : null;
-    if (planId && typeof goalDeliveryHandoff?.handoffPlan === 'function') {
-      queueMicrotask(() => {
-        try {
-          const plan = goalPlanStore.getPlan(planId);
-          if (!plan) return;
-          void goalDeliveryHandoff.handoffPlan(plan).then((next) => {
-            const delivered = next?.deliveryHandoff?.status === 'delivered';
-            if (delivered && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
-              return goalWorktreeAdapter.retainOrCleanupPlan(next);
-            }
-            return next;
-          }).catch((error) => {
-            console.warn('[goal-handoff] deliver failed:', error?.message || error);
-          });
-        } catch (error) {
-          console.warn('[goal-handoff] deliver failed:', error?.message || error);
-        }
-      });
-    }
+    scheduleGoalDeliveryHandoff(planId);
     if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
       queueMicrotask(() => {
         try {
@@ -496,6 +482,10 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
+  artifactRoots: {
+    shell: path.join(dataHome, 'shell-artifacts'),
+    browser: path.join(dataHome, 'browser-artifacts'),
+  },
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
@@ -1907,9 +1897,70 @@ const conversationSessionApplicationService = createConversationSessionApplicati
   },
 });
 
+const editorLaunchService = createEditorLaunchService({
+  spawnDetached: (command, args) =>
+    new Promise((resolve) => {
+      try {
+        const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+        child.once('error', (error) => resolve({ ok: false, message: error?.message || '' }));
+        child.unref();
+        // 编辑器是长驻进程：spawn 成功即视为已拉起，不等待其退出。
+        resolve({ ok: true });
+      } catch (error) {
+        resolve({ ok: false, message: error?.message || String(error) });
+      }
+    }),
+  readBundleId: (appPath) => {
+    try {
+      return (
+        execFileSync('defaults', ['read', `${appPath}/Contents/Info`, 'CFBundleIdentifier'], {
+          encoding: 'utf8',
+          timeout: 2000,
+        }).trim() || null
+      );
+    } catch {
+      return null;
+    }
+  },
+  // 已经是 .icns/.png 就直接读；getFileIcon 对着图标文件会回系统通用文件图。
+  readAppIcon: async (appOrExePath) => {
+    const plan = planMacAppIconRead(appOrExePath);
+    if (plan.kind === 'none') return null;
+    const toDataUrl = (image) => {
+      if (!image || typeof image.isEmpty !== 'function' || image.isEmpty()) return null;
+      return image.resize({ width: 32, height: 32 }).toDataURL();
+    };
+    if (plan.kind === 'file') {
+      try {
+        return toDataUrl(nativeImage.createFromPath(plan.path));
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const icon = await app.getFileIcon(plan.path, { size: 'normal' });
+      return toDataUrl(icon);
+    } catch {
+      return null;
+    }
+  },
+});
+
+const editorPreferenceService = createEditorPreferenceService({
+  getSettings: () => settingsStore.getAll(),
+  mergeSettings: (patch) => settingsStore.merge(patch),
+  detectEditors: () => editorLaunchService.detect(),
+});
+
 const openPathApplicationService = createOpenPathApplicationService({
   openPath: (target) => shell.openPath(target),
   showItemInFolder: (target) => shell.showItemInFolder(target),
+  // 未显式指定 editorId 时用「记住的默认程序」，该值已保证在本机可用。
+  launchEditor: ({ editorId, absPath }) =>
+    editorLaunchService.launch({
+      editorId: editorId || editorPreferenceService.resolve().defaultEditorId,
+      absPath,
+    }),
 });
 
 const workspaceApplicationService = createWorkspaceApplicationService({
@@ -1963,6 +2014,10 @@ const goalApplicationService = createGoalApplicationService({
   recordTaskEvidence: (planId, taskId, change) =>
     goalPlanStore.recordTaskEvidence(planId, taskId, change),
   deletePlan: (planId) => goalPlanStore.deletePlan(planId),
+  retryHandoff: (planId) => {
+    scheduleGoalDeliveryHandoff(planId, { retry: true });
+    return goalPlanStore.getPlan(planId) ?? null;
+  },
   startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
   getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,
   pauseRunner: (planId) => goalRunner?.pause(planId) ?? null,
@@ -1971,10 +2026,16 @@ const goalApplicationService = createGoalApplicationService({
 });
 
 function registerDesktopIpcHost() {
+  const productLinkService = createProductLinkService({
+    openExternal: (url) => shell.openExternal(url),
+  });
   return registerIpcOwners({
   ipc: ipcMain,
   registrations: [
     ...createDesktopIpcRegistrations({
+    about: {
+      openLink: (kind) => productLinkService.open(kind),
+    },
     appshot: {
       capture: () => handleAppshotHotkey('settings-test'),
       getPermissionStatus: () => buildAppshotPermissionPreflight({
@@ -2135,6 +2196,12 @@ function registerDesktopIpcHost() {
     ...createRuntimeHostIpcRegistrations({
       shell: {
         openPath: (payload) => openPathApplicationService.open(payload),
+        listEditors: async () => {
+          const preference = editorPreferenceService.resolve();
+          const editors = await editorLaunchService.detectWithIcons();
+          return { ...preference, editors };
+        },
+        setDefaultEditor: (editorId) => editorPreferenceService.setDefault(editorId),
         listTasks: () => localToolHost?.listShellTasks() ?? [],
         stopActiveTask: () => localToolHost?.stopActiveShellTask() ?? false,
         stopTask: (taskId) => localToolHost?.stopShellTask(taskId) ?? false,
@@ -2605,6 +2672,35 @@ function latestUserTextFromProviderMessages(messages = []) {
 //   - 明确目标：模型调用 goal_create_plan → upsertGoalContract 已把本契约原地升级为
 //     accepted_goal（activation.kind 不再是 intake）→ 本函数直接跳过，落入正常自驱推进。
 //   - 出错/中止的回合不在此误删，保留契约交由既有失败链路处理。
+
+function scheduleGoalDeliveryHandoff(planId, { retry = false } = {}) {
+  if (typeof planId !== 'string' || !planId) return;
+  if (typeof goalDeliveryHandoff?.handoffPlan !== 'function') return;
+  queueMicrotask(() => {
+    try {
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan) return;
+      if (!goalDeliveryHandoff.canHandoff?.(plan)) return;
+      const status = plan.deliveryHandoff?.status;
+      if (status === 'delivered') return;
+      if (status === 'delivering' && !retry) return;
+      if (status === 'stopped' && !retry) return;
+      const run = retry && typeof goalDeliveryHandoff.retryHandoff === 'function'
+        ? goalDeliveryHandoff.retryHandoff(plan)
+        : goalDeliveryHandoff.handoffPlan(plan);
+      void Promise.resolve(run).then((next) => {
+        if (next?.deliveryHandoff?.status === 'delivered') {
+          return goalWorktreeAdapter?.retainOrCleanupPlan?.(next);
+        }
+        return next;
+      }).catch((error) => {
+        console.warn('[goal-handoff] deliver failed:', error?.message || error);
+      });
+    } catch (error) {
+      console.warn('[goal-handoff] deliver failed:', error?.message || error);
+    }
+  });
+}
 
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;

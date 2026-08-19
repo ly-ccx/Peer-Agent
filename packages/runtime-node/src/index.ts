@@ -20,6 +20,14 @@ export type {
   NodeProviderBundle,
   NodeShellProviderOptions,
 } from './provider-contracts.ts';
+export {
+  FileReadRangeError,
+  formatNumberedLines,
+  parseFileReadLineRange,
+  sliceFileReadLines,
+  splitFileLines,
+} from './file-read-range.ts';
+export type { FileReadLineRange, FileReadSlice } from './file-read-range.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
 export {
   enforceConversationArtifactBudget,
@@ -30,6 +38,12 @@ export {
   writeToolResultArtifact,
 } from './tool-artifact-store.ts';
 export type { MaterializedToolResult, ToolResultArtifact } from './tool-artifact-store.ts';
+export {
+  encodeProviderToolResult,
+  FILE_READ_INLINE_MAX_CHARS,
+  SHELL_CONTEXT_PREVIEW_CHARS,
+} from './tool-result-encoder.ts';
+export type { EncodeProviderToolResultInput } from './tool-result-encoder.ts';
 export {
   createNodeInteractionProvider,
   INTERACTION_CAPABILITY_ID,
@@ -98,6 +112,20 @@ export {
   normalizeNodeShellCwd,
 } from './shell-classifier.ts';
 export { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
+export type { NodeShellProvider } from './shell-provider.ts';
+export {
+  createNodeShellSessionManager,
+  resolvePersistentShellPath,
+  sessionConversationKey,
+  supportsPersistentShellSession,
+} from './shell-session.ts';
+export type {
+  CreateNodeShellSessionManagerOptions,
+  NodeShellSessionCommandResult,
+  NodeShellSessionManager,
+  NodeShellSessionStatus,
+  RunNodeShellSessionCommandOptions,
+} from './shell-session.ts';
 export { createNodeShellArtifactStore } from './shell-artifact-store.ts';
 export type {
   CreateNodeShellArtifactStoreOptions,

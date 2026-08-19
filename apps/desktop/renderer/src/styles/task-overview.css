@@ -13,6 +13,8 @@
 
   .task-overview-scroll-region {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
+    /* 末卡离开外壳圆角裁切，避免底角被 page-layer / primary-page-shell 剃掉 */
+    padding-bottom: var(--radius-lg);
   }
 
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::before,
@@ -111,6 +113,14 @@
   /* ---------- topline：面包屑 + Workspace 徽标 ---------- */
   .task-overview-topline {
     @apply mb-5 flex items-center justify-between gap-4;
+  }
+
+  .task-overview-topline-end {
+    @apply flex items-center gap-2;
+  }
+
+  .task-overview-topline-end .chat-header-cap {
+    flex: none;
   }
 
   .task-overview-crumb {
@@ -414,7 +424,7 @@
   }
 
   .task-overview-discussion-card__footer strong {
-    @apply shrink-0 font-semibold;
+    @apply inline-flex shrink-0 items-center gap-0.5 font-semibold;
     color: var(--za-accent);
   }
 
@@ -524,6 +534,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
     gap: 0.75rem;
+    align-items: start;
   }
 
   .task-overview-work-stream:has(> :only-child) {
@@ -531,6 +542,17 @@
   }
 
   .task-overview-work-stream > * {
+    min-width: 0;
+  }
+
+  .task-overview-work-stream.is-waterfall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-overview-work-stream__column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     min-width: 0;
   }
 
@@ -720,20 +742,8 @@
   }
 
   .result-card-stack {
-    /* 兼容旧类名：等同 work-stream 稳定双列 */
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  @media (min-width: 768px) {
-    .result-card-stack {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  .result-card-stack > * {
-    min-width: 0;
+    /* 旧类名保留：列数交给 WorkStream，不再按 viewport 硬切双列。 */
+    display: contents;
   }
 
   .result-card-state {
@@ -861,6 +871,229 @@
       opacity: 0;
       transform: none;
     }
+  }
+
+  .task-artifacts {
+    @apply mt-3 rounded-xl border;
+    border-color: color-mix(in srgb, var(--za-border) 78%, transparent);
+    background: color-mix(in srgb, var(--za-card) 72%, transparent);
+    interpolate-size: allow-keywords;
+  }
+
+  .task-artifacts::details-content {
+    height: 0;
+    overflow: hidden;
+    transition:
+      height var(--za-motion-medium) var(--za-ease-out),
+      content-visibility var(--za-motion-medium) allow-discrete;
+  }
+
+  .task-artifacts[open]::details-content {
+    height: auto;
+  }
+
+  .task-artifacts-summary {
+    @apply flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifacts-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .task-artifacts-count {
+    @apply font-normal;
+    color: var(--za-text-muted);
+  }
+
+  .task-artifacts-chevron {
+    @apply ml-auto h-1.5 w-1.5 border-b border-r;
+    border-color: currentColor;
+    transform: scaleY(1) translateY(-25%) rotate(45deg);
+    transition: transform var(--za-motion-medium) var(--za-ease-out);
+  }
+
+  .task-artifacts[open] .task-artifacts-chevron {
+    transform: scaleY(-1) translateY(-25%) rotate(45deg);
+  }
+
+  .task-artifacts-content {
+    @apply space-y-3 border-t px-3 pb-3 pt-2;
+    border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
+  }
+
+  .task-artifacts-group-title {
+    @apply mb-2 flex items-center justify-between text-[0.6875rem] font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifacts-group-title span:last-child {
+    @apply font-normal tabular-nums;
+    color: var(--za-text-muted);
+  }
+
+  .task-artifacts-list {
+    @apply space-y-0.5;
+  }
+
+  .task-artifact {
+    @apply flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors;
+    color: var(--za-text);
+  }
+
+  .task-artifact:not(:disabled):hover {
+    background: color-mix(in srgb, var(--za-accent) 10%, transparent);
+  }
+
+  .task-artifact:disabled {
+    @apply cursor-default opacity-70;
+  }
+
+  .task-artifact-copy {
+    @apply flex min-w-0 flex-1 items-baseline gap-2;
+  }
+
+  .task-artifact-copy strong {
+    @apply shrink-0 text-[0.6875rem] font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifact-copy span {
+    @apply truncate text-[0.8125rem];
+  }
+
+  /* 行内增删徽标：不依赖 hover 预览就能看到 +N/−M。 */
+  .task-artifact-stat {
+    @apply flex shrink-0 items-center gap-1.5 font-mono text-[0.6875rem] font-semibold;
+  }
+
+  .task-artifact-stat-add {
+    color: var(--za-diff-add-fg);
+  }
+
+  .task-artifact-stat-del {
+    color: var(--za-diff-del-fg);
+  }
+
+  /* 长文件名截断，避免撑破卡片并挤掉右侧徽标与操作文案。 */
+  .task-artifact-name {
+    @apply min-w-0 flex-1 truncate;
+  }
+
+  .task-artifact-action {
+    @apply shrink-0 text-[0.6875rem] font-medium;
+    color: var(--za-accent);
+  }
+
+  .task-artifact-preview {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    max-height: min(22rem, calc(100vh - 1.5rem));
+    overflow: hidden;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .task-artifact-preview--code {
+    width: 100%;
+  }
+
+  .task-artifact-preview-header {
+    @apply flex items-center justify-between gap-3 border-b px-3 py-2 text-xs;
+    border-color: var(--za-line);
+  }
+
+  .task-artifact-preview-header strong {
+    @apply min-w-0 truncate;
+    color: var(--za-text);
+  }
+
+  .task-artifact-preview-stats {
+    @apply flex shrink-0 items-center gap-2 font-mono font-semibold;
+  }
+
+  .task-artifact-preview-additions,
+  .task-artifact-diff-line--added {
+    color: var(--za-diff-add-fg);
+  }
+
+  .task-artifact-preview-deletions,
+  .task-artifact-diff-line--deleted {
+    color: var(--za-diff-del-fg);
+  }
+
+  .task-artifact-diff {
+    max-height: 18rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0.5rem 0;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    text-align: left;
+    color: var(--za-text-soft);
+  }
+
+  .task-artifact-diff-line {
+    display: flex;
+    align-items: flex-start;
+    min-width: 0;
+    padding: 0 0.75rem 0 0;
+    white-space: pre;
+    overflow-wrap: anywhere;
+  }
+
+  .task-artifact-diff-gutter {
+    flex: none;
+    width: 2.25rem;
+    padding-right: 0.375rem;
+    text-align: right;
+    color: var(--za-text-muted);
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .task-artifact-diff-gutter--new {
+    margin-right: 0.5rem;
+    border-right: 1px solid var(--za-line);
+    padding-right: 0.5rem;
+  }
+
+  .task-artifact-diff-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .task-artifact-diff-line--meta .task-artifact-diff-gutter {
+    color: transparent;
+  }
+
+  .task-artifact-diff-line--added {
+    background: color-mix(in srgb, var(--za-success, #238636) 10%, transparent);
+  }
+
+  .task-artifact-diff-line--deleted {
+    background: color-mix(in srgb, var(--za-danger, #cf222e) 10%, transparent);
+  }
+
+  .task-artifact-preview--image {
+    width: 100%;
+    padding: 0.5rem;
+  }
+
+  .task-artifact-preview--image img {
+    display: block;
+    width: 100%;
+    max-height: 20rem;
+    border-radius: 0.5rem;
+    object-fit: contain;
+    background: color-mix(in srgb, var(--za-text) 4%, transparent);
+  }
+
+  .task-artifacts-limit-note {
+    @apply m-0 text-center text-[0.6875rem];
+    color: var(--za-text-muted);
   }
 
   .work-item-actions {
@@ -1144,7 +1377,7 @@
   }
 
   .task-row-open {
-    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center justify-self-end gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
     color: var(--za-text);
     background: transparent;
   }
@@ -1237,7 +1470,7 @@
   }
 
   .history-row-open {
-    @apply justify-self-end rounded-full px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center justify-self-end gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
     color: var(--za-text);
     background: transparent;
   }
@@ -1394,33 +1627,13 @@
   flex: 1 1 0;
   align-self: stretch;
   max-height: 100%;
+  /* 与会话抽屉同一条 Overlay 链路：覆盖基座直角，只露出左侧圆角。 */
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
   transition:
     translate var(--za-motion-medium) var(--za-ease-decelerate),
     filter var(--za-motion-medium) var(--za-ease-decelerate);
 }
 
-
-.conversation-result-drawer__head {
-  @apply flex flex-none items-start justify-between gap-3 border-b px-5 py-4;
-  border-color: var(--za-line);
-}
-
-.conversation-result-drawer__head h2 {
-  @apply m-0 text-base font-semibold;
-  color: var(--za-text);
-}
-
-.conversation-result-drawer__head p {
-  @apply m-0 mt-1 text-xs;
-  color: var(--za-text-muted);
-}
-
-.conversation-result-drawer__close {
-  @apply rounded-full border px-3 py-1 text-xs;
-  border-color: var(--za-line);
-  color: var(--za-text-muted);
-  background: transparent;
-}
 
 /* body 必须吃掉 head/footer 之外的全部剩余高度；flex-basis:0 防止按内容高度参与分配，
  * 否则空白会落到 footer 下方，看起来像「操作区 + 再一段空白」。 */
@@ -1429,8 +1642,37 @@
   flex: 1 1 0;
 }
 
-.conversation-result-drawer__scroll-bottom.chat-scroll-bottom-btn {
-  bottom: 5.75rem;
+.conversation-result-drawer__standalone {
+  @apply relative min-h-full;
+}
+
+.conversation-result-drawer__icon-close {
+  @apply absolute right-0 top-0 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border-0 p-0;
+  color: var(--za-text-muted);
+  background: transparent;
+}
+
+.conversation-result-drawer__icon-close:hover {
+  color: var(--za-text);
+  background: var(--za-hover);
+}
+
+.conversation-result-drawer__icon-close:focus-visible {
+  outline: 2px solid var(--za-accent);
+  outline-offset: 1px;
+}
+
+.conversation-result-drawer__icon-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.conversation-result-drawer.conversation-chat-drawer .conversation-result-drawer__body {
+  @apply overflow-hidden p-0;
+}
+
+.conversation-result-drawer__body .conversation-chat-drawer-shell {
+  height: 100%;
 }
 
 /* ---------- 继续讨论：会话 Drawer（可关闭，挂载 ChatSurface） ---------- */
@@ -1439,6 +1681,8 @@
   --pa-drawer-width: min(1320px, 96vw);
   @apply flex h-full min-h-0 flex-col;
   background: var(--za-surface-0);
+  /* Overlay drawer 基座强制直角贴边；会话抽屉只恢复左侧可见圆角，右侧仍贴窗。 */
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
 }
 
 /* Ant Design 风格多级 Drawer：父级保留挂载并左推，子级独立覆盖右侧。 */
@@ -1464,6 +1708,15 @@
 .conversation-chat-drawer-shell > .workbench-panel {
   flex: 0 0 auto;
   height: 100%;
+}
+
+/* Drawer 内的 Workbench 使用同一个最大化状态：聊天体让位，面板占满宿主。 */
+.conversation-chat-drawer-shell:has(> .workbench-panel--maximized) > .conversation-chat-drawer__body {
+  display: none;
+}
+
+.conversation-chat-drawer-shell > .workbench-panel--maximized {
+  flex: 1 1 100%;
 }
 
 .conversation-chat-drawer__body .thread,
@@ -1615,10 +1868,8 @@
   overflow: visible;
 }
 
-.conversation-result-view__msg {
-  @apply rounded-xl border px-3 py-2;
-  border-color: var(--za-line);
-  background: var(--za-surface-0);
+.conversation-result-view__messages .chat-msg {
+  max-width: none;
 }
 
 .conversation-result-drawer__footer > .task-overview-btn,
@@ -1644,23 +1895,9 @@
   outline-offset: 2px;
 }
 
-.conversation-result-view__msg-role {
-  @apply mb-1 text-[11px] font-semibold;
-  color: var(--za-text-muted);
-}
-
-.conversation-result-view__msg-body {
-  @apply whitespace-pre-wrap break-words text-sm leading-relaxed;
-  color: var(--za-text);
-}
-
-.conversation-result-view__msg.is-assistant {
-  border-color: color-mix(in srgb, #3f9a6f 28%, var(--za-line));
-}
-
 .conversation-result-drawer__footer {
   /* 三区中的独立底部操作区：与 body 滚动区分开，贴 source 底边。 */
-  @apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;
+  @apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;
   margin-top: auto;
   margin-bottom: 0;
   border-top: 1px solid var(--za-line);
@@ -1679,38 +1916,15 @@
 }
 
 /* 本任务高亮：只用一层边框，避免 border + box-shadow 叠成双边框 */
-.conversation-result-view__msg.is-task-target {
+.conversation-result-view__messages .chat-msg.is-task-target {
   border-color: color-mix(in srgb, #3f9a6f 55%, var(--za-line));
   background: color-mix(in srgb, #3f9a6f 6%, var(--za-surface-0));
 }
 
-.conversation-result-view__target-tag {
-  @apply ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium;
+.conversation-result-view__messages .chat-msg-target-tag {
+  @apply rounded-full px-1.5 py-0.5 text-[10px] font-medium;
   background: color-mix(in srgb, #3f9a6f 18%, transparent);
   color: #2f7a57;
-}
-
-.conversation-result-view__msg-body .markdown-content {
-  @apply text-sm leading-relaxed;
-  color: var(--za-text);
-}
-
-.conversation-result-view__msg-body .markdown-content pre {
-  @apply overflow-x-auto rounded-lg p-2 text-xs;
-  background: color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0));
-}
-
-.conversation-result-view__msg-body .markdown-content code {
-  @apply text-[0.85em];
-}
-
-.conversation-result-view__msg-body .markdown-content p {
-  @apply m-0 mb-2 last:mb-0;
-}
-
-.conversation-result-view__msg-body .markdown-content ul,
-.conversation-result-view__msg-body .markdown-content ol {
-  @apply my-2 pl-5;
 }
 
 .task-details-view {
@@ -1802,10 +2016,7 @@
  * 不单靠颜色区分（CONTRACT.md 红线 6）。
  * ------------------------------------------------------------------------- */
 .goal-thread-stream {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
-  gap: 0.75rem;
-  align-items: start;
+  /* Marker only. Column packing lives on `.task-overview-work-stream`. */
 }
 
 .goal-thread-card {
@@ -1820,7 +2031,7 @@
   color: var(--za-text-fade, var(--za-text-soft));
 }
 
-.thread-tree {
+.thread-list {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
@@ -1829,12 +2040,12 @@
   border-top: 1px solid var(--za-line);
 }
 
-.thread-tree-row {
-  position: relative;
+.thread-list-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
   min-height: 2.375rem;
   padding: 0.375rem 0.625rem;
   border: 0;
@@ -1846,32 +2057,23 @@
   cursor: pointer;
 }
 
-.thread-tree-row:hover {
+.thread-list-row:hover {
   background: var(--za-surface-hover, color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0)));
 }
 
-.thread-tree-row.is-child {
-  margin-left: 1.375rem;
+.thread-list-round {
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--za-text-fade, var(--za-text-soft));
 }
 
-.thread-tree-row.is-child::before {
-  content: "";
-  position: absolute;
-  left: -0.875rem;
-  top: -0.75rem;
-  width: 0.75rem;
-  height: 1.875rem;
-  border-left: 1.5px solid var(--za-line);
-  border-bottom: 1.5px solid var(--za-line);
-  border-radius: 0 0 0 6px;
-}
-
-.thread-tree-row.is-current {
+.thread-list-row.is-current {
   background: var(--za-surface-0);
   box-shadow: inset 0 0 0 1px var(--za-line);
 }
 
-.thread-tree-row.is-context {
+.thread-list-row.is-context {
   opacity: 0.82;
 }
 
@@ -1988,4 +2190,7 @@
   background: color-mix(in srgb, var(--za-accent) 12%, transparent);
   color: var(--za-accent);
 }
+
+/* Hover preview chrome lives in task-artifact-preview-overlay.css so
+   body-portaled cards keep radius/shadow after later styles load. */
 

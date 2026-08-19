@@ -1,82 +1,12 @@
 import { useMemo } from 'react';
 
-type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
+import { buildDiffLines } from './diffLines';
 
-interface DiffLine {
-  readonly kind: LineKind;
-  readonly text: string;
-  readonly oldNo: number | null;
-  readonly newNo: number | null;
-}
+export { buildDiffLines } from './diffLines';
+export type { DiffLine, DiffLineKind } from './diffLines';
 
 interface DiffViewerProps {
   readonly diffText: string;
-}
-
-function parseHunkHeader(line: string): readonly [number, number] | null {
-  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2])];
-}
-
-function classifyLine(line: string): LineKind {
-  if (line.startsWith('@@')) return 'hunk';
-  if (
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('--- ') ||
-    line.startsWith('+++ ') ||
-    line.startsWith('new file') ||
-    line.startsWith('deleted file') ||
-    line.startsWith('old mode') ||
-    line.startsWith('new mode') ||
-    line.startsWith('similarity ') ||
-    line.startsWith('rename ') ||
-    line.startsWith('Binary ')
-  ) {
-    return 'meta';
-  }
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'del';
-  return 'ctx';
-}
-
-export function buildDiffLines(text: string): DiffLine[] {
-  if (!text) return [];
-  const out: DiffLine[] = [];
-  let oldCursor = 0;
-  let newCursor = 0;
-  for (const raw of text.replace(/\n$/, '').split('\n')) {
-    const kind = classifyLine(raw);
-    if (kind === 'hunk') {
-      const parsed = parseHunkHeader(raw);
-      if (parsed) {
-        oldCursor = parsed[0];
-        newCursor = parsed[1];
-      }
-      out.push({ kind, text: raw, oldNo: null, newNo: null });
-      continue;
-    }
-    if (kind === 'meta') {
-      out.push({ kind, text: raw, oldNo: null, newNo: null });
-      continue;
-    }
-    const body = raw.slice(1);
-    if (kind === 'add') {
-      out.push({ kind, text: body, oldNo: null, newNo: newCursor });
-      newCursor += 1;
-      continue;
-    }
-    if (kind === 'del') {
-      out.push({ kind, text: body, oldNo: oldCursor, newNo: null });
-      oldCursor += 1;
-      continue;
-    }
-    out.push({ kind, text: body, oldNo: oldCursor, newNo: newCursor });
-    oldCursor += 1;
-    newCursor += 1;
-  }
-  return out;
 }
 
 export function DiffViewer({ diffText }: DiffViewerProps) {

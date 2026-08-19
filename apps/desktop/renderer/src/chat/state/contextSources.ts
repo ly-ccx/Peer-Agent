@@ -6,9 +6,10 @@
 // 架构边界（System Context 治理）：
 // - 这些函数只负责「把已有事实/配置整理成结构化 Context item」，由上层经既有 Context Source
 //   通道纳入 System Context，而不是在组件里直接拼接系统提示词字符串。
-// - 附件是 user/factual 上下文（sourceKind=user_upload、lifecycle=ephemeral），
-//   不被提升为 system 指令；图片走 provider 多模态分片、文本走 user_text_part、
-//   不支持类型仅保留 metadata。
+// - 附件是 user/factual 上下文（lifecycle=ephemeral），不被提升为 system 指令。
+//   sourceKind 按附件来源透传：上传默认 user_upload，@ 会话引用 session_reference，
+//   @ 工作区文件 workspace_file。图片走 provider 多模态分片、文本走 user_text_part、
+//   不支持类型 / 路径引用仅保留 metadata。
 // - 压缩摘要是连续性上下文（continuity），不替代 Tool Result / Evidence。
 // - ConfigInstructionContext 来自共享的宿主设置映射（systemInstructions / replyLanguage /
 //   gitBranchPrefix），属于 instruction 层，Desktop 与 CLI 使用同一实现。
@@ -38,9 +39,10 @@ export function buildAttachmentContext(attachments: readonly ChatAttachment[]): 
       : attachment.kind === 'text'
         ? 'user_text_part'
         : 'metadata_only',
-    sourceKind: 'user_upload',
-    scope: 'conversation',
+    sourceKind: attachment.sourceKind || 'user_upload',
+    scope: attachment.sourceKind === 'session_reference' ? 'session' : 'conversation',
     lifecycle: 'ephemeral',
+    ...(attachment.workspaceRelPath ? { contentRef: attachment.workspaceRelPath } : {}),
   }));
 }
 

@@ -438,7 +438,7 @@
   }
 
   .skill-upload-btn {
-    @apply ml-auto h-9 shrink-0 rounded-full px-5 text-[13px] font-semibold;
+    @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-5 text-[13px] font-semibold;
     color: #fff;
     background: #222;
   }

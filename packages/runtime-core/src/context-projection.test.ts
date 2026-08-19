@@ -8,6 +8,7 @@ import {
   estimateContextToolsTokens,
   isPromptTooLongError,
   projectContext,
+  shouldSkipExactContextCount,
 } from './context-projection.ts';
 
 test('provider-observed input is never replaced by a lower local projection', () => {
@@ -104,4 +105,27 @@ test('recognizes Grok maximum prompt length overflow evidence', () => {
     ),
     true,
   );
+});
+
+test('skips exact count only when last observation plus new tool text stay under the line', () => {
+  assert.equal(shouldSkipExactContextCount({
+    lastPercent: 20,
+    contextWindow: 100_000,
+    appendedText: 'small tool result',
+  }), true);
+  assert.equal(shouldSkipExactContextCount({
+    lastPercent: 75,
+    contextWindow: 100_000,
+    appendedText: 'x'.repeat(8_000),
+  }), false);
+  assert.equal(shouldSkipExactContextCount({
+    lastPercent: null,
+    contextWindow: 100_000,
+    appendedText: 'small',
+  }), false);
+  assert.equal(shouldSkipExactContextCount({
+    lastPercent: 10,
+    contextWindow: null,
+    appendedText: 'small',
+  }), false);
 });

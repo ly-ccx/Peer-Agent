@@ -3,7 +3,7 @@ import type {
   ProviderRequestUsage,
   RuntimeTurnUsage,
 } from '@peer-agent/protocol';
-import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
+import type { ModelMessage, ModelToolCall, ModelToolDefinition, ModelUsage } from '@peer-agent/runtime-node';
 import type { RuntimeUsageAccounting } from '@peer-agent/runtime-core';
 import type { SystemContextInput } from '@peer-agent/system-context';
 import {
@@ -46,7 +46,7 @@ import {
 import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
-import { normalizeTuiMode, normalizeTuiRuntimeMode, type TuiMode } from './tui-mode.ts';
+import { normalizeTuiMode, normalizeTuiRuntimeMode, type TuiMode, type TuiRuntimeMode } from './tui-mode.ts';
 import {
   createToolPresentation,
   formatToolResultSummary,
@@ -154,8 +154,23 @@ export interface ChatSystemContextBlock {
 
 export type ChatSupplementalSystemContextInput = Pick<
   SystemContextInput,
-  'continuityContext' | 'explorerContext' | 'verifierContext'
+  'continuityContext' | 'explorerContext' | 'verifierContext' | 'taskAcceptance'
 >;
+
+function firstPinnedUserText(
+  history: readonly ChatMessage[],
+  current: string,
+  hideFromUi: boolean,
+): string {
+  for (const message of history) {
+    if (message.role !== 'user') continue;
+    if (typeof message.content === 'string' && message.content.trim()) {
+      return message.content.trim();
+    }
+  }
+  if (hideFromUi) return '';
+  return current.trim();
+}
 
 export interface ChatModelInput {
   readonly content: string;
@@ -188,6 +203,14 @@ export interface ChatModelState {
    * 经 persistence 写入共享 `_compaction` marker。
    */
   readonly midTurnCompactions?: readonly MidTurnCompaction[];
+  /**
+   * UserTurn 内钉死的 provider 前缀。mode 不变时不得重算 System Context 或 tools schema。
+   */
+  readonly pinnedProviderPrefix?: {
+    readonly mode: TuiRuntimeMode;
+    readonly systemMessages: readonly ModelMessage[];
+    readonly tools: readonly ModelToolDefinition[];
+  };
 }
 
 /** turn 内自动压缩记录(优先 LLM 摘要,失败回退 structural;与 Desktop mid-turn 对齐)。 */
@@ -246,6 +269,13 @@ export interface ChatCompactResult {
   readonly notice: string;
 }
 
+export interface ChatSendResult {
+  readonly status: 'completed' | 'stopped' | 'cancelled' | 'exhausted' | 'failed' | 'skipped';
+  readonly turns: number;
+  readonly output?: string;
+  readonly reason?: string;
+}
+
 export interface ChatController {
   getSnapshot(): ChatSnapshot;
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
@@ -258,7 +288,8 @@ export interface ChatController {
     readonly images?: readonly ChatMessageImage[];
     /** Goal Runner ticks: feed the model without rendering a user bubble (Desktop parity). */
     readonly hideFromUi?: boolean;
-  }): Promise<void>;
+    readonly maxTurns?: number;
+  }): Promise<ChatSendResult>;
   runGoalTurn(content: string): Promise<{
     readonly continued: boolean;
     readonly explorers: readonly TuiExplorerRequest[];
@@ -1048,7 +1079,9 @@ export function createChatController(options: {
       const trimmed = content.trim();
       const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
       const hideFromUi = sendOptions?.hideFromUi === true;
-      if ((!trimmed && images.length === 0) || activeTurn) return;
+      if ((!trimmed && images.length === 0) || activeTurn) {
+        return { status: 'skipped', turns: 0 };
+      }
 
       const pendingContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
@@ -1080,6 +1113,7 @@ export function createChatController(options: {
       const uiMessages = clearedMessages.filter((message) => !message.pending);
       const userContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
+      const pinnedTaskAcceptance = firstPinnedUserText(history, userContent, hideFromUi);
       if (snapshot.contextAccounting) {
         turnAccountingLifecycle = createContextAccountingLifecycle({
           initialSnapshot: snapshot.contextAccounting,
@@ -1119,12 +1153,14 @@ export function createChatController(options: {
         ],
       });
 
+      let sendResult: ChatSendResult = { status: 'failed', turns: 0 };
       try {
         const result = await pipeline.run(
           {
             sessionId: turn.sessionId,
             ...(turn.conversationId ? { conversationId: turn.conversationId } : {}),
             ...(turn.streamId ? { streamId: turn.streamId } : {}),
+            ...(sendOptions?.maxTurns ? { maxTurns: sendOptions.maxTurns } : {}),
             mode: turnMode,
             input: {
               content: userContent,
@@ -1145,6 +1181,9 @@ export function createChatController(options: {
                       trust: 'continuity',
                     }],
                   }
+                : {}),
+              ...(pinnedTaskAcceptance
+                ? { systemContextInput: { taskAcceptance: pinnedTaskAcceptance } }
                 : {}),
               turnId: turn.turnId,
               turnIndex: turn.turnIndex,
@@ -1254,6 +1293,13 @@ export function createChatController(options: {
           ],
           error: failureDetail,
         });
+        sendResult = {
+          status: result.status,
+          turns: result.turns,
+          ...(typeof result.output === 'string' ? { output: result.output } : {}),
+          ...(result.reason ? { reason: result.reason } : {}),
+          ...(failureDetail && !result.reason ? { reason: failureDetail } : {}),
+        };
       } catch (error) {
         flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
@@ -1278,11 +1324,17 @@ export function createChatController(options: {
           lastRequestUsage,
           contextAccounting: failedAccounting,
         });
+        sendResult = {
+          status: wasCancelled ? 'cancelled' : 'failed',
+          turns: 0,
+          reason: detail,
+        };
       } finally {
         turnAccountingLifecycle = null;
         activeRuntimeTurnUsage = undefined;
         if (activeTurn === turn) activeTurn = null;
       }
+      return sendResult;
     },
     clear() {
       if (activeTurn) return false;

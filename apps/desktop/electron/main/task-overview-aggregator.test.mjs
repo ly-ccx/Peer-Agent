@@ -7,8 +7,10 @@ import {
   createTaskOverviewAggregator,
   currentStepTitleFromItem,
   displayConversationTitle,
+  deriveTaskArtifacts,
   expandGoalThreadRelatives,
   extractPlanSteps,
+  MAX_TASK_OVERVIEW_ARTIFACTS,
   looksLikeOpaqueId,
   modelLabelFromConversation,
   providerLabelFromConversation,
@@ -17,6 +19,7 @@ import {
   toAutomationSnapshot,
   toGoalPlanSnapshot,
   isGoalPlanInScope,
+  isGoalPlanMetaCandidate,
   isGoalThreadContextPlan,
   isPlanResultAccepted,
   RESULT_ACCEPTANCE_REQUIRED_SINCE,
@@ -363,6 +366,44 @@ test('目标线：sourceTaskId 兜底链也能解析出关系；旧数据无关�
   assert.equal(legacy.relationType, undefined);
   assert.equal(legacy.round, undefined);
   assert.equal(legacy.rootPlanTitle, undefined);
+});
+
+test('目标线：根计划自指 parentPlanId 仍能求出线根并与子计划归组', () => {
+  const rootId = 'plan-self-root';
+  const root = {
+    planId: rootId,
+    parentPlanId: rootId,
+    sourceTaskId: 'orient',
+    status: 'completed',
+    title: '开 0.0.5 开发线',
+    createdAt: '2026-08-15T04:20:00.000Z',
+    updatedAt: '2026-08-15T04:32:00.000Z',
+  };
+  const child = {
+    planId: 'plan-self-child',
+    parentPlanId: rootId,
+    sourceTaskId: 'commit',
+    status: 'completed',
+    title: '落地 @ 文件与会话',
+    createdAt: '2026-08-15T04:40:00.000Z',
+    updatedAt: '2026-08-15T04:58:00.000Z',
+  };
+  const relationIndex = buildGoalThreadRelationIndex([root, child]);
+  assert.equal(relationIndex.rootPlanIdOf(rootId), rootId);
+  assert.equal(relationIndex.parentPlanIdOf(rootId), undefined);
+  assert.equal(relationIndex.roundOf(rootId), 1);
+  assert.equal(relationIndex.rootPlanIdOf(child.planId), rootId);
+  assert.equal(relationIndex.parentPlanIdOf(child.planId), rootId);
+  assert.equal(relationIndex.roundOf(child.planId), 2);
+
+  const rootSnapshot = toGoalPlanSnapshot(root, { relationIndex });
+  const childSnapshot = toGoalPlanSnapshot(child, { relationIndex });
+  assert.equal(rootSnapshot.rootPlanId, rootId);
+  assert.equal(rootSnapshot.parentPlanId, undefined);
+  assert.equal(rootSnapshot.round, 1);
+  assert.equal(childSnapshot.rootPlanId, rootId);
+  assert.equal(childSnapshot.parentPlanId, rootId);
+  assert.equal(childSnapshot.round, 2);
 });
 
 test('toGoalPlanSnapshot 只有交付绑定才标出需要质量自检', () => {
@@ -811,6 +852,240 @@ test('extractPlanSteps 抽取叶子步骤并标记 current', () => {
   ]);
 });
 
+test('extractPlanSteps 仅把各叶子任务自己的 Evidence 派生产物挂到对应步骤', () => {
+  const steps = extractPlanSteps(
+    {
+      tasks: [
+        { taskId: 'code', title: '代码实现', status: 'completed', evidenceRefs: ['ev-code'] },
+        { taskId: 'shot', title: '界面截图', status: 'completed', evidenceRefs: ['ev-shot'] },
+        { taskId: 'none', title: '无产物', status: 'pending' },
+      ],
+    },
+    [
+      {
+        evidenceRef: 'ev-code',
+        artifactRefs: ['local-shell-artifact://shell-code/stdout'],
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/app.ts',
+          label: '代码变更',
+          preview: { kind: 'code', additions: 1, deletions: 1, diffLines: ['--- a/app.ts', '+++ b/app.ts', '-old', '+new'] },
+        }],
+      },
+      {
+        evidenceRef: 'ev-shot',
+        artifactRefs: ['local-browser-artifact://shot-1/metadata'],
+        userArtifacts: [{
+          kind: 'image',
+          ref: 'local-browser-artifact://shot-1/screenshot',
+          label: '界面截图',
+          preview: { kind: 'image', dataUrl: 'data:image/png;base64,dGh1bWI=', width: 640, height: 480 },
+        }],
+      },
+    ],
+  );
+  assert.deepEqual(steps?.[0].artifacts, [
+    {
+      ref: 'file:///work/src/app.ts',
+      kind: 'code',
+      label: '代码变更',
+      actionLabel: '查看变更',
+      preview: { kind: 'code', additions: 1, deletions: 1, diffLines: ['--- a/app.ts', '+++ b/app.ts', '-old', '+new'] },
+    },
+  ]);
+  assert.deepEqual(steps?.[1].artifacts, [
+    {
+      ref: 'local-browser-artifact://shot-1/screenshot',
+      kind: 'image',
+      label: '界面截图',
+      actionLabel: '预览截图',
+      preview: { kind: 'image', dataUrl: 'data:image/png;base64,dGh1bWI=', width: 640, height: 480 },
+    },
+  ]);
+  assert.equal(steps?.[2].artifacts, undefined);
+  assert.equal(steps?.[0].artifacts?.some((artifact) => artifact.ref.includes('shot-1')), false);
+  assert.doesNotMatch(JSON.stringify(steps?.[0].artifacts), /"label":"(?:shell_|stdout|tool-result)/);
+});
+
+test('deriveTaskArtifacts 把存量通用文案回退成真实文件名', () => {
+  const artifacts = deriveTaskArtifacts(
+    ['ev-legacy-code', 'ev-legacy-file'],
+    [
+      {
+        evidenceRef: 'ev-legacy-code',
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/GoalPlanPanel.tsx',
+          path: '/work/src/GoalPlanPanel.tsx',
+          label: '代码变更',
+          preview: { kind: 'code', additions: 14, deletions: 2, diffLines: ['+new'] },
+        }],
+      },
+      {
+        evidenceRef: 'ev-legacy-file',
+        userArtifacts: [{
+          kind: 'file',
+          ref: 'file:///work/src/goalPlanTree.ts',
+          path: '/work/src/goalPlanTree.ts',
+          label: '新建文件',
+          preview: { kind: 'code', additions: 8, deletions: 0, diffLines: ['+ 新建文件，共 8 行'] },
+        }],
+      },
+    ],
+  );
+
+  assert.deepEqual(artifacts.map((artifact) => artifact.label), ['GoalPlanPanel.tsx', 'goalPlanTree.ts']);
+  assert.deepEqual(
+    artifacts.map((artifact) => [artifact.preview?.additions, artifact.preview?.deletions]),
+    [[14, 2], [8, 0]],
+  );
+});
+
+test('deriveTaskArtifacts 缺 label 时退回真实文件名，并保留新建文件的增删统计', () => {
+  const artifacts = deriveTaskArtifacts(
+    ['ev-new-file', 'ev-edit'],
+    [
+      {
+        evidenceRef: 'ev-new-file',
+        // 新建文件：kind='file' 也带 code 预览，不能在归一化时被丢掉。
+        userArtifacts: [{
+          kind: 'file',
+          ref: 'file:///work/src/created.ts',
+          path: '/work/src/created.ts',
+          preview: { kind: 'code', additions: 12, deletions: 0, diffLines: ['+ 新建文件，共 12 行'] },
+        }],
+      },
+      {
+        evidenceRef: 'ev-edit',
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/changed.ts',
+          path: '/work/src/changed.ts',
+          preview: { kind: 'code', additions: 3, deletions: 2, diffLines: ['-old', '+new'] },
+        }],
+      },
+    ],
+  );
+
+  // label 必须是可区分的文件名，而不是「新建文件」「代码变更」这类固定文案。
+  assert.deepEqual(artifacts.map((artifact) => artifact.label), ['created.ts', 'changed.ts']);
+  assert.deepEqual(
+    artifacts.map((artifact) => [artifact.preview?.additions, artifact.preview?.deletions]),
+    [[12, 0], [3, 2]],
+  );
+});
+
+test('deriveTaskArtifacts 丢弃错配或越界的 hover preview，但保留用户产物', () => {
+  const artifacts = deriveTaskArtifacts(
+    ['bad-code', 'bad-image'],
+    [
+      {
+        evidenceRef: 'bad-code',
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: 'file:///work/src/bad.ts',
+          preview: { kind: 'image', dataUrl: 'data:image/png;base64,eA==', width: 1, height: 1 },
+        }],
+      },
+      {
+        evidenceRef: 'bad-image',
+        userArtifacts: [{
+          kind: 'image',
+          ref: 'local-browser-artifact://bad/screenshot',
+          preview: { kind: 'image', dataUrl: 'file:///tmp/secret.png', width: 800, height: 600 },
+        }],
+      },
+    ],
+  );
+  assert.equal(artifacts.length, 2);
+  assert.equal(artifacts[0].preview, undefined);
+  assert.equal(artifacts[1].preview, undefined);
+});
+
+test('extractPlanSteps 不把没有 artifactRefs 的内部 Evidence 当作用户产物', () => {
+  const steps = extractPlanSteps(
+    {
+      tasks: [
+        { taskId: 'internal', title: '内部追溯', status: 'completed', evidenceRefs: ['tool-result://call-secret'] },
+      ],
+    },
+    [{ evidenceRef: 'tool-result://call-secret', artifactRefs: [] }],
+  );
+  assert.equal(steps?.[0].artifacts, undefined);
+});
+
+test('extractPlanSteps caps each task artifact list to keep renderer DOM bounded', () => {
+  const evidenceRefs = Array.from({ length: MAX_TASK_OVERVIEW_ARTIFACTS + 12 }, (_, index) => `ev-${index}`);
+  const steps = extractPlanSteps(
+    {
+      tasks: [{ taskId: 'many', title: '大量证据', status: 'completed', evidenceRefs }],
+    },
+    evidenceRefs.map((evidenceRef, index) => ({
+      evidenceRef,
+      artifactRefs: [`local-shell-artifact://shell-${index}/stdout`],
+      userArtifacts: [{ kind: 'file', ref: `file:///work/result-${index}.txt`, label: `结果文件 ${index + 1}` }],
+    })),
+  );
+  assert.equal(steps?.[0].artifacts?.length, MAX_TASK_OVERVIEW_ARTIFACTS);
+});
+
+test('aggregator artifact projection never reads the full EvidenceIndex', () => {
+  let requestedRefs = [];
+  const plan = {
+    planId: 'plan-artifacts',
+    conversationId: 'conversation-artifacts',
+    title: '有产物的任务',
+    status: 'executing',
+    updatedAt: '2026-08-16T04:00:00.000Z',
+    targetWorkspacePath: '/work/peer_agent',
+    runner: { status: 'running', currentTaskId: 'leaf' },
+    tasks: [
+      {
+        taskId: 'leaf',
+        title: '生成截图',
+        status: 'completed',
+        evidenceRefs: ['evidence-shot'],
+      },
+    ],
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [plan],
+      listEvidenceIndex: () => {
+        throw new Error('full EvidenceIndex must stay out of taskOverview:list');
+      },
+      findEvidenceIndexRecords: (refs) => {
+        requestedRefs = refs;
+        return [
+          {
+            evidenceRef: 'evidence-shot',
+            createdAt: '2026-08-16T04:00:00.000Z',
+            artifactRefs: ['local-browser-artifact://shot-1/metadata'],
+            userArtifacts: [{
+              kind: 'image',
+              ref: 'local-browser-artifact://shot-1/screenshot',
+              label: '界面截图',
+            }],
+          },
+        ];
+      },
+    },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-artifacts',
+        title: '有产物的任务',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-16T04:00:00.000Z',
+      },
+    ],
+  });
+
+  const item = agg.listTaskOverview({ activeWithinMs: 0 })[0];
+  assert.deepEqual(requestedRefs, ['evidence-shot']);
+  assert.equal(item.planSteps[0].artifacts[0].kind, 'image');
+});
+
 test('toGoalPlanSnapshot preserves waiting_user for action-owner projection', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-waiting',
@@ -1037,6 +1312,103 @@ test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收�
     ),
     false,
   );
+});
+
+test('已验收仅有 deliveryBinding 不进工作台，真实交回中仍进工作台', () => {
+  const acceptedOnly = {
+    planId: 'accepted-route-only',
+    status: 'completed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+    deliveryBinding: {
+      repoId: 'peer_agent',
+      targetBranch: 'PeerAgent/0.0.5',
+      executionIsolation: 'worktree',
+    },
+  };
+  const delivering = {
+    ...acceptedOnly,
+    planId: 'accepted-delivering',
+    deliveryHandoff: { status: 'delivering', updatedAt: POST_CUTOFF },
+  };
+
+  assert.equal(isGoalPlanInScope(acceptedOnly, { nowMs: NOW }), false);
+  assert.equal(isGoalPlanInScope(acceptedOnly, { nowMs: NOW, includeTerminal: true }), true);
+  assert.equal(isGoalPlanMetaCandidate(acceptedOnly, { includeTerminal: false }), false);
+  assert.equal(isGoalPlanMetaCandidate(acceptedOnly, { includeTerminal: true }), true);
+
+  assert.equal(isGoalPlanInScope(delivering, { nowMs: NOW }), true);
+  assert.equal(isGoalPlanMetaCandidate(delivering, { includeTerminal: false }), true);
+});
+
+test('历史 includeTerminal 不把未验收 completed 当作 hydrate 候选', () => {
+  const unaccepted = {
+    planId: 'unaccepted-done',
+    status: 'completed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+  };
+  const accepted = {
+    ...unaccepted,
+    planId: 'accepted-done',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+  };
+  const failed = {
+    planId: 'failed-done',
+    status: 'failed',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+  };
+
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: false }), true);
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: true }), false);
+  assert.equal(isGoalPlanMetaCandidate(accepted, { includeTerminal: true }), true);
+  assert.equal(isGoalPlanMetaCandidate(failed, { includeTerminal: true }), true);
+});
+
+test('历史列表先把 limit 传给详情读取，且不展开同会话亲戚', () => {
+  const calls = [];
+  const siblingCalls = [];
+  const recentAccepted = {
+    planId: 'accepted-recent',
+    status: 'completed',
+    title: '最近验收',
+    updatedAt: POST_CUTOFF,
+    targetWorkspacePath: '/x/peer_agent',
+    conversationId: 'conv-hist',
+    resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
+  };
+  const goalPlanStore = {
+    listPlanDetails: (options) => {
+      calls.push({ kind: 'all', limit: options?.limit, filter: typeof options?.candidateFilter });
+      return [recentAccepted];
+    },
+    listPlanDetailsByConversation: (conversationId) => {
+      siblingCalls.push(conversationId);
+      return [{
+        planId: 'sibling-old',
+        status: 'completed',
+        title: '同会话旧计划',
+        conversationId,
+        updatedAt: STALE,
+        targetWorkspacePath: '/x/peer_agent',
+        resultAcceptance: { acceptedAt: STALE, acceptedBy: 'user' },
+      }];
+    },
+    getPlan: () => null,
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore,
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [],
+  });
+
+  const items = agg.listTaskOverview({ includeTerminal: true, limit: 12 });
+  assert.deepEqual(calls, [{ kind: 'all', limit: 12, filter: 'function' }]);
+  assert.deepEqual(siblingCalls, []);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].taskId, 'accepted-recent');
 });
 
 test('workspace overview 使用按工作区读取接口，全局 overview 传入 candidateFilter', () => {
@@ -1327,7 +1699,7 @@ test('listTaskOverview 默认 limit 截断', () => {
     planId: `p${i}`,
     status: 'executing',
     title: `t${i}`,
-    updatedAt: RECENT,
+    updatedAt: new Date().toISOString(),
     targetWorkspacePath: '/x/peer_agent',
     runner: { status: 'running' },
     progress: { completed: 1, total: 2 },

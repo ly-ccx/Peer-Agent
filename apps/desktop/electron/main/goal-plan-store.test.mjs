@@ -77,6 +77,79 @@ function registerEvidenceRefs(planId, refs) {
   return registerEvidenceRefsFor(store, planId, refs);
 }
 
+test('recordEvidenceRefs 不让 goal_update_task 包装记录覆盖原工具元数据', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.recordEvidenceRefs({
+    planId: plan.planId,
+    evidenceRefs: ['tool-result://original'],
+    artifactRefs: ['local-browser-artifact://shot-1/screenshot'],
+    toolCallId: 'call-original',
+    capabilityId: 'browser.screenshot',
+    toolName: 'browser_screenshot',
+    userArtifacts: [{
+      kind: 'image',
+      ref: 'local-browser-artifact://shot-1/screenshot',
+      path: '/tmp/shot-1/screenshot.png',
+      label: '界面截图',
+      preview: {
+        kind: 'image',
+        dataUrl: 'data:image/png;base64,dGh1bWI=',
+        width: 640,
+        height: 480,
+      },
+    }],
+  });
+  store.recordEvidenceRefs({
+    planId: plan.planId,
+    conversationId: 'conversation-owner',
+    evidenceRefs: ['tool-result://original'],
+    artifactRefs: [],
+    toolCallId: 'call-wrapper',
+    toolName: 'goal_update_task',
+  });
+
+  const [record] = store.findEvidenceIndexRecords(['tool-result://original']);
+  assert.equal(record.toolName, 'browser_screenshot');
+  assert.equal(record.capabilityId, 'browser.screenshot');
+  assert.equal(record.toolCallId, 'call-original');
+  assert.equal(record.conversationId, 'conversation-owner');
+  assert.deepEqual(record.artifactRefs, ['local-browser-artifact://shot-1/screenshot']);
+  const expectedUserArtifacts = [{
+    kind: 'image',
+    ref: 'local-browser-artifact://shot-1/screenshot',
+    path: '/tmp/shot-1/screenshot.png',
+    label: '界面截图',
+    preview: {
+      kind: 'image',
+      dataUrl: 'data:image/png;base64,dGh1bWI=',
+      width: 640,
+      height: 480,
+    },
+  }];
+  assert.deepEqual(record.userArtifacts, expectedUserArtifacts);
+
+  const reloadedStore = createGoalPlanStore();
+  const [reloadedRecord] = reloadedStore.findEvidenceIndexRecords(['tool-result://original']);
+  assert.equal(reloadedRecord.toolName, 'browser_screenshot');
+  assert.deepEqual(reloadedRecord.artifactRefs, ['local-browser-artifact://shot-1/screenshot']);
+  assert.deepEqual(reloadedRecord.userArtifacts, expectedUserArtifacts);
+});
+
+test('findEvidenceIndexRecords 按引用读取追加式索引并复用内存缓存', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const [record] = store.recordEvidenceRefs({
+    planId: plan.planId,
+    evidenceRefs: ['tool-result://wanted'],
+    artifactRefs: ['local-shell-artifact://shell-wanted/stdout'],
+    toolCallId: 'call-wanted',
+    toolName: 'bash',
+  });
+  const reopened = createGoalPlanStore();
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://wanted']), [record]);
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://wanted']), [record]);
+  assert.deepEqual(reopened.findEvidenceIndexRecords(['tool-result://missing']), []);
+});
+
 test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   const { tasks } = draftWithTasks();
   const p = aggregateProgress(tasks);
@@ -634,6 +707,34 @@ test('listPlanDetailsByWorkspace 先按索引工作区筛选再返回完整计�
   assert.equal(details.length, 1);
   assert.equal(details[0].planId, alpha.planId);
   assert.equal(details[0].tasks.length, 2);
+});
+
+test('listPlanDetails / listPlanDetailsByWorkspace 在 hydrate 前按索引截断', () => {
+  const older = store.createPlan({
+    ...draftWithTasks(),
+    title: '较旧',
+    originWorkspacePath: '/tmp/workspaces/alpha',
+  });
+  const newer = store.createPlan({
+    ...draftWithTasks(),
+    title: '较新',
+    originWorkspacePath: '/tmp/workspaces/alpha',
+  });
+  store.createPlan({
+    ...draftWithTasks(),
+    title: '别的工作区',
+    originWorkspacePath: '/tmp/workspaces/beta',
+  });
+
+  const limited = store.listPlanDetails({
+    candidateFilter: (meta) => meta.originWorkspacePath?.includes('alpha'),
+    limit: 1,
+  });
+  assert.deepEqual(limited.map((plan) => plan.planId), [newer.planId]);
+  assert.notEqual(limited[0].planId, older.planId);
+
+  const workspaceLimited = store.listPlanDetailsByWorkspace('/tmp/workspaces/alpha', { limit: 1 });
+  assert.deepEqual(workspaceLimited.map((plan) => plan.planId), [newer.planId]);
 });
 
 test('listPlanDetailsByWorkspace 首次读取补齐旧索引的工作区字段', () => {
@@ -1834,6 +1935,21 @@ test('createPlan: 派生目标从父目标和来源任务计算并持久化关�
   assert.equal(reread.sourceTaskId, 'source-task');
   assert.equal(reread.rootPlanId, parent.planId);
   assert.equal(reread.depth, 1);
+});
+
+test('createPlan: 拒绝把自己填成父节点', () => {
+  const planId = 'self-parent-plan';
+  assert.throws(
+    () => store.createPlan({
+      planId,
+      title: '自指根',
+      parentPlanId: planId,
+      sourceTaskId: 'orient',
+      tasks: [{ taskId: 'orient', title: '起步' }],
+    }),
+    /parentPlanId cannot be its own parent/,
+  );
+  assert.equal(store.getPlan(planId), null);
 });
 
 test('createPlan: 拒绝不存在的父目标或来源任务', () => {

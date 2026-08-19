@@ -53,6 +53,30 @@ export const SHARED_LOCAL_TOOL_CONTRACT_LIST = Object.freeze(
 );
 
 /**
+ * Tool calls that may run concurrently inside one ModelStep.
+ * Writes, shell, MCP, and unknown capabilities stay serial.
+ */
+export const PARALLEL_SAFE_LOCAL_CAPABILITY_IDS = Object.freeze([
+  SHARED_LOCAL_TOOL_CONTRACTS.readFile.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.listFiles.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.searchFiles.capabilityId,
+] as const);
+
+const PARALLEL_SAFE_LOCAL_CAPABILITY_ID_SET: ReadonlySet<string> = new Set(
+  PARALLEL_SAFE_LOCAL_CAPABILITY_IDS,
+);
+
+export function isParallelSafeLocalToolBatch(
+  calls: readonly { readonly capabilityId?: string }[],
+): boolean {
+  if (calls.length <= 1) return false;
+  return calls.every((call) => (
+    typeof call.capabilityId === 'string'
+    && PARALLEL_SAFE_LOCAL_CAPABILITY_ID_SET.has(call.capabilityId)
+  ));
+}
+
+/**
  * Explicit Desktop-only capabilities. Parity assertions must exclude exactly
  * these contracts instead of ignoring arbitrary browser-prefixed additions.
  */

@@ -5,10 +5,20 @@ import test from 'node:test';
 const readPageSource = () => readFile(new URL('./TaskOverviewPage.tsx', import.meta.url), 'utf8');
 const readStyles = () => readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
+test('advancing and paused streams pack cards instead of stretching a flat grid', async () => {
+  const source = await readPageSource();
+  assert.match(source, /<WorkStream items=\{paused\}>/);
+  assert.match(source, /<WorkStream items=\{advancing\}>/);
+  assert.doesNotMatch(
+    source,
+    /<div className="task-overview-work-stream">\s*\{(paused|advancing)\.map/,
+  );
+});
+
 test('discussion preview uses compact cards instead of execution WorkItem cards', async () => {
   const source = await readPageSource();
   const discussionSection = source.match(
-    /<div className="task-overview-discussion-grid">([\s\S]*?)<\/div>\s*<\/section>/,
+    /<div className="task-overview-discussion-grid">([\s\S]*?)<\/div>/,
   )?.[1];
 
   assert.ok(discussionSection, 'discussion grid should have a dedicated render branch');
@@ -46,13 +56,17 @@ test('interrupted execution excludes ordinary conversations and keeps recovery s
 test('interrupted execution reuses the container-responsive work stream', async () => {
   const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
   const interruptedSection = source.match(
-    /<h2 title="执行异常">执行异常<\/h2>[\s\S]*?<div className="(task-overview-work-[^"]+)">/,
+    /<h2 title="执行异常">执行异常<\/h2>[\s\S]*?<WorkStream items=\{paused\}>/,
   );
 
-  assert.equal(interruptedSection?.[1], 'task-overview-work-stream');
+  assert.ok(interruptedSection, 'paused cards should reuse WorkStream');
   assert.match(
     styles,
     /\.task-overview-work-stream\s*\{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 28rem\), 1fr\)\);/,
+  );
+  assert.match(
+    styles,
+    /\.task-overview-work-stream\s*\{[\s\S]*?align-items: start;/,
   );
   assert.doesNotMatch(
     styles,
@@ -143,4 +157,20 @@ test('home result-ready section renders the full queue and keeps the real total 
   assert.doesNotMatch(source, /previewedResults/);
   assert.match(source, /groupResultCardsByGoalThread\(displayedResults, allItems \?\? items\)/);
   assert.match(source, /<small>\{resultReady\.length\}<\/small>/);
+});
+
+test('result-ready cards reuse WorkStream packing instead of a flat two-column grid', async () => {
+  const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
+
+  assert.match(source, /<WorkStream[\s\S]*className="goal-thread-stream"/);
+  assert.match(source, /weightOf=\{\(group\) => resultCardWeight\(group\.kind === 'thread' \? group\.nodes\.length : 0\)\}/);
+  assert.doesNotMatch(
+    source,
+    /<div className="task-overview-work-stream goal-thread-stream">\s*\{groupResultCardsByGoalThread/,
+  );
+  assert.doesNotMatch(styles, /@media \(min-width: 768px\)[\s\S]*?\.result-card-stack/);
+  assert.doesNotMatch(
+    styles,
+    /\.goal-thread-stream\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit/,
+  );
 });

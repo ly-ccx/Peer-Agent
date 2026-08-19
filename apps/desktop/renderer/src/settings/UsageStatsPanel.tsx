@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { clientApi } from '../clientApi';
 import { Overlay } from '../app/components/Overlay';
+import { PeerIcon } from '../ui/icons';
 import type {
   UsageDailyDay,
   UsageDailyRange,
@@ -568,7 +569,7 @@ function DayDetailPanel({
           onClick={onClose}
           aria-label={i18n.t('settings.usage.dayDetail.close')}
         >
-          ×
+          <PeerIcon name="close" size={14} />
         </button>
       </div>
 

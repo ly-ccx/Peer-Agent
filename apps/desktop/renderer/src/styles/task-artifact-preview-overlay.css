@@ -1,0 +1,59 @@
+/* Loaded last and kept outside @layer so body-portaled previews keep glass chrome. */
+.task-artifact-preview-portal {
+  position: fixed;
+  z-index: 2147483000;
+  box-sizing: border-box;
+  overflow: visible;
+  pointer-events: none;
+  isolation: auto;
+  filter: none;
+  border-radius: 0.75rem;
+  box-shadow: var(--glass-modal-shadow, 0 24px 64px rgb(0 0 0 / 36%));
+}
+
+.task-artifact-preview-portal--code {
+  width: 34rem;
+}
+
+.task-artifact-preview-portal--image {
+  width: 24rem;
+}
+
+.task-artifact-preview-portal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: var(--glass-modal-background, color-mix(in srgb, var(--za-surface-0, #1e232c) 78%, transparent));
+  backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
+  -webkit-backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
+}
+
+.task-artifact-preview-portal .task-artifact-preview {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(22rem, calc(100vh - 1.5rem));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+}
+
+.task-artifact-preview-portal .task-artifact-diff {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+.task-artifact-preview-portal .task-artifact-preview--image {
+  padding: 0.5rem;
+}

@@ -7,13 +7,15 @@ export interface ChatTurnRenderIdentity {
   readonly isLive: boolean;
   readonly streamStartedAt: number | null;
   readonly isZh: boolean;
-  readonly i18n: unknown;
-  readonly onMessageAction: unknown;
-  readonly onBeginEdit: unknown;
-  readonly onRegenerate: unknown;
-  readonly onPreviewImage: unknown;
+  readonly i18n?: unknown;
+  readonly onMessageAction?: unknown;
+  readonly onBeginEdit?: unknown;
+  readonly onRegenerate?: unknown;
+  readonly onPreviewImage?: unknown;
   readonly turnIndex: number;
-  readonly onMeasure: unknown;
+  readonly onMeasure?: unknown;
+  readonly readOnly?: boolean;
+  readonly highlightedMessageId?: string | null;
 }
 
 /**
@@ -38,6 +40,8 @@ export function areChatTurnRenderPropsEqual(
     || previous.onPreviewImage !== next.onPreviewImage
     || previous.turnIndex !== next.turnIndex
     || previous.onMeasure !== next.onMeasure
+    || previous.readOnly !== next.readOnly
+    || previous.highlightedMessageId !== next.highlightedMessageId
   ) {
     return false;
   }

@@ -22,6 +22,7 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
   await writeFile(path.join(workspaceRoot, 'note.txt'), 'bundle', 'utf8');
   const bundle = createNodeProviderBundle({ workspaceRoot, ...fixedClock() });
+  t.after(() => bundle.dispose());
 
   assert.deepEqual(
     bundle.projection.tools.map(({ name, capabilityId }) => ({ name, capabilityId })),
@@ -77,6 +78,7 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
   const goal = createNodeProviderBundle({ workspaceRoot, mode: 'goal', ...fixedClock() });
   const compact = createNodeProviderBundle({ workspaceRoot, mode: 'compact', ...fixedClock() });
   const system = createNodeProviderBundle({ workspaceRoot, mode: 'system', ...fixedClock() });
+  t.after(() => Promise.all([plan, explorer, goal, compact, system].map((bundle) => bundle.dispose())));
 
   const explorerCapabilities = [
     'local.file.read',
@@ -122,6 +124,7 @@ test('node provider bundle omits shell execution and stop together when shell is
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
 
   const bundle = createNodeProviderBundle({ workspaceRoot, shell: false, ...fixedClock() });
+  t.after(() => bundle.dispose());
   const capabilityIds = bundle.projection.tools.map((tool) => tool.capabilityId);
   assert.equal(capabilityIds.includes('local.shell.exec'), false);
   assert.equal(capabilityIds.includes('local.shell.stop'), false);
@@ -133,6 +136,7 @@ test('pipeline tool executor resolves only projected names and blocks unprojecte
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
   await writeFile(path.join(workspaceRoot, 'note.txt'), 'projected', 'utf8');
   const bundle = createNodeProviderBundle({ workspaceRoot, ...fixedClock() });
+  t.after(() => bundle.dispose());
   const context = {
     run: { sessionId: 'session-1', input: null },
     turn: 1,
@@ -181,6 +185,7 @@ test('Hook ask and capability approval remain separate gates and preserve Hook E
     },
     ...fixedClock(),
   });
+  t.after(() => bundle.dispose());
   bundle.events.subscribe((event) => events.push(event));
 
   const execution = await bundle.runtime.execute({
@@ -230,6 +235,7 @@ test('Hook deny prevents capability approval and provider execution', async (t) 
     },
     ...fixedClock(),
   });
+  t.after(() => bundle.dispose());
 
   const execution = await bundle.runtime.execute({
     sessionId: 'session-1',

@@ -49,6 +49,7 @@ function fakeHost(observed: TuiExecutionContext[]): TuiHost {
       listener(null);
       return () => {};
     },
+    dispose: async () => {},
   };
 }
 
@@ -204,6 +205,7 @@ describe('TUI Goal worker adapter', () => {
       expect(report.evidenceRefs).toHaveLength(1);
       expect(report.evidenceRefs[0]).toMatch(/^tool-result:\/\/tui-tool-/);
       expect(await Bun.file(path.join(workspaceRoot, 'should-not-exist')).exists()).toBe(false);
+      await host.dispose();
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }

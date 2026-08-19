@@ -502,6 +502,10 @@ export async function executeModelToolCall({
   const evidenceRefs = collectToolEvidenceRefs({ toolCallId, execution: result.execution });
   if (evidenceRefs.length > 0 && typeof goalPlanStore?.recordEvidenceRefs === 'function') {
     try {
+      const providerEvidence = result.execution?.result?.evidence;
+      const userArtifacts = Array.isArray(providerEvidence?.userArtifacts)
+        ? providerEvidence.userArtifacts
+        : [];
       goalPlanStore.recordEvidenceRefs({
         conversationId,
         streamId,
@@ -510,6 +514,7 @@ export async function executeModelToolCall({
         capabilityId: result.execution?.call?.capabilityId,
         evidenceRefs,
         artifactRefs: evidenceRefs.filter((ref) => !ref.startsWith('tool-result://')),
+        userArtifacts,
       });
     } catch (err) {
       console.warn('[tool-orchestrator] failed to register EvidenceIndex refs:', err);

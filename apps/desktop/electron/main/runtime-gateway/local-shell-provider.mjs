@@ -1,6 +1,10 @@
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createEvidenceBundle } from '@peer-agent/runtime-core';
+import {
+  createNodeShellSessionManager,
+  supportsPersistentShellSession,
+} from '@peer-agent/runtime-node';
 import { classifyShellCommand } from './shell-classifier.mjs';
 import { createShellArtifactStore } from './shell-artifacts.mjs';
 import { createPermissionReview } from './permission-review.mjs';
@@ -8,6 +12,7 @@ import { redactShellOutput, outputRedactions } from './shell-redaction.mjs';
 import { createShellTaskManager } from './shell-task-manager.mjs';
 import { appendHookEvidence } from './hook-evidence.mjs';
 import { mostRestrictiveDecision } from './hook-runner.mjs';
+import { buildShellSessionBootstrap } from './shell-env-snapshot.mjs';
 
 export { classifyShellCommand } from './shell-classifier.mjs';
 
@@ -309,6 +314,12 @@ function shellStopResult({ call, locale, stopResult }) {
   };
 }
 
+function clampTimeoutMs(timeoutMs) {
+  const value = Number(timeoutMs);
+  if (!Number.isFinite(value) || value <= 0) return 30_000;
+  return Math.min(value, 10 * 60_000);
+}
+
 function abortedTaskOutput({ taskId = null, toolCallId, startedAt = nowIso() } = {}) {
   const completedAt = nowIso();
   return {
@@ -340,6 +351,12 @@ export function createLocalShellProvider({
   artifactStore = createShellArtifactStore({ userDataPath }),
   taskManager = createShellTaskManager({ artifactStore }),
   hookRunner = null,
+  sessionManager = workspaceRoot && supportsPersistentShellSession()
+    ? createNodeShellSessionManager({
+        workspaceRoot,
+        bootstrapScript: buildShellSessionBootstrap(),
+      })
+    : null,
 } = {}) {
   async function execute(call, locale, context = {}) {
     const args = readShellArgs(call);
@@ -425,6 +442,58 @@ export function createLocalShellProvider({
           classification,
           taskOutput: abortedTaskOutput({ toolCallId: call.toolCallId }),
         }), hookRecords, hookDecision?.behavior),
+      };
+    }
+
+    const runInBackground = args.runInBackground === true || args.background === true;
+    if (!runInBackground && sessionManager) {
+      const requestedCwd = typeof args.cwd === 'string' && args.cwd.trim()
+        ? classification.cwd
+        : undefined;
+      const sessionResult = await sessionManager.runCommand({
+        conversationId: context.conversationId,
+        command,
+        cwd: requestedCwd,
+        timeoutMs: clampTimeoutMs(args.timeoutMs),
+        signal: context.signal,
+      });
+      const artifact = await artifactStore.writeTaskArtifacts({
+        taskId: sessionResult.commandId,
+        toolCallId: call.toolCallId,
+        command,
+        cwd: sessionResult.cwd,
+        stdout: sessionResult.stdout,
+        stderr: sessionResult.stderr,
+        classification,
+        startedAt: sessionResult.startedAt,
+        completedAt: sessionResult.completedAt,
+      });
+      const taskOutput = {
+        taskId: sessionResult.commandId,
+        toolCallId: call.toolCallId,
+        status: sessionResult.status === 'completed' ? 'success' : sessionResult.status,
+        exitCode: sessionResult.exitCode,
+        stdout: sessionResult.stdout,
+        stderr: sessionResult.stderr,
+        timedOut: sessionResult.timedOut,
+        interrupted: sessionResult.interrupted,
+        promptDetected: false,
+        stopReason: sessionResult.timedOut
+          ? 'timeout'
+          : sessionResult.cancelled
+            ? 'user_stopped'
+            : null,
+        startedAt: sessionResult.startedAt,
+        completedAt: sessionResult.completedAt,
+        artifact,
+      };
+      return {
+        grant,
+        result: appendHookEvidence(
+          shellRunResult({ call, locale, classification, taskOutput }),
+          hookRecords,
+          hookDecision?.behavior,
+        ),
       };
     }
 
@@ -520,6 +589,9 @@ export function createLocalShellProvider({
     stopTask: taskManager.stopTask,
     stopActiveTask: taskManager.stopActiveTask,
     permissionReview,
+    async dispose() {
+      if (sessionManager) await sessionManager.disposeAll();
+    },
   };
 }
 

@@ -51,6 +51,7 @@ function allowedWindowRolesFor(channel, rendererToMain) {
 }
 
 const INVOKE_CHANNELS = Object.freeze([
+  'about:open-link',
   'appshot:capture',
   'appshot:open-screen-settings',
   'appshot:permission-status',
@@ -130,6 +131,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'goalPlans:mark-requested-user-input',
   'goalPlans:record-manual-confirmation',
   'goalPlans:record-task-evidence',
+  'goalPlans:retry-handoff',
   'goalPlans:revise',
   'taskOverview:list',
   'taskOverview:mark-read',
@@ -210,6 +212,8 @@ const INVOKE_CHANNELS = Object.freeze([
   'settings:get',
   'settings:import',
   'settings:update',
+  'shell:editors:list',
+  'shell:editors:set-default',
   'shell:open-path',
   'shell:permissions:add',
   'shell:permissions:list',
@@ -254,8 +258,10 @@ const INVOKE_CHANNELS = Object.freeze([
   'workspace:ensure-default',
   'workspace:info',
   'workspace:list',
+  'workspace:preview-default',
   'workspace:remove',
   'workspace:remove-linked-folder',
+  'workspace:search-files',
   'workspace:set-active',
   'workspace:set-primary',
   'workspace:update',

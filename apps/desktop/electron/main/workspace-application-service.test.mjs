@@ -78,6 +78,11 @@ test('reuses an existing active workspace without persistence or synchronization
     name: 'configured',
     created: false,
   });
+  assert.deepEqual(service.previewDefaultWorkspace(), {
+    path: '/configured',
+    name: 'configured',
+    exists: true,
+  });
   assert.deepEqual(calls, []);
 });
 

@@ -14,7 +14,12 @@ import {
   createNodeToolResult,
   createProviderRuntimeClock,
 } from './provider-utils.ts';
+import { createNodeShellArtifactStore } from './shell-artifact-store.ts';
 import { classifyNodeShellCommand } from './shell-classifier.ts';
+import {
+  createNodeShellSessionManager,
+  supportsPersistentShellSession,
+} from './shell-session.ts';
 import {
   createNodeShellTaskManager,
   type NodeShellTaskOutput,
@@ -30,7 +35,7 @@ export const NODE_SHELL_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Ob
   {
     capabilityId: 'local.shell.exec',
     displayName: 'Run shell command',
-    description: 'Run a foreground or background shell command inside the active workspace with risk-based approval.',
+    description: 'Run a foreground or background shell command inside the active workspace with risk-based approval. Foreground commands in the same conversation share one persistent shell, so cwd and environment persist across calls.',
     riskLevel: 'L3_sensitive',
     modeScopes: SHELL_MODE_SCOPES,
     inputSchema: {
@@ -167,7 +172,19 @@ function taskSummary(output: NodeShellTaskOutput, timeoutMs: number): string {
   return `Shell command exited with code ${output.exitCode}.`;
 }
 
-export function createNodeShellProvider(options: NodeShellProviderOptions): CapabilityProvider {
+function sessionConversationId(context: { sessionId?: string; metadata?: Readonly<Record<string, unknown>> }): string {
+  const fromMeta = context.metadata?.conversationId;
+  if (typeof fromMeta === 'string' && fromMeta.trim()) return fromMeta.trim();
+  if (typeof context.sessionId === 'string' && context.sessionId.trim()) return context.sessionId.trim();
+  return 'unscoped';
+}
+
+export interface NodeShellProvider extends CapabilityProvider {
+  dispose(): Promise<void>;
+  disposeConversation(conversationId: string): Promise<void>;
+}
+
+export function createNodeShellProvider(options: NodeShellProviderOptions): NodeShellProvider {
   if (!options?.workspaceRoot) {
     throw new TypeError('Node shell provider requires workspaceRoot.');
   }
@@ -175,8 +192,12 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
   const clock = createProviderRuntimeClock(options);
   const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxTimeoutMs = options.maxTimeoutMs ?? DEFAULT_MAX_TIMEOUT_MS;
+  const artifactStore = options.artifactStore ?? createNodeShellArtifactStore({
+    rootPath: options.artifactRoot,
+  });
   const taskManager = options.taskManager ?? createNodeShellTaskManager({
     workspaceRoot,
+    artifactStore,
     artifactRoot: options.artifactRoot,
     shellPath: options.shellPath,
     env: options.env,
@@ -184,6 +205,18 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
     killGraceMs: options.killGraceMs,
     now: clock.now,
   });
+  const sessionManager = options.sessionManager
+    ?? (supportsPersistentShellSession()
+      ? createNodeShellSessionManager({
+          workspaceRoot,
+          shellPath: options.shellPath,
+          env: options.env,
+          maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+          killGraceMs: options.killGraceMs,
+          now: clock.now,
+        })
+      : null);
+  const ownsSessionManager = sessionManager != null && options.sessionManager == null;
 
   return {
     providerId: 'runtime-node.shell',
@@ -344,14 +377,6 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
 
         const timeoutMs = normalizeTimeout(input.timeoutMs, defaultTimeoutMs, maxTimeoutMs);
         const background = input.background === true;
-        const task = await taskManager.runTask({
-          toolCallId: call.toolCallId,
-          command,
-          cwd: classification.cwd,
-          timeoutMs,
-          classification: classificationData,
-          signal: background ? undefined : context.signal,
-        });
         const grant = createNodePermissionGrant({
           clock,
           call,
@@ -360,6 +385,109 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
             ? 'classified_readonly'
             : 'approved_shell_execution',
           metadata: classificationData,
+        });
+
+        if (!background && sessionManager) {
+          const requestedCwd = typeof input.cwd === 'string' && input.cwd.trim()
+            ? classification.cwd
+            : undefined;
+          const sessionResult = await sessionManager.runCommand({
+            conversationId: sessionConversationId(context),
+            command,
+            cwd: requestedCwd,
+            timeoutMs,
+            signal: context.signal,
+          });
+          const stopReason = sessionResult.timedOut
+            ? 'timeout'
+            : sessionResult.cancelled
+              ? 'aborted'
+              : null;
+          const artifactSession = await artifactStore.createTaskArtifact({
+            taskId: sessionResult.commandId,
+            toolCallId: call.toolCallId,
+            command,
+            cwd: sessionResult.cwd,
+            workspaceRoot,
+            classification: classificationData,
+            startedAt: sessionResult.startedAt,
+            completedAt: sessionResult.completedAt,
+            status: sessionResult.status,
+            exitCode: sessionResult.exitCode,
+            signal: sessionResult.signal,
+            timedOut: sessionResult.timedOut,
+            interrupted: sessionResult.interrupted,
+            stopReason,
+            truncated: sessionResult.truncated,
+            sessionRebuilt: sessionResult.sessionRebuilt,
+          });
+          if (sessionResult.stdout) await artifactSession.appendStdout(sessionResult.stdout);
+          if (sessionResult.stderr) await artifactSession.appendStderr(sessionResult.stderr);
+          const artifact = await artifactSession.finalize({
+            taskId: sessionResult.commandId,
+            toolCallId: call.toolCallId,
+            command,
+            cwd: sessionResult.cwd,
+            workspaceRoot,
+            classification: classificationData,
+            startedAt: sessionResult.startedAt,
+            completedAt: sessionResult.completedAt,
+            status: sessionResult.status,
+            exitCode: sessionResult.exitCode,
+            signal: sessionResult.signal,
+            timedOut: sessionResult.timedOut,
+            interrupted: sessionResult.interrupted,
+            stopReason,
+            truncated: sessionResult.truncated,
+            sessionRebuilt: sessionResult.sessionRebuilt,
+          });
+          const shellOutput: NodeShellTaskOutput = {
+            taskId: sessionResult.commandId,
+            toolCallId: call.toolCallId,
+            command,
+            cwd: sessionResult.cwd,
+            status: sessionResult.status,
+            stdout: sessionResult.stdout,
+            stderr: sessionResult.stderr,
+            exitCode: sessionResult.exitCode,
+            signal: sessionResult.signal,
+            timedOut: sessionResult.timedOut,
+            cancelled: sessionResult.cancelled,
+            interrupted: sessionResult.interrupted,
+            stopReason,
+            truncated: sessionResult.truncated || artifact.truncated,
+            startedAt: sessionResult.startedAt,
+            completedAt: sessionResult.completedAt,
+            artifact,
+          };
+          return createNodeToolResult({
+            clock,
+            call,
+            status: taskResultStatus(shellOutput),
+            summary: taskSummary(shellOutput, timeoutMs),
+            output: taskOutputPayload(shellOutput),
+            outputPreview: taskOutputPreview(shellOutput),
+            grant,
+            error: taskError(shellOutput),
+            artifactRefs: shellOutput.artifact.artifactRefs,
+            metadata: {
+              ...classificationData,
+              taskId: shellOutput.taskId,
+              timeoutMs,
+              background: false,
+              persistentSession: true,
+              sessionRebuilt: sessionResult.sessionRebuilt,
+            },
+          });
+        }
+
+        const task = await taskManager.runTask({
+          toolCallId: call.toolCallId,
+          command,
+          cwd: classification.cwd,
+          timeoutMs,
+          classification: classificationData,
+          signal: background ? undefined : context.signal,
         });
 
         if (background) {
@@ -423,6 +551,16 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
           grant: createNodePermissionGrant({ clock, call, decision: 'deny', reason }),
           error: { code: reason, message: reason, recoverable: true },
         });
+      }
+    },
+    async dispose() {
+      if (ownsSessionManager && sessionManager) {
+        await sessionManager.disposeAll();
+      }
+    },
+    async disposeConversation(conversationId) {
+      if (sessionManager) {
+        await sessionManager.disposeConversation(conversationId);
       }
     },
   };

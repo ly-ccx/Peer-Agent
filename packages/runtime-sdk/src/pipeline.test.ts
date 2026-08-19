@@ -77,6 +77,101 @@ test('runs text-only model turns to completion without a host dependency', async
   ]);
 });
 
+test('runs an all-read file batch in parallel and still returns calls in order', async () => {
+  let started = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const starts: string[] = [];
+  const pipeline = createRuntimePipeline<string, State, ToolCall, ToolResult, string>({
+    model: {
+      initialize: ({ input }) => ({ phase: 0, transcript: [input] }),
+      runTurn: async (state) => {
+        if (state.phase === 0) {
+          return {
+            kind: 'tool_calls',
+            state: { ...state, phase: 1 },
+            calls: [
+              { toolCallId: 'tool-1', capabilityId: 'local.file.read', name: 'read_a' },
+              { toolCallId: 'tool-2', capabilityId: 'local.file.search', name: 'search_b' },
+            ],
+          };
+        }
+        return {
+          kind: 'completed',
+          state,
+          output: state.transcript.join(','),
+        };
+      },
+      applyToolResults: (state, executions) => ({
+        ...state,
+        transcript: [
+          ...state.transcript,
+          ...executions.map((execution) => execution.result.output),
+        ],
+      }),
+    },
+    tools: {
+      execute: async (call): Promise<RuntimePipelineToolExecution<ToolCall, ToolResult>> => {
+        starts.push(call.name);
+        started += 1;
+        if (started === 2) release();
+        await gate;
+        return { call, result: { output: `${call.name}-result` } };
+      },
+    },
+  });
+
+  const result = await Promise.race([
+    pipeline.run({ sessionId: 'session-1', input: 'start' }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('read batch stayed serial')), 1000);
+    }),
+  ]);
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'start,read_a-result,search_b-result');
+  assert.equal(starts.length, 2);
+});
+
+test('keeps mixed read and shell batches serial', async () => {
+  const order: string[] = [];
+  const pipeline = createRuntimePipeline<string, State, ToolCall, ToolResult, string>({
+    model: {
+      initialize: ({ input }) => ({ phase: 0, transcript: [input] }),
+      runTurn: async (state) => {
+        if (state.phase === 0) {
+          return {
+            kind: 'tool_calls',
+            state: { ...state, phase: 1 },
+            calls: [
+              { toolCallId: 'tool-1', capabilityId: 'local.file.read', name: 'read' },
+              { toolCallId: 'tool-2', capabilityId: 'local.shell.exec', name: 'bash' },
+            ],
+          };
+        }
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    },
+    tools: {
+      execute: async (call): Promise<RuntimePipelineToolExecution<ToolCall, ToolResult>> => {
+        order.push(`start:${call.name}`);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20);
+        });
+        order.push(`end:${call.name}`);
+        return { call, result: { output: call.name } };
+      },
+    },
+  });
+
+  const result = await pipeline.run({ sessionId: 'session-1', input: 'start' });
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(order, ['start:read', 'end:read', 'start:bash', 'end:bash']);
+});
+
 test('feeds ordered tool executions back into the model before the next turn', async () => {
   const order: string[] = [];
   const observedTranscripts: string[][] = [];

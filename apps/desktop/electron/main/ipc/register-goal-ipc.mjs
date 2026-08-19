@@ -29,6 +29,7 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
       'goalPlans.recordTaskEvidence',
     ),
     remove: assertFunction(goalPlans?.remove, 'goalPlans.remove'),
+    retryHandoff: assertFunction(goalPlans?.retryHandoff, 'goalPlans.retryHandoff'),
   };
   const runner = {
     getState: assertFunction(goalRunner?.getState, 'goalRunner.getState'),
@@ -54,6 +55,7 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
       ipc.handle('goalPlans:record-task-evidence', (_event, payload) =>
         plans.recordTaskEvidence(payload));
       ipc.handle('goalPlans:delete', (_event, payload) => plans.remove(payload));
+      ipc.handle('goalPlans:retry-handoff', (_event, payload) => plans.retryHandoff(payload));
     }),
     owner('goalRunner-ipc', (ipc) => {
       ipc.handle('goalRunner:get-state', (_event, payload) => runner.getState(payload));

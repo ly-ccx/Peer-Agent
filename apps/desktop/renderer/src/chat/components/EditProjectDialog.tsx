@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import { abbreviateWorkspacePath } from './workspacePathDisplay';
 
 export interface ProjectFolder {
@@ -116,7 +117,7 @@ export function EditProjectDialog({
           <header className="edit-project-header">
             <h3>{isZh ? '编辑项目' : 'Edit project'}</h3>
             <button type="button" className="edit-project-close" onClick={requestClose} aria-label={isZh ? '关闭' : 'Close'}>
-              ×
+              <PeerIcon name="close" size={14} />
             </button>
           </header>
 
@@ -161,7 +162,7 @@ export function EditProjectDialog({
                         aria-label={isZh ? '移除文件夹' : 'Remove folder'}
                         onClick={() => { void handleRemoveFolder(folder.path); }}
                       >
-                        ×
+                        <PeerIcon name="close" size={12} />
                       </button>
                     </>
                   )}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 import { clientApi } from '../../clientApi';
+import { ActionLabel, splitDecorativeArrow } from './actionLabelDisplay';
 
 /**
  * 任务页 —— 对齐 peer-2-0 高保真「Active Tasks」表格布局。
@@ -91,13 +92,18 @@ function actionOwnerLabel(item: TaskOverviewItem): string {
 function rowOpenLabel(item: TaskOverviewItem): string {
   if (item.source === 'conversation') return item.actionLabel || '打开';
   if (item.actionRight === 'needs_you') {
-    if (item.nextAction === 'grant_permission') return '处理 →';
-    if (item.nextAction === 'decide_blocked' || item.nextAction === 'approve_plan') return '进入 →';
-    return '进入 →';
+    if (item.nextAction === 'grant_permission') return '处理';
+    if (item.nextAction === 'decide_blocked' || item.nextAction === 'approve_plan') return '进入';
+    return '进入';
   }
   if (item.actionRight === 'result_ready') return '查看结果';
-  if (item.actionRight === 'paused') return '继续 →';
-  return '查看 →';
+  if (item.actionRight === 'paused') return '继续';
+  return '查看';
+}
+
+function rowOpenShowsArrow(item: TaskOverviewItem): boolean {
+  if (item.source === 'conversation') return splitDecorativeArrow(item.actionLabel || '打开').hasArrow;
+  return item.actionRight !== 'result_ready';
 }
 
 export function TasksPage({
@@ -280,7 +286,7 @@ export function TasksPage({
                   className="task-row-open"
                   onClick={() => onOpenItem?.(item)}
                 >
-                  {rowOpenLabel(item)}
+                  <ActionLabel label={rowOpenLabel(item)} forceArrow={rowOpenShowsArrow(item)} />
                 </button>
                 {item.source === 'goal_plan' && item.actionRight === 'paused' ? (
                   <button

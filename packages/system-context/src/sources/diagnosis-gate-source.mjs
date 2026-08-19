@@ -28,8 +28,8 @@ export function createDiagnosisGatePromptSource() {
   return {
     id: 'agent.diagnosis-gate',
     layer: 'L1_AGENT',
-    // priority 与 adaptive 同为 1：同层按 id 字典序 → adaptive-planning 在 diagnosis-gate 前，
-    // 且二者都在 agent.mcp-host（id 更大）之前。
+    // priority 与 adaptive / construction-falsification 同为 1：同层按 id 字典序 →
+    // adaptive-planning → construction-falsification → diagnosis-gate → mcp-host。
     priority: 1,
     trust: 'runtime',
     observe(input = {}) {

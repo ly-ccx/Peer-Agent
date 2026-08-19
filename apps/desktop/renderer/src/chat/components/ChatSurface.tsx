@@ -16,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
@@ -110,6 +111,10 @@ import {
   buildSessionReferenceAttachment,
   type SessionReferenceHit,
 } from '../state/sessionReference';
+import {
+  buildWorkspaceFileAttachment,
+  type WorkspaceFileHit,
+} from '../state/contextMention';
 import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
@@ -141,7 +146,7 @@ import {
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
-import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
+import { registerBrowserToolReveal } from '../state/streamRouterOwnership';
 import {
   planThreadScrollAfterMessagesChange,
   resolveThreadFollowAfterScroll,
@@ -506,8 +511,8 @@ export function ChatSurface({
     useConversationModelEffort(conversationId);
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
   // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
-  // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
-  // mode-source 进入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
+  // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend / IPC
+  // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const changeFastMode = useCallback((enabled: boolean) => {
@@ -720,6 +725,7 @@ export function ChatSurface({
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
   const messageNavigationRequestRef = useRef(0);
+  const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
 
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentRef.current = true;
@@ -802,7 +808,9 @@ export function ChatSurface({
     setIsThreadAtBottom((previous) => (previous ? previous : true));
     saveThreadScrollSnapshot(conversationIdRef.current, container);
     updateCurrentTurnContext(container);
-  }, [saveThreadScrollSnapshot, updateCurrentTurnContext]);
+    // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
+    updateVirtualViewport();
+  }, [saveThreadScrollSnapshot, updateCurrentTurnContext, updateVirtualViewport]);
 
   const threadScrollCoalescerRef = useRef(createFrameCoalescer({
     request: (callback) => requestAnimationFrame(callback),
@@ -845,9 +853,9 @@ export function ChatSurface({
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
   const scrollToMessage = useCallback((id: string) => {
     const container = threadRef.current;
-    if (!container) return;
+    if (!container) return false;
     const turnIndex = messageTurnIndex.get(id);
-    if (turnIndex == null) return;
+    if (turnIndex == null) return false;
 
     const requestId = messageNavigationRequestRef.current + 1;
     messageNavigationRequestRef.current = requestId;
@@ -870,11 +878,15 @@ export function ChatSurface({
       target.classList.add('chat-msg-flash');
       window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
     });
+    return true;
   }, [messageTurnIndex, scrollToTurn]);
 
   useEffect(() => {
     if (!messageTarget || messageTarget.conversationId !== conversationId) return;
-    scrollToMessage(messageTarget.messageId);
+    if (lastAppliedMessageTargetRequestId.current === messageTarget.requestId) return;
+    if (scrollToMessage(messageTarget.messageId)) {
+      lastAppliedMessageTargetRequestId.current = messageTarget.requestId;
+    }
   }, [conversationId, messageTarget, scrollToMessage]);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
@@ -1459,6 +1471,11 @@ export function ChatSurface({
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
 
+  useEffect(() => registerBrowserToolReveal(conversationId, handleBrowserToolActivity), [
+    conversationId,
+    handleBrowserToolActivity,
+  ]);
+
   // 显式 /compact 的 renderer 入口。自动压缩只能发生在 Runtime provider 请求前的
   // 阻塞式 preflight 中，不能从 stream done 旁路启动，否则会与 Goal Runner 下一 tick 并发写会话。
   const runCompaction = useCallback(async (compactConversationId: string): Promise<boolean> => {
@@ -1470,15 +1487,8 @@ export function ChatSurface({
     return result.compacted;
   }, [onConversationUpdated]);
 
-  // 应用级单例流路由器（方案 C / 甲-1）：订阅全部 chatStream 事件，按 streamId→conversationId
-  // 路由到对应会话桶。前台会话（=当前 conversationId）的 delta 走打字机平滑吐字，后台会话的
-  // delta 直接整段写入其桶。因 App 只渲染单个稳定的 ChatSurface 实例（切会话只改 conversationId
-  // 这个 prop、不重挂载），此处挂载即「全应用唯一一份」订阅，终结了旧的 streamIdRef 单流过滤。
-  useConversationStreamRouter({
-    activeConversationId: conversationId,
-    onConversationUpdated,
-    onBrowserToolActivity: handleBrowserToolActivity,
-  });
+  // 流订阅已上移到 App 顶层唯一一份。这里只注册浏览器工具展开副作用，
+  // 避免多个 ChatSurface 同时在世时重复订阅同一条 delta。
 
   useLayoutEffect(() => {
     const pending = pendingThreadScrollRestoreRef.current;
@@ -1671,6 +1681,14 @@ export function ChatSurface({
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
     setAttachmentError(null);
+  }, []);
+
+  const attachWorkspaceFile = useCallback((hit: WorkspaceFileHit) => {
+    const attachment = buildWorkspaceFileAttachment(hit);
+    setAttachments((prev) => {
+      const filtered = prev.filter((item) => item.workspaceRelPath !== attachment.workspaceRelPath);
+      return [...filtered, attachment];
+    });
   }, []);
 
   const attachSessionReference = useCallback(async (hit: SessionReferenceHit) => {
@@ -2367,7 +2385,7 @@ export function ChatSurface({
       {isFileDropActive ? (
         <div className="chat-file-drop-overlay" aria-hidden="true">
           <div className="chat-file-drop-card">
-            <div className="chat-file-drop-icon">＋</div>
+            <div className="chat-file-drop-icon"><PeerIcon name="plus" size={22} /></div>
             <div className="chat-file-drop-title">{isZh ? '松手添加到当前对话' : 'Drop to attach to this chat'}</div>
             <div className="chat-file-drop-subtitle">{isZh ? '文件会复用现有附件规则加入输入区' : 'Files will be added with the existing attachment rules'}</div>
           </div>
@@ -2435,20 +2453,11 @@ export function ChatSurface({
               <h2>{hasProvider ? emptyHomeGreeting : (isZh ? '先连接 AI 服务，再开始任务' : 'Connect an AI service to get started')}</h2>
             </div>
             {!hasProvider ? (
-              <>
-                <p>
-                  {isZh ? '请先' : 'Please '}
-                  <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
-                    {isZh ? '连接 AI 服务' : 'connect an AI service'}
-                  </button>
-                  {isZh ? '后开始对话。' : ' to start chatting.'}
-                </p>
-                <div className="chat-empty-actions">
-                  <button type="button" className="chat-empty-primary-btn" onClick={onOpenSettings}>
-                    {isZh ? '连接 AI 服务' : 'Connect AI service'}
-                  </button>
-                </div>
-              </>
+              <div className="chat-empty-actions">
+                <button type="button" className="chat-empty-primary-btn" onClick={onOpenSettings}>
+                  {isZh ? '连接 AI 服务' : 'Connect AI service'}
+                </button>
+              </div>
             ) : null}
             {hasProvider ? (
               <div className="chat-empty-cards" aria-label={isZh ? '任务快捷入口' : 'Task starters'}>
@@ -2650,6 +2659,9 @@ export function ChatSurface({
             onForceSend={handleForceSendQueued}
           />
         ) : null}
+        {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
+        {!(showEmptyHome && !hasProvider) ? (
+        <>
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
@@ -2666,6 +2678,8 @@ export function ChatSurface({
           onPaste={handlePaste}
           onAddFiles={addFiles}
           onAttachSessionReference={attachSessionReference}
+          onAttachWorkspaceFile={attachWorkspaceFile}
+          workspacePath={workspacePath}
           onPrimaryAction={stableHandlePrimaryAction}
           editingMessage={editingMessage}
           onCancelEdit={stableCancelComposerEdit}
@@ -2710,6 +2724,8 @@ export function ChatSurface({
           </div>
           {homeComposerContextControls}
         </div>
+        </>
+        ) : null}
       </div>
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />

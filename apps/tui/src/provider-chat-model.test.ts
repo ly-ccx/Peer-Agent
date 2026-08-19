@@ -65,6 +65,7 @@ function host(
       listener(null);
       return () => {};
     },
+    dispose: async () => {},
   };
 }
 
@@ -370,7 +371,6 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         content: JSON.stringify({
           status: 'completed',
           output: { content: 'note contents' },
-          outputPreview: 'note contents',
         }),
       },
     ]);
@@ -387,6 +387,90 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       totalTokens: 85,
     });
     expect(controller.getSnapshot().contextAccounting?.authoritativeInputTokens).toBe(45);
+  });
+
+  test('pins system and tools bytes across inner-loop provider requests', async () => {
+    let promptBuilds = 0;
+    let toolProjectionBuilds = 0;
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: { inputTokens: 20, outputTokens: 2 },
+          };
+        }
+        return completed('done');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        getSystemPrompt: () => {
+          promptBuilds += 1;
+          return `system-v${promptBuilds}`;
+        },
+        toolDefinitionsForMode: () => {
+          toolProjectionBuilds += 1;
+          return [{
+            ...toolDefinitions[0]!,
+            description: `Read a workspace file #${toolProjectionBuilds}`,
+          }];
+        },
+      }),
+    });
+
+    await controller.send('read note');
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.messages[0]).toEqual(requests[1]?.messages[0]);
+    expect(requests[0]?.tools).toEqual(requests[1]?.tools);
+    expect(requests[0]?.messages[0]).toEqual({ role: 'system', content: 'system-v1' });
+    expect(requests[0]?.tools?.[0]?.description).toBe('Read a workspace file #1');
+  });
+
+  test('skips exact token count when the last observation is far below the trigger', async () => {
+    const countCalls: number[] = [];
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async countInputTokens() {
+        countCalls.push(Date.now());
+        return { inputTokens: 1_000, source: 'provider_tokenizer' };
+      },
+      async stream(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: { inputTokens: 1_000, outputTokens: 2 },
+          };
+        }
+        return {
+          ...completed('done'),
+          usage: { inputTokens: 1_100, outputTokens: 3 },
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions,
+        getContextWindow: () => 100_000,
+      }),
+    });
+
+    await controller.send('read note');
+
+    expect(requests).toHaveLength(2);
+    expect(countCalls).toHaveLength(1);
   });
 
   test('keeps prior request billing and counts a later failed provider request', async () => {

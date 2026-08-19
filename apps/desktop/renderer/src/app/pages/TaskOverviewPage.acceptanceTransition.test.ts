@@ -6,16 +6,17 @@ const readPage = () => readFile(new URL('./TaskOverviewPage.tsx', import.meta.ur
 const readStyles = () => readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
 
-test('result acceptance waits for success before celebrating and preserves a removal snapshot', async () => {
+test('result acceptance waits for delivered before celebrating and preserves a removal snapshot', async () => {
   const source = await readPage();
   assert.match(source, /type AcceptancePhase/);
-  assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
+  assert.match(source, /await onAcceptResult\(item\);[\s\S]*交回在后台进行/);
+  assert.match(source, /deliveryHandoffStatus === 'delivered'/);
   assert.match(source, /Object\.values\(acceptanceTransitions\)/);
   assert.match(source, /ParticleShatterOverlay/);
   assert.match(source, /acceptHandlerRef\.current = handleAccept/);
   assert.match(source, /is-shattering/);
   assert.match(source, /is-exiting/);
-  assert.match(source, /正在验收…/);
+  assert.match(source, /正在交回…/);
   assert.match(source, /验收完成，任务已圆满结束/);
 });
 
@@ -37,7 +38,7 @@ test('a failed acceptance returns the card to a retryable idle state', async () 
 test('third-bucket card only offers 查看结果; accept and reject stay off the card', async () => {
   const source = await readPage();
   assert.match(source, /主按钮「查看结果」/);
-  assert.match(source, /确认验收和还不行只出现在看过结果之后/);
+  assert.match(source, /确认验收只出现在看过结果之后/);
   assert.match(source, />\s*查看结果\s*</);
   assert.doesNotMatch(source, /disabled=\{!canAccept \|\| Boolean\(phase\)\}/);
   const card = source.slice(source.indexOf('function ResultCard'));

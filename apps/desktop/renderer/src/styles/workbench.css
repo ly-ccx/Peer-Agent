@@ -26,6 +26,21 @@
     border-left: none;
   }
 
+  /* 根 Workbench 最大化：三栏网格只保留 Workbench，左栏与聊天栏让位但保持挂载。 */
+  :root[data-workbench-maximized='true'] .app-layout {
+    grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
+  }
+
+  :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .workbench-panel--maximized {
+    width: 100% !important;
+    max-width: none;
+  }
+
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
   .workbench-resizer {
     position: absolute;
@@ -63,6 +78,8 @@
     box-sizing: border-box;
     flex: 0 0 40px;
     height: 40px;
+    min-height: 0;
+    max-height: 40px;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -72,6 +89,32 @@
     background: transparent;
     /* 与 .chat-header.has-scroll 同一条 hairline，避免左右底边错位。 */
     border-bottom: 1px solid var(--chrome-hairline);
+  }
+
+  .workbench-maximize-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    border-radius: var(--ui-radius-control, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+  }
+
+  .workbench-maximize-button:hover,
+  .workbench-maximize-button[aria-pressed='true'] {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--graphite-base);
+  }
+
+  .workbench-maximize-button:focus-visible {
+    outline: 2px solid var(--za-accent, #4c8dff);
+    outline-offset: 1px;
   }
 
   .workbench-tab {
@@ -149,6 +192,20 @@
    * Electron webview 也需要 display:none 才能可靠移除 guest surface 的残留画面。 */
   .workbench-view[data-active='false'] {
     display: none;
+  }
+
+  /* 后台 Task 拉起的会话浏览器必须保持 guest 可初始化，但不能抢前台画面。
+   * display:none 会阻止 Electron webview 进入就绪态，所以改成离屏挂载。 */
+  .workbench-view--prepared-browser[data-active='false'] {
+    display: flex;
+    visibility: hidden;
+    pointer-events: none;
+    position: fixed;
+    inset: auto auto 0 0;
+    width: 960px;
+    height: 720px;
+    transform: translate(-200vw, -200vh);
+    overflow: hidden;
   }
 
   .workbench-view[data-active='true'] {
@@ -282,6 +339,96 @@
   .workbench-diff-btn:hover {
     background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
+  }
+
+  /* 预览头部「打开 ▾」：沿用 workbench-diff-btn 的字号/色板，只多一处分栏。 */
+  .workbench-open-split {
+    position: relative;
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
+    background: transparent;
+    overflow: visible;
+  }
+  .workbench-open-split-main,
+  .workbench-open-split-caret {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    color: var(--graphite-mute);
+    font-size: var(--ui-font-meta, 12px);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .workbench-open-split-main {
+    padding: 3px 8px 3px 7px;
+    font-weight: 600;
+  }
+  .workbench-open-split-caret {
+    padding: 3px 7px 3px 5px;
+    border-left: 1px solid var(--ui-border-subtle, var(--za-line));
+    color: var(--za-text-faint, var(--graphite-mute));
+    line-height: 1;
+  }
+  .workbench-open-split-main:hover,
+  .workbench-open-split-caret:hover,
+  .workbench-open-split.is-open .workbench-open-split-caret {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--graphite-base);
+  }
+  .workbench-open-split-main:disabled,
+  .workbench-open-split-caret:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .workbench-open-app-icon {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    object-fit: contain;
+    flex: 0 0 auto;
+  }
+  .workbench-open-split-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    min-width: 220px;
+    padding: 6px;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
+    background: var(--za-surface-0, var(--za-surface-1));
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--za-text) 12%, transparent);
+  }
+  .workbench-open-split-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--graphite-base, var(--za-text));
+    font-size: var(--ui-font-meta, 12px);
+    text-align: left;
+    cursor: pointer;
+  }
+  .workbench-open-split-item:hover,
+  .workbench-open-split-item.is-selected {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+  }
+  .workbench-open-split-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--ui-border-subtle, var(--za-line));
   }
   .workbench-diff-body {
     flex: 1 1 auto;
@@ -474,6 +621,34 @@
   .workbench-file-preview-hint {
     margin: 8px 16px 16px;
     text-align: left;
+  }
+
+  .workbench-image-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100%;
+    padding: 24px;
+  }
+
+  .workbench-image-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    background: var(--chrome-surface, transparent);
+  }
+
+  .workbench-html-preview {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
   }
 
   .workbench-document {

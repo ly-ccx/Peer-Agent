@@ -41,4 +41,5 @@ test('buildSessionReferenceAttachment produces text attachment', () => {
   assert.match(attachment.name, /^session:Demo Session\.txt$/);
   assert.match(attachment.text || '', /Referenced conversation: Demo Session/);
   assert.match(attachment.text || '', /user: context/);
+  assert.equal(attachment.sourceKind, 'session_reference');
 });

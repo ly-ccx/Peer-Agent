@@ -22,6 +22,10 @@ const readPage = async () => {
   const { readFile } = await import('node:fs/promises');
   return readFile(new URL('./TaskOverviewPage.tsx', import.meta.url), 'utf8');
 };
+const readGrouping = async () => {
+  const { readFile } = await import('node:fs/promises');
+  return readFile(new URL('./goalThreadGrouping.tsx', import.meta.url), 'utf8');
+};
 
 // ---- 与页面实现保持同一语义的纯逻辑镜像（结构断言保证两者同步）----
 type Phase = 'submitting' | null;
@@ -149,7 +153,7 @@ function mirror(entries: readonly Entry[], contextItems: readonly Item[] = []): 
 }
 
 test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段 continue 吞掉', async () => {
-  const source = await readPage();
+  const source = await readGrouping();
   // 无 rootPlanId 的卡必须在扫描循环里立刻 push single 并 continue
   assert.match(
     source,
@@ -157,18 +161,32 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   );
   // 死代码 singles 数组已移除
   assert.doesNotMatch(source, /const singles:/);
-  assert.match(source, /thread-tree/);
-  assert.match(source, /goal-thread-card/);
-  assert.match(source, /function buildThreadTreeNodes/);
+  assert.match(source, /thread-list/);
+  assert.match(source, /function buildThreadListNodes/);
   assert.match(source, /function compareThreadItems/);
+  assert.match(source, /function ThreadList\(/);
+  assert.match(source, /role="list"/);
+  // 同线 Goal 只按 round 排序，禁止恢复树语义、深度或子级投影。
+  assert.doesNotMatch(source, /role="tree"|isChild|depth:|marginLeft/);
   assert.doesNotMatch(source, /className="goal-thread-group"/);
-  // 回归：compareThreadEntries 读 a.item.round。树节点是 TaskOverviewItem，
-  // 若直接 bucket.sort(compareThreadEntries) 会抛
-  // Cannot read properties of undefined (reading 'round')，整页白屏。
-  assert.doesNotMatch(source, /bucket\.sort\(compareThreadEntries\)/);
+  // 回归：byId 列表节点是 TaskOverviewItem，必须使用 item 比较器；
+  // 待验收 entries 自身仍可合法使用 compareThreadEntries。
   assert.doesNotMatch(source, /byId\.values\(\)\]\.sort\(compareThreadEntries\)/);
-  assert.match(source, /bucket\.sort\(compareThreadItems\)/);
-  assert.match(source, /byId\.values\(\)\]\.sort\(compareThreadItems\)/);
+  assert.match(source, /function compareThreadItems/);
+  assert.match(source, /byId\.values\(\)\]\s*\.sort\(compareThreadItems\)/);
+});
+
+test('源码：区级页面归组卡带上同线待签项，树行点击只开单个节点', async () => {
+  const source = await readPage();
+  // 归组卡「查看结果」带上这条线全部待签项；点某一行仍只传 node.item。
+  assert.match(source, /acceptTogether=\{collectPendingAcceptanceItems\(/);
+  assert.match(source, /onOpenItem\?\.\(item, acceptTogether\?\.length \? \{ acceptTogether \} : undefined\)/);
+  const grouping = await readGrouping();
+  assert.match(grouping, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);
+  assert.doesNotMatch(
+    grouping,
+    /onClick=\{\(\) => onOpenItem\?\.\(node\.item, acceptTogether/,
+  );
 });
 
 test('纯逻辑：12 张无关系旧卡全部平铺输出（截图回归场景）', () => {

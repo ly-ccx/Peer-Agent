@@ -124,6 +124,23 @@ export function createWorkspaceApplicationService(options = {}) {
     return { path: defaultDir, name, created };
   }
 
+  function previewDefaultWorkspace() {
+    const all = getSettings();
+    if (all.activeWorkspace && pathExists(all.activeWorkspace)) {
+      return {
+        path: all.activeWorkspace,
+        name: basename(all.activeWorkspace),
+        exists: true,
+      };
+    }
+    const defaultDir = getDefaultWorkspacePath();
+    return {
+      path: defaultDir,
+      name: basename(defaultDir),
+      exists: pathExists(defaultDir),
+    };
+  }
+
   async function addWorkspace(sender) {
     const dir = await chooseDirectory(sender);
     if (!dir) return null;
@@ -257,6 +274,7 @@ export function createWorkspaceApplicationService(options = {}) {
   return Object.freeze({
     listWorkspaces,
     ensureDefaultWorkspace,
+    previewDefaultWorkspace,
     addWorkspace,
     setActiveWorkspace,
     removeWorkspace,

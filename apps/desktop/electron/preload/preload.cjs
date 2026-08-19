@@ -58,7 +58,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   approveLocalAction: (toolCallId, options) => ipcRenderer.invoke('permission:approve', { toolCallId, ...(options || {}) }),
   denyLocalAction: (toolCallId) => ipcRenderer.invoke('permission:deny', { toolCallId }),
   executeClientToolCall: (call, grant) => ipcRenderer.invoke('client-tool:execute', { call, grant }),
-  openPath: (absPath, workspaceRoot) => ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot }),
+  openPath: (absPath, workspaceRoot, options) =>
+    ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot, ...(options || {}) }),
+  listEditors: () => ipcRenderer.invoke('shell:editors:list'),
+  setDefaultEditor: (editorId) => ipcRenderer.invoke('shell:editors:set-default', { editorId }),
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
@@ -67,6 +70,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   writeFile: (absPath, workspaceRoot, relPath, content) => ipcRenderer.invoke('file:write', { absPath, workspaceRoot, relPath, content }),
   mkdir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:mkdir', { absPath, workspaceRoot, relPath }),
   readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
+  searchWorkspaceFiles: (workspacePath, query, limit) => ipcRenderer.invoke('workspace:search-files', { workspacePath, query, limit }),
   /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
   watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
   /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */
@@ -184,6 +188,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('quick-chat:popover-closed', handler);
   },
   workspaceEnsureDefault: () => ipcRenderer.invoke('workspace:ensure-default'),
+  workspacePreviewDefault: () => ipcRenderer.invoke('workspace:preview-default'),
   workspaceAdd: () => ipcRenderer.invoke('workspace:add'),
   workspaceSetActive: (params) => ipcRenderer.invoke('workspace:set-active', params),
   workspaceRemove: (params) => ipcRenderer.invoke('workspace:remove', params),
@@ -253,6 +258,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),
+  goalPlansRetryHandoff: (params) => ipcRenderer.invoke('goalPlans:retry-handoff', params),
   goalPlansApprove: (params) => ipcRenderer.invoke('goalPlans:approve', params),
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
   goalPlansMarkRequestedUserInput: (params) =>
@@ -427,6 +433,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   mcpReadResource: (params) => ipcRenderer.invoke('mcp:read-resource', params),
   mcpGetPrompt: (params) => ipcRenderer.invoke('mcp:get-prompt', params),
   mcpConnectAndRegister: (params) => ipcRenderer.invoke('mcp:connect-and-register', params),
+  openProductLink: (kind) => ipcRenderer.invoke('about:open-link', { kind }),
   // ── Updater ──
   updaterGetStatus: () => ipcRenderer.invoke('updater:get-status'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),

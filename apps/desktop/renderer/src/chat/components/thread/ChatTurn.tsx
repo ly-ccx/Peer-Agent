@@ -15,19 +15,25 @@ interface ChatTurnProps {
   readonly isLive: boolean;
   readonly streamStartedAt: number | null;
   readonly isZh: boolean;
-  readonly i18n: I18nRuntime;
-  readonly onMessageAction: (messageIndex: number, action: MessageActionId) => void;
+  readonly i18n?: I18nRuntime;
+  readonly onMessageAction?: (messageIndex: number, action: MessageActionId) => void;
   /** 点击编辑：把目标用户消息装进底部输入框，而不是气泡内联编辑。 */
-  readonly onBeginEdit: (messageId: string, text: string, attachments: readonly ChatAttachment[]) => void;
-  readonly onRegenerate: (messageIndex: number) => void;
-  readonly onPreviewImage: (attachment: ChatAttachment) => void;
+  readonly onBeginEdit?: (messageId: string, text: string, attachments: readonly ChatAttachment[]) => void;
+  readonly onRegenerate?: (messageIndex: number) => void;
+  readonly onPreviewImage?: (attachment: ChatAttachment) => void;
   readonly turnIndex: number;
-  readonly onMeasure: (
+  readonly onMeasure?: (
     index: number,
     element: HTMLElement | null,
     previousElement?: HTMLElement | null,
   ) => void;
+  /** 只读查看：隐藏编辑/重生成等活动操作，供「查看结果」复用同一套消息渲染。 */
+  readonly readOnly?: boolean;
+  /** 结果页「本任务」高亮；主聊天不传。 */
+  readonly highlightedMessageId?: string | null;
 }
+
+function noopMeasure() {}
 
 function StreamingElapsedTime({ startedAt, isZh }: { readonly startedAt: number | null; readonly isZh: boolean }) {
   const [elapsedMs, setElapsedMs] = useState(() => Math.max(0, Date.now() - (startedAt ?? Date.now())));
@@ -65,7 +71,9 @@ function ChatTurnImpl({
   onRegenerate,
   onPreviewImage,
   turnIndex,
-  onMeasure,
+  onMeasure = noopMeasure,
+  readOnly = false,
+  highlightedMessageId = null,
 }: ChatTurnProps) {
   const lastMessage = turn.messages.at(-1)?.msg;
   const measureRef = useMemo(() => {
@@ -87,8 +95,15 @@ function ChatTurnImpl({
       data-chat-turn-id={turn.id}
       data-settled={isLive ? 'false' : 'true'}
     >
-      {turn.messages.map(({ msg, index: messageIndex, answeredText }) => (
-        <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
+      {turn.messages.map(({ msg, index: messageIndex, answeredText }) => {
+        const isTarget = highlightedMessageId != null && msg.id === highlightedMessageId;
+        return (
+        <div
+          key={msg.id}
+          data-msg-id={msg.id}
+          data-task-target={isTarget ? 'true' : undefined}
+          className={`chat-msg chat-msg-${msg.role}${isTarget ? ' is-task-target' : ''}`}
+        >
           {msg.compaction ? (
             <CompactionSummaryCard compaction={msg.compaction} isZh={isZh} />
           ) : (
@@ -97,6 +112,9 @@ function ChatTurnImpl({
                 <span className="chat-msg-role-label">
                   {msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}
                 </span>
+                {isTarget ? (
+                  <span className="chat-msg-target-tag">{isZh ? '本任务' : 'This task'}</span>
+                ) : null}
                 {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
               </div>
               <div className="chat-msg-body">
@@ -126,17 +144,19 @@ function ChatTurnImpl({
                 )}
               </div>
               <div className="chat-msg-footer">
-                <MessageActionBar
-                  role={msg.role}
-                  content={msg.content}
-                  canEdit={true}
-                  isStreaming={isLive}
-                  onAction={(action) => {
-                    if (action === 'edit') onBeginEdit(msg.id, msg.content, msg.attachments ?? []);
-                    else onMessageAction(messageIndex, action);
-                  }}
-                  i18n={i18n}
-                />
+                {readOnly || !i18n ? null : (
+                  <MessageActionBar
+                    role={msg.role}
+                    content={msg.content}
+                    canEdit={true}
+                    isStreaming={isLive}
+                    onAction={(action) => {
+                      if (action === 'edit') onBeginEdit?.(msg.id, msg.content, msg.attachments ?? []);
+                      else onMessageAction?.(messageIndex, action);
+                    }}
+                    i18n={i18n}
+                  />
+                )}
                 {msg.role === 'assistant' ? (
                   isLive && msg === lastMessage ? (
                     <StreamingElapsedTime startedAt={streamStartedAt} isZh={isZh} />
@@ -158,7 +178,8 @@ function ChatTurnImpl({
             </>
           )}
         </div>
-      ))}
+        );
+      })}
     </section>
   );
 }

@@ -21,6 +21,7 @@ function createHarness() {
       recordManualConfirmation: port('plans.recordManualConfirmation'),
       recordTaskEvidence: port('plans.recordTaskEvidence'),
       remove: port('plans.remove'),
+      retryHandoff: port('plans.retryHandoff'),
     },
     goalRunner: {
       getState: port('runner.getState'),
@@ -57,6 +58,7 @@ test('goal owners register the exact 15 invoke channels', () => {
     'goalPlans:mark-requested-user-input',
     'goalPlans:record-manual-confirmation',
     'goalPlans:record-task-evidence',
+    'goalPlans:retry-handoff',
     'goalPlans:revise',
     'goalPlans:set-status',
     'goalRunner:clear',
@@ -88,6 +90,7 @@ test('goal handlers preserve payload defaults and return values', () => {
   );
   assert.equal(handlers.get('goalPlans:record-task-evidence')({}, payload), 'plans.recordTaskEvidence');
   assert.equal(handlers.get('goalPlans:delete')({}, payload), 'plans.remove');
+  assert.equal(handlers.get('goalPlans:retry-handoff')({}, payload), 'plans.retryHandoff');
   assert.equal(handlers.get('goalRunner:get-state')({}, payload), 'runner.getState');
   assert.equal(handlers.get('goalRunner:start')({}, undefined), 'runner.start');
   assert.equal(handlers.get('goalRunner:pause')({}, payload), 'runner.pause');
@@ -106,6 +109,7 @@ test('goal handlers preserve payload defaults and return values', () => {
     ['plans.recordManualConfirmation', payload],
     ['plans.recordTaskEvidence', payload],
     ['plans.remove', payload],
+    ['plans.retryHandoff', payload],
     ['runner.getState', payload],
     ['runner.start', {}],
     ['runner.pause', payload],

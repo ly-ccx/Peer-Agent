@@ -4,6 +4,153 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.5 - 2026-08-19
+
+### Notes
+
+- Stable release that graduates the `0.0.5-beta.1`–`0.0.5-beta.4` Goal workbench, review drawer, and headless CLI.
+- Group pending reviews by Goal Thread on the global workbench; the result drawer reuses the current conversation and can accept a whole thread.
+- Open workbench artifacts in a remembered editor with syntax highlighting; keep review cards until delivery finishes.
+- Add headless `peer exec` with provider-aware model disambiguation and no default turn cutoff.
+
+### Added
+
+- Goal Thread grouping on the global workbench, flattened into a sibling list, with jump-to-message from a round.
+- Result drawer that reuses the live chat surface, with maximize and accept-all on a thread.
+- Foldable primary artifacts on task overview, with hover previews for code diffs and image thumbnails.
+- Split-open control on preview headers: remembered editor, another installed app, or reveal the folder.
+- Source-mode highlighting via the existing highlight.js highlighter for common languages.
+- Headless `peer exec` for one Agent turn from the current directory without opening the TUI.
+- Provider-aware model disambiguation so same-named models do not collide in `peer exec`.
+- Persistent cwd and env for foreground `local.shell.exec` inside one conversation.
+- Optional `start_line` / `end_line` on `read_file` for numbered slices.
+- Single-line live thinking bar; first-run lands in chat.
+- Workbench-header entry to open the current workspace's capability panel.
+- Composer `@` mentions for workspace files.
+
+### Changed
+
+- Keep thinking collapsed until expanded; replace character arrows with linear SVG icons.
+- Task artifacts show real filenames and +N/−M, with line numbers aligned to unified-diff hunks.
+- Leave `peer exec` unbounded unless `--max-turns` is set.
+- Keep working-set tool results inline so they stay in the current context.
+- Goal plan history renders as aligned sibling cards instead of an indented tree.
+
+### Fixed
+
+- Restore left-side rounded corners on the session / result drawer when maximized.
+- Send accepted completed cards into history; opening history no longer freezes the drawer.
+- After a jump to a message, sending no longer replays the old scroll target.
+- Keep virtual turns aligned so a long thread no longer opens as a blank spacer.
+- Restore editor menu icons from local icns instead of leaving them blank.
+- Render Markdown image syntax in chat; pack workbench cards by the shortest column.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.5` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.5`.
+
+## 0.0.5-beta.4 - 2026-08-18
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.3`.
+- Add headless `peer exec` with provider-aware model disambiguation and no default turn cutoff.
+- Persist foreground shell cwd/env across calls, and let `read_file` return a numbered line range.
+- Keep the thinking ticker collapsed until expanded; restore editor menu icons and linear SVG arrows.
+
+### Added
+
+- `peer exec` runs one Agent turn from the current directory without opening the TUI.
+- Provider-aware model disambiguation so same-named models do not collide in `peer exec`.
+- Persistent cwd and env for foreground `local.shell.exec` inside one conversation.
+- Optional `start_line` / `end_line` on `read_file` for numbered slices.
+
+### Changed
+
+- Leave `peer exec` unbounded unless `--max-turns` is set.
+- Keep working-set tool results inline so they stay in the current context.
+
+### Fixed
+
+- Hide the live thinking ticker until the thinking block is expanded.
+- Restore editor menu icons from local icns instead of leaving them blank.
+- Replace character arrows with linear SVG icons.
+- Pass an unbounded turn limit when TUI `exec` omits `--max-turns`.
+
+## 0.0.5-beta.3 - 2026-08-17
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.2`.
+- Restore left-side rounded corners on the session / result drawer.
+- Accepted completed cards move into history without freezing the drawer; sending after a message jump no longer flashes the old target.
+
+### Fixed
+
+- Restore the left-side rounded corners on the session / result drawer so maximize no longer clips them into a square.
+- Send accepted completed cards into history; opening history no longer freezes the drawer.
+- After a successful jump to a message, keep that one-shot navigation from replaying on send so the view does not scroll back and flash the old target.
+
+## 0.0.5-beta.2 - 2026-08-17
+
+### Notes
+
+- Follow-up beta on the `0.0.5` line after `0.0.5-beta.1`.
+- Open workbench files in the remembered editor, highlight source previews, and keep accept cards until delivery actually lands.
+- Clicking a Goal Thread round jumps to the matching message; long chats no longer open as a blank spacer.
+
+### Added
+
+- Split-open control on preview headers: open the current file in the remembered editor, pick another installed app, or open/reveal the containing folder.
+- Source-mode highlighting via the existing highlight.js highlighter for common languages such as jsx/tsx; unknown languages and files over the 20k-character cap stay as plain text.
+
+### Changed
+
+- Task artifacts show real filenames and +N/−M, with line numbers aligned to unified-diff hunks instead of generic “code change / new file” labels.
+- Goal plan history renders as aligned sibling cards instead of an indented tree.
+
+### Fixed
+
+- Keep virtual turns aligned with the live viewport so a long thread no longer opens as a blank spacer.
+- Keep accept cards visible until delivery actually finishes, then celebrate and dismiss; rebase when the target branch moved, and keep conflicts visible with a retry path.
+- Clicking a Goal Thread round scrolls to the matching message instead of only opening the conversation at the default position.
+- Stop appending the same streaming delta twice.
+
+## 0.0.5-beta.1 - 2026-08-16
+
+### Notes
+
+- First published beta on the `0.0.5` line after stable `0.0.4`.
+- Bring Goal Threads onto the global workbench, reuse live chat in the result drawer, and fold primary artifacts into task overview.
+- First-run lands in chat; thinking stays on a single live line.
+
+### Added
+
+- Goal Thread grouping on the global workbench, flattened into a sibling list instead of a nested tree.
+- Result drawer that reuses the live chat surface, with maximize and accept-all on a thread.
+- Foldable primary artifacts on task overview, with hover previews for code diffs and image thumbnails.
+- Single-line live thinking bar that follows the latest tail.
+- Workbench-header entry to open the current workspace's capability panel.
+- Composer `@` mentions for workspace files, without false attachment errors.
+- First-run landing directly in chat.
+
+### Changed
+
+- Result view reuses chat turn rendering and can preview images and HTML.
+- Workbench cards pack by the shortest column; character icons become linear SVGs.
+- Empty home hides the composer when no provider is configured.
+- Accepting a result card refills the list more smoothly.
+
+### Fixed
+
+- Render Markdown image syntax in chat.
+- Keep self-parent Goal Threads grouped on one card.
+- Make `@` picker rows usable, pin folders, and keep highlight around session ids.
+- Enlarge images in the result view and stop clipping result-card corners.
+- Let background tasks schedule the in-conversation browser.
+- Stamp changelog `generatedAt` with a real time so docs-site drift gates stay honest.
+
 ## 0.0.4 - 2026-08-14
 
 ### Notes

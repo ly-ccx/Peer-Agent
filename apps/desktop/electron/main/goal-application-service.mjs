@@ -16,6 +16,7 @@ export function createGoalApplicationService({
   recordManualConfirmation,
   recordTaskEvidence,
   deletePlan,
+  retryHandoff,
   startRunner,
   getRunnerState,
   pauseRunner,
@@ -47,6 +48,7 @@ export function createGoalApplicationService({
     ),
     recordTaskEvidence: assertFunction(recordTaskEvidence, 'recordTaskEvidence'),
     deletePlan: assertFunction(deletePlan, 'deletePlan'),
+    retryHandoff: assertFunction(retryHandoff, 'retryHandoff'),
     startRunner: assertFunction(startRunner, 'startRunner'),
     getRunnerState: assertFunction(getRunnerState, 'getRunnerState'),
     pauseRunner: assertFunction(pauseRunner, 'pauseRunner'),
@@ -94,6 +96,7 @@ export function createGoalApplicationService({
     recordTaskEvidence: ({ planId, taskId, change }) =>
       ports.recordTaskEvidence(planId, taskId, change),
     remove,
+    retryHandoff: ({ planId } = {}) => ports.retryHandoff(planId),
     getRunnerState: ({ planId }) => ports.getRunnerState(planId),
     startRunner: ({ planId, options } = {}) => ports.startRunner(planId, options),
     pauseRunner: ({ planId }) => ports.pauseRunner(planId),

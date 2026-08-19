@@ -42,7 +42,7 @@ describe('virtual chat turn range', () => {
     ]);
   });
 
-  it('can force-mount a target outside the visible window for message navigation', () => {
+  it('expands the current window to include forceIndex instead of collapsing to that item', () => {
     const range = calculateVirtualTurnRange({
       count: 100,
       scrollTop: 0,
@@ -53,11 +53,31 @@ describe('virtual chat turn range', () => {
       forceIndex: 80,
     });
 
-    assert.equal(range.startIndex, 80);
+    assert.equal(range.startIndex, 0);
     assert.equal(range.endIndex, 80);
-    assert.deepEqual(range.items.map((item) => item.index), [80]);
-    assert.equal(range.paddingStart, 24_000);
+    assert.ok(range.items.some((item) => item.index === 0));
+    assert.ok(range.items.some((item) => item.index === 80));
+    assert.equal(range.paddingStart, 0);
+    assert.ok(range.paddingStart < 24_000);
     assert.equal(range.paddingEnd, 5_700);
+  });
+
+  it('keeps the top viewport populated when forceIndex points at the last turn', () => {
+    const range = calculateVirtualTurnRange({
+      count: 80,
+      scrollTop: 0,
+      viewportSize: 900,
+      measuredSizes: new Map(),
+      estimateSize: 360,
+      overscanPx: 900,
+      forceIndex: 79,
+    });
+
+    assert.equal(range.startIndex, 0);
+    assert.ok(range.endIndex >= 79);
+    assert.equal(range.paddingStart, 0);
+    assert.ok(range.items[0]?.index === 0);
+    assert.ok(range.items.some((item) => item.index === 79));
   });
 
   it('estimates a stable offset from measured and fallback sizes', () => {

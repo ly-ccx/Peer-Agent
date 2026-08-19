@@ -32,6 +32,26 @@ test('resolves the active browser tab independently for each conversation', () =
   assert.equal(getActiveWebContentsId(), 21);
 });
 
+test('background registration does not steal the foreground window menu target', () => {
+  registerBrowserWebContents({
+    webContentsId: 11,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-1',
+    active: true,
+  });
+  registerBrowserWebContents({
+    webContentsId: 21,
+    conversationId: 'conversation-b',
+    browserTabId: 'b-1',
+    active: true,
+    claimForeground: false,
+  });
+
+  assert.equal(getActiveWebContentsId('conversation-a'), 11);
+  assert.equal(getActiveWebContentsId('conversation-b'), 21);
+  assert.equal(getActiveWebContentsId(), 11);
+});
+
 test('switching active tabs updates both conversation and foreground targets', () => {
   registerBrowserWebContents({
     webContentsId: 11,

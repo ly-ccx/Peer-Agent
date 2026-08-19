@@ -9,6 +9,14 @@ import {
   insertSessionMention,
   type SessionReferenceHit,
 } from '../state/sessionReference';
+import {
+  fileMentionSubtitle,
+  insertFileMention,
+  mergeContextMentionHits,
+  type ContextMentionHit,
+  type MentionScope,
+  type WorkspaceFileHit,
+} from '../state/contextMention';
 import { clientApi } from '../../clientApi';
 import { AttachmentStrip } from './thread/AttachmentStrip';
 
@@ -51,6 +59,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onPaste,
   onAddFiles,
   onAttachSessionReference,
+  onAttachWorkspaceFile,
+  workspacePath = null,
   onPrimaryAction,
   editingMessage = null,
   onCancelEdit,
@@ -72,6 +82,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
+  readonly onAttachWorkspaceFile: (hit: WorkspaceFileHit) => void | Promise<void>;
+  readonly workspacePath?: string | null;
   readonly onPrimaryAction: () => void;
   /** 正在编辑的用户消息引用（底部输入框上方展示）。 */
   readonly editingMessage?: { messageId: string; preview: string } | null;
@@ -143,6 +155,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onPaste={onPaste}
         onAddFiles={onAddFiles}
         onAttachSessionReference={onAttachSessionReference}
+        onAttachWorkspaceFile={onAttachWorkspaceFile}
+        workspacePath={workspacePath}
         onPrimaryAction={onPrimaryAction}
         editingMessage={editingMessage}
         onCancelEdit={onCancelEdit}
@@ -169,6 +183,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   onPaste,
   onAddFiles,
   onAttachSessionReference,
+  onAttachWorkspaceFile,
+  workspacePath = null,
   onPrimaryAction,
   editingMessage = null,
   onCancelEdit,
@@ -186,16 +202,21 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
+  readonly onAttachWorkspaceFile: (hit: WorkspaceFileHit) => void | Promise<void>;
+  readonly workspacePath?: string | null;
   readonly onPrimaryAction: () => void;
   readonly editingMessage?: { messageId: string; preview: string } | null;
   readonly onCancelEdit?: () => void;
 }) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
-  const [activeSessionIndex, setActiveSessionIndex] = useState(0);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [sessionHits, setSessionHits] = useState<readonly SessionReferenceHit[]>([]);
-  const [sessionLoading, setSessionLoading] = useState(false);
-  const sessionQueryRef = useRef<string | null>(null);
+  const [fileHits, setFileHits] = useState<readonly WorkspaceFileHit[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionScope, setMentionScope] = useState<MentionScope>('all');
+  const mentionQueryRef = useRef<string | null>(null);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
   const hydrationReadyConversationRef = useRef<string | null>(null);
@@ -211,7 +232,13 @@ const ComposerDraftField = memo(function ComposerDraftField({
     if (showSlashCommands) return null;
     return detectAtQuery(draft);
   }, [draft, showSlashCommands]);
-  const showSessionMentions = Boolean(atQuery) && !isBusy;
+  const showContextMentions = Boolean(atQuery) && !isBusy;
+  const mentionHits = useMemo(() => mergeContextMentionHits({
+    query: atQuery?.query ?? '',
+    mentionScope,
+    files: fileHits,
+    sessions: sessionHits,
+  }), [atQuery?.query, fileHits, mentionScope, sessionHits]);
   const hasComposerContent = draft.trim().length > 0 || hasAttachments;
 
   // 只在 slash 候选列表变化时重置高亮，避免每个字符 setState 二次渲染。
@@ -220,23 +247,34 @@ const ComposerDraftField = memo(function ComposerDraftField({
   }, [slashCommands]);
 
   useEffect(() => {
-    setActiveSessionIndex(0);
-  }, [atQuery?.query, showSessionMentions]);
+    setActiveMentionIndex(0);
+  }, [atQuery?.query, mentionScope, showContextMentions]);
 
   useEffect(() => {
-    if (!showSessionMentions || !atQuery) {
-      sessionQueryRef.current = null;
+    if (!showContextMentions) setMentionScope('all');
+  }, [showContextMentions]);
+
+  useEffect(() => {
+    if (!showContextMentions) return;
+    const active = mentionMenuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [activeMentionIndex, mentionHits, showContextMentions]);
+
+  useEffect(() => {
+    if (!showContextMentions || !atQuery) {
+      mentionQueryRef.current = null;
       setSessionHits([]);
-      setSessionLoading(false);
+      setFileHits([]);
+      setMentionLoading(false);
       return;
     }
     const query = atQuery.query.trim();
-    sessionQueryRef.current = query;
+    mentionQueryRef.current = query;
     let cancelled = false;
-    setSessionLoading(true);
+    setMentionLoading(true);
     const timer = window.setTimeout(() => {
       void (async () => {
-        try {
+        const loadSessions = async (): Promise<SessionReferenceHit[]> => {
           let hits: SessionReferenceHit[] = [];
           try {
             const search = await clientApi.conversationsSearch?.({ query, status: 'active', limit: 20 });
@@ -274,17 +312,43 @@ const ComposerDraftField = memo(function ComposerDraftField({
               );
             }
           }
-          hits = hits.filter((item) => item.id !== conversationId).slice(0, 12);
-          if (!cancelled && sessionQueryRef.current === query) {
-            setSessionHits(hits);
+          return hits.filter((item) => item.id !== conversationId).slice(0, 8);
+        };
+
+        const loadFiles = async (): Promise<WorkspaceFileHit[]> => {
+          if (!workspacePath) return [];
+          try {
+            const result = await clientApi.searchWorkspaceFiles?.(workspacePath, query, 12);
+            if (!result?.ok || !Array.isArray(result.files)) return [];
+            return result.files.map((item): WorkspaceFileHit => ({
+              relPath: String(item.relPath || ''),
+              name: String(item.name || item.relPath || ''),
+              kind: item.kind === 'directory' ? 'directory' : 'file',
+            })).filter((item) => item.relPath);
+          } catch {
+            return [];
+          }
+        };
+
+        try {
+          const shouldLoadFiles = mentionScope !== 'chats' && (Boolean(query) || mentionScope === 'files');
+          const shouldLoadSessions = mentionScope !== 'files' && (Boolean(query) || mentionScope === 'chats');
+          const [nextSessions, nextFiles] = await Promise.all([
+            shouldLoadSessions ? loadSessions() : Promise.resolve([]),
+            shouldLoadFiles ? loadFiles() : Promise.resolve([]),
+          ]);
+          if (!cancelled && mentionQueryRef.current === query) {
+            setSessionHits(nextSessions);
+            setFileHits(nextFiles);
           }
         } catch {
-          if (!cancelled && sessionQueryRef.current === query) {
+          if (!cancelled && mentionQueryRef.current === query) {
             setSessionHits([]);
+            setFileHits([]);
           }
         } finally {
-          if (!cancelled && sessionQueryRef.current === query) {
-            setSessionLoading(false);
+          if (!cancelled && mentionQueryRef.current === query) {
+            setMentionLoading(false);
           }
         }
       })();
@@ -293,7 +357,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [atQuery, conversationId, showSessionMentions]);
+  }, [atQuery, conversationId, mentionScope, showContextMentions, workspacePath]);
 
   // 草稿与队列仍沿用既有表达层持久化缝；仅把订阅移入输入叶子。
   // 切会话时：先把「离开的会话」当前桶态同步写入持久化镜像，避免入队后立刻切走导致
@@ -365,6 +429,40 @@ const ComposerDraftField = memo(function ComposerDraftField({
     });
   };
 
+  const applyFileMention = (hit: WorkspaceFileHit) => {
+    if (!atQuery) return;
+    const next = insertFileMention(draft, atQuery.start, atQuery.query, hit.relPath);
+    setDraft(next);
+    void onAttachWorkspaceFile(hit);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const caret = Math.min(next.length, atQuery.start + hit.relPath.length + 2);
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
+  const applyMentionHit = (hit: ContextMentionHit) => {
+    if (hit.type === 'category') {
+      setMentionScope(hit.id);
+      setActiveMentionIndex(0);
+      return;
+    }
+    if (hit.type === 'back') {
+      setMentionScope('all');
+      setActiveMentionIndex(0);
+      return;
+    }
+    if (hit.type === 'file') {
+      applyFileMention(hit.file);
+      return;
+    }
+    if (hit.type === 'session') {
+      applySessionMention({ id: hit.id, title: hit.title });
+    }
+  };
+
   return (
     <>
       {showSlashCommands ? (
@@ -387,34 +485,66 @@ const ComposerDraftField = memo(function ComposerDraftField({
           ))}
         </div>
       ) : null}
-      {showSessionMentions ? (
-        <div className="slash-command-menu" role="listbox" aria-label={isZh ? '引用任务' : 'Mention task'}>
-          {sessionLoading ? (
-            <div className="slash-command-empty">{isZh ? '搜索任务…' : 'Searching tasks…'}</div>
-          ) : sessionHits.length === 0 ? (
-            <div className="slash-command-empty">{isZh ? '没有匹配的任务' : 'No matching tasks'}</div>
-          ) : (
-            sessionHits.map((hit, index) => (
-              <button
-                key={hit.id}
-                type="button"
-                role="option"
-                aria-selected={index === activeSessionIndex}
-                className={`slash-command-item session-mention-item${index === activeSessionIndex ? ' active' : ''}`}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  applySessionMention(hit);
-                }}
-              >
-                <span className="session-mention-main">
-                  <span className="session-mention-title">
-                    {hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session')}
+      {showContextMentions ? (
+        <div ref={mentionMenuRef} className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '引用文件或会话' : 'Mention files or chats'}>
+          {mentionHits.map((hit, index) => {
+              const key = hit.type === 'file'
+                ? `file:${hit.file.relPath}`
+                : hit.type === 'session'
+                  ? `session:${hit.id}`
+                  : hit.type === 'back'
+                    ? `back:${hit.from}`
+                    : `category:${hit.id}`;
+              const title = hit.type === 'file'
+                ? (hit.file.kind === 'directory' ? `${hit.file.name}/` : hit.file.name)
+                : hit.type === 'session'
+                  ? (hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session'))
+                  : hit.type === 'back'
+                    ? (isZh ? '返回' : 'Back')
+                    : hit.id === 'files' ? 'Files' : 'Chats';
+              const subtitle = hit.type === 'file'
+                ? fileMentionSubtitle(hit.file.relPath)
+                : hit.type === 'session'
+                  ? hit.id
+                  : hit.type === 'back'
+                    ? (isZh ? '全部类别' : 'All categories')
+                    : (hit.id === 'files'
+                      ? (isZh ? '搜索当前工作区文件' : 'Search workspace files')
+                      : (isZh ? '引用另一段会话' : 'Reference another chat'));
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeMentionIndex}
+                  className={`slash-command-item session-mention-item${hit.type === 'category' || hit.type === 'back' ? ' session-mention-nav' : ''}${index === activeMentionIndex ? ' active' : ''}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    applyMentionHit(hit);
+                  }}
+                >
+                  <span className="session-mention-main">
+                    <span className="session-mention-title">{title}</span>
+                    {subtitle ? <span className="session-mention-id">{subtitle}</span> : null}
                   </span>
-                  <span className="session-mention-id">{hit.id}</span>
-                </span>
-              </button>
-            ))
-          )}
+                </button>
+              );
+            })}
+          {mentionLoading && mentionHits.every((hit) => hit.type === 'back' || hit.type === 'category') ? (
+            <div className="slash-command-empty">
+              {mentionScope === 'chats'
+                ? (isZh ? '搜索会话…' : 'Searching chats…')
+                : mentionScope === 'files'
+                  ? (isZh ? '搜索文件…' : 'Searching files…')
+                  : (isZh ? '搜索文件与会话…' : 'Searching files and chats…')}
+            </div>
+          ) : mentionHits.every((hit) => hit.type === 'back' || hit.type === 'category') && mentionScope !== 'all' ? (
+            <div className="slash-command-empty">
+              {mentionScope === 'chats'
+                ? (isZh ? '没有匹配的会话' : 'No matching chats')
+                : (isZh ? '没有匹配的文件' : 'No matching files')}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <textarea
@@ -426,7 +556,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
             ? (isZh ? '随心输入' : 'Message will auto-send when done...')
             : variant === 'home'
               ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
-              : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
+              : (isZh ? '输入消息，@ 引用文件或会话' : 'Type a message, @ to mention a file or session')
           : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
         rows={1}
         onPaste={onPaste}
@@ -458,26 +588,26 @@ const ComposerDraftField = memo(function ComposerDraftField({
               return;
             }
           }
-          if (showSessionMentions && atQuery) {
+          if (showContextMentions && atQuery) {
             if (event.key === 'ArrowDown') {
               event.preventDefault();
-              if (sessionHits.length === 0) return;
-              setActiveSessionIndex((index) => (index + 1) % sessionHits.length);
+              if (mentionHits.length === 0) return;
+              setActiveMentionIndex((index) => (index + 1) % mentionHits.length);
               return;
             }
             if (event.key === 'ArrowUp') {
               event.preventDefault();
-              if (sessionHits.length === 0) return;
-              setActiveSessionIndex((index) => (index - 1 + sessionHits.length) % sessionHits.length);
+              if (mentionHits.length === 0) return;
+              setActiveMentionIndex((index) => (index - 1 + mentionHits.length) % mentionHits.length);
               return;
             }
             if ((event.key === 'Tab' || event.key === 'Enter')
-              && sessionHits.length > 0
+              && mentionHits.length > 0
               && !event.nativeEvent.isComposing
               && event.keyCode !== 229) {
               event.preventDefault();
-              const hit = sessionHits[activeSessionIndex] ?? sessionHits[0];
-              if (hit) applySessionMention(hit);
+              const hit = mentionHits[activeMentionIndex] ?? mentionHits[0];
+              if (hit) applyMentionHit(hit);
               return;
             }
             if (event.key === 'Escape') {

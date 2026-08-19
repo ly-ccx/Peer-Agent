@@ -1,6 +1,7 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
+import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
@@ -20,6 +21,7 @@ export function HomePage({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
   enabled = true,
 }: {
   /** null = 全部工作区；有 path = 仅该工作区。 */
@@ -28,18 +30,20 @@ export function HomePage({
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页（与侧栏新建任务一致）。 */
   readonly onNewTask?: () => void;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（落库 resultAcceptance）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  /** 区级摘要跳到侧栏「插件」页。 */
+  readonly onOpenTools?: () => void;
   readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
   const isGlobal = !workspacePath;
 
-  const handleOpenItem = useCallback((item: TaskOverviewItem) => {
+  const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
     // 后台 shell 线程：打开右侧「后台线程」Tab，不跳会话。
     if (
       item.source === 'shell_background' ||
@@ -48,7 +52,7 @@ export function HomePage({
       workbench?.openBackgroundThread(item.taskId);
       return;
     }
-    onOpenItem?.(item);
+    onOpenItem?.(item, options);
   }, [onOpenItem, workbench]);
 
   return (
@@ -56,14 +60,14 @@ export function HomePage({
       title="工作台"
       subtitle={
         isGlobal
-          ? 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。跨工作区待办汇总在此。'
-          : 'Peer 持续推进任务，仅在需要你决策、授权或验收时交还给你。当前工作区待办。'
+          ? '有任务时再回来看。现在只需要发出第一条任务。'
+          : '当前工作区还没有待办。先发出一条任务。'
       }
       filter={(item) => item.actionRight !== 'terminal'}
       emptyLabel={
         isGlobal
-          ? '全部工作区都没有需要处理的任务'
-          : '当前工作区没有需要处理的任务'
+          ? '还没有任务。发出第一条后，这里会显示需要你处理的事项。'
+          : '当前工作区还没有任务。发出第一条后会显示在这里。'
       }
       hero
       enabled={enabled}
@@ -75,6 +79,7 @@ export function HomePage({
       onAcceptResult={onAcceptResult}
       acceptHandlerRef={acceptHandlerRef}
       onCancelItem={onCancelItem}
+      onOpenTools={onOpenTools}
     />
   );
 }

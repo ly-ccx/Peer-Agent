@@ -15,6 +15,11 @@ import type {
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
 
+import {
+  FileReadRangeError,
+  parseFileReadLineRange,
+  sliceFileReadLines,
+} from './file-read-range.ts';
 import { runNodeFileSearch } from './file-search.ts';
 import type { NodeFileProviderOptions } from './provider-contracts.ts';
 import {
@@ -39,11 +44,18 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
   {
     capabilityId: 'local.file.read',
     displayName: 'Read File',
-    description: 'Read a UTF-8 file from an absolute or workspace-relative path.',
+    description: 'Read a UTF-8 file from an absolute or workspace-relative path. Optional start_line/end_line return a numbered slice; omit both for the full file without line numbers.',
     sideEffectLevel: 'L1',
     modeScopes: READ_MODE_SCOPES,
     inputSchema: {
-      type: 'object', properties: { path: { type: 'string', description: 'Absolute or workspace-relative file path.' } }, required: ['path'], additionalProperties: false,
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute or workspace-relative file path.' },
+        start_line: { type: 'number', description: 'Optional 1-based inclusive start line. When set, content is a numbered slice.' },
+        end_line: { type: 'number', description: 'Optional 1-based inclusive end line. When set with start_line, both ends are included.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
     },
   },
   {
@@ -166,13 +178,34 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
           if (fileStat.size > maxReadBytes) throw new Error('file_too_large');
           const content = await readFile(targetPath, 'utf8');
           if (context.signal?.aborted) return cancelledResult(call, clock);
+          const range = parseFileReadLineRange(input);
+          const slice = sliceFileReadLines(content, range);
           readSnapshots.set(targetPath, hashContent(content));
           const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: 'file_read' });
+          const output = slice.ranged
+            ? {
+                path: displayPath,
+                content: slice.content,
+                bytes: Buffer.byteLength(content),
+                contentHash: readSnapshots.get(targetPath),
+                start_line: slice.startLine,
+                end_line: slice.endLine,
+                total_lines: slice.totalLines,
+              }
+            : {
+                path: displayPath,
+                content: slice.content,
+                bytes: Buffer.byteLength(content),
+                contentHash: readSnapshots.get(targetPath),
+              };
           return createNodeToolResult({
-            clock, call, status: 'completed', summary: `Read ${displayPath}.`,
-            output: { path: displayPath, content, bytes: Buffer.byteLength(content), contentHash: readSnapshots.get(targetPath) },
-            outputPreview: { path: displayPath, content: content.slice(0, PREVIEW_CHARS) },
-            grant, metadata: { path: displayPath, operation: 'read' },
+            clock, call, status: 'completed',
+            summary: slice.ranged
+              ? `Read ${displayPath} lines ${slice.startLine}-${slice.endLine}.`
+              : `Read ${displayPath}.`,
+            output,
+            outputPreview: { path: displayPath, content: slice.content.slice(0, PREVIEW_CHARS) },
+            grant, metadata: { path: displayPath, operation: 'read', ranged: slice.ranged },
           });
         }
 
@@ -295,7 +328,9 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
 
         throw new Error('unsupported_file_capability');
       } catch (error) {
-        const reason = error instanceof Error ? error.message : 'file_capability_failed';
+        const reason = error instanceof FileReadRangeError
+          ? error.code
+          : error instanceof Error ? error.message : 'file_capability_failed';
         if (reason === 'aborted') return cancelledResult(call, clock);
         return createNodeToolResult({
           clock, call, status: 'failed', summary: `File capability failed: ${reason}.`,

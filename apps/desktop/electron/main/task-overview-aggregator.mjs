@@ -19,6 +19,8 @@
  * goalPlanStore / automationStore，便于单测。
  */
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import {
   formatGoalDeliveryRoute,
   formatGoalDeliveryHandoff,
@@ -323,7 +325,150 @@ const PLAN_STEP_STATUSES = new Set([
  * 从 GoalPlan 任务树抽取叶子步骤（与 progress 叶子计数对齐）。
  * 供「Peer 正在推进」卡片展示具体步骤标题与状态。
  */
-export function extractPlanSteps(plan) {
+export const MAX_TASK_OVERVIEW_ARTIFACTS = 8;
+
+export function resolveArtifactOpenPath(ref, artifactRoots = {}, createdAt) {
+  if (typeof ref !== 'string' || !ref.trim()) return undefined;
+  const value = ref.trim();
+  if (value.startsWith('file://')) {
+    try {
+      const target = decodeURIComponent(new URL(value).pathname);
+      return path.isAbsolute(target) && existsSync(target) ? target : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const date = typeof createdAt === 'string' ? createdAt.slice(0, 10) : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  const match = /^(local-(?:shell|browser)-artifact):\/\/([^/]+)(?:\/(.+))?$/.exec(value);
+  if (!match) return undefined;
+  const [, scheme, artifactId, suffix] = match;
+  const root = scheme === 'local-shell-artifact' ? artifactRoots.shell : artifactRoots.browser;
+  if (!root) return undefined;
+  const names = scheme === 'local-shell-artifact'
+    ? { stdout: 'stdout.txt', stderr: 'stderr.txt', metadata: 'metadata.json' }
+    : { screenshot: 'screenshot.png', content: 'content.txt', metadata: 'metadata.json' };
+  const directory = path.join(root, date, artifactId);
+  const name = suffix ? names[suffix] : undefined;
+  const target = name ? path.join(directory, name) : directory;
+  return existsSync(target) ? target : undefined;
+}
+
+const USER_ARTIFACT_PRESENTATION = Object.freeze({
+  'code-change': { kind: 'code', actionLabel: '查看变更' },
+  file: { kind: 'file', actionLabel: '打开文件' },
+  image: { kind: 'image', actionLabel: '预览截图' },
+});
+
+const GENERIC_ARTIFACT_LABELS = new Set([
+  '代码变更',
+  '新建文件',
+  '结果文件',
+  'Code change',
+  'New file',
+  'Result file',
+]);
+
+function isGenericArtifactLabel(label) {
+  return !label || GENERIC_ARTIFACT_LABELS.has(label);
+}
+
+function genericArtifactFallback(kind) {
+  if (kind === 'code') return '代码变更';
+  if (kind === 'image') return '界面截图';
+  return '结果文件';
+}
+
+const MAX_CODE_PREVIEW_LINES = 41;
+const MAX_CODE_PREVIEW_LINE_CHARS = 240;
+const MAX_IMAGE_PREVIEW_EDGE = 640;
+const MAX_IMAGE_PREVIEW_DATA_URL_CHARS = 512 * 1024;
+const SAFE_IMAGE_PREVIEW_URL = /^data:image\/(?:png|jpeg|webp);base64,/;
+
+function normalizeArtifactPreview(kind, preview) {
+  // 'file' 也可能携带 code 预览（新建文件按整文件计新增行），
+  // 否则新建文件的 +N/−M 会在这一层被丢掉。
+  if ((kind === 'code' || kind === 'file') && preview?.kind === 'code') {
+    if (!Number.isSafeInteger(preview.additions) || preview.additions < 0
+      || !Number.isSafeInteger(preview.deletions) || preview.deletions < 0
+      || !Array.isArray(preview.diffLines)) return undefined;
+    const diffLines = preview.diffLines
+      .filter((line) => typeof line === 'string')
+      .slice(0, MAX_CODE_PREVIEW_LINES)
+      .map((line) => line.slice(0, MAX_CODE_PREVIEW_LINE_CHARS));
+    return { kind: 'code', additions: preview.additions, deletions: preview.deletions, diffLines };
+  }
+  if (kind === 'image' && preview?.kind === 'image') {
+    const dataUrl = typeof preview.dataUrl === 'string' ? preview.dataUrl : '';
+    if (!SAFE_IMAGE_PREVIEW_URL.test(dataUrl) || dataUrl.length > MAX_IMAGE_PREVIEW_DATA_URL_CHARS
+      || !Number.isSafeInteger(preview.width) || preview.width < 1 || preview.width > MAX_IMAGE_PREVIEW_EDGE
+      || !Number.isSafeInteger(preview.height) || preview.height < 1 || preview.height > MAX_IMAGE_PREVIEW_EDGE) {
+      return undefined;
+    }
+    return { kind: 'image', dataUrl, width: preview.width, height: preview.height };
+  }
+  return undefined;
+}
+
+export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRoots = {}) {
+  const records = new Map(
+    (Array.isArray(evidenceIndex) ? evidenceIndex : [])
+      .filter((record) => record && typeof record.evidenceRef === 'string')
+      .map((record) => [record.evidenceRef, record]),
+  );
+  const artifacts = [];
+  const seen = new Set();
+  for (const evidenceRef of Array.isArray(evidenceRefs) ? evidenceRefs : []) {
+    if (artifacts.length >= MAX_TASK_OVERVIEW_ARTIFACTS) break;
+    if (typeof evidenceRef !== 'string' || !evidenceRef.trim()) continue;
+    const record = records.get(evidenceRef.trim());
+    for (const userArtifact of Array.isArray(record?.userArtifacts) ? record.userArtifacts : []) {
+      if (artifacts.length >= MAX_TASK_OVERVIEW_ARTIFACTS) break;
+      const ref = typeof userArtifact?.ref === 'string' ? userArtifact.ref.trim() : '';
+      const presentation = USER_ARTIFACT_PRESENTATION[userArtifact?.kind];
+      if (!ref || !presentation || seen.has(ref)) continue;
+      seen.add(ref);
+      const declaredPath = typeof userArtifact.path === 'string' && path.isAbsolute(userArtifact.path)
+        && existsSync(userArtifact.path)
+        ? userArtifact.path
+        : undefined;
+      const openPath = declaredPath ?? resolveArtifactOpenPath(ref, artifactRoots, record?.createdAt);
+      // 产物行必须能区分对象。存量数据把「代码变更」「新建文件」写成了非空
+      // label，不能再把非空当有效名；这类通用文案一律回退到真实文件名。
+      const fallbackName = openPath
+        ? path.basename(openPath)
+        : (typeof userArtifact.path === 'string' && userArtifact.path.trim()
+          ? path.basename(userArtifact.path.trim())
+          : '');
+      const rawLabel = typeof userArtifact.label === 'string' ? userArtifact.label.trim() : '';
+      const label = isGenericArtifactLabel(rawLabel)
+        ? (fallbackName || rawLabel || genericArtifactFallback(presentation.kind))
+        : (rawLabel || fallbackName || genericArtifactFallback(presentation.kind));
+      const artifact = { ref, kind: presentation.kind, label, actionLabel: presentation.actionLabel };
+      const preview = normalizeArtifactPreview(presentation.kind, userArtifact.preview);
+      if (preview) artifact.preview = preview;
+      if (openPath) artifact.openPath = openPath;
+      artifacts.push(artifact);
+    }
+  }
+  return artifacts;
+}
+
+function collectPlanEvidenceRefs(plans) {
+  const refs = new Set();
+  const walk = (tasks) => {
+    for (const task of Array.isArray(tasks) ? tasks : []) {
+      for (const ref of Array.isArray(task?.evidenceRefs) ? task.evidenceRefs : []) {
+        if (typeof ref === 'string' && ref.trim()) refs.add(ref.trim());
+      }
+      walk(task?.subtasks);
+    }
+  };
+  for (const plan of Array.isArray(plans) ? plans : []) walk(plan?.tasks);
+  return [...refs];
+}
+
+export function extractPlanSteps(plan, evidenceIndex = [], artifactRoots = {}) {
   if (!plan || typeof plan !== 'object') return undefined;
   const currentTaskId =
     typeof plan.runner?.currentTaskId === 'string'
@@ -350,6 +495,8 @@ export function extractPlanSteps(plan) {
       const status = PLAN_STEP_STATUSES.has(rawStatus) ? rawStatus : 'pending';
       const step = { taskId, title, status };
       if (currentTaskId && taskId === currentTaskId) step.current = true;
+      const artifacts = deriveTaskArtifacts(task.evidenceRefs, evidenceIndex, artifactRoots);
+      if (artifacts.length > 0) step.artifacts = artifacts;
       steps.push(step);
     }
   };
@@ -381,25 +528,41 @@ export function buildGoalThreadRelationIndex(plans) {
     if (!parentId) return;
     childCountByParent.set(parentId, (childCountByParent.get(parentId) ?? 0) + 1);
   };
-  for (const plan of byPlanId.values()) {
-    if (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId)) {
-      noteChild(plan.parentPlanId);
-    } else if (
-      typeof plan.sourceTaskId === 'string'
-      && byPlanId.has(plan.sourceTaskId)
+  /**
+   * 解析 plan 真正的上级 planId；没有上级时返回 null。
+   *
+   * parentPlanId 指向自身一律视作「没有父节点」：存量脏数据会把线根写成
+   * parentPlanId === 自身 planId，若当成真父节点，rootOf 沿这条自环走回起点
+   * 会被判成环并返回 null，整条目标线的线根随之算空，待验收区就把同一条线
+   * 的卡片降级成平铺。线根必须是它自己，而不是「无根」。
+   *
+   * mustExist=true 时只认已加载的父计划（用于子节点计数与是否成线判断）；
+   * mustExist=false 保留「父计划不在本次快照内则自身即线根」的既有语义。
+   */
+  const parentIdOf = (plan, { mustExist = false } = {}) => {
+    if (!plan) return null;
+    const declared = typeof plan.parentPlanId === 'string'
+      && plan.parentPlanId
+      && plan.parentPlanId !== plan.planId
+      ? plan.parentPlanId
+      : null;
+    if (declared && (!mustExist || byPlanId.has(declared))) return declared;
+    const sourceId = typeof plan.sourceTaskId === 'string'
+      && plan.sourceTaskId
       && plan.sourceTaskId !== plan.planId
-    ) {
-      noteChild(plan.sourceTaskId);
-    }
+      ? plan.sourceTaskId
+      : null;
+    if (sourceId && byPlanId.has(sourceId)) return sourceId;
+    return null;
+  };
+  for (const plan of byPlanId.values()) {
+    const parentId = parentIdOf(plan, { mustExist: true });
+    if (parentId) noteChild(parentId);
   }
   const rootOf = (plan, seen = new Set()) => {
     if (!plan || seen.has(plan.planId)) return null;
     seen.add(plan.planId);
-    const parentId = typeof plan.parentPlanId === 'string' && plan.parentPlanId
-      ? plan.parentPlanId
-      : (typeof plan.sourceTaskId === 'string' && plan.sourceTaskId && byPlanId.has(plan.sourceTaskId)
-        ? plan.sourceTaskId
-        : null);
+    const parentId = parentIdOf(plan);
     if (!parentId) return plan;
     const parent = byPlanId.get(parentId);
     if (!parent) return plan;
@@ -408,10 +571,7 @@ export function buildGoalThreadRelationIndex(plans) {
   const inThread = (planId) => {
     const plan = byPlanId.get(planId);
     if (!plan) return false;
-    const hasParent =
-      (typeof plan.parentPlanId === 'string' && byPlanId.has(plan.parentPlanId))
-      || (typeof plan.sourceTaskId === 'string' && byPlanId.has(plan.sourceTaskId) && plan.sourceTaskId !== planId);
-    return hasParent || childCountByParent.has(planId);
+    return Boolean(parentIdOf(plan, { mustExist: true })) || childCountByParent.has(planId);
   };
   // rootPlanIdOf：仅当 plan 参与目标线（有父或有子）才返回线根 id；
   // 根自身返回自己的 planId（分组时根卡与派生轮同组）；孤立计划返回 undefined（平铺）。
@@ -419,16 +579,7 @@ export function buildGoalThreadRelationIndex(plans) {
     if (!inThread(planId)) return undefined;
     return rootOf(byPlanId.get(planId))?.planId;
   };
-  const parentPlanIdOf = (planId) => {
-    const plan = byPlanId.get(planId);
-    if (!plan) return undefined;
-    if (typeof plan.parentPlanId === 'string' && plan.parentPlanId && plan.parentPlanId !== planId) {
-      return plan.parentPlanId;
-    }
-    const sourceId = typeof plan.sourceTaskId === 'string' ? plan.sourceTaskId : null;
-    if (sourceId && sourceId !== planId && byPlanId.has(sourceId)) return sourceId;
-    return undefined;
-  };
+  const parentPlanIdOf = (planId) => parentIdOf(byPlanId.get(planId)) ?? undefined;
   // 轮次：同根下按 createdAt 升序的序号（1 起）。根自身也参与排序，
   // 保证 R1 是最早一轮；时间缺失时按数组顺序稳定兜底。
   const roundsByRoot = new Map();
@@ -495,7 +646,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     plan.progress && Number.isFinite(plan.progress.completed) && Number.isFinite(plan.progress.total)
       ? { completed: plan.progress.completed, total: plan.progress.total }
       : undefined;
-  const planSteps = extractPlanSteps(plan);
+  const planSteps = extractPlanSteps(plan, options.evidenceIndex, options.artifactRoots);
   const timing =
     plan.timing && typeof plan.timing === 'object' ? plan.timing : undefined;
   const resolved = resolveConversationModelLabels(
@@ -527,6 +678,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     workspaceLabel: workspaceLabelFromPath(workspacePath),
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
+    ...(plan.deliveryHandoff?.status ? { deliveryHandoffStatus: plan.deliveryHandoff.status } : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
@@ -595,7 +747,8 @@ export function toAutomationSnapshot(definition, latestRun) {
  * - 默认排除 cancelled/failed，除非 includeTerminal（历史页）。
  * - completed：
  *   - 已验收 / 存量祖父化 → 仅 includeTerminal 时纳入（历史）
- *   - 功能上线后未验收 → 工作台纳入（result_ready），不限条数；历史页也纳入（列表可再滤 terminal）
+ *   - 已验收但真实交回中 / 交回失败 → 工作台仍纳入
+ *   - 功能上线后未验收 → 工作台纳入（result_ready），不限条数；历史页不 hydrate
  * - 其他活跃状态要求在 activeWithinMs 窗口内（activeWithinMs<=0 表示不限时）。
  * - workspacePath 过滤（target/origin 任一匹配）。
  * - 展示名固定使用 plan.title（核对后的 plan 名字）。
@@ -619,8 +772,10 @@ export function isGoalPlanInScope(plan, options = {}) {
   // cancelled/failed：只在历史页
   if (isHistoryTerminal && !includeTerminal) return false;
 
-  // 已验收 completed：工作台不展示，历史页展示
-  if (isCompleted && isResultAccepted && !includeTerminal) return false;
+  // 已验收：工作台只留真实交回中 / 交回失败。仅有 deliveryBinding 不算正在交回。
+  if (isCompleted && isResultAccepted && !includeTerminal) {
+    if (!hasPendingDeliveryHandoff(plan)) return false;
+  }
 
   const wanted = normalizeWorkspacePath(workspacePath);
   if (wanted) {
@@ -644,6 +799,17 @@ export function isGoalPlanInScope(plan, options = {}) {
   }
 
   return true;
+}
+
+/**
+ * 已验收后是否仍有真实交回进行中 / 交回失败。
+ * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在交回。
+ */
+export function hasPendingDeliveryHandoff(plan) {
+  const handoffStatus = plan?.deliveryHandoff?.status;
+  return handoffStatus === 'delivering'
+    || handoffStatus === 'idle'
+    || handoffStatus === 'stopped';
 }
 
 /**
@@ -786,7 +952,8 @@ export function isGoalPlanMetaCandidate(plan, options = {}) {
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (!status) return false;
   if (status === GOAL_COMPLETED_STATUS) {
-    return !isPlanResultAccepted(plan) || includeTerminal;
+    if (!isPlanResultAccepted(plan)) return !includeTerminal;
+    return includeTerminal || hasPendingDeliveryHandoff(plan);
   }
   if (GOAL_HISTORY_TERMINAL_STATUSES.has(status)) return includeTerminal;
   return true;
@@ -854,6 +1021,7 @@ export function createTaskOverviewAggregator({
   listShellTasks,
   listProviders,
   markTaskRead,
+  artifactRoots = {},
 } = {}) {
   if (!goalPlanStore || typeof goalPlanStore.listPlanDetails !== 'function') {
     throw new TypeError('goalPlanStore.listPlanDetails must be a function');
@@ -929,6 +1097,9 @@ export function createTaskOverviewAggregator({
     let plans = [];
     try {
       const candidateFilter = (meta) => isGoalPlanMetaCandidate(meta, scope);
+      const hydrateOptions = includeTerminal
+        ? { candidateFilter, limit }
+        : { candidateFilter };
       if (
         conversationId &&
         typeof goalPlanStore.listPlanDetailsByConversation === 'function'
@@ -938,19 +1109,21 @@ export function createTaskOverviewAggregator({
         workspacePath &&
         typeof goalPlanStore.listPlanDetailsByWorkspace === 'function'
       ) {
-        plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, {
-          candidateFilter,
-        }) ?? [];
+        plans = goalPlanStore.listPlanDetailsByWorkspace(workspacePath, hydrateOptions) ?? [];
       } else {
         // 总工作台也必须先用 index meta 筛候选，禁止为历史 completed 全量 hydrate。
-        plans = goalPlanStore.listPlanDetails({ candidateFilter }) ?? [];
+        plans = goalPlanStore.listPlanDetails(hydrateOptions) ?? [];
       }
     } catch {
       plans = [];
     }
     plans = expandGoalThreadRelatives(goalPlanStore, plans, {
-      includeConversationSiblings: !conversationId,
+      includeConversationSiblings: !conversationId && !includeTerminal,
     });
+    const evidenceRefs = collectPlanEvidenceRefs(plans);
+    const evidenceIndex = typeof goalPlanStore.findEvidenceIndexRecords === 'function'
+      ? goalPlanStore.findEvidenceIndexRecords(evidenceRefs)
+      : [];
     const latestPlanByConversationId = new Map();
     const independentlyProjectedResults = [];
     const unlinkedPlans = [];
@@ -962,7 +1135,7 @@ export function createTaskOverviewAggregator({
         continue;
       }
       const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
-      const snapshot = toGoalPlanSnapshot(plan, { relationIndex });
+      const snapshot = toGoalPlanSnapshot(plan, { relationIndex, evidenceIndex, artifactRoots });
       const projected = snapshot ? projectGoalPlan(snapshot) : null;
       // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，
       // 不能混入 conversation 级去重后形成用户看不见的验收队列。
@@ -990,7 +1163,13 @@ export function createTaskOverviewAggregator({
       const conversationId =
         typeof plan?.conversationId === 'string' ? plan.conversationId : undefined;
       const conversation = conversationId ? conversationById.get(conversationId) : undefined;
-      const snapshot = toGoalPlanSnapshot(plan, { conversation, providerIndex, relationIndex });
+      const snapshot = toGoalPlanSnapshot(plan, {
+        conversation,
+        providerIndex,
+        relationIndex,
+        evidenceIndex,
+        artifactRoots,
+      });
       if (!snapshot) continue;
       // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。
       const projected = projectGoalPlan(snapshot, { nowMs });

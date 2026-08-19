@@ -7,6 +7,7 @@ Use this tool when:
 
 Rules:
 - The path may be absolute or workspace-relative. Absolute paths may point outside the session workspace (e.g. a linked code repo); there is no path hard sandbox.
+- Optional start_line and end_line are 1-based inclusive. Omit both to read the full file without line numbers. When a range is set, content is a numbered slice; bytes and contentHash still describe the whole file.
 - If the file does not exist, report that result directly.
 - Use bash for broad search when you do not know the path.
 - Do not claim to have read lines or content that are not present in the returned preview or retrieved artifact.

@@ -1,14 +1,36 @@
-import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { createI18n } from '@peer-agent/i18n';
+import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { ChatHeaderCapabilities } from '../../chat/components/thread/ChatHeaderCapabilities';
+import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPreference';
 import { formatDuration } from '../../chat/state/format';
+import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
+import { ActionLabel } from './actionLabelDisplay';
 import {
   ACCEPTANCE_CELEBRATION_MS,
   ACCEPTANCE_EXIT_MS,
   mergeAcceptanceTransitionItems,
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
+import {
+  collectPendingAcceptanceItems,
+  type OpenTaskOverviewItem,
+} from '../state/resultDrawerAcceptance';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
+import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { useTaskOverview } from '../hooks/useTaskOverview';
+import { WorkStream } from './WorkStream';
+import { resultCardWeight } from './workStreamLayout';
+import { projectTaskOverviewArtifacts } from './taskOverviewArtifacts';
+import { availablePreviewSize, positionTaskArtifactPreview } from './taskArtifactPreviewPosition';
+import { buildDiffLines } from '../../workbench/file-preview/DiffViewer';
+import {
+  groupResultCardsByGoalThread,
+  ThreadList,
+  type ThreadListNode,
+} from './goalThreadGrouping';
 
 /**
  * TaskOverview 页面 —— 对齐 peer-2-0 高保真原型工作台结构。
@@ -21,7 +43,7 @@ import { useTaskOverview } from '../hooks/useTaskOverview';
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
  * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
- * 主按钮「查看结果」。确认验收和还不行只出现在看过结果之后。
+ * 主按钮「查看结果」。确认验收只出现在看过结果之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
@@ -41,13 +63,15 @@ interface TaskOverviewPageProps {
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页。 */
   readonly onNewTask?: () => void;
-  /** 打开对应会话（决策 / 查看结果）。 */
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  /** 打开对应会话（决策 / 查看结果）。归组卡可带上同线待签项。 */
+  readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（仅 goal_plan）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan（仅 goal_plan）。 */
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  /** 区级摘要跳到侧栏「插件」页。 */
+  readonly onOpenTools?: () => void;
 }
 
 function workspaceLabelFromPath(workspacePath: string | null | undefined): string {
@@ -315,6 +339,7 @@ export function TaskOverviewPage({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
 }: TaskOverviewPageProps) {
   const items = useTaskOverview({ enabled, workspacePath, includeTerminal });
   const filtered = items.filter(filter);
@@ -336,6 +361,7 @@ export function TaskOverviewPage({
         onAcceptResult={onAcceptResult}
         acceptHandlerRef={acceptHandlerRef}
         onCancelItem={onCancelItem}
+        onOpenTools={onOpenTools}
       />
     );
   }
@@ -356,11 +382,16 @@ function TopLine({
   pageTitle,
   crumbExtra,
   scopeLabel,
+  onOpenTools,
 }: {
   readonly pageTitle: string;
   readonly crumbExtra: string;
   readonly scopeLabel: string;
+  readonly onOpenTools?: () => void;
 }) {
+  const i18n = useMemo(() => createI18n(), []);
+  const { localAccessLevel } = useLocalAccessPreference();
+
   return (
     <div className="task-overview-topline">
       <div className="task-overview-crumb">
@@ -368,9 +399,18 @@ function TopLine({
         <span>/</span>
         <span>{crumbExtra}</span>
       </div>
-      <div className="task-overview-scope">
-        <i className="task-overview-scope-dot" aria-hidden="true" />
-        {scopeLabel}
+      <div className="task-overview-topline-end">
+        {onOpenTools ? (
+          <ChatHeaderCapabilities
+            i18n={i18n}
+            localAccessLevel={localAccessLevel}
+            onOpenTools={onOpenTools}
+          />
+        ) : null}
+        <div className="task-overview-scope">
+          <i className="task-overview-scope-dot" aria-hidden="true" />
+          {scopeLabel}
+        </div>
       </div>
     </div>
   );
@@ -395,6 +435,7 @@ function HeroLayout({
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
+  onOpenTools,
 }: {
   readonly title: string;
   readonly subtitle?: string;
@@ -406,10 +447,11 @@ function HeroLayout({
   readonly onOpenTasks?: () => void;
   readonly onOpenHistory?: () => void;
   readonly onNewTask?: () => void;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
+  readonly onOpenItem?: OpenTaskOverviewItem;
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
+  readonly onOpenTools?: () => void;
 }) {
   const discussions = items.filter((i) => i.source === 'conversation');
   const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
@@ -478,32 +520,7 @@ function HeroLayout({
 
     try {
       await onAcceptResult(item);
-      setAcceptanceTransitions((prev) => {
-        const current = prev[item.taskId];
-        if (!current) return prev;
-        return {
-          ...prev,
-          [item.taskId]: { ...current, phase: 'celebrating' },
-        };
-      });
-      scheduleTransition(() => {
-        setAcceptanceTransitions((prev) => {
-          const current = prev[item.taskId];
-          if (!current) return prev;
-          return {
-            ...prev,
-            [item.taskId]: { ...current, phase: 'exiting' },
-          };
-        });
-        scheduleTransition(() => {
-          setAcceptanceTransitions((prev) => {
-            if (!(item.taskId in prev)) return prev;
-            const next = { ...prev };
-            delete next[item.taskId];
-            return next;
-          });
-        }, ACCEPTANCE_EXIT_MS);
-      }, ACCEPTANCE_CELEBRATION_MS);
+      // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
     } catch {
       setAcceptanceTransitions((prev) => {
         if (!(item.taskId in prev)) return prev;
@@ -512,7 +529,55 @@ function HeroLayout({
         return next;
       });
     }
-  }, [acceptanceTransitions, onAcceptResult, resultReady, scheduleTransition]);
+  }, [acceptanceTransitions, onAcceptResult, resultReady]);
+
+  useEffect(() => {
+    const submittingIds = Object.entries(acceptanceTransitions)
+      .filter(([, transition]) => transition.phase === 'submitting')
+      .map(([taskId]) => taskId);
+    if (submittingIds.length === 0) return;
+
+    for (const taskId of submittingIds) {
+      const live = resultReady.find((item) => item.taskId === taskId);
+      if (live?.deliveryHandoffStatus === 'stopped') {
+        setAcceptanceTransitions((prev) => {
+          if (!(taskId in prev)) return prev;
+          const next = { ...prev };
+          delete next[taskId];
+          return next;
+        });
+        continue;
+      }
+      const delivered = live?.deliveryHandoffStatus === 'delivered' || !live;
+      if (!delivered) continue;
+      setAcceptanceTransitions((prev) => {
+        const current = prev[taskId];
+        if (!current || current.phase !== 'submitting') return prev;
+        return {
+          ...prev,
+          [taskId]: { ...current, phase: 'celebrating' },
+        };
+      });
+      scheduleTransition(() => {
+        setAcceptanceTransitions((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [taskId]: { ...current, phase: 'exiting' },
+          };
+        });
+        scheduleTransition(() => {
+          setAcceptanceTransitions((prev) => {
+            if (!(taskId in prev)) return prev;
+            const next = { ...prev };
+            delete next[taskId];
+            return next;
+          });
+        }, ACCEPTANCE_EXIT_MS);
+      }, ACCEPTANCE_CELEBRATION_MS);
+    }
+  }, [acceptanceTransitions, resultReady, scheduleTransition]);
 
   useEffect(() => {
     if (!acceptHandlerRef) return;
@@ -560,6 +625,7 @@ function HeroLayout({
         pageTitle="工作台"
         crumbExtra={formatTodayCrumb()}
         scopeLabel={scopeLabel}
+        onOpenTools={onOpenTools}
       />
 
       <header className="task-overview-hero">
@@ -628,8 +694,8 @@ function HeroLayout({
             </div>
             <span className="task-overview-section-hint">中断原因与恢复入口已保留</span>
           </div>
-          <div className="task-overview-work-stream">
-            {paused.map((item) => (
+          <WorkStream items={paused}>
+            {(item) => (
               <WorkItem
                 key={item.taskId}
                 item={item}
@@ -649,8 +715,8 @@ function HeroLayout({
                   ) : undefined
                 }
               />
-            ))}
-          </div>
+            )}
+          </WorkStream>
         </section>
       ) : null}
 
@@ -667,16 +733,16 @@ function HeroLayout({
               <span className="task-overview-section-meta">Peer 会在完成后带回结果</span>
             )}
           </div>
-          <div className="task-overview-work-stream">
-            {advancing.map((item) => (
+          <WorkStream items={advancing}>
+            {(item) => (
               <WorkItem
                 key={item.taskId}
                 item={item}
                 onOpenItem={onOpenItem}
                 onCancelItem={onCancelItem}
               />
-            ))}
-          </div>
+            )}
+          </WorkStream>
         </section>
       ) : null}
 
@@ -724,8 +790,15 @@ function HeroLayout({
             )}
           </div>
           {/* 一格一线：同 rootPlanId 只占一张结果卡，卡内用压缩树表达父子。 */}
-          <div className="task-overview-work-stream goal-thread-stream">
-            {groupResultCardsByGoalThread(displayedResults, allItems ?? items).map((group) =>
+          <WorkStream
+            className="goal-thread-stream"
+            items={groupResultCardsByGoalThread(displayedResults, allItems ?? items)}
+            weightOf={(group) => resultCardWeight(group.kind === 'thread' ? group.nodes.length : 0)}
+            keyOf={(group) =>
+              group.kind === 'thread' ? `thread-${group.rootPlanId}` : group.item.taskId
+            }
+          >
+            {(group) =>
               group.kind === 'thread' ? (
                 <ResultCard
                   key={`thread-${group.rootPlanId}`}
@@ -734,6 +807,9 @@ function HeroLayout({
                   onOpenItem={onOpenItem}
                   threadNodes={group.nodes}
                   pendingCount={group.pendingCount}
+                  acceptTogether={collectPendingAcceptanceItems(
+                    group.items.map((entry) => entry.item),
+                  )}
                 />
               ) : (
                 <ResultCard
@@ -742,184 +818,13 @@ function HeroLayout({
                   phase={group.phase ?? null}
                   onOpenItem={onOpenItem}
                 />
-              ),
-            )}
-          </div>
+              )
+            }
+          </WorkStream>
         </section>
       ) : null}
     </div>
   );
-}
-
-/**
- * 目标线（Goal Thread）分组 —— 结果待验收区的归组规则：
- * - 同 rootPlanId 的卡片归为一条线（≥2 张才成组；单张线归属卡与普通卡无异，
- *   避免给独立目标套一层空壳分组）。
- * - 组内按 round 升序（round 缺省排最后），线头标题用 rootPlanTitle。
- * - 无 rootPlanId 的旧数据按单卡平铺，渲染路径与现状完全一致（向后兼容）。
- * 输入顺序即投影层排序，组间顺序保持稳定。
- */
-function groupResultCardsByGoalThread(
-  entries: readonly {
-    item: TaskOverviewItem;
-    phase?: AcceptancePhase | null;
-  }[],
-  contextItems: readonly TaskOverviewItem[] = [],
-): (
-  | {
-      kind: 'thread';
-      rootPlanId: string;
-      rootPlanTitle?: string;
-      items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[];
-      latest: { item: TaskOverviewItem; phase: AcceptancePhase | null };
-      nodes: ThreadTreeNode[];
-      pendingCount: number;
-    }
-  | { kind: 'single'; item: TaskOverviewItem; phase: AcceptancePhase | null }
-)[] {
-  const threads = new Map<
-    string,
-    { rootPlanId: string; rootPlanTitle?: string; items: { item: TaskOverviewItem; phase: AcceptancePhase | null }[] }
-  >();
-  for (const entry of entries) {
-    const phase = entry.phase ?? null;
-    const rootPlanId = entry.item.rootPlanId;
-    if (!rootPlanId) continue;
-    const existing = threads.get(rootPlanId);
-    if (existing) {
-      existing.items.push({ item: entry.item, phase });
-    } else {
-      threads.set(rootPlanId, {
-        rootPlanId,
-        rootPlanTitle: entry.item.rootPlanTitle,
-        items: [{ item: entry.item, phase }],
-      });
-    }
-  }
-  const result: ReturnType<typeof groupResultCardsByGoalThread> = [];
-  const emitted = new Set<string>();
-  for (const entry of entries) {
-    const phase = entry.phase ?? null;
-    const rootPlanId = entry.item.rootPlanId;
-    // 无关系字段的旧数据：逐张平铺，绝不能丢（2026-08-14 回归：
-    // 旧实现把 singles 收集后从未 emit，12 张无 rootPlanId 的卡全部消失）。
-    if (!rootPlanId) {
-      result.push({ kind: 'single', item: entry.item, phase });
-      continue;
-    }
-    if (emitted.has(rootPlanId)) continue;
-    emitted.add(rootPlanId);
-    const thread = threads.get(rootPlanId);
-    if (!thread) continue;
-    thread.items.sort(compareThreadEntries);
-    const latest = pickLatestPending(thread.items) ?? thread.items[thread.items.length - 1];
-    const nodes = buildThreadTreeNodes(thread.rootPlanId, thread.items, contextItems);
-    if (thread.items.length < 2 && nodes.length < 2) {
-      // 单张线归属卡：没有同线上下文时不套树，直接平铺。
-      const solo = thread.items[0];
-      result.push({ kind: 'single', item: solo.item, phase: solo.phase });
-      continue;
-    }
-    const pendingCount = thread.items.filter((entry) => entry.item.actionRight === 'result_ready').length;
-    result.push({
-      kind: 'thread',
-      ...thread,
-      latest,
-      nodes,
-      pendingCount,
-    });
-  }
-  return result;
-}
-
-type ThreadTreeNode = {
-  readonly item: TaskOverviewItem;
-  readonly depth: number;
-  readonly isChild: boolean;
-  readonly isCurrent: boolean;
-  readonly isContext: boolean;
-};
-
-function compareThreadItems(a: TaskOverviewItem, b: TaskOverviewItem): number {
-  const ar = a.round ?? Number.POSITIVE_INFINITY;
-  const br = b.round ?? Number.POSITIVE_INFINITY;
-  if (ar !== br) return ar - br;
-  return String(a.taskId).localeCompare(String(b.taskId));
-}
-
-function compareThreadEntries(
-  a: { item: TaskOverviewItem },
-  b: { item: TaskOverviewItem },
-): number {
-  return compareThreadItems(a.item, b.item);
-}
-
-function pickLatestPending(
-  items: readonly { item: TaskOverviewItem; phase: AcceptancePhase | null }[],
-): { item: TaskOverviewItem; phase: AcceptancePhase | null } | undefined {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].item.actionRight === 'result_ready') return items[index];
-  }
-  return undefined;
-}
-
-function buildThreadTreeNodes(
-  rootPlanId: string,
-  pendingEntries: readonly { item: TaskOverviewItem; phase: AcceptancePhase | null }[],
-  contextItems: readonly TaskOverviewItem[],
-): ThreadTreeNode[] {
-  const pendingIds = new Set(pendingEntries.map((entry) => entry.item.taskId));
-  const latestPending = pickLatestPending(pendingEntries)?.item.taskId;
-  const byId = new Map<string, TaskOverviewItem>();
-  for (const item of contextItems) {
-    if (item.rootPlanId === rootPlanId || item.taskId === rootPlanId) {
-      byId.set(item.taskId, item);
-    }
-  }
-  for (const entry of pendingEntries) {
-    byId.set(entry.item.taskId, entry.item);
-  }
-
-  const children = new Map<string, TaskOverviewItem[]>();
-  for (const item of byId.values()) {
-    const parentId = item.parentPlanId && byId.has(item.parentPlanId)
-      ? item.parentPlanId
-      : item.taskId === rootPlanId
-        ? null
-        : rootPlanId;
-    if (!parentId || parentId === item.taskId) continue;
-    const bucket = children.get(parentId) ?? [];
-    bucket.push(item);
-    children.set(parentId, bucket);
-  }
-  for (const bucket of children.values()) {
-    bucket.sort(compareThreadItems);
-  }
-
-  const nodes: ThreadTreeNode[] = [];
-  const walk = (item: TaskOverviewItem, depth: number) => {
-    nodes.push({
-      item,
-      depth,
-      isChild: depth > 0,
-      isCurrent: item.taskId === latestPending,
-      isContext: !pendingIds.has(item.taskId),
-    });
-    for (const child of children.get(item.taskId) ?? []) {
-      walk(child, depth + 1);
-    }
-  };
-
-  const root = byId.get(rootPlanId)
-    ?? pendingEntries.find((entry) => !entry.item.parentPlanId)?.item
-    ?? pendingEntries[0]?.item;
-  if (!root) return nodes;
-  walk(root, 0);
-  for (const item of [...byId.values()].sort(compareThreadItems)) {
-    if (nodes.some((node) => node.item.taskId === item.taskId)) continue;
-    walk(item, item.parentPlanId && byId.has(item.parentPlanId) ? 1 : 0);
-  }
-  return nodes;
 }
 
 function ListLayout({
@@ -997,7 +902,7 @@ function HandoffRow({
         className={primary ? 'task-overview-btn task-overview-btn--primary' : 'task-overview-btn task-overview-btn--secondary'}
         onClick={() => onOpenItem?.(item)}
       >
-        {item.actionLabel}
+        <ActionLabel label={item.actionLabel} />
       </button>
     </article>
   );
@@ -1029,7 +934,7 @@ function DiscussionCard({
       <h3>{item.title}</h3>
       <div className="task-overview-discussion-card__footer">
         <span>{item.deliveryRoute ?? item.workspaceLabel ?? '当前 Workspace'}</span>
-        <strong>{item.actionLabel || '打开'}</strong>
+        <strong><ActionLabel label={item.actionLabel || '打开'} /></strong>
       </div>
     </article>
   );
@@ -1123,82 +1028,212 @@ function WorkItem({
 }
 
 
-/** 结果待验收卡片 —— 与推进中同款双列卡片：顶栏状态 + 标题 + 摘要 + 操作 */
-function threadRowStatus(item: TaskOverviewItem, isContext: boolean): string {
-  if (item.actionRight === 'result_ready') return '等待验收';
-  if (item.actionRight === 'peer_advancing') return item.statusLabel || '推进中';
-  if (item.actionRight === 'needs_you') return item.statusLabel || '需要你';
-  if (item.actionRight === 'paused') return item.statusLabel || '已暂停';
-  if (isContext) return item.statusLabel || '已完成';
-  return item.statusLabel || '已完成';
-}
+const ARTIFACT_PREVIEW_CHROME_STYLE = {
+  background: 'transparent',
+} as const;
 
-function threadRowFraction(item: TaskOverviewItem): string | null {
-  if (!item.planProgress || !item.planProgress.total) return null;
-  return `${item.planProgress.completed}/${item.planProgress.total}`;
-}
-
-function ThreadTree({
-  nodes,
-  currentId,
-  onOpenItem,
-}: {
-  readonly nodes: readonly ThreadTreeNode[];
-  readonly currentId?: string;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
-}) {
+function ArtifactHoverPreview({ artifact }: { readonly artifact: TaskOverviewArtifact }) {
+  const preview = artifact.preview;
+  if (!preview) return null;
+  if (preview.kind === 'image') {
+    return (
+      <div className="task-artifact-preview task-artifact-preview--image" role="tooltip" style={ARTIFACT_PREVIEW_CHROME_STYLE}>
+        <img
+          src={preview.dataUrl}
+          width={preview.width}
+          height={preview.height}
+          alt={`${artifact.label}缩略图`}
+        />
+      </div>
+    );
+  }
   return (
-    <div className="thread-tree" role="tree" aria-label="目标线">
-      {nodes.map((node) => {
-        const fraction = threadRowFraction(node.item);
-        const duration = typeof node.item.durationMs === 'number'
-          ? formatDuration(node.item.durationMs)
-          : null;
-        const current = node.isCurrent || node.item.taskId === currentId;
-        return (
-          <button
-            key={node.item.taskId}
-            type="button"
-            role="treeitem"
-            className={`thread-tree-row${node.isChild ? ' is-child' : ''}${current ? ' is-current' : ''}${node.isContext ? ' is-context' : ''}`}
-            style={node.depth > 1 ? { marginLeft: `${Math.min(node.depth, 4) * 14}px` } : undefined}
-            aria-current={current ? 'true' : undefined}
-            onClick={() => onOpenItem?.(node.item)}
+    <div className="task-artifact-preview task-artifact-preview--code" role="tooltip" style={ARTIFACT_PREVIEW_CHROME_STYLE}>
+      <div className="task-artifact-preview-header">
+        <strong>{artifact.label}</strong>
+        <span className="task-artifact-preview-stats">
+          <span className="task-artifact-preview-additions">+{preview.additions}</span>
+          <span className="task-artifact-preview-deletions">−{preview.deletions}</span>
+        </span>
+      </div>
+      <pre className="task-artifact-diff">
+        {buildDiffLines(preview.diffLines.join('\n')).map((line, index) => (
+          <code
+            className={
+              line.kind === 'add'
+                ? 'task-artifact-diff-line task-artifact-diff-line--added'
+                : line.kind === 'del'
+                  ? 'task-artifact-diff-line task-artifact-diff-line--deleted'
+                  : line.kind === 'hunk' || line.kind === 'meta'
+                    ? 'task-artifact-diff-line task-artifact-diff-line--meta'
+                    : 'task-artifact-diff-line'
+            }
+            key={`${index}:${line.oldNo ?? ''}:${line.newNo ?? ''}:${line.text}`}
           >
-            <span className={`thread-tree-pill${node.item.actionRight === 'result_ready' ? ' is-wait' : ''}`}>
-              {threadRowStatus(node.item, node.isContext)}
+            <span className="task-artifact-diff-gutter task-artifact-diff-gutter--old" aria-hidden="true">
+              {line.oldNo ?? ''}
             </span>
-            <span className="thread-tree-title">{node.item.title}</span>
-            {node.isContext && node.item.actionRight !== 'result_ready' ? (
-              <span className="thread-tree-note">未进队列</span>
-            ) : duration ? (
-              <span className="thread-tree-meta">用时 {duration}</span>
-            ) : (
-              <span className="thread-tree-meta" />
-            )}
-            {fraction ? <span className="thread-tree-frac">{fraction}</span> : <span className="thread-tree-frac" />}
-            <span className="thread-tree-chevron" aria-hidden="true">›</span>
-          </button>
-        );
-      })}
+            <span className="task-artifact-diff-gutter task-artifact-diff-gutter--new" aria-hidden="true">
+              {line.newNo ?? ''}
+            </span>
+            <span className="task-artifact-diff-text">{line.text === '' ? '\u00a0' : line.text}</span>
+          </code>
+        ))}
+      </pre>
     </div>
   );
 }
 
+interface ActiveArtifactPreview {
+  readonly artifact: TaskOverviewArtifact;
+  readonly anchor: HTMLElement;
+}
+
+function ArtifactPreviewPortal({ active }: { readonly active: ActiveArtifactPreview }) {
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
+
+  useLayoutEffect(() => {
+    const updatePosition = () => {
+      const previewElement = previewRef.current;
+      if (!previewElement || !active.anchor.isConnected) return;
+      const triggerRect = active.anchor.getBoundingClientRect();
+      const previewRect = previewElement.getBoundingClientRect();
+      setPosition(positionTaskArtifactPreview(
+        triggerRect,
+        { width: previewRect.width, height: previewRect.height },
+        { width: window.innerWidth, height: window.innerHeight },
+      ));
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [active]);
+
+  return createPortal(
+    <div
+      ref={previewRef}
+      id={`artifact-preview-${encodeURIComponent(active.artifact.ref)}`}
+      className={`task-artifact-preview-portal task-artifact-preview-portal--${active.artifact.preview?.kind ?? 'code'} is-${position?.placement ?? 'below'}`}
+      style={{
+        position: 'fixed',
+        zIndex: 2147483000,
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        maxWidth: availablePreviewSize({ width: window.innerWidth, height: window.innerHeight }).width,
+        visibility: position ? 'visible' : 'hidden',
+      }}
+    >
+      <ArtifactHoverPreview artifact={active.artifact} />
+    </div>,
+    document.body,
+  );
+}
+
+function ArtifactList({ item }: { readonly item: TaskOverviewItem }) {
+  const [activePreview, setActivePreview] = useState<ActiveArtifactPreview | null>(null);
+  const projection = projectTaskOverviewArtifacts(item);
+  if (projection.total === 0) return null;
+  return (
+    <>
+    <details className="task-artifacts">
+      <summary className="task-artifacts-summary" onClick={(event) => event.stopPropagation()}>
+        <span>主要产物</span>
+        <span className="task-artifacts-count">{projection.summary}</span>
+        <span className="task-artifacts-chevron" aria-hidden="true" />
+      </summary>
+      <div className="task-artifacts-content" aria-label="主要产物">
+        {projection.groups.map((group) => (
+          <section className="task-artifacts-group" key={group.kind}>
+            <div className="task-artifacts-group-title">
+              <span>{group.label}</span>
+              <span>{group.total}</span>
+            </div>
+            <ul className="task-artifacts-list">
+              {group.artifacts.map((artifact) => (
+                <li
+                  className="task-artifact-shell"
+                  key={`${artifact.kind}:${artifact.ref}`}
+                  onPointerEnter={(event) => {
+                    if (artifact.preview) setActivePreview({ artifact, anchor: event.currentTarget });
+                  }}
+                  onPointerLeave={() => setActivePreview(null)}
+                  onFocus={(event) => {
+                    if (artifact.preview) setActivePreview({ artifact, anchor: event.currentTarget });
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setActivePreview(null);
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`task-artifact task-artifact--${artifact.kind}`}
+                    aria-describedby={activePreview?.artifact.ref === artifact.ref
+                      ? `artifact-preview-${encodeURIComponent(artifact.ref)}`
+                      : undefined}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void clientApi.openPath(artifact.openPath!);
+                    }}
+                  >
+                    <span className="task-artifact-copy">
+                      <span className="task-artifact-name" title={artifact.label}>{artifact.label}</span>
+                    </span>
+                    {artifact.preview?.kind === 'code' ? (
+                      <span
+                        className="task-artifact-stat"
+                        aria-label={
+                          artifact.preview.deletions > 0
+                            ? `新增 ${artifact.preview.additions} 行，删除 ${artifact.preview.deletions} 行`
+                            : `新增 ${artifact.preview.additions} 行`
+                        }
+                      >
+                        <span className="task-artifact-stat-add">+{artifact.preview.additions}</span>
+                        {artifact.preview.deletions > 0 ? (
+                          <span className="task-artifact-stat-del">−{artifact.preview.deletions}</span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    <span className="task-artifact-action">{artifact.actionLabel}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+        {projection.hiddenTotal > 0 ? (
+          <p className="task-artifacts-limit-note">仅显示前 {projection.visibleTotal} 项主要产物</p>
+        ) : null}
+      </div>
+    </details>
+    {activePreview ? <ArtifactPreviewPortal active={activePreview} /> : null}
+    </>
+  );
+}
+
+/** 结果待验收卡片 —— 与推进中同款双列卡片：顶栏状态 + 标题 + 摘要 + 操作 */
 function ResultCard({
   item,
   phase,
   onOpenItem,
   threadNodes,
   pendingCount,
+  acceptTogether,
 }: {
   readonly item: TaskOverviewItem;
   readonly phase: AcceptancePhase | null;
-  readonly onOpenItem?: (item: TaskOverviewItem) => void;
-  readonly threadNodes?: readonly ThreadTreeNode[];
+  readonly onOpenItem?: OpenTaskOverviewItem;
+  readonly threadNodes?: readonly ThreadListNode[];
   readonly pendingCount?: number;
+  readonly acceptTogether?: readonly TaskOverviewItem[];
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  useShatterExitCollapse(phase, hostRef);
   const summary = item.planProgress
     ? `${item.planProgress.total} 项标准通过 · ${item.planProgress.completed} 项完成 · 无已知风险`
     : 'Peer 已完成并带回 Evidence · 无已知风险';
@@ -1206,7 +1241,10 @@ function ResultCard({
   const celebrating = phase === 'celebrating' || phase === 'exiting';
   const shattering = celebrating;
   return (
-    <div className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}>
+    <div
+      ref={hostRef}
+      className={`particle-shatter-host${phase === 'exiting' ? ' is-exiting' : ''}`}
+    >
     <article
       ref={cardRef}
       className={`task-overview-work-item task-overview-work-item--result_ready result-card particle-shatter-source${threadNodes && threadNodes.length > 0 ? ' goal-thread-card' : ''}${phase === 'submitting' ? ' result-card--submitting' : ''}${shattering ? ' is-shattering' : ''}`}
@@ -1216,7 +1254,13 @@ function ResultCard({
           <i className="result-card-seal" aria-hidden="true">
             ✓
           </i>
-          {celebrating ? '验收完成，任务已圆满结束' : '等待验收'}
+          {celebrating
+            ? '验收完成，任务已圆满结束'
+            : phase === 'submitting' || item.deliveryHandoffStatus === 'delivering'
+              ? '正在交回目标分支'
+              : item.deliveryHandoffStatus === 'stopped'
+                ? (item.deliveryHandoffLabel || '交回未完成')
+                : '等待验收'}
         </span>
         {threadNodes && threadNodes.length > 0 ? (
           <span className="goal-thread-route">
@@ -1235,15 +1279,16 @@ function ResultCard({
         </div>
       ) : null}
       {threadNodes && threadNodes.length > 0 ? (
-        <ThreadTree nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
+        <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
+      <ArtifactList item={item} />
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
         <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
             <span className="result-card-spinner" aria-hidden="true" />
-            正在验收…
+            正在交回…
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
@@ -1253,7 +1298,7 @@ function ResultCard({
           <button
             type="button"
             className="task-overview-btn task-overview-btn--primary"
-            onClick={() => onOpenItem?.(item)}
+            onClick={() => onOpenItem?.(item, acceptTogether?.length ? { acceptTogether } : undefined)}
           >
             查看结果
           </button>

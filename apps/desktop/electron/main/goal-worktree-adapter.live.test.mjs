@@ -165,6 +165,24 @@ describe('goal worktree live isolation', () => {
     assert.equal(git(['status', '--porcelain']), '');
   });
 
+  it('removes the isolated worktree after a successful delivery', async () => {
+    const store = createStore(boundPlan({
+      planId: 'plan-delivered',
+      deliveryHandoff: { status: 'delivered' },
+    }));
+    const adapter = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await adapter.prepareForPlan(store.getPlan('plan-delivered'));
+    const worktreePath = prepared.deliveryBinding.worktreePath;
+    writeFileSync(path.join(worktreePath, 'landed.txt'), 'already handed off\n');
+    const cleaned = await adapter.retainOrCleanupPlan(store.getPlan('plan-delivered'));
+    assert.equal(existsSync(worktreePath), false);
+    assert.equal(cleaned.deliveryBinding.worktreePath, undefined);
+    assert.equal(cleaned.deliveryBinding.taskBranch, undefined);
+  });
+
   it('clears isolation when the recorded worktree is already gone', async () => {
     const store = createStore(boundPlan({ planId: 'plan-stale' }));
     const adapter = createGoalWorktreeAdapter({

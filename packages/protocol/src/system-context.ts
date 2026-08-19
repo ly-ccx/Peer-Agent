@@ -33,6 +33,10 @@ export type ContextAttachmentSourceKind =
   | 'hook'
   | 'mcp'
   | 'runtime'
+  | 'session_reference'
+  | 'workspace_file'
+  | 'workspace_dir'
+  | 'git_diff'
   | string;
 
 export type ContextAttachmentScope = 'turn' | 'conversation' | 'workspace' | 'session' | string;

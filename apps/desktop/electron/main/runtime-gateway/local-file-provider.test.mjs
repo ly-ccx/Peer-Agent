@@ -48,6 +48,108 @@ describe('local file provider', () => {
     assert.equal(toolContext.readFiles.get(filePath)?.fullRead, true);
   });
 
+  it('write_file and edit_file emit structured user artifacts while read_file does not', async () => {
+    const filePath = path.join(tmpDir, 'artifact.txt');
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const toolContext = { conversationId: 'c1', readFiles: new Map() };
+
+    const writeExecution = await provider.executeCapability(
+      { call: createCall('local.file.write', { path: filePath, content: 'before\n' }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    // 产物名必须是真实文件名，且新建文件也要带增删统计（整文件计为新增）。
+    assert.deepEqual(writeExecution.result.evidence.userArtifacts, [{
+      kind: 'file',
+      ref: `file://${filePath}`,
+      path: filePath,
+      label: 'artifact.txt',
+      preview: {
+        kind: 'code',
+        additions: 2,
+        deletions: 0,
+        diffLines: ['+ 新建文件，共 2 行'],
+      },
+    }]);
+
+    const readExecution = await provider.executeCapability(
+      { call: createCall('local.file.read', { path: filePath }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    assert.equal(readExecution.result.evidence.userArtifacts, undefined);
+
+    const editExecution = await provider.executeCapability(
+      { call: createCall('local.file.edit', { path: filePath, old_string: 'before', new_string: 'after' }) },
+      { workspaceRoot: tmpDir, toolContext, locale: 'zh-CN' },
+    );
+    assert.deepEqual(editExecution.result.evidence.userArtifacts, [{
+      kind: 'code-change',
+      ref: `file://${filePath}`,
+      path: filePath,
+      label: 'artifact.txt',
+      preview: {
+        kind: 'code',
+        additions: 1,
+        deletions: 1,
+        diffLines: [
+          `--- a/${filePath}`,
+          `+++ b/${filePath}`,
+          '@@ -1,2 +1,2 @@',
+          '-before',
+          '+after',
+          ' ',
+        ],
+      },
+    }]);
+    assert.ok(editExecution.result.evidence.userArtifacts[0].preview.diffLines.length <= 41);
+    assert.ok(editExecution.result.evidence.userArtifacts[0].preview.diffLines.every((line) => line.length <= 240));
+  });
+
+  it('reads a numbered line range and still allows edit_file afterwards', async () => {
+    const filePath = path.join(tmpDir, 'note.txt');
+    const toolContext = { conversationId: 'c1', readFiles: new Map() };
+    writeFileSync(filePath, 'one\ntwo\nthree\nfour\n', 'utf8');
+
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const ranged = await provider.executeCapability({
+      call: createCall('local.file.read', { path: filePath, start_line: 2, end_line: 3 }),
+    }, {
+      workspaceRoot: tmpDir,
+      toolContext,
+      locale: 'zh-CN',
+    });
+    assert.equal(ranged.result.status, 'success');
+    const output = JSON.parse(ranged.result.outputPreview.fileResult.output);
+    assert.equal(output.preview, '2\ttwo\n3\tthree');
+    assert.equal(output.start_line, 2);
+    assert.equal(output.end_line, 3);
+    assert.equal(output.total_lines, 4);
+    assert.equal(toolContext.readFiles.get(filePath)?.fullRead, true);
+
+    const invalid = await provider.executeCapability({
+      call: createCall('local.file.read', { path: filePath, start_line: 9 }),
+    }, {
+      workspaceRoot: tmpDir,
+      toolContext,
+      locale: 'zh-CN',
+    });
+    assert.equal(invalid.result.status, 'failed');
+    assert.equal(JSON.parse(invalid.result.outputPreview.fileResult.output).code, 'start_line_out_of_range');
+
+    const edited = await provider.executeCapability({
+      call: createCall('local.file.edit', {
+        path: filePath,
+        old_string: 'two',
+        new_string: 'TWO',
+      }),
+    }, {
+      workspaceRoot: tmpDir,
+      toolContext,
+      locale: 'zh-CN',
+    });
+    assert.equal(edited.result.status, 'success');
+    assert.equal(readFileSync(filePath, 'utf8'), 'one\nTWO\nthree\nfour\n');
+  });
+
   it('lists directory entries through the governed file provider', async () => {
     const directoryPath = path.join(tmpDir, 'docs');
     mkdirSync(directoryPath);

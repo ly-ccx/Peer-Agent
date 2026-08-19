@@ -9,10 +9,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import {
+  FileReadRangeError,
+  parseFileReadLineRange,
+  sliceFileReadLines,
+} from '@peer-agent/runtime-node';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
+/** Working-set file reads. Keep in sync with FILE_READ_INLINE_MAX_CHARS. */
+const FILE_READ_INLINE_MAX_CHARS = 32_000;
+const MAX_USER_CODE_PREVIEW_LINES = 40;
+const MAX_USER_CODE_PREVIEW_LINE_CHARS = 240;
 /** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
 export const MAX_WRITE_FILE_BYTES = 32 * 1024;
 
@@ -309,23 +318,29 @@ function formatToolFailure(tool, status, reason, extra = {}) {
   };
 }
 
-function materializeFileRead({ filePath, content, readState }) {
-  const snapshot = readState ?? getFileSnapshot(filePath, content);
-  const preview = previewText(content);
+function materializeFileRead({ filePath, content, readState, fullContent = null, range = null }) {
+  const source = fullContent ?? content;
+  const snapshot = readState ?? getFileSnapshot(filePath, source);
+  const preview = previewText(content, FILE_READ_INLINE_MAX_CHARS);
   return {
     success: true,
     output: formatContextResult({
       kind: 'local_file_ref',
       tool: 'read_file',
       path: filePath,
-      chars: content.length,
-      lines: lineCount(content),
+      chars: source.length,
+      lines: lineCount(source),
       mtimeMs: snapshot.mtimeMs,
       sizeBytes: snapshot.sizeBytes,
       contentHash: snapshot.contentHash,
       fullRead: readState?.fullRead ?? true,
       preview: preview.text,
       contextPreviewTruncated: preview.truncated,
+      ...(range ? {
+        start_line: range.start_line,
+        end_line: range.end_line,
+        total_lines: range.total_lines,
+      } : {}),
       suggestedRetrieval: [
         `sed -n '1,160p' ${quoteShellPath(filePath)}`,
         `rg -n "<pattern>" ${quoteShellPath(filePath)}`,
@@ -590,9 +605,38 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
       if (!existsSync(filePath)) return { success: false, error: `File not found: ${filePath}` };
-      const content = readFileSync(filePath, 'utf8');
-      const readState = recordReadState(toolContext, { cwd, filePath, content, fullRead: true });
-      return materializeFileRead({ filePath, content, readState });
+      const fullContent = readFileSync(filePath, 'utf8');
+      let slice;
+      try {
+        slice = sliceFileReadLines(fullContent, parseFileReadLineRange(args));
+      } catch (error) {
+        if (error instanceof FileReadRangeError) {
+          return formatToolFailure('read_file', 'failed', error.message, {
+            path: filePath,
+            code: error.code,
+          });
+        }
+        throw error;
+      }
+      const readState = recordReadState(toolContext, {
+        cwd,
+        filePath,
+        content: fullContent,
+        fullRead: true,
+      });
+      return materializeFileRead({
+        filePath,
+        content: slice.content,
+        readState,
+        fullContent,
+        range: slice.ranged
+          ? {
+              start_line: slice.startLine,
+              end_line: slice.endLine,
+              total_lines: slice.totalLines,
+            }
+          : null,
+      });
     }
 
     if (name === 'list_files') {
@@ -750,6 +794,7 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
           mtimeAfter: nextState?.mtimeMs ?? null,
           contentHashBefore: beforeSnapshot?.contentHash ?? null,
           contentHashAfter: nextState?.contentHash ?? hashContent(args.content),
+          linesWritten: countLines(args.content),
           diffPreview: diffPreview || null,
           contextPreviewTruncated: diffPreview.length >= MAX_TOOL_CONTEXT_CHARS,
         }),
@@ -772,12 +817,80 @@ function statusFromFileResult(fileResult) {
   }
 }
 
+function countLines(content) {
+  const text = String(content ?? '');
+  if (!text) return 0;
+  return text.split('\n').length;
+}
+
+/**
+ * 产物行的展示名必须能区分不同文件，因此以真实文件名为准，
+ * 而不是「代码变更」「新建文件」这类无法分辨对象的固定文案。
+ */
+function artifactLabelFromPath(filePath) {
+  const name = basename(String(filePath ?? '').trim());
+  return name || '结果文件';
+}
+
+/**
+ * 新建文件没有 diff，但用户仍需要看到写入规模，
+ * 因此按整文件视作全新增行，保证增删统计不会恒为 0。
+ */
+function buildCreatedFilePreview(lineCount) {
+  const additions = Number.isSafeInteger(lineCount) && lineCount > 0 ? lineCount : 0;
+  if (additions <= 0) return undefined;
+  return {
+    kind: 'code',
+    additions,
+    deletions: 0,
+    diffLines: [`+ 新建文件，共 ${additions} 行`],
+  };
+}
+
+function buildCodePreview(diffPreview) {
+  const lines = String(diffPreview ?? '').split('\n');
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  const diffLines = lines
+    .slice(0, MAX_USER_CODE_PREVIEW_LINES)
+    .map((line) => line.slice(0, MAX_USER_CODE_PREVIEW_LINE_CHARS));
+  if (lines.length > MAX_USER_CODE_PREVIEW_LINES) diffLines.push('… diff preview truncated …');
+  return { kind: 'code', additions, deletions, diffLines };
+}
+
+function userArtifactsFromFileResult(name, fileResult) {
+  if (!fileResult?.success || (name !== 'write_file' && name !== 'edit_file')) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(fileResult.output || '{}');
+  } catch {
+    return [];
+  }
+  if (typeof parsed.path !== 'string' || !parsed.path) return [];
+  // write_file 覆盖已有文件时同样有 diff；只有真正新建才退化为「整文件皆新增」。
+  const preview = parsed.diffPreview
+    ? buildCodePreview(parsed.diffPreview)
+    : buildCreatedFilePreview(parsed.linesWritten);
+  return [{
+    kind: name === 'edit_file' ? 'code-change' : 'file',
+    ref: `file://${parsed.path}`,
+    path: parsed.path,
+    label: artifactLabelFromPath(parsed.path),
+    ...(preview ? { preview } : {}),
+  }];
+}
+
 function buildFileCapabilityResult({ call, name, locale, fileResult }) {
   const status = statusFromFileResult(fileResult);
   const dataLevel =
     name === 'read_file' || name === 'list_files' || name === 'search_files'
       ? 'D1_internal'
       : 'D2_sensitive';
+  const userArtifacts = userArtifactsFromFileResult(name, fileResult);
   return {
     toolCallId: call.toolCallId,
     status,
@@ -798,6 +911,7 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
       dataLevel,
       redactions: [],
       artifactRefs: [],
+      ...(userArtifacts.length > 0 ? { userArtifacts } : {}),
     },
     completedAt: nowIso(),
   };

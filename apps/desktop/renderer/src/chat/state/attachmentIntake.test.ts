@@ -58,10 +58,8 @@ describe('intakeAttachments', () => {
       mimeType: 'application/zip',
       size: 42,
       kind: 'unsupported',
+      sourceKind: 'user_upload',
     }]);
-    assert.match(
-      result.error ?? '',
-      /content is not inlined.*file info \(name\/type\/size\) was attached.*read the local file when needed/,
-    );
+    assert.equal(result.error, null);
   });
 });

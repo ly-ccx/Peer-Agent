@@ -188,6 +188,35 @@ export function isPromptTooLongError(
   );
 }
 
+/** Stay this far below the compaction trigger before skipping exact count. */
+export const EXACT_COUNT_SKIP_HEADROOM_RATIO = 0.1;
+
+/**
+ * Inner-loop accounting: skip a provider exact count when the last observed
+ * percent plus this step's new tool text still sits clearly under the trigger.
+ * First requests, unknown windows, and near-threshold steps must still count.
+ */
+export function shouldSkipExactContextCount(options: {
+  readonly lastPercent?: number | null;
+  readonly contextWindow?: number | null;
+  readonly appendedText?: string | null;
+  readonly triggerRatio?: number;
+  readonly headroomRatio?: number;
+}): boolean {
+  const lastPercent = options.lastPercent;
+  const contextWindow = finitePositive(options.contextWindow);
+  if (typeof lastPercent !== 'number' || !Number.isFinite(lastPercent) || lastPercent < 0) {
+    return false;
+  }
+  if (contextWindow == null) return false;
+  const triggerRatio = options.triggerRatio ?? CONTEXT_PROJECTION_CONFIG.triggerRatio;
+  const headroomRatio = options.headroomRatio ?? EXACT_COUNT_SKIP_HEADROOM_RATIO;
+  const skipBelowPercent = (triggerRatio - headroomRatio) * 100;
+  if (skipBelowPercent <= 0) return false;
+  const addedPercent = (estimateContextTextTokens(options.appendedText ?? '') / contextWindow) * 100;
+  return lastPercent + addedPercent < skipBelowPercent;
+}
+
 export function decideContextCompaction(options: {
   pressureTokens: number | null | undefined;
   contextWindow: number | null | undefined;

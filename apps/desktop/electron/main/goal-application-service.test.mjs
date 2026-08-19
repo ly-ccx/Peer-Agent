@@ -21,6 +21,7 @@ function createHarness(overrides = {}) {
     recordManualConfirmation: port('manual-confirmation'),
     recordTaskEvidence: port('task-evidence'),
     deletePlan: port('delete'),
+    retryHandoff: port('retry-handoff'),
     startRunner: port('start-runner'),
     getRunnerState: port('runner-state'),
     pauseRunner: port('pause-runner'),
@@ -88,6 +89,7 @@ test('goal plan and runner commands preserve payload mapping', () => {
   assert.equal(service.startRunner(undefined), 'start-runner');
   assert.equal(service.pauseRunner({ planId: 'p' }), 'pause-runner');
   assert.equal(service.resumeRunner(undefined), 'resume-runner');
+  assert.equal(service.retryHandoff({ planId: 'p' }), 'retry-handoff');
   assert.equal(service.clearRunner({ planId: 'p' }), 'clear-runner');
 
   assert.deepEqual(calls, [
@@ -102,6 +104,7 @@ test('goal plan and runner commands preserve payload mapping', () => {
     ['start-runner', undefined, undefined],
     ['pause-runner', 'p'],
     ['resume-runner', undefined, undefined],
+    ['retry-handoff', 'p'],
     ['clear-runner', 'p'],
   ]);
 });

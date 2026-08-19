@@ -5,11 +5,18 @@ import {
   basename,
   detectFileKind,
   formatJsonForPreview,
+  highlightLanguageForPath,
   type WorkbenchFileKind,
 } from '../file-preview/fileTypes';
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
 import { ResourceTabStrip } from '../ResourceTabStrip';
+import { OpenTargetSplitButton } from '../OpenTargetSplitButton';
+import {
+  buildOpenTargetMenu,
+  type InstalledEditor,
+  type OpenTargetAction,
+} from '../openTargetMenu';
 import {
   activateDocumentTab,
   closeDocumentTab,
@@ -38,6 +45,7 @@ interface DocumentPageProps {
 type GitDiffResult = Awaited<ReturnType<typeof clientApi.gitDiff>>;
 type DiffStatus = GitDiffResult['status'];
 type FileReadResult = Awaited<ReturnType<typeof clientApi.readFile>>;
+type ImageReadResult = Awaited<ReturnType<typeof clientApi.readImageDataUrl>>;
 
 interface DiffState {
   readonly loading: boolean;
@@ -51,8 +59,15 @@ interface ContentState {
   readonly error: string | null;
 }
 
+interface ImageState {
+  readonly loading: boolean;
+  readonly result: ImageReadResult | null;
+  readonly error: string | null;
+}
+
 const INITIAL_DIFF: DiffState = { loading: false, result: null, error: null };
 const INITIAL_CONTENT: ContentState = { loading: false, result: null, error: null };
+const INITIAL_IMAGE: ImageState = { loading: false, result: null, error: null };
 
 function statusLabel(status: DiffStatus, isZh: boolean): string {
   switch (status) {
@@ -90,6 +105,23 @@ function contentErrorLabel(status: FileReadResult['status'], size: number | unde
   }
 }
 
+function imageErrorLabel(status: ImageReadResult['status'], isZh: boolean): string {
+  switch (status) {
+    case 'not_found':
+      return isZh ? '图片不存在或无权访问。' : 'Image not found or not accessible.';
+    case 'not_file':
+      return isZh ? '该路径不是文件（可能是目录）。' : 'This path is not a file (it may be a directory).';
+    case 'too_large':
+      return isZh ? '图片过大，无法预览。' : 'Image is too large to preview.';
+    case 'unsupported_type':
+      return isZh ? '不支持预览该图片格式。' : 'This image format cannot be previewed.';
+    case 'invalid_path':
+      return isZh ? '图片路径无效。' : 'Invalid image path.';
+    default:
+      return isZh ? '无法读取图片。' : 'Unable to read image.';
+  }
+}
+
 function modeBadge(mode: WorkbenchFileMode, kind: WorkbenchFileKind, isZh: boolean): string {
   if (mode === 'diff') return '';
   if (mode === 'source') return isZh ? '源码' : 'Source';
@@ -100,6 +132,8 @@ function modeBadge(mode: WorkbenchFileMode, kind: WorkbenchFileKind, isZh: boole
       return 'JSON';
     case 'image':
       return isZh ? '图片' : 'Image';
+    case 'html':
+      return isZh ? '网页' : 'HTML';
     default:
       return isZh ? '预览' : 'Preview';
   }
@@ -200,15 +234,18 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
   const mode = fileTarget.mode;
   const [diff, setDiff] = useState<DiffState>(INITIAL_DIFF);
   const [content, setContent] = useState<ContentState>(INITIAL_CONTENT);
+  const [image, setImage] = useState<ImageState>(INITIAL_IMAGE);
 
   const kind = useMemo(
     () => detectFileKind(fileTarget.absPath),
     [fileTarget.absPath],
   );
+  const isImage = kind === 'image';
 
   useEffect(() => {
     setDiff(INITIAL_DIFF);
     setContent(INITIAL_CONTENT);
+    setImage(INITIAL_IMAGE);
   }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
 
   const loadDiff = useCallback(async () => {
@@ -239,28 +276,111 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
     }
   }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
 
+  const loadImage = useCallback(async () => {
+    setImage({ loading: true, result: null, error: null });
+    try {
+      const result = await clientApi.readImageDataUrl(
+        fileTarget.absPath,
+        fileTarget.workspaceRoot,
+        fileTarget.relPath,
+      );
+      setImage({ loading: false, result, error: null });
+    } catch (err) {
+      setImage({
+        loading: false,
+        result: null,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
+
   useEffect(() => {
     if (!active || mode !== 'diff' || diff.loading || diff.result || diff.error) return;
     void loadDiff();
   }, [active, mode, diff.loading, diff.result, diff.error, loadDiff]);
 
   useEffect(() => {
-    if (!active || mode === 'diff' || content.loading || content.result || content.error) return;
+    if (!active || mode === 'diff' || isImage) return;
+    if (content.loading || content.result || content.error) return;
     void loadContent();
-  }, [active, mode, content.loading, content.result, content.error, loadContent]);
+  }, [active, mode, isImage, content.loading, content.result, content.error, loadContent]);
+
+  useEffect(() => {
+    if (!active || mode === 'diff' || !isImage) return;
+    if (image.loading || image.result || image.error) return;
+    void loadImage();
+  }, [active, mode, isImage, image.loading, image.result, image.error, loadImage]);
 
   const fileName = basename(fileTarget.absPath);
+  const highlightLanguage = useMemo(
+    () => highlightLanguageForPath(fileTarget.absPath),
+    [fileTarget.absPath],
+  );
   const statusBadge = mode === 'diff'
     ? (diff.result?.ok ? statusLabel(diff.result.status, isZh) : '')
     : modeBadge(mode, kind, isZh);
 
+  const [editors, setEditors] = useState<readonly InstalledEditor[]>([]);
+  const [defaultEditorId, setDefaultEditorId] = useState<string | null>(null);
+
+  const refreshEditors = useCallback(async () => {
+    try {
+      const listed = await clientApi.listEditors();
+      setEditors(listed.editors);
+      setDefaultEditorId(listed.defaultEditorId);
+    } catch {
+      setEditors([]);
+      setDefaultEditorId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshEditors();
+  }, [refreshEditors]);
+
+  const openTargetMenu = useMemo(
+    () => buildOpenTargetMenu({ editors, defaultEditorId, isZh }),
+    [defaultEditorId, editors, isZh],
+  );
+
   const openInEditor = () => {
-    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot);
+    const editorId = openTargetMenu.defaultEditorId;
+    void clientApi.openPath(
+      fileTarget.absPath,
+      fileTarget.workspaceRoot,
+      editorId ? { mode: 'editor', editorId } : undefined,
+    );
+  };
+
+  const handleOpenTarget = (action: OpenTargetAction) => {
+    if (action.kind === 'reveal') {
+      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, { mode: 'reveal' });
+      return;
+    }
+    if (action.kind === 'open-parent') {
+      void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
+        mode: 'editor',
+        target: 'parent',
+        editorId: action.editorId,
+      });
+      return;
+    }
+    void clientApi.setDefaultEditor(action.editorId).then((result) => {
+      if (result.ok) setDefaultEditorId(action.editorId);
+    });
+    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot, {
+      mode: 'editor',
+      editorId: action.editorId,
+    });
   };
 
   const refresh = () => {
     if (mode === 'diff') {
       void loadDiff();
+      return;
+    }
+    if (isImage) {
+      void loadImage();
       return;
     }
     void loadContent();
@@ -278,7 +398,42 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
     </div>
   );
 
+  const renderImagePreview = () => {
+    if (image.loading) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? '正在加载图片…' : 'Loading image…'}
+        </div>
+      );
+    }
+    if (image.error) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? `加载失败：${image.error}` : `Failed to load: ${image.error}`}
+        </div>
+      );
+    }
+    if (!image.result) return null;
+    if (!image.result.ok) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          <div>{imageErrorLabel(image.result.status, isZh)}</div>
+          <div className="workbench-diff-path">{fileTarget.absPath}</div>
+          <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
+            {isZh ? '在编辑器中打开' : 'Open in editor'}
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="workbench-image-preview">
+        <img src={image.result.dataUrl} alt={fileName} />
+      </div>
+    );
+  };
+
   const renderSource = () => {
+    if (isImage) return renderImagePreview();
     if (content.loading) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
@@ -306,6 +461,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
         ) : null}
         <SourceViewer
           content={content.result.content}
+          language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
       </>
@@ -313,6 +469,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
   };
 
   const renderPreview = () => {
+    if (isImage) return renderImagePreview();
     if (content.loading) {
       return (
         <div className="workbench-empty-hint workbench-diff-status">
@@ -352,6 +509,21 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
       );
     }
 
+    if (kind === 'html') {
+      return (
+        <>
+          {resolved}
+          <iframe
+            className="workbench-html-preview"
+            title={fileName}
+            srcDoc={content.result.content}
+            sandbox=""
+            referrerPolicy="no-referrer"
+          />
+        </>
+      );
+    }
+
     if (kind === 'json') {
       const formatted = formatJsonForPreview(content.result.content);
       return (
@@ -360,6 +532,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
           <SourceViewer
             className="workbench-json-preview"
             content={formatted ?? content.result.content}
+            language={highlightLanguage}
             emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
           />
           {!formatted && content.result.content !== '' ? (
@@ -376,6 +549,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
         {resolved}
         <SourceViewer
           content={content.result.content}
+          language={highlightLanguage}
           emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
         />
       </>
@@ -514,14 +688,13 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
           >
             {isZh ? '刷新' : 'Refresh'}
           </button>
-          <button
-            type="button"
-            className="workbench-diff-btn"
-            onClick={openInEditor}
-            title={isZh ? '在编辑器中打开' : 'Open in editor'}
-          >
-            {isZh ? '在编辑器中打开' : 'Open in editor'}
-          </button>
+          <OpenTargetSplitButton
+            isZh={isZh}
+            defaultEditorName={openTargetMenu.defaultEditorName}
+            defaultEditorIconDataUrl={openTargetMenu.defaultEditorIconDataUrl}
+            items={openTargetMenu.items}
+            onAction={handleOpenTarget}
+          />
         </div>
       </div>
 

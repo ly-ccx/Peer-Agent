@@ -324,6 +324,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .markdown-content .markdown-local-image > img {
+    display: block;
+    max-width: min(100%, 320px);
+    max-height: 180px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm, 8px);
+    background: var(--za-bg-1);
+  }
 }
 
 /* Lightbox sits outside .markdown-content stacking; fixed to viewport. */

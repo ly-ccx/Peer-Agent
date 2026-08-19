@@ -57,6 +57,7 @@ function host(run: (
       listener(null);
       return () => {};
     },
+    dispose: async () => {},
   };
 }
 
@@ -474,6 +475,29 @@ describe('chat controller', () => {
     expect(snapshots.some((item) => item.status === 'running' && item.pending && item.content === '')).toBe(true);
   });
 
+  test('honors send maxTurns and returns exhausted', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state) {
+        return {
+          kind: 'tool_calls',
+          state,
+          calls: [{
+            toolCallId: 't1',
+            capabilityId: 'local.file.read',
+            arguments: { path: '.' },
+          }],
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const result = await controller.send('loop', { maxTurns: 2 });
+    expect(result.status).toBe('exhausted');
+    expect(result.turns).toBe(2);
+    expect(controller.getSnapshot().error).toContain('turn limit');
+  });
+
   test('streams reasoning.delta into thinkingContent on the pending assistant', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
@@ -812,6 +836,25 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().session?.lastTurn?.status).toBe('failed');
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
     expect(controller.getSnapshot().usage).toBeUndefined();
+  });
+
+  test('pins the first user task into system context for the whole run', async () => {
+    const observed: Array<unknown> = [];
+    const model: ChatModelPort = {
+      initialize(input) {
+        observed.push(input.input.systemContextInput?.taskAcceptance);
+        return initialState(input.input);
+      },
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const brief = 'IMPORTANT: flatten_rename keys must stay field names.';
+    await controller.send(brief);
+    await controller.send('follow up without repeating the contract');
+    expect(observed).toEqual([brief, brief]);
   });
 
   test('compacts modelMessages while preserving UI transcript and invalidating old authority', async () => {

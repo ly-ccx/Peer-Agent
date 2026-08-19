@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { GoalPlan, TaskOverviewItem } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
-import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
+import { ChatTurn } from '../../chat/components/thread/ChatTurn';
+import { ImagePreviewOverlay } from '../../chat/components/thread/AttachmentStrip';
+import { groupMessagesIntoTurns } from '../../chat/state/chatTurns';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
-import { contentFromSegments } from '../../chat/state/streamSegments';
-import type { ChatMsg } from '../../chat/state/types';
-
+import { findTaskRelatedMessageId } from '../../chat/state/taskRelatedMessage';
+import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 
 /**
  * 工作台「查看结果」用的只读会话/执行内容展示。
  *
- * - Markdown：复用会话主路径 MarkdownMessage
+ * - 消息：复用主聊天 ChatTurn / AssistantContent，不再压成另一套 Markdown
  * - 相关消息：用 is-task-target 高亮，打开时不自动滚动定位（避免侧栏整体上滚）
- * - 操作区（还不行 / 确认验收）已移至 Drawer footer，本组件只渲染结果内容
+ * - 操作区（确认验收）已移至 Drawer footer，本组件只渲染结果内容
  */
 export function ConversationResultView({
   item,
@@ -25,7 +26,7 @@ export function ConversationResultView({
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly ChatMsg[]>([]);
   const [plan, setPlan] = useState<GoalPlan | null>(null);
-  const targetMsgRef = useRef<HTMLElement | null>(null);
+  const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +34,7 @@ export function ConversationResultView({
     setError(null);
     setMessages([]);
     setPlan(null);
+    setImagePreview(null);
 
     void (async () => {
       try {
@@ -77,6 +79,7 @@ export function ConversationResultView({
     () => findTaskRelatedMessageId(messages, item, plan),
     [messages, item, plan],
   );
+  const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
 
   // 打开结果侧栏时不要自动滚动定位目标消息：会带动 drawer body 祖先滚动，造成「打开就往上滚一下」。
   // 相关消息仍通过 is-task-target 高亮；用户可自行滚动查看。
@@ -151,42 +154,28 @@ export function ConversationResultView({
           <p className="conversation-result-view__hint">会话中暂无消息。</p>
         ) : (
           <div className="conversation-result-view__messages">
-            {messages.map((msg) => {
-              const isTarget = msg.id === targetMessageId;
-              const markdown = messageMarkdown(msg);
-              return (
-                <article
-                  key={msg.id}
-                  ref={isTarget ? targetMsgRef : undefined}
-                  data-message-id={msg.id}
-                  data-task-target={isTarget ? 'true' : undefined}
-                  className={`conversation-result-view__msg is-${msg.role}${isTarget ? ' is-task-target' : ''}`}
-                >
-                  <div className="conversation-result-view__msg-role">
-                    {roleLabel(msg.role)}
-                    {isTarget ? <span className="conversation-result-view__target-tag">本任务</span> : null}
-                  </div>
-                  <div className="conversation-result-view__msg-body">
-                    {markdown ? (
-                      <MarkdownMessage content={markdown} />
-                    ) : (
-                      <span className="conversation-result-view__hint">（无文本内容）</span>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+            {turns.map((turn, turnIndex) => (
+              <ChatTurn
+                key={turn.id}
+                conversationId={item.conversationId ? String(item.conversationId) : null}
+                turn={turn}
+                isLive={false}
+                streamStartedAt={null}
+                isZh={isZh}
+                turnIndex={turnIndex}
+                readOnly
+                highlightedMessageId={targetMessageId}
+                onPreviewImage={setImagePreview}
+              />
+            ))}
           </div>
         )}
       </section>
+      {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
+        <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
+      ) : null}
     </div>
   );
-}
-
-function roleLabel(role: ChatMsg['role']): string {
-  if (role === 'assistant') return 'Peer';
-  if (role === 'system') return '系统';
-  return '你';
 }
 
 function statusLabel(status: string): string {
@@ -206,110 +195,4 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
-}
-
-function messageMarkdown(msg: ChatMsg): string {
-  const raw = (msg.content || '').trim();
-  if (raw) return raw;
-  if (Array.isArray(msg.segments) && msg.segments.length > 0) {
-    const fromSegments = contentFromSegments(msg.segments, '').trim();
-    if (fromSegments) return fromSegments;
-    const toolHints = msg.segments
-      .map((seg) => {
-        if (!seg || typeof seg !== 'object') return '';
-        if ((seg as { type?: string }).type === 'tool-call') {
-          const name =
-            (seg as { name?: string; tool?: string }).name ||
-            (seg as { tool?: string }).tool ||
-            'tool';
-          return '**工具调用** `' + name + '`';
-        }
-        return '';
-      })
-      .filter(Boolean);
-    if (toolHints.length) return toolHints.join('\n\n');
-  }
-  return '';
-}
-
-/**
- * 定位与当前 Task 最相关的消息：
- * 1) 正文/片段含 planId / taskId
- * 2) 用户消息含 plan.title / plan.goal / item.title
- * 3) 取最后一次匹配，否则回退最后一条消息
- */
-function findTaskRelatedMessageId(
-  messages: readonly ChatMsg[],
-  item: TaskOverviewItem,
-  plan: GoalPlan | null,
-): string | null {
-  if (messages.length === 0) return null;
-
-  const needles: string[] = [];
-  if (item.taskId) needles.push(item.taskId);
-  if (item.title?.trim()) needles.push(item.title.trim());
-  if (plan?.planId) needles.push(plan.planId);
-  if (plan?.title?.trim()) needles.push(plan.title.trim());
-  if (plan?.goal?.trim()) {
-    const g = plan.goal.trim();
-    needles.push(g.length > 40 ? g.slice(0, 40) : g);
-  }
-
-  const uniqueNeedles = [...new Set(needles.filter((n) => n.length >= 2))];
-  if (uniqueNeedles.length === 0) {
-    return messages[messages.length - 1]?.id ?? null;
-  }
-
-  let lastIdMatch: string | null = null;
-  let lastTitleMatch: string | null = null;
-
-  for (const msg of messages) {
-    const blob = messageSearchBlob(msg);
-    if (!blob) continue;
-    if (item.taskId && blob.includes(item.taskId)) {
-      lastIdMatch = msg.id;
-      continue;
-    }
-    if (plan?.planId && blob.includes(plan.planId)) {
-      lastIdMatch = msg.id;
-      continue;
-    }
-    for (const needle of uniqueNeedles) {
-      if (needle === item.taskId || needle === plan?.planId) continue;
-      if (blob.includes(needle)) {
-        if (msg.role === 'user') lastTitleMatch = msg.id;
-        else if (!lastTitleMatch) lastTitleMatch = msg.id;
-        break;
-      }
-    }
-  }
-
-  return lastIdMatch || lastTitleMatch || messages[messages.length - 1]?.id || null;
-}
-
-function messageSearchBlob(msg: ChatMsg): string {
-  const parts: string[] = [];
-  if (msg.content) parts.push(msg.content);
-  if (Array.isArray(msg.segments)) {
-    for (const seg of msg.segments) {
-      if (!seg || typeof seg !== 'object') continue;
-      if ((seg as { type?: string }).type === 'text' && typeof (seg as { content?: string }).content === 'string') {
-        parts.push((seg as { content: string }).content);
-      }
-      if ((seg as { type?: string }).type === 'tool-call') {
-        const name = (seg as { name?: string; tool?: string }).name || (seg as { tool?: string }).tool || '';
-        const args =
-          (seg as { arguments?: unknown; args?: unknown }).arguments ?? (seg as { args?: unknown }).args;
-        parts.push(name);
-        if (args != null) {
-          try {
-            parts.push(typeof args === 'string' ? args : JSON.stringify(args));
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-  }
-  return parts.join('\n');
 }

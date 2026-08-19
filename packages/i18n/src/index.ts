@@ -597,6 +597,11 @@ export type TranslationKey =
   | 'updater.settings.checkNow'
   | 'updater.settings.checking'
   | 'updater.settings.disabledHint'
+  | 'updater.settings.help.title'
+  | 'updater.settings.help.description'
+  | 'updater.settings.help.github'
+  | 'updater.settings.help.feedback'
+  | 'updater.settings.help.releaseNotes'
   | 'header.capabilities.label'
   | 'header.capabilities.title'
   | 'header.capabilities.group.skill'
@@ -1211,6 +1216,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.checkNow': '检查更新',
     'updater.settings.checking': '检查中…',
     'updater.settings.disabledHint': '开发环境下自动更新已禁用。',
+    'updater.settings.help.title': '帮助与链接',
+    'updater.settings.help.description': 'GitHub 仓库、反馈入口与发布说明',
+    'updater.settings.help.github': 'GitHub',
+    'updater.settings.help.feedback': '提交反馈',
+    'updater.settings.help.releaseNotes': '发布说明',
     'header.capabilities.label': '能力',
     'header.capabilities.title': '已挂载能力',
     'header.capabilities.group.skill': '技能',
@@ -1824,6 +1834,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.checkNow': 'Check for updates',
     'updater.settings.checking': 'Checking…',
     'updater.settings.disabledHint': 'Auto-update is disabled in development.',
+    'updater.settings.help.title': 'Help and links',
+    'updater.settings.help.description': 'GitHub repository, feedback, and release notes',
+    'updater.settings.help.github': 'GitHub',
+    'updater.settings.help.feedback': 'Submit feedback',
+    'updater.settings.help.releaseNotes': 'Release notes',
     'header.capabilities.label': 'Capabilities',
     'header.capabilities.title': 'Mounted capabilities',
     'header.capabilities.group.skill': 'Skills',

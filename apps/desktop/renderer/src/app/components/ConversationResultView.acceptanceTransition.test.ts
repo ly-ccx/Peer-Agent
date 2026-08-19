@@ -23,33 +23,43 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.doesNotMatch(source, /Finding|第 N 轮|第\s*\d+\s*轮/);
 });
 
-test('result drawer keeps 确认验收 and routes 还不行 back to the conversation', async () => {
+test('result view reuses the live chat turn renderer instead of flattening markdown', async () => {
+  const source = await readView();
+  assert.match(source, /from '\.\.\/\.\.\/chat\/components\/thread\/ChatTurn'/);
+  assert.match(source, /<ChatTurn[\s\S]*?readOnly/);
+  assert.match(source, /highlightedMessageId=\{targetMessageId\}/);
+  assert.match(source, /AssistantContent/);
+  assert.doesNotMatch(source, /function messageMarkdown/);
+  assert.doesNotMatch(source, /from '\.\.\/\.\.\/chat\/components\/markdown\/MarkdownMessage'/);
+  assert.doesNotMatch(source, /conversation-result-view__msg/);
+});
+
+test('result drawer keeps 确认验收 and shows the conversation composer by default', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
-  assert.match(app, /closeResult: item\.actionRight === 'result_ready'/);
-  assert.match(app, /continuation\.label/);
+  assert.doesNotMatch(app, /revealComposer/);
+  assert.doesNotMatch(app, /hideComposer/);
+  assert.doesNotMatch(app, /resultComposerVisible/);
+  assert.doesNotMatch(app, /getTaskContinuationAction/);
   assert.match(app, /\? '确认验收'/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
 });
 
-test('result drawer places actions in a separate footer sibling of the body', async () => {
+test('result drawer reuses the chat title bar close and keeps actions below the body', async () => {
   const source = await readApp();
   const styles = await readStyles();
-  // 三区：head / body / footer 是抽屉的直接子节点，footer 在 body 之后。
-  assert.match(source, /conversation-result-drawer__head/);
+  assert.doesNotMatch(source, /conversation-result-drawer__head/);
+  assert.doesNotMatch(source, /查看结果|View result/);
   assert.match(source, /conversation-result-drawer__body/);
-  assert.match(
-    source,
-    /<div(?:\s+ref=\{resultBodyRef\})?\s+className="conversation-result-drawer__body">[\s\S]*?<ConversationResultView[\s\S]*?<\/div>[\s\S]*?<footer className="conversation-result-drawer__footer">/,
-  );
-  assert.match(source, /conversation-result-drawer__scroll-bottom/);
-  assert.match(source, /chat-scroll-bottom-btn/);
-  assert.match(source, /M12 5v14/);
-  assert.match(source, /resultBodyRef/);
-  assert.match(source, /showResultScrollToBottom/);
-  assert.match(source, /scrollResultToBottom/);
+  assert.match(source, /<ChatSurface[\s\S]*?isPageActive=\{collectionDrawer === 'result'\}[\s\S]*?onClose=\{requestClose\}/);
+  assert.match(source, /conversation-result-drawer__icon-close/);
+  assert.match(source, /aria-label=\{isZh \? '关闭' : 'Close'\}/);
+  assert.match(source, /<footer className="conversation-result-drawer__footer">/);
+  assert.doesNotMatch(source, /resultBodyRef/);
+  assert.doesNotMatch(source, /showResultScrollToBottom/);
+  assert.doesNotMatch(source, /scrollResultToBottom/);
   assert.match(styles, /\.conversation-result-drawer__footer \{/);
-  assert.match(styles, /\.conversation-result-drawer__scroll-bottom\.chat-scroll-bottom-btn \{/);
+  assert.match(styles, /\.conversation-result-drawer\.conversation-chat-drawer \.conversation-result-drawer__body/);
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
@@ -63,7 +73,9 @@ test('result drawer closes first and leaves shatter to the workbench card', asyn
   assert.match(source, /setResultAcceptancePending\(item\)/);
   assert.match(source, /requestClose\(\)/);
   assert.match(source, /acceptHandlerRef=\{workbenchAcceptRef\}/);
+  assert.match(source, /resolveResultDrawerAcceptanceTargets\(pending, acceptTogether\)/);
   assert.match(source, /workbenchAcceptRef\.current\?\.\(pending\)/);
+  assert.match(source, /void acceptResultFromWorkbench\(target\)/);
 });
 
 test('result drawer no longer mounts a fullscreen shatter layer', async () => {
@@ -75,26 +87,24 @@ test('result drawer no longer mounts a fullscreen shatter layer', async () => {
   assert.doesNotMatch(styles, /conversation-result-drawer--shattering/);
 });
 
-test('result drawer splits into head, scrolling body and independent footer', async () => {
+test('result drawer splits into scrolling body and independent footer without an outer header', async () => {
   const styles = await readStyles();
   const overlay = await readFile(
     new URL('../../styles/overlay.css', import.meta.url),
     'utf8',
   );
-  // head 固定，不参与高度抢占。
-  assert.match(
-    styles,
-    /\.conversation-result-drawer__head \{[\s\S]*?@apply flex flex-none items-start/,
-  );
+  assert.doesNotMatch(styles, /\.conversation-result-drawer__head/);
+  assert.doesNotMatch(styles, /\.conversation-result-drawer__close/);
+  assert.match(styles, /\.conversation-result-drawer__icon-close/);
   // body 是唯一滚动区，且必须 flex:1 1 0 吃掉剩余高度，避免空白落在 footer 下方。
   assert.match(
     styles,
     /\.conversation-result-drawer__body \{[\s\S]*?@apply min-h-0 overflow-y-auto px-5 py-4;[\s\S]*?flex: 1 1 0;/,
   );
-  // footer 是 flex-none 的独立底部区域，并用 margin-top:auto 贴底。
+  // footer 是 flex-none 的独立底部区域，用 margin-top:auto 贴底，动作右对齐（确认验收在右下角）。
   assert.match(
     styles,
-    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-between gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
+    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
   );
   // 抽屉本体自己吃满 panel，不再依赖粉碎包裹层撑高度。
   assert.match(

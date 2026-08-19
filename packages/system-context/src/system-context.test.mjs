@@ -14,6 +14,7 @@ const DEFAULT_SOURCE_IDS = [
   'core.identity',
   'agent.brainstorming',
   'agent.adaptive-planning',
+  'agent.construction-falsification',
   'agent.diagnosis-gate',
   'runtime.workspace',
   'runtime.provider',
@@ -25,6 +26,7 @@ const DEFAULT_SOURCE_IDS = [
   'runtime.goal-plan',
   'runtime.goal-runner',
   'runtime.goal-checkpoint',
+  'runtime.task-acceptance',
   'agent.mcp-host',
   'runtime.explorer',
   'runtime.verifier',
@@ -261,5 +263,46 @@ test('goal-checkpoint source ignores non-committed checkpoints', async () => {
   const observation = source.observe({ mode: 'goal', conversationId: 'c1', goalPlanStore: store });
   assert.equal(observation.checkpoint, null);
   assert.deepEqual(source.render(observation), []);
+});
+
+test('chat and goal inject construction falsification between adaptive planning and diagnosis', () => {
+  for (const mode of ['chat', 'goal']) {
+    const context = assembleSystemContext({ mode });
+    const ids = context.sections.map((section) => section.id);
+    assert.ok(ids.includes('agent.construction-falsification'));
+    assert.ok(
+      ids.indexOf('agent.adaptive-planning')
+        < ids.indexOf('agent.construction-falsification'),
+    );
+    assert.ok(
+      ids.indexOf('agent.construction-falsification')
+        < ids.indexOf('agent.diagnosis-gate'),
+    );
+    assert.match(context.rendered, /cross-product matrix/);
+    assert.match(context.rendered, /single-axis suite is not completion/);
+    assert.match(context.rendered, /File count is not the depth signal/);
+  }
+
+  const plan = assembleSystemContext({ mode: 'plan' });
+  assert.equal(plan.sections.some((section) => section.id === 'agent.construction-falsification'), false);
+});
+
+test('task acceptance stays dark unless the host pins the original brief', () => {
+  const bare = assembleSystemContext({ mode: 'chat' });
+  assert.equal(bare.sections.some((section) => section.id === 'runtime.task-acceptance'), false);
+
+  const pinned = assembleSystemContext({
+    mode: 'chat',
+    taskAcceptance: [
+      'IMPORTANT: flatten_rename keys must be field names, not serialized aliases.',
+      'Also, serialize_by_alias on a child must keep their own alias for unmapped fields.',
+    ].join('\n'),
+  });
+  const section = pinned.sections.find((item) => item.id === 'runtime.task-acceptance');
+  assert.ok(section);
+  assert.equal(section.layer, 'L7_CONTINUITY');
+  assert.match(section.content, /Host-pinned original task/);
+  assert.match(section.content, /flatten_rename/);
+  assert.match(section.content, /serialize_by_alias/);
 });
 

@@ -119,6 +119,22 @@ function assertRendererHasNoHighPrivilegeImports() {
   }
 }
 
+function assertConversationStreamRouterIsAppSingleton() {
+  const app = readText('apps/desktop/renderer/src/App.tsx');
+  const chatSurface = readText('apps/desktop/renderer/src/chat/components/ChatSurface.tsx');
+  const router = readText('apps/desktop/renderer/src/chat/hooks/useConversationStreamRouter.ts');
+
+  if (!app.includes('useConversationStreamRouter(')) {
+    fail('App.tsx must mount useConversationStreamRouter exactly once at the application root.');
+  }
+  if (chatSurface.includes('useConversationStreamRouter(')) {
+    fail('ChatSurface.tsx must not subscribe to chatStream events; the App-level router is the only subscriber.');
+  }
+  if (!router.includes('acquireStreamRouterLease') || !router.includes('releaseStreamRouterLease')) {
+    fail('useConversationStreamRouter must keep the module-level singleton lease so a second instance cannot subscribe.');
+  }
+}
+
 function assertNoStreamReplaceChannel() {
   const forbiddenChannel = ['chat', 'stream', 'replace'].join(':');
   const files = [
@@ -898,6 +914,8 @@ function assertMotionPrimitivesAreCentralized() {
     'apps/desktop/renderer/src/styles/motion.css',
     'apps/desktop/renderer/src/styles/tokens.css',
     'apps/desktop/renderer/src/styles/llm-settings.css',
+    'apps/desktop/renderer/src/styles/global-workbench.css',
+    'apps/desktop/renderer/src/chat/styles/chat-surface.css',
   ]);
 
   const cssFiles = collectFiles('apps/desktop/renderer/src', ['.css']);
@@ -992,6 +1010,7 @@ if (scope === 'desktop-main') {
 assertMotionPrimitivesAreCentralized();
 assertRendererHasNoHighPrivilegeImports();
 assertNoStreamReplaceChannel();
+assertConversationStreamRouterIsAppSingleton();
 assertSystemContextProtocolContracts();
 assertProviderAdaptersOwnProviderStreaming();
 assertLocalFileProviderOwnsFileRuntime();

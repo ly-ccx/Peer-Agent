@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { PeerIcon } from '../../../ui/icons';
 
 /**
  * 会话内文本查找(cmd/ctrl+F)。
@@ -197,7 +198,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, recomputeKey }: ChatF
         aria-label={isZh ? '上一个' : 'Previous'}
         title={isZh ? '上一个 (Shift+Enter)' : 'Previous (Shift+Enter)'}
       >
-        ↑
+        <PeerIcon name="chevronUp" size={14} />
       </button>
       <button
         type="button"
@@ -207,7 +208,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, recomputeKey }: ChatF
         aria-label={isZh ? '下一个' : 'Next'}
         title={isZh ? '下一个 (Enter)' : 'Next (Enter)'}
       >
-        ↓
+        <PeerIcon name="chevronDown" size={14} />
       </button>
       <button
         type="button"
@@ -216,7 +217,7 @@ export function ChatFindBar({ containerRef, isZh, onClose, recomputeKey }: ChatF
         aria-label={isZh ? '关闭查找' : 'Close find'}
         title={isZh ? '关闭 (Esc)' : 'Close (Esc)'}
       >
-        ✕
+        <PeerIcon name="close" size={14} />
       </button>
     </div>
   );

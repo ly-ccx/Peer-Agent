@@ -381,12 +381,45 @@ export interface BootstrapPreloadApi {
   readonly openPath: (
     absPath: string,
     workspaceRoot?: string,
+    options?: {
+      /** 'self'（默认）打开 absPath 本身；'parent' 打开其所在目录。 */
+      readonly target?: 'self' | 'parent';
+      /** 'auto'（默认）系统默认程序；'editor' 指定编辑器；'reveal' 在文件管理器中定位。 */
+      readonly mode?: 'auto' | 'editor' | 'reveal';
+      /** mode='editor' 时生效；省略则由主进程用记住的默认编辑器。 */
+      readonly editorId?: string;
+    },
   ) => Promise<{
     readonly ok: boolean;
     readonly fallback?: string;
     readonly reason?: string;
     readonly message?: string;
+    readonly kind?: 'file' | 'directory';
+    readonly mode?: 'editor' | 'reveal';
+    readonly editorId?: string;
+    readonly path?: string;
   }>;
+  /**
+   * 本机可用的编辑器候选 + 当前生效的默认值。
+   * - defaultEditorId 一定是 editors 中真实存在的项；若记住的编辑器已被卸载则回退候选首项。
+   * - stale=true 表示此前记住的 stored 已不可用，UI 可据此提示。
+   */
+  readonly listEditors: () => Promise<{
+    readonly editors: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly bundleId?: string | null;
+      /** 本机 App 真实图标（data URL）；读失败为 null，UI 不得用字符冒充。 */
+      readonly iconDataUrl?: string | null;
+    }[];
+    readonly defaultEditorId: string | null;
+    readonly stored: string | null;
+    readonly stale: boolean;
+  }>;
+  /** 记住默认编辑器；只接受本机真实可用的 editorId。 */
+  readonly setDefaultEditor: (
+    editorId: string,
+  ) => Promise<{ readonly ok: boolean; readonly editorId?: string; readonly reason?: string }>;
   /**
    * 计算并返回指定文件的 git diff（点击聊天消息中的文件路径时，在 Workbench 的 Diff 视图展示）。
    * - absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录推断）。
@@ -546,6 +579,25 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * Composer @ 菜单用的工作区文件搜索：只扫当前 workspace，尊重忽略目录，
+   * 返回相对路径，不读文件内容。
+   */
+  readonly searchWorkspaceFiles?: (
+    workspacePath: string,
+    query?: string,
+    limit?: number,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
+    readonly files: readonly {
+      readonly relPath: string;
+      readonly name: string;
+      readonly kind: 'file' | 'directory';
+    }[];
+    readonly workspacePath?: string;
+    readonly error?: string;
+  }>;
+  /**
    * 同步文件树轻量监听目录集合（根 + 已展开）。传空数组清空。
    * main 侧按 webContents 维护 fs.watch，不递归整仓。
    */
@@ -570,6 +622,7 @@ export interface BootstrapPreloadApi {
     readonly conversationId: string | null;
     readonly browserTabId: string;
     readonly active: boolean;
+    readonly claimForeground?: boolean;
     readonly url?: string;
     readonly title?: string;
   }) => Promise<{
@@ -851,6 +904,7 @@ export interface BootstrapPreloadApi {
   readonly onQuickChatPopoverSelected: (listener: (payload: { kind: QuickChatPopoverKind; value: string }) => void) => () => void;
   readonly onQuickChatPopoverClosed: (listener: () => void) => () => void;
   readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
+  readonly workspacePreviewDefault: () => Promise<{ path: string; name: string; exists: boolean }>;
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
@@ -917,8 +971,8 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
-  // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend → IPC →
-  // mode-source 进入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
+  // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend / IPC
+  // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
   readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
   readonly conversationsUpdateFastMode: (params: { id: string; fastMode: boolean }) => Promise<unknown>;
   // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。effort/modelProviderId
@@ -985,6 +1039,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     reason: string;
     changedBy?: string;
   }) => Promise<GoalPlan>;
+  readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
   /**
@@ -1281,6 +1336,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly appshotOpenScreenSettings: () => Promise<{ ok: boolean; url?: string; error?: string }>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
+  /** 打开应用关于页的白名单外链（源仓库 / 反馈 / 发布说明）。Renderer 只传 kind。 */
+  readonly openProductLink: (kind: 'github' | 'feedback' | 'releaseNotes') => Promise<{
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly reason?: string;
+  }>;
   // ── Updater ──（主进程负责能力，渲染层只表达）
   readonly updaterGetStatus: () => Promise<UpdaterStatus>;
   readonly updaterCheck: () => Promise<UpdaterStatus>;

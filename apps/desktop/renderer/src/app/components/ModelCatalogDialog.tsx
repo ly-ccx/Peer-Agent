@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmModelInfo, LlmModelListResult, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Checkbox } from '../../ui/boolean-controls';
+import { PeerIcon } from '../../ui/icons';
 import { LlmBrandIcon } from './LlmBrandIcon';
 import { Overlay } from './Overlay';
 import {
@@ -173,7 +174,7 @@ export function ModelCatalogDialog({
               <h3>{zh ? '获取模型列表' : 'Import models'}</h3>
               <p>{providerName} · {sourceLabel(source, zh)}</p>
             </div>
-            <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}>✕</button>
+            <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}><PeerIcon name="close" size={14} /></button>
           </header>
 
           <div className="llm-catalog-toolbar" data-fetch-state={fetchState}>

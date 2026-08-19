@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { QuickChatTask } from '../../chat/state/quickChatTasks';
 import { getQuickChatWorkspaceIdentity } from '../../chat/state/quickChatWorkspaceIdentity';
+import { PeerIcon } from '../../ui/icons';
 
 export function QuickChatTaskCard({
   task,
@@ -49,9 +50,9 @@ export function QuickChatTaskCard({
         </div>
         {total > 1 ? (
           <div className="quick-chat-task-pager" aria-label={`第 ${position + 1} 个，共 ${total} 个任务`}>
-            <button type="button" onClick={onPrevious} aria-label="上一个任务">‹</button>
+            <button type="button" onClick={onPrevious} aria-label="上一个任务"><PeerIcon name="chevronLeft" size={14} /></button>
             <span>{position + 1}/{total}</span>
-            <button type="button" onClick={onNext} aria-label="下一个任务">›</button>
+            <button type="button" onClick={onNext} aria-label="下一个任务"><PeerIcon name="chevronRight" size={14} /></button>
           </div>
         ) : null}
       </header>

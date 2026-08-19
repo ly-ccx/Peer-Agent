@@ -84,6 +84,50 @@ test('browser_open_panel returns the reveal state without requesting network per
   });
 });
 
+test('background Goal can open a panel and navigate without requiring the conversation to be foreground', async () => {
+  const browser = createWebContents('about:blank');
+  const revealRequests = [];
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {},
+    resolveWebContents: (id) => id === 41 ? browser : null,
+    ensureBrowserReady: async (request) => {
+      revealRequests.push(request);
+      registerBrowserWebContents({
+        webContentsId: 41,
+        conversationId: request.conversationId,
+        browserTabId: 'b-1',
+        active: true,
+        claimForeground: false,
+        url: browser.getURL(),
+      });
+      return { status: 'opened', sessionId: request.conversationId, focused: false };
+    },
+  });
+
+  const open = await provider.executeCapability(openPanelCall(false), {
+    locale: 'en-US',
+    toolContext: { conversationId: 'conversation-b' },
+    requestPermission: async () => ({ granted: true }),
+  });
+  const navigate = await provider.executeCapability(
+    navigateCall('https://example.com/verify'),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-b' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+
+  assert.equal(open.result.status, 'success');
+  assert.equal(JSON.parse(open.result.output).focused, false);
+  assert.equal(navigate.result.status, 'success');
+  assert.deepEqual(browser.navigations, ['https://example.com/verify']);
+  assert.equal(revealRequests.length, 2);
+  assert.equal(revealRequests[0].focus, false);
+  assert.equal(revealRequests[1].focus, false);
+});
+
 test('browser provider reveals before navigation even when the Browser WebContents is already registered', async () => {
   const browser = createWebContents('https://example.com');
   const order = [];
@@ -106,7 +150,7 @@ test('browser provider reveals before navigation even when the Browser WebConten
     ensureBrowserReady: async ({ conversationId, focus }) => {
       order.push('reveal');
       assert.equal(conversationId, 'conversation-a');
-      assert.equal(focus, true);
+      assert.equal(focus, false);
       return { status: 'opened' };
     },
   });
@@ -237,6 +281,10 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
       toPNG: () => Buffer.from('png-bytes'),
       toDataURL: () => dataUrl,
       getSize: () => ({ width: 800, height: 600 }),
+      resize: ({ width, height }) => ({
+        toDataURL: () => 'data:image/png;base64,dGh1bWI=',
+        getSize: () => ({ width, height }),
+      }),
     }),
   };
   registerBrowserWebContents({
@@ -255,6 +303,7 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
           'local-browser-artifact://shot-1/screenshot',
           'local-browser-artifact://shot-1/metadata',
         ],
+        screenshotPath: '/tmp/peer-agent-browser-provider-test/shot-1/screenshot.png',
         bytes: 9,
       }),
     },
@@ -286,4 +335,17 @@ test('browser screenshot exposes ephemeral visual context without putting bytes 
   assert.equal(JSON.stringify(execution.result.outputPreview).includes('base64'), false);
   assert.equal(JSON.stringify(execution.result.output).includes('base64'), false);
   assert.equal(execution.result.output.visualObservation.artifactRef, 'local-browser-artifact://shot-1');
+  assert.deepEqual(execution.result.evidence.userArtifacts, [{
+    kind: 'image',
+    ref: 'local-browser-artifact://shot-1/screenshot',
+    path: '/tmp/peer-agent-browser-provider-test/shot-1/screenshot.png',
+    label: '界面截图',
+    preview: {
+      kind: 'image',
+      dataUrl: 'data:image/png;base64,dGh1bWI=',
+      width: 640,
+      height: 480,
+    },
+  }]);
+  assert.ok(execution.result.evidence.userArtifacts[0].preview.dataUrl.length <= 512 * 1024);
 });

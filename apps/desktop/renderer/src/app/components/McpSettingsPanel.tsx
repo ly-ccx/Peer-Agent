@@ -2,6 +2,7 @@ import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@pee
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';
+import { PeerIcon } from '../../ui/icons';
 import { useConfirm } from './ConfirmProvider';
 import { Drawer } from './Drawer';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -621,7 +622,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 onClick={() => { resetForm(); setShowAddForm(false); }}
                 disabled={busy}
               >
-                ✕
+                <PeerIcon name="close" size={12} />
               </button>
             </header>
             <div className="mcp-modal-body">
@@ -698,7 +699,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                         aria-label="删除参数"
                         onClick={() => removeArgRow(index)}
                       >
-                        ✕
+                        <PeerIcon name="close" size={12} />
                       </button>
                     </div>
                   ))}
@@ -726,7 +727,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                         aria-label="删除环境变量"
                         onClick={() => removeEnvRow(index)}
                       >
-                        ✕
+                        <PeerIcon name="close" size={12} />
                       </button>
                     </div>
                   ))}

@@ -59,6 +59,7 @@ function createProvider({ hookDecision, approvalDecider } = {}) {
     userDataPath: workspaceRoot,
     approvalDecider,
     taskManager,
+    sessionManager: null,
     hookRunner: {
       runPreToolUse: async (payload) => [
         {

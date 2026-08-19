@@ -91,6 +91,13 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
     if (count <= 0) {
       return EMPTY_RANGE;
     }
+    const element = scrollRef.current;
+    if (element) {
+      viewportRef.current = {
+        scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
+      };
+    }
     return calculateVirtualTurnRange({
       count,
       scrollTop: viewportRef.current.scrollTop,
@@ -101,7 +108,7 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
       overscanPx: enabled ? DEFAULT_TURN_OVERSCAN_PX : Number.MAX_SAFE_INTEGER,
       forceIndex: enabled ? forceIndex : null,
     });
-  }, [count, enabled]);
+  }, [count, enabled, scrollRef]);
 
   const commitRangeIfChanged = useCallback((next: VirtualTurnRange): boolean => {
     // rangeChanged: only publish React state when the virtual window truly changes.

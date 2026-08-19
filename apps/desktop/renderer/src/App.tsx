@@ -6,12 +6,17 @@ import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
 import { Drawer } from './app/components/Drawer';
 import { ConversationResultView } from './app/components/ConversationResultView';
 import { TaskDetailsView } from './app/components/TaskDetailsView';
-import { continueTaskInConversation, getTaskContinuationAction } from './app/taskContinuation';
+import { continueTaskInConversation } from './app/taskContinuation';
+import { resolveTaskRelatedMessageId } from './chat/state/taskRelatedMessageResolve';
 import { HomePage } from './app/pages/HomePage';
 import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import {
+  resolveResultDrawerAcceptanceTargets,
+  type OpenResultOptions,
+} from './app/state/resultDrawerAcceptance';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -27,6 +32,7 @@ import {
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
+import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
@@ -79,6 +85,7 @@ type ConversationView = 'active' | 'archived';
 interface ConversationMeta {
   id: string;
   title: string;
+  workspacePath?: string | null;
   messageCount: number;
   updatedAt: string;
   status?: ConversationStatus;
@@ -104,12 +111,6 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
 }
 
-function readSetupModelAutoOpened(settings: Record<string, unknown> | null | undefined): boolean {
-  const onboarding = settings?.onboarding;
-  if (!onboarding || typeof onboarding !== 'object' || Array.isArray(onboarding)) return false;
-  return Boolean((onboarding as { setupModelAutoOpened?: unknown }).setupModelAutoOpened);
-}
-
 function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
   return readGitBranchPrefixFromSettings(settings);
 }
@@ -130,74 +131,35 @@ function MainApp() {
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [activePage, setActivePage] = useState<AppPage>('home');
+  const [activePage, setActivePage] = useState<AppPage>('chat');
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
   const [homeScope, setHomeScope] = useState<'all' | 'workspace'>('all');
   const [collectionDrawer, setCollectionDrawer] = useState<CollectionDrawer>(null);
   /** 二级会话 Drawer 独立于一级结果 Drawer，避免“继续讨论”替换并卸载父级。 */
   const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
+  const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
-  const resultBodyRef = useRef<HTMLDivElement | null>(null);
-  const [showResultScrollToBottom, setShowResultScrollToBottom] = useState(false);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
-
-  const updateResultScrollButton = useCallback((container: HTMLDivElement | null) => {
-    if (!container) {
-      setShowResultScrollToBottom((previous) => (previous ? false : previous));
-      return;
-    }
-    const overflowed = container.scrollHeight > container.clientHeight + 1;
-    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const next = overflowed && remaining > 64;
-    setShowResultScrollToBottom((previous) => (previous === next ? previous : next));
-  }, []);
-
-  useEffect(() => {
-    if (!resultDrawerItem) {
-      setShowResultScrollToBottom(false);
-      return;
-    }
-    const container = resultBodyRef.current;
-    if (!container) return;
-    container.scrollTop = 0;
-    const onScroll = () => updateResultScrollButton(container);
-    container.addEventListener('scroll', onScroll, { passive: true });
-    const observer =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => updateResultScrollButton(container));
-    observer?.observe(container);
-    if (container.firstElementChild) observer?.observe(container.firstElementChild);
-    updateResultScrollButton(container);
-    return () => {
-      container.removeEventListener('scroll', onScroll);
-      observer?.disconnect();
-    };
-  }, [resultDrawerItem, updateResultScrollButton]);
-
-  const scrollResultToBottom = useCallback(() => {
-    const container = resultBodyRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    setShowResultScrollToBottom(false);
-  }, []);
 
   const openCollectionDrawer = useCallback((kind: Exclude<CollectionDrawer, null>) => {
     setCollectionDrawer(kind);
   }, []);
 
-  const openResultDrawer = useCallback((item: TaskOverviewItem) => {
+  const openResultDrawer = useCallback((item: TaskOverviewItem, options?: OpenResultOptions) => {
     setResultDrawerItem(item);
+    setResultDrawerAcceptTogether(options?.acceptTogether ?? []);
     setCollectionDrawer('result');
     setResultAcceptancePending(null);
+    if (item.conversationId) setActiveConversationId(item.conversationId);
   }, []);
 
   const closeResultDrawer = useCallback(() => {
     setConversationDrawerOpen(false);
     setCollectionDrawer(null);
     setResultDrawerItem(null);
+    setResultDrawerAcceptTogether([]);
   }, []);
 
   const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
@@ -215,6 +177,9 @@ function MainApp() {
         changedBy: 'user',
       });
       setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
+      setResultDrawerAcceptTogether((currentTogether) => (
+        currentTogether.some((entry) => entry.taskId === item.taskId) ? [] : currentTogether
+      ));
       setCollectionDrawer((current) => (current === 'result' ? null : current));
     } catch (error) {
       console.error('[workbench] accept result failed', error);
@@ -258,6 +223,7 @@ function MainApp() {
   const closeCollectionDrawer = useCallback(() => {
     setCollectionDrawer(null);
     setResultDrawerItem(null);
+    setResultDrawerAcceptTogether([]);
   }, []);
   const [automationRunTarget, setAutomationRunTarget] = useState<{ automationId: string; runId: string } | null>(null);
   const openAutomationRun = useCallback((target: { automationId: string; runId: string }) => {
@@ -271,11 +237,6 @@ function MainApp() {
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [providersReady, setProvidersReady] = useState(false);
-  const [setupModelAutoOpened, setSetupModelAutoOpened] = useState(() =>
-    readSetupModelAutoOpened(clientApi.initialSettings),
-  );
-  const setupModelAutoOpenAttemptedRef = useRef(false);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
@@ -293,6 +254,19 @@ function MainApp() {
     requestId: number;
   } | null>(null);
   const notificationMessageRequestRef = useRef(0);
+  const focusTaskRelatedMessage = useCallback((item: TaskOverviewItem) => {
+    if (!item.conversationId) return;
+    const conversationId = String(item.conversationId);
+    void resolveTaskRelatedMessageId(item).then((messageId) => {
+      if (!messageId) return;
+      notificationMessageRequestRef.current += 1;
+      setNotificationMessageTarget({
+        conversationId,
+        messageId,
+        requestId: notificationMessageRequestRef.current,
+      });
+    });
+  }, []);
   const [conversationRevision, setConversationRevision] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
   // 真值来自 main 的 activeStreams:挂载时经 chatStreamListActive 拉取,之后由
@@ -340,6 +314,18 @@ function MainApp() {
   const [gitBranchPrefix, setGitBranchPrefix] = useState(() =>
     readGitBranchPrefix(clientApi.initialSettings));
 
+  useEffect(() => {
+    if (activeWorkspace || draftWorkspacePath) return;
+    let cancelled = false;
+    void clientApi.workspacePreviewDefault().then((preview) => {
+      if (cancelled || !preview.path) return;
+      setDraftWorkspacePath(preview.path);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace, draftWorkspacePath]);
+
   const refreshProviders = useCallback(async () => {
     // 表达层只展示用户明确配置的模型。远程/本机目录是设置页的候选来源，不能在聊天菜单里
     // 自动展开，否则“支持的模型”会绕过配置边界，串进 provider 的已配置模型列表。
@@ -347,8 +333,6 @@ function MainApp() {
       setProviders(await clientApi.llmListProviders());
     } catch {
       // Keep previous providers on transient list failures.
-    } finally {
-      setProvidersReady(true);
     }
   }, []);
 
@@ -392,6 +376,13 @@ function MainApp() {
       applyConversationListPage(page as any, { append: false });
     } catch {}
   }, [activeWorkspace, applyConversationListPage, conversationView]);
+
+  useConversationStreamRouter({
+    activeConversationId,
+    onConversationUpdated: () => {
+      void refreshConversations();
+    },
+  });
 
   const loadMoreConversations = useCallback(async () => {
     if (!conversationHasMore || conversationsLoadingMore || !conversationNextCursor) return;
@@ -529,41 +520,8 @@ function MainApp() {
     setSettingsInitialSection(section);
     setActivePage('settings');
   }, []);
-
-  const markSetupModelAutoOpened = useCallback(() => {
-    if (setupModelAutoOpened) return;
-    setSetupModelAutoOpened(true);
-    void (async () => {
-      try {
-        const current = await clientApi.getSettings();
-        const prev = current?.onboarding;
-        const nextOnboarding = {
-          ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
-          setupModelAutoOpened: true,
-        };
-        await clientApi.updateSettings({ onboarding: nextOnboarding });
-      } catch {
-        // Preference write failure must not block opening settings.
-      }
-    })();
-  }, [setupModelAutoOpened]);
-
-  // Gate A：未配置服务时，首启自动进入 Settings/服务商 一次（可返回；之后只靠空态 CTA）。
-  useEffect(() => {
-    if (!showMainShell || !providersReady) return;
-    if (setupModelAutoOpened || setupModelAutoOpenAttemptedRef.current) return;
-    if (providers.some((p) => p.apiKeyConfigured)) return;
-    setupModelAutoOpenAttemptedRef.current = true;
-    markSetupModelAutoOpened();
-    openSettings('providers');
-  }, [
-    markSetupModelAutoOpened,
-    openSettings,
-    providers,
-    providersReady,
-    setupModelAutoOpened,
-    showMainShell,
-  ]);
+  // setupModelAutoOpened used to auto-open Settings once. First-run now stays
+  // on the empty chat path and no longer uses that preference to steal focus.
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -819,12 +777,10 @@ function MainApp() {
   }, [activeWorkspace, conversationView, refreshConversations]);
 
   const handleNewChat = useCallback(async () => {
-    // 没有工作区时不允许把对话落到根目录:先确保有一个工作区(必要时默认初始化)。
     let ws = activeWorkspace;
     if (!ws) {
-      const ensured = await clientApi.workspaceEnsureDefault();
-      ws = ensured.path;
-      setActiveWorkspace(ws);
+      const preview = await clientApi.workspacePreviewDefault();
+      ws = preview.path;
     }
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
@@ -839,9 +795,8 @@ function MainApp() {
     // Jump to the same new-task home as sidebar "新建任务", but prefill a GPT/Codex-style scheduled-task draft.
     let ws = activeWorkspace;
     if (!ws) {
-      const ensured = await clientApi.workspaceEnsureDefault();
-      ws = ensured.path;
-      setActiveWorkspace(ws);
+      const preview = await clientApi.workspacePreviewDefault();
+      ws = preview.path;
     }
     const zh = (session?.locale ?? '').toLowerCase().startsWith('zh');
     const template = getAutomationCopy(zh).chatDraftTemplate;
@@ -901,6 +856,7 @@ function MainApp() {
     // 若用户随后新开 Goal，那是同会话下的新计划，原 Plan 应留下。
     if (options?.closeResult) {
       setResultDrawerItem(null);
+      setResultDrawerAcceptTogether([]);
       setCollectionDrawer(null);
     }
     continueTaskInConversation(conversationId, {
@@ -1081,14 +1037,16 @@ function MainApp() {
                       onNewTask={() => {
                         void handleNewChat();
                       }}
-                      onOpenItem={(item: TaskOverviewItem) => {
+                      onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
                         if (item.actionRight === 'result_ready') {
-                          openResultDrawer(item);
+                          openResultDrawer(item, options);
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         openCollectionDrawer('tasks');
@@ -1113,16 +1071,18 @@ function MainApp() {
                       onNewTask={() => {
                         void handleNewChat();
                       }}
-                      onOpenItem={(item: TaskOverviewItem) => {
+                      onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
                         // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话。
                         if (item.actionRight === 'result_ready') {
-                          openResultDrawer(item);
+                          openResultDrawer(item, options);
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));
+                          focusTaskRelatedMessage(item);
                           return;
                         }
                         openCollectionDrawer('tasks');
@@ -1130,6 +1090,10 @@ function MainApp() {
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}
                       onCancelItem={(item: TaskOverviewItem) => cancelPlanFromWorkbench(item)}
+                      onOpenTools={() => {
+                        setConversationDrawerOpen(false);
+                        setActivePage('tools');
+                      }}
                     />
                   )}
                   </div>
@@ -1194,7 +1158,7 @@ function MainApp() {
                     setConversationView('active');
                     setActiveConversationId(conversationId);
                     setCollectionDrawer(null);
-                    setActivePage('home');
+                    setActivePage('chat');
                     void refreshConversations(draftWorkspacePath, 'active');
                   }}
                   onRenameConversation={handleRenameConversation}
@@ -1203,8 +1167,15 @@ function MainApp() {
                   onOpenTaskDetails={() => openCollectionDrawer('task_details')}
                   workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                   workspaces={workspaces}
-                  onWorkspaceChange={setDraftWorkspacePath}
-                  isPageActive={activePage === 'chat' && !conversationDrawerOpen}
+                  onWorkspaceChange={async (workspacePath) => {
+                    setDraftWorkspacePath(workspacePath);
+                    if (!activeWorkspace && workspacePath) {
+                      setActiveWorkspace(workspacePath);
+                      const listed = await clientApi.workspaceList();
+                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                    }
+                  }}
+                  isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
                   messageTarget={notificationMessageTarget}
                   />
                 </section>
@@ -1256,10 +1227,17 @@ function MainApp() {
                 <Drawer
                   onClose={() => {
                     const pending = resultAcceptancePending;
+                    const acceptTogether = resultDrawerAcceptTogether;
                     closeResultDrawer();
                     if (pending) {
                       setResultAcceptancePending(null);
+                      const targets = resolveResultDrawerAcceptanceTargets(pending, acceptTogether);
+                      // 归组卡只占一张：动画打在当前打开的那张上，其余待签项直接落库。
                       void workbenchAcceptRef.current?.(pending);
+                      for (const target of targets) {
+                        if (target.taskId === pending.taskId) continue;
+                        void acceptResultFromWorkbench(target);
+                      }
                     }
                   }}
                   ariaLabel={
@@ -1282,6 +1260,8 @@ function MainApp() {
                   panelClassName={
                     collectionDrawer === 'result' || collectionDrawer === 'task_details'
                       ? `conversation-result-drawer${
+                          collectionDrawer === 'result' ? ' conversation-chat-drawer' : ''
+                        }${
                           collectionDrawer === 'result' && conversationDrawerOpen
                             ? ' conversation-result-drawer--pushed'
                             : ''
@@ -1308,6 +1288,7 @@ function MainApp() {
                               // 任务列表点击只打开会话 Drawer；发送消息后才会创建新回合。
                               if (!item.conversationId) return;
                               handleContinueTask(String(item.conversationId));
+                              focusTaskRelatedMessage(item);
                             }}
                           />
                         </div>
@@ -1348,88 +1329,116 @@ function MainApp() {
                       </div>
                     ) : resultDrawerItem ? (
                       <>
-                          <div className="conversation-result-drawer__head">
-                            <div>
-                              <h2>{isZh ? '查看结果' : 'View result'}</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="conversation-result-drawer__close"
-                              onClick={requestClose}
-                              disabled={Boolean(resultAcceptancePending)}
-                            >
-                              {isZh ? '关闭' : 'Close'}
-                            </button>
-                          </div>
-                          <div ref={resultBodyRef} className="conversation-result-drawer__body">
-                            <ConversationResultView item={resultDrawerItem} isZh={isZh} />
-                          </div>
-                          {showResultScrollToBottom ? (
-                            <button
-                              type="button"
-                              className="chat-scroll-bottom-btn conversation-result-drawer__scroll-bottom"
-                              onClick={scrollResultToBottom}
-                              aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
-                              title={isZh ? '滚动到底部' : 'Scroll to bottom'}
-                            >
-                              <svg
-                                aria-hidden="true"
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                          <div className="conversation-result-drawer__body">
+                            {resultDrawerItem.conversationId ? (
+                              <WorkbenchProvider
+                                conversationId={resultDrawerItem.conversationId}
+                                isPageActive
+                                layoutHost="local"
                               >
-                                <path d="M12 5v14" />
-                                <path d="m19 12-7 7-7-7" />
-                              </svg>
-                            </button>
-                          ) : null}
+                                <div className="conversation-chat-drawer-shell">
+                                  <div className="conversation-chat-drawer__body">
+                                    <ChatSurface
+                                      i18n={i18n}
+                                      providers={providers}
+                                      conversationId={resultDrawerItem.conversationId}
+                                      conversationRevision={conversationRevision}
+                                      conversationTitle={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.title
+                                        ?? resultDrawerItem.title
+                                      }
+                                      automationOrigin={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.automationOrigin
+                                        ?? null
+                                      }
+                                      systemInstructions={systemInstructions}
+                                      replyLanguage={replyLanguage}
+                                      gitBranchPrefix={gitBranchPrefix}
+                                      onOpenSettings={() => openSettings('providers')}
+                                      onProvidersRefresh={refreshProviders}
+                                      onConversationUpdated={() => { void refreshConversations(); }}
+                                      onBranch={(id) => {
+                                        setConversationView('active');
+                                        setActiveConversationId(id);
+                                        void refreshConversations(activeWorkspace, 'active');
+                                      }}
+                                      onRenameConversation={handleRenameConversation}
+                                      onArchiveConversation={handleArchiveConversation}
+                                      onOpenAutomationRun={openAutomationRun}
+                                      onOpenTaskDetails={() => openCollectionDrawer('task_details')}
+                                      workspacePath={
+                                        conversations.find((c) => c.id === resultDrawerItem.conversationId)?.workspacePath
+                                        ?? activeWorkspace
+                                        ?? draftWorkspacePath
+                                      }
+                                      workspaces={workspaces}
+                                      onWorkspaceChange={async (workspacePath) => {
+                                        setDraftWorkspacePath(workspacePath);
+                                        if (!activeWorkspace && workspacePath) {
+                                          setActiveWorkspace(workspacePath);
+                                          const listed = await clientApi.workspaceList();
+                                          setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                                        }
+                                      }}
+                                      isPageActive={collectionDrawer === 'result'}
+                                      messageTarget={notificationMessageTarget}
+                                      onClose={requestClose}
+                                    />
+                                  </div>
+                                  <WorkbenchPanel
+                                    isZh={isZh}
+                                    workspacePath={
+                                      conversations.find((c) => c.id === resultDrawerItem.conversationId)?.workspacePath
+                                      ?? activeWorkspace
+                                    }
+                                  />
+                                </div>
+                              </WorkbenchProvider>
+                            ) : (
+                              <div className="conversation-result-drawer__standalone">
+                                <button
+                                  type="button"
+                                  className="conversation-result-drawer__icon-close"
+                                  onClick={requestClose}
+                                  disabled={Boolean(resultAcceptancePending)}
+                                  aria-label={isZh ? '关闭' : 'Close'}
+                                  title={isZh ? '关闭' : 'Close'}
+                                >
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                  </svg>
+                                </button>
+                                <ConversationResultView item={resultDrawerItem} isZh={isZh} />
+                              </div>
+                            )}
+                          </div>
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;
                             const canAccept =
                               item.source === 'goal_plan' && Boolean(item.taskId);
-                            const continuation = getTaskContinuationAction(item, isZh);
-                            if (!continuation && !canAccept) return null;
+                            if (!canAccept) return null;
                             return (
                               <footer className="conversation-result-drawer__footer">
-                                {continuation ? (
-                                  <div className="conversation-result-view__continue">
-                                    <button
-                                      type="button"
-                                      className="task-overview-btn task-overview-btn--secondary"
-                                      onClick={() => handleContinueTask(continuation.conversationId, {
-                                        closeResult: item.actionRight === 'result_ready',
-                                      })}
-                                    >
-                                      {continuation.label}
-                                    </button>
-                                  </div>
-                                ) : null}
-                                {canAccept ? (
-                                  <button
-                                    type="button"
-                                    className="task-overview-btn task-overview-btn--primary"
-                                    disabled={Boolean(resultAcceptancePending)}
-                                    onClick={() => {
-                                      if (resultAcceptancePending) return;
-                                      setResultAcceptancePending(item);
-                                      requestClose();
-                                    }}
-                                  >
-                                    {resultAcceptancePending
-                                      ? isZh
-                                        ? '正在验收…'
-                                        : 'Accepting…'
-                                      : isZh
-                                        ? '确认验收'
-                                        : 'Accept result'}
-                                  </button>
-                                ) : null}
+                                <button
+                                  type="button"
+                                  className="task-overview-btn task-overview-btn--primary"
+                                  disabled={Boolean(resultAcceptancePending)}
+                                  onClick={() => {
+                                    if (resultAcceptancePending) return;
+                                    setResultAcceptancePending(item);
+                                    requestClose();
+                                  }}
+                                >
+                                  {resultAcceptancePending
+                                    ? isZh
+                                      ? '正在验收…'
+                                      : 'Accepting…'
+                                    : isZh
+                                      ? '确认验收'
+                                      : 'Accept result'}
+                                </button>
                               </footer>
                             );
                           })()}
@@ -1483,7 +1492,14 @@ function MainApp() {
                       onClose={() => setConversationDrawerOpen(false)}
                       workspacePath={activeConversationId ? activeWorkspace : draftWorkspacePath}
                       workspaces={workspaces}
-                      onWorkspaceChange={setDraftWorkspacePath}
+                      onWorkspaceChange={async (workspacePath) => {
+                    setDraftWorkspacePath(workspacePath);
+                    if (!activeWorkspace && workspacePath) {
+                      setActiveWorkspace(workspacePath);
+                      const listed = await clientApi.workspaceList();
+                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                    }
+                  }}
                       isPageActive={conversationDrawerOpen}
                       messageTarget={notificationMessageTarget}
                     />

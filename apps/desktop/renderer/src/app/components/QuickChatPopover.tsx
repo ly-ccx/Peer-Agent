@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { PeerIcon } from '../../ui/icons';
 import { effortIndexFromValue, snapEffortValue } from '../../chat/components/thread/effortSlider';
 import { effortLabel, isEffortLevel } from '../../chat/state/preferences';
 import type {
@@ -229,7 +230,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
                   onFocus={() => setActiveModelGroupIndex(index)}
                 >
                   <span>{group}</span>
-                  <span className="quick-chat-model-arrow" aria-hidden="true">›</span>
+                  <span className="quick-chat-model-arrow" aria-hidden="true"><PeerIcon name="chevronRight" size={12} /></span>
                 </button>
               );
             })}

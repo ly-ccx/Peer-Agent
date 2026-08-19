@@ -57,6 +57,7 @@ describe('System Context assembly', () => {
       'core.identity',
       'agent.brainstorming',
       'agent.adaptive-planning',
+      'agent.construction-falsification',
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
@@ -67,9 +68,10 @@ describe('System Context assembly', () => {
     assert.equal(context.sections[0].layer, 'L0_CORE');
     assert.equal(context.sections[1].layer, 'L1_AGENT'); // brainstorming
     assert.equal(context.sections[2].layer, 'L1_AGENT'); // adaptive-planning
-    assert.equal(context.sections[3].layer, 'L1_AGENT'); // diagnosis-gate
-    assert.equal(context.sections[4].layer, 'L1_AGENT'); // mcp-host
-    assert.equal(context.sections[5].layer, 'L2_RUNTIME'); // workspace
+    assert.equal(context.sections[3].layer, 'L1_AGENT'); // construction-falsification
+    assert.equal(context.sections[4].layer, 'L1_AGENT'); // diagnosis-gate
+    assert.equal(context.sections[5].layer, 'L1_AGENT'); // mcp-host
+    assert.equal(context.sections[6].layer, 'L2_RUNTIME'); // workspace
     assert.match(context.sections[0].checksum, /^[a-f0-9]{64}$/);
     assert.match(context.snapshot.renderedHash, /^[a-f0-9]{64}$/);
     assert.equal(context.snapshot.conversationId, 'c1');
@@ -77,7 +79,7 @@ describe('System Context assembly', () => {
     assert.equal(context.snapshot.provider, 'openai');
     assert.equal(context.snapshot.model, 'test-model');
     assert.equal(context.snapshot.sectionRefs.length, context.sections.length);
-    assert.equal(context.snapshot.sectionRefs.length, 9);
+    assert.equal(context.snapshot.sectionRefs.length, 10);
     assert.match(renderSystemContext(context), /Evidence discipline/);
     assert.match(renderSystemContext(context), /Never narrate "writing" \/ "正在写入"/);
     assert.match(renderSystemContext(context), /prefer chunked writes/);
@@ -127,6 +129,7 @@ describe('System Context assembly', () => {
       'core.identity',
       'agent.brainstorming',
       'agent.adaptive-planning',
+      'agent.construction-falsification',
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
@@ -259,9 +262,13 @@ describe('System Context assembly', () => {
     assert.match(modeSection.content, /Self-driven agent mode/);
     // adaptive planning + diagnosis sources should be present for Agent default.
     const adaptive = chatContext.sections.find((section) => section.id === 'agent.adaptive-planning');
+    const falsification = chatContext.sections.find((section) => section.id === 'agent.construction-falsification');
     const diagnosis = chatContext.sections.find((section) => section.id === 'agent.diagnosis-gate');
     assert.ok(adaptive, 'chat mode should inject adaptive-planning source');
+    assert.ok(falsification, 'chat mode should inject construction-falsification source');
     assert.ok(diagnosis, 'chat mode should inject diagnosis-gate source');
+    assert.match(adaptive.content, /File count is not the depth signal/);
+    assert.match(falsification.content, /cross-product matrix/);
   });
 
   it('renders explicit runtime reminders without mixing them into user messages', () => {
@@ -301,6 +308,7 @@ describe('System Context assembly', () => {
       'core.identity',
       'agent.brainstorming',
       'agent.adaptive-planning',
+      'agent.construction-falsification',
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
@@ -450,6 +458,7 @@ describe('System Context assembly', () => {
       'core.identity',
       'agent.brainstorming',
       'agent.adaptive-planning',
+      'agent.construction-falsification',
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',

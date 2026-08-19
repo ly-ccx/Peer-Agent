@@ -162,6 +162,16 @@ export function createGoalWorktreeAdapter({
         baseline: { commit: plan.deliveryBinding?.baseCommit || plan.baseCommit },
       });
       try {
+        if (plan.deliveryHandoff?.status === 'delivered') {
+          if (typeof worktreeAdapter.cleanup === 'function') {
+            // delivered: worktree remove
+            await worktreeAdapter.cleanup(run, execution, { force: true });
+          }
+          return clearIsolation(plan);
+        }
+        if (plan.deliveryHandoff?.status === 'stopped') {
+          return plan;
+        }
         const collected = typeof worktreeAdapter.collect === 'function'
           ? await worktreeAdapter.collect(run, execution)
           : null;

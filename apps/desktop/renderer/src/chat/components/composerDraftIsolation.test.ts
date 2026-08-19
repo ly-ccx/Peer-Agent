@@ -87,7 +87,7 @@ test('send path does not seed or estimate context occupancy', async () => {
   assert.doesNotMatch(surface, /contextReady=/);
 });
 
-test('new task starts in main and navigates directly to the workbench', async () => {
+test('new task starts in main and stays on the first-run chat path', async () => {
   const [surface, app] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('../../App.tsx'),
@@ -95,7 +95,11 @@ test('new task starts in main and navigates directly to the workbench', async ()
 
   assert.match(surface, /await clientApi\.chatStartTask\(\{[\s\S]*text,[\s\S]*attachments: sentAttachments/);
   assert.match(surface, /onTaskStarted\?\.\(started\.conversationId\)/);
-  assert.match(app, /onTaskStarted=\{\(conversationId\) => \{[\s\S]*setActivePage\('home'\)/);
+  assert.match(app, /onTaskStarted=\{\(conversationId\) => \{[\s\S]*setActivePage\('chat'\)/);
+  assert.match(surface, /chat-empty-primary-btn/);
+  assert.match(surface, /连接 AI 服务/);
+  assert.doesNotMatch(surface, /FirstRunSetupPanel|first-run-setup/);
+  assert.doesNotMatch(app, /Gate A[\s\S]*openSettings\('providers'\)/);
   assert.doesNotMatch(surface, /pendingFirstSendRef|onInitialMessageSubmitted|onEnsureConversation/);
   assert.doesNotMatch(app, /const ensureConversation/);
 });

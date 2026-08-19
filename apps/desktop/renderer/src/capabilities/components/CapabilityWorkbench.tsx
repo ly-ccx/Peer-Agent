@@ -1,6 +1,7 @@
 import type { CapabilityManifest } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 import {
   buildCapabilityWorkbenchItems,
   countCapabilityWorkbenchItems,
@@ -62,7 +63,8 @@ export function CapabilityWorkbench({
               className="skill-upload-btn"
               onClick={() => setSkillsUploadOpen(true)}
             >
-              ＋ 上传技能
+              <PeerIcon name="plus" size={14} />
+              上传技能
             </button>
           )}
         </div>

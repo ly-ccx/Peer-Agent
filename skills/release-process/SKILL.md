@@ -1,8 +1,8 @@
 ---
 name: release-process
-description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、GitHub Pages 文档站、打 tag 触发 CI）。
+description: Peer Agent 发版流程（版本戳、release notes、CHANGELOG、根 README 漂移检查、CLI 平台矩阵核对、GitHub Pages 文档站、打 tag 触发 CI）。
 whenToUse: 用户要求发版、打 beta/正式 tag、写 release notes、更新 CHANGELOG、检查/更新根 README、同步 docs 站点/Pages，或询问如何发布 Desktop/CLI。
-version: 0.1.3
+version: 0.1.4
 ---
 
 # Peer Agent 发布流程 Skill
@@ -14,7 +14,7 @@ version: 0.1.3
 
 | 项 | 路径 / 事实 |
 |---|---|
-| 版本权威（发布时） | git tag `v*`（如 `v0.0.1-beta.44` / `v0.1.0`） |
+| 版本权威（发布时） | git tag `v*`（如 `v0.0.4-beta.5` / `v0.1.0`） |
 | 仓库基线版本文件 | `VERSION` + 各 `package.json` / Cargo 清单（由 `scripts/stamp-version.mjs` 回写） |
 | 产品说明（中英） | `release-notes/vX.Y.Z.md`（更新日志唯一内容来源；`<!-- locale:zh-CN -->` / `<!-- locale:en-US -->`） |
 | 累积 Changelog | `CHANGELOG.md` |
@@ -30,7 +30,7 @@ version: 0.1.3
 1. 在干净工作区或明确列出的改动集上工作：`git status -sb`。
 2. 确认当前分支策略：预发布可以在 `dev/<version>` 或发布约定分支打 tag；**正式版必须先合并 `main`，再创建正式 tag**，不得直接从开发/发布分支发布 latest。
 3. 与用户确认目标版本字符串：
-   - 预发布：`0.0.1-beta.N` → tag `v0.0.1-beta.N`（CI prerelease / beta 通道）
+   - 预发布：`0.0.4-beta.N` → tag `v0.0.4-beta.N`（CI prerelease / beta 通道）
    - 正式：`x.y.z` → tag `vX.Y.Z`（latest 通道）
 4. 确认本轮用户可见变更摘要（Desktop / CLI / docs / 修复 / 破坏性变更）。
 
@@ -110,6 +110,7 @@ release-notes/v<version>.md
 | `docs/changelog.html` | **生成门禁**：新版本 notes 已写则运行 `pnpm build:changelog`；禁止手工维护 `ENTRIES` |
 | `docs/docs.html` | 用户可见行为/命令/安装/能力（Skill/Plugin/MCP/权限）有变更 |
 | `docs/index.html` | 定位文案、下载入口、入口能力（Desktop/CLI）有变更 |
+| `docs/docs.html` / `docs/index.html` 中的版本与发布态文案 | 残留旧版本示例（如 `v0.0.1-beta.*`）或未发布态文案（如 `install (when published)`）时**必须**改 |
 | `docs/logo*.png` / `favicon*.png` | 品牌资源变更时同步 |
 
 #### `docs/changelog.html` 生成门禁（禁止 stamp / tag 前跳过）
@@ -118,20 +119,23 @@ release-notes/v<version>.md
 
 发版前必须同时满足：
 
-1. `CHANGELOG.md` 含本版标题（如 `## 0.0.1-beta.N`）
+1. `CHANGELOG.md` 含本版标题（如 `## 0.0.4-beta.N`）
 2. `pnpm build:changelog` 成功，随后 `pnpm check:changelog` 通过
 3. 目标版本的 notes 含非空的 zh-CN 与 en-US 段落
+4. `docs/changelog-data/manifest.json` 的 `generatedAt` 为真实时间戳（生成器从 `release-notes/` 最近提交派生；`check:changelog` 会拒绝 epoch 占位 `1970-01-01`）
 
 本地核验（失败则**禁止**进入 stamp / tag）：
 
 ```bash
-# 把 VERSION 换成目标版本号，如 0.0.1-beta.47
-VERSION=0.0.1-beta.47
+# 把 VERSION 换成目标版本号，如 0.0.4-beta.5
+VERSION=0.0.4-beta.5
 rg -n "## ${VERSION}" CHANGELOG.md
 pnpm build:changelog
 pnpm check:changelog
 test -f "docs/changelog-data/v${VERSION}.json"
 rg -n "\"version\":\"v${VERSION}\"" docs/changelog-data/manifest.json | head
+# generatedAt 非 epoch 占位（check:changelog 已含该断言，此处仅显式复核）
+node -e "const m=require('./docs/changelog-data/manifest.json'); if (m.generatedAt==='1970-01-01T00:00:00.000Z' || Number.isNaN(Date.parse(m.generatedAt))) { console.error('generatedAt invalid:', m.generatedAt); process.exit(1); } console.log('generatedAt ok:', m.generatedAt)"
 ```
 
 操作要点：
@@ -145,7 +149,7 @@ python3 -m http.server 8777 --directory docs
 # 打开 http://127.0.0.1:8777/ 与 /docs.html /changelog.html
 ```
 
-4. 提交 `docs/*`、`CHANGELOG.md` 与 notes 到将要打 tag 的分支（Pages 若绑定 `dev/0.0.1` 的 `/docs`，确保该分支包含站点提交）。
+4. 提交 `docs/*`、`CHANGELOG.md` 与 notes 到将要打 tag 的分支（Pages 从该分支的 `/docs` 构建，确保该分支包含站点提交）。
 
 ### 3.5) 根 `README.md` 漂移检查（每次必做，条件更新）
 
@@ -153,11 +157,13 @@ python3 -m http.server 8777 --directory docs
 
 #### 每次发版至少扫这些字段
 
-1. **版本表述** — 是否仍写过时 early-development / 旧版本号；可写当前系列（如 `0.0.1-beta.N`）或指向 `VERSION` / Release。
-2. **安装路径** — `@peer-agent/cli`、`peer`、Desktop 开发/打包命令是否与本轮一致。
+1. **版本表述** — 是否仍写过时 early-development / 旧版本号；**且不得引用尚未发布的版本**：无对应 git tag 与 release note 的版本（如刚 stamp 的 `0.0.5-beta.1` 开发线）只能写作「开发中」，不得写成「当前 beta 通道」。可写当前系列（如 `0.0.4`）或指向 `VERSION` / Release。
+2. **安装路径与平台矩阵** — `@peer-agent/cli`、`peer`、Desktop 开发/打包命令是否与本轮一致；README 中的 CLI 平台表述必须与 `packages/npm-cli/lib/platform.mjs` 的 `supported` 矩阵一致（当前仅 `darwin-arm64` 一等支持，其余平台 `supported: false` 并在 postinstall 明确失败）。
 3. **入口面** — Desktop / TUI / CLI 是否仍与产品一致。
 4. **核心能力** — Agent / Plan / Goal / Quick Chat / Browser·Workbench / MCP / Skills 等用户可见能力是否过时或遗漏。
 5. **链接存活** — 相对链接与文档入口是否可达；禁止再把已迁出的架构文档写成代码仓内死链。
+6. **站点版本与发布态文案** — `docs/docs.html` / `docs/index.html` 中不得残留旧版本示例（如 `v0.0.1-beta.*`）或未发布态文案（如 `install (when published)`、demo 里的旧版本号）。
+7. **新用户可见能力闭环** — 本轮 CHANGELOG / release-notes 里新增的用户可见能力（如自动更新、内嵌浏览器、Roundtable），必须显式决策：写进根 README 与落地页，**或**记录为有意暂不写（在发版汇报中说明理由）；不允许无声漏掉。
 
 #### 仅在命中触发条件时更新 README
 
@@ -180,6 +186,21 @@ python3 -m http.server 8777 --directory docs
 - 不要把每条 bugfix 写进 README
 - 不要把 README 当 CHANGELOG 用
 - 不要在发版流程里维护 `peer-knowledge` 架构长文
+
+### 3.6) 开启开发线（与「发布」严格区分）
+
+当目标是**开启 `x.y.z` 开发线**（如 stamp `0.0.5-beta.1`）而非发布时，只允许最小动作集：
+
+- `node scripts/stamp-version.mjs x.y.z-beta.1` 回写 `VERSION` / manifests；
+- `CHANGELOG.md` 顶部写入 `## x.y.z-beta.1 - <date>` 段，并明确注明「开启开发线」（如 `Open the 0.0.5 development line from the published 0.0.4 / origin/main`）。
+
+**禁止**（否则会造成「CHANGELOG 有、站点无、README 当已发布」的分裂状态）：
+
+- 写 `release-notes/vx.y.z-beta.1.md`（还没有可发布的用户可见变更）；
+- 运行 `build:changelog` / 提交 `docs/changelog-data` 变更；
+- 把该版本写进根 README / 站点任何「当前 beta 通道 / latest」表述。
+
+README 若必须提及该版本，只能写「`0.0.5` 开发中（尚未发布）」；「当前 beta 通道」只允许引用**已有 tag 且已有 release note** 的版本（当下即 `v0.0.4-beta.4`）。
 
 ### 4) 版本戳（工作区）
 
@@ -247,6 +268,8 @@ curl -sI https://ly-ccx.github.io/Peer-Agent/docs.html | head
 curl -sI https://ly-ccx.github.io/Peer-Agent/changelog.html | head
 # 内容冒烟：新版本号是否出现在 changelog 页
 curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" | head
+# 数据冒烟：线上 manifest 的 latest 通道与本版一致，且 generatedAt 非 epoch 占位
+curl -sL https://ly-ccx.github.io/Peer-Agent/changelog-data/manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);console.log('latest:',JSON.stringify(m.latest),'generatedAt:',m.generatedAt);if(m.generatedAt==='1970-01-01T00:00:00.000Z'||Number.isNaN(Date.parse(m.generatedAt)))process.exit(1);})"
 ```
 
 4. 若 Pages 仍显示旧内容：确认已 push 到 Pages source 分支，等待 `built`，必要时硬刷新。
@@ -261,8 +284,9 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 - [ ] 已用本地核验命令确认 CHANGELOG + 生成后的 changelog 包含本版；失败则未 stamp/tag
 - [ ] 用户可见产品变更已反映到 `docs/docs.html`（若有）
 - [ ] 相关 release notes、生成器、`docs/*` 与 `CHANGELOG.md` 已提交；Pages workflow 可从该 ref 构建
-- [ ] 已完成根 `README.md` 漂移检查（版本 / 安装 / 入口 / 能力 / 链接）
+- [ ] 已完成根 `README.md` 漂移检查（版本口径 / 安装与 CLI 平台矩阵 / 入口 / 能力 / 链接 / 站点版本文案 / 新能力闭环）
 - [ ] 若命中 README 触发条件：已更新并随发版提交；否则汇报中记录 `README: no-op`
+- [ ] 若有「开启开发线」动作：只做了 3.6 允许的最小动作，未伪造发布态（无 notes / 无站点数据 / README 不写「当前通道」）
 - [ ] `stamp-version` + `check-version` 通过
 - [ ] `v<version>` tag 已推送且 CI 触发
 - [ ] 线上 Pages / Release 冒烟通过
@@ -280,13 +304,15 @@ curl -sL https://ly-ccx.github.io/Peer-Agent/changelog.html | rg -n "<version>" 
 | `check-version.mjs` 失败 | 先 `stamp-version.mjs` 再检查；勿手改漏文件 |
 | Release CI 未触发 | 确认 tag 名 `v*` 且已 `git push origin v…` |
 | Pages 无新 changelog / 「最新」仍是上版 | 先运行生成与检查命令，再检查 `Deploy GitHub Pages` workflow；不要手工修改 `ENTRIES` 或切换版本分支 |
+| `manifest.json` 的 `generatedAt` 是 `1970-01-01` | 生成器旧版或数据未重建：升级到修复后的 `build-changelog.mjs` 并重跑 `pnpm build:changelog && pnpm check:changelog`；新版从 `release-notes/` 最近提交派生真实时间戳 |
+| README 写的 beta 通道与站点 manifest `latest.beta` 不一致 | 核对该版本是否有 git tag + release note；只有已发布版本可写「当前通道」，未发布开发线只能写「开发中」（见 3.6） |
 | CLI 归档缺 helper | 以 workflow 为准；文档/notes 写清 `peer` + `peer-credential-helper` 同目录要求 |
 | 文档仍写已删命令 | 发版前以代码 registry 为准扫一遍 `docs/docs.html` |
 | 根 README 仍写旧入口/死链 | 执行 3.5 漂移检查；命中触发条件则更新，勿用 notes 顶替 |
 
 ## Agent 执行协议
 
-1. 先复述将要发布的 **version**、分支、是否含 docs / README 变更，再动版本文件。
+1. 先复述将要发布的 **version**、分支、是否含 docs / README 变更，再动版本文件。若只是开启开发线，声明走 3.6 最小动作集而非发布流程。
 2. 每完成一个大步骤（notes → CHANGELOG → changelog 生成门禁 → 其他 docs → README 漂移检查 → stamp → tag → verify）简短汇报 Evidence（路径/命令结果）。
 3. 进入 stamp/tag 前必须贴出 `pnpm check:changelog` 的通过输出；缺失则停。
 4. README 步骤必须给出 `README: no-op` 或 `README: updated`，禁止静默跳过检查。

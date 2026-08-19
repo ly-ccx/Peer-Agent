@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { getProviderDisplayName } from '../../chat/state/providerDisplay';
 import { Switch } from '../../ui/boolean-controls';
+import { PeerIcon } from '../../ui/icons';
 import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
 import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { useConfirm } from './ConfirmProvider';
@@ -1462,10 +1463,7 @@ export function LlmSettingsPanel({
       {onBack ? (
         <header className="llm-settings-header">
           <button type="button" onClick={onBack} aria-label="Back">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M19 12H5" />
-              <path d="m12 19-7-7 7-7" />
-            </svg>
+            <PeerIcon name="back" size={18} />
           </button>
           <strong>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</strong>
         </header>
@@ -1477,7 +1475,8 @@ export function LlmSettingsPanel({
           <span>{groups.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
         </div>
         <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
-          ＋ {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
+          <PeerIcon name="plus" size={14} />
+          {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
         </button>
       </div>
 
@@ -1513,8 +1512,10 @@ export function LlmSettingsPanel({
               </p>
             </div>
             <button type="button" className="llm-catalog-back-btn" onClick={closeCatalog}>
-              {i18n.locale === 'zh-CN' ? '← 返回' : '← Back'}
+              <PeerIcon name="back" size={14} />
+              {i18n.locale === 'zh-CN' ? '返回' : 'Back'}
             </button>
+            {/* Decorative back control is a linear <svg> via PeerIcon, not a character arrow. */}
           </div>
           <label className="llm-service-catalog-search">
             <span className="sr-only">{i18n.locale === 'zh-CN' ? '搜索服务' : 'Search services'}</span>
@@ -1605,7 +1606,8 @@ export function LlmSettingsPanel({
           <div className="llm-empty">
             <p>{i18n.locale === 'zh-CN' ? '还没有连接 AI 服务。' : 'No AI services connected yet.'}</p>
             <button type="button" onClick={openAdd}>
-              ＋ {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
+              <PeerIcon name="plus" size={14} />
+              {i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}
             </button>
           </div>
         ) : groups.map((g) => {
@@ -1803,7 +1805,7 @@ export function LlmSettingsPanel({
                 aria-label={i18n.locale === 'zh-CN' ? '关闭' : 'Close'}
                 onClick={requestClose}
               >
-                ✕
+                <PeerIcon name="close" size={14} />
               </button>
             </header>
             <div className="llm-form llm-modal-body">

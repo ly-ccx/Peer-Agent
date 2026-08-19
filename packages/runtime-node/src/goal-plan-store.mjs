@@ -97,6 +97,47 @@ function readJsonlCached(filePath) {
   return records.slice();
 }
 
+const EVIDENCE_TAIL_SCAN_BYTES = 16 * 1024 * 1024;
+
+/**
+ * EvidenceIndex 可达数百 MB；任务概览只需要少量已知 ref，禁止为此全量解析。
+ * 一次读取有界尾部再统一 UTF-8 解码，避免分块边界截断中文 JSON。
+ */
+function readEvidenceRecordsFromTail(filePath, refs, maxScanBytes = EVIDENCE_TAIL_SCAN_BYTES) {
+  const wanted = new Set(normalizeEvidenceRefList(refs));
+  if (wanted.size === 0 || !existsSync(filePath)) return [];
+  const fd = openSync(filePath, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, maxScanBytes);
+    const start = size - length;
+    const buffer = Buffer.allocUnsafe(length);
+    const bytesRead = readSync(fd, buffer, 0, length, start);
+    const lines = buffer.toString('utf8', 0, bytesRead).split('\n');
+    if (start > 0) lines.shift(); // 首行可能从 JSON 中间开始。
+    const found = new Map();
+    const resolvedOriginals = new Set();
+    for (let index = lines.length - 1; index >= 0 && resolvedOriginals.size < wanted.size; index -= 1) {
+      const line = lines[index]?.trim();
+      if (!line) continue;
+      let parsed;
+      try {
+        parsed = normalizeEvidenceIndexRecord(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      if (!parsed || !wanted.has(parsed.evidenceRef)) continue;
+      found.set(parsed.evidenceRef, mergeEvidenceIndexRecords(found.get(parsed.evidenceRef), parsed));
+      if (!EVIDENCE_WRAPPER_TOOL_NAMES.has(parsed.toolName)) {
+        resolvedOriginals.add(parsed.evidenceRef);
+      }
+    }
+    return [...found.values()];
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function appendJsonl(filePath, obj) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify(obj) + '\n', 'utf8');
@@ -667,7 +708,88 @@ function normalizeEvidenceIndexRecord(value) {
   }
   const artifactRefs = normalizeEvidenceRefList(value.artifactRefs);
   if (artifactRefs.length > 0) record.artifactRefs = artifactRefs;
+  const userArtifacts = Array.isArray(value.userArtifacts)
+    ? value.userArtifacts
+      .filter((artifact) => artifact && typeof artifact === 'object')
+      .map((artifact) => {
+        const kind = ['code-change', 'file', 'image'].includes(artifact.kind) ? artifact.kind : null;
+        const ref = normalizeOptionalString(artifact.ref);
+        const label = normalizeOptionalString(artifact.label);
+        if (!kind || !ref || !label) return null;
+        const normalized = { kind, ref, label };
+        const artifactPath = normalizeOptionalString(artifact.path);
+        if (artifactPath) normalized.path = artifactPath;
+        // 新建文件（kind='file'）同样带增删统计，因此不能只放行 code-change，
+        // 否则「新建文件」这一类产物的 +N/−M 会在持久化这一层被丢掉。
+        if ((kind === 'code-change' || kind === 'file') && artifact.preview?.kind === 'code') {
+          const additions = Number.isSafeInteger(artifact.preview.additions) && artifact.preview.additions >= 0
+            ? artifact.preview.additions
+            : 0;
+          const deletions = Number.isSafeInteger(artifact.preview.deletions) && artifact.preview.deletions >= 0
+            ? artifact.preview.deletions
+            : 0;
+          const diffLines = Array.isArray(artifact.preview.diffLines)
+            ? artifact.preview.diffLines
+              .filter((line) => typeof line === 'string')
+              .slice(0, 41)
+              .map((line) => line.slice(0, 240))
+            : [];
+          if (diffLines.length > 0) normalized.preview = { kind: 'code', additions, deletions, diffLines };
+        }
+        if (kind === 'image' && artifact.preview?.kind === 'image') {
+          const dataUrl = normalizeOptionalString(artifact.preview.dataUrl);
+          const width = Number.isSafeInteger(artifact.preview.width) && artifact.preview.width > 0
+            ? Math.min(640, artifact.preview.width)
+            : 0;
+          const height = Number.isSafeInteger(artifact.preview.height) && artifact.preview.height > 0
+            ? Math.min(640, artifact.preview.height)
+            : 0;
+          if (dataUrl && dataUrl.length <= 512 * 1024
+            && /^data:image\/(?:png|jpeg|webp);base64,/i.test(dataUrl)
+            && width > 0 && height > 0) {
+            normalized.preview = { kind: 'image', dataUrl, width, height };
+          }
+        }
+        return normalized;
+      })
+      .filter(Boolean)
+    : [];
+  if (userArtifacts.length > 0) record.userArtifacts = userArtifacts;
   return record;
+}
+
+const EVIDENCE_WRAPPER_TOOL_NAMES = new Set(['goal_update_task']);
+
+function mergeEvidenceIndexRecords(current, incoming) {
+  if (!current) return incoming;
+  if (!incoming) return current;
+  const merged = { ...current };
+  for (const field of ['planId', 'conversationId', 'streamId']) {
+    if (incoming[field]) merged[field] = incoming[field];
+  }
+  const currentIsWrapper = EVIDENCE_WRAPPER_TOOL_NAMES.has(current.toolName);
+  const incomingIsWrapper = EVIDENCE_WRAPPER_TOOL_NAMES.has(incoming.toolName);
+  if (!current.toolName || (currentIsWrapper && !incomingIsWrapper)) {
+    for (const field of ['toolCallId', 'capabilityId', 'toolName']) {
+      if (incoming[field]) merged[field] = incoming[field];
+    }
+    if (incoming.createdAt) merged.createdAt = incoming.createdAt;
+  } else if (!incomingIsWrapper) {
+    for (const field of ['toolCallId', 'capabilityId', 'toolName']) {
+      if (!merged[field] && incoming[field]) merged[field] = incoming[field];
+    }
+  }
+  const artifactRefs = normalizeEvidenceRefList([
+    ...(current.artifactRefs ?? []),
+    ...(incoming.artifactRefs ?? []),
+  ]);
+  if (artifactRefs.length > 0) merged.artifactRefs = artifactRefs;
+  const userArtifacts = new Map();
+  for (const artifact of [...(current.userArtifacts ?? []), ...(incoming.userArtifacts ?? [])]) {
+    if (artifact?.ref) userArtifacts.set(artifact.ref, artifact);
+  }
+  if (userArtifacts.size > 0) merged.userArtifacts = [...userArtifacts.values()];
+  return merged;
 }
 
 function normalizeWorkflowKind(value) {
@@ -1584,6 +1706,8 @@ export function createGoalPlanStore({
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
   const changeFile = path.join(storeDir, '.changes.jsonl');
+  const evidenceRecordCache = new Map();
+  const missingEvidenceRefCache = new Set();
   // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
   // auto-start 闸门（见 goal-runner-adapter），故暴露 setOnChange 修改同一引用。
   let onChangeCallback = typeof onChange === 'function' ? onChange : null;
@@ -1837,6 +1961,25 @@ export function createGoalPlanStore({
       .filter(Boolean);
   }
 
+  function findEvidenceIndexRecords(refs) {
+    const normalizedRefs = normalizeEvidenceRefList(refs);
+    const missing = normalizedRefs.filter(
+      (ref) => !evidenceRecordCache.has(ref) && !missingEvidenceRefCache.has(ref),
+    );
+    if (missing.length > 0) {
+      const found = readEvidenceRecordsFromTail(evidenceIndexFile, missing);
+      const foundRefs = new Set();
+      for (const record of found) {
+        foundRefs.add(record.evidenceRef);
+        evidenceRecordCache.set(record.evidenceRef, record);
+      }
+      for (const ref of missing) {
+        if (!foundRefs.has(ref)) missingEvidenceRefCache.add(ref);
+      }
+    }
+    return normalizedRefs.map((ref) => evidenceRecordCache.get(ref)).filter(Boolean);
+  }
+
   function inferEvidencePlanId(planId, conversationId) {
     const normalizedPlanId = normalizeOptionalString(planId);
     if (normalizedPlanId) return normalizedPlanId;
@@ -1860,11 +2003,21 @@ export function createGoalPlanStore({
       if (normalized) base[field] = normalized;
     }
     if (artifactRefs.length > 0) base.artifactRefs = artifactRefs;
+    if (Array.isArray(entry.userArtifacts) && entry.userArtifacts.length > 0) {
+      base.userArtifacts = entry.userArtifacts;
+    }
     const records = refs
       .map((evidenceRef) => normalizeEvidenceIndexRecord({ ...base, evidenceRef }))
       .filter(Boolean);
-    for (const record of records) appendJsonl(evidenceIndexFile, record);
-    return records;
+    const mergedRecords = [];
+    for (const record of records) {
+      const merged = mergeEvidenceIndexRecords(evidenceRecordCache.get(record.evidenceRef), record);
+      appendJsonl(evidenceIndexFile, merged);
+      missingEvidenceRefCache.delete(record.evidenceRef);
+      evidenceRecordCache.set(record.evidenceRef, merged);
+      mergedRecords.push(merged);
+    }
+    return mergedRecords;
   }
 
   function evidenceRecordMatchesPlan(record, plan) {
@@ -1928,6 +2081,8 @@ export function createGoalPlanStore({
       resultAcceptance: plan.resultAcceptance ?? null,
       resultAcceptedAt: plan.resultAcceptedAt ?? null,
       resultAcceptedBy: plan.resultAcceptedBy ?? null,
+      // 候选筛要在 hydrate 前看见真实交回态，避免交回中的已验收被提前丢掉。
+      deliveryHandoff: plan.deliveryHandoff ?? null,
     };
   }
 
@@ -2061,22 +2216,29 @@ export function createGoalPlanStore({
     return { ...plan, progress: aggregateProgress(plan.tasks) };
   }
 
-  function listPlanDetails(options = {}) {
+  function selectPlanMetas(metas, options = {}) {
     const candidateFilter = typeof options?.candidateFilter === 'function'
       ? options.candidateFilter
       : null;
-    const metas = listPlans();
-    const selected = candidateFilter
-      ? metas.filter((meta) => {
-          try {
-            return candidateFilter(meta) === true;
-          } catch {
-            // 筛选器异常时宁可多 hydrate，也不能把工作台任务漏掉。
-            return true;
-          }
-        })
-      : metas;
-    return selected.map(hydratePlanMeta).filter(Boolean);
+    const limit = Number.isFinite(options?.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : 0;
+    const selected = [];
+    for (const meta of metas) {
+      if (candidateFilter) {
+        try {
+          if (candidateFilter(meta) !== true) continue;
+        } catch {
+          // 筛选器异常时宁可多 hydrate，也不能把工作台任务漏掉。
+        }
+      }
+      selected.push(meta);
+    }
+    return limit > 0 ? selected.slice(0, limit) : selected;
+  }
+
+  function listPlanDetails(options = {}) {
+    return selectPlanMetas(listPlans(), options).map(hydratePlanMeta).filter(Boolean);
   }
 
   /**
@@ -2094,9 +2256,13 @@ export function createGoalPlanStore({
     const candidateFilter = typeof options?.candidateFilter === 'function'
       ? options.candidateFilter
       : null;
+    const limit = Number.isFinite(options?.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : 0;
 
     const index = readIndex();
     let indexChanged = false;
+    const indexedMatches = [];
     const details = [];
     const nextIndex = index.map((rawMeta) => {
       const meta = normalizePlan(rawMeta);
@@ -2108,22 +2274,26 @@ export function createGoalPlanStore({
         meta.originWorkspacePath ?? meta.targetWorkspacePath,
       );
       if (hasWorkspaceIndex && indexedWorkspacePath !== wanted) return rawMeta;
-      if (hasWorkspaceIndex && candidateFilter) {
+      if (candidateFilter) {
         try {
           if (candidateFilter(meta) !== true) return rawMeta;
         } catch {
-          // 筛选器异常时继续 hydrate，避免漏掉工作区任务。
+          // 筛选器异常时继续，避免漏掉工作区任务。
         }
       }
 
+      if (hasWorkspaceIndex) {
+        indexedMatches.push(meta);
+        return rawMeta;
+      }
+
+      // 旧索引没有工作区字段时才回退读详情，用来补齐并判断归属。
       const plan = hydratePlanMeta(meta);
       if (!plan) return rawMeta;
       const planWorkspacePath = normalizePath(
         plan.originWorkspacePath ?? plan.targetWorkspacePath,
       );
       if (planWorkspacePath === wanted) details.push(plan);
-
-      if (hasWorkspaceIndex) return rawMeta;
       indexChanged = true;
       return {
         ...rawMeta,
@@ -2131,6 +2301,20 @@ export function createGoalPlanStore({
         targetWorkspacePath: plan.targetWorkspacePath ?? null,
       };
     });
+
+    indexedMatches.sort((a, b) =>
+      String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+    );
+    const remaining = limit > 0 ? Math.max(0, limit - details.length) : indexedMatches.length;
+    const selectedIndexed = limit > 0 ? indexedMatches.slice(0, remaining) : indexedMatches;
+    for (const meta of selectedIndexed) {
+      const plan = hydratePlanMeta(meta);
+      if (!plan) continue;
+      const planWorkspacePath = normalizePath(
+        plan.originWorkspacePath ?? plan.targetWorkspacePath,
+      );
+      if (planWorkspacePath === wanted) details.push(plan);
+    }
 
     // 旧索引只在首次按工作区读取时补齐一次，后续切换即可直接跳过无关详情文件。
     if (indexChanged) writeJsonl(indexFile, nextIndex);
@@ -2301,6 +2485,9 @@ export function createGoalPlanStore({
     const requestedSourceTaskId = typeof draft.sourceTaskId === 'string' && draft.sourceTaskId.trim()
       ? draft.sourceTaskId.trim()
       : undefined;
+    if (requestedParentPlanId && requestedParentPlanId === planId) {
+      throw new Error('parentPlanId cannot be its own parent');
+    }
     const parentPlan = requestedParentPlanId ? getPlan(requestedParentPlanId) : null;
     const sourceTask = parentPlan && requestedSourceTaskId
       ? parentPlan.tasks?.find((task) => task.taskId === requestedSourceTaskId)
@@ -3867,6 +4054,7 @@ export function createGoalPlanStore({
     recordVerifierRun,
     recordEvidenceRefs,
     listEvidenceIndex: readEvidenceIndex,
+    findEvidenceIndexRecords,
     recordTaskEvidence,
     recordCriterionResults,
     recordQualityReview,

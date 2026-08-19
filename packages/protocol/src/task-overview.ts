@@ -19,7 +19,7 @@
  * 且测试无需构造巨型 fixture。
  */
 
-import type { GoalPlanStatus, GoalRunnerStatus, GoalTiming } from './goal.ts';
+import type { GoalDeliveryHandoffStatus, GoalPlanStatus, GoalRunnerStatus, GoalTiming } from './goal.ts';
 import { projectGoalTiming } from './goal.ts';
 import type {
   AutomationLifecycleStatus,
@@ -108,12 +108,47 @@ export type TaskOverviewPlanStepStatus =
   | 'cancelled'
   | 'waiting_user';
 
+export type TaskOverviewArtifactKind = 'code' | 'file' | 'image';
+
+export interface TaskOverviewCodePreview {
+  readonly kind: 'code';
+  readonly additions: number;
+  readonly deletions: number;
+  readonly diffLines: readonly string[];
+}
+
+export interface TaskOverviewImagePreview {
+  readonly kind: 'image';
+  readonly dataUrl: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type TaskOverviewArtifactPreview = TaskOverviewCodePreview | TaskOverviewImagePreview;
+
+/** 由 GoalTask.evidenceRefs / EvidenceIndex 派生的用户可浏览产物。 */
+export interface TaskOverviewArtifact {
+  /** 原始 Artifact 引用；仅用于追溯与列表 key，不直接展示给用户。 */
+  readonly ref: string;
+  readonly kind: TaskOverviewArtifactKind;
+  /** 用户可理解的产物名称，不得包含内部 UUID 或协议引用。 */
+  readonly label: string;
+  /** 与产物类型匹配的动作文案，例如“预览截图”“查看结果”。 */
+  readonly actionLabel: string;
+  /** Provider 产生、main 规范化后的有界 hover 内容。 */
+  readonly preview?: TaskOverviewArtifactPreview;
+  /** main 进程确认可安全打开后才提供。 */
+  readonly openPath?: string;
+}
+
 export interface TaskOverviewPlanStep {
   readonly taskId: string;
   readonly title: string;
   readonly status: TaskOverviewPlanStepStatus;
   /** 当前 Runner 正在推进的步骤。 */
   readonly current?: boolean;
+  /** 仅属于该叶子任务的 Evidence 派生产物。 */
+  readonly artifacts?: readonly TaskOverviewArtifact[];
 }
 
 export interface TaskOverviewItem {
@@ -143,6 +178,7 @@ export interface TaskOverviewItem {
    * 没隔离或没验收时不出现。
    */
   readonly deliveryHandoffLabel?: string;
+  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -249,6 +285,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly deliveryRoute?: string;
   /** 用户可见的交回状态；没隔离或没验收时省略。 */
   readonly deliveryHandoffLabel?: string;
+  readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -420,6 +457,8 @@ export function projectConversation(
  * 13. runner paused → paused
  * 14. runner idle 且 plan executing → paused（异常态，提示诊断）
  * 16. plan completed（已验收）/cancelled/failed → terminal
+ *      已验收但交回仍在进行（delivering / idle）或失败（stopped）时
+ *      暂不进终态；仅有 deliveryRoute 不算正在交回。
  *
  * 注意 rule 14 在 rule 8 之前不会命中（executing 已被 rule 8 拦截），
  * 因此实现时将 rule 14 放在 rule 8 之后、仅当 runner 显式 idle 时生效。
@@ -479,6 +518,7 @@ export function projectGoalPlan(
     ...(snapshot.workspaceLabel ? { workspaceLabel: snapshot.workspaceLabel } : {}),
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
+    ...(snapshot.deliveryHandoffStatus ? { deliveryHandoffStatus: snapshot.deliveryHandoffStatus } : {}),
     ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
     ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
     ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),
@@ -501,7 +541,7 @@ export function projectGoalPlan(
 }
 
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, interrupted, accepted } = snapshot;
+  const { status, runnerStatus, interrupted, accepted, deliveryHandoffStatus } = snapshot;
 
   // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
   // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
@@ -548,6 +588,25 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
       statusLabel: '待用户验收',
       actionLabel: '查看结果',
     };
+  }
+  if (status === 'completed' && accepted === true && deliveryHandoffStatus !== 'delivered') {
+    if (deliveryHandoffStatus === 'stopped') {
+      return {
+        actionRight: 'result_ready',
+        nextAction: 'review_result',
+        statusLabel: '交回未完成',
+        actionLabel: '查看结果',
+      };
+    }
+    // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
+    if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
+      return {
+        actionRight: 'result_ready',
+        nextAction: 'none',
+        statusLabel: '正在交回目标分支',
+        actionLabel: '查看 →',
+      };
+    }
   }
   if (status === 'completed' || status === 'cancelled' || status === 'failed') {
     return {

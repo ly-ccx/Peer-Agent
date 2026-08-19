@@ -19,6 +19,8 @@ import type {
   NodeRuntimePermissionResponse,
   NodeRuntimeSession,
 } from './contracts.ts';
+import type { NodeShellArtifactStore } from './shell-artifact-store.ts';
+import type { NodeShellSessionManager } from './shell-session.ts';
 import type { NodeShellTaskManager } from './shell-task-manager.ts';
 
 export type NodeCapabilityApprovalKind = 'file-write' | 'shell-exec' | 'web-fetch';
@@ -55,6 +57,8 @@ export interface NodeShellProviderOptions {
   readonly artifactRoot?: string;
   readonly killGraceMs?: number;
   readonly taskManager?: NodeShellTaskManager;
+  readonly sessionManager?: NodeShellSessionManager;
+  readonly artifactStore?: NodeShellArtifactStore;
 }
 
 export interface CreateNodeProviderBundleOptions {
@@ -90,4 +94,5 @@ export interface NodeProviderBundle {
   readonly events: {
     subscribe(listener: (event: RuntimeSdkEvent) => void): () => void;
   };
+  dispose(): Promise<void>;
 }

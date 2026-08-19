@@ -16,7 +16,7 @@ function planWithDelivery(overrides: Partial<GoalPlan> = {}): GoalPlan {
     createdAt: '2026-08-13T00:00:00.000Z',
     updatedAt: '2026-08-13T00:00:00.000Z',
     ...overrides,
-  };
+  } as GoalPlan;
 }
 
 test('GoalPlan 用 targetBranch 表达交付分支，不把 workspace 路径当唯一路由', () => {
@@ -166,6 +166,18 @@ test('formatGoalDeliveryHandoff 只在已隔离且已验收时展示交回状态
       },
     }),
     '目标分支已更新',
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      resultAcceptance: accepted,
+      deliveryHandoff: {
+        status: 'stopped',
+        stoppedReason: 'target_checkout_dirty',
+        updatedAt: '2026-08-14T01:01:00.000Z',
+      },
+    }),
+    '你正在目标分支上，还有未提交改动，交回已暂停',
   );
   assert.equal(
     formatGoalDeliveryHandoff({

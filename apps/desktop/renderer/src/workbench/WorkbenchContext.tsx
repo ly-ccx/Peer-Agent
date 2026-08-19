@@ -31,6 +31,10 @@ import {
 import { defaultModeForKind, detectFileKind } from './file-preview/fileTypes';
 import { workbenchIsLayoutVisible } from './workbenchLayoutProjection';
 import {
+  rememberPreparedBrowser,
+  resolveBrowserPanelReveal,
+} from './browserPanelReveal';
+import {
   normalizeWorkbenchOpenMap,
   resolveWorkbenchOpen,
   updateWorkbenchOpen,
@@ -87,6 +91,8 @@ interface WorkbenchSettingsShape {
 interface WorkbenchState {
   open: boolean;
   width: number;
+  /** 临时铺满当前布局宿主；不持久化，恢复后继续使用原 width。 */
+  maximized: boolean;
   activeTab: WorkbenchTabId;
   goalSlot: HTMLElement | null;
   hasGoalPlan: boolean;
@@ -102,6 +108,10 @@ interface WorkbenchState {
   documentSession: DocumentSessionState;
   /** 工作台点击后台线程卡片后，右侧 Threads 面板聚焦的 shell taskId。 */
   focusThreadTaskId: string | null;
+  /** 根工作台才承担全局 Browser 调度；会话抽屉只表达当前会话。 */
+  layoutHost: 'root' | 'local';
+  /** 后台 Task 已拉起、需要继续挂着 WebContents 的会话（不含当前前台会话）。 */
+  preparedBrowserConversations: readonly string[];
 }
 
 type BrowserSessionUpdater =
@@ -117,6 +127,7 @@ interface WorkbenchActions {
   toggleOpen: () => void;
   setActiveTab: (tab: WorkbenchTabId) => void;
   setWidth: (width: number) => void;
+  setMaximized: (maximized: boolean) => void;
   registerGoalSlot: (el: HTMLElement | null) => void;
   setHasGoalPlan: (has: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
@@ -136,6 +147,8 @@ interface WorkbenchActions {
   /** 展开右侧面板并打开后台线程 Tab；可选聚焦某个 shell taskId。 */
   openBackgroundThread: (taskId?: string | null) => void;
   setBrowserSession: (next: BrowserSessionUpdater) => void;
+  setBrowserSessionFor: (targetConversationId: string, next: BrowserSessionUpdater) => void;
+  resolveBrowserSession: (targetConversationId: string | null) => BrowserSessionState;
   setDocumentSession: (next: DocumentSessionUpdater) => void;
 }
 
@@ -186,6 +199,7 @@ export function WorkbenchProvider({
     normalizeWorkbenchOpenMap(initial.openByConversation),
   );
   const [width, setWidthState] = useState<number>(clampWidth(initial.width ?? WORKBENCH_DEFAULT_WIDTH));
+  const [maximized, setMaximizedState] = useState(false);
   const [activeTabMap, setActiveTabMap] = useState<Record<string, WorkbenchTabId>>(
     normalizeWorkbenchTabMap(initial.activeTab),
   );
@@ -209,6 +223,7 @@ export function WorkbenchProvider({
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
   const [focusThreadTaskId, setFocusThreadTaskId] = useState<string | null>(null);
+  const [preparedBrowserConversations, setPreparedBrowserConversations] = useState<string[]>([]);
 
   const currentSessionKey = workbenchSessionKey(conversationId);
   const open = resolveWorkbenchOpen(openByConversation, conversationId, legacyOpenDefault);
@@ -271,11 +286,14 @@ export function WorkbenchProvider({
 
   const setOpen = useCallback((next: boolean) => {
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, next));
+    if (!next) setMaximizedState(false);
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
   const toggleOpen = useCallback(() => {
-    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, !openRef.current));
+    const next = !openRef.current;
+    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, next));
+    if (!next) setMaximizedState(false);
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
@@ -284,6 +302,10 @@ export function WorkbenchProvider({
     setWidthState((prev) => (prev === clamped ? prev : clamped));
     schedulePersist();
   }, [schedulePersist]);
+
+  const setMaximized = useCallback((next: boolean) => {
+    setMaximizedState(next);
+  }, []);
 
   const setActiveTab = useCallback((tab: WorkbenchTabId) => {
     const key = workbenchSessionKey(conversationId);
@@ -294,8 +316,19 @@ export function WorkbenchProvider({
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
-  const setBrowserSession = useCallback((next: BrowserSessionUpdater) => {
-    const key = workbenchSessionKey(conversationId);
+  const resolveBrowserSession = useCallback((targetConversationId: string | null) => {
+    const key = workbenchSessionKey(targetConversationId);
+    const stored = browserSessionMap[key];
+    if (stored) return stored;
+    const existing = defaultBrowserSessionsRef.current[key];
+    if (existing) return existing;
+    const created = createBrowserSessionState();
+    defaultBrowserSessionsRef.current[key] = created;
+    return created;
+  }, [browserSessionMap]);
+
+  const setBrowserSessionFor = useCallback((targetConversationId: string, next: BrowserSessionUpdater) => {
+    const key = workbenchSessionKey(targetConversationId);
     setBrowserSessionMap((prev) => {
       const current = prev[key]
         ?? defaultBrowserSessionsRef.current[key]
@@ -307,27 +340,51 @@ export function WorkbenchProvider({
       return { ...prev, [key]: normalized };
     });
     schedulePersist();
-  }, [conversationId, schedulePersist]);
+  }, [schedulePersist]);
+
+  const setBrowserSession = useCallback((next: BrowserSessionUpdater) => {
+    if (!conversationId) {
+      setBrowserSessionFor('__none', next);
+      return;
+    }
+    setBrowserSessionFor(conversationId, next);
+  }, [conversationId, setBrowserSessionFor]);
 
   useEffect(() => clientApi.onBrowserPanelRevealRequest((request) => {
-    if (!conversationId || request.conversationId !== conversationId) return;
-    const wasOpen = openRef.current;
-    const wasBrowser = latestRef.current.activeTabMap[currentSessionKey] === 'browser';
-    const existing = latestRef.current.browserSessionMap[currentSessionKey]
-      ?? defaultBrowserSessionsRef.current[currentSessionKey];
-    const session = existing ?? createBrowserSessionState();
-    if (!existing) setBrowserSession(session);
-    setOpen(true);
-    setActiveTab('browser');
+    const requestId = typeof request.conversationId === 'string' ? request.conversationId.trim() : '';
+    const requestKey = workbenchSessionKey(requestId || null);
+    const existing = latestRef.current.browserSessionMap[requestKey]
+      ?? defaultBrowserSessionsRef.current[requestKey]
+      ?? null;
+    const decision = resolveBrowserPanelReveal({
+      requestConversationId: requestId,
+      hostConversationId: conversationId,
+      layoutHost,
+      focus: request.focus,
+      hostOpen: openRef.current,
+      hostBrowserActive: latestRef.current.activeTabMap[currentSessionKey] === 'browser',
+      requestSessionExists: existing != null,
+    });
+    if (!decision.accept) return;
+    if (decision.prepareSession && !existing) {
+      setBrowserSessionFor(requestId, createBrowserSessionState());
+    }
+    if (decision.mountPrepared && requestId !== conversationId) {
+      setPreparedBrowserConversations((prev) => rememberPreparedBrowser(prev, requestId));
+    }
+    if (decision.stealUi) {
+      setOpen(true);
+      setActiveTab('browser');
+    }
     void clientApi.acknowledgeBrowserPanelReveal({
       requestId: request.requestId,
-      conversationId,
+      conversationId: requestId,
       ok: true,
-      status: wasOpen && wasBrowser ? 'already_active' : wasOpen ? 'activated' : 'opened',
-      sessionId: currentSessionKey,
-      focused: request.focus !== false,
+      status: decision.status,
+      sessionId: requestKey,
+      focused: decision.stealUi,
     });
-  }), [conversationId, currentSessionKey, setActiveTab, setBrowserSession, setOpen]);
+  }), [conversationId, currentSessionKey, layoutHost, setActiveTab, setBrowserSessionFor, setOpen]);
 
   const setDocumentSession = useCallback((next: DocumentSessionUpdater) => {
     const key = workbenchSessionKey(conversationId);
@@ -486,8 +543,13 @@ export function WorkbenchProvider({
   // 根布局只投影当前可见的 Workbench；离开 Chat 时保留 open 状态但释放第三列。
   useEffect(() => {
     if (layoutHost !== 'root') return;
-    document.documentElement.dataset.workbenchOpen = workbenchIsLayoutVisible(open, isPageActive) ? 'true' : 'false';
-  }, [open, isPageActive, layoutHost]);
+    const visible = workbenchIsLayoutVisible(open, isPageActive);
+    document.documentElement.dataset.workbenchOpen = visible ? 'true' : 'false';
+    document.documentElement.dataset.workbenchMaximized = visible && maximized ? 'true' : 'false';
+    return () => {
+      delete document.documentElement.dataset.workbenchMaximized;
+    };
+  }, [open, maximized, isPageActive, layoutHost]);
   useEffect(() => {
     if (layoutHost !== 'root') return;
     document.documentElement.dataset.sidebarCollapsed = sidebarCollapsed ? 'true' : 'false';
@@ -537,6 +599,7 @@ export function WorkbenchProvider({
   const value = useMemo<WorkbenchContextValue>(() => ({
     open,
     width,
+    maximized,
     activeTab,
     goalSlot,
     hasGoalPlan,
@@ -548,11 +611,14 @@ export function WorkbenchProvider({
     browserSession,
     documentSession,
     focusThreadTaskId,
+    layoutHost,
+    preparedBrowserConversations,
     conversationId,
     setOpen,
     toggleOpen,
     setActiveTab,
     setWidth,
+    setMaximized,
     registerGoalSlot,
     setHasGoalPlan,
     setSidebarAutoCollapsed,
@@ -564,13 +630,15 @@ export function WorkbenchProvider({
     revealInFiles,
     openBackgroundThread,
     setBrowserSession,
+    setBrowserSessionFor,
+    resolveBrowserSession,
     setDocumentSession,
   }), [
-    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, focusThreadTaskId, conversationId,
-    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
+    open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
+    filesTarget, browserSession, documentSession, focusThreadTaskId, layoutHost, preparedBrowserConversations, conversationId,
+    setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, openBackgroundThread,
-    setBrowserSession, setDocumentSession,
+    setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;

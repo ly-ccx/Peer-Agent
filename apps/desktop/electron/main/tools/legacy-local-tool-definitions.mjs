@@ -120,6 +120,14 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
           type: 'string',
           description: 'Absolute or workspace-relative file path.',
         },
+        start_line: {
+          type: 'number',
+          description: 'Optional 1-based inclusive start line. When set, content is a numbered slice.',
+        },
+        end_line: {
+          type: 'number',
+          description: 'Optional 1-based inclusive end line. When set with start_line, both ends are included.',
+        },
       },
       required: ['path'],
       additionalProperties: false,

@@ -52,7 +52,7 @@
 | **CLI** | 可安装的 `@peer-agent/cli` —— 脚本化进入同一台机器 |
 
 > [!NOTE]
-> 当前正式版：**`0.0.4`**（npm `latest`），beta 通道 **`0.0.4-beta.4`**。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
+> 当前正式版：**`0.0.5`**（npm `latest`）；最新已发布 beta 通道 **`0.0.5-beta.4`**。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
 
 ---
 
@@ -199,9 +199,10 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 npm install -g @peer-agent/cli
 peer --version
 peer
+peer exec "总结这个仓库"
 ```
 
-npm 包会在安装时从 GitHub Releases 下载对应平台的 `peer` 二进制（macOS / Linux，arm64 / x64）。
+npm 包会在安装时从 GitHub Releases 下载对应平台的 `peer` 二进制。当前仅 macOS arm64（`peer-darwin-arm64.tar.gz`）一等支持；其余平台在多平台 CLI 发布前会由 postinstall 明确报错。
 
 ### 方式 C —— 从源码构建
 

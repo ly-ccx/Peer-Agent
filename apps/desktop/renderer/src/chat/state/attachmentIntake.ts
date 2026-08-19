@@ -86,6 +86,7 @@ export async function intakeAttachments(
           mimeType: file.type || 'image/png',
           size: file.size,
           kind: 'image',
+          sourceKind: 'user_upload',
           dataUrl: await readAsDataUrl(file),
         });
       } else if (isTextLikeFile(file)) {
@@ -99,6 +100,7 @@ export async function intakeAttachments(
           mimeType: file.type || 'text/plain',
           size: file.size,
           kind: 'text',
+          sourceKind: 'user_upload',
           text: await readAsText(file),
         });
       } else {
@@ -108,10 +110,8 @@ export async function intakeAttachments(
           mimeType: file.type || 'application/octet-stream',
           size: file.size,
           kind: 'unsupported',
+          sourceKind: 'user_upload',
         });
-        error = isZh
-          ? `${file.name || '文件'} 的内容不会随消息内联发送，已附带文件信息（名称/类型/大小），Agent 可在需要时自行读取本地文件`
-          : `${file.name || 'File'} content is not inlined into the message; file info (name/type/size) was attached, and the agent can read the local file when needed`;
       }
     } catch (cause) {
       error = cause instanceof Error

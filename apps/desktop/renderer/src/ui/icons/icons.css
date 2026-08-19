@@ -1,0 +1,11 @@
+.peer-icon {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.action-label-arrow {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+}

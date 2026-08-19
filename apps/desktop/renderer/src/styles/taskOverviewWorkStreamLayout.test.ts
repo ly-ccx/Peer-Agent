@@ -26,3 +26,35 @@ test('work stream keeps responsive columns and caps its only card', async () => 
   assert.match(onlyCard, /grid-template-columns:\s*minmax\(0,\s*42rem\)/);
   assert.doesNotMatch(onlyCard, /width:|min-width:/);
 });
+
+test('work stream lets short cards shrink to their content instead of matching the neighbor', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  const stream = ruleBody(css, '.task-overview-work-stream');
+  assert.match(stream, /align-items:\s*start/);
+  assert.doesNotMatch(stream, /align-items:\s*stretch/);
+  assert.doesNotMatch(css, /\.task-overview-work-item[^{]*\{[^}]*min-height:/);
+
+  const actions = ruleBody(css, '.work-item-actions');
+  assert.doesNotMatch(actions, /mt-auto|margin-top:\s*auto/);
+});
+
+test('three-plus cards can pack into waterfall columns instead of equal-height rows', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  const waterfall = ruleBody(css, '.task-overview-work-stream.is-waterfall');
+  assert.match(waterfall, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+
+  const column = ruleBody(css, '.task-overview-work-stream__column');
+  assert.match(column, /flex-direction:\s*column|flex-col/);
+  assert.doesNotMatch(column, /min-height:/);
+});
+
+test('result stack no longer hard-cuts into a viewport two-column row grid', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  const stack = ruleBody(css, '.result-card-stack');
+  assert.match(stack, /display:\s*contents/);
+  assert.doesNotMatch(css, /@media \(min-width:\s*768px\)[\s\S]*?\.result-card-stack/);
+  assert.doesNotMatch(
+    css,
+    /\.goal-thread-stream\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit/,
+  );
+});

@@ -988,27 +988,6 @@
   gap: 6px;
 }
 
-.goal-plan-tree-row {
-  position: relative;
-  margin-left: calc(min(var(--goal-tree-depth), 4) * 16px);
-}
-
-.goal-plan-tree-row > .goal-plan-card {
-  position: relative;
-  z-index: 1;
-}
-
-.goal-plan-tree-branch {
-  position: absolute;
-  top: -6px;
-  bottom: 50%;
-  left: -10px;
-  width: 9px;
-  border-left: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
-  border-bottom-left-radius: 6px;
-}
-
 .goal-plan-history-title {
   font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
@@ -1254,6 +1233,49 @@
   color: var(--za-text-muted);
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+.goal-task-child-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.goal-task-child-plan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: var(--ui-font-meta, 12px);
+}
+
+.goal-task-child-plan:focus-visible {
+  outline: none;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+}
+
+.goal-task-child-plan-title {
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
+  color: var(--za-text);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.goal-task-child-plan-progress {
+  flex: none;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-faint);
 }
 
 .goal-plan-empty-tasks {

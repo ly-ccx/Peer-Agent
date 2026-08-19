@@ -1,5 +1,6 @@
 import type { CapabilityWorkbenchItem } from '../types';
 import { useState } from 'react';
+import { PeerIcon } from '../../ui/icons';
 
 function DetailList({
   items,
@@ -35,7 +36,7 @@ export function CapabilityDetailPanel({
             <h3>{item.name}</h3>
           </div>
         </div>
-        <button type="button" aria-label="关闭详情" onClick={onClose}>×</button>
+        <button type="button" aria-label="关闭详情" onClick={onClose}><PeerIcon name="close" size={14} /></button>
       </header>
 
       <section>
