@@ -32,11 +32,17 @@ import path from 'node:path';
 import { app, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+import { createDownloadStallWatchdog } from './update-download-stall.mjs';
 import {
   createUpdateCheckSchedule,
   registerActivationUpdateChecks,
 } from './update-check-schedule.mjs';
 import { isNewerVersion } from './update-version.mjs';
+import {
+  isLockedPhase,
+  shouldSkipUpdateCheck,
+  shouldSkipStaleUpdateEvent,
+} from './updater-phase.mjs';
 
 export { buildDmgUrl, buildReleaseUrl, mapArch };
 
@@ -96,6 +102,12 @@ const state = {
   checkTimer: undefined,
   /** 应用激活/窗口聚焦监听清理器。 */
   disposeActivationChecks: undefined,
+  /**
+   * 下载停滞看门狗句柄（update-download-stall.mjs）。mac 自管下载期间
+   * 存活，正常结束/失败/停滞触发后清理。睡眠中 socket 静默死亡导致
+   * read() 永久挂起时，由它把状态机置 error 并提供 Release 页面兜底。
+   */
+  stallWatchdog: undefined,
 };
 
 /**
@@ -272,6 +284,14 @@ export async function checkForUpdates() {
     log('checkForUpdates skipped (disabled).');
     return getUpdaterStatus();
   }
+  // 相位锁定：downloading/downloaded/ready-to-open 期间（定时/激活/手动
+  // recheck），直接返回当前快照。既不打断下载，也不制造迟到事件链——
+  // 否则「离开一会回来」触发的激活重查会把相位打回 available，安装
+  // 按钮随之消失（本次修复的主根因）。
+  if (shouldSkipUpdateCheck(state.phase)) {
+    log(`checkForUpdates skipped (phase locked: ${state.phase}).`);
+    return getUpdaterStatus();
+  }
   checkSchedule.markChecked();
   try {
     setPhase('checking');
@@ -315,6 +335,12 @@ export async function downloadUpdate() {
     log('downloadUpdate skipped (disabled).');
     return getUpdaterStatus();
   }
+  // 防重入：downloading 进行中 / downloaded / ready-to-open（安装包已就绪）
+  // 时，重复点击「更新」不再发起第二次下载，直接返回当前快照。
+  if (isLockedPhase(state.phase)) {
+    log(`downloadUpdate skipped (phase locked: ${state.phase}).`);
+    return getUpdaterStatus();
+  }
   // mac 走自管下载链路：应用为 ad-hoc 签名，Squirrel 的「下载→签名校验→原子替换」
   // 会在校验步骤失败（code requirement 不满足）。改为自管下载 dmg + 手动打开。
   if (process.platform === 'darwin') {
@@ -323,11 +349,14 @@ export async function downloadUpdate() {
   try {
     setPhase('downloading');
     state.percent = 0;
+    startDownloadStallWatchdog();
     await autoUpdater.downloadUpdate();
   } catch (err) {
     state.error = err?.message ?? String(err);
     setPhase('error');
     log(`downloadUpdate failed: ${state.error}`);
+  } finally {
+    stopStallWatchdog();
   }
   return getUpdaterStatus();
 }
@@ -365,6 +394,7 @@ async function downloadUpdateMacManual() {
     state.releaseUrl = undefined;
     state.installerPath = undefined;
     emit('download-progress', { percent: 0 });
+    startDownloadStallWatchdog();
 
     // 1) HEAD 校验：资产缺失/命名漂移时尽早暴露并兜底。
     const head = await fetchWithProxyFallback(dmgUrl, { method: 'HEAD', redirect: 'follow' });
@@ -381,6 +411,7 @@ async function downloadUpdateMacManual() {
     // 3) 流式下载并按 Content-Length 上报进度。
     await downloadToFile(dmgUrl, dest, (percent) => {
       state.percent = percent;
+      state.stallWatchdog?.notifyProgress();
       emit('download-progress', { percent });
     });
 
@@ -397,6 +428,8 @@ async function downloadUpdateMacManual() {
     state.releaseUrl = releaseUrl;
     setPhase('error');
     log(`downloadUpdateMacManual failed: ${state.error}`);
+  } finally {
+    stopStallWatchdog();
   }
   return getUpdaterStatus();
 }
@@ -527,6 +560,34 @@ export function quitAndInstall() {
   autoUpdater.quitAndInstall(false, true);
 }
 
+/**
+ * 启动下载停滞看门狗（下载开始时调用）。
+ * windowMs 内没有任何进度 → 置 error + 提供 Release 页面兜底。
+ * 只触发一次；触发后自动停止监控。
+ */
+function startDownloadStallWatchdog() {
+  stopStallWatchdog();
+  state.stallWatchdog = createDownloadStallWatchdog({
+    onStall: () => {
+      log('download stalled (no progress within window); surfacing error.');
+      state.error = '下载长时间无进度，可能因休眠中断。请重试，或打开 Release 页面手动下载。';
+      state.releaseUrl = buildReleaseUrl({
+        owner: GITHUB_OWNER,
+        repo: GITHUB_REPO,
+        version: state.availableVersion,
+      });
+      setPhase('error');
+      emit('error', { message: state.error });
+    },
+  });
+}
+
+/** 停止并清理看门狗（下载正常结束/失败时调用）。 */
+function stopStallWatchdog() {
+  state.stallWatchdog?.stop();
+  state.stallWatchdog = undefined;
+}
+
 function setPhase(phase) {
   state.phase = phase;
 }
@@ -552,15 +613,24 @@ function wireEvents() {
   // ADR-61：毕业探查（state.probing）期间，以下六个处理器一律跳过状态写入
   // 与事件广播——探查只是静默探测 stable 清单，中间态与结果都不能经由事件
   // 通道泄漏给渲染层；探查结论由 checkForUpdates 统一表达。
+  //
+  // 相位锁定（updater-phase.mjs）：downloading/downloaded/ready-to-open 期间
+  // 到来的 check 类事件（checking-for-update / update-available /
+  // update-not-available）属于迟到事件——来源是并发重查（激活聚焦、定时、
+  // 手动）产生的旧检查流程。必须丢弃，否则会把相位打回 available，
+  // 安装按钮消失。下载链路自身的事件（download-progress /
+  // update-downloaded / error）不受此过滤影响。
 
   autoUpdater.on('checking-for-update', () => {
     if (state.probing) return;
+    if (shouldSkipStaleUpdateEvent(state.phase, 'checking-for-update')) return;
     setPhase('checking');
     emit('checking-for-update');
   });
 
   autoUpdater.on('update-available', (info) => {
     if (state.probing) return;
+    if (shouldSkipStaleUpdateEvent(state.phase, 'update-available')) return;
     state.availableVersion = info?.version;
     state.releaseNotes = normalizeReleaseNotes(info?.releaseNotes);
     setPhase('available');
@@ -572,6 +642,7 @@ function wireEvents() {
 
   autoUpdater.on('update-not-available', (info) => {
     if (state.probing) return;
+    if (shouldSkipStaleUpdateEvent(state.phase, 'update-not-available')) return;
     state.availableVersion = undefined;
     setPhase('not-available');
     emit('update-not-available', { version: info?.version });
@@ -580,6 +651,7 @@ function wireEvents() {
   autoUpdater.on('download-progress', (p) => {
     if (state.probing) return;
     state.percent = Math.round(p?.percent ?? 0);
+    state.stallWatchdog?.notifyProgress();
     setPhase('downloading');
     emit('download-progress', { percent: state.percent });
   });
