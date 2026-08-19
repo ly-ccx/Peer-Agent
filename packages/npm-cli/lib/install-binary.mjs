@@ -87,7 +87,7 @@ export async function installBinary(options) {
   if (!response.ok) {
     throw new Error(
       `Failed to download CLI archive (${response.status} ${response.statusText}): ${url}\n` +
-        'Check that this version published peer-darwin-arm64.tar.gz on GitHub Releases.',
+        `Check that this version published ${target.archive} on GitHub Releases.`,
     );
   }
 
@@ -159,7 +159,7 @@ function extractArchive(archivePath, extractDir, archiveName) {
 }
 
 /**
- * Walk extract tree for peer + helper (archive may nest peer-darwin-arm64/).
+ * Walk extract tree for peer + helper (archive may nest peer-<platform>-<arch>/).
  * @param {string} dir
  * @returns {{ peer: string | null, helper: string | null }}
  */

@@ -9,8 +9,9 @@
 #   build     → matrix（mac + win）各自构建 Desktop，electron-builder --publish never
 #               只产出安装包与更新清单（*-mac.yml / *.yml），不直接发布，
 #               产物经 upload-artifact 上传。
-#   build-cli → 构建 CLI 归档（peer + peer-credential-helper 同目录），阶段一
-#               最小平台：darwin-arm64（macos-14）。关键失败阻断整个 Release。
+#   build-cli → 构建 CLI 归档（peer + peer-credential-helper 同目录），
+#               当前矩阵：darwin-arm64（macos-14）+ linux-x64（ubuntu-latest）。
+#               关键失败阻断整个 Release。
 #   release   → 单个 job 下载 Desktop + CLI 产物，一次性创建/更新同一个 GitHub Release。
 #
 # 为什么拆分：mac、win 两个 matrix job 若各自 --publish 到同一 tag，会并发
@@ -178,11 +179,20 @@ jobs:
           retention-days: 5
 
   # ── CLI 一等发布：peer + peer-credential-helper 同归档 ──
-  # 阶段一最小平台：macos-14 → peer-darwin-arm64.tar.gz
-  # 失败策略：needs 纳入 release，CLI 失败阻断整个 tag 发布。
+  # 当前矩阵：macos-14 → peer-darwin-arm64.tar.gz
+  #           ubuntu-latest → peer-linux-x64.tar.gz
+  # 失败策略：needs 纳入 release，任一 CLI 目标失败阻断整个 tag 发布。
   build-cli:
     needs: meta
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -205,6 +215,12 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux credential-helper build deps
+        if: startsWith(matrix.target, 'linux-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -253,20 +269,14 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.meta.outputs.version }}"
-          ARCHIVE="peer-darwin-arm64.tar.gz"
-          STAGE="cli-stage/peer-darwin-arm64"
-          mkdir -p "$STAGE" cli-dist
-          cp apps/tui/dist/peer "$STAGE/peer"
-          cp apps/tui/dist/peer-credential-helper "$STAGE/peer-credential-helper"
-          chmod +x "$STAGE/peer" "$STAGE/peer-credential-helper"
-          tar -czf "cli-dist/${ARCHIVE}" -C cli-stage peer-darwin-arm64
+          node scripts/package-cli-archive.mjs "${{ matrix.target }}"
           ls -la cli-dist
-          echo "Packaged CLI ${VERSION} → cli-dist/${ARCHIVE}"
+          echo "Packaged CLI ${VERSION} → cli-dist/peer-${{ matrix.target }}.tar.gz"
 
       - name: Upload CLI artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: dist-cli-darwin-arm64
+          name: dist-cli-${{ matrix.target }}
           path: cli-dist/*
           if-no-files-found: error
           retention-days: 5
@@ -293,8 +303,9 @@ jobs:
           find artifacts -type f -exec cp -f {} release-assets/ \;
           echo "=== release-assets ==="
           ls -la release-assets
-          # CLI 归档必须在 Release 资产中（阶段一：darwin-arm64）
+          # CLI 归档必须在 Release 资产中（当前：darwin-arm64 + linux-x64）
           test -f release-assets/peer-darwin-arm64.tar.gz
+          test -f release-assets/peer-linux-x64.tar.gz
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

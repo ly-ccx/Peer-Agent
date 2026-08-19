@@ -3,10 +3,17 @@ import { describe, it } from 'node:test';
 import { listKnownTargets, releaseAssetUrl, resolvePlatformTarget } from '../lib/platform.mjs';
 
 describe('resolvePlatformTarget', () => {
-  it('maps darwin arm64 to the stage-1 archive', () => {
+  it('maps darwin arm64 to the first-class archive', () => {
     const target = resolvePlatformTarget('darwin', 'arm64');
     assert.ok(target);
     assert.equal(target.archive, 'peer-darwin-arm64.tar.gz');
+    assert.equal(target.supported, true);
+  });
+
+  it('maps linux x64 to the first-class archive', () => {
+    const target = resolvePlatformTarget('linux', 'x64');
+    assert.ok(target);
+    assert.equal(target.archive, 'peer-linux-x64.tar.gz');
     assert.equal(target.supported, true);
   });
 
@@ -43,8 +50,9 @@ describe('releaseAssetUrl', () => {
 });
 
 describe('listKnownTargets', () => {
-  it('includes at least darwin-arm64', () => {
+  it('includes first-class darwin-arm64 and linux-x64 archives', () => {
     const archives = listKnownTargets().map((t) => t.archive);
     assert.ok(archives.includes('peer-darwin-arm64.tar.gz'));
+    assert.ok(archives.includes('peer-linux-x64.tar.gz'));
   });
 });

@@ -537,7 +537,8 @@ peer exec "总结这个仓库"</code></pre>
               <thead><tr><th data-i18n="install.thPlat">Platform</th><th data-i18n="install.thArchive">Archive</th><th data-i18n="install.thStatus">Status</th></tr></thead>
               <tbody>
                 <tr><td>macOS arm64</td><td><code>peer-darwin-arm64.tar.gz</code></td><td data-i18n="install.firstClass">First-class</td></tr>
-                <tr><td data-i18n="install.other">Other platforms</td><td>—</td><td data-i18n="install.otherStatus">postinstall fails clearly until multi-platform CLI ships</td></tr>
+                <tr><td>Linux x64</td><td><code>peer-linux-x64.tar.gz</code></td><td data-i18n="install.firstClass">First-class</td></tr>
+                <tr><td data-i18n="install.other">Other platforms</td><td>—</td><td data-i18n="install.otherStatus">postinstall fails clearly until that Release asset ships</td></tr>
               </tbody>
             </table>
           </div>
@@ -1181,8 +1182,9 @@ Evidence owns governance.</code></pre>
 
           <h2 id="faq-cli-plat" data-i18n="faq.q3">Why did CLI install fail on my platform?</h2>
           <p data-i18n="faq.a3">
-            Today the public installer’s first-class binary archive path is macOS arm64 (<code>peer-darwin-arm64.tar.gz</code>).
-            Other platforms should fail clearly in postinstall until multi-platform CLI shipping expands.
+            First-class CLI archives today are macOS arm64 (<code>peer-darwin-arm64.tar.gz</code>)
+            and Linux x64 (<code>peer-linux-x64.tar.gz</code>).
+            Other platforms should fail clearly in postinstall until their Release assets ship.
           </p>
 
           <h2 id="faq-helper" data-i18n="faq.q4">Why credentials break after I moved the binary?</h2>
@@ -1416,7 +1418,7 @@ Evidence owns governance.</code></pre>
             "install.thArchive": "归档", "install.thStatus": "状态",
             "install.firstClass": "一等支持",
             "install.other": "其他平台",
-            "install.otherStatus": "在多平台 CLI 发布前，postinstall 会给出明确失败",
+            "install.otherStatus": "在对应 Release 资产发布前，postinstall 会给出明确失败",
             "install.envTitle": "安装器环境变量",
             "install.thVar": "变量", "install.thEffect": "效果",
             "install.envSkip": "跳过二进制下载（CI 发布 / 离线）",
@@ -1554,7 +1556,7 @@ Evidence owns governance.</code></pre>
             "faq.q2": "Desktop 和 CLI 共享历史吗？",
             "faq.a2": "共享。两者都用 ~/.peer-agent 下的同一本地 Runtime 主目录（设置、会话、凭证、产物）。",
             "faq.q3": "为什么我的平台 CLI 安装失败？",
-            "faq.a3": "当前公开安装器的一等二进制归档路径是 macOS arm64（peer-darwin-arm64.tar.gz）。其他平台在多平台 CLI 扩展前应在 postinstall 明确失败。",
+            "faq.a3": "当前公开安装器的一等二进制归档是 macOS arm64（peer-darwin-arm64.tar.gz）与 Linux x64（peer-linux-x64.tar.gz）。其他平台在对应 Release 资产发布前应在 postinstall 明确失败。",
             "faq.q4": "为什么我移动二进制后凭证坏了？",
             "faq.a4": "保持 peer 与 peer-credential-helper 同目录。helper 不是可有可无的装饰。",
             "faq.q5": "Goal 模式是什么？",

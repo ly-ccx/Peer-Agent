@@ -1,6 +1,6 @@
 {
   "name": "peer-agent",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
@@ -13,7 +13,8 @@
     "architecture:check": "node scripts/check-architecture-governance.mjs",
     "marketplace:build": "node marketplace/build-catalog.mjs",
     "marketplace:test": "node --test marketplace/*.test.mjs",
-    "changelog:test": "node --test scripts/build-changelog.test.mjs scripts/check-release-readiness.test.mjs",
+    "changelog:test": "node --test scripts/build-changelog.test.mjs scripts/check-release-readiness.test.mjs scripts/package-cli-archive.test.mjs",
+    "package:cli": "node scripts/package-cli-archive.mjs",
     "version:check": "node scripts/check-version.mjs",
     "release:source-check": "node scripts/check-release-source.mjs",
     "release:readiness-check": "node scripts/check-release-readiness.mjs",
