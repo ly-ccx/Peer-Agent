@@ -76,14 +76,17 @@ test('global workbench removes the final divider through the shatter host wrappe
 test('advancing tasks animate the running ring and progress changes accessibly', async () => {
   const source = await readPage();
   assert.match(source, /className="gwb-run-dot"/);
+  assert.match(source, /<ThinkingOrb\s+state="weaving"\s+size=\{20\}/);
   assert.match(source, /className="gwb-run-pct" aria-live="polite" aria-atomic="true"/);
   assert.match(source, /key=\{`\$\{item\.planProgress\.completed\}\/\$\{item\.planProgress\.total\}`\}/);
   assert.match(source, /className="gwb-run-pct-value"/);
 
   const styles = await readStyles();
-  assert.match(styles, /animation: gwb-run-spin 900ms linear infinite/);
   assert.match(styles, /animation: gwb-run-count-change 280ms/);
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.gwb-run-dot[\s\S]*\.gwb-run-pct-value/);
+  assert.match(
+    styles,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.gwb-run-dot[\s\S]*\.gwb-run-pct-value/,
+  );
 });
 
 test('global workbench acceptance uses particle shatter overlay styles', async () => {

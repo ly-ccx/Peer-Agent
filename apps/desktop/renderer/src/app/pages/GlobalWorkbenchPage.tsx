@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import { ThinkingOrb } from 'thinking-orbs';
+import { prefersReducedMotion } from '../hooks/useMotionPresence';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { collectPendingAcceptanceItems } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
@@ -420,7 +422,14 @@ export function GlobalWorkbenchPage({
                       className="gwb-run-row"
                       onClick={() => handleOpenItem(item)}
                     >
-                      <span className="gwb-run-dot" aria-hidden="true" />
+                      <span className="gwb-run-dot" aria-hidden="true">
+                        <ThinkingOrb
+                          state="weaving"
+                          size={20}
+                          aria-label="Peer 正在推进"
+                          paused={prefersReducedMotion()}
+                        />
+                      </span>
                       <span className="gwb-run-copy">
                         <span className="gwb-run-title">{item.title}</span>
                         <span className="gwb-run-sub">
