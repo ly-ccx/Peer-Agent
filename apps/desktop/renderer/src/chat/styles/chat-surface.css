@@ -3121,8 +3121,11 @@
 }
 
 /* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
-   避免会话标题与红绿灯重叠。 */
-:root[data-sidebar-collapsed='true'] .app-shell:not(.is-fullscreen) .chat-header {
+   避免会话标题与红绿灯重叠。仅 darwin 生效:Windows/Linux 无系统交通灯,
+   hiddenInset 窗口左上角没有任何控件,保留 78px 只会挤压标题空间。 */
+:root[data-os='darwin'][data-sidebar-collapsed='true']
+  .app-shell:not(.is-fullscreen)
+  .chat-header {
   padding-left: 78px;
 }
 

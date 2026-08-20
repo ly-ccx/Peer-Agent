@@ -54,10 +54,17 @@
   box-shadow: none;
   /* 常态不画分隔线；拖拽反馈由 resizer 自身表达。 */
   border-right: none;
+  /* 顶部 40px 是 macOS 交通灯预留：仅 darwin 保留（见下方 :root[data-os] 门控）。 */
   padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+/* 非 darwin（Windows/Linux）hiddenInset 窗口没有系统交通灯，
+   顶部预留只会成为死空白：收成与全屏一致的 12px。 */
+:root:not([data-os='darwin']) .app-sidebar {
+  padding-top: var(--space-3, 12px);
 }
 
 @media (prefers-reduced-transparency: reduce) {

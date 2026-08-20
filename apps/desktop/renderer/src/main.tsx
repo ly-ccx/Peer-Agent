@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AppearanceProvider } from './appearance/AppearanceProvider';
 import { AppErrorBoundary } from './app/components/AppErrorBoundary';
 import { ConfirmProvider } from './app/components/ConfirmProvider';
+import { detectRendererOs } from './app/osPlatform';
 import { App } from './App';
 import './styles.css';
 
@@ -12,6 +13,10 @@ import './styles.css';
 if (/Macintosh|Mac OS X/.test(navigator.userAgent)) {
   document.documentElement.dataset.vibrancy = 'true';
 }
+
+// 平台标记：CSS 用它门控 macOS 交通灯专属的窗口留白（侧栏顶部、折叠页头左缘）。
+// 非 darwin 平台上 hiddenInset 窗口没有系统交通灯，保留这些预留只会得到一段死空白。
+document.documentElement.dataset.os = detectRendererOs(navigator.userAgent);
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
