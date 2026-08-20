@@ -7,6 +7,7 @@ import type { ModelReasoningEffort } from '@peer-agent/runtime-node';
 import { createChatController } from './chat-controller.ts';
 import type { PeerExecOptions } from './cli-argv.ts';
 import { CLI_EXIT, type CliExitCode } from './cli-exit.ts';
+import { collectPlanIds, driveNewGoalPlansToSettled, type ExecGoalDriveOutcome } from './cli-exec-goal.ts';
 import { encodeExecJson, isAuthFailureReason } from './cli-output.ts';
 import { resolveExecCatalogEntry } from './cli-model-ref.ts';
 import { resolveExecToolAllowlist } from './cli-tools.ts';
@@ -200,11 +201,33 @@ export async function runPeerExec(
   };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
+
+  // Goal 自驱闭环：send() 前采集本会话计划基线，send() 后如有新计划则由
+  // 共享 Goal Runner 驱动至终态（详见 cli-exec-goal.ts 模块注释）。
+  const goalBridge = runtime.host.goalBridge;
+  const conversationIdForGoal = () => persistence.getConversationId() ?? undefined;
+  const planIdsBefore = goalBridge
+    ? collectPlanIds(goalBridge, conversationIdForGoal())
+    : new Set<string>();
+
   try {
     const sendResult = await controller.send(prompt, {
       // RuntimePipeline defaults to 64 when maxTurns is omitted.
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
     });
+
+    // 模型在本轮创建了 GoalPlan 且尚未到终态 → exec 进程内驱动到终态/停止态。
+    let goalOutcome: ExecGoalDriveOutcome | null = null;
+    if (goalBridge) {
+      goalOutcome = await driveNewGoalPlansToSettled({
+        bridge: goalBridge,
+        chat: controller,
+        getConversationId: conversationIdForGoal,
+        planIdsBefore,
+      });
+      persistence.syncSnapshot(controller.getSnapshot());
+    }
+
     persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
     const resultText = sendResult.output?.trim() || lastAssistantText(snapshot.messages);
@@ -220,6 +243,7 @@ export async function runPeerExec(
       turns: sendResult.turns,
       durationMs: Date.now() - startedAt,
       ...(snapshot.usage ? { usage: snapshot.usage } : {}),
+      ...(goalOutcome?.report ? { goal: goalOutcome.report } : {}),
     };
 
     if (options.outputFormat === 'json') {
@@ -233,6 +257,12 @@ export async function runPeerExec(
 
     if (sendResult.status === 'exhausted') return CLI_EXIT.maxTurns;
     if (sendResult.status === 'cancelled') return CLI_EXIT.cancelled;
+    // Goal 自驱结果的退出码优先级高于单轮 send 的兜底：计划终态/停止态是更强的信号。
+    if (goalOutcome?.drove) {
+      if (goalOutcome.exitKind === 'waiting_user') return CLI_EXIT.waitingUser;
+      if (goalOutcome.exitKind === 'goal_failed') return CLI_EXIT.goalFailed;
+      // exitKind === 'ok' | 'cancelled'：计划完成/取消沿用下方常规路径。
+    }
     if (ok) return CLI_EXIT.ok;
     if (isAuthFailureReason(error ?? undefined)) return CLI_EXIT.auth;
     return CLI_EXIT.runtime;
