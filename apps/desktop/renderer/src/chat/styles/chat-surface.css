@@ -560,7 +560,7 @@
 /* 思考态 ThinkingOrb(canvas):与 meta 文字视觉居中,不参与 shimmer。 */
 .thinking-toggle canvas {
   flex: none;
-  margin-left: 2px;
+  margin-right: 2px;
   vertical-align: middle;
 }
 /* 思考中:文字底色 soft,一道高光从左到右循环扫过(shimmer)。 */
