@@ -48,13 +48,16 @@ test('task row view button opens the matching task details', async () => {
   assert.doesNotMatch(openItemHandler, /planId|goalPlansMarkRequestedUserInput/);
 });
 
-test('opening a goal-thread round also focuses the matching message', async () => {
+test('result_ready opens the drawer without focusing; goal-thread rounds still focus', async () => {
   const appSource = await readAppSource();
   const openItemHandlers = [...appSource.matchAll(/onOpenItem=\{\(item: TaskOverviewItem, options\?: OpenResultOptions\) => \{[\s\S]*?\n                      \}\}/g)]
     .map((match) => match[0]);
   assert.ok(openItemHandlers.length >= 2);
   for (const handler of openItemHandlers) {
-    assert.match(handler, /openResultDrawer\(item, options\);\s*focusTaskRelatedMessage\(item\)/);
+    // result_ready：只打开结果抽屉，不定位消息——嵌套会话面全新挂载原生贴底，定位会造成高亮后二次跳动。
+    assert.match(handler, /result_ready'\) \{[\s\S]*?openResultDrawer\(item, options\);\s*\n\s*return;/);
+    assert.doesNotMatch(handler, /openResultDrawer\(item, options\);\s*focusTaskRelatedMessage\(item\)/);
+    // 继续讨论路径仍定位到相关消息。
     assert.match(handler, /handleContinueTask\(String\(conversationId\)\);\s*focusTaskRelatedMessage\(item\)/);
   }
   assert.match(appSource, /setNotificationMessageTarget\(\{/);

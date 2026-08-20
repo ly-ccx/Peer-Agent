@@ -8,6 +8,20 @@ const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8'
 const readStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
+/** 从 App.tsx 源码中截取两个锚点之间的 ChatSurface props 段。 */
+function appSourcePropsSection(
+  source: string,
+  startAnchor: RegExp,
+  endAnchor: RegExp,
+): string | null {
+  const startMatch = startAnchor.exec(source);
+  if (!startMatch || startMatch.index == null) return null;
+  const start = startMatch.index;
+  const endMatch = endAnchor.exec(source.slice(start));
+  if (!endMatch) return null;
+  return source.slice(start, start + endMatch.index + endMatch[0].length);
+}
+
 test('result view stays a pure content component without acceptance logic', async () => {
   const source = await readView();
   assert.match(source, /export function ConversationResultView\(\{/);
@@ -52,6 +66,10 @@ test('result drawer reuses the chat title bar close and keeps actions below the 
   assert.doesNotMatch(source, /查看结果|View result/);
   assert.match(source, /conversation-result-drawer__body/);
   assert.match(source, /<ChatSurface[\s\S]*?isPageActive=\{collectionDrawer === 'result'\}[\s\S]*?onClose=\{requestClose\}/);
+  // 结果抽屉的嵌套 ChatSurface 不接收 messageTarget：全新挂载原生贴底，定位通路会带来高亮后二次跳动。
+  const resultDrawerSurfaceProps =
+    appSourcePropsSection(source, /isPageActive=\{collectionDrawer === 'result'\}/, /onClose=\{requestClose\}/) ?? '';
+  assert.doesNotMatch(resultDrawerSurfaceProps, /messageTarget/);
   assert.match(source, /conversation-result-drawer__icon-close/);
   assert.match(source, /aria-label=\{isZh \? '关闭' : 'Close'\}/);
   assert.match(source, /<footer className="conversation-result-drawer__footer">/);
