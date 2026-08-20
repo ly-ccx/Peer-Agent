@@ -320,8 +320,8 @@ export function Sidebar({
     const ok = await confirm({
       title: isZh ? '移除工作区' : 'Remove workspace',
       message: isZh
-        ? `确定移除「${name}」？仅从侧边栏列表移除，不会删除磁盘上的文件。`
-        : `Remove “${name}”? This only removes it from the sidebar list and does not delete files on disk.`,
+        ? `确定移除「${name}」？该工作区下的会话记录将一并删除，磁盘上的文件不受影响。`
+        : `Remove “${name}”? Conversations under this workspace will also be deleted. Files on disk are not affected.`,
       confirmText: isZh ? '移除' : 'Remove',
       cancelText: isZh ? '取消' : 'Cancel',
       tone: 'danger',

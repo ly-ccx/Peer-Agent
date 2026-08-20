@@ -1421,6 +1421,34 @@ export function createConversationStore(options = {}) {
     });
   }
 
+  function deleteConversationsByWorkspace(workspacePath) {
+    const requestedWorkspace = workspacePath || null;
+    if (requestedWorkspace === null) return [];
+    const index = readIndex();
+    const kept = [];
+    const removed = [];
+    for (const meta of index) {
+      const executionWorkspace = meta.workspacePath || null;
+      const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
+      const belongs = executionWorkspace === requestedWorkspace
+        || automationWorkspace === requestedWorkspace;
+      if (belongs) removed.push(meta);
+      else kept.push(meta);
+    }
+    if (removed.length === 0) return [];
+    writeJsonl(indexFile, kept);
+    for (const meta of removed) {
+      try { if (existsSync(convFile(meta.id))) unlinkSync(convFile(meta.id)); } catch {}
+      clearStreamPatch(meta.id);
+      try {
+        const snapshotFile = contextSnapshotFile(meta.id);
+        if (existsSync(snapshotFile)) unlinkSync(snapshotFile);
+      } catch {}
+      publishChange(meta, 'deleted');
+    }
+    return removed.map((meta) => withMessageCount(meta));
+  }
+
   // 一次性迁移：如果旧 conversations.json 存在，转成 JSONL 格式
   const legacyFile = path.join(path.dirname(storeDir), 'conversations.json');
   if (existsSync(legacyFile) && !existsSync(indexFile)) {
@@ -1500,6 +1528,7 @@ export function createConversationStore(options = {}) {
     reorderPinnedConversations,
     autoArchiveConversations,
     deleteConversation: changed(deleteConversation, 'deleted'),
+    deleteConversationsByWorkspace,
     subscribeChanges,
   };
 }

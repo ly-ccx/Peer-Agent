@@ -77,6 +77,7 @@ export interface ConversationListParams {
 export interface ConversationStore {
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];
   scheduleMessageCountMigration?(ids?: readonly string[] | null): void;
   backfillMessageCounts?(): ConversationMeta[];
   searchConversations(params?: {

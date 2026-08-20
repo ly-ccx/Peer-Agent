@@ -709,12 +709,16 @@ async function listTrayRecentConversations({ limit = TRAY_RECENT_LIMIT } = {}) {
     status: 'active',
     limit: Math.min(requested, TRAY_RECENT_EXPANDED_LIMIT),
   });
-  return (Array.isArray(listed) ? listed : []).map((item) => ({
-    id: item.id,
-    title: item.title,
-    workspacePath: item.workspacePath,
-    updatedAt: item.updatedAt,
-  }));
+  return (Array.isArray(listed) ? listed : [])
+    // 过滤 workspacePath 目录已不存在（工作区已移除/临时目录已清理）的会话，
+    // 与侧栏「只显示手动添加且存在的工作区」保持同一语义。
+    .filter((item) => !item.workspacePath || existsSync(item.workspacePath))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      workspacePath: item.workspacePath,
+      updatedAt: item.updatedAt,
+    }));
 }
 
 function createAppTrayController() {
@@ -1966,7 +1970,8 @@ const openPathApplicationService = createOpenPathApplicationService({
 const workspaceApplicationService = createWorkspaceApplicationService({
   getSettings: () => settingsStore.getAll(),
   mergeSettings: (patch) => settingsStore.merge(patch),
-  listConversations: (options) => conversationStore.listConversations(options),
+  deleteConversationsByWorkspace: (workspacePath) =>
+    conversationStore.deleteConversationsByWorkspace(workspacePath),
   pathExists: (candidate) => existsSync(candidate),
   basename: (candidate) => path.basename(candidate),
   getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),
