@@ -114,3 +114,96 @@ describe('auto-updater activation integration contract', () => {
     assert.match(source, /export function stopAutoUpdater\(\) \{[\s\S]*?state\.disposeActivationChecks\?\.\(\);[\s\S]*?state\.disposeActivationChecks = undefined/);
   });
 });
+
+describe('auto-updater phase-locking integration contract', () => {
+  // 修复「离开一会回来后安装按钮消失」的三处源码契约：
+  //   1) checkForUpdates 入口有相位锁定守卫（重查不打断 downloading/ready-to-open）；
+  //   2) wireEvents 的 check 类事件处理器引用 shouldSkipStaleUpdateEvent（迟到事件丢弃）；
+  //   3) downloadUpdate 有防重入守卫（锁定相位不发起第二次下载）。
+  // 既有 auto-updater.mjs 无法在 node:test 下直接 import（依赖 electron 模块），
+  // 故沿用本文件既有的「源码契约断言」约定（readFile + 正则）。
+
+  it('checkForUpdates guards against locked phases before marking the schedule', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+
+    // 入口守卫必须位于 checkSchedule.markChecked() 之前——否则锁定相位下的
+    // 激活重查仍会消耗节流窗口，且后续迟到事件链依然会改写相位。
+    const guardIdx = source.indexOf('if (shouldSkipUpdateCheck(state.phase))');
+    const markIdx = source.indexOf('checkSchedule.markChecked()');
+    assert.ok(guardIdx > -1, 'checkForUpdates must call shouldSkipUpdateCheck');
+    assert.ok(markIdx > -1, 'checkForUpdates must call checkSchedule.markChecked()');
+    assert.ok(guardIdx < markIdx, 'phase guard must run before markChecked()');
+
+    // 守卫命中时返回当前快照（不是继续走网络检查）。
+    assert.match(
+      source,
+      /if \(shouldSkipUpdateCheck\(state\.phase\)\) \{[\s\S]*?return getUpdaterStatus\(\);[\s\S]*?\n\s*\}/,
+    );
+  });
+
+  it('wireEvents filters stale check events through shouldSkipStaleUpdateEvent', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+    const wireIdx = source.indexOf('function wireEvents()');
+    const wireEnd = source.indexOf('function normalizeReleaseNotes');
+    assert.ok(wireIdx > -1 && wireEnd > wireIdx, 'wireEvents block not found');
+    const wireBlock = source.slice(wireIdx, wireEnd);
+
+    for (const eventType of ['checking-for-update', 'update-available', 'update-not-available']) {
+      const handlerIdx = wireBlock.indexOf(`autoUpdater.on('${eventType}'`);
+      assert.ok(handlerIdx > -1, `wireEvents must handle ${eventType}`);
+      const skipIdx = wireBlock.indexOf(
+        `if (shouldSkipStaleUpdateEvent(state.phase, '${eventType}')) return;`,
+        handlerIdx,
+      );
+      assert.ok(
+        skipIdx > handlerIdx,
+        `wireEvents ${eventType} handler must call shouldSkipStaleUpdateEvent after the probing guard`,
+      );
+    }
+
+    // download-progress 处理器必须喂看门狗（停滞检测依赖进度信号）。
+    assert.match(
+      wireBlock,
+      /autoUpdater\.on\('download-progress',[\s\S]*?state\.stallWatchdog\?\.notifyProgress\(\)/,
+    );
+  });
+
+  it('downloadUpdate re-entrancy guard blocks locked phases', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+
+    // downloadUpdate 的防重入守卫：锁定相位直接返回快照。
+    assert.match(
+      source,
+      /export async function downloadUpdate\(\) \{[\s\S]*?if \(isLockedPhase\(state\.phase\)\) \{[\s\S]*?return getUpdaterStatus\(\);/,
+    );
+  });
+
+  it('mac manual download runs under the stall watchdog and cleans it up', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+
+    // 下载开始即启动看门狗；进度回调喂狗；finally 里清理。
+    const macIdx = source.indexOf('async function downloadUpdateMacManual()');
+    assert.ok(macIdx > -1, 'downloadUpdateMacManual not found');
+    const macBlock = source.slice(macIdx, source.indexOf('function downloadToFile'));
+    assert.match(macBlock, /startDownloadStallWatchdog\(\);/);
+    assert.match(macBlock, /state\.stallWatchdog\?\.notifyProgress\(\);/);
+    assert.match(macBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
+
+    // Windows 路径同样受看门狗保护。
+    const winIdx = source.indexOf('export async function downloadUpdate()');
+    const winBlock = source.slice(winIdx, macIdx);
+    assert.match(winBlock, /startDownloadStallWatchdog\(\);/);
+    assert.match(winBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
+
+    // 看门狗触发时置 error 并提供 Release 页面兜底（睡眠断流的恢复路径）。
+    const stallFnIdx = source.indexOf('function startDownloadStallWatchdog()');
+    assert.ok(stallFnIdx > -1, 'startDownloadStallWatchdog not found');
+    const stallBlock = source.slice(
+      stallFnIdx,
+      source.indexOf('function stopStallWatchdog()'),
+    );
+    assert.match(stallBlock, /setPhase\('error'\);/);
+    assert.match(stallBlock, /emit\('error', \{ message: state\.error \}\);/);
+    assert.match(stallBlock, /buildReleaseUrl\(/);
+  });
+});

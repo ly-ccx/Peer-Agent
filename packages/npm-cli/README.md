@@ -49,7 +49,8 @@ Press **Y** or **Enter** to confirm, or **N** / **Esc** to dismiss. Restart `pee
 | Platform | Archive | Notes |
 |----------|---------|-------|
 | macOS arm64 | `peer-darwin-arm64.tar.gz` | First-class |
-| other | — | postinstall fails with a clear error until multi-platform CLI ships |
+| Linux x64 | `peer-linux-x64.tar.gz` | First-class |
+| other | — | recognized in the installer matrix; postinstall fails clearly until that Release asset ships |
 
 ## Environment variables
 
@@ -67,6 +68,7 @@ Inside this repository, `postinstall` **does not** download binaries by default 
 ```bash
 pnpm --filter @peer-agent/tui build
 ./apps/tui/dist/peer --version
+node scripts/package-cli-archive.mjs linux-x64   # → cli-dist/peer-linux-x64.tar.gz
 ```
 
 To force the installer path locally:
@@ -80,8 +82,8 @@ PEER_AGENT_FORCE_DOWNLOAD=1 node packages/npm-cli/scripts/postinstall.mjs
 From the GitHub Release for the same version:
 
 ```bash
-tar -xzf peer-darwin-arm64.tar.gz
-export PATH="$PWD/peer-darwin-arm64:$PATH"
+tar -xzf peer-linux-x64.tar.gz   # or peer-darwin-arm64.tar.gz on macOS arm64
+export PATH="$PWD/peer-linux-x64:$PATH"
 peer --version
 ```
 

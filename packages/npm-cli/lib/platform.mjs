@@ -1,9 +1,9 @@
 /**
  * Map Node process.platform / process.arch to the GitHub Release CLI archive name.
  *
- * Stage-1 release assets currently ship only peer-darwin-arm64.tar.gz.
- * Platform keys below include forward-looking names so installers can fail with a
- * precise "not yet published" message instead of inventing a wrong URL.
+ * First-class Release assets: peer-darwin-arm64.tar.gz, peer-linux-x64.tar.gz.
+ * Other keys stay recognized so installers fail with a precise
+ * "not yet published" message instead of inventing a wrong URL.
  */
 
 /** @typedef {{ os: string, arch: string, archive: string, supported: boolean }} PlatformTarget */
@@ -31,7 +31,7 @@ const TARGETS = {
     os: 'linux',
     arch: 'x64',
     archive: 'peer-linux-x64.tar.gz',
-    supported: false,
+    supported: true,
   },
   'win32-x64': {
     os: 'win32',

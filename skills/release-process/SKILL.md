@@ -158,7 +158,7 @@ python3 -m http.server 8777 --directory docs
 #### 每次发版至少扫这些字段
 
 1. **版本表述** — 是否仍写过时 early-development / 旧版本号；**且不得引用尚未发布的版本**：无对应 git tag 与 release note 的版本（如刚 stamp 的 `0.0.5-beta.1` 开发线）只能写作「开发中」，不得写成「当前 beta 通道」。可写当前系列（如 `0.0.4`）或指向 `VERSION` / Release。
-2. **安装路径与平台矩阵** — `@peer-agent/cli`、`peer`、Desktop 开发/打包命令是否与本轮一致；README 中的 CLI 平台表述必须与 `packages/npm-cli/lib/platform.mjs` 的 `supported` 矩阵一致（当前仅 `darwin-arm64` 一等支持，其余平台 `supported: false` 并在 postinstall 明确失败）。
+2. **安装路径与平台矩阵** — `@peer-agent/cli`、`peer`、Desktop 开发/打包命令是否与本轮一致；README 中的 CLI 平台表述必须与 `packages/npm-cli/lib/platform.mjs` 的 `supported` 矩阵一致（当前 `darwin-arm64` 与 `linux-x64` 一等支持，其余平台 `supported: false` 并在 postinstall 明确失败）。
 3. **入口面** — Desktop / TUI / CLI 是否仍与产品一致。
 4. **核心能力** — Agent / Plan / Goal / Quick Chat / Browser·Workbench / MCP / Skills 等用户可见能力是否过时或遗漏。
 5. **链接存活** — 相对链接与文档入口是否可达；禁止再把已迁出的架构文档写成代码仓内死链。
@@ -251,7 +251,7 @@ CI（`release.yml`）会：
 - 在任何构建/发布前运行 `version:check` 与 `release:source-check`
 - 从 tag 解析版本/通道
 - matrix 构建 Desktop（mac/win）
-- 组装 CLI 归档（含 `peer` + `peer-credential-helper`）
+- 组装 CLI 归档（含 `peer` + `peer-credential-helper`；当前矩阵 `darwin-arm64` + `linux-x64`，脚本 `scripts/package-cli-archive.mjs`）
 - 创建/更新 GitHub Release，上传产物与更新清单
 
 **不要**在本地绕过 workflow 手工伪造“已发布”状态，除非用户明确要求且你说明风险。

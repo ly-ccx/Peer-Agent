@@ -45,6 +45,45 @@ describe('installBinary', () => {
     assert.equal(result.reason, 'skip-download');
   });
 
+  it('downloads and extracts a mocked linux-x64 tar.gz archive', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'peer-install-'));
+    roots.push(root);
+    const archiveDir = mkdtempSync(join(tmpdir(), 'peer-archive-'));
+    const nested = join(archiveDir, 'peer-linux-x64');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, 'peer'), '#!/bin/sh\necho peer-bin\n');
+    writeFileSync(join(nested, 'peer-credential-helper'), '#!/bin/sh\necho helper-bin\n');
+    chmodSync(join(nested, 'peer'), 0o755);
+    chmodSync(join(nested, 'peer-credential-helper'), 0o755);
+    const tarPath = join(archiveDir, 'peer-linux-x64.tar.gz');
+    const tar = spawnSync('tar', ['-czf', tarPath, '-C', archiveDir, 'peer-linux-x64'], {
+      encoding: 'utf8',
+    });
+    assert.equal(tar.status, 0, tar.stderr);
+
+    const archiveBytes = readFileSync(tarPath);
+    const fetchImpl = async () =>
+      new Response(archiveBytes, {
+        status: 200,
+        headers: { 'Content-Type': 'application/gzip' },
+      });
+
+    const result = await installBinary({
+      version: '0.0.6',
+      root,
+      platform: 'linux',
+      arch: 'x64',
+      fetchImpl,
+      force: true,
+      log: () => {},
+    });
+
+    assert.equal(result.skipped, false);
+    assert.ok(existsSync(peerBinaryPath(root)));
+    assert.ok(existsSync(helperBinaryPath(root)));
+    assert.equal(readFileSync(join(vendorDir(root), '.peer-agent-version'), 'utf8').trim(), '0.0.6');
+  });
+
   it('downloads and extracts a mocked tar.gz archive', async () => {
     const root = mkdtempSync(join(tmpdir(), 'peer-install-'));
     roots.push(root);

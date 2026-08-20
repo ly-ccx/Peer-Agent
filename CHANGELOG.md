@@ -4,6 +4,19 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.6 - 2026-08-19
+
+### Notes
+
+- Open the `0.0.6` development line from the published `0.0.5` / `origin/main`.
+- Stamp the in-repo development version to `0.0.6`. This commit is not a published GitHub Release.
+- Extend the existing CLI Release / npm installer matrix so Linux x64 ships the same `peer` + `peer-credential-helper` archive layout as darwin-arm64.
+
+### Added
+
+- First-class Linux x64 CLI archive `peer-linux-x64.tar.gz` on the existing `build-cli` Release path.
+- `@peer-agent/cli` postinstall now downloads `peer-linux-x64.tar.gz` on linux-x64; missing assets still fail with a clear error.
+
 ## 0.0.5 - 2026-08-19
 
 ### Notes

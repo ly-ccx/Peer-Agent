@@ -10,6 +10,10 @@ coverage/
 
 target/
 
+# Local CLI release staging (produced by scripts/package-cli-archive.mjs)
+cli-stage/
+cli-dist/
+
 .env
 .env.*
 !.env.example
