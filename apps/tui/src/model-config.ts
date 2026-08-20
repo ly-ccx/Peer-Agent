@@ -46,14 +46,25 @@ export function createEnvironmentCredentialPort(
 ): ModelCredentialPort {
   return {
     async resolve(request: ModelCredentialRequest): Promise<ModelCredential | null> {
-      if (request.providerId !== 'openai-compatible') return null;
-      const apiKey = value(environment, TUI_MODEL_ENV.apiKey);
-      if (!apiKey) return null;
-      return {
-        apiKey,
-        baseUrl: value(environment, TUI_MODEL_ENV.baseUrl),
-      };
+      return environmentCredentialOf(environment, request.providerId);
     },
+    /** 同步读取 env 凭证（同步构造 provider 时使用，如 tui-runtime 的种子 provider）。 */
+    environmentCredential(providerId: string): ModelCredential | null {
+      return environmentCredentialOf(environment, providerId);
+    },
+  };
+}
+
+function environmentCredentialOf(
+  environment: TuiModelEnvironment,
+  providerId: string,
+): ModelCredential | null {
+  if (providerId !== 'openai-compatible') return null;
+  const apiKey = value(environment, TUI_MODEL_ENV.apiKey);
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: value(environment, TUI_MODEL_ENV.baseUrl),
   };
 }
 

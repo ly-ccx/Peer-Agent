@@ -231,10 +231,17 @@ export async function runPeerExec(
     persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
     const resultText = sendResult.output?.trim() || lastAssistantText(snapshot.messages);
-    const error = sendResult.status === 'completed' || sendResult.status === 'stopped'
+    // Goal 完成时进程语义为成功：send 单轮的 exhausted/误差不应污染 ok/error 字段
+    // （退出码已由 goal 分类决定，JSON 同步对齐）。
+    const goalSucceeded = goalOutcome?.drove && goalOutcome.exitKind === 'ok';
+    const error = goalSucceeded
       ? null
-      : (sendResult.reason || snapshot.error || sendResult.status);
-    const ok = sendResult.status === 'completed' || sendResult.status === 'stopped';
+      : sendResult.status === 'completed' || sendResult.status === 'stopped'
+        ? null
+        : (sendResult.reason || snapshot.error || sendResult.status);
+    const ok = goalSucceeded
+      || sendResult.status === 'completed'
+      || sendResult.status === 'stopped';
     const payload = {
       sessionId: persistence.getConversationId() ?? '',
       ok,
@@ -255,14 +262,16 @@ export async function runPeerExec(
       writeLine(io.stderr, error);
     }
 
-    if (sendResult.status === 'exhausted') return CLI_EXIT.maxTurns;
-    if (sendResult.status === 'cancelled') return CLI_EXIT.cancelled;
-    // Goal 自驱结果的退出码优先级高于单轮 send 的兜底：计划终态/停止态是更强的信号。
+    // Goal 自驱结果的退出码优先级最高：计划终态/停止态是比单轮 send 状态更强的信号
+    // （goal 在 send 轮内完成时，send 可能同时报 exhausted——不应掩盖 goal 的完成）。
     if (goalOutcome?.drove) {
       if (goalOutcome.exitKind === 'waiting_user') return CLI_EXIT.waitingUser;
       if (goalOutcome.exitKind === 'goal_failed') return CLI_EXIT.goalFailed;
-      // exitKind === 'ok' | 'cancelled'：计划完成/取消沿用下方常规路径。
+      if (goalOutcome.exitKind === 'ok') return CLI_EXIT.ok;
+      if (goalOutcome.exitKind === 'cancelled') return CLI_EXIT.cancelled;
     }
+    if (sendResult.status === 'exhausted') return CLI_EXIT.maxTurns;
+    if (sendResult.status === 'cancelled') return CLI_EXIT.cancelled;
     if (ok) return CLI_EXIT.ok;
     if (isAuthFailureReason(error ?? undefined)) return CLI_EXIT.auth;
     return CLI_EXIT.runtime;

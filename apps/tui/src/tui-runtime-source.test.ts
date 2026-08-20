@@ -6,7 +6,7 @@ const runtimeSource = readFileSync(new URL('./tui-runtime.ts', import.meta.url),
 describe('TUI runtime provider wiring', () => {
   test('defines the initial provider before constructing the chat model', () => {
     const providerDefinition = runtimeSource.indexOf(
-      'const provider = sharedMetadata ? sharedProvider(modelConfig.providerId) : undefined;',
+      'const provider = sharedMetadata',
     );
     const modelConstruction = runtimeSource.indexOf('const model = provider');
 

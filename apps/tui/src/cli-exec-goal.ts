@@ -53,11 +53,16 @@ export interface ExecGoalDriveOutcome {
 
 function planProgress(plan: any): { completed: number; total: number } | null {
   const progress = plan?.progress;
-  if (!progress || typeof progress !== 'object') return null;
-  const completed = Number(progress.completed);
-  const total = Number(progress.total);
-  if (!Number.isFinite(completed) || !Number.isFinite(total)) return null;
-  return { completed, total };
+  if (progress && typeof progress === 'object') {
+    const completed = Number(progress.completed);
+    const total = Number(progress.total);
+    if (Number.isFinite(completed) && Number.isFinite(total)) return { completed, total };
+  }
+  // meta 视图可能不带 progress：从任务列表统计（与 store 的叶子语义一致）。
+  const tasks = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  if (tasks.length === 0) return null;
+  const completed = tasks.filter((t: any) => t?.status === 'completed').length;
+  return { completed, total: tasks.length };
 }
 
 function manualDodCriterionIds(plan: any): readonly string[] {
@@ -100,15 +105,17 @@ function buildStopReport(planId: string, plan: any): ExecGoalStopReport {
 
 function classify(plan: any): ExecGoalDriveOutcome['exitKind'] {
   const status = plan?.status;
-  // Runner 停止态优先：manual DoD 确认路径下计划状态可能已是 completed，
-  // 但 runner blocked（manual_dod_confirmation_required）——人工闸门未过不得算 ok。
   const runnerStatus = plan?.runner?.status;
+  // Runner 停止态优先：manual DoD 确认路径下计划状态可能已是 completed，但 runner
+  // blocked（manual_dod_confirmation_required）——人工闸门未过不得算 ok。
   if (STOPPED_RUNNER_STATUSES.has(runnerStatus) || runnerStatus === 'waiting_user') {
     if (status === 'cancelled') return 'cancelled';
     return 'waiting_user';
   }
   if (status === 'completed') return 'ok';
   if (status === 'cancelled') return 'cancelled';
+  // 非终态 + 待确认 manual DoD：等待人工验收，不是失败。
+  if (manualDodCriterionIds(plan).length > 0) return 'waiting_user';
   if (status === 'failed') return 'goal_failed';
   // 非终态 + Runner 停止：人工介入路径。
   return 'waiting_user';
@@ -132,11 +139,23 @@ export async function driveNewGoalPlansToSettled(options: ExecGoalDriveOptions):
   if (!conversationId) return { drove: false, exitKind: 'ok', report: null };
 
   const plans = bridge.listPlansByConversation(conversationId) ?? [];
+  // 本轮新建的计划（含已在 send() 轮内跑到终态的——那正是自驱最快的形态）。
   const newPlans = plans.filter((plan: any) => {
     const planId = typeof plan?.planId === 'string' ? plan.planId : null;
-    return planId && !planIdsBefore.has(planId) && !TERMINAL_PLAN_STATUSES.has(plan.status);
+    return planId && !planIdsBefore.has(planId);
   });
   if (newPlans.length === 0) return { drove: false, exitKind: 'ok', report: null };
+
+  // 已到终态的新计划：无需驱动，直接分类汇报（send() 轮内即完成的快路径）。
+  const settled = newPlans.filter((plan: any) => TERMINAL_PLAN_STATUSES.has(plan?.status));
+  if (settled.length > 0) {
+    const target = settled.reduce((latest: any, plan: any) => (
+      String(plan?.updatedAt ?? '') > String(latest?.updatedAt ?? '') ? plan : latest
+    ));
+    // meta 视图不带 tasks/progress：取全量计划构建报告。
+    const full = bridge.getPlan(target.planId) ?? target;
+    return { drove: true, exitKind: classify(full), report: buildStopReport(target.planId, full) };
+  }
 
   // 取 updatedAt 最新的计划作为驱动对象。
   const target = newPlans.reduce((latest: any, plan: any) => (
