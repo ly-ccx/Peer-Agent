@@ -918,7 +918,7 @@
   }
 
   .task-artifacts-content {
-    @apply space-y-3 border-t px-3 pb-3 pt-2;
+    @apply space-y-3 border-t px-3 pb-2 pt-2;
     border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
   }
 
@@ -932,8 +932,14 @@
     color: var(--za-text-muted);
   }
 
+  /* 行距由行自身声明：每行 li 自带 my-1，hover 高亮的四边留白不再依赖
+     space-y 兄弟间距；去 space-y 后补上列表默认 padding/margin 重置。 */
   .task-artifacts-list {
-    @apply space-y-0.5;
+    @apply m-0 list-none p-0;
+  }
+
+  .task-artifact-shell {
+    @apply my-1;
   }
 
   .task-artifact {
