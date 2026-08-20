@@ -17,6 +17,13 @@
     padding-bottom: var(--radius-lg);
   }
 
+  /* 双栏工作台：滚动发生在左右两栏内部，外层不再滚动。
+     :has 精确命中 hero 分支（含 .task-overview-split），不影响全局工作台/列表页。 */
+  .task-overview-scroll-region:has(.task-overview-split) {
+    @apply overflow-hidden;
+    padding-bottom: 0;
+  }
+
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::before,
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::after {
     content: '';
@@ -44,8 +51,14 @@
     @apply mx-auto w-full max-w-5xl px-7 py-6;
   }
 
+  /* 双栏工作台：page 是 scroll-region 里唯一的 flex 列容器，占满视口剩余高度，
+     让 .task-overview-split 的 flex-1 真正受约束（左右两栏各自独立滚动，整页不滚）。 */
   .task-overview-page--home {
-    @apply max-w-6xl;
+    @apply mx-auto flex h-full w-full max-w-6xl flex-col px-7 pb-6 pt-6;
+  }
+
+  .task-overview-page--home .task-overview-split {
+    @apply min-h-0 flex-1;
   }
 
   .task-overview-header-sentinel {
@@ -232,7 +245,9 @@
   .task-overview-split {
     @apply grid min-h-0 flex-1 gap-6;
     grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
-    align-items: start;
+    /* 等高两栏：split 有视口高度约束后，两栏 stretch 占满，
+       滚动发生在各栏内部（align-items:start 会破坏这一点）。 */
+    align-items: stretch;
   }
 
   .task-overview-split-list {

@@ -40,10 +40,29 @@ test('each split column scrolls independently instead of the whole page', async 
     styles,
     /\.task-overview-split-detail\s*\{[\s\S]*?overflow-y-auto/,
   );
+  // 高度约束链：page--home 是 flex 列容器，split 通过 flex-1 + min-h-0 受视口约束。
+  assert.match(
+    styles,
+    /\.task-overview-page--home\s*\{[\s\S]*?h-full[\s\S]*?flex-col/,
+  );
+  assert.match(
+    styles,
+    /\.task-overview-page--home \.task-overview-split\s*\{[\s\S]*?min-h-0[\s\S]*?flex-1/,
+  );
   // 双栏容器自身不产生纵向滚动。
   assert.doesNotMatch(
     styles,
     /\.task-overview-split\s*\{[^}]*?overflow-y-auto/,
+  );
+  // 外层滚动容器在 hero 分支停止滚动（:has 精确命中）。
+  assert.match(
+    styles,
+    /\.task-overview-scroll-region:has\(\.task-overview-split\)\s*\{[\s\S]*?overflow-hidden/,
+  );
+  // 等高两栏：stretch 让两栏占满 split 高度，各自内部滚。
+  assert.match(
+    styles,
+    /\.task-overview-split\s*\{[\s\S]*?align-items:\s*stretch/,
   );
   // 左栏四组分区全部收进 split-section（紧凑行），不再用整节 WorkStream 卡。
   const splitSections = source.match(/task-overview-split-section/g) ?? [];
@@ -53,17 +72,22 @@ test('each split column scrolls independently instead of the whole page', async 
 test('clicking a left row switches the right detail panel', async () => {
   const source = await readPage();
 
-  // 状态与派生：选中 id + 从左栏条目中解析详情项。
+  // 状态与派生：选中 id + 从左栏条目中解析详情项，未选中时回退到左栏第一项。
   assert.match(source, /const \[selectedTaskId, setSelectedTaskId\] = useState<string \| null>\(null\);/);
-  assert.match(source, /const selectedDetailItem: TaskOverviewItem \| null = leftColumnItems\.find\(/);
-  assert.match(source, /item\.taskId === selectedTaskId/);
+  assert.match(
+    source,
+    /leftColumnItems\.find\(\(item\) => item\.taskId === selectedTaskId\) \?\? leftColumnItems\[0\] \?\? null/,
+  );
 
   // 左栏行点击 → setSelectedTaskId；右栏渲染选中的 WorkItem。
   assert.match(source, /onSelect=\{setSelectedTaskId\}/);
   assert.match(source, /onClick=\{\(\) => onSelect\(item\.taskId\)\}/);
   assert.match(source, /<WorkItem\s*\n\s*item=\{selectedDetailItem\}/);
 
-  // 未选中时的默认视图：待验收队列或占位说明。
+  // 行高亮与右栏详情共用同一个 selectedDetailItem（初始即第一项高亮）。
+  assert.match(source, /active=\{selectedDetailItem\?\.taskId === item\.taskId\}/);
+
+  // 左栏空时的回退：待验收队列或占位说明。
   assert.match(source, /displayedResults\.length > 0 \? \(/);
   assert.match(source, /从左侧选择一个任务/);
 });
@@ -94,7 +118,9 @@ test('left rows are compact single-line items with an active state', async () =>
 test('hero stats are clickable chips that drive the right panel focus', async () => {
   const [source, styles] = await Promise.all([readPage(), readStyles()]);
 
-  assert.match(source, /className=\{`task-overview-stat\$\{selectedTaskId === null[^`]*\}`}/);
+  // 默认态即「选中第一项」，chip 不再依赖 is-active 常亮表达焦点。
+  assert.match(source, /className="task-overview-stat"/);
+  assert.doesNotMatch(source, /selectedTaskId === null && displayedResults/);
   assert.match(source, /role="button"/);
   assert.match(source, /onClick=\{\(\) => setSelectedTaskId\(null\)\}/);
   assert.match(
@@ -103,7 +129,6 @@ test('hero stats are clickable chips that drive the right panel focus', async ()
   );
 
   assert.match(styles, /\.task-overview-stat\s*\{[\s\S]*?cursor: pointer/);
-  assert.match(styles, /\.task-overview-stat\.is-active\s*\{/);
 });
 
 test('HomePage subtitle no longer claims an empty workspace when tasks exist', async () => {

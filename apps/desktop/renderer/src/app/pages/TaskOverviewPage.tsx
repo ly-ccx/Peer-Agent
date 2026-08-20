@@ -1,6 +1,6 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatHeaderCapabilities } from '../../chat/components/thread/ChatHeaderCapabilities';
 import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPreference';
@@ -162,6 +162,22 @@ function workItemMetaParts(
 }
 
 /** 任务卡元信息。route = 来源/交付；runtime = 渠道/模型/时长/相对时间。 */
+function useLiveDurationMs(item: TaskOverviewItem): number | undefined {
+  const isLive = item.actionRight === 'peer_advancing' && typeof item.startedAt === 'string';
+  const snapshotRef = useRef({ item, durationMs: item.durationMs, capturedAt: Date.now() });
+  if (snapshotRef.current.item !== item) {
+    snapshotRef.current = { item, durationMs: item.durationMs, capturedAt: Date.now() };
+  }
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isLive) return undefined;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isLive, item.taskId]);
+  if (!isLive || typeof snapshotRef.current.durationMs !== 'number') return item.durationMs;
+  return snapshotRef.current.durationMs + Math.max(0, nowMs - snapshotRef.current.capturedAt);
+}
+
 function WorkItemMeta({
   item,
   fallbackWhenEmpty = 'LIVE',
@@ -171,10 +187,12 @@ function WorkItemMeta({
   readonly fallbackWhenEmpty?: string;
   readonly group?: WorkItemMetaGroup;
 }) {
-  const parts = workItemMetaParts(item, fallbackWhenEmpty, group);
+  const liveDurationMs = useLiveDurationMs(item);
+  const displayItem = liveDurationMs === item.durationMs ? item : { ...item, durationMs: liveDurationMs };
+  const parts = workItemMetaParts(displayItem, fallbackWhenEmpty, group);
   if (parts.length === 0) return null;
-  const providerLabel = safeDisplayLabel(item.providerLabel);
-  const modelLabel = safeDisplayLabel(item.modelLabel);
+  const providerLabel = safeDisplayLabel(displayItem.providerLabel);
+  const modelLabel = safeDisplayLabel(displayItem.modelLabel);
   const className =
     group === 'runtime'
       ? 'task-overview-work-meta task-overview-work-meta--runtime'
@@ -187,7 +205,7 @@ function WorkItemMeta({
         const isProvider = Boolean(providerLabel && part === providerLabel);
         const isModel = Boolean(modelLabel && part === modelLabel);
         const isDuration =
-          typeof item.durationMs === 'number' && formatDuration(item.durationMs) === part;
+          typeof displayItem.durationMs === 'number' && formatDuration(displayItem.durationMs) === part;
         return (
           <span key={`${part}-${index}`} className="task-overview-work-meta-part">
             {index > 0 ? (
@@ -202,7 +220,7 @@ function WorkItemMeta({
             ) : isDuration ? (
               <time
                 className="task-overview-work-duration"
-                dateTime={`PT${Math.floor((item.durationMs ?? 0) / 1000)}S`}
+                dateTime={`PT${Math.floor((displayItem.durationMs ?? 0) / 1000)}S`}
               >
                 {part}
               </time>
@@ -605,9 +623,10 @@ function HeroLayout({
     ...advancing,
     ...visibleDiscussions,
   ];
-  const selectedDetailItem: TaskOverviewItem | null = leftColumnItems.find(
-    (item) => item.taskId === selectedTaskId,
-  ) ?? null;
+  // 右栏默认选中左栏第一项：未手动点选时回退到首个条目，
+  // 避免「待验收队列」占据同一位置造成语义跳变。
+  const selectedDetailItem: TaskOverviewItem | null =
+    leftColumnItems.find((item) => item.taskId === selectedTaskId) ?? leftColumnItems[0] ?? null;
 
   return (
     <div className="task-overview-page task-overview-page--home">
@@ -649,7 +668,7 @@ function HeroLayout({
         </div>
         <div className="task-overview-hero-stats" aria-label="工作台状态">
           <div
-            className={`task-overview-stat${selectedTaskId === null && displayedResults.length === 0 ? ' is-active' : ''}`}
+            className="task-overview-stat"
             role="button"
             tabIndex={0}
             onClick={() => setSelectedTaskId(null)}
@@ -678,7 +697,7 @@ function HeroLayout({
             <span>Peer 推进</span>
           </div>
           <div
-            className={`task-overview-stat${selectedTaskId === null && displayedResults.length > 0 ? ' is-active' : ''}`}
+            className="task-overview-stat"
             role="button"
             tabIndex={0}
             onClick={() => setSelectedTaskId(null)}
@@ -722,7 +741,7 @@ function HeroLayout({
                   <WorkListRow
                     key={item.taskId}
                     item={item}
-                    active={selectedTaskId === item.taskId}
+                    active={selectedDetailItem?.taskId === item.taskId}
                     onSelect={setSelectedTaskId}
                     meta={item.planProgress ? `计划 ${item.planProgress.completed} / ${item.planProgress.total}` : undefined}
                   />
@@ -743,7 +762,7 @@ function HeroLayout({
                   <WorkListRow
                     key={item.taskId}
                     item={item}
-                    active={selectedTaskId === item.taskId}
+                    active={selectedDetailItem?.taskId === item.taskId}
                     onSelect={setSelectedTaskId}
                     meta={item.statusLabel}
                   />
@@ -766,7 +785,7 @@ function HeroLayout({
                   <WorkListRow
                     key={item.taskId}
                     item={item}
-                    active={selectedTaskId === item.taskId}
+                    active={selectedDetailItem?.taskId === item.taskId}
                     onSelect={setSelectedTaskId}
                     meta={advancingStateLabel(item)}
                   />
@@ -796,7 +815,7 @@ function HeroLayout({
                   <WorkListRow
                     key={item.taskId}
                     item={item}
-                    active={selectedTaskId === item.taskId}
+                    active={selectedDetailItem?.taskId === item.taskId}
                     onSelect={setSelectedTaskId}
                     meta={formatRelativeTime(item.lastActiveAt)}
                   />
@@ -930,7 +949,7 @@ function ListLayout({
 }
 
 /** 左栏紧凑行：标题 + 状态/进度摘要。点击选中，右栏展开完整详情。 */
-function WorkListRow({
+const WorkListRow = memo(function WorkListRow({
   item,
   active,
   onSelect,
@@ -953,10 +972,10 @@ function WorkListRow({
       <span className="task-overview-work-row__meta">{meta ?? item.statusLabel}</span>
     </button>
   );
-}
+});
 
 /** 四列交接行：任务 / 行动权 / 决策事由 / 主操作 */
-function HandoffRow({
+const HandoffRow = memo(function HandoffRow({
   item,
   onOpenItem,
 }: {
@@ -996,10 +1015,10 @@ function HandoffRow({
       </button>
     </article>
   );
-}
+});
 
 /** 无计划讨论卡：只表达讨论上下文，不复用执行状态或进度。 */
-function DiscussionCard({
+const DiscussionCard = memo(function DiscussionCard({
   item,
   onOpenItem,
 }: {
@@ -1028,10 +1047,10 @@ function DiscussionCard({
       </div>
     </article>
   );
-}
+});
 
 /** 推进中工作卡：状态 + 标题 + 进度条 + 取消 */
-function WorkItem({
+const WorkItem = memo(function WorkItem({
   item,
   onOpenItem,
   onCancelItem,
@@ -1115,7 +1134,7 @@ function WorkItem({
       ) : null}
     </article>
   );
-}
+});
 
 
 const ARTIFACT_PREVIEW_CHROME_STYLE = {
