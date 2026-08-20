@@ -60,8 +60,8 @@ export function HomePage({
       title="工作台"
       subtitle={
         isGlobal
-          ? '有任务时再回来看。现在只需要发出第一条任务。'
-          : '当前工作区还没有待办。先发出一条任务。'
+          ? 'Peer 跨工作区持续推进，只在需要你决策、授权或验收时交还给你。'
+          : 'Peer 在当前工作区持续推进任务，只在需要你决策、授权或验收时交还给你。'
       }
       filter={(item) => item.actionRight !== 'terminal'}
       emptyLabel={

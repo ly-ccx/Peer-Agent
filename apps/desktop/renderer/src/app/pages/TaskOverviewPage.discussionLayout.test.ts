@@ -7,8 +7,9 @@ const readStyles = () => readFile(new URL('../../styles/task-overview.css', impo
 
 test('advancing and paused streams pack cards instead of stretching a flat grid', async () => {
   const source = await readPageSource();
-  assert.match(source, /<WorkStream items=\{paused\}>/);
-  assert.match(source, /<WorkStream items=\{advancing\}>/);
+  // 方案 A 双栏：左栏用紧凑行（WorkListRow）承载 paused/advancing，
+  // 完整 WorkItem 卡只在右栏详情面板渲染；结果区仍用 WorkStream 瀑布。
+  assert.match(source, /<WorkStream[\s\S]*className="goal-thread-stream"/);
   assert.doesNotMatch(
     source,
     /<div className="task-overview-work-stream">\s*\{(paused|advancing)\.map/,
@@ -17,13 +18,15 @@ test('advancing and paused streams pack cards instead of stretching a flat grid'
 
 test('discussion preview uses compact cards instead of execution WorkItem cards', async () => {
   const source = await readPageSource();
-  const discussionSection = source.match(
-    /<div className="task-overview-discussion-grid">([\s\S]*?)<\/div>/,
-  )?.[1];
+  // 方案 A 双栏：讨论区不再有专属 grid div，行直接平铺在左栏 split-section 里（最后一个）。
+  const sections = [...source.matchAll(
+    /<section className="task-overview-section task-overview-split-section">([\s\S]*?)<\/section>/g,
+  )];
+  const discussionSection = sections.at(-1)?.[1];
 
-  assert.ok(discussionSection, 'discussion grid should have a dedicated render branch');
+  assert.ok(discussionSection, 'discussion rows should live in a split section branch');
   assert.match(discussionSection, /visibleDiscussions\.map/);
-  assert.match(discussionSection, /<DiscussionCard/);
+  assert.match(discussionSection, /<WorkListRow/);
   assert.doesNotMatch(discussionSection, /<WorkItem/);
   assert.match(source, /const DISCUSSION_PREVIEW_LIMIT = 6;/);
   assert.match(source, /const visibleDiscussions = discussions\.slice\(0, DISCUSSION_PREVIEW_LIMIT\);/);
@@ -48,25 +51,27 @@ test('interrupted execution excludes ordinary conversations and keeps recovery s
   );
   assert.match(source, /title="执行异常"/);
   assert.match(source, /item\.issueDetail/);
-  assert.match(source, /item\.nextAction === 'resume'/);
+  // 方案 A 双栏：恢复入口跟随右栏详情卡（selectedDetailItem）渲染。
+  assert.match(source, /selectedDetailItem\.nextAction === 'resume'/);
   assert.match(source, />\s*继续执行\s*</);
   assert.match(source, /item\.actionRight === 'paused' \? item\.statusLabel : advancingStateLabel\(item\)/);
 });
 
 test('interrupted execution reuses the container-responsive work stream', async () => {
   const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
+  // 方案 A 双栏：执行异常不再渲染为 WorkStream 卡，而是左栏紧凑行 + 右栏详情。
   const interruptedSection = source.match(
-    /<h2 title="执行异常">执行异常<\/h2>[\s\S]*?<WorkStream items=\{paused\}>/,
+    /<h2 title="执行异常">执行异常<\/h2>[\s\S]*?\{paused\.map/,
   );
 
-  assert.ok(interruptedSection, 'paused cards should reuse WorkStream');
+  assert.ok(interruptedSection, 'paused items should render compact rows');
   assert.match(
     styles,
-    /\.task-overview-work-stream\s*\{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 28rem\), 1fr\)\);/,
+    /\.task-overview-split\s*\{[\s\S]*?grid-template-columns: minmax\(0, 40%\) minmax\(0, 1fr\);/,
   );
   assert.match(
     styles,
-    /\.task-overview-work-stream\s*\{[\s\S]*?align-items: start;/,
+    /\.task-overview-split-list\s*\{[\s\S]*?overflow-y-auto/,
   );
   assert.doesNotMatch(
     styles,
@@ -145,7 +150,8 @@ test('discussion section stays visible when there are no unread conversations', 
   const source = await readPageSource();
 
   assert.doesNotMatch(source, /\{discussions\.length > 0 \? \(/);
-  assert.match(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  // 方案 A 双栏：讨论区移入左栏 task-overview-split-section，仍无条件渲染。
+  assert.match(source, /<section className="task-overview-section task-overview-split-section">/);
   assert.match(source, /\{visibleDiscussions\.length > 0 \? \(/);
   assert.match(source, /暂无未读讨论/);
 });
