@@ -163,7 +163,8 @@ function workItemMetaParts(
 
 /** 任务卡元信息。route = 来源/交付；runtime = 渠道/模型/时长/相对时间。 */
 function useLiveDurationMs(item: TaskOverviewItem): number | undefined {
-  const isLive = item.actionRight === 'peer_advancing' && typeof item.startedAt === 'string';
+  const isLive = item.actionRight === 'peer_advancing'
+    && typeof item.activeSegmentStartedAt === 'string';
   const snapshotRef = useRef({ item, durationMs: item.durationMs, capturedAt: Date.now() });
   if (snapshotRef.current.item !== item) {
     snapshotRef.current = { item, durationMs: item.durationMs, capturedAt: Date.now() };

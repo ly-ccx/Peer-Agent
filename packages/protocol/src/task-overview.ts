@@ -202,8 +202,18 @@ export interface TaskOverviewItem {
    * 有效运行时长（毫秒）。
    * GoalPlan 来自 timing 投影（activeMs）；缺 timing 时省略。
    * UI 负责格式化为「3m12s」等，不在协议层落展示字符串。
+   *
+   * live 任务每次 list 都会重算该字段；身份比较 / 卡片复用必须忽略它，
+   * 否则一路流式更新会把其余推进卡一起打成新对象。
    */
   readonly durationMs?: number;
+  /** 任务整体计时起点（ISO）。 */
+  readonly startedAt?: string;
+  /**
+   * 当前有效运行片段的起点（ISO）。仅存在时 live 卡片才在本地继续走表；
+   * 暂停中的任务保留 durationMs，不随墙钟继续增长。
+   */
+  readonly activeSegmentStartedAt?: string;
   /**
    * 任务所用模型的用户可见标签（如 grok-4.5）。
    * 来源：会话级 model / modelProviderId 绑定；无绑定时省略。
@@ -533,6 +543,10 @@ export function projectGoalPlan(
     ...(snapshot.updatedAt ? { lastActiveAt: snapshot.updatedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(projectedTiming?.startedAt ? { startedAt: projectedTiming.startedAt } : {}),
+    ...(projectedTiming?.isLive && snapshot.timing?.activeSegmentStartedAt
+      ? { activeSegmentStartedAt: snapshot.timing.activeSegmentStartedAt }
+      : {}),
     ...(modelLabel ? { modelLabel } : {}),
     ...(providerLabel ? { providerLabel } : {}),
     actionLabel: decision.actionLabel,
@@ -928,4 +942,67 @@ function automationTerminalLabel(
     case 'blocked':
       return '已阻塞';
   }
+}
+
+/**
+ * live `durationMs` 每次投影都会变。比较「任务身份」时忽略它，
+ * 这样一路任务的秒数/流式刷新不会把其余卡片判定为脏数据。
+ */
+function taskOverviewIdentity(item: TaskOverviewItem): unknown {
+  const { durationMs: _durationMs, ...rest } = item;
+  return rest;
+}
+
+export function areTaskOverviewItemsEqual(
+  current: TaskOverviewItem,
+  next: TaskOverviewItem,
+  options?: { readonly ignoreLiveClock?: boolean },
+): boolean {
+  if (current === next) return true;
+  if (!current || !next) return false;
+  if (current.taskId !== next.taskId) return false;
+  if (options?.ignoreLiveClock) {
+    return JSON.stringify(taskOverviewIdentity(current)) === JSON.stringify(taskOverviewIdentity(next));
+  }
+  return JSON.stringify(current) === JSON.stringify(next);
+}
+
+/**
+ * 按 taskId 复用未变卡片的对象身份。
+ * 首页无 conversationId，只能整表重拉；复用后单路进度不会拖垮其余卡。
+ */
+export function reuseUnchangedTaskOverviewItems(
+  current: readonly TaskOverviewItem[],
+  next: readonly TaskOverviewItem[],
+): TaskOverviewItem[] {
+  if (current === next) return current as TaskOverviewItem[];
+  if (!Array.isArray(next) || next.length === 0) return next as TaskOverviewItem[];
+  if (!Array.isArray(current) || current.length === 0) return next as TaskOverviewItem[];
+
+  const previousById = new Map<string, TaskOverviewItem>();
+  for (const item of current) {
+    if (item && typeof item.taskId === 'string') previousById.set(item.taskId, item);
+  }
+
+  let unchanged = current.length === next.length;
+  const reused = next.map((item, index) => {
+    const previous = item && typeof item.taskId === 'string' ? previousById.get(item.taskId) : undefined;
+    if (previous && areTaskOverviewItemsEqual(previous, item, { ignoreLiveClock: true })) {
+      if (previous !== current[index]) unchanged = false;
+      return previous;
+    }
+    unchanged = false;
+    return item;
+  });
+
+  if (unchanged) {
+    for (let index = 0; index < current.length; index += 1) {
+      if (current[index] !== reused[index]) {
+        unchanged = false;
+        break;
+      }
+    }
+    if (unchanged) return current as TaskOverviewItem[];
+  }
+  return reused;
 }

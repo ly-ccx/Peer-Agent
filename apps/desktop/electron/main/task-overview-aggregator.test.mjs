@@ -1976,3 +1976,68 @@ test('expandGoalThreadRelatives 会补同线已验收祖先', () => {
   const inScopeRoots = new Set(['root']);
   assert.equal(isGoalThreadContextPlan(parent, relationIndex, inScopeRoots), true);
 });
+
+test('listTaskOverview reuses sibling cards when one live durationMs changes', () => {
+  const startedAt = '2026-08-10T00:00:00.000Z';
+  const plans = [
+    {
+      planId: 'plan-a',
+      conversationId: 'conv-a',
+      title: '任务 A',
+      status: 'executing',
+      updatedAt: startedAt,
+      targetWorkspacePath: '/x/peer_agent',
+      timing: { startedAt, activeAccumulatedMs: 10_000 },
+    },
+    {
+      planId: 'plan-b',
+      conversationId: 'conv-b',
+      title: '任务 B',
+      status: 'executing',
+      updatedAt: startedAt,
+      targetWorkspacePath: '/x/peer_agent',
+      timing: { startedAt, activeAccumulatedMs: 20_000 },
+    },
+    {
+      planId: 'plan-c',
+      conversationId: 'conv-c',
+      title: '任务 C',
+      status: 'executing',
+      updatedAt: startedAt,
+      targetWorkspacePath: '/x/peer_agent',
+      timing: { startedAt, activeAccumulatedMs: 30_000 },
+    },
+    {
+      planId: 'plan-d',
+      conversationId: 'conv-d',
+      title: '任务 D',
+      status: 'executing',
+      updatedAt: startedAt,
+      targetWorkspacePath: '/x/peer_agent',
+      timing: { startedAt, activeAccumulatedMs: 40_000 },
+    },
+  ];
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => plans,
+      getPlan: () => null,
+    },
+    automationStore: {
+      listDefinitions: () => [],
+      listRuns: () => [],
+    },
+  });
+  const first = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const firstById = Object.fromEntries(first.map((item) => [item.taskId, item]));
+  plans[1] = {
+    ...plans[1],
+    title: '任务 B 进度变了',
+  };
+  const second = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const secondById = Object.fromEntries(second.map((item) => [item.taskId, item]));
+  assert.equal(secondById['plan-a'], firstById['plan-a']);
+  assert.equal(secondById['plan-c'], firstById['plan-c']);
+  assert.equal(secondById['plan-d'], firstById['plan-d']);
+  assert.notEqual(secondById['plan-b'], firstById['plan-b']);
+  assert.equal(secondById['plan-b'].title, '任务 B 进度变了');
+});

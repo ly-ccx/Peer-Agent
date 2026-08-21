@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TaskOverviewItem } from '@peer-agent/protocol';
+import {
+  reuseUnchangedTaskOverviewItems,
+  type TaskOverviewItem,
+} from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 
 /**
@@ -26,18 +29,6 @@ export type UseTaskOverviewOptions = {
   readonly activeWithinMs?: number;
   readonly limit?: number;
 };
-
-function areTaskOverviewItemsEqual(
-  current: readonly TaskOverviewItem[],
-  next: readonly TaskOverviewItem[],
-): boolean {
-  if (current === next) return true;
-  if (current.length !== next.length) return false;
-  for (let index = 0; index < current.length; index += 1) {
-    if (JSON.stringify(current[index]) !== JSON.stringify(next[index])) return false;
-  }
-  return true;
-}
 
 /**
  * 广播 payload 的相关性判定（性能治理，见知识库 multi-task-ui-performance-remediation §12）：
@@ -101,7 +92,7 @@ export function useTaskOverview(
           ...(Number.isFinite(limit) ? { limit } : {}),
         });
         if (requestId !== requestIdRef.current) return;
-        setItems((current) => areTaskOverviewItemsEqual(current, result) ? current : result);
+        setItems((current) => reuseUnchangedTaskOverviewItems(current, result));
       } catch {
         // 只读投影：拉取失败保持空列表，不阻断页面渲染。
         if (requestId === requestIdRef.current) setItems([]);

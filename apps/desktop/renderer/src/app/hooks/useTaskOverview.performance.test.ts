@@ -25,8 +25,8 @@ test('ChatSurface queries only its current conversation and follows page visibil
 test('TaskOverview hook preserves the previous array when projection contents are unchanged', async () => {
   const source = await readHook();
 
-  assert.match(source, /areTaskOverviewItemsEqual/);
-  assert.match(source, /setItems\(\(current\)\s*=>\s*areTaskOverviewItemsEqual\(current, result\)\s*\?\s*current\s*:\s*result\)/);
+  assert.match(source, /reuseUnchangedTaskOverviewItems/);
+  assert.match(source, /setItems\(\(current\)\s*=>\s*reuseUnchangedTaskOverviewItems\(current, result\)\)/);
 });
 
 test('hidden document pauses both polling and broadcast-driven reloads', async () => {

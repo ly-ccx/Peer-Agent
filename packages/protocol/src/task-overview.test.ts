@@ -7,6 +7,7 @@ import {
   projectConversation,
   projectGoalPlan,
   projectShellBackgroundTask,
+  reuseUnchangedTaskOverviewItems,
   type AutomationProjectionSnapshot,
   type ConversationProjectionSnapshot,
   type GoalPlanProjectionSnapshot,
@@ -513,13 +514,75 @@ test('projectGoalPlan 从 timing 投影 durationMs，并透传 modelLabel / prov
   );
   // 15s 累计 + 15s open segment = 30s
   assert.equal(item.durationMs, 30_000);
+  assert.equal(item.startedAt, '2026-08-10T00:00:00.000Z');
   assert.equal(item.modelLabel, 'grok-4.5');
   assert.equal(item.providerLabel, 'xai');
 
   const without = projectGoalPlan(goalSnapshot());
   assert.equal(without.durationMs, undefined);
+  assert.equal(without.startedAt, undefined);
   assert.equal(without.modelLabel, undefined);
   assert.equal(without.providerLabel, undefined);
+});
+
+test('reuseUnchangedTaskOverviewItems keeps sibling cards when only one live durationMs changes', () => {
+  const liveTiming = (accumulatedMs) => ({
+    startedAt: '2026-08-10T00:00:00.000Z',
+    activeAccumulatedMs: accumulatedMs,
+    activeSegmentStartedAt: '2026-08-10T00:00:10.000Z',
+  });
+  const a = projectGoalPlan(goalSnapshot({
+    planId: 'plan-a',
+    conversationId: 'conv-a',
+    timing: liveTiming(10_000),
+  }), { nowMs: Date.parse('2026-08-10T00:00:10.000Z') });
+  const b = projectGoalPlan(goalSnapshot({
+    planId: 'plan-b',
+    conversationId: 'conv-b',
+    timing: liveTiming(20_000),
+  }), { nowMs: Date.parse('2026-08-10T00:00:10.000Z') });
+  const c = projectGoalPlan(goalSnapshot({
+    planId: 'plan-c',
+    conversationId: 'conv-c',
+    timing: liveTiming(30_000),
+  }), { nowMs: Date.parse('2026-08-10T00:00:10.000Z') });
+  const d = projectGoalPlan(goalSnapshot({
+    planId: 'plan-d',
+    conversationId: 'conv-d',
+    timing: liveTiming(40_000),
+  }), { nowMs: Date.parse('2026-08-10T00:00:10.000Z') });
+  const current = [a, b, c, d];
+  const next = [
+    projectGoalPlan(goalSnapshot({
+      planId: 'plan-a',
+      conversationId: 'conv-a',
+      timing: liveTiming(10_000),
+    }), { nowMs: Date.parse('2026-08-10T00:00:12.000Z') }),
+    projectGoalPlan(goalSnapshot({
+      planId: 'plan-b',
+      conversationId: 'conv-b',
+      title: '任务 B 进度变了',
+      timing: liveTiming(20_000),
+    }), { nowMs: Date.parse('2026-08-10T00:00:12.000Z') }),
+    projectGoalPlan(goalSnapshot({
+      planId: 'plan-c',
+      conversationId: 'conv-c',
+      timing: liveTiming(30_000),
+    }), { nowMs: Date.parse('2026-08-10T00:00:12.000Z') }),
+    projectGoalPlan(goalSnapshot({
+      planId: 'plan-d',
+      conversationId: 'conv-d',
+      timing: liveTiming(40_000),
+    }), { nowMs: Date.parse('2026-08-10T00:00:12.000Z') }),
+  ];
+  const reused = reuseUnchangedTaskOverviewItems(current, next);
+  assert.equal(reused[0], a);
+  assert.equal(reused[2], c);
+  assert.equal(reused[3], d);
+  assert.notEqual(reused[1], b);
+  assert.equal(reused[1].taskId, 'plan-b');
+  assert.equal(reused[1].title, '任务 B 进度变了');
+  assert.equal(reused[1].durationMs, 22_000);
 });
 
 test('projectGoalPlan 透传 timing.completedAt 为 completedAt', () => {
