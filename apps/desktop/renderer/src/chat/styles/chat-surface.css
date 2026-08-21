@@ -591,6 +591,14 @@
 .thinking-toggle:hover .thinking-chevron {
   opacity: 0.9;
 }
+/* 思考中：右侧箭头默认隐藏，悬停或键盘聚焦时再显示。完成后仍走上方默认可见样式。 */
+.thinking-section.active .thinking-chevron {
+  opacity: 0;
+}
+.thinking-section.active .thinking-toggle:hover .thinking-chevron,
+.thinking-section.active .thinking-toggle:focus-visible .thinking-chevron {
+  opacity: 0.9;
+}
 .thinking-body {
   display: flex;
   flex-direction: column;
