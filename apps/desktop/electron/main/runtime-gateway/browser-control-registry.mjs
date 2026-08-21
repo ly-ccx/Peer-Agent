@@ -44,6 +44,7 @@ function findEntryKeyByWebContentsId(webContentsId) {
  *   browserTabId: string,
  *   active?: boolean,
  *   claimForeground?: boolean,
+ *   hidden?: boolean,
  *   url?: string,
  *   title?: string
  * }} entry
@@ -65,6 +66,7 @@ export function registerBrowserWebContents(entry = {}) {
     conversationId: convKey === FALLBACK_CONVERSATION_KEY ? null : convKey,
     browserTabId,
     active: entry.active === true,
+    hidden: entry.hidden === true,
     url: typeof entry.url === 'string' ? entry.url : '',
     title: typeof entry.title === 'string' ? entry.title : '',
     registeredAt: new Date().toISOString(),
