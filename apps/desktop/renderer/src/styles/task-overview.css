@@ -1,6 +1,6 @@
-/* TaskOverview 三页面 —— 对齐 peer-2-0 高保真首页结构。
+/* TaskOverview 三页面 —— Action Inbox。
  *
- * 首页：topline + hero(说明|统计) + 交接四列 + 双列瀑布流推进 + 结果待验收。
+ * 首页：topline + hero + 需要你处理 / 异常恢复 / 待验收；推进与讨论沉到底栏。
  * 颜色只走 --za-* token，由 [data-theme] 切换，无硬编码 fallback。
  */
 @layer components {
@@ -13,15 +13,8 @@
 
   .task-overview-scroll-region {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
-    /* 末卡离开外壳圆角裁切，避免底角被 page-layer / primary-page-shell 剃掉 */
-    padding-bottom: var(--radius-lg);
-  }
-
-  /* 双栏工作台：滚动发生在左右两栏内部，外层不再滚动。
-     :has 精确命中 hero 分支（含 .task-overview-split），不影响全局工作台/列表页。 */
-  .task-overview-scroll-region:has(.task-overview-split) {
-    @apply overflow-hidden;
-    padding-bottom: 0;
+    /* 给常驻底栏留出高度，末卡也不被外壳圆角裁切 */
+    padding-bottom: calc(var(--radius-lg) + 3.25rem);
   }
 
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::before,
@@ -51,14 +44,87 @@
     @apply mx-auto w-full max-w-5xl px-7 py-6;
   }
 
-  /* 双栏工作台：page 是 scroll-region 里唯一的 flex 列容器，占满视口剩余高度，
-     让 .task-overview-split 的 flex-1 真正受约束（左右两栏各自独立滚动，整页不滚）。 */
+  /* Action Inbox：主列自然滚动，底栏由 page-layer 钉住。 */
   .task-overview-page--home {
-    @apply mx-auto flex h-full w-full max-w-6xl flex-col px-7 pb-6 pt-6;
+    @apply mx-auto w-full max-w-6xl px-7 pb-6 pt-6;
   }
 
-  .task-overview-page--home .task-overview-split {
-    @apply min-h-0 flex-1;
+  .task-overview-background-bar {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 24;
+    display: flex;
+    min-height: 3.25rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 1.5rem;
+    border-top: 1px solid var(--za-line);
+    background: color-mix(in srgb, var(--za-app-bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+    pointer-events: auto;
+  }
+
+  .task-overview-background-bar__cluster {
+    @apply inline-flex min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left;
+    color: var(--za-text);
+  }
+
+  .task-overview-background-bar__cluster:disabled,
+  .task-overview-background-bar__cluster.is-quiet {
+    cursor: default;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-background-bar__cluster:not(:disabled):hover .task-overview-background-bar__hint {
+    color: var(--za-accent);
+  }
+
+  .task-overview-background-bar__copy {
+    @apply inline-flex items-center gap-1.5 text-sm font-medium;
+  }
+
+  .task-overview-background-bar__copy b {
+    color: var(--za-accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .task-overview-background-bar__hint {
+    @apply min-w-0 truncate text-xs;
+    color: var(--za-text-muted);
+    max-width: 18rem;
+  }
+
+  .task-overview-background-bar__pulse {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--za-accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-accent) 18%, transparent);
+  }
+
+  .task-overview-background-bar__meter {
+    display: inline-flex;
+    width: 4.5rem;
+    height: 0.3rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+
+  .task-overview-background-bar__meter i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--za-accent);
+  }
+
+  .task-overview-inbox-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
   .task-overview-header-sentinel {
@@ -194,33 +260,9 @@
     @apply flex shrink-0 items-stretch gap-0;
   }
 
+  /* 原型 hero-stats：静态统计块，块间 1px 分隔线（无交互）。 */
   .task-overview-stat {
-    @apply flex min-w-[4.5rem] cursor-pointer flex-col items-start px-4 text-left first:pl-0;
-    border: none;
-    background: none;
-    border-radius: 0.5rem;
-    -webkit-app-region: no-drag;
-    color: inherit;
-    font: inherit;
-    padding-block: 0.25rem;
-    transition: background-color var(--za-motion-fast) var(--za-ease-standard);
-  }
-
-  .task-overview-stat:hover {
-    background: var(--za-surface-1);
-  }
-
-  .task-overview-stat.is-active {
-    background: color-mix(in srgb, var(--za-accent) 10%, transparent);
-  }
-
-  .task-overview-stat.is-active b {
-    color: var(--za-accent);
-  }
-
-  .task-overview-stat:focus-visible {
-    outline: 2px solid var(--za-accent);
-    outline-offset: 2px;
+    @apply flex min-w-[4.5rem] flex-col items-start px-4 first:pl-0;
   }
 
   .task-overview-stat + .task-overview-stat {
@@ -239,79 +281,6 @@
 
   .task-overview-header {
     @apply mb-6;
-  }
-
-  /* ---------- 双栏：左列表 + 右详情，各自独立滚动 ---------- */
-  .task-overview-split {
-    @apply grid min-h-0 flex-1 gap-6;
-    grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
-    /* 等高两栏：split 有视口高度约束后，两栏 stretch 占满，
-       滚动发生在各栏内部（align-items:start 会破坏这一点）。 */
-    align-items: stretch;
-  }
-
-  .task-overview-split-list {
-    @apply min-h-0 min-w-0 overflow-y-auto overscroll-contain;
-    padding-right: 0.25rem;
-  }
-
-  .task-overview-split-detail {
-    @apply min-h-0 min-w-0 overflow-y-auto overscroll-contain;
-    padding-left: 0.25rem;
-    border-left: 1px solid var(--za-line);
-  }
-
-  .task-overview-split-section {
-    @apply mb-5;
-  }
-
-  .task-overview-split-section .task-overview-section-head {
-    @apply mb-2;
-  }
-
-  .task-overview-detail-card {
-    @apply rounded-2xl;
-    background: var(--za-surface-0);
-    border: 1px solid var(--za-line);
-    padding: 1rem;
-  }
-
-  .task-overview-detail-placeholder {
-    @apply flex h-full items-center justify-center;
-  }
-
-  /* 左栏紧凑行：单行标题 + 右侧状态摘要，高度收敛。 */
-  .task-overview-work-row {
-    @apply mb-1 flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    -webkit-app-region: no-drag;
-    transition:
-      background-color var(--za-motion-fast) var(--za-ease-standard),
-      border-color var(--za-motion-fast) var(--za-ease-standard);
-  }
-
-  .task-overview-work-row:hover {
-    background: var(--za-surface-1);
-    border-color: var(--za-line-strong);
-  }
-
-  .task-overview-work-row.is-active {
-    border-color: var(--za-accent);
-    background: color-mix(in srgb, var(--za-accent) 8%, transparent);
-  }
-
-  .task-overview-work-row__title {
-    @apply min-w-0 flex-1 truncate text-sm font-medium;
-    color: var(--za-text);
-  }
-
-  .task-overview-work-row__meta {
-    @apply shrink-0 text-xs;
-    color: var(--za-text-muted);
   }
 
   /* ---------- section ---------- */

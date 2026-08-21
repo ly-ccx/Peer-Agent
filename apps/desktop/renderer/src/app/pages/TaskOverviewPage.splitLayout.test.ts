@@ -6,137 +6,70 @@ const readPage = () => readFile(new URL('./TaskOverviewPage.tsx', import.meta.ur
 const readStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 const readHome = () => readFile(new URL('./HomePage.tsx', import.meta.url), 'utf8');
+const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
 
-/**
- * 方案 A 双栏布局回归测试（源码结构断言，与 discussionLayout 同风格）。
- *
- * 2026-08-20：工作台从单列纵向长页改为双栏——
- * 左栏 task-overview-split-list 承载四组紧凑行（轮到你/执行异常/Peer 推进/讨论），
- * 右栏 task-overview-split-detail 渲染选中任务详情或默认待验收队列。
- * 点击左侧行（WorkListRow → setSelectedTaskId）切换右侧详情。
- */
-
-test('split layout renders two columns: list on the left, detail on the right', async () => {
+test('home is a single-column inbox, not a split workbench', async () => {
   const [source, styles] = await Promise.all([readPage(), readStyles()]);
 
-  assert.match(source, /<div className="task-overview-split">/);
-  assert.match(source, /<div className="task-overview-split-list" role="list"/);
-  assert.match(source, /<div className="task-overview-split-detail">/);
-
-  assert.match(
-    styles,
-    /\.task-overview-split\s*\{[\s\S]*?grid-template-columns: minmax\(0, 40%\) minmax\(0, 1fr\);/,
-  );
+  assert.doesNotMatch(source, /task-overview-split/);
+  assert.doesNotMatch(source, /WorkListRow/);
+  assert.doesNotMatch(source, /selectedTaskId/);
+  assert.doesNotMatch(styles, /task-overview-split/);
+  assert.match(source, /task-overview-page--home/);
+  assert.match(styles, /\.task-overview-page--home\s*\{/);
 });
 
-test('each split column scrolls independently instead of the whole page', async () => {
-  const [source, styles] = await Promise.all([readPage(), readStyles()]);
-
-  assert.match(
-    styles,
-    /\.task-overview-split-list\s*\{[\s\S]*?overflow-y-auto/,
-  );
-  assert.match(
-    styles,
-    /\.task-overview-split-detail\s*\{[\s\S]*?overflow-y-auto/,
-  );
-  // 高度约束链：page--home 是 flex 列容器，split 通过 flex-1 + min-h-0 受视口约束。
-  assert.match(
-    styles,
-    /\.task-overview-page--home\s*\{[\s\S]*?h-full[\s\S]*?flex-col/,
-  );
-  assert.match(
-    styles,
-    /\.task-overview-page--home \.task-overview-split\s*\{[\s\S]*?min-h-0[\s\S]*?flex-1/,
-  );
-  // 双栏容器自身不产生纵向滚动。
-  assert.doesNotMatch(
-    styles,
-    /\.task-overview-split\s*\{[^}]*?overflow-y-auto/,
-  );
-  // 外层滚动容器在 hero 分支停止滚动（:has 精确命中）。
-  assert.match(
-    styles,
-    /\.task-overview-scroll-region:has\(\.task-overview-split\)\s*\{[\s\S]*?overflow-hidden/,
-  );
-  // 等高两栏：stretch 让两栏占满 split 高度，各自内部滚。
-  assert.match(
-    styles,
-    /\.task-overview-split\s*\{[\s\S]*?align-items:\s*stretch/,
-  );
-  // 左栏四组分区全部收进 split-section（紧凑行），不再用整节 WorkStream 卡。
-  const splitSections = source.match(/task-overview-split-section/g) ?? [];
-  assert.ok(splitSections.length >= 4, `expected >= 4 split sections, got ${splitSections.length}`);
-});
-
-test('clicking a left row switches the right detail panel', async () => {
+test('inbox groups the same conversation into original cards', async () => {
   const source = await readPage();
 
-  // 状态与派生：选中 id + 从左栏条目中解析详情项，未选中时回退到左栏第一项。
-  assert.match(source, /const \[selectedTaskId, setSelectedTaskId\] = useState<string \| null>\(null\);/);
-  assert.match(
-    source,
-    /leftColumnItems\.find\(\(item\) => item\.taskId === selectedTaskId\) \?\? leftColumnItems\[0\] \?\? null/,
-  );
-
-  // 左栏行点击 → setSelectedTaskId；右栏渲染选中的 WorkItem。
-  assert.match(source, /onSelect=\{setSelectedTaskId\}/);
-  assert.match(source, /onClick=\{\(\) => onSelect\(item\.taskId\)\}/);
-  assert.match(source, /<WorkItem\s*\n\s*item=\{selectedDetailItem\}/);
-
-  // 行高亮与右栏详情共用同一个 selectedDetailItem（初始即第一项高亮）。
-  assert.match(source, /active=\{selectedDetailItem\?\.taskId === item\.taskId\}/);
-
-  // 左栏空时的回退：待验收队列或占位说明。
-  assert.match(source, /displayedResults\.length > 0 \? \(/);
-  assert.match(source, /从左侧选择一个任务/);
+  assert.match(source, /groupInboxByConversation/);
+  assert.match(source, /<ResultCard/);
+  assert.match(source, /<HandoffRow/);
+  assert.match(source, /<WorkItem/);
+  assert.match(source, /<h2>需要你处理<\/h2>/);
+  assert.match(source, /<h2 title="执行异常">执行异常<\/h2>/);
+  assert.match(source, /<h2>结果待验收<\/h2>/);
+  assert.doesNotMatch(source, /<h2>现在轮到你<\/h2>/);
+  assert.doesNotMatch(source, /task-overview-session-card/);
+  assert.doesNotMatch(source, /<WorkStream items=\{paused\}>/);
 });
 
-test('left rows are compact single-line items with an active state', async () => {
-  const [source, styles] = await Promise.all([readPage(), readStyles()]);
+test('advancing stays off the main column unless there is live work', async () => {
+  const source = await readPage();
 
-  assert.match(source, /function WorkListRow\(/);
-  assert.match(source, /task-overview-work-row\$\{active \? ' is-active' : ''\}/);
-  assert.match(source, /aria-current=\{active \? 'true' : undefined\}/);
-
-  assert.match(
-    styles,
-    /\.task-overview-work-row\s*\{[\s\S]*?truncate/,
-  );
-  assert.match(
-    styles,
-    /\.task-overview-work-row\.is-active\s*\{[\s\S]*?border-color: var\(--za-accent\);/,
-  );
-  // 按钮语义：可点、可聚焦、无 opacity 过渡（buttonCursor 约束同族）。
-  assert.match(styles, /\.task-overview-work-row\s*\{[\s\S]*?cursor: pointer/);
-  assert.doesNotMatch(
-    styles,
-    /\.task-overview-work-row\s*\{[^}]*?opacity\s*:/,
-  );
+  assert.doesNotMatch(source, /<h2>Peer 正在推进<\/h2>/);
+  assert.doesNotMatch(source, /<WorkStream items=\{advancing\}>/);
+  assert.doesNotMatch(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /backgroundBarHost && advancing\.length > 0/);
+  assert.match(source, /Peer 推进中/);
+  assert.doesNotMatch(source, /打开会话抽屉/);
+  assert.doesNotMatch(source, /Peer 待命/);
 });
 
-test('hero stats are clickable chips that drive the right panel focus', async () => {
-  const [source, styles] = await Promise.all([readPage(), readStyles()]);
+test('hero drops the marketing kicker and static stats', async () => {
+  const source = await readPage();
 
-  // 默认态即「选中第一项」，chip 不再依赖 is-active 常亮表达焦点。
-  assert.match(source, /className="task-overview-stat"/);
-  assert.doesNotMatch(source, /selectedTaskId === null && displayedResults/);
-  assert.match(source, /role="button"/);
-  assert.match(source, /onClick=\{\(\) => setSelectedTaskId\(null\)\}/);
-  assert.match(
-    source,
-    /const first = needsYou\[0\] \?\? paused\[0\] \?\? advancing\[0\] \?\? null;/,
-  );
-
-  assert.match(styles, /\.task-overview-stat\s*\{[\s\S]*?cursor: pointer/);
+  assert.doesNotMatch(source, /Delegation OS/);
+  assert.doesNotMatch(source, /task-overview-hero-stats/);
+  assert.match(source, /<h1>现在轮到你做什么<\/h1>/);
+  assert.doesNotMatch(source, /onClick=\{[^}]*setHeroFilter/);
 });
 
-test('HomePage subtitle no longer claims an empty workspace when tasks exist', async () => {
+test('home subtitle describes one card per task', async () => {
   const home = await readHome();
 
-  // 空态话术只允许出现在 emptyLabel（仅在 hasAny 为 false 时渲染），不得再出现在副标题。
-  assert.doesNotMatch(home, /subtitle=\{\s*isGlobal\s*\?\s*'[^']*还没有待办/);
-  assert.doesNotMatch(home, /当前工作区还没有待办。先发出一条任务。/);
-  // 空态文案仍在 emptyLabel 里保留，供真正的空态渲染。
-  assert.match(home, /当前工作区还没有任务。发出第一条后会显示在这里。/);
+  assert.match(home, /现在轮到我做什么/);
+  assert.match(home, /一张卡是一件事/);
+  assert.doesNotMatch(home, /同一会话收成一张卡/);
+  assert.doesNotMatch(home, /工作和讨论在底栏/);
+});
+
+test('workbench cards open the conversation instead of the result drawer', async () => {
+  const app = await readApp();
+
+  assert.match(app, /handleContinueTask\(String\(conversationId\)\)/);
+  assert.doesNotMatch(
+    app,
+    /if \(item\.actionRight === 'result_ready'\) \{\s*[\s\S]*?openResultDrawer\(item, options\);/,
+  );
 });

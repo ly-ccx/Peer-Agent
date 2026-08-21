@@ -1038,11 +1038,6 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
-                        if (item.actionRight === 'result_ready') {
-                          // 只打开结果抽屉，不定位消息：嵌套会话面全新挂载原生贴底，定位会造成高亮后二次跳动。
-                          openResultDrawer(item, options);
-                          return;
-                        }
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));
@@ -1072,12 +1067,7 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
-                        // 结果待验收：右侧结果 Drawer 展示执行内容，不跳会话，也不定位消息（贴底即可）。
-                        if (item.actionRight === 'result_ready') {
-                          openResultDrawer(item, options);
-                          return;
-                        }
-                        // 决策 / 推进：打开会话 Drawer 继续讨论，不跳主 Chat。
+                        // 工作台卡片进入原会话流，不再先弹结果抽屉。
                         const conversationId = item.conversationId;
                         if (conversationId) {
                           handleContinueTask(String(conversationId));

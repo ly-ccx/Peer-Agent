@@ -176,11 +176,13 @@ test('源码：无 rootPlanId 的卡在第一段就被 emit，不会被第二段
   assert.match(source, /byId\.values\(\)\]\s*\.sort\(compareThreadItems\)/);
 });
 
-test('源码：区级页面归组卡带上同线待签项，树行点击只开单个节点', async () => {
+test('源码：首页按会话收成一张卡，Goal Thread 分组仍保留在共享模块', async () => {
   const source = await readPage();
-  // 归组卡「查看结果」带上这条线全部待签项；点某一行仍只传 node.item。
-  assert.match(source, /acceptTogether=\{collectPendingAcceptanceItems\(/);
-  assert.match(source, /onOpenItem\?\.\(item, acceptTogether\?\.length \? \{ acceptTogether \} : undefined\)/);
+  assert.match(source, /groupInboxByConversation/);
+  assert.match(source, /groupResultCardsByGoalThread/);
+  assert.match(source, /<ResultCard/);
+  assert.match(source, /<h2>结果待验收<\/h2>/);
+  assert.doesNotMatch(source, /task-overview-session-card/);
   const grouping = await readGrouping();
   assert.match(grouping, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);
   assert.doesNotMatch(

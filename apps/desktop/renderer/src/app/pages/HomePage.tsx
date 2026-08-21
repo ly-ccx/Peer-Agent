@@ -5,7 +5,7 @@ import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
- * 工作台页：只回答「现在需要关注什么」。
+ * 工作台页：只回答「现在轮到我做什么」。
  * 折叠头部状态 isHeaderCompact 由 TaskOverviewPage 内的实际滚动容器统一维护。
  *
  * 侧栏两套入口（勿混）：
@@ -60,8 +60,8 @@ export function HomePage({
       title="工作台"
       subtitle={
         isGlobal
-          ? 'Peer 跨工作区持续推进，只在需要你决策、授权或验收时交还给你。'
-          : 'Peer 在当前工作区持续推进任务，只在需要你决策、授权或验收时交还给你。'
+          ? '一张卡是一件事。点进去继续这件事。'
+          : '一张卡是一件事。点进去继续这件事。'
       }
       filter={(item) => item.actionRight !== 'terminal'}
       emptyLabel={
