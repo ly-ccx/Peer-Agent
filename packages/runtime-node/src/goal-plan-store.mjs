@@ -18,6 +18,11 @@ import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { attachWorkspaceHeadBinding } from './goal-delivery-binding.mjs';
 import { normalizeGoalCheckpoint, validateGoalCheckpoint } from '@peer-agent/runtime-core';
+import {
+  assertAcceptanceCloseGate,
+  collectHeldEvidenceRefs,
+  isAcceptanceClosePatch,
+} from '@peer-agent/protocol';
 
 /**
  * Goal 计划持久化 store —— 见 Goal 模式设计。
@@ -29,8 +34,8 @@ import { normalizeGoalCheckpoint, validateGoalCheckpoint } from '@peer-agent/run
  * - 子任务（含嵌套）状态只能由 Evidence 回写；置为 'completed' 必须带 evidenceRefs。
  * - progress 由子任务自底向上聚合，调用方不可手填（每次写入都会重算覆盖）。
  *
- * 协议类型见 packages/protocol/src/goal.ts。本模块只依赖 fs/path/crypto，
- * 不 import electron，可被单测直接 import。
+ * 协议类型见 packages/protocol/src/goal.ts。关闭闸门（resultAcceptance）
+ * 与协议层 evaluateAcceptanceCloseGate 共用。不 import electron，可被单测直接 import。
  */
 
 // maxExplorers 的硬上限护栏。历史语义为「每计划累计可派发 Explorer 总数」，现已弃用
@@ -2791,6 +2796,15 @@ export function createGoalPlanStore({
       ],
       updatedAt: new Date().toISOString(),
     };
+    if (isAcceptanceClosePatch(plan.resultAcceptance, next.resultAcceptance)) {
+      const knownRefs = new Set(collectHeldEvidenceRefs(plan));
+      for (const record of readEvidenceIndex()) {
+        if (evidenceRecordMatchesPlan(record, plan) && record.evidenceRef) {
+          knownRefs.add(record.evidenceRef);
+        }
+      }
+      assertAcceptanceCloseGate(next, { knownRefs: [...knownRefs] });
+    }
     return persist(withRunTraceEvent(next, {
       type: 'plan_revised',
       summary: reason ? `计划有调整：${reason}` : '计划有调整',

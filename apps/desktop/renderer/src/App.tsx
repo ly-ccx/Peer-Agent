@@ -1,5 +1,5 @@
 import { createI18n } from '@peer-agent/i18n';
-import type { LlmProviderConfigView } from '@peer-agent/protocol';
+import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { CapabilitiesPanel } from './app/components/CapabilitiesPanel';
@@ -139,6 +139,7 @@ function MainApp() {
   const [resultDrawerItem, setResultDrawerItem] = useState<TaskOverviewItem | null>(null);
   const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
+  const [resultCloseGate, setResultCloseGate] = useState<AcceptanceCloseVerdict | null>(null);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
@@ -151,6 +152,7 @@ function MainApp() {
     setResultDrawerAcceptTogether(options?.acceptTogether ?? []);
     setCollectionDrawer('result');
     setResultAcceptancePending(null);
+    setResultCloseGate(null);
     if (item.conversationId) setActiveConversationId(item.conversationId);
   }, []);
 
@@ -1318,7 +1320,11 @@ function MainApp() {
                                   <path d="m6 6 12 12" />
                                 </svg>
                               </button>
-                              <ConversationResultView item={resultDrawerItem} isZh={isZh} />
+                              <ConversationResultView
+                                item={resultDrawerItem}
+                                isZh={isZh}
+                                onCloseGateChange={setResultCloseGate}
+                              />
                             </div>
                           </div>
                           {(() => {
@@ -1327,8 +1333,12 @@ function MainApp() {
                             const canAccept =
                               item.source === 'goal_plan' && Boolean(item.taskId);
                             if (!canAccept) return null;
+                            const closeBlocked = Boolean(resultCloseGate && !resultCloseGate.ok);
                             return (
                               <footer className="conversation-result-drawer__footer">
+                                {closeBlocked && resultCloseGate?.message ? (
+                                  <p className="conversation-result-drawer__gate">{resultCloseGate.message}</p>
+                                ) : null}
                                 <button
                                   type="button"
                                   className="task-overview-btn"
@@ -1345,9 +1355,9 @@ function MainApp() {
                                 <button
                                   type="button"
                                   className="task-overview-btn task-overview-btn--primary"
-                                  disabled={Boolean(resultAcceptancePending)}
+                                  disabled={Boolean(resultAcceptancePending) || closeBlocked}
                                   onClick={() => {
-                                    if (resultAcceptancePending) return;
+                                    if (resultAcceptancePending || closeBlocked) return;
                                     setResultAcceptancePending(item);
                                     requestClose();
                                   }}

@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { GoalPlan, TaskOverviewArtifact, TaskOverviewItem } from '@peer-agent/protocol';
+import {
+  collectHeldEvidenceRefs,
+  evaluateAcceptanceCloseGate,
+  formatAuthorizationSummary,
+  projectAcceptanceBasis,
+  type AcceptanceCloseVerdict,
+  type GoalPlan,
+  type TaskOverviewArtifact,
+  type TaskOverviewItem,
+} from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import {
   acceptancePageMeta,
@@ -16,9 +25,11 @@ import { projectTaskOverviewArtifacts } from '../pages/taskOverviewArtifacts';
 export function ConversationResultView({
   item,
   isZh = true,
+  onCloseGateChange,
 }: {
   readonly item: TaskOverviewItem;
   readonly isZh?: boolean;
+  readonly onCloseGateChange?: (verdict: AcceptanceCloseVerdict | null) => void;
 }) {
   const [loading, setLoading] = useState(item.source === 'goal_plan' && Boolean(item.taskId));
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +67,18 @@ export function ConversationResultView({
   }, [item.source, item.taskId]);
 
   const acceptanceRows = useMemo(() => pairAcceptanceCriteria(plan), [plan]);
+  const closeGate = useMemo(() => {
+    if (!plan) return null;
+    return evaluateAcceptanceCloseGate(plan, {
+      knownRefs: collectHeldEvidenceRefs(plan),
+      locale: isZh ? 'zh' : 'en',
+    });
+  }, [isZh, plan]);
+  const basis = useMemo(() => projectAcceptanceBasis(plan, { isZh }), [isZh, plan]);
+
+  useEffect(() => {
+    onCloseGateChange?.(loading ? null : closeGate);
+  }, [closeGate, loading, onCloseGateChange]);
   const leftoverEvidence = plan?.evidenceRefs ?? [];
   const evidenceSources = useMemo(
     () => (item.planSteps ?? []).flatMap((step) => step.artifacts ?? []),
@@ -134,6 +157,47 @@ export function ConversationResultView({
           </p>
         )}
       </section>
+
+      {plan && (basis.authorization.planApproved || basis.events.length > 0) ? (
+        <section className="conversation-result-view__basis">
+          <div className="conversation-result-view__section-title">
+            {isZh ? '授权摘要' : 'Authorization'}
+          </div>
+          <p className="conversation-result-view__auth">
+            {formatAuthorizationSummary(basis.authorization, isZh)}
+          </p>
+          {basis.events.length > 0 ? (
+            <>
+              <div className="conversation-result-view__section-title conversation-result-view__section-title--sub">
+                {isZh ? '依据时间线' : 'Evidence trail'}
+              </div>
+              <ol className="conversation-result-view__basis-list">
+                {basis.events.map((event) => (
+                  <li key={event.id} className={`conversation-result-view__basis-item is-${event.kind}`}>
+                    <span className="conversation-result-view__basis-kind">
+                      {event.kind === 'grant'
+                        ? (isZh ? '授权' : 'Grant')
+                        : event.kind === 'tool'
+                          ? (isZh ? '工具' : 'Tool')
+                          : event.kind === 'denial'
+                            ? (isZh ? '拒绝' : 'Denied')
+                            : (isZh ? '产物' : 'Artifact')}
+                    </span>
+                    <div className="conversation-result-view__basis-body">
+                      <span>{event.title}</span>
+                      {event.detail ? <em>{event.detail}</em> : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {closeGate && !closeGate.ok ? (
+        <p className="conversation-result-view__error">{closeGate.message}</p>
+      ) : null}
 
       {artifacts.length > 0 ? (
         <section className="conversation-result-view__artifacts">

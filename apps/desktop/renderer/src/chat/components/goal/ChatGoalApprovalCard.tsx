@@ -1,10 +1,11 @@
-import { useContext } from 'react';
+import { useContext, useRef } from 'react';
 import type { ReactElement } from 'react';
 import type { GoalPlan } from '@peer-agent/protocol';
 import { InteractionActionsContext } from '../thread/interactionContext';
 import { goalPlanNextStepCopy } from './goalPlanNextActions';
 import { useGoalPlanApproval } from './useGoalPlanApproval';
 import { useAwaitingGoalPlans } from './useAwaitingGoalPlans';
+import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './SuccessCriteriaEditor';
 
 /**
  * 聊天侧「受治理批准卡」 —— 见 Goal 模式运行时闸门设计。
@@ -33,6 +34,7 @@ export function ChatGoalApprovalCard({
   const { busyPlanId, error, decide } = useGoalPlanApproval({ isZh });
   const interactionActions = useContext(InteractionActionsContext);
   const copy = goalPlanNextStepCopy(isZh);
+  const editorsRef = useRef(new Map<string, SuccessCriteriaEditorHandle>());
 
   if (!enabled || awaitingPlans.length === 0) return null;
 
@@ -53,6 +55,22 @@ export function ChatGoalApprovalCard({
             {plan.goal ? (
               <div className="chat-goal-approval-goal">{plan.goal}</div>
             ) : null}
+            <SuccessCriteriaEditor
+              ref={(handle) => {
+                if (handle) editorsRef.current.set(plan.planId, handle);
+                else editorsRef.current.delete(plan.planId);
+              }}
+              plan={plan}
+              isZh={isZh}
+              disabled={disabled}
+            />
+            {plan.boundaries?.inScope?.length || plan.boundaries?.outOfScope?.length ? (
+              <div className="chat-goal-approval-bounds">
+                {isZh
+                  ? `范围 ${plan.boundaries.inScope?.length ?? 0} · 范围外 ${plan.boundaries.outOfScope?.length ?? 0}`
+                  : `in scope ${plan.boundaries.inScope?.length ?? 0} · out of scope ${plan.boundaries.outOfScope?.length ?? 0}`}
+              </div>
+            ) : null}
             <div className="chat-goal-next-guidance">{copy.guidance}</div>
             <div className="chat-goal-approval-actions" data-goal-plan-next-actions>
               <button
@@ -67,7 +85,11 @@ export function ChatGoalApprovalCard({
                     : undefined
                 }
                 onClick={() => {
-                  void decide(plan, 'approve');
+                  void (async () => {
+                    const saved = await editorsRef.current.get(plan.planId)?.flush();
+                    if (saved === false) return;
+                    await decide(plan, 'approve');
+                  })();
                 }}
               >
                 {copy.start}

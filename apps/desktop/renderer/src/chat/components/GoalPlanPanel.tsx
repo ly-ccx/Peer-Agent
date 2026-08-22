@@ -1,6 +1,6 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement, ReactNode, Ref } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
@@ -20,6 +20,7 @@ import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
+import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './goal/SuccessCriteriaEditor';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
@@ -819,7 +820,15 @@ function criterionKindLabel(kind: GoalSuccessCriterion['kind'], isZh: boolean): 
   return isZh ? zh[kind] : en[kind];
 }
 
-function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): ReactElement {
+function GoalContractSection({
+  plan,
+  isZh,
+  editorRef,
+}: {
+  plan: GoalPlan;
+  isZh: boolean;
+  editorRef?: Ref<SuccessCriteriaEditorHandle>;
+}): ReactElement {
   const criteria = Array.isArray(plan.successCriteria) ? plan.successCriteria : [];
   const results = new Map(
     (Array.isArray(plan.criterionResults) ? plan.criterionResults : [])
@@ -827,6 +836,7 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
   );
   const inScopeCount = Array.isArray(plan.boundaries?.inScope) ? plan.boundaries.inScope.length : 0;
   const outOfScopeCount = Array.isArray(plan.boundaries?.outOfScope) ? plan.boundaries.outOfScope.length : 0;
+  const editable = plan.status === 'awaiting_approval';
 
   return (
     <section className="goal-projection goal-projection--goal" aria-label={isZh ? '目标契约' : 'Goal contract'}>
@@ -848,7 +858,9 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
           {isZh ? '尚未写入目标描述' : 'No goal description recorded yet'}
         </p>
       )}
-      {criteria.length > 0 ? (
+      {editable ? (
+        <SuccessCriteriaEditor ref={editorRef} plan={plan} isZh={isZh} />
+      ) : criteria.length > 0 ? (
         <ul className="goal-criteria-list">
           {criteria.map((criterion) => {
             const result = results.get(criterion.id);
@@ -1523,6 +1535,7 @@ interface PlanCardProps {
   readonly childPlans?: readonly GoalPlan[];
   readonly onNavigateToPlan?: (planId: string, taskId?: string) => void;
   readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
     plan: GoalPlan,
@@ -1547,6 +1560,7 @@ const PlanCard = memo(function PlanCard({
   childPlans = EMPTY_CHILD_PLANS,
   onNavigateToPlan,
   onNextAction,
+  criteriaEditorRef,
   onRunnerControl,
   onManualConfirm,
 }: PlanCardProps): ReactElement {
@@ -1673,7 +1687,7 @@ const PlanCard = memo(function PlanCard({
               {nextStepCopy.guidance}
             </div>
           ) : null}
-          <GoalContractSection plan={plan} isZh={isZh} />
+          <GoalContractSection plan={plan} isZh={isZh} editorRef={criteriaEditorRef} />
           <PlanProjectionSection
             plan={plan}
             progress={progress}
@@ -1722,6 +1736,13 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // - reload（goalPlans:changed 广播）路径：若基线为 0 且新数量 > 0，判定为本会话内真正新建，触发一次。
   // 切换会话时一并重置为 0（见下方 load effect），避免跨会话的脏基线导致误判。
   const prevPlanCountRef = useRef<number>(0);
+  const criteriaEditorsRef = useRef(new Map<string, SuccessCriteriaEditorHandle>());
+  const bindCriteriaEditor = useCallback((planId: string): Ref<SuccessCriteriaEditorHandle> => (
+    (handle) => {
+      if (handle) criteriaEditorsRef.current.set(planId, handle);
+      else criteriaEditorsRef.current.delete(planId);
+    }
+  ), []);
 
   // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
   // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
@@ -1977,6 +1998,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         return;
       }
       if (plan.status === 'awaiting_approval') {
+        const saved = await criteriaEditorsRef.current.get(plan.planId)?.flush();
+        if (saved === false) return;
         await decide(plan, action === 'start' ? 'approve' : 'reject');
         return;
       }
@@ -2237,6 +2260,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           {...relationFor(mainPlan)}
           onNavigateToPlan={navigateToPlan}
           onNextAction={handleNextAction}
+          criteriaEditorRef={bindCriteriaEditor(mainPlan.planId)}
           onRunnerControl={controlRunner}
           onManualConfirm={recordManualDodConfirmation}
         />
@@ -2263,6 +2287,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               {...relationFor(plan)}
               onNavigateToPlan={navigateToPlan}
               onNextAction={handleNextAction}
+              criteriaEditorRef={bindCriteriaEditor(plan.planId)}
               onRunnerControl={controlRunner}
               onManualConfirm={recordManualDodConfirmation}
             />

@@ -1892,8 +1892,56 @@
 
 .conversation-result-view__criteria-block,
 .conversation-result-view__artifacts,
-.conversation-result-view__checks-block {
+.conversation-result-view__checks-block,
+.conversation-result-view__basis {
   min-width: 0;
+}
+
+.conversation-result-view__auth {
+  @apply m-0 mb-4 text-sm;
+  color: var(--za-text);
+}
+
+.conversation-result-view__section-title--sub {
+  margin-top: 8px;
+}
+
+.conversation-result-view__basis-list {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__basis-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--za-line);
+}
+
+.conversation-result-view__basis-item:last-child {
+  border-bottom: 0;
+}
+
+.conversation-result-view__basis-kind {
+  flex: none;
+  min-width: 2.5rem;
+  font-size: 11px;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__basis-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.conversation-result-view__basis-body em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--za-text-muted);
 }
 
 .conversation-result-view__artifact-list {
@@ -2068,12 +2116,21 @@
 .conversation-result-drawer__footer {
   /* 三区中的独立底部操作区：与 body 滚动区分开，贴 source 底边。 */
   @apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;
+  flex-wrap: wrap;
   margin-top: auto;
   margin-bottom: 0;
   border-top: 1px solid var(--za-line);
   background: var(--za-surface-0);
   /* 与 panel 同色底，避免底部缝隙露出不同层的 vibrancy/scrim */
   flex-shrink: 0;
+}
+
+.conversation-result-drawer__gate {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--za-warn, #c0392b);
 }
 
 .conversation-result-view__continue {

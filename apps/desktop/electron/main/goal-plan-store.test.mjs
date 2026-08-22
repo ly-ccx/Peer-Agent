@@ -77,6 +77,27 @@ function registerEvidenceRefs(planId, refs) {
   return registerEvidenceRefsFor(store, planId, refs);
 }
 
+function acceptCompletedPlan(planId, acceptedAt = '2026-08-08T00:00:00.000Z') {
+  const plan = store.getPlan(planId);
+  const criteria = Array.isArray(plan?.successCriteria) ? plan.successCriteria : [];
+  const refs = [];
+  const criterionResults = criteria.map((criterion, index) => {
+    const evidenceRef = `local-file://accept-${String(planId).slice(0, 8)}-${index}`;
+    refs.push(evidenceRef);
+    return {
+      criterionId: criterion.id,
+      passed: true,
+      evidenceRef,
+      checkedAt: acceptedAt,
+    };
+  });
+  if (refs.length > 0) registerEvidenceRefs(planId, refs);
+  return store.revisePlan(planId, {
+    ...(criterionResults.length > 0 ? { criterionResults } : {}),
+    resultAcceptance: { acceptedAt, acceptedBy: 'user' },
+  }, { reason: 'user accepted result', changedBy: 'user' });
+}
+
 test('recordEvidenceRefs 不让 goal_update_task 包装记录覆盖原工具元数据', () => {
   const plan = store.createPlan(draftWithTasks());
   store.recordEvidenceRefs({
@@ -1288,11 +1309,7 @@ test('单活跃计划: 已验收 completed 旧结果在新建计划时保持 com
     });
   }
   assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
-  store.revisePlan(
-    executingOld.planId,
-    { resultAcceptance: { acceptedAt: '2026-08-08T00:00:00.000Z', acceptedBy: 'user' } },
-    { reason: 'user accepted result', changedBy: 'user' },
-  );
+  acceptCompletedPlan(executingOld.planId);
   assert.equal(store.getPlan(executingOld.planId)?.resultAcceptance?.acceptedAt, '2026-08-08T00:00:00.000Z');
 
   store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
@@ -2406,9 +2423,7 @@ test('getUnacceptedCompletedPlanByConversation keeps the latest unaccepted resul
     goal: '已验收旧任务',
   });
   store.setPlanStatus(accepted.planId, 'completed', { changedBy: 'system:test' });
-  store.revisePlan(accepted.planId, {
-    resultAcceptance: { acceptedAt: '2026-08-08T00:00:00.000Z', acceptedBy: 'user' },
-  }, { reason: 'accept old result', changedBy: 'user' });
+  acceptCompletedPlan(accepted.planId);
 
   const unaccepted = store.createPlan({
     ...draftWithTasks(),
@@ -2520,5 +2535,38 @@ test('upsertGoalContract: 同会话新开 Goal 不改写未验收旧计划', () 
     summary: 'Goal Runner started',
   });
   assert.equal(events.at(-1)?.changeKind, 'persist');
+});
+
+test('revisePlan 拒绝在成功标准缺可解析证据时写入 resultAcceptance', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setPlanStatus(plan.planId, 'completed', { changedBy: 'system:test' });
+  assert.throws(
+    () => store.revisePlan(plan.planId, {
+      resultAcceptance: { acceptedAt: '2026-08-22T00:00:00.000Z', acceptedBy: 'user' },
+    }, { reason: 'workbench_one_click_accept', changedBy: 'user' }),
+    (error) => error?.code === 'acceptance_evidence_incomplete',
+  );
+  assert.equal(store.getPlan(plan.planId)?.resultAcceptance, undefined);
+});
+
+test('revisePlan 在每条标准都有已登记 evidenceRef 时允许验收', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setPlanStatus(plan.planId, 'completed', { changedBy: 'system:test' });
+  const accepted = acceptCompletedPlan(plan.planId, '2026-08-22T00:00:00.000Z');
+  assert.equal(accepted.resultAcceptance?.acceptedAt, '2026-08-22T00:00:00.000Z');
+});
+
+test('revisePlan 无成功标准时允许验收（空标准集合）', () => {
+  const plan = store.createPlan({
+    title: '轻量交付',
+    goal: '没有单独写下标准',
+    successCriteria: [],
+    tasks: [{ taskId: 't1', order: 0, title: '做完', status: 'completed', evidenceRefs: ['local-file://done'] }],
+  });
+  store.setPlanStatus(plan.planId, 'completed', { changedBy: 'system:test' });
+  const accepted = store.revisePlan(plan.planId, {
+    resultAcceptance: { acceptedAt: '2026-08-22T00:00:00.000Z', acceptedBy: 'user' },
+  }, { reason: 'workbench_one_click_accept', changedBy: 'user' });
+  assert.equal(accepted.resultAcceptance?.acceptedAt, '2026-08-22T00:00:00.000Z');
 });
 

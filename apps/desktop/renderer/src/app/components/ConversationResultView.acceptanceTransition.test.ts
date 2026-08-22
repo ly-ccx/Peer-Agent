@@ -24,6 +24,10 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /resolveEvidenceLabel/);
   assert.match(source, /acceptancePageMeta/);
   assert.match(source, /projectTaskOverviewArtifacts/);
+  assert.match(source, /evaluateAcceptanceCloseGate/);
+  assert.match(source, /projectAcceptanceBasis/);
+  assert.match(source, /授权摘要/);
+  assert.match(source, /依据时间线/);
   assert.match(source, /conversation-result-view__mark/);
   assert.doesNotMatch(source, />\{\s*isZh \? '任务现场' : 'Task thread'\s*\}/);
   assert.doesNotMatch(source, /summaryProgress|plan\?\.progress|plan\?\.tasks/);
@@ -51,6 +55,8 @@ test('result drawer keeps 确认验收 and 退回补充, without mounting a chat
   assert.doesNotMatch(app, /getTaskContinuationAction/);
   assert.match(app, /\? '确认验收'/);
   assert.match(app, /\? '退回补充'/);
+  assert.match(app, /closeBlocked/);
+  assert.match(app, /conversation-result-drawer__gate/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.match(styles, /conversation-result-view__criteria/);
   assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
@@ -62,7 +68,8 @@ test('result drawer always shows ConversationResultView and keeps actions below 
   assert.doesNotMatch(source, /conversation-result-drawer__head/);
   assert.doesNotMatch(source, /查看结果|View result/);
   assert.match(source, /conversation-result-drawer__body/);
-  assert.match(source, /<ConversationResultView item=\{resultDrawerItem\} isZh=\{isZh\} \/>/);
+  assert.match(source, /<ConversationResultView/);
+  assert.match(source, /onCloseGateChange=\{setResultCloseGate\}/);
   assert.doesNotMatch(source, /isPageActive=\{collectionDrawer === 'result'\}/);
   assert.match(source, /conversation-result-drawer__icon-close/);
   assert.match(source, /aria-label=\{isZh \? '关闭' : 'Close'\}/);
