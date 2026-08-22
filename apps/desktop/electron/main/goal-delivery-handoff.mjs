@@ -44,13 +44,6 @@ async function git(cwd, args) {
   }
 }
 
-function lockKey(plan) {
-  const repo = trim(plan?.deliveryBinding?.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
-  const branch = trim(plan?.deliveryBinding?.targetBranch) || trim(plan?.targetBranch);
-  if (!repo || !branch) return null;
-  return `${repo}::${branch}`;
-}
-
 function isAccepted(plan) {
   return Boolean(trim(plan?.resultAcceptance?.acceptedAt));
 }
@@ -60,13 +53,8 @@ function isQualityReady(plan) {
   return !plan?.deliveryBinding && !plan?.targetBranch;
 }
 
-function canHandoff(plan) {
-  if (!plan || typeof plan !== 'object') return false;
-  if (!isAccepted(plan)) return false;
-  if (!isQualityReady(plan)) return false;
-  const binding = plan.deliveryBinding;
-  if (binding?.executionIsolation !== 'worktree') return false;
-  return Boolean(trim(binding.worktreePath) && trim(binding.taskBranch) && trim(binding.targetBranch));
+function defaultMergeTarget(plan) {
+  return trim(plan?.deliveryBinding?.targetBranch) || trim(plan?.targetBranch);
 }
 
 function alreadyDelivered(plan) {
@@ -85,11 +73,19 @@ async function commitWorktreeIfNeeded(worktreePath, message) {
   return git(worktreePath, ['rev-parse', 'HEAD']);
 }
 
-async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, taskBranch }) {
+async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, taskBranch, isolated = false }) {
   const checkout = await git(repositoryRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const mergeBase = await git(repositoryRoot, ['merge-base', targetBranch, taskBranch]);
   const targetTip = await git(repositoryRoot, ['rev-parse', targetBranch]);
+  const canRebaseHere = isolated || checkout === taskBranch;
   if (mergeBase !== targetTip) {
+    if (!canRebaseHere) {
+      return {
+        ok: false,
+        reason: 'merge_conflict',
+        checkout,
+      };
+    }
     try {
       await git(worktreePath, ['rebase', targetBranch]);
     } catch (error) {
@@ -152,7 +148,37 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
 export function createGoalDeliveryHandoff({
   goalPlanStore = null,
   now = nowIso,
+  resolveMergeTarget = null,
 } = {}) {
+  function mergeTargetFor(plan) {
+    if (typeof resolveMergeTarget === 'function') {
+      const resolved = trim(resolveMergeTarget(plan));
+      if (resolved) return resolved;
+    }
+    return defaultMergeTarget(plan);
+  }
+
+  function lockKey(plan) {
+    const repo = trim(plan?.deliveryBinding?.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+    const branch = mergeTargetFor(plan);
+    if (!repo || !branch) return null;
+    return `${repo}::${branch}`;
+  }
+
+  function canHandoff(plan) {
+    if (!plan || typeof plan !== 'object') return false;
+    if (!isAccepted(plan)) return false;
+    if (!isQualityReady(plan)) return false;
+    const binding = plan.deliveryBinding;
+    if (!binding) return false;
+    const taskBranch = trim(binding.taskBranch);
+    const targetBranch = mergeTargetFor(plan);
+    if (!taskBranch || !targetBranch) return false;
+    if (binding.executionIsolation === 'worktree') {
+      return Boolean(trim(binding.worktreePath));
+    }
+    return binding.executionIsolation === 'none';
+  }
   function stopPlan(plan, reason, extras = {}) {
     const binding = plan.deliveryBinding || {};
     return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
@@ -171,9 +197,13 @@ export function createGoalDeliveryHandoff({
     const binding = plan.deliveryBinding;
     const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan.targetWorkspacePath);
     const worktreePath = trim(binding.worktreePath);
-    const targetBranch = trim(binding.targetBranch);
+    const targetBranch = mergeTargetFor(plan);
     const taskBranch = trim(binding.taskBranch);
-    if (!repositoryRoot || !worktreePath || !existsSync(worktreePath)) return plan;
+    const isolated = binding.executionIsolation === 'worktree';
+    const operationRoot = isolated ? worktreePath : repositoryRoot;
+    if (!repositoryRoot || !existsSync(repositoryRoot)) return plan;
+    if (!operationRoot || !existsSync(operationRoot)) return plan;
+    if (isolated && (!worktreePath || !existsSync(worktreePath))) return plan;
 
     const key = lockKey(plan);
     if (!key) return plan;
@@ -191,15 +221,20 @@ export function createGoalDeliveryHandoff({
     }) || plan;
 
     try {
-      const commitSha = await commitWorktreeIfNeeded(
-        worktreePath,
-        `Peer Agent handoff ${plan.planId}`,
-      );
+      const checkout = await git(repositoryRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+      const canCommitHere = isolated || checkout === taskBranch;
+      const commitSha = canCommitHere
+        ? await commitWorktreeIfNeeded(
+          operationRoot,
+          `Peer Agent handoff ${plan.planId}`,
+        )
+        : await git(repositoryRoot, ['rev-parse', taskBranch]);
       const merged = await mergeIntoTarget({
         repositoryRoot,
-        worktreePath,
+        worktreePath: operationRoot,
         targetBranch,
         taskBranch,
+        isolated,
       });
       if (!merged.ok) {
         return stopPlan(delivering, merged.reason, {

@@ -494,7 +494,7 @@ test('toGoalPlanSnapshot 隔离执行时写独立执行环境，不再写未隔�
   });
   assert.equal(
     snapshot.deliveryRoute,
-    '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4 · 独立执行环境',
+    '来源 peer-knowledge · 交付 peer_agent · peer-goal/p-isolated · from PeerAgent/0.0.4 · 独立执行环境',
   );
   assert.equal(snapshot.deliveryRoute?.includes('未隔离执行'), false);
 });

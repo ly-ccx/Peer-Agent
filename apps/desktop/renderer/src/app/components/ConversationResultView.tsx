@@ -34,6 +34,11 @@ export function ConversationResultView({
   const [loading, setLoading] = useState(item.source === 'goal_plan' && Boolean(item.taskId));
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<GoalPlan | null>(null);
+  const [rangeDiff, setRangeDiff] = useState<{
+    readonly status: string;
+    readonly diffText: string;
+  } | null>(null);
+  const [suggestedTarget, setSuggestedTarget] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +85,60 @@ export function ConversationResultView({
     onCloseGateChange?.(loading ? null : closeGate);
   }, [closeGate, loading, onCloseGateChange]);
   const leftoverEvidence = plan?.evidenceRefs ?? [];
+  const workspaceRoot = plan?.deliveryBinding?.targetWorkspacePath ?? plan?.targetWorkspacePath ?? null;
+  const fromRef = plan?.deliveryBinding?.baseCommit ?? plan?.baseCommit ?? null;
+  const toRef = plan?.deliveryBinding?.taskBranch ?? null;
+  const snapshotBranch = plan?.deliveryBinding?.targetBranch ?? plan?.targetBranch ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceRoot || !fromRef) {
+      setRangeDiff(null);
+      return;
+    }
+    void clientApi.gitDiffRange({
+      workspaceRoot,
+      fromRef,
+      ...(toRef ? { toRef } : {}),
+    }).then(
+      (result) => {
+        if (cancelled) return;
+        setRangeDiff({
+          status: result.status,
+          diffText: result.ok ? result.diffText : '',
+        });
+      },
+      () => {
+        if (cancelled) return;
+        setRangeDiff(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [fromRef, toRef, workspaceRoot]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceRoot) {
+      setSuggestedTarget(snapshotBranch);
+      return;
+    }
+    void clientApi.workspaceList().then(
+      (directory) => {
+        if (cancelled) return;
+        const workspace = directory.workspaces.find((item) => item.path === workspaceRoot);
+        setSuggestedTarget(workspace?.baseBranch?.trim() || snapshotBranch);
+      },
+      () => {
+        if (cancelled) return;
+        setSuggestedTarget(snapshotBranch);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshotBranch, workspaceRoot]);
   const evidenceSources = useMemo(
     () => (item.planSteps ?? []).flatMap((step) => step.artifacts ?? []),
     [item.planSteps],
@@ -197,6 +256,34 @@ export function ConversationResultView({
 
       {closeGate && !closeGate.ok ? (
         <p className="conversation-result-view__error">{closeGate.message}</p>
+      ) : null}
+
+      {plan && (toRef || fromRef || suggestedTarget) ? (
+        <section className="conversation-result-view__diff">
+          <div className="conversation-result-view__section-title">
+            {isZh ? '代码改动' : 'Code changes'}
+          </div>
+          {suggestedTarget ? (
+            <p className="conversation-result-view__auth">
+              {isZh ? `建议合入 ${suggestedTarget}` : `Suggested merge target ${suggestedTarget}`}
+              {snapshotBranch && snapshotBranch !== suggestedTarget
+                ? (isZh ? ` · 创建时源头 ${snapshotBranch}` : ` · created from ${snapshotBranch}`)
+                : null}
+            </p>
+          ) : null}
+          {toRef && snapshotBranch ? (
+            <p className="conversation-result-view__ref">
+              {`${toRef} · from ${snapshotBranch}`}
+            </p>
+          ) : null}
+          {rangeDiff?.diffText ? (
+            <pre className="conversation-result-view__diff-text">{rangeDiff.diffText}</pre>
+          ) : (
+            <p className="conversation-result-view__hint">
+              {isZh ? '相对源头还没有可展示的 diff。' : 'No range diff against the base yet.'}
+            </p>
+          )}
+        </section>
       ) : null}
 
       {artifacts.length > 0 ? (

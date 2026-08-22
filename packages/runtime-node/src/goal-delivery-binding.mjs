@@ -34,11 +34,37 @@ function runGit(workspaceRoot, args) {
  */
 export function readWorkspaceHead(workspaceRoot, run = runGit) {
   const root = trimName(workspaceRoot);
-  if (!root || !existsSync(path.join(root, '.git'))) return null;
+  if (!root) return null;
+  if (run === runGit && !existsSync(path.join(root, '.git'))) return null;
   const branch = trimName(run(root, ['branch', '--show-current']));
   if (!branch) return null;
   const commit = trimName(run(root, ['rev-parse', 'HEAD'])) || undefined;
-  return { branch, commit };
+  return { branch, commit, source: 'workspace_head' };
+}
+
+function resolveNamedTip(workspaceRoot, branch, run) {
+  const name = trimName(branch);
+  if (!name) return null;
+  const commit = trimName(run(workspaceRoot, ['rev-parse', name]))
+    || trimName(run(workspaceRoot, ['rev-parse', `refs/heads/${name}`]));
+  return commit || null;
+}
+
+/**
+ * Prefer a configured Workspace `baseBranch` when that ref still resolves.
+ * Unresolvable config falls back to current HEAD. Never invents `main`.
+ */
+export function resolveWorkspaceHead(workspaceRoot, options = {}) {
+  const run = typeof options.run === 'function' ? options.run : runGit;
+  const root = trimName(workspaceRoot);
+  if (!root) return null;
+  if (run === runGit && !existsSync(path.join(root, '.git'))) return null;
+  const preferred = trimName(options.preferredBranch);
+  if (preferred) {
+    const commit = resolveNamedTip(root, preferred, run);
+    if (commit) return { branch: preferred, commit, source: 'preconfigured' };
+  }
+  return readWorkspaceHead(root, run);
 }
 
 function isIntake(plan) {
@@ -72,18 +98,19 @@ export function attachWorkspaceHeadBinding(plan, options = {}) {
   if (!repoId) return plan;
 
   const boundAt = options.now || new Date().toISOString();
+  const source = head.source === 'preconfigured' ? 'preconfigured' : 'workspace_head';
   return {
     ...plan,
     targetRepoId: repoId,
     targetBranch: head.branch,
     ...(head.commit ? { baseCommit: head.commit } : {}),
-    targetBranchSource: 'workspace_head',
+    targetBranchSource: source,
     deliveryBinding: {
       repoId,
       targetWorkspacePath,
       targetBranch: head.branch,
       ...(head.commit ? { baseCommit: head.commit } : {}),
-      targetBranchSource: 'workspace_head',
+      targetBranchSource: source,
       executionIsolation: 'none',
       boundAt,
     },

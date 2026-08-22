@@ -36,6 +36,8 @@ const unavailableApi: ClientApi = {
   listEditors: unavailableMethod('listEditors'),
   setDefaultEditor: unavailableMethod('setDefaultEditor'),
   gitDiff: unavailableMethod('gitDiff'),
+  gitDiffRange: unavailableMethod('gitDiffRange'),
+  gitListBranches: unavailableMethod('gitListBranches'),
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),
   readImageDataUrl: unavailableMethod('readImageDataUrl'),

@@ -120,6 +120,10 @@ export type TranslationKey =
   | 'settings.git'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
+  | 'settings.git.baseBranch'
+  | 'settings.git.baseBranch.description'
+  | 'settings.git.baseBranch.empty'
+  | 'settings.git.baseBranch.unset'
   | 'settings.fallbackVision'
   | 'settings.fallbackVision.description'
   | 'settings.fallbackVision.none'
@@ -717,6 +721,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
+    'settings.git.baseBranch': '源头分支',
+    'settings.git.baseBranch.description': '这个工作区之后新建的任务线从哪分叉；切换只影响新线，不改已有任务。',
+    'settings.git.baseBranch.empty': '先打开一个工作区',
+    'settings.git.baseBranch.unset': '尚未固定（用当前 HEAD）',
     'settings.fallbackVision': '兜底多模态模型',
     'settings.fallbackVision.description': '当主模型不支持图像时，先用此模型识别本轮新图，再把文字结果静默交给主模型。未配置则剥离图片并给出弱提示。',
     'settings.fallbackVision.none': '不使用（仅剥离图片）',
@@ -1333,6 +1341,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
+    'settings.git.baseBranch': 'Base branch',
+    'settings.git.baseBranch.description': 'New task lines fork from this workspace branch. Changing it only affects lines created after the switch.',
+    'settings.git.baseBranch.empty': 'Open a workspace first',
+    'settings.git.baseBranch.unset': 'Not set (use current HEAD)',
     'settings.fallbackVision': 'Fallback vision model',
     'settings.fallbackVision.description': 'When the main model cannot read images, use this model to recognize new images in the current turn and silently pass text to the main model. If unset, images are stripped with a light notice.',
     'settings.fallbackVision.none': 'None (strip images only)',

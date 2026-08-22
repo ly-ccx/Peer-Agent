@@ -28,6 +28,10 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /projectAcceptanceBasis/);
   assert.match(source, /授权摘要/);
   assert.match(source, /依据时间线/);
+  assert.match(source, /gitDiffRange/);
+  assert.match(source, /建议合入/);
+  assert.match(source, /代码改动/);
+  assert.match(source, /conversation-result-view__diff/);
   assert.match(source, /conversation-result-view__mark/);
   assert.doesNotMatch(source, />\{\s*isZh \? '任务现场' : 'Task thread'\s*\}/);
   assert.doesNotMatch(source, /summaryProgress|plan\?\.progress|plan\?\.tasks/);

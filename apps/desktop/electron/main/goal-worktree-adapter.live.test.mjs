@@ -60,7 +60,7 @@ function boundPlan(overrides = {}) {
       targetWorkspacePath: repository,
       targetBranch: 'main',
       targetBranchSource: 'workspace_head',
-      executionIsolation: 'none',
+      executionIsolation: 'worktree',
       boundAt: '2026-08-13T16:00:00.000Z',
     },
     ...overrides,

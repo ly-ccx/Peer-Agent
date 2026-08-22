@@ -298,6 +298,47 @@ test('stores, updates, and promotes linked folders without merging two projects'
   assert.equal(harness.state.activeWorkspace, '/code');
 });
 
+test('stores workspace baseBranch without inventing main, and switching it does not rewrite other fields', () => {
+  const harness = createHarness({
+    workspaces: [
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
+    ],
+  });
+
+  assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, undefined);
+  assert.deepEqual(harness.service.updateWorkspace({
+    path: '/configured',
+    baseBranch: 'develop',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Configured',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [],
+      baseBranch: 'develop',
+    },
+  });
+  assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, 'develop');
+  assert.deepEqual(harness.service.updateWorkspace({
+    path: '/configured',
+    name: 'Knowledge',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [],
+      baseBranch: 'develop',
+    },
+  });
+  assert.equal(harness.service.updateWorkspace({
+    path: '/configured',
+    baseBranch: '   ',
+  }).workspace.baseBranch, undefined);
+});
+
 test('returns project metadata with basename fallback', () => {
   const indexed = { name: 'Indexed', absolutePath: '/indexed' };
   const { service } = createHarness({ projectIndex: { '/indexed': [indexed] } });

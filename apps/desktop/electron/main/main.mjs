@@ -84,6 +84,7 @@ import {
   createAutomationStore,
   createGoalPlanStore,
   createGoalRunner,
+  resolveWorkspaceHead,
   decideIntakeConvergence,
   exportBundle,
   getDataHome,
@@ -122,7 +123,9 @@ import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
+import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
+import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -424,9 +427,24 @@ const automationProposalService = createAutomationChatProposalService({
 });
 
 let goalWorktreeAdapter = null;
+let goalTaskBranchAdapter = null;
 let goalDeliveryHandoff = null;
 
+function readWorkspaceBaseBranch(workspacePath) {
+  const match = (settingsStore.getAll().workspaces || []).find((item) => item?.path === workspacePath);
+  return typeof match?.baseBranch === 'string' && match.baseBranch.trim()
+    ? match.baseBranch.trim()
+    : null;
+}
+
+function readDesktopWorkspaceHead(workspaceRoot) {
+  return resolveWorkspaceHead(workspaceRoot, {
+    preferredBranch: readWorkspaceBaseBranch(workspaceRoot) || undefined,
+  });
+}
+
 const goalPlanStore = createGoalPlanStore({
+  readWorkspaceHead: readDesktopWorkspaceHead,
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
@@ -1103,7 +1121,20 @@ function parseExplorerReport(rawText, fallback = {}) {
 }
 
 goalWorktreeAdapter = createGoalWorktreeAdapter({ goalPlanStore });
-goalDeliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
+goalTaskBranchAdapter = createGoalTaskBranchAdapter({
+  goalPlanStore,
+  resolvePrefix: () => resolveGitBranchPrefix(settingsStore.getAll().gitBranchPrefix),
+});
+goalDeliveryHandoff = createGoalDeliveryHandoff({
+  goalPlanStore,
+  resolveMergeTarget: (plan) => {
+    const root = plan?.deliveryBinding?.targetWorkspacePath || plan?.targetWorkspacePath;
+    return readWorkspaceBaseBranch(root)
+      || plan?.deliveryBinding?.targetBranch
+      || plan?.targetBranch
+      || null;
+  },
+});
 
 const llmChatService = createLlmChatService({
   llmConfigStore,
@@ -1119,6 +1150,7 @@ const llmChatService = createLlmChatService({
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
   goalWorktreeAdapter,
+  goalTaskBranchAdapter,
   // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
   ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
@@ -1137,8 +1169,15 @@ const chatStreamApplicationService = createChatStreamApplicationService({
 goalRunner = createGoalRunner({
   goalPlanStore,
   prepareIsolation: async (plan) => {
-    if (!plan || typeof goalWorktreeAdapter?.prepareForPlan !== 'function') return plan;
-    return goalWorktreeAdapter.prepareForPlan(plan);
+    if (!plan) return plan;
+    let next = plan;
+    if (typeof goalTaskBranchAdapter?.ensureTaskBranch === 'function') {
+      next = await goalTaskBranchAdapter.ensureTaskBranch(next) || next;
+    }
+    if (typeof goalWorktreeAdapter?.prepareForPlan === 'function') {
+      next = await goalWorktreeAdapter.prepareForPlan(next) || next;
+    }
+    return next;
   },
   chatRuntime: {
     async runGoalTurn({ plan, turnNumber }) {
@@ -2010,7 +2049,17 @@ const goalApplicationService = createGoalApplicationService({
   getPlan: (planId) => goalPlanStore.getPlan(planId),
   createPlan: (draft) => goalPlanStore.createPlan(draft),
   revisePlan: (planId, patch, options) => goalPlanStore.revisePlan(planId, patch, options),
-  recordApproval: (planId, approval) => goalPlanStore.recordApproval(planId, approval),
+  recordApproval: (planId, approval) => {
+    const plan = goalPlanStore.recordApproval(planId, approval);
+    if (approval?.decision === 'approve' && plan && typeof goalTaskBranchAdapter?.ensureTaskBranch === 'function') {
+      try {
+        return goalTaskBranchAdapter.ensureTaskBranch(plan) || plan;
+      } catch (error) {
+        console.warn('[goal-task-branch] create after approve failed:', error?.message || error);
+      }
+    }
+    return plan;
+  },
   setPlanStatus: (planId, status) => goalPlanStore.setPlanStatus(planId, status),
   markRequestedUserInput: (planId, runnerPatch) =>
     goalPlanStore.markRequestedUserInput(planId, runnerPatch),

@@ -21,7 +21,25 @@ function boundPlan(overrides = {}) {
   };
 }
 
-test('有交付绑定的 Goal 才创建 Worktree，并回写任务分支和路径', async () => {
+test('未声明隔离时即使有交付绑定也不建 Worktree', async () => {
+  let prepared = 0;
+  const adapter = createGoalWorktreeAdapter({
+    worktreeAdapter: {
+      async prepare() {
+        prepared += 1;
+        throw new Error('should not prepare');
+      },
+    },
+  });
+
+  const plan = boundPlan();
+  assert.equal(adapter.planNeedsIsolatedWorktree(plan), false);
+  const next = await adapter.prepareForPlan(plan);
+  assert.equal(next, plan);
+  assert.equal(prepared, 0);
+});
+
+test('显式 worktree 隔离才会创建 Worktree，并回写任务分支和路径', async () => {
   const recorded = [];
   const adapter = createGoalWorktreeAdapter({
     worktreeAdapter: {
@@ -52,7 +70,12 @@ test('有交付绑定的 Goal 才创建 Worktree，并回写任务分支和路�
     },
   });
 
-  const next = await adapter.prepareForPlan(boundPlan());
+  const next = await adapter.prepareForPlan(boundPlan({
+    deliveryBinding: {
+      ...boundPlan().deliveryBinding,
+      executionIsolation: 'worktree',
+    },
+  }));
   assert.equal(next.deliveryBinding.executionIsolation, 'worktree');
   assert.equal(next.deliveryBinding.taskBranch, 'peer-goal/plan-1');
   assert.equal(next.deliveryBinding.worktreePath, '/tmp/peer-goal-worktrees/plan-1');

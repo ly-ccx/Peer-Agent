@@ -28,10 +28,14 @@ function normalizeLinkedFolders(folders, primaryPath, basename) {
   return result;
 }
 
+function normalizeBaseBranch(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function projectWorkspace(workspace, basename) {
   const path = normalizePath(workspace?.path);
   if (!path) return null;
-  return {
+  const projected = {
     path,
     name: typeof workspace?.name === 'string' && workspace.name.trim()
       ? workspace.name.trim()
@@ -39,6 +43,9 @@ function projectWorkspace(workspace, basename) {
     addedAt: typeof workspace?.addedAt === 'string' ? workspace.addedAt : new Date(0).toISOString(),
     linkedFolders: normalizeLinkedFolders(workspace?.linkedFolders, path, basename),
   };
+  const baseBranch = normalizeBaseBranch(workspace?.baseBranch);
+  if (baseBranch) projected.baseBranch = baseBranch;
+  return projected;
 }
 
 export function createWorkspaceApplicationService(options = {}) {
@@ -179,7 +186,7 @@ export function createWorkspaceApplicationService(options = {}) {
     return { workspaces, activeWorkspace, removedConversations };
   }
 
-  function updateWorkspace({ path, name, linkedFolders } = {}) {
+  function updateWorkspace({ path, name, linkedFolders, baseBranch } = {}) {
     const target = normalizePath(path);
     if (!target) return { ok: false, reason: 'missing-path' };
     const workspaces = configuredWorkspaces();
@@ -190,7 +197,13 @@ export function createWorkspaceApplicationService(options = {}) {
     const nextLinked = linkedFolders === undefined
       ? current.linkedFolders
       : normalizeLinkedFolders(linkedFolders, current.path, basename);
-    workspaces[index] = { ...current, name: nextName, linkedFolders: nextLinked };
+    const nextBase = baseBranch === undefined
+      ? normalizeBaseBranch(current.baseBranch)
+      : normalizeBaseBranch(baseBranch);
+    const next = { ...current, name: nextName, linkedFolders: nextLinked };
+    if (nextBase) next.baseBranch = nextBase;
+    else delete next.baseBranch;
+    workspaces[index] = next;
     mergeSettings({ workspaces });
     return { ok: true, workspace: workspaces[index] };
   }

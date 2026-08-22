@@ -22,6 +22,7 @@ function hasDeliveryTarget(plan) {
 
 function planNeedsIsolatedWorktree(plan) {
   if (!hasDeliveryTarget(plan)) return false;
+  if (plan.deliveryBinding?.executionIsolation !== 'worktree') return false;
   return plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed';
 }
 
