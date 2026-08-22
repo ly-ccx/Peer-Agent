@@ -18,6 +18,7 @@ import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
+import { isWorkspaceRequiredNotice, registeredWorkspacePath, workspaceRequiredNotice } from '../state/registeredWorkspace';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
@@ -383,8 +384,6 @@ export function ChatSurface({
   messageTarget,
   onOpenAutomationRun,
   onClose,
-  onContinueRecentTask,
-  hasRecentTask = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -426,8 +425,6 @@ export function ChatSurface({
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
-  readonly onContinueRecentTask?: () => void;
-  readonly hasRecentTask?: boolean;
 }) {
   const isDraftConversation = conversationId === null;
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
@@ -615,6 +612,11 @@ export function ChatSurface({
       }, 6000);
     });
   }, [i18n]);
+
+  useEffect(() => {
+    if (!registeredWorkspacePath(workspacePath, workspaces)) return;
+    setAttachmentError((current) => (isWorkspaceRequiredNotice(current) ? null : current));
+  }, [workspacePath, workspaces]);
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
@@ -1005,6 +1007,11 @@ export function ChatSurface({
     })),
     [workspaces],
   );
+  const hasRegisteredWorkspace = Boolean(registeredWorkspacePath(workspacePath, workspaces));
+  const handleAddWorkspace = useCallback(async () => {
+    const result = await clientApi.workspaceAdd();
+    if (result?.path) await onWorkspaceChange?.(result.path);
+  }, [onWorkspaceChange]);
   const handleModeDropdownChange = useCallback((next: string) => {
     if (isChatMode(next)) changeMode(next);
   }, [changeMode]);
@@ -1928,6 +1935,10 @@ export function ChatSurface({
     // 草稿态：由 main 原子创建会话、持久化首条消息并启动后台 turn。
     // ChatSurface 不再是执行中转页，命令返回后即可直接进入工作台。
     if (!conversationId) {
+      if (!registeredWorkspacePath(workspacePath, workspaces)) {
+        setAttachmentError(workspaceRequiredNotice(isZh));
+        return;
+      }
       if (creatingConversationRef.current) return;
       creatingConversationRef.current = true;
       conversationStore.setDraft(conversationId, '');
@@ -1950,7 +1961,10 @@ export function ChatSurface({
         // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
         setAttachments(sentAttachments);
-        setAttachmentError(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        setAttachmentError(message === 'workspace_required'
+          ? workspaceRequiredNotice(isZh)
+          : message);
       } finally {
         creatingConversationRef.current = false;
       }
@@ -1979,6 +1993,7 @@ export function ChatSurface({
     enqueueMessage,
     onTaskStarted,
     workspacePath,
+    workspaces,
     mode,
     modelProviderId,
     isZh,
@@ -2368,30 +2383,6 @@ export function ChatSurface({
                 </button>
               </div>
             ) : null}
-            {hasProvider ? (
-              <div className="chat-empty-actions" aria-label={isZh ? '任务入口' : 'Task actions'}>
-                <button
-                  type="button"
-                  className="chat-empty-primary-btn"
-                  onClick={() => {
-                    requestAnimationFrame(() => {
-                      document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.focus();
-                    });
-                  }}
-                >
-                  {isZh ? '发出任务' : 'Start a task'}
-                </button>
-                {hasRecentTask && onContinueRecentTask ? (
-                  <button
-                    type="button"
-                    className="chat-empty-primary-btn"
-                    onClick={onContinueRecentTask}
-                  >
-                    {isZh ? '继续这条任务' : 'Continue this task'}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         ) : (
           <VirtualChatTurnList
@@ -2576,6 +2567,7 @@ export function ChatSurface({
           onAttachSessionReference={attachSessionReference}
           onAttachWorkspaceFile={attachWorkspaceFile}
           workspacePath={workspacePath}
+          canStartTask={!isDraftConversation || hasRegisteredWorkspace}
           onPrimaryAction={stableHandlePrimaryAction}
           editingMessage={editingMessage}
           onCancelEdit={stableCancelComposerEdit}
@@ -2583,19 +2575,40 @@ export function ChatSurface({
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
-            {workspacePath && workspaceOptions.length > 0 ? (
+            {isDraftConversation ? (
+              workspaceOptions.length > 0 ? (
+                <Dropdown
+                  className="composer-dropdown composer-workspace-dropdown"
+                  value={workspacePath ?? ''}
+                  placeholder={isZh ? '选择工作区' : 'Select workspace'}
+                  options={workspaceOptions}
+                  onChange={(nextWorkspacePath) => {
+                    void onWorkspaceChange?.(nextWorkspacePath);
+                  }}
+                  ariaLabel={isZh ? '工作区' : 'Workspace'}
+                  title={isZh ? '新任务必须先选择工作区' : 'Select a workspace before starting a task'}
+                  menuPlacement="up"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="composer-workspace-add"
+                  onClick={() => void handleAddWorkspace()}
+                >
+                  {isZh ? '添加工作区' : 'Add workspace'}
+                </button>
+              )
+            ) : workspacePath && workspaceOptions.length > 0 ? (
               <Dropdown
                 className="composer-dropdown composer-workspace-dropdown"
                 value={workspacePath}
                 options={workspaceOptions}
                 onChange={(nextWorkspacePath) => {
-                  if (isDraftConversation) void onWorkspaceChange?.(nextWorkspacePath);
+                  void onWorkspaceChange?.(nextWorkspacePath);
                 }}
-                disabled={!isDraftConversation}
+                disabled
                 ariaLabel={isZh ? '工作区' : 'Workspace'}
-                title={isDraftConversation
-                  ? (isZh ? '切换工作区' : 'Switch workspace')
-                  : (isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created')}
+                title={isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created'}
                 menuPlacement="up"
               />
             ) : null}

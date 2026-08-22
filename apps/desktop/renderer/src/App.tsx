@@ -47,6 +47,7 @@ import {
 } from './chat/state/runningWorkspaceState';
 import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
+import { registeredWorkspacePath } from './chat/state/registeredWorkspace';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
@@ -316,7 +317,10 @@ function MainApp() {
   // A draft task may target a workspace without navigating the application there.
   // Keep that choice separate from the globally active workspace until submission.
   const [draftWorkspacePath, setDraftWorkspacePath] = useState<string | null>(
-    () => startupSnapshot?.activeWorkspace ?? null,
+    () => registeredWorkspacePath(
+      startupSnapshot?.activeWorkspace,
+      startupSnapshot?.workspaces ?? [],
+    ),
   );
   const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>(
     () => startupSnapshot?.workspaces ?? [],
@@ -330,18 +334,6 @@ function MainApp() {
     readReplyLanguage(clientApi.initialSettings));
   const [gitBranchPrefix, setGitBranchPrefix] = useState(() =>
     readGitBranchPrefix(clientApi.initialSettings));
-
-  useEffect(() => {
-    if (activeWorkspace || draftWorkspacePath) return;
-    let cancelled = false;
-    void clientApi.workspacePreviewDefault().then((preview) => {
-      if (cancelled || !preview.path) return;
-      setDraftWorkspacePath(preview.path);
-    }).catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [activeWorkspace, draftWorkspacePath]);
 
   const refreshProviders = useCallback(async () => {
     // 表达层只展示用户明确配置的模型。远程/本机目录是设置页的候选来源，不能在聊天菜单里
@@ -793,11 +785,7 @@ function MainApp() {
   }, [activeWorkspace, conversationView, refreshConversations]);
 
   const handleNewChat = useCallback(async () => {
-    let ws = activeWorkspace;
-    if (!ws) {
-      const preview = await clientApi.workspacePreviewDefault();
-      ws = preview.path;
-    }
+    const ws = registeredWorkspacePath(activeWorkspace, workspaces);
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
     // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。
@@ -805,15 +793,10 @@ function MainApp() {
     setActiveConversationId(null);
     setCollectionDrawer(null);
     setActivePage('chat');
-  }, [activeWorkspace]);
+  }, [activeWorkspace, workspaces]);
 
   const handleCreateAutomation = useCallback(async () => {
     // Jump to the same new-task home as sidebar "新建任务", but prefill a GPT/Codex-style scheduled-task draft.
-    let ws = activeWorkspace;
-    if (!ws) {
-      const preview = await clientApi.workspacePreviewDefault();
-      ws = preview.path;
-    }
     const zh = (session?.locale ?? '').toLowerCase().startsWith('zh');
     const template = getAutomationCopy(zh).chatDraftTemplate;
     conversationStore.setDraft(null, template);
@@ -821,7 +804,7 @@ function MainApp() {
     setActiveConversationId(null);
     setCollectionDrawer(null);
     setActivePage('chat');
-  }, [activeWorkspace, session?.locale]);
+  }, [session?.locale]);
 
   useEffect(() => {
     const offNewChat = clientApi.onTrayNewChat?.(() => {
@@ -1186,11 +1169,6 @@ function MainApp() {
                   }}
                   isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
                   messageTarget={notificationMessageTarget}
-                  hasRecentTask={conversations.length > 0}
-                  onContinueRecentTask={() => {
-                    const recent = [...conversations].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
-                    if (recent) handleSelectConversation(recent.id);
-                  }}
                   />
                 </section>
               )}

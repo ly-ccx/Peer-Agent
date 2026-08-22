@@ -124,6 +124,7 @@ import { createAutomationOutcomeController } from './automation-outcome-controll
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
 import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal-evidence-export.mjs';
+import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
@@ -2905,9 +2906,18 @@ async function handleChatStartTask({
   if (!normalizedText && (!Array.isArray(attachments) || attachments.length === 0)) {
     throw new Error('task_text_or_attachment_required');
   }
+  const settings = settingsStore.getAll();
+  const boundWorkspacePath = resolveNewTaskWorkspacePath({
+    requested: workspacePath,
+    activeWorkspace: settings.activeWorkspace,
+    workspaces: settings.workspaces,
+  });
+  if (!boundWorkspacePath) {
+    throw new Error('workspace_required');
+  }
   const conversation = conversationStore.createConversation({
     title: String(title ?? normalizedText).slice(0, 48) || '新任务',
-    workspacePath: workspacePath ?? settingsStore.getAll().activeWorkspace ?? null,
+    workspacePath: boundWorkspacePath,
     mode,
     fastMode,
   });

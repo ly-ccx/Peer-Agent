@@ -1041,6 +1041,27 @@
   max-width: 180px;
 }
 
+.composer-workspace-add {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  max-width: 180px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-size: var(--composer-addon-font-size);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.composer-workspace-add:hover {
+  background: var(--composer-addon-hover-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-soft);
+}
+
 .composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
   display: none;
 }
@@ -4592,7 +4613,8 @@ button.chat-header-cap-item:focus-visible {
   margin-left: auto;
 }
 
-.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger {
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger,
+.chat-composer-wrap--empty-home .composer-workspace-add {
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
   padding: 0 8px;
@@ -4604,7 +4626,8 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
-.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open {
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open,
+.chat-composer-wrap--empty-home .composer-workspace-add:hover {
   background: color-mix(in srgb, var(--ink-base) 6%, transparent);
 }
 

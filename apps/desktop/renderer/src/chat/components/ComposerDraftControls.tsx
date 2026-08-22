@@ -61,6 +61,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onAttachSessionReference,
   onAttachWorkspaceFile,
   workspacePath = null,
+  canStartTask = true,
   onPrimaryAction,
   editingMessage = null,
   onCancelEdit,
@@ -84,6 +85,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onAttachWorkspaceFile: (hit: WorkspaceFileHit) => void | Promise<void>;
   readonly workspacePath?: string | null;
+  readonly canStartTask?: boolean;
   readonly onPrimaryAction: () => void;
   /** 正在编辑的用户消息引用（底部输入框上方展示）。 */
   readonly editingMessage?: { messageId: string; preview: string } | null;
@@ -157,6 +159,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onAttachSessionReference={onAttachSessionReference}
         onAttachWorkspaceFile={onAttachWorkspaceFile}
         workspacePath={workspacePath}
+        canStartTask={canStartTask}
         onPrimaryAction={onPrimaryAction}
         editingMessage={editingMessage}
         onCancelEdit={onCancelEdit}
@@ -185,6 +188,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
   onAttachSessionReference,
   onAttachWorkspaceFile,
   workspacePath = null,
+  canStartTask = true,
   onPrimaryAction,
   editingMessage = null,
   onCancelEdit,
@@ -204,6 +208,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onAttachWorkspaceFile: (hit: WorkspaceFileHit) => void | Promise<void>;
   readonly workspacePath?: string | null;
+  readonly canStartTask?: boolean;
   readonly onPrimaryAction: () => void;
   readonly editingMessage?: { messageId: string; preview: string } | null;
   readonly onCancelEdit?: () => void;
@@ -663,13 +668,15 @@ const ComposerDraftField = memo(function ComposerDraftField({
         </div>
       <button
         type="submit"
-        disabled={!hasProvider || (!isStreaming && !hasComposerContent)}
+        disabled={!hasProvider || (!isStreaming && (!hasComposerContent || !canStartTask))}
         className={isStreaming ? 'streaming' : undefined}
         title={isStreaming
           ? (isZh ? '停止生成' : 'Stop')
-          : editingMessage
-            ? (isZh ? '保存并发送' : 'Save and send')
-            : (isZh ? '发送' : 'Send')}
+          : !canStartTask
+            ? (isZh ? '请先选择工作区' : 'Select a workspace first')
+            : editingMessage
+              ? (isZh ? '保存并发送' : 'Save and send')
+              : (isZh ? '发送' : 'Send')}
         aria-label={isStreaming
           ? (isZh ? '停止生成' : 'Stop')
           : editingMessage
