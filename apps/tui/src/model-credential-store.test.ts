@@ -4,6 +4,7 @@ import {
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
 } from '@peer-agent/credential-helper';
+import { ensureFreshGrokTokens } from '@peer-agent/runtime-node';
 
 import {
   createTuiSharedModelCredentialStore,
@@ -77,6 +78,36 @@ describe('TUI shared model credential store', () => {
     expect(() => store.getOAuthTokens('group-oauth')).toThrow(
       'credential_oauth_tokens_invalid',
     );
+  });
+
+  test('keeps Grok scope metadata so refresh does not demand a fake re-login', async () => {
+    const oauthKey = modelOauthCredentialKey('group-grok');
+    const stored = {
+      access: 'grok-access',
+      refresh: 'grok-refresh',
+      expires: Date.now() + 300_000,
+      scope: 'openid profile email offline_access grok-cli:access api:access',
+      issuer: 'https://auth.x.ai',
+      clientId: 'b1a00492-073a-47ea-816f-4c329264a828',
+    };
+    const memory = createMemoryClient({
+      [oauthKey]: JSON.stringify({
+        ...stored,
+        ignored: 'not-exposed',
+      }),
+    });
+    const store = createTuiSharedModelCredentialStore({
+      dataHome: '/tmp/peer-test',
+      client: memory.client,
+    });
+
+    const tokens = store.getOAuthTokens('group-grok');
+    expect(tokens).toEqual(stored);
+    await expect(ensureFreshGrokTokens(tokens, {
+      fetchImpl: async () => {
+        throw new Error('should not fetch');
+      },
+    })).resolves.toMatchObject({ refreshed: false, tokens: stored });
   });
 
   test('writes, verifies, and deletes OAuth tokens through the Helper client', () => {
