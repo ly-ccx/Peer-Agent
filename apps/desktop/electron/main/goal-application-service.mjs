@@ -20,6 +20,7 @@ export function createGoalApplicationService({
   isolate,
   openSite,
   discardLine,
+  exportEvidence,
   startRunner,
   getRunnerState,
   pauseRunner,
@@ -55,6 +56,7 @@ export function createGoalApplicationService({
     isolate: assertFunction(isolate, 'isolate'),
     openSite: assertFunction(openSite, 'openSite'),
     discardLine: assertFunction(discardLine, 'discardLine'),
+    exportEvidence: assertFunction(exportEvidence, 'exportEvidence'),
     startRunner: assertFunction(startRunner, 'startRunner'),
     getRunnerState: assertFunction(getRunnerState, 'getRunnerState'),
     pauseRunner: assertFunction(pauseRunner, 'pauseRunner'),
@@ -107,6 +109,7 @@ export function createGoalApplicationService({
     openSite: ({ planId, mode } = {}) => ports.openSite(planId, { mode }),
     discardLine: ({ planId, deleteBranch } = {}) =>
       ports.discardLine(planId, { deleteBranch: Boolean(deleteBranch) }),
+    exportEvidence: ({ planId } = {}) => ports.exportEvidence(planId),
     getRunnerState: ({ planId }) => ports.getRunnerState(planId),
     startRunner: ({ planId, options } = {}) => ports.startRunner(planId, options),
     pauseRunner: ({ planId }) => ports.pauseRunner(planId),

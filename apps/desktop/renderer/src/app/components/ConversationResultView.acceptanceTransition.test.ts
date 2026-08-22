@@ -32,6 +32,8 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /建议合入/);
   assert.match(source, /goalPlansOpenSite/);
   assert.match(source, /打开现场/);
+  assert.match(source, /goalPlansExportEvidence/);
+  assert.match(source, /导出依据/);
   assert.match(source, /代码改动/);
   assert.match(source, /conversation-result-view__diff/);
   assert.match(source, /conversation-result-view__mark/);

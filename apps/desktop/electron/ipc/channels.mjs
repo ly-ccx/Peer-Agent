@@ -129,6 +129,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'goalPlans:create',
   'goalPlans:delete',
   'goalPlans:discard-line',
+  'goalPlans:export-evidence',
   'goalPlans:get',
   'goalPlans:isolate',
   'goalPlans:list',

@@ -35,7 +35,7 @@ Your host implements environment-specific ports (provider execution, authorizati
 - TUI / OpenTUI
 - `@peer-agent/runtime-node`
 
-A runnable external-host example lives at [`examples/external-host`](../../examples/external-host).
+A runnable external-host example lives at [`examples/external-host`](../../examples/external-host). It shows provider hot-replace and packing already-admitted Evidence refs into an export document.
 
 ## Product vs SDK
 

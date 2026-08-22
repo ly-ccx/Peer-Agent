@@ -33,14 +33,14 @@ npm install
 npm start
 ```
 
-Expected: JSON with `"ok": true` and completed session/pipeline statuses.
+Expected: JSON with `"ok": true`, `replacedProviderSummary`, an evidence export kind, and completed session/pipeline statuses.
 
 ## What this proves
 
 | Package | Role in the sample |
 |---------|--------------------|
 | `@peer-agent/protocol` | Shared contracts (types; often transitive via sdk) |
-| `@peer-agent/runtime-core` | Capability registry primitives |
+| `@peer-agent/runtime-core` | Capability registry `replace()`, Evidence export packing |
 | `@peer-agent/runtime-sdk` | `createRuntimeSdk` / session / pipeline orchestration |
 
 Your host only implements environment ports (provider execution, blocking, optional hooks).  

@@ -1080,6 +1080,11 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     plan: GoalPlan | null;
     reason?: string;
   }>;
+  readonly goalPlansExportEvidence: (params: { planId: string }) => Promise<{
+    ok: boolean;
+    path?: string;
+    reason?: string;
+  }>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
   /**

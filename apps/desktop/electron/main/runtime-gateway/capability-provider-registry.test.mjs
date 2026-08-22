@@ -72,6 +72,19 @@ test('desktop registry returns null for unsupported requests', async () => {
   assert.equal(await registry.execute({ call: {} }, {}), null);
 });
 
+test('desktop registry replace swaps the live provider without a process restart', async () => {
+  const registry = createCapabilityProviderRegistry({ providers: [createDesktopProvider()] });
+  const swapped = createDesktopProvider({
+    async executeCapability(request) {
+      return { swapped: true, capabilityId: request.call.capabilityId };
+    },
+  });
+  registry.replace(swapped);
+  const result = await registry.execute(createRequest(), {});
+  assert.equal(result.swapped, true);
+  assert.equal(registry.getProvider('desktop.test.echo'), swapped);
+});
+
 test('desktop registry surfaces runtime-core duplicate errors', () => {
   assert.throws(
     () => createCapabilityProviderRegistry({ providers: [createDesktopProvider(), createDesktopProvider()] }),

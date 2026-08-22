@@ -162,6 +162,7 @@ const unavailableApi: ClientApi = {
   goalPlansIsolate: unavailableMethod('goalPlansIsolate'),
   goalPlansOpenSite: unavailableMethod('goalPlansOpenSite'),
   goalPlansDiscardLine: unavailableMethod('goalPlansDiscardLine'),
+  goalPlansExportEvidence: unavailableMethod('goalPlansExportEvidence'),
   goalPlansApprove: unavailableMethod('goalPlansApprove'),
   goalPlansSetStatus: unavailableMethod('goalPlansSetStatus'),
   goalPlansMarkRequestedUserInput: unavailableMethod('goalPlansMarkRequestedUserInput'),

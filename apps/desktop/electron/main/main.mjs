@@ -123,6 +123,7 @@ import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
+import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal-evidence-export.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
@@ -2102,6 +2103,30 @@ const goalApplicationService = createGoalApplicationService({
       return { ok: false, reason: 'unavailable', plan };
     }
     return goalWorktreeAdapter.discardLine(plan, { deleteBranch: Boolean(deleteBranch) });
+  },
+  exportEvidence: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    const document = buildPlanEvidenceExport(plan, {
+      findIndexRecords: (refs) => (
+        typeof goalPlanStore.findEvidenceIndexRecords === 'function'
+          ? goalPlanStore.findEvidenceIndexRecords(refs)
+          : []
+      ),
+    });
+    if (!document) return { ok: false, reason: 'empty' };
+    const mainWindow = getPeerAgentMainWindow();
+    const result = await dialog.showSaveDialog(
+      mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+      {
+        title: '导出依据',
+        defaultPath: `peer-evidence-${String(plan.planId || 'plan').slice(0, 8)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      },
+    );
+    if (result.canceled || !result.filePath) return { ok: false, reason: 'cancelled' };
+    await writeFile(result.filePath, serializeEvidenceExportDocument(document), 'utf8');
+    return { ok: true, path: result.filePath };
   },
   startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
   getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,

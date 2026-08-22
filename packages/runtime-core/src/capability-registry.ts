@@ -56,6 +56,8 @@ function assertProvider(provider: CapabilityProvider): void {
 
 export interface CapabilityProviderRegistry {
   register(provider: CapabilityProvider): void;
+  unregister(providerId: RuntimeProviderId): boolean;
+  replace(provider: CapabilityProvider): void;
   getProvider(capabilityId: RuntimeCapabilityId): CapabilityProvider | undefined;
   execute(request: CapabilityRequest, context: CapabilityExecutionContext): Promise<CapabilityResult>;
   hasCapability(capabilityId: RuntimeCapabilityId): boolean;
@@ -99,6 +101,28 @@ export function createCapabilityProviderRegistry(
     }
   }
 
+  function unregister(providerId: RuntimeProviderId): boolean {
+    const existing = providersById.get(providerId);
+    if (!existing) return false;
+    providersById.delete(providerId);
+    for (const capabilityId of providerCapabilityIds(existing)) {
+      if (providerByCapabilityId.get(capabilityId) === existing) {
+        providerByCapabilityId.delete(capabilityId);
+      }
+    }
+    const prefixIndex = prefixProviders.indexOf(existing);
+    if (prefixIndex >= 0) prefixProviders.splice(prefixIndex, 1);
+    const customIndex = customProviders.indexOf(existing);
+    if (customIndex >= 0) customProviders.splice(customIndex, 1);
+    return true;
+  }
+
+  function replace(provider: CapabilityProvider): void {
+    assertProvider(provider);
+    unregister(provider.providerId);
+    register(provider);
+  }
+
   function getProvider(capabilityId: RuntimeCapabilityId): CapabilityProvider | undefined {
     const direct = providerByCapabilityId.get(capabilityId);
     if (direct) {
@@ -131,6 +155,8 @@ export function createCapabilityProviderRegistry(
 
   return {
     register,
+    unregister,
+    replace,
     getProvider,
     execute,
     hasCapability: (capabilityId) => Boolean(getProvider(capabilityId)),

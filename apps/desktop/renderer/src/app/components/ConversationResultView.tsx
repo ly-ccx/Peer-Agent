@@ -160,6 +160,17 @@ export function ConversationResultView({
         {metaBits.length > 0 ? (
           <p className="conversation-result-view__meta">{metaBits.join(' · ')}</p>
         ) : null}
+        {plan?.planId ? (
+          <div className="conversation-result-view__site-actions">
+            <button
+              type="button"
+              className="conversation-result-view__site-action"
+              onClick={() => void clientApi.goalPlansExportEvidence({ planId: plan.planId })}
+            >
+              {isZh ? '导出依据' : 'Export evidence'}
+            </button>
+          </div>
+        ) : null}
       </header>
 
       <section className="conversation-result-view__criteria-block">
