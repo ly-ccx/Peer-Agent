@@ -5,8 +5,6 @@ import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
-import { ChatTaskContext } from './ChatTaskContext';
-import type { ChatTaskContextView } from './taskContext';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -33,7 +31,6 @@ export function ChatHeader({
   isStreaming,
   hasScroll,
   localAccessLevel,
-  taskContext,
   editTriggerRef,
   onRename,
   onArchive,
@@ -41,7 +38,6 @@ export function ChatHeader({
   onFind,
   onOpenTools,
   onOpenAutomationRun,
-  onOpenTaskDetails,
   onClose,
 }: {
   readonly title: string;
@@ -59,7 +55,6 @@ export function ChatHeader({
   readonly isStreaming: boolean;
   readonly hasScroll?: boolean;
   readonly localAccessLevel: LocalAccessLevel;
-  readonly taskContext?: ChatTaskContextView | null;
   readonly editTriggerRef?: MutableRefObject<(() => void) | null>;
   readonly onRename?: (newTitle: string) => void;
   readonly onArchive?: () => void;
@@ -67,7 +62,6 @@ export function ChatHeader({
   readonly onFind?: () => void;
   readonly onOpenTools?: () => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
-  readonly onOpenTaskDetails?: () => void;
   /** When set (e.g. conversation Drawer), render a close control in the main header row. */
   readonly onClose?: () => void;
 }) {
@@ -196,9 +190,6 @@ export function ChatHeader({
             >
               {displayTitle}
             </span>
-            {taskContext ? (
-              <ChatTaskContext context={taskContext} onOpenDetails={onOpenTaskDetails} />
-            ) : null}
           </>
         )}
 

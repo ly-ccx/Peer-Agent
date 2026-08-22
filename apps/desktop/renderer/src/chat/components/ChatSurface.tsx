@@ -119,8 +119,6 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
-import { projectChatTaskContext } from './thread/taskContext';
-import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import {
   VirtualChatTurnList,
   type VirtualChatTurnListHandle,
@@ -384,8 +382,9 @@ export function ChatSurface({
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
-  onOpenTaskDetails,
   onClose,
+  onContinueRecentTask,
+  hasRecentTask = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -418,7 +417,6 @@ export function ChatSurface({
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
-  readonly onOpenTaskDetails?: (conversationId: string) => void;
   /** Drawer host close action; surfaces as a close control in ChatHeader. */
   readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
@@ -428,6 +426,8 @@ export function ChatSurface({
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
+  readonly onContinueRecentTask?: () => void;
+  readonly hasRecentTask?: boolean;
 }) {
   const isDraftConversation = conversationId === null;
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
@@ -974,21 +974,6 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
-  const taskOverviewItems = useTaskOverview({
-    enabled: Boolean(conversationId) && isPageActive,
-    workspacePath,
-    conversationId,
-    includeTerminal: true,
-    limit: 4,
-  });
-  const currentTaskItem = useMemo(
-    () => taskOverviewItems.find((item) => item.conversationId === conversationId),
-    [conversationId, taskOverviewItems],
-  );
-  const taskContext = useMemo(
-    () => projectChatTaskContext(currentTaskItem, isZh),
-    [currentTaskItem, isZh],
-  );
   const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
     if (!conversationId || !automationProposal) return;
     const result = await clientApi.automationProposalAct(
@@ -2228,78 +2213,6 @@ export function ChatSurface({
     return parts[parts.length - 1] || normalized;
   }, [workspacePath]);
 
-  const emptyStarterCards = useMemo(() => {
-    if (isZh) {
-      return [
-        {
-          id: 'understand',
-          title: '梳理现状',
-          prompt: workspaceLabel
-            ? `帮我梳理一下 ${workspaceLabel} 的当前状态，指出关键结构和最近值得关注的点。`
-            : '帮我梳理一下当前工作区的状态，指出关键结构和最近值得关注的点。',
-          icon: 'scan' as const,
-        },
-        {
-          id: 'goal',
-          title: '推进一个目标',
-          prompt: workspaceLabel
-            ? `我想在 ${workspaceLabel} 推进一个目标，先帮我拆成可执行步骤。`
-            : '我想推进一个目标，先帮我拆成可执行步骤。',
-          icon: 'target' as const,
-        },
-        {
-          id: 'debug',
-          title: '排查问题',
-          prompt: workspaceLabel
-            ? `我在 ${workspaceLabel} 遇到一个问题，先帮我定位可能原因和验证路径。`
-            : '我遇到一个问题，先帮我定位可能原因和验证路径。',
-          icon: 'debug' as const,
-        },
-      ];
-    }
-    return [
-      {
-        id: 'understand',
-        title: 'Understand the current state',
-        prompt: workspaceLabel
-          ? `Help me understand the current state of ${workspaceLabel}, including structure and what matters most right now.`
-          : 'Help me understand the current workspace state, including structure and what matters most right now.',
-        icon: 'scan' as const,
-      },
-      {
-        id: 'goal',
-        title: 'Drive a goal forward',
-        prompt: workspaceLabel
-          ? `I want to drive a goal in ${workspaceLabel}. Break it into executable steps first.`
-          : 'I want to drive a goal forward. Break it into executable steps first.',
-        icon: 'target' as const,
-      },
-      {
-        id: 'debug',
-        title: 'Investigate a problem',
-        prompt: workspaceLabel
-          ? `I hit a problem in ${workspaceLabel}. Help me find likely causes and a verification path.`
-          : 'I hit a problem. Help me find likely causes and a verification path.',
-        icon: 'debug' as const,
-      },
-    ];
-  }, [isZh, workspaceLabel]);
-
-  const applyEmptyStarter = useCallback((prompt: string) => {
-    if (!hasProvider) {
-      onOpenSettings();
-      return;
-    }
-    conversationStore.setDraft(conversationId, prompt);
-    requestAnimationFrame(() => {
-      const el = document.querySelector('.chat-composer textarea') as HTMLTextAreaElement | null;
-      if (!el) return;
-      el.focus();
-      const end = prompt.length;
-      el.setSelectionRange(end, end);
-    });
-  }, [conversationId, hasProvider, onOpenSettings]);
-
   const showEmptyHome = shouldShowConversationEmptyHome({
     loadStatus,
     messageCount: messages.length,
@@ -2400,10 +2313,6 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
-        taskContext={taskContext}
-        onOpenTaskDetails={conversationId && onOpenTaskDetails
-          ? () => onOpenTaskDetails(conversationId)
-          : undefined}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
@@ -2460,40 +2369,27 @@ export function ChatSurface({
               </div>
             ) : null}
             {hasProvider ? (
-              <div className="chat-empty-cards" aria-label={isZh ? '任务快捷入口' : 'Task starters'}>
-                {emptyStarterCards.map((card) => (
+              <div className="chat-empty-actions" aria-label={isZh ? '任务入口' : 'Task actions'}>
+                <button
+                  type="button"
+                  className="chat-empty-primary-btn"
+                  onClick={() => {
+                    requestAnimationFrame(() => {
+                      document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.focus();
+                    });
+                  }}
+                >
+                  {isZh ? '发出任务' : 'Start a task'}
+                </button>
+                {hasRecentTask && onContinueRecentTask ? (
                   <button
-                    key={card.id}
                     type="button"
-                    className="chat-empty-card"
-                    onClick={() => applyEmptyStarter(card.prompt)}
+                    className="chat-empty-primary-btn"
+                    onClick={onContinueRecentTask}
                   >
-                    <span className={`chat-empty-card-icon chat-empty-card-icon--${card.icon}`} aria-hidden="true">
-                      {card.icon === 'scan' ? (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="7" />
-                          <path d="m20 20-3.5-3.5" />
-                        </svg>
-                      ) : card.icon === 'target' ? (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="8" />
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v2" />
-                          <path d="M12 20v2" />
-                          <path d="M2 12h2" />
-                          <path d="M20 12h2" />
-                        </svg>
-                      ) : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 9v4" />
-                          <path d="M12 17h.01" />
-                          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-                        </svg>
-                      )}
-                    </span>
-                    <span className="chat-empty-card-title">{card.title}</span>
+                    {isZh ? '继续这条任务' : 'Continue this task'}
                   </button>
-                ))}
+                ) : null}
               </div>
             ) : null}
           </div>

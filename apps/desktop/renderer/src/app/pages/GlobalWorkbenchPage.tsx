@@ -641,7 +641,7 @@ function InboxRow({
                 onClick={onOpen}
                 disabled={acceptBusy}
               >
-                查看
+                先看依据
               </button>
               <button
                 type="button"

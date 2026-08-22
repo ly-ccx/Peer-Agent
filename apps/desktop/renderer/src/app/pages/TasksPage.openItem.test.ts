@@ -43,22 +43,21 @@ test('task row view button opens the matching task details', async () => {
   const openItemHandler =
     appSource.match(/<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?\n                            \}\}/)?.[0] ?? '';
   assert.match(openItemHandler, /if \(!item\.conversationId\) return;/);
-  assert.match(openItemHandler, /handleContinueTask\(String\(item\.conversationId\)\);/);
+  assert.match(openItemHandler, /handleSelectConversation\(String\(item\.conversationId\)\);/);
   assert.match(openItemHandler, /focusTaskRelatedMessage\(item\)/);
+  assert.match(openItemHandler, /openResultDrawer\(item\)/);
   assert.doesNotMatch(openItemHandler, /planId|goalPlansMarkRequestedUserInput/);
 });
 
-test('result_ready opens the drawer without focusing; goal-thread rounds still focus', async () => {
+test('result_ready opens the drawer without focusing; other rights open the main task', async () => {
   const appSource = await readAppSource();
   const openItemHandlers = [...appSource.matchAll(/onOpenItem=\{\(item: TaskOverviewItem, options\?: OpenResultOptions\) => \{[\s\S]*?\n                      \}\}/g)]
     .map((match) => match[0]);
   assert.ok(openItemHandlers.length >= 2);
   for (const handler of openItemHandlers) {
-    // result_ready：只打开结果抽屉，不定位消息——嵌套会话面全新挂载原生贴底，定位会造成高亮后二次跳动。
     assert.match(handler, /result_ready'\) \{[\s\S]*?openResultDrawer\(item, options\);\s*\n\s*return;/);
     assert.doesNotMatch(handler, /openResultDrawer\(item, options\);\s*focusTaskRelatedMessage\(item\)/);
-    // 继续讨论路径仍定位到相关消息。
-    assert.match(handler, /handleContinueTask\(String\(conversationId\)\);\s*focusTaskRelatedMessage\(item\)/);
+    assert.match(handler, /handleSelectConversation\(String\(conversationId\)\);\s*focusTaskRelatedMessage\(item\)/);
   }
   assert.match(appSource, /setNotificationMessageTarget\(\{/);
   assert.match(appSource, /resolveTaskRelatedMessageId\(item\)/);

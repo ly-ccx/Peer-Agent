@@ -8,20 +8,6 @@ const readApp = () => readFile(new URL('../../App.tsx', import.meta.url), 'utf8'
 const readStyles = () =>
   readFile(new URL('../../styles/task-overview.css', import.meta.url), 'utf8');
 
-/** 从 App.tsx 源码中截取两个锚点之间的 ChatSurface props 段。 */
-function appSourcePropsSection(
-  source: string,
-  startAnchor: RegExp,
-  endAnchor: RegExp,
-): string | null {
-  const startMatch = startAnchor.exec(source);
-  if (!startMatch || startMatch.index == null) return null;
-  const start = startMatch.index;
-  const endMatch = endAnchor.exec(source.slice(start));
-  if (!endMatch) return null;
-  return source.slice(start, start + endMatch.index + endMatch[0].length);
-}
-
 test('result view stays a pure content component without acceptance logic', async () => {
   const source = await readView();
   assert.match(source, /export function ConversationResultView\(\{/);
@@ -33,43 +19,51 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.doesNotMatch(source, /scrollIntoView\s*\(/);
   assert.match(source, /交卷前查过/);
   assert.match(source, /item\.qualityChecks/);
+  assert.match(source, /对照标准/);
+  assert.match(source, /pairAcceptanceCriteria/);
+  assert.match(source, /resolveEvidenceLabel/);
+  assert.match(source, /acceptancePageMeta/);
+  assert.match(source, /projectTaskOverviewArtifacts/);
+  assert.match(source, /conversation-result-view__mark/);
+  assert.doesNotMatch(source, />\{\s*isZh \? '任务现场' : 'Task thread'\s*\}/);
+  assert.doesNotMatch(source, /summaryProgress|plan\?\.progress|plan\?\.tasks/);
+  assert.doesNotMatch(source, /conversation-result-view__evidence/);
   assert.doesNotMatch(source, /意图关|机械关|产物关|集成关/);
   assert.doesNotMatch(source, /Finding|第 N 轮|第\s*\d+\s*轮/);
 });
 
-test('result view reuses the live chat turn renderer instead of flattening markdown', async () => {
+test('result view is criteria-first and does not remount the task thread', async () => {
   const source = await readView();
-  assert.match(source, /from '\.\.\/\.\.\/chat\/components\/thread\/ChatTurn'/);
-  assert.match(source, /<ChatTurn[\s\S]*?readOnly/);
-  assert.match(source, /highlightedMessageId=\{targetMessageId\}/);
-  assert.match(source, /AssistantContent/);
+  assert.doesNotMatch(source, /from '\.\.\/\.\.\/chat\/components\/thread\/ChatTurn'/);
+  assert.doesNotMatch(source, /loadConversationMessages/);
+  assert.doesNotMatch(source, /<ChatTurn/);
   assert.doesNotMatch(source, /function messageMarkdown/);
-  assert.doesNotMatch(source, /from '\.\.\/\.\.\/chat\/components\/markdown\/MarkdownMessage'/);
   assert.doesNotMatch(source, /conversation-result-view__msg/);
+  assert.doesNotMatch(source, /conversation-result-view__progress/);
+  assert.doesNotMatch(source, />子任务</);
 });
 
-test('result drawer keeps 确认验收 and shows the conversation composer by default', async () => {
+test('result drawer keeps 确认验收 and 退回补充, without mounting a chat composer', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
   assert.doesNotMatch(app, /revealComposer/);
   assert.doesNotMatch(app, /hideComposer/);
   assert.doesNotMatch(app, /resultComposerVisible/);
   assert.doesNotMatch(app, /getTaskContinuationAction/);
   assert.match(app, /\? '确认验收'/);
+  assert.match(app, /\? '退回补充'/);
   assert.match(styles, /conversation-result-view__checks/);
+  assert.match(styles, /conversation-result-view__criteria/);
   assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
 });
 
-test('result drawer reuses the chat title bar close and keeps actions below the body', async () => {
+test('result drawer always shows ConversationResultView and keeps actions below the body', async () => {
   const source = await readApp();
   const styles = await readStyles();
   assert.doesNotMatch(source, /conversation-result-drawer__head/);
   assert.doesNotMatch(source, /查看结果|View result/);
   assert.match(source, /conversation-result-drawer__body/);
-  assert.match(source, /<ChatSurface[\s\S]*?isPageActive=\{collectionDrawer === 'result'\}[\s\S]*?onClose=\{requestClose\}/);
-  // 结果抽屉的嵌套 ChatSurface 不接收 messageTarget：全新挂载原生贴底，定位通路会带来高亮后二次跳动。
-  const resultDrawerSurfaceProps =
-    appSourcePropsSection(source, /isPageActive=\{collectionDrawer === 'result'\}/, /onClose=\{requestClose\}/) ?? '';
-  assert.doesNotMatch(resultDrawerSurfaceProps, /messageTarget/);
+  assert.match(source, /<ConversationResultView item=\{resultDrawerItem\} isZh=\{isZh\} \/>/);
+  assert.doesNotMatch(source, /isPageActive=\{collectionDrawer === 'result'\}/);
   assert.match(source, /conversation-result-drawer__icon-close/);
   assert.match(source, /aria-label=\{isZh \? '关闭' : 'Close'\}/);
   assert.match(source, /<footer className="conversation-result-drawer__footer">/);
@@ -77,7 +71,15 @@ test('result drawer reuses the chat title bar close and keeps actions below the 
   assert.doesNotMatch(source, /showResultScrollToBottom/);
   assert.doesNotMatch(source, /scrollResultToBottom/);
   assert.match(styles, /\.conversation-result-drawer__footer \{/);
-  assert.match(styles, /\.conversation-result-drawer\.conversation-chat-drawer \.conversation-result-drawer__body/);
+  const resultPanelClass = source.match(
+    /collectionDrawer === 'result'\s*\?[\s\S]*?: 'workbench-collection-drawer'/,
+  )?.[0] ?? '';
+  assert.match(resultPanelClass, /conversation-result-drawer/);
+  assert.doesNotMatch(resultPanelClass, /conversation-chat-drawer/);
+  assert.doesNotMatch(
+    styles,
+    /\.conversation-result-drawer\.conversation-chat-drawer \.conversation-result-drawer__body/,
+  );
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
@@ -132,7 +134,7 @@ test('result drawer splits into scrolling body and independent footer without an
   // CRV 不再 h-full 叠百分比高度。
   assert.match(
     styles,
-    /\.conversation-result-view \{[\s\S]*?@apply flex min-h-0 flex-col gap-4;[\s\S]*?height: auto;/,
+    /\.conversation-result-view \{[\s\S]*?@apply flex min-h-0 flex-col;[\s\S]*?height: auto;/,
   );
   // drawer panel 贴满 fixed backdrop，禁止用 100vh 造成底部色差缝。
   assert.match(

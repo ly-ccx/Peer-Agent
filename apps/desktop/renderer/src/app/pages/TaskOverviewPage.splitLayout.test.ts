@@ -39,18 +39,22 @@ test('advancing stays off the main column unless there is live work', async () =
 
   assert.doesNotMatch(source, /<h2>Peer 正在推进<\/h2>/);
   assert.doesNotMatch(source, /<WorkStream items=\{advancing\}>/);
-  assert.doesNotMatch(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /<h2>正在讨论<\/h2>/);
   assert.match(source, /backgroundBarHost && advancing\.length > 0/);
   assert.match(source, /Peer 推进中/);
   assert.doesNotMatch(source, /打开会话抽屉/);
   assert.doesNotMatch(source, /Peer 待命/);
 });
 
-test('hero drops the marketing kicker and static stats', async () => {
+test('hero restores static stats without marketing kicker or split chips', async () => {
   const source = await readPage();
 
   assert.doesNotMatch(source, /Delegation OS/);
-  assert.doesNotMatch(source, /task-overview-hero-stats/);
+  assert.match(source, /task-overview-hero-stats/);
+  assert.match(source, /<span>轮到你<\/span>/);
+  assert.match(source, /<span>Peer 推进<\/span>/);
+  assert.match(source, /<span>结果待验收<\/span>/);
   assert.match(source, /<h1>现在轮到你做什么<\/h1>/);
   assert.doesNotMatch(source, /onClick=\{[^}]*setHeroFilter/);
 });
@@ -64,11 +68,11 @@ test('home subtitle describes one card per task', async () => {
   assert.doesNotMatch(home, /工作和讨论在底栏/);
 });
 
-test('workbench cards open the conversation instead of the result drawer', async () => {
+test('workbench cards open the main task, except result_ready which inspects evidence first', async () => {
   const app = await readApp();
 
-  assert.match(app, /handleContinueTask\(String\(conversationId\)\)/);
-  assert.doesNotMatch(
+  assert.match(app, /handleSelectConversation\(String\(conversationId\)\)/);
+  assert.match(
     app,
     /if \(item\.actionRight === 'result_ready'\) \{\s*[\s\S]*?openResultDrawer\(item, options\);/,
   );

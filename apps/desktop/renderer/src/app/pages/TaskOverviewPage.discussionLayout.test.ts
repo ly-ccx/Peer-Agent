@@ -14,13 +14,17 @@ test('home inbox no longer packs paused or result cards in WorkStream', async ()
   assert.match(source, /groupResultCardsByGoalThread/);
 });
 
-test('discussions leave the main column', async () => {
+test('discussions return to the main column after action sections', async () => {
   const source = await readPageSource();
 
-  assert.doesNotMatch(source, /task-overview-discussion-grid/);
-  assert.doesNotMatch(source, /visibleDiscussions/);
-  assert.doesNotMatch(source, /DISCUSSION_PREVIEW_LIMIT/);
-  assert.doesNotMatch(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /task-overview-discussion-grid/);
+  assert.match(source, /visibleDiscussions/);
+  assert.match(source, /DISCUSSION_PREVIEW_LIMIT/);
+  assert.match(source, /<section className="task-overview-section task-overview-section--discuss">/);
+  assert.match(source, /<h2>正在讨论<\/h2>/);
+  const needsYouAt = source.indexOf('<h2>需要你处理</h2>');
+  const discussAt = source.indexOf('<h2>正在讨论</h2>');
+  assert.ok(needsYouAt >= 0 && discussAt > needsYouAt);
 });
 
 test('interrupted execution still excludes ordinary conversations', async () => {

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   normalizeConversationListPage,
-  shouldShowConversationLoadMore,
+  shouldContinueConversationList,
 } from './conversationListPagination.ts';
 
-test('a short first page has no next page and does not show Load more', () => {
+test('a short first page has no next page and does not keep fetching', () => {
   const page = normalizeConversationListPage({
     items: [{ id: 'one' }, { id: 'two' }],
     nextCursor: null,
@@ -17,7 +17,7 @@ test('a short first page has no next page and does not show Load more', () => {
     nextCursor: null,
     hasMore: false,
   });
-  assert.equal(shouldShowConversationLoadMore({
+  assert.equal(shouldContinueConversationList({
     conversationCount: page.items.length,
     hasMore: page.hasMore,
     nextCursor: page.nextCursor,
@@ -38,20 +38,20 @@ test('replacing a paginated list with a legacy short list clears stale paginatio
     nextCursor: null,
     hasMore: false,
   });
-  assert.equal(shouldShowConversationLoadMore({
+  assert.equal(shouldContinueConversationList({
     conversationCount: replacement.items.length,
     hasMore: replacement.hasMore,
     nextCursor: replacement.nextCursor,
   }), false);
 });
 
-test('Load more is shown only when the server provides both hasMore and a cursor', () => {
-  assert.equal(shouldShowConversationLoadMore({
+test('later pages continue only when the server provides both hasMore and a cursor', () => {
+  assert.equal(shouldContinueConversationList({
     conversationCount: 2,
     hasMore: true,
     nextCursor: 'two',
   }), true);
-  assert.equal(shouldShowConversationLoadMore({
+  assert.equal(shouldContinueConversationList({
     conversationCount: 2,
     hasMore: true,
     nextCursor: null,

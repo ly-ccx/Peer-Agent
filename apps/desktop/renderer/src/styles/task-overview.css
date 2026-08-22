@@ -1753,10 +1753,6 @@
   opacity: 0.45;
 }
 
-.conversation-result-drawer.conversation-chat-drawer .conversation-result-drawer__body {
-  @apply overflow-hidden p-0;
-}
-
 .conversation-result-drawer__body .conversation-chat-drawer-shell {
   height: 100%;
 }
@@ -1827,8 +1823,10 @@
 
 /* 结果视图在 body 内按内容高度自然排布；滚动由 drawer body 负责，避免 h-full 再叠一层百分比。 */
 .conversation-result-view {
-  @apply flex min-h-0 flex-col gap-4;
+  @apply flex min-h-0 flex-col;
+  gap: 28px;
   height: auto;
+  padding-right: 8px;
   transform-origin: center top;
   transition:
     opacity 420ms cubic-bezier(0.33, 0, 0.2, 1),
@@ -1868,6 +1866,10 @@
   }
 }
 
+.conversation-result-view__header {
+  padding-right: 32px;
+}
+
 .conversation-result-view__kicker {
   @apply text-[11px] font-medium uppercase tracking-wide;
   color: var(--za-text-muted);
@@ -1879,24 +1881,106 @@
 }
 
 .conversation-result-view__meta {
-  @apply m-0 mt-1 text-xs;
+  @apply m-0 mt-1.5 text-xs;
   color: var(--za-text-muted);
-}
-
-.conversation-result-view__section {
-  @apply rounded-2xl border p-3;
-  border-color: var(--za-line);
-  background: color-mix(in srgb, var(--za-surface-0) 92%, var(--za-text) 4%);
-}
-
-.conversation-result-view__section--grow {
-  @apply flex min-h-0 flex-col;
-  flex: 0 0 auto;
 }
 
 .conversation-result-view__section-title {
-  @apply mb-2 text-xs font-semibold;
+  @apply mb-3 text-[11px] font-semibold tracking-wide;
   color: var(--za-text-muted);
+}
+
+.conversation-result-view__criteria-block,
+.conversation-result-view__artifacts,
+.conversation-result-view__checks-block {
+  min-width: 0;
+}
+
+.conversation-result-view__artifact-list {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__criteria {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__criterion {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--za-line);
+  color: var(--za-text);
+}
+
+.conversation-result-view__criterion:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.conversation-result-view__criterion:first-child {
+  padding-top: 2px;
+}
+
+.conversation-result-view__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.conversation-result-view__criterion.is-passed .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--state-success, #2f8f5b) 16%, transparent);
+  color: var(--state-success, #2f8f5b);
+}
+
+.conversation-result-view__criterion.is-failed .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--state-danger, #c0392b) 14%, transparent);
+  color: var(--state-danger, #c0392b);
+}
+
+.conversation-result-view__criterion.is-pending .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--za-text-muted) 12%, transparent);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__criterion-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conversation-result-view__criterion-title {
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.conversation-result-view__ref {
+  font-size: 11px;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__criterion-body em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__thread > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.conversation-result-view__thread > summary::-webkit-details-marker {
+  display: none;
 }
 
 .conversation-result-view__checks {
@@ -2012,79 +2096,6 @@
   background: color-mix(in srgb, #3f9a6f 18%, transparent);
   color: #2f7a57;
 }
-
-.task-details-view {
-  @apply flex flex-col gap-6 p-5;
-}
-
-.task-details-view__header {
-  @apply border-b pb-5;
-  border-color: var(--za-line);
-}
-
-.task-details-view__header > span {
-  @apply text-[11px] font-semibold uppercase tracking-[0.14em];
-  color: var(--za-accent);
-}
-
-.task-details-view__header h2 {
-  @apply mt-1 text-xl font-semibold;
-  color: var(--za-text);
-}
-
-.task-details-view__header p,
-.task-details-view__muted,
-.task-details-view__empty p,
-.task-details-plan p {
-  @apply mt-1 text-sm leading-relaxed;
-  color: var(--za-text-soft);
-}
-
-.task-details-view__section {
-  @apply flex flex-col gap-3;
-}
-
-.task-details-view__section h3 {
-  @apply text-xs font-semibold uppercase tracking-[0.12em];
-  color: var(--za-text-muted);
-}
-
-.task-details-view__empty,
-.task-details-plan {
-  @apply rounded-xl border p-4;
-  border-color: var(--za-line);
-  background: var(--za-surface-0);
-}
-
-.task-details-view__empty strong,
-.task-details-plan__heading strong {
-  color: var(--za-text);
-}
-
-.task-details-view__history {
-  @apply flex flex-col gap-3;
-}
-
-.task-details-plan__heading {
-  @apply flex items-start justify-between gap-3;
-}
-
-.task-details-plan__heading span {
-  @apply rounded-full px-2 py-0.5 text-[10px] font-medium uppercase;
-  background: color-mix(in srgb, var(--za-accent) 10%, transparent);
-  color: var(--za-accent);
-}
-
-.task-details-plan__progress {
-  @apply mt-3 flex items-center gap-3 text-xs;
-  color: var(--za-text-muted);
-}
-
-.task-details-plan__progress progress {
-  @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
-  accent-color: var(--za-accent);
-}
-
 
 /* 讨论区降级：次于行动权三桶 */
 .task-overview-section--discussion {

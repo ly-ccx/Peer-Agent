@@ -41,7 +41,7 @@ import { groupInboxByConversation } from './inboxConversationGrouping';
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
  * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
- * 主按钮「查看结果」。确认验收只出现在看过结果之后。
+ * 主按钮「先看依据」。确认验收只出现在看过结果之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
@@ -61,7 +61,7 @@ interface TaskOverviewPageProps {
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页。 */
   readonly onNewTask?: () => void;
-  /** 打开对应会话（决策 / 查看结果）。归组卡可带上同线待签项。 */
+  /** 打开对应会话（决策 / 先看依据）。归组卡可带上同线待签项。 */
   readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（仅 goal_plan）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
@@ -280,6 +280,9 @@ function planStepStatusLabel(status: string): string {
   }
 }
 
+/** 「正在讨论」首页预览条数：克制，避免盖过行动权三桶。 */
+const DISCUSSION_PREVIEW_LIMIT = 6;
+
 /**
  * 板块头部的次级入口。
  *
@@ -468,6 +471,8 @@ function HeroLayout({
   readonly onOpenTools?: () => void;
 }) {
   const discussions = items.filter((i) => i.source === 'conversation');
+  const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
+  const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
   const paused = items.filter(
     (i) => i.source !== 'conversation' && i.actionRight === 'paused',
@@ -635,7 +640,9 @@ function HeroLayout({
             </span>
           </div>
           <div className="task-overview-compact-stats" aria-label="工作台状态">
-            <span><b>{needsYouCards.length + pausedCards.length + resultCards.length}</b> 件事</span>
+            <span><b>{needsYouCards.length}</b> 轮到你</span>
+            <span><b>{advancing.length}</b> Peer 推进</span>
+            <span><b>{resultCards.length}</b> 结果待验收</span>
           </div>
         </header>
       </div>
@@ -654,9 +661,23 @@ function HeroLayout({
             {subtitle ?? '一张卡是一件事。点进去继续这件事。'}
           </p>
         </div>
+        <div className="task-overview-hero-stats">
+          <div className="task-overview-stat">
+            <b>{needsYouCards.length}</b>
+            <span>轮到你</span>
+          </div>
+          <div className="task-overview-stat">
+            <b>{advancing.length}</b>
+            <span>Peer 推进</span>
+          </div>
+          <div className="task-overview-stat">
+            <b>{resultCards.length}</b>
+            <span>结果待验收</span>
+          </div>
+        </div>
       </header>
 
-      {!hasInbox ? (
+      {!hasInbox && discussions.length === 0 ? (
         <div className="task-overview-empty">
           <p>{emptyLabel}</p>
           {onNewTask ? (
@@ -776,6 +797,32 @@ function HeroLayout({
                     />
                   );
                 })}
+              </div>
+            </section>
+          ) : null}
+
+          {discussions.length > 0 ? (
+            <section className="task-overview-section task-overview-section--discuss">
+              <div className="task-overview-section-head">
+                <div className="task-overview-section-title">
+                  <h2>正在讨论</h2>
+                  <small>{discussions.length}</small>
+                </div>
+                {onOpenTasks ? (
+                  <SectionLink
+                    label="查看全部"
+                    count={hiddenDiscussionCount}
+                    countHint={`还有 ${hiddenDiscussionCount} 条`}
+                    onClick={onOpenTasks}
+                  />
+                ) : (
+                  <span className="task-overview-section-meta">未读沟通</span>
+                )}
+              </div>
+              <div className="task-overview-discussion-grid">
+                {visibleDiscussions.map((item) => (
+                  <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
+                ))}
               </div>
             </section>
           ) : null}
@@ -1299,7 +1346,7 @@ function ResultCard({
             className="task-overview-btn task-overview-btn--primary"
             onClick={() => onOpenItem?.(item, acceptTogether?.length ? { acceptTogether } : undefined)}
           >
-            查看结果
+            先看依据
           </button>
         )}
         </div>
