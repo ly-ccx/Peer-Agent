@@ -17,26 +17,42 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.doesNotMatch(source, /acceptancePhase/);
   // 打开结果侧栏时不得调用 scrollIntoView(...)，否则会带动 drawer body 整体上滚。
   assert.doesNotMatch(source, /scrollIntoView\s*\(/);
-  assert.match(source, /交卷前查过/);
-  assert.match(source, /item\.qualityChecks/);
   assert.match(source, /对照标准/);
+  assert.match(source, /改了什么/);
+  assert.match(source, /签字前要注意/);
+  assert.match(source, /item\.qualityChecks/);
+  assert.match(source, /check\.status === 'failed' \|\| check\.status === 'skipped'/);
   assert.match(source, /pairAcceptanceCriteria/);
   assert.match(source, /resolveEvidenceLabel/);
   assert.match(source, /acceptancePageMeta/);
   assert.match(source, /projectTaskOverviewArtifacts/);
+  assert.match(source, /listedArtifacts/);
+  assert.match(source, /artifact\.kind === 'image'/);
   assert.match(source, /evaluateAcceptanceCloseGate/);
-  assert.match(source, /projectAcceptanceBasis/);
-  assert.match(source, /授权摘要/);
-  assert.match(source, /依据时间线/);
   assert.match(source, /gitDiffRange/);
   assert.match(source, /建议合入/);
   assert.match(source, /goalPlansOpenSite/);
   assert.match(source, /打开现场/);
   assert.match(source, /goalPlansExportEvidence/);
   assert.match(source, /导出依据/);
-  assert.match(source, /代码改动/);
   assert.match(source, /conversation-result-view__diff/);
+  assert.match(source, /<DiffViewer/);
+  assert.match(source, /diffText=\{rangeDiff\.diffText\}/);
+  assert.match(source, /showFileIndex/);
+  assert.doesNotMatch(source, /showFileHeaders=\{false\}/);
+  assert.doesNotMatch(source, /<pre className="conversation-result-view__diff-text">/);
   assert.match(source, /conversation-result-view__mark/);
+  assert.match(source, /conversation-result-view__hesitations/);
+  assert.doesNotMatch(source, /projectAcceptanceBasis/);
+  assert.doesNotMatch(source, /授权与过程/);
+  assert.doesNotMatch(source, /过程要点/);
+  assert.doesNotMatch(source, /依据时间线/);
+  assert.doesNotMatch(source, /代码改动/);
+  assert.doesNotMatch(source, /可打开的产物/);
+  assert.doesNotMatch(source, /交卷前查过/);
+  assert.doesNotMatch(source, /Goal Runner/);
+  assert.doesNotMatch(source, /<html/);
+  assert.doesNotMatch(source, /runTrace/);
   assert.doesNotMatch(source, />\{\s*isZh \? '任务现场' : 'Task thread'\s*\}/);
   assert.doesNotMatch(source, /summaryProgress|plan\?\.progress|plan\?\.tasks/);
   assert.doesNotMatch(source, /conversation-result-view__evidence/);
@@ -55,18 +71,25 @@ test('result view is criteria-first and does not remount the task thread', async
   assert.doesNotMatch(source, />子任务</);
 });
 
-test('result drawer keeps 确认验收 and 退回补充, without mounting a chat composer', async () => {
+test('result drawer keeps 确认归档 and 继续追问, without mounting a chat composer', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
   assert.doesNotMatch(app, /revealComposer/);
   assert.doesNotMatch(app, /hideComposer/);
   assert.doesNotMatch(app, /resultComposerVisible/);
   assert.doesNotMatch(app, /getTaskContinuationAction/);
-  assert.match(app, /\? '确认验收'/);
-  assert.match(app, /\? '退回补充'/);
+  assert.match(app, /\? '确认归档'/);
+  assert.match(app, /\? '继续追问'/);
+  assert.doesNotMatch(app, /\? '确认验收'/);
+  assert.doesNotMatch(app, /\? '退回补充'/);
   assert.match(app, /closeBlocked/);
   assert.match(app, /conversation-result-drawer__gate/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.match(styles, /conversation-result-view__criteria/);
+  assert.match(styles, /\.conversation-result-view__diff-text \{/);
+  assert.doesNotMatch(
+    styles,
+    /\.conversation-result-view__diff-text \{[^}]*color:\s*var\(--za-text\)/,
+  );
   assert.doesNotMatch(app, /意见表|请写下意见|交给 Peer/);
 });
 
@@ -136,7 +159,7 @@ test('result drawer splits into scrolling body and independent footer without an
     styles,
     /\.conversation-result-drawer__body \{[\s\S]*?@apply min-h-0 overflow-y-auto px-5 py-4;[\s\S]*?flex: 1 1 0;/,
   );
-  // footer 是 flex-none 的独立底部区域，用 margin-top:auto 贴底，动作右对齐（确认验收在右下角）。
+  // footer 是 flex-none 的独立底部区域，用 margin-top:auto 贴底，动作右对齐（确认归档在右下角）。
   assert.match(
     styles,
     /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,

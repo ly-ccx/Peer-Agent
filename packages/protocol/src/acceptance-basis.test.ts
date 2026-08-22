@@ -18,7 +18,7 @@ function plan(overrides: Partial<GoalPlan> = {}): GoalPlan {
   } as GoalPlan;
 }
 
-test('projects grant, tool, artifact and denial into a readable basis', () => {
+test('export basis is authorization and held refs, not a runTrace diary', () => {
   const projected = projectAcceptanceBasis(plan({
     approval: {
       decision: 'approve',
@@ -33,7 +33,7 @@ test('projects grant, tool, artifact and denial into a readable basis', () => {
           goalPlanId: 'plan-basis',
           type: 'action_completed',
           summary: '写完文件',
-          evidenceRefs: [],
+          evidenceRefs: ['local-file://src/app.ts'],
           createdAt: '2026-08-22T00:20:00.000Z',
         },
         {
@@ -45,26 +45,47 @@ test('projects grant, tool, artifact and denial into a readable basis', () => {
           createdAt: '2026-08-22T00:30:00.000Z',
         },
         {
-          id: 'e3',
+          id: 'start-1',
           goalPlanId: 'plan-basis',
-          type: 'message_routed',
-          summary: '不进依据',
+          type: 'action_started',
+          summary: 'Goal Runner started',
           evidenceRefs: [],
-          createdAt: '2026-08-22T00:05:00.000Z',
+          createdAt: '2026-08-22T00:11:00.000Z',
+        },
+        {
+          id: 'fail-1',
+          goalPlanId: 'plan-basis',
+          type: 'problem_found',
+          summary: 'Goal Runner failed: Model provider "openai" returned HTTP 503: <html><head><title>503 Service Temporarily Unavailable</title></head><body><center><h1>503</h1></center><hr><center>nginx</center></body></html>',
+          evidenceRefs: [],
+          createdAt: '2026-08-22T00:14:00.000Z',
         },
       ],
     },
   }));
 
   assert.equal(projected.authorization.planApproved, true);
-  assert.equal(projected.authorization.toolCount, 1);
-  assert.equal(projected.authorization.denialCount, 1);
+  assert.equal(projected.authorization.approvedAt, '2026-08-22T00:10:00.000Z');
   assert.equal(projected.authorization.artifactCount, 1);
-  assert.deepEqual(projected.events.map((event) => event.kind), ['grant', 'tool', 'denial', 'artifact']);
-  assert.doesNotMatch(projected.events.map((event) => event.title).join(','), /不进依据|Message routed/);
+  assert.equal(projected.authorization.toolCount, 0);
+  assert.equal(projected.authorization.denialCount, 0);
+  assert.deepEqual(projected.events, []);
+  assert.doesNotMatch(JSON.stringify(projected), /<html|nginx|Goal Runner|写完文件|测试红了/);
 });
 
-test('authorization summary stays one line', () => {
+test('does not promote criterion claims into artifacts', () => {
+  const projected = projectAcceptanceBasis(plan({
+    criterionResults: [{
+      criterionId: 'c1',
+      passed: true,
+      evidenceRef: 'model-said://done',
+    }],
+  }));
+  assert.equal(projected.authorization.artifactCount, 0);
+  assert.doesNotMatch(JSON.stringify(projected), /model-said/);
+});
+
+test('authorization summary stays plan approval and held artifacts', () => {
   assert.equal(
     formatAuthorizationSummary({
       planApproved: true,
@@ -72,6 +93,15 @@ test('authorization summary stays one line', () => {
       artifactCount: 1,
       denialCount: 0,
     }),
-    '计划已批准 · 工具 2 · 产物 1',
+    '计划已批准 · 1 份产物',
+  );
+  assert.equal(
+    formatAuthorizationSummary({
+      planApproved: true,
+      toolCount: 0,
+      artifactCount: 0,
+      denialCount: 1,
+    }),
+    '计划已批准',
   );
 });

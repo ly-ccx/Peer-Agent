@@ -35,15 +35,17 @@ test('a failed acceptance returns the card to a retryable idle state', async () 
   assert.match(app, /accept result failed'[\s\S]*throw error/);
 });
 
-test('third-bucket card only offers 先看依据; accept and reject stay off the card', async () => {
+test('third-bucket card only offers 查看进度; accept and reject stay off the card', async () => {
   const source = await readPage();
-  assert.match(source, /主按钮「先看依据」/);
-  assert.match(source, /确认验收只出现在看过结果之后/);
-  assert.match(source, />\s*先看依据\s*</);
+  assert.match(source, /主按钮「查看进度」/);
+  assert.match(source, /确认归档只出现在看过依据之后/);
+  assert.match(source, />\s*查看进度\s*</);
   assert.doesNotMatch(source, /disabled=\{!canAccept \|\| Boolean\(phase\)\}/);
   const card = source.slice(source.indexOf('function ResultCard'));
-  assert.match(card, /先看依据/);
+  assert.match(card, /查看进度/);
+  assert.doesNotMatch(card, /先看依据/);
   assert.doesNotMatch(card, /确认验收/);
+  assert.doesNotMatch(card, /确认归档/);
   assert.doesNotMatch(card, /还不行/);
 });
 

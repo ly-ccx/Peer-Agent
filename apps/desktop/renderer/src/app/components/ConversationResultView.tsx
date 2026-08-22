@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   collectHeldEvidenceRefs,
   evaluateAcceptanceCloseGate,
-  formatAuthorizationSummary,
-  projectAcceptanceBasis,
   type AcceptanceCloseVerdict,
   type GoalPlan,
   type TaskOverviewArtifact,
@@ -16,11 +14,12 @@ import {
   resolveEvidenceLabel,
 } from './acceptanceCriteria';
 import { projectTaskOverviewArtifacts } from '../pages/taskOverviewArtifacts';
+import { DiffViewer } from '../../workbench/file-preview/DiffViewer';
 
 /**
- * 工作台「先看依据」：只展示验收对照。
- * 进度条、计划步骤和对话现场不进这一页；退回补充才回到任务。
- * 操作区（确认验收 / 退回补充）在 Drawer footer。
+ * 工作台「查看进度」：签字包，不是执行日记。
+ * 只回答对照标准、仓库里改了什么、现在还有没有让人不敢签的事。
+ * 操作区（确认归档 / 继续追问）在 Drawer footer。
  */
 export function ConversationResultView({
   item,
@@ -79,7 +78,6 @@ export function ConversationResultView({
       locale: isZh ? 'zh' : 'en',
     });
   }, [isZh, plan]);
-  const basis = useMemo(() => projectAcceptanceBasis(plan, { isZh }), [isZh, plan]);
 
   useEffect(() => {
     onCloseGateChange?.(loading ? null : closeGate);
@@ -147,10 +145,19 @@ export function ConversationResultView({
     () => projectTaskOverviewArtifacts(item).groups.flatMap((group) => group.artifacts),
     [item],
   );
+  // Range diff 已经按文件列出改动。步骤产物最多保留 2 条，再垫在 diff 下面会像给当前 hunk 标错文件。
+  const listedArtifacts = rangeDiff?.diffText
+    ? artifacts.filter((artifact) => artifact.kind === 'image')
+    : artifacts;
   const metaBits = acceptancePageMeta(item);
-  const qualityChecks = item.qualityChecks ?? [];
+  const blockingChecks = (item.qualityChecks ?? []).filter(
+    (check) => check.status === 'failed' || check.status === 'skipped',
+  );
   const hasCriteria = acceptanceRows.length > 0;
   const hasLeftover = leftoverEvidence.length > 0;
+  const hasGitChange = Boolean(plan && (toRef || fromRef || suggestedTarget));
+  const showChanges = hasGitChange || artifacts.length > 0;
+  const hasHesitations = Boolean(closeGate && !closeGate.ok) || blockingChecks.length > 0;
 
   return (
     <div className="conversation-result-view">
@@ -228,52 +235,16 @@ export function ConversationResultView({
         )}
       </section>
 
-      {plan && (basis.authorization.planApproved || basis.events.length > 0) ? (
-        <section className="conversation-result-view__basis">
-          <div className="conversation-result-view__section-title">
-            {isZh ? '授权摘要' : 'Authorization'}
-          </div>
-          <p className="conversation-result-view__auth">
-            {formatAuthorizationSummary(basis.authorization, isZh)}
-          </p>
-          {basis.events.length > 0 ? (
-            <>
-              <div className="conversation-result-view__section-title conversation-result-view__section-title--sub">
-                {isZh ? '依据时间线' : 'Evidence trail'}
-              </div>
-              <ol className="conversation-result-view__basis-list">
-                {basis.events.map((event) => (
-                  <li key={event.id} className={`conversation-result-view__basis-item is-${event.kind}`}>
-                    <span className="conversation-result-view__basis-kind">
-                      {event.kind === 'grant'
-                        ? (isZh ? '授权' : 'Grant')
-                        : event.kind === 'tool'
-                          ? (isZh ? '工具' : 'Tool')
-                          : event.kind === 'denial'
-                            ? (isZh ? '拒绝' : 'Denied')
-                            : (isZh ? '产物' : 'Artifact')}
-                    </span>
-                    <div className="conversation-result-view__basis-body">
-                      <span>{event.title}</span>
-                      {event.detail ? <em>{event.detail}</em> : null}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </>
-          ) : null}
-        </section>
-      ) : null}
-
-      {closeGate && !closeGate.ok ? (
-        <p className="conversation-result-view__error">{closeGate.message}</p>
-      ) : null}
-
-      {plan && (toRef || fromRef || suggestedTarget) ? (
+      {showChanges ? (
         <section className="conversation-result-view__diff">
           <div className="conversation-result-view__section-title">
-            {isZh ? '代码改动' : 'Code changes'}
+            {isZh ? '改了什么' : 'What changed'}
           </div>
+          {toRef && snapshotBranch ? (
+            <p className="conversation-result-view__ref">
+              {`${toRef} · from ${snapshotBranch}`}
+            </p>
+          ) : null}
           {suggestedTarget ? (
             <p className="conversation-result-view__auth">
               {isZh ? `建议合入 ${suggestedTarget}` : `Suggested merge target ${suggestedTarget}`}
@@ -282,12 +253,7 @@ export function ConversationResultView({
                 : null}
             </p>
           ) : null}
-          {toRef && snapshotBranch ? (
-            <p className="conversation-result-view__ref">
-              {`${toRef} · from ${snapshotBranch}`}
-            </p>
-          ) : null}
-          {plan.planId ? (
+          {plan ? (
             <div className="conversation-result-view__site-actions">
               <button
                 type="button"
@@ -305,45 +271,46 @@ export function ConversationResultView({
               </button>
             </div>
           ) : null}
-          {rangeDiff?.diffText ? (
-            <pre className="conversation-result-view__diff-text">{rangeDiff.diffText}</pre>
-          ) : (
-            <p className="conversation-result-view__hint">
-              {isZh ? '相对源头还没有可展示的 diff。' : 'No range diff against the base yet.'}
-            </p>
-          )}
+          {hasGitChange ? (
+            rangeDiff?.diffText ? (
+              <div className="conversation-result-view__diff-text">
+                <DiffViewer diffText={rangeDiff.diffText} showFileIndex isZh={isZh} />
+              </div>
+            ) : (
+              <p className="conversation-result-view__hint">
+                {isZh ? '相对源头还没有可展示的 diff。' : 'No range diff against the base yet.'}
+              </p>
+            )
+          ) : null}
+          {listedArtifacts.length > 0 ? (
+            <ul className="conversation-result-view__artifact-list">
+              {listedArtifacts.map((artifact) => (
+                <AcceptanceArtifactButton key={`${artifact.kind}:${artifact.ref}`} artifact={artifact} />
+              ))}
+            </ul>
+          ) : null}
         </section>
       ) : null}
 
-      {artifacts.length > 0 ? (
-        <section className="conversation-result-view__artifacts">
+      {hasHesitations ? (
+        <section className="conversation-result-view__hesitations">
           <div className="conversation-result-view__section-title">
-            {isZh ? '可打开的产物' : 'Openable artifacts'}
-          </div>
-          <ul className="conversation-result-view__artifact-list">
-            {artifacts.map((artifact) => (
-              <AcceptanceArtifactButton key={`${artifact.kind}:${artifact.ref}`} artifact={artifact} />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {qualityChecks.length > 0 ? (
-        <section className="conversation-result-view__checks-block">
-          <div className="conversation-result-view__section-title">
-            {isZh ? '交卷前查过' : 'Checked before handoff'}
+            {isZh ? '签字前要注意' : 'Before you sign'}
           </div>
           <ul className="conversation-result-view__checks">
-            {qualityChecks.map((check) => (
+            {closeGate && !closeGate.ok ? (
+              <li className="conversation-result-view__check">
+                <span>{closeGate.message}</span>
+              </li>
+            ) : null}
+            {blockingChecks.map((check) => (
               <li key={check.id} className="conversation-result-view__check">
                 <span>{check.label}</span>
                 <b>
                   {check.note
-                    || (check.status === 'passed'
-                      ? (isZh ? '已通过' : 'Passed')
-                      : check.status === 'skipped'
-                        ? (isZh ? '未做' : 'Skipped')
-                        : (isZh ? '未通过' : 'Failed'))}
+                    || (check.status === 'skipped'
+                      ? (isZh ? '未做' : 'Skipped')
+                      : (isZh ? '未通过' : 'Failed'))}
                 </b>
               </li>
             ))}

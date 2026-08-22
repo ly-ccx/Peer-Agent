@@ -1893,6 +1893,7 @@
 .conversation-result-view__criteria-block,
 .conversation-result-view__artifacts,
 .conversation-result-view__checks-block,
+.conversation-result-view__hesitations,
 .conversation-result-view__basis,
 .conversation-result-view__diff {
   min-width: 0;
@@ -1918,11 +1919,7 @@
 }
 
 .conversation-result-view__diff-text {
-  @apply m-0 max-h-72 overflow-auto rounded-md px-3 py-2 text-[12px] leading-5;
-  background: color-mix(in srgb, var(--za-fill) 88%, transparent);
-  color: var(--za-text);
-  white-space: pre-wrap;
-  word-break: break-word;
+  @apply m-0 min-w-0;
 }
 
 .conversation-result-view__auth {

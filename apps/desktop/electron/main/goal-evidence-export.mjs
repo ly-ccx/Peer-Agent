@@ -34,7 +34,6 @@ export function buildPlanEvidenceExport(plan, {
     refs,
     metadata: {
       authorization: basis.authorization,
-      events: basis.events,
       ...(Array.isArray(indexRecords) && indexRecords.length > 0
         ? { indexRecords }
         : {}),

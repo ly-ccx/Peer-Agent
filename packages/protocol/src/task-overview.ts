@@ -600,7 +600,7 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
       actionRight: 'result_ready',
       nextAction: 'review_result',
       statusLabel: '待用户验收',
-      actionLabel: '查看结果',
+      actionLabel: '查看进度',
     };
   }
   if (status === 'completed' && accepted === true && deliveryHandoffStatus !== 'delivered') {
@@ -609,7 +609,7 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
         actionRight: 'result_ready',
         nextAction: 'review_result',
         statusLabel: '交回未完成',
-        actionLabel: '查看结果',
+        actionLabel: '查看进度',
       };
     }
     // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。

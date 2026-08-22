@@ -225,7 +225,7 @@ test('rule 6: completed 未验收 → result_ready', () => {
   assert.equal(item.actionRight, 'result_ready');
   assert.equal(item.nextAction, 'review_result');
   assert.equal(item.statusLabel, '待用户验收');
-  assert.equal(item.actionLabel, '查看结果');
+  assert.equal(item.actionLabel, '查看进度');
 });
 
 test('completed 但质量自检未过线时仍算正在处理，不进待验收', () => {

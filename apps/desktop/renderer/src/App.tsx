@@ -1344,7 +1344,7 @@ function MainApp() {
                                     }
                                   }}
                                 >
-                                  {isZh ? '退回补充' : 'Send back'}
+                                  {isZh ? '继续追问' : 'Follow up'}
                                 </button>
                                 <button
                                   type="button"
@@ -1358,11 +1358,11 @@ function MainApp() {
                                 >
                                   {resultAcceptancePending
                                     ? isZh
-                                      ? '正在验收…'
-                                      : 'Accepting…'
+                                      ? '正在归档…'
+                                      : 'Archiving…'
                                     : isZh
-                                      ? '确认验收'
-                                      : 'Accept result'}
+                                      ? '确认归档'
+                                      : 'Archive'}
                                 </button>
                               </footer>
                             );

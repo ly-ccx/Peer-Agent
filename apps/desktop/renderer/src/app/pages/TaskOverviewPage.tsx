@@ -41,7 +41,7 @@ import { groupInboxByConversation } from './inboxConversationGrouping';
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
  * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
- * 主按钮「先看依据」。确认验收只出现在看过结果之后。
+ * 主按钮「查看进度」。确认归档只出现在看过依据之后。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
@@ -61,7 +61,7 @@ interface TaskOverviewPageProps {
   readonly onOpenHistory?: () => void;
   /** 空态「发起新任务」：跳到新建任务页。 */
   readonly onNewTask?: () => void;
-  /** 打开对应会话（决策 / 先看依据）。归组卡可带上同线待签项。 */
+  /** 打开对应会话（决策 / 查看进度）。归组卡可带上同线待签项。 */
   readonly onOpenItem?: OpenTaskOverviewItem;
   /** 工作台一键确认验收（仅 goal_plan）。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
@@ -1103,7 +1103,7 @@ function ArtifactHoverPreview({ artifact }: { readonly artifact: TaskOverviewArt
         </span>
       </div>
       <pre className="task-artifact-diff">
-        {buildDiffLines(preview.diffLines.join('\n')).map((line, index) => (
+        {buildDiffLines(preview.diffLines.join('\n')).filter((line) => line.kind !== 'meta').map((line, index) => (
           <code
             className={
               line.kind === 'add'
@@ -1338,7 +1338,7 @@ function ResultCard({
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
-            已验收 ✓
+            已归档 ✓
           </button>
         ) : (
           <button
@@ -1346,7 +1346,7 @@ function ResultCard({
             className="task-overview-btn task-overview-btn--primary"
             onClick={() => onOpenItem?.(item, acceptTogether?.length ? { acceptTogether } : undefined)}
           >
-            先看依据
+            查看进度
           </button>
         )}
         </div>

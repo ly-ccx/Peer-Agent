@@ -96,7 +96,7 @@ function rowOpenLabel(item: TaskOverviewItem): string {
     if (item.nextAction === 'decide_blocked' || item.nextAction === 'approve_plan') return '进入';
     return '进入';
   }
-  if (item.actionRight === 'result_ready') return '先看依据';
+  if (item.actionRight === 'result_ready') return '查看进度';
   if (item.actionRight === 'paused') return '继续';
   return '查看';
 }

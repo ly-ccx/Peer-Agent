@@ -47,8 +47,11 @@ test('global workbench acceptance waits for success before celebrating and freez
   assert.match(source, /className="gwb-chips"/);
   assert.match(source, /className="gwb-chip gwb-chip-ws"/);
   assert.doesNotMatch(source, /gwb-tag-col|gwb-item-main|gwb-meta/);
-  assert.match(source, /正在验收…/);
-  assert.match(source, /已验收 ✓/);
+  assert.match(source, /正在交回…/);
+  assert.match(source, /已归档 ✓/);
+  assert.match(source, /查看进度/);
+  assert.doesNotMatch(source, /先看依据/);
+  assert.doesNotMatch(source, /确认验收/);
   assert.doesNotMatch(
     source,
     /onAccept=\{\s*onAcceptResult\s*\?\s*\(\)\s*=>\s*\{\s*void onAcceptResult\(item\);/,
@@ -58,7 +61,7 @@ test('global workbench acceptance waits for success before celebrating and freez
 test('global workbench acceptance failure returns the card to a retryable idle state', async () => {
   const source = await readPage();
   assert.match(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
-  assert.match(source, /disabled=\{acceptBusy\}/);
+  assert.match(source, /disabled=\{kind === 'accept' && acceptBusy\}/);
 });
 
 test('global workbench removes the final divider through the shatter host wrapper', async () => {

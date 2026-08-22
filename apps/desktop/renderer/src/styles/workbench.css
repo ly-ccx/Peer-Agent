@@ -461,6 +461,90 @@
     border-bottom: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.2));
     opacity: 0.85;
   }
+  .diff-file-index {
+    margin: 0;
+    padding: 10px 12px 6px;
+    border: 1px solid var(--za-line);
+    border-radius: 12px;
+    background: var(--za-surface-1);
+  }
+  .diff-file-index-head {
+    margin-bottom: 4px;
+    font-size: var(--ui-font-meta);
+    color: var(--za-text-muted);
+  }
+  .diff-file-index-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .diff-file-index-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 4px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--za-text);
+    font: inherit;
+    text-align: left;
+    cursor: default;
+  }
+  .diff-file-index-row:hover,
+  .diff-file-index-row:focus-visible,
+  .diff-file-index-row.is-active {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+  }
+  .diff-file-index-name {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--ui-font-control);
+  }
+  .diff-file-index-stats {
+    display: flex;
+    flex: none;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: var(--ui-font-meta);
+    font-weight: 600;
+  }
+  .diff-file-index-stats .is-add {
+    color: var(--za-diff-add-fg, #1a7f37);
+  }
+  .diff-file-index-stats .is-del {
+    color: var(--za-diff-del-fg, #cf222e);
+  }
+  .diff-file-head-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 0 6px;
+    background: var(--za-surface-0);
+  }
+  .diff-file-head {
+    display: inline-flex;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 4px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border: 1px solid var(--za-line);
+    border-radius: 999px;
+    background: var(--za-surface-1);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--za-text);
+  }
+  .diff-file + .diff-file {
+    margin-top: 12px;
+  }
   .workbench-diff-pre {
     margin: 0;
     padding: 8px 0;

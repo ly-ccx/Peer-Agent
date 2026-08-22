@@ -362,17 +362,6 @@ export function GlobalWorkbenchPage({
                                 : undefined,
                             )
                           }
-                          onAccept={
-                            onAcceptResult && group.latest.item.source === 'goal_plan'
-                              ? () => {
-                                  for (const pending of collectPendingAcceptanceItems(
-                                    group.items.map((threadEntry) => threadEntry.item),
-                                  )) {
-                                    void handleAccept(pending);
-                                  }
-                                }
-                              : undefined
-                          }
                         />
                       </div>
                     ) : (
@@ -382,13 +371,6 @@ export function GlobalWorkbenchPage({
                         kind="accept"
                         phase={group.phase}
                         onOpen={() => handleOpenItem(group.item)}
-                        onAccept={
-                          onAcceptResult && group.item.source === 'goal_plan'
-                            ? () => {
-                                void handleAccept(group.item);
-                              }
-                            : undefined
-                        }
                       />
                     ),
                   )}
@@ -529,7 +511,6 @@ function InboxRow({
   kind,
   phase = null,
   onOpen,
-  onAccept,
   threadNodes,
   threadPendingCount,
   onOpenThreadNode,
@@ -538,7 +519,6 @@ function InboxRow({
   readonly kind: 'need' | 'accept';
   readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
-  readonly onAccept?: () => void;
   readonly threadNodes?: readonly ThreadListNode[];
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
@@ -575,11 +555,11 @@ function InboxRow({
 
   const cta =
     kind === 'accept'
-      ? phase == null
-        ? '确认验收'
-        : submitting
-          ? '正在交回…'
-          : '已验收 ✓'
+      ? submitting
+        ? '正在交回…'
+        : celebrating
+          ? '已归档 ✓'
+          : '查看进度'
       : item.actionLabel || '去处理';
 
   const durationLabel =
@@ -633,32 +613,16 @@ function InboxRow({
           ) : null}
         </div>
         <div className="gwb-actions">
-          {kind === 'accept' && onAccept ? (
-            <>
-              <button
-                type="button"
-                className="gwb-btn gwb-btn-ghost"
-                onClick={onOpen}
-                disabled={acceptBusy}
-              >
-                先看依据
-              </button>
-              <button
-                type="button"
-                className="gwb-btn gwb-btn-primary"
-                onClick={onAccept}
-                disabled={acceptBusy}
-              >
-                {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
-                <ActionLabel label={cta} />
-              </button>
-            </>
-          ) : (
-            <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
-              <ActionLabel label={cta} />
-              {item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
-            </button>
-          )}
+          <button
+            type="button"
+            className="gwb-btn gwb-btn-primary"
+            onClick={onOpen}
+            disabled={kind === 'accept' && acceptBusy}
+          >
+            {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+            <ActionLabel label={cta} />
+            {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
+          </button>
         </div>
       </div>
       {kind === 'accept' ? (
