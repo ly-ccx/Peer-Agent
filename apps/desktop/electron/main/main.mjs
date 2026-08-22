@@ -122,7 +122,7 @@ import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
-import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
+import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
@@ -2071,6 +2071,37 @@ const goalApplicationService = createGoalApplicationService({
   retryHandoff: (planId) => {
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
+  },
+  isolate: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found', plan: null };
+    if (typeof goalWorktreeAdapter?.isolatePlan !== 'function') {
+      return { ok: false, reason: 'unavailable', plan };
+    }
+    return goalWorktreeAdapter.isolatePlan(plan, {
+      ensureTaskBranch: (current) => {
+        if (typeof goalTaskBranchAdapter?.ensureTaskBranch !== 'function') return current;
+        return goalTaskBranchAdapter.ensureTaskBranch(current) || current;
+      },
+    });
+  },
+  openSite: async (planId, { mode } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    const site = resolveGoalSitePath(plan);
+    if (!site) return { ok: false, reason: 'no_site' };
+    return openPathApplicationService.open({
+      absPath: site,
+      mode: mode === 'editor' ? 'editor' : 'reveal',
+    });
+  },
+  discardLine: async (planId, { deleteBranch } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found', plan: null };
+    if (typeof goalWorktreeAdapter?.discardLine !== 'function') {
+      return { ok: false, reason: 'unavailable', plan };
+    }
+    return goalWorktreeAdapter.discardLine(plan, { deleteBranch: Boolean(deleteBranch) });
   },
   startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
   getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,

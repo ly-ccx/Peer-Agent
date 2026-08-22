@@ -1063,6 +1063,23 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansIsolate: (params: { planId: string }) => Promise<{
+    ok: boolean;
+    plan: GoalPlan | null;
+    reason?: string;
+  }>;
+  readonly goalPlansOpenSite: (params: {
+    planId: string;
+    mode?: 'reveal' | 'editor';
+  }) => Promise<{ ok: boolean; path?: string; reason?: string }>;
+  readonly goalPlansDiscardLine: (params: {
+    planId: string;
+    deleteBranch?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    plan: GoalPlan | null;
+    reason?: string;
+  }>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
   /**

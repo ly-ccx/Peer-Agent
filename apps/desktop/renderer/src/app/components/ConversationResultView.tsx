@@ -276,6 +276,24 @@ export function ConversationResultView({
               {`${toRef} · from ${snapshotBranch}`}
             </p>
           ) : null}
+          {plan.planId ? (
+            <div className="conversation-result-view__site-actions">
+              <button
+                type="button"
+                className="conversation-result-view__site-action"
+                onClick={() => void clientApi.goalPlansOpenSite({ planId: plan.planId, mode: 'reveal' })}
+              >
+                {isZh ? '打开现场' : 'Reveal site'}
+              </button>
+              <button
+                type="button"
+                className="conversation-result-view__site-action"
+                onClick={() => void clientApi.goalPlansOpenSite({ planId: plan.planId, mode: 'editor' })}
+              >
+                {isZh ? '在编辑器打开' : 'Open in editor'}
+              </button>
+            </div>
+          ) : null}
           {rangeDiff?.diffText ? (
             <pre className="conversation-result-view__diff-text">{rangeDiff.diffText}</pre>
           ) : (

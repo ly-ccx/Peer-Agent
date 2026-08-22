@@ -579,6 +579,52 @@
   word-break: break-word;
 }
 
+.goal-plan-delivery-handoff-row,
+.goal-plan-delivery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.goal-plan-delivery-handoff {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.45;
+  color: var(--za-text-soft);
+}
+
+.goal-plan-delivery-retry,
+.goal-plan-delivery-action {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.goal-plan-delivery-retry:disabled,
+.goal-plan-delivery-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-plan-delivery-action--danger {
+  color: var(--za-warn);
+}
+
+.goal-plan-delivery-error {
+  margin: 0;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.45;
+  color: var(--za-danger);
+}
+
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;

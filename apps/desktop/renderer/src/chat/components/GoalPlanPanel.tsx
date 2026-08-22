@@ -15,6 +15,7 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
+import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
@@ -1480,6 +1481,68 @@ function ExplorerItem({
   );
 }
 
+function hasDeliveryTarget(plan: GoalPlan): boolean {
+  const binding = plan.deliveryBinding;
+  if (!binding?.targetBranch || !binding.targetBranchSource) return false;
+  if (plan.activation?.kind === 'intake') return false;
+  return Boolean(binding.targetWorkspacePath || plan.targetWorkspacePath);
+}
+
+function isIsolatedPlan(plan: GoalPlan): boolean {
+  return plan.deliveryBinding?.executionIsolation === 'worktree'
+    && Boolean(plan.deliveryBinding.worktreePath?.trim());
+}
+
+function hasTaskLine(plan: GoalPlan): boolean {
+  return Boolean(plan.deliveryBinding?.taskBranch?.trim() || plan.deliveryBinding?.worktreePath?.trim());
+}
+
+async function confirmDiscardAfterStop(
+  confirm: (options: {
+    title?: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    tone?: 'default' | 'danger';
+  }) => Promise<boolean>,
+  plan: GoalPlan,
+  isZh: boolean,
+): Promise<void> {
+  if (!hasTaskLine(plan)) return;
+  const ok = await confirm({
+    title: isZh ? '删除这条线？' : 'Discard this line?',
+    message: isZh
+      ? '推进已经停了。也可以继续删除隔离目录和未合入的任务分支；已合入的提交不会被抹掉。'
+      : 'Advancing has stopped. You can also remove the isolated worktree and any unmerged task branch. Merged commits stay.',
+    confirmText: isZh ? '删除这条线' : 'Discard line',
+    cancelText: isZh ? '只停推进' : 'Stop only',
+    tone: 'danger',
+  });
+  if (!ok) return;
+  await clientApi.goalPlansDiscardLine({ planId: plan.planId, deleteBranch: true });
+}
+
+function isolateReasonCopy(reason: string | undefined, isZh: boolean): string {
+  switch (reason) {
+    case 'task_checkout_dirty':
+      return isZh
+        ? '任务分支正被主工作区占用，且还有未提交改动。先提交或收拾干净再隔离。'
+        : 'The task branch is checked out in the main workspace with uncommitted changes.';
+    case 'switch_base_failed':
+      return isZh ? '无法切回源头分支，隔离没有继续。' : 'Could not switch back to the source branch.';
+    case 'worktree_add_failed':
+      return isZh ? '创建隔离目录失败。' : 'Failed to create the isolated worktree.';
+    case 'workspace_unusable':
+      return isZh ? '目标仓库现在不可用。' : 'The target repository is not usable right now.';
+    case 'terminal':
+      return isZh ? '已经结束的任务不能再升级为隔离线。' : 'A finished task cannot be isolated.';
+    case 'no_delivery_target':
+      return isZh ? '这条任务还没有绑定交付目标。' : 'This task has no delivery target yet.';
+    default:
+      return isZh ? '隔离没有完成。' : 'Isolation did not finish.';
+  }
+}
+
 interface CompactApprovalBarProps {
   readonly plan: GoalPlan;
   readonly isZh: boolean;
@@ -1581,6 +1644,70 @@ const PlanCard = memo(function PlanCard({
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
   const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
+  const confirm = useConfirm();
+  const [lineBusy, setLineBusy] = useState(false);
+  const [lineError, setLineError] = useState<string | null>(null);
+  const isolated = isIsolatedPlan(plan);
+  const canIsolate = hasDeliveryTarget(plan)
+    && !isolated
+    && plan.status !== 'completed'
+    && plan.status !== 'cancelled'
+    && plan.status !== 'failed';
+  const canOpenSite = hasDeliveryTarget(plan) || isolated;
+  const canDiscardLine = hasTaskLine(plan) && plan.status !== 'executing';
+  const lineDisabled = busy || isStreaming || lineBusy;
+
+  const isolateLine = useCallback(async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansIsolate({ planId: plan.planId });
+      if (result && result.ok === false) {
+        setLineError(isolateReasonCopy(result.reason, isZh));
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [isZh, plan.planId]);
+
+  const openSite = useCallback(async (mode: 'reveal' | 'editor') => {
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansOpenSite({ planId: plan.planId, mode });
+      if (result && result.ok === false) {
+        setLineError(isZh ? '打不开这条任务的现场。' : 'Could not open the task site.');
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    }
+  }, [isZh, plan.planId]);
+
+  const discardLine = useCallback(async () => {
+    const ok = await confirm({
+      title: isZh ? '删除这条线' : 'Discard this line',
+      message: isZh
+        ? '将删除隔离目录；若任务分支还没合入，也会删掉本地分支。已合入的提交不会被抹掉。'
+        : 'This removes the isolated worktree and, if it is still unmerged, the local task branch. Merged commits stay.',
+      confirmText: isZh ? '删除这条线' : 'Discard line',
+      cancelText: isZh ? '再想想' : 'Keep it',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansDiscardLine({ planId: plan.planId, deleteBranch: true });
+      if (result && result.ok === false) {
+        setLineError(isolateReasonCopy(result.reason, isZh));
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [confirm, isZh, plan.planId]);
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1669,6 +1796,51 @@ const PlanCard = memo(function PlanCard({
               ) : null}
             </div>
           ) : null}
+          {canIsolate || canOpenSite || canDiscardLine ? (
+            <div className="goal-plan-delivery-actions">
+              {canIsolate ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-action"
+                  disabled={lineDisabled}
+                  onClick={() => void isolateLine()}
+                >
+                  {isZh ? '隔离执行' : 'Isolate'}
+                </button>
+              ) : null}
+              {canOpenSite ? (
+                <>
+                  <button
+                    type="button"
+                    className="goal-plan-delivery-action"
+                    disabled={lineDisabled}
+                    onClick={() => void openSite('reveal')}
+                  >
+                    {isZh ? '打开现场' : 'Reveal site'}
+                  </button>
+                  <button
+                    type="button"
+                    className="goal-plan-delivery-action"
+                    disabled={lineDisabled}
+                    onClick={() => void openSite('editor')}
+                  >
+                    {isZh ? '在编辑器打开' : 'Open in editor'}
+                  </button>
+                </>
+              ) : null}
+              {canDiscardLine ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-action goal-plan-delivery-action--danger"
+                  disabled={lineDisabled}
+                  onClick={() => void discardLine()}
+                >
+                  {isZh ? '删除这条线' : 'Discard line'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {lineError ? <p className="goal-plan-delivery-error">{lineError}</p> : null}
           {parentPlan ? (
             <div className="goal-plan-origin" data-goal-plan-origin>
               <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>
@@ -1721,6 +1893,7 @@ const PlanCard = memo(function PlanCard({
 const GOAL_PANEL_MOTION_MS = 200;
 
 export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1937,6 +2110,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           await clientApi.goalRunnerResume({ planId: plan.planId });
         } else {
           await clientApi.goalRunnerClear({ planId: plan.planId });
+          await confirmDiscardAfterStop(confirm, plan, isZh);
         }
         await reload({ mode: 'silent' });
       } catch (err) {
@@ -1945,7 +2119,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         setBusyPlanId(null);
       }
     },
-    [reload, isZh],
+    [confirm, reload, isZh],
   );
 
   const recordManualDodConfirmation = useCallback(
@@ -2012,6 +2186,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         } else {
           // 与工作台一致：clear 才会真正停 runner / 后续流式，不能只写 cancelled 状态。
           await clientApi.goalRunnerClear({ planId: plan.planId });
+          await confirmDiscardAfterStop(confirm, plan, isZh);
         }
         await reload({ mode: 'silent' });
       } catch (err) {
@@ -2020,7 +2195,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         setBusyPlanId(null);
       }
     },
-    [decide, interactionActions, isZh, onRequestHostFocus, reload],
+    [confirm, decide, interactionActions, isZh, onRequestHostFocus, reload],
   );
 
   // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）

@@ -176,11 +176,50 @@ describe('goal worktree live isolation', () => {
     });
     const prepared = await adapter.prepareForPlan(store.getPlan('plan-delivered'));
     const worktreePath = prepared.deliveryBinding.worktreePath;
+    const taskBranch = prepared.deliveryBinding.taskBranch;
     writeFileSync(path.join(worktreePath, 'landed.txt'), 'already handed off\n');
     const cleaned = await adapter.retainOrCleanupPlan(store.getPlan('plan-delivered'));
     assert.equal(existsSync(worktreePath), false);
     assert.equal(cleaned.deliveryBinding.worktreePath, undefined);
-    assert.equal(cleaned.deliveryBinding.taskBranch, undefined);
+    assert.equal(cleaned.deliveryBinding.taskBranch, taskBranch);
+    assert.equal(cleaned.deliveryBinding.executionIsolation, 'none');
+    assert.ok(git(['rev-parse', '--verify', `refs/heads/${taskBranch}`]));
+  });
+
+  it('upgrades an existing task branch into a worktree without creating another branch', async () => {
+    git(['branch', '--', 'PeerAgent/task-live', 'HEAD']);
+    const store = createStore(boundPlan({
+      planId: 'plan-upgrade',
+      deliveryBinding: {
+        ...boundPlan().deliveryBinding,
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/task-live',
+      },
+    }));
+    const adapter = createGoalWorktreeAdapter({
+      rootDir: worktrees,
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+
+    const isolated = await adapter.isolatePlan(store.getPlan('plan-upgrade'));
+    assert.equal(isolated.ok, true);
+    const worktreePath = isolated.plan.deliveryBinding.worktreePath;
+    assert.equal(isolated.plan.deliveryBinding.executionIsolation, 'worktree');
+    assert.equal(isolated.plan.deliveryBinding.taskBranch, 'PeerAgent/task-live');
+    assert.ok(worktreePath.startsWith(worktrees));
+    assert.ok(existsSync(worktreePath));
+    assert.equal(git(['branch', '--show-current']), 'main');
+    assert.equal(git(['branch', '--show-current'], worktreePath), 'PeerAgent/task-live');
+    assert.equal(git(['branch', '--list', 'PeerAgent/automation-*']), '');
+
+    writeFileSync(path.join(worktreePath, 'isolated.txt'), 'from upgrade\n');
+    const discarded = await adapter.discardLine(store.getPlan('plan-upgrade'), { deleteBranch: true });
+    assert.equal(discarded.ok, true);
+    assert.equal(existsSync(worktreePath), false);
+    assert.equal(discarded.plan.deliveryBinding.taskBranch, undefined);
+    assert.equal(discarded.plan.deliveryBinding.worktreePath, undefined);
+    assert.throws(() => git(['rev-parse', '--verify', '--quiet', 'refs/heads/PeerAgent/task-live']));
   });
 
   it('clears isolation when the recorded worktree is already gone', async () => {

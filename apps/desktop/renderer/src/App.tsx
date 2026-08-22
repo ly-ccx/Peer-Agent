@@ -219,6 +219,22 @@ function MainApp() {
         console.error('[workbench] cancel plan status fallback failed', fallbackError);
       }
     }
+    if (!item.deliveryRoute) return;
+    const discard = await confirm({
+      title: zh ? '删除这条线？' : 'Discard this line?',
+      message: zh
+        ? '推进已经停了。也可以继续删除隔离目录和未合入的任务分支；已合入的提交不会被抹掉。'
+        : 'Advancing has stopped. You can also remove the isolated worktree and any unmerged task branch. Merged commits stay.',
+      confirmText: zh ? '删除这条线' : 'Discard line',
+      cancelText: zh ? '只停推进' : 'Stop only',
+      tone: 'danger',
+    });
+    if (!discard) return;
+    try {
+      await clientApi.goalPlansDiscardLine({ planId: item.taskId, deleteBranch: true });
+    } catch (error) {
+      console.error('[workbench] discard line after cancel failed', error);
+    }
   }, [confirm, session?.locale]);
 
   const closeCollectionDrawer = useCallback(() => {
