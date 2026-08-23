@@ -1062,6 +1062,75 @@
   color: var(--graphite-soft);
 }
 
+.composer-worktree-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--composer-addon-color);
+  font-size: var(--composer-addon-font-size);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.composer-worktree-toggle input {
+  margin: 0;
+  accent-color: var(--graphite-ink, currentColor);
+}
+
+.composer-worktree-toggle:hover:not(:has(input:disabled)) {
+  background: var(--composer-addon-hover-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-soft);
+}
+
+.composer-worktree-toggle.is-active {
+  color: var(--graphite-soft);
+}
+
+.composer-worktree-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.composer-bound-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 11rem;
+  height: var(--composer-addon-height);
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.2;
+  pointer-events: auto;
+}
+
+.composer-bound-branch svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.composer-bound-branch-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
   display: none;
 }
@@ -3326,6 +3395,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 1 1 auto;
   min-width: 0;
   -webkit-app-region: no-drag;
 }
@@ -3350,6 +3420,8 @@
 }
 
 .chat-header-title {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 0.82rem;
   font-weight: 500;
   color: var(--graphite-base);
@@ -3362,6 +3434,38 @@
   padding: 2px 6px;
   border-radius: var(--radius-frost-sm);
   transition: background var(--za-motion-fast);
+}
+
+.chat-header-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 11rem;
+  color: var(--graphite-mute);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  /* 元信息，不是控件：不要做成带边框的 chip。 */
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-header-branch svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.chat-header-branch-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-header-title:hover {
@@ -3391,6 +3495,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  flex: 0 0 auto;
   -webkit-app-region: no-drag;
 }
 
@@ -4756,6 +4861,7 @@ button.chat-header-cap-item:focus-visible {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar .token-usage-wrap {
@@ -4763,7 +4869,8 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger,
-.chat-composer-wrap--empty-home .composer-workspace-add {
+.chat-composer-wrap--empty-home .composer-workspace-add,
+.chat-composer-wrap--empty-home .composer-worktree-toggle {
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
   padding: 0 8px;
@@ -4776,7 +4883,8 @@ button.chat-header-cap-item:focus-visible {
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open,
-.chat-composer-wrap--empty-home .composer-workspace-add:hover {
+.chat-composer-wrap--empty-home .composer-workspace-add:hover,
+.chat-composer-wrap--empty-home .composer-worktree-toggle:hover:not(:has(input:disabled)) {
   background: color-mix(in srgb, var(--ink-base) 6%, transparent);
 }
 

@@ -322,7 +322,7 @@ function MainApp() {
       startupSnapshot?.workspaces ?? [],
     ),
   );
-  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>(
+  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string; baseBranch?: string }[]>(
     () => startupSnapshot?.workspaces ?? [],
   );
   // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
@@ -1164,7 +1164,11 @@ function MainApp() {
                     if (!activeWorkspace && workspacePath) {
                       setActiveWorkspace(workspacePath);
                       const listed = await clientApi.workspaceList();
-                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                      setWorkspaces(listed.workspaces.map((item) => ({
+                        path: item.path,
+                        name: item.name,
+                        baseBranch: item.baseBranch,
+                      })));
                     }
                   }}
                   isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
@@ -1421,7 +1425,11 @@ function MainApp() {
                     if (!activeWorkspace && workspacePath) {
                       setActiveWorkspace(workspacePath);
                       const listed = await clientApi.workspaceList();
-                      setWorkspaces(listed.workspaces.map((item) => ({ path: item.path, name: item.name })));
+                      setWorkspaces(listed.workspaces.map((item) => ({
+                        path: item.path,
+                        name: item.name,
+                        baseBranch: item.baseBranch,
+                      })));
                     }
                   }}
                       isPageActive={conversationDrawerOpen}

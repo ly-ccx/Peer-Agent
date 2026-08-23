@@ -24,6 +24,11 @@ export interface ConversationMeta {
   readonly workspacePath?: string | null;
   readonly mode?: string;
   readonly fastMode: boolean;
+  /**
+   * User opt-in to isolate later writes in a Git worktree.
+   * Not isolation truth — Goal deliveryBinding.executionIsolation is.
+   */
+  readonly preferredExecutionIsolation: 'none' | 'worktree';
   readonly updatedAt?: string;
   /**
    * 用户上次打开/阅读该会话的水位时间（ISO）。
@@ -97,6 +102,7 @@ export interface ConversationStore {
     workspacePath?: string;
     mode?: string;
     fastMode?: boolean;
+    preferredExecutionIsolation?: 'none' | 'worktree';
     automationCreateContext?: AutomationCreateContext | null;
     automationOrigin?: ConversationAutomationOrigin | null;
   }): ConversationMeta;

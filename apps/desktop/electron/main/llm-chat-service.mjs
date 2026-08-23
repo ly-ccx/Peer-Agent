@@ -24,6 +24,7 @@ import { joinSummaryThinkingContent } from './thinking-summary-join.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
 import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import {
   createProviderAttemptStream,
   describeFetchFailure,
@@ -977,11 +978,17 @@ export function createLlmChatService({
         const activePlan = typeof goalPlanStore?.getActivePlanByConversation === 'function'
           ? goalPlanStore.getActivePlanByConversation(conversationId)
           : null;
-        if (activePlan && typeof goalTaskBranchAdapter?.ensureTaskBranch === 'function') {
-          await goalTaskBranchAdapter.ensureTaskBranch(activePlan);
-        }
-        if (activePlan && typeof goalWorktreeAdapter?.prepareForPlan === 'function') {
-          await goalWorktreeAdapter.prepareForPlan(activePlan);
+        if (activePlan) {
+          const conversation = typeof conversationStore?.getConversation === 'function'
+            ? conversationStore.getConversation(conversationId)
+            : null;
+          await preparePlanExecutionWorkspace({
+            plan: activePlan,
+            conversation,
+            ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+            prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+            isolatePlan: goalWorktreeAdapter?.isolatePlan,
+          });
         }
       } catch (error) {
         console.warn('[goal-worktree] prepare failed; writing to bound workspace:', error?.message || error);

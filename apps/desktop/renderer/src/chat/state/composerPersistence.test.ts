@@ -75,6 +75,30 @@ describe('composerPersistence', () => {
     assert.deepEqual(reopened.queue, []);
   });
 
+  it('persists and cold-restores draft worktree opt-in while keeping legacy entries compatible', () => {
+    const port = makePort({
+      composerDrafts: {
+        legacy: { draft: 'old draft', queue: [] },
+      },
+    });
+    __setComposerSettingsPort(port);
+
+    assert.equal(loadComposerEntry('legacy')?.preferredWorktree, false);
+    saveComposerEntry('__draft__', { draft: '', queue: [], preferredWorktree: true });
+    flushComposerPersistence();
+
+    const written = port.writes[0].composerDrafts as Record<string, unknown>;
+    const saved = written.__draft__ as { preferredWorktree: boolean };
+    assert.equal(saved.preferredWorktree, true);
+
+    __setComposerSettingsPort(makePort({ composerDrafts: written }));
+    const reopened = loadComposerEntry('__draft__');
+    assert.ok(reopened);
+    assert.equal(reopened.preferredWorktree, true);
+    assert.equal(reopened.draft, '');
+    assert.deepEqual(reopened.queue, []);
+  });
+
   it('persists draft + queue under the conversation id', () => {
     const port = makePort({});
     __setComposerSettingsPort(port);

@@ -120,9 +120,33 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   assert.match(composer, /aria-pressed=\{fastMode\}/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
   assert.match(surface, /chatSend\(\{[^}]*fastMode/);
-  assert.match(surface, /saveComposerEntry\(DRAFT_CONVERSATION_ID,[\s\S]*fastMode: enabled/);
+  assert.match(surface, /persistDraftComposer\(\{ fastMode: enabled \}\)/);
   assert.match(surface, /loadComposerEntry\(composerId\)[\s\S]*fastMode: persisted\?\.fastMode === true/);
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
+});
+
+test('new tasks can opt into worktree isolation from the draft composer', async () => {
+  const [surface, main, service, panel] = await Promise.all([
+    readSource('./ChatSurface.tsx'),
+    readSource('../../../../electron/main/main.mjs'),
+    readSource('../../../../electron/main/llm-chat-service.mjs'),
+    readSource('./GoalPlanPanel.tsx'),
+  ]);
+
+  assert.match(surface, /composer-worktree-toggle/);
+  assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
+  assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
+  assert.match(surface, /isDraftConversation && workspacePath/);
+  assert.match(main, /preferredExecutionIsolation = 'none'/);
+  assert.match(main, /preferredExecutionIsolation,/);
+  assert.match(main, /preparePlanExecutionWorkspace/);
+  assert.match(service, /preparePlanExecutionWorkspace/);
+  assert.match(panel, /goalPlansIsolate/);
+  assert.match(surface, /composer-bound-branch/);
+  assert.match(surface, /formatComposerBoundBranch/);
+  assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
+  assert.match(panel, /onActiveDeliveryChange/);
+  assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
 });
 
 test('external conversation reload replaces or clears the shared accounting snapshot', async () => {

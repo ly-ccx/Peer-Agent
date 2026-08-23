@@ -123,6 +123,7 @@ import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal-evidence-export.mjs';
 import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
@@ -1172,14 +1173,16 @@ goalRunner = createGoalRunner({
   goalPlanStore,
   prepareIsolation: async (plan) => {
     if (!plan) return plan;
-    let next = plan;
-    if (typeof goalTaskBranchAdapter?.ensureTaskBranch === 'function') {
-      next = await goalTaskBranchAdapter.ensureTaskBranch(next) || next;
-    }
-    if (typeof goalWorktreeAdapter?.prepareForPlan === 'function') {
-      next = await goalWorktreeAdapter.prepareForPlan(next) || next;
-    }
-    return next;
+    const conversation = plan.conversationId
+      ? conversationStore.getConversation(plan.conversationId)
+      : null;
+    return preparePlanExecutionWorkspace({
+      plan,
+      conversation,
+      ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+      prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+      isolatePlan: goalWorktreeAdapter?.isolatePlan,
+    });
   },
   chatRuntime: {
     async runGoalTurn({ plan, turnNumber }) {
@@ -2899,6 +2902,7 @@ async function handleChatStartTask({
   mode = 'goal',
   effort,
   fastMode = false,
+  preferredExecutionIsolation = 'none',
   modelProviderId,
   attachments = [],
 } = {}, sender) {
@@ -2920,6 +2924,7 @@ async function handleChatStartTask({
     workspacePath: boundWorkspacePath,
     mode,
     fastMode,
+    preferredExecutionIsolation,
   });
   if (effort !== undefined || modelProviderId !== undefined) {
     conversationStore.updateModelEffort(conversation.id, {

@@ -15,6 +15,7 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
+import { snapshotDeliveryLine } from '../state/taskBoundBranch';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
@@ -155,6 +156,14 @@ interface GoalPlanPanelProps {
    * docked 灯条被点击。当面板已迁到 Workbench 时，由上层负责展开 Workbench 并切到 Goal tab。
    */
   readonly onRequestHostFocus?: () => void;
+  /**
+   * 当前活动计划的交付线快照。用于输入栏展示绑定分支；无绑定则报 null。
+   * 表达层只读，不把隔离/分支真值放进 renderer state。
+   */
+  readonly onActiveDeliveryChange?: (line: {
+    readonly targetBranch: string | null;
+    readonly taskBranch: string | null;
+  } | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -1892,7 +1901,7 @@ const PlanCard = memo(function PlanCard({
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange }: GoalPlanPanelProps): ReactElement | null {
   const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2282,6 +2291,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     const orderedListPlans = orderGoalPlansByLineage(listPlans);
     return { activePlan, mainPlan, listPlans, orderedListPlans, relations };
   }, [plans]);
+
+  useEffect(() => {
+    onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
+  }, [onActiveDeliveryChange, planViewModel.activePlan]);
 
   const navigateToPlan = useCallback((planId: string, taskId?: string) => {
     const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);

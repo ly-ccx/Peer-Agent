@@ -46,6 +46,7 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
+import { formatComposerBoundBranch, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
@@ -420,7 +421,7 @@ export function ChatSurface({
   readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
-  readonly workspaces?: readonly { path: string; name: string }[];
+  readonly workspaces?: readonly { path: string; name: string; baseBranch?: string }[];
   readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
@@ -512,6 +513,20 @@ export function ChatSurface({
   // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
+  const [preferredWorktree, setPreferredWorktree] = useState(false);
+  const [workspaceGit, setWorkspaceGit] = useState<{ ok: boolean; current: string | null } | null>(null);
+  const workspaceIsGit = workspaceGit == null ? null : workspaceGit.ok;
+  const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
+  const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
+  const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
+    const draftComposer = conversationStore.getSnapshot(null);
+    saveComposerEntry(DRAFT_CONVERSATION_ID, {
+      draft: draftComposer.draft,
+      queue: [...draftComposer.messageQueue],
+      fastMode: patch.fastMode ?? fastMode,
+      preferredWorktree: patch.preferredWorktree ?? preferredWorktree,
+    });
+  }, [fastMode, preferredWorktree]);
   const changeFastMode = useCallback((enabled: boolean) => {
     convActions.set({ fastMode: enabled });
     if (conversationId) {
@@ -520,13 +535,12 @@ export function ChatSurface({
       });
       return;
     }
-    const draftComposer = conversationStore.getSnapshot(null);
-    saveComposerEntry(DRAFT_CONVERSATION_ID, {
-      draft: draftComposer.draft,
-      queue: [...draftComposer.messageQueue],
-      fastMode: enabled,
-    });
-  }, [convActions, conversationId]);
+    persistDraftComposer({ fastMode: enabled });
+  }, [convActions, conversationId, persistDraftComposer]);
+  const changePreferredWorktree = useCallback((enabled: boolean) => {
+    setPreferredWorktree(enabled);
+    if (!conversationId) persistDraftComposer({ preferredWorktree: enabled });
+  }, [conversationId, persistDraftComposer]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
@@ -1140,6 +1154,9 @@ export function ChatSurface({
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
       ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
+    setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
+    setDeliveryLine(null);
+    setDeliveryLineKnown(false);
     const threadScrollSnapshot = conversationId
       ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
       : null;
@@ -1343,6 +1360,37 @@ export function ChatSurface({
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
+
+  useEffect(() => {
+    if (!workspacePath) {
+      setWorkspaceGit(null);
+      return;
+    }
+    if (typeof clientApi.gitListBranches !== 'function') {
+      setWorkspaceGit({ ok: false, current: null });
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceGit(null);
+    void clientApi.gitListBranches({ workspaceRoot: workspacePath })
+      .then((result) => {
+        if (cancelled) return;
+        const isGit = result?.ok === true;
+        setWorkspaceGit({
+          ok: isGit,
+          current: typeof result?.current === 'string' && result.current.trim() ? result.current.trim() : null,
+        });
+        if (!isGit) setPreferredWorktree(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWorkspaceGit({ ok: false, current: null });
+        setPreferredWorktree(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
 
   // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
   useEffect(() => {
@@ -1953,6 +2001,7 @@ export function ChatSurface({
           mode,
           effort,
           fastMode,
+          preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false ? 'worktree' : 'none',
           modelProviderId,
           attachments: sentAttachments,
         });
@@ -1995,7 +2044,10 @@ export function ChatSurface({
     workspacePath,
     workspaces,
     mode,
+    fastMode,
     modelProviderId,
+    preferredWorktree,
+    workspaceIsGit,
     isZh,
     editingMessage,
     handleEditMessage,
@@ -2202,6 +2254,23 @@ export function ChatSurface({
   const handleGoalPlansCountChange = useCallback((count: number) => {
     setHasGoalPlan(count > 0);
   }, [setHasGoalPlan]);
+  const handleActiveDeliveryChange = useCallback((line: TaskDeliveryLine | null) => {
+    setDeliveryLine(line);
+    setDeliveryLineKnown(true);
+  }, []);
+  const workspaceBaseBranch = useMemo(() => {
+    const match = workspaces.find((workspace) => workspace.path === workspacePath);
+    const configured = match?.baseBranch?.trim();
+    return configured ? configured : null;
+  }, [workspacePath, workspaces]);
+  const boundBranch = useMemo(
+    () => formatComposerBoundBranch({
+      delivery: deliveryLine,
+      workspaceBaseBranch: (!conversationId || deliveryLineKnown) ? workspaceBaseBranch : null,
+      currentHead: (!conversationId || deliveryLineKnown) && workspaceGit?.ok ? workspaceGit.current : null,
+    }, { locale: isZh ? 'zh' : 'en' }),
+    [conversationId, deliveryLine, deliveryLineKnown, isZh, workspaceBaseBranch, workspaceGit],
+  );
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2328,6 +2397,7 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
+        boundBranch={boundBranch}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
@@ -2517,7 +2587,7 @@ export function ChatSurface({
       ) : null}
 
       <div className={`chat-composer-wrap${showEmptyHome ? ' chat-composer-wrap--empty-home' : ''}`}>
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} />
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -2612,6 +2682,21 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
+            {boundBranch ? (
+              <span
+                className="composer-bound-branch"
+                title={boundBranch.title}
+                aria-label={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="6" y1="3" x2="6" y2="15" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M18 9a9 9 0 0 1-9 9" />
+                </svg>
+                <span className="composer-bound-branch-text">{boundBranch.label}</span>
+              </span>
+            ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
@@ -2630,6 +2715,27 @@ export function ChatSurface({
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
             />
+            {isDraftConversation && workspacePath ? (
+              <label
+                className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
+                title={
+                  workspaceIsGit === false
+                    ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
+                    : (isZh
+                      ? '在独立 Git worktree 里改代码，主工作区保持当前分支。默认关闭，之后仍可在任务里再开。'
+                      : 'Run in a Git worktree so the main workspace stays on its current branch. Off by default; you can still isolate later.')
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={preferredWorktree}
+                  disabled={workspaceIsGit === false}
+                  onChange={(event) => changePreferredWorktree(event.target.checked)}
+                  aria-label={isZh ? '隔离执行' : 'Worktree'}
+                />
+                <span>{isZh ? '隔离执行' : 'Worktree'}</span>
+              </label>
+            ) : null}
           </div>
           {homeComposerContextControls}
         </div>

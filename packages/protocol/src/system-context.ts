@@ -114,6 +114,11 @@ export interface ChatStartTaskRequest {
   readonly effort?: string;
   /** Request-scoped OpenAI Fast mode; only the ChatGPT subscription adapter consumes it. */
   readonly fastMode?: boolean;
+  /**
+   * User opt-in at new-task start. Stored on the conversation; applied later via
+   * existing Goal isolatePlan when a writable delivery line exists. Default none.
+   */
+  readonly preferredExecutionIsolation?: 'none' | 'worktree';
   readonly modelProviderId?: string | null;
   readonly attachments?: readonly unknown[];
 }

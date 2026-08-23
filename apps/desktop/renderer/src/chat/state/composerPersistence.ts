@@ -49,6 +49,8 @@ export interface PersistedComposerEntry {
   queue: PersistedQueuedMessage[];
   /** 未落库新任务选择的 Fast mode；正式会话仍以会话 meta 为真值。 */
   fastMode?: boolean;
+  /** 未落库新任务勾选隔离执行；正式会话以 conversation.preferredExecutionIsolation 为真值。 */
+  preferredWorktree?: boolean;
 }
 
 /** 设置读写缝：默认绑定 window.peerAgent；测试可注入假端口。 */
@@ -88,8 +90,9 @@ function sanitizeEntry(raw: unknown): PersistedComposerEntry | null {
   const draft = typeof raw.draft === 'string' ? raw.draft : '';
   const queue = Array.isArray(raw.queue) ? (raw.queue as PersistedQueuedMessage[]) : [];
   const fastMode = raw.fastMode === true;
-  if (draft.length === 0 && queue.length === 0 && !fastMode) return null;
-  return { draft, queue, fastMode };
+  const preferredWorktree = raw.preferredWorktree === true;
+  if (draft.length === 0 && queue.length === 0 && !fastMode && !preferredWorktree) return null;
+  return { draft, queue, fastMode, preferredWorktree };
 }
 
 function getMap(): ComposerDraftMap {
@@ -153,7 +156,7 @@ export function flushComposerPersistence(): void {
 export function loadComposerEntry(conversationId: string): PersistedComposerEntry | null {
   const map = getMap();
   const entry = map[conversationId];
-  return entry ? { draft: entry.draft, queue: entry.queue, fastMode: entry.fastMode } : null;
+  return entry ? { draft: entry.draft, queue: entry.queue, fastMode: entry.fastMode, preferredWorktree: entry.preferredWorktree } : null;
 }
 
 /** 输入叶子重新挂载时，仅阻止初始空态覆盖尚待恢复的磁盘数据。 */
@@ -199,11 +202,12 @@ export function saveComposerEntry(conversationId: string, entry: PersistedCompos
   const draft = entry.draft ?? '';
   const queue = entry.queue ?? [];
   const fastMode = entry.fastMode ?? map[conversationId]?.fastMode ?? false;
-  if (draft.length === 0 && queue.length === 0 && !fastMode) {
+  const preferredWorktree = entry.preferredWorktree ?? map[conversationId]?.preferredWorktree ?? false;
+  if (draft.length === 0 && queue.length === 0 && !fastMode && !preferredWorktree) {
     if (!(conversationId in map)) return;
     delete map[conversationId];
   } else {
-    map[conversationId] = { draft, queue, fastMode };
+    map[conversationId] = { draft, queue, fastMode, preferredWorktree };
   }
   schedulePersist();
 }
