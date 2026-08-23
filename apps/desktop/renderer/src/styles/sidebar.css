@@ -570,7 +570,8 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  padding: 5px var(--space-3);
   border: 1px solid transparent;
   /* Match right panel / goal list card radius so left/right no longer feel split. */
   border-radius: var(--ui-radius-panel, var(--radius-lg));
