@@ -421,7 +421,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
 
   const applySessionMention = (hit: SessionReferenceHit) => {
     if (!atQuery) return;
-    const title = hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session');
+    const title = hit.title?.trim() || (isZh ? '未命名任务' : 'Untitled task');
     const next = insertSessionMention(draft, atQuery.start, atQuery.query, title);
     setDraft(next);
     void onAttachSessionReference(hit);
@@ -503,7 +503,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
               const title = hit.type === 'file'
                 ? (hit.file.kind === 'directory' ? `${hit.file.name}/` : hit.file.name)
                 : hit.type === 'session'
-                  ? (hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session'))
+                  ? (hit.title?.trim() || (isZh ? '未命名任务' : 'Untitled task'))
                   : hit.type === 'back'
                     ? (isZh ? '返回' : 'Back')
                     : hit.id === 'files' ? 'Files' : 'Chats';

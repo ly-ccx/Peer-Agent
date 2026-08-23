@@ -329,7 +329,7 @@ export function QuickChatWindow() {
     setSending(true);
     setError('');
     await runQuickChatSubmission(async () => {
-      const conversation = await clientApi.conversationsCreate({ title: text.slice(0, 48) || attachments[0]?.name || '新会话', workspacePath, mode });
+      const conversation = await clientApi.conversationsCreate({ title: text.slice(0, 48) || attachments[0]?.name || '新任务', workspacePath, mode });
       const now = Date.now();
       const userMessage: ChatMsg = { id: id('user'), role: 'user', content: text, attachments, timestamp: now };
       const assistantMessage = { id: id('assistant'), role: 'assistant', content: '', timestamp: now + 1 };

@@ -10,7 +10,7 @@ export const TRAY_TITLE_MAX_CHARS = 36;
 
 export function truncateTrayTitle(title, maxChars = TRAY_TITLE_MAX_CHARS) {
   const text = String(title ?? '').replace(/\s+/g, ' ').trim();
-  if (!text) return '新会话';
+  if (!text) return '新任务';
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
@@ -35,10 +35,10 @@ export function buildTrayMenuTemplate({
   recentAutomationRuns = [],
 } = {}) {
   const L = {
-    recent: labels.recent ?? '最近会话',
-    empty: labels.empty ?? '暂无会话',
+    recent: labels.recent ?? '最近任务',
+    empty: labels.empty ?? '暂无任务',
     more: labels.more ?? '更多',
-    newChat: labels.newChat ?? '新会话',
+    newChat: labels.newChat ?? '新任务',
     open: labels.open ?? '打开 Peer Agent',
     quit: labels.quit ?? '退出 Peer Agent',
   };

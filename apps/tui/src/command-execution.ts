@@ -23,7 +23,7 @@ export function executeTuiCommand(
     handlers.setNotice(cleared ? 'Chat cleared' : 'Finish or interrupt the active turn before clearing');
   } else if (action.type === 'new-session') {
     const started = handlers.startNewSession();
-    handlers.setNotice(started ? 'New session' : 'Finish or interrupt the active turn before starting a new session');
+    handlers.setNotice(started ? 'New task' : 'Finish or interrupt the active turn before starting a new task');
   } else if (action.type === 'compact-context') {
     const noticeOrPromise = handlers.compactContext();
     if (typeof noticeOrPromise === 'string') {
