@@ -411,12 +411,13 @@
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row {
-  padding: 3px 8px;
+  --sidebar-conv-row-pad-x: 4px;
+  padding: 3px 8px 3px var(--sidebar-conv-row-pad-x);
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row:hover,
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row:focus-within {
-  padding-left: calc(8px + var(--sidebar-conv-leading-gutter));
+  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
 }
 
 .sidebar-workspace-add {
@@ -562,6 +563,7 @@
 }
 
 .channel-conversation-list .conversation-row {
+  --sidebar-conv-row-pad-x: var(--space-3);
   --sidebar-conv-leading-gutter: calc(18px + var(--space-1));
   position: relative;
   display: flex;
@@ -571,7 +573,7 @@
   min-width: 0;
   box-sizing: border-box;
   min-height: 32px;
-  padding: 5px var(--space-3);
+  padding: 5px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
   /* Match right panel / goal list card radius so left/right no longer feel split. */
   border-radius: var(--ui-radius-panel, var(--radius-lg));
@@ -588,7 +590,7 @@
 }
 .channel-conversation-list .conversation-row:hover,
 .channel-conversation-list .conversation-row:focus-within {
-  padding-left: calc(var(--space-3) + var(--sidebar-conv-leading-gutter));
+  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
 }
 .channel-conversation-list .conversation-row:hover {
   background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
@@ -978,7 +980,7 @@
 .sidebar-conv-pin-leading {
   position: absolute;
   top: 50%;
-  left: var(--space-3);
+  left: var(--sidebar-conv-row-pad-x, var(--space-3));
   z-index: 2;
   opacity: 0;
   pointer-events: none;
