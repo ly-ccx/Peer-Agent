@@ -7,6 +7,7 @@ export interface ComposerBoundBranch {
   readonly label: string;
   readonly title: string;
   readonly kind: 'task-line' | 'bound-source' | 'preview-source';
+  readonly value: string;
 }
 
 function trimBranch(value: string | null | undefined): string | null {
@@ -73,6 +74,7 @@ export function formatComposerBoundBranch(
       title: isZh
         ? `当前任务线 ${taskBranch}，从 ${targetBranch} 分叉`
         : `Task line ${taskBranch}, forked from ${targetBranch}`,
+      value: taskBranch,
     };
   }
   if (taskBranch) {
@@ -80,6 +82,7 @@ export function formatComposerBoundBranch(
       kind: 'task-line',
       label: formatTaskLineLabel(taskBranch, null, isZh),
       title: isZh ? `当前任务线 ${taskBranch}` : `Task line ${taskBranch}`,
+      value: taskBranch,
     };
   }
   if (targetBranch) {
@@ -87,6 +90,7 @@ export function formatComposerBoundBranch(
       kind: 'bound-source',
       label: targetBranch,
       title: isZh ? `已绑定源头 ${targetBranch}` : `Bound to ${targetBranch}`,
+      value: targetBranch,
     };
   }
   const source = trimBranch(input.workspaceBaseBranch) || trimBranch(input.currentHead);
@@ -98,5 +102,38 @@ export function formatComposerBoundBranch(
     title: configured
       ? (isZh ? `新任务将从工作区源头 ${source} 分叉` : `New tasks will fork from ${source}`)
       : (isZh ? `新任务将从当前分支 ${source} 分叉` : `New tasks will fork from the current branch ${source}`),
+    value: source,
   };
+}
+
+export function formatComposerBranchOptionLabel(branch: string): string {
+  return compactBranchName(branch) || branch;
+}
+
+/** Draft composer can pick a workspace source; bound sessions/task lines stay locked. */
+export function canSelectComposerSourceBranch(input: {
+  readonly isDraft: boolean;
+  readonly delivery?: TaskDeliveryLine | null;
+}): boolean {
+  if (!input.isDraft) return false;
+  return !trimBranch(input.delivery?.taskBranch) && !trimBranch(input.delivery?.targetBranch);
+}
+
+/** Unique local branches for the composer picker. Isolation UUID paths stay hidden unless already selected. */
+export function buildComposerBranchOptions(input: {
+  readonly branches?: readonly string[] | null;
+  readonly selected?: string | null;
+}): readonly string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  const push = (raw: string | null | undefined, allowInternal: boolean) => {
+    const next = trimBranch(raw);
+    if (!next || seen.has(next)) return;
+    if (!allowInternal && isInternalIsolationBranch(next)) return;
+    seen.add(next);
+    options.push(next);
+  };
+  for (const branch of input.branches ?? []) push(branch, false);
+  push(input.selected, true);
+  return options;
 }

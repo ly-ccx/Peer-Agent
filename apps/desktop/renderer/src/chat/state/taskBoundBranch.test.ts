@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatComposerBoundBranch, isInternalIsolationBranch, snapshotDeliveryLine } from './taskBoundBranch.ts';
+import {
+  buildComposerBranchOptions,
+  canSelectComposerSourceBranch,
+  formatComposerBoundBranch,
+  formatComposerBranchOptionLabel,
+  isInternalIsolationBranch,
+  snapshotDeliveryLine,
+} from './taskBoundBranch.ts';
 
 test('snapshotDeliveryLine ignores plans without a git binding', () => {
   assert.equal(snapshotDeliveryLine(null), null);
@@ -79,5 +86,50 @@ test('formatComposerBoundBranch previews configured baseBranch, then HEAD, and n
       currentHead: null,
     }),
     null,
+  );
+});
+
+test('draft composer can pick a source branch until a session or task line is bound', () => {
+  assert.equal(canSelectComposerSourceBranch({ isDraft: true, delivery: null }), true);
+  assert.equal(canSelectComposerSourceBranch({ isDraft: false, delivery: null }), false);
+  assert.equal(
+    canSelectComposerSourceBranch({
+      isDraft: true,
+      delivery: { targetBranch: '0.0.6', taskBranch: null },
+    }),
+    false,
+  );
+  assert.equal(
+    canSelectComposerSourceBranch({
+      isDraft: true,
+      delivery: { targetBranch: null, taskBranch: 'PeerAgent/fix-login' },
+    }),
+    false,
+  );
+});
+
+test('composer branch options hide isolation UUID paths unless already selected', () => {
+  const isolation = 'PeerAgent/automation-3d164dfe-9951-4db0-9aec-d88e1ab8cd5a/run-3d164dfe-9951-4db0-9aec-d88e1ab8cd5a';
+  assert.deepEqual(
+    buildComposerBranchOptions({
+      branches: ['main', '  0.0.6  ', isolation, 'main'],
+      selected: '0.0.6',
+    }),
+    ['main', '0.0.6'],
+  );
+  assert.deepEqual(
+    buildComposerBranchOptions({
+      branches: ['main'],
+      selected: isolation,
+    }),
+    ['main', isolation],
+  );
+  assert.equal(formatComposerBranchOptionLabel('PeerAgent/0.0.6'), '0.0.6');
+  assert.equal(
+    formatComposerBoundBranch({
+      delivery: null,
+      currentHead: 'PeerAgent/0.0.6',
+    })?.value,
+    'PeerAgent/0.0.6',
   );
 });

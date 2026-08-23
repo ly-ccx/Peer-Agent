@@ -45,8 +45,15 @@ import {
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
+import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
-import { formatComposerBoundBranch, type TaskDeliveryLine } from '../state/taskBoundBranch';
+import {
+  buildComposerBranchOptions,
+  canSelectComposerSourceBranch,
+  formatComposerBoundBranch,
+  formatComposerBranchOptionLabel,
+  type TaskDeliveryLine,
+} from '../state/taskBoundBranch';
 import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
@@ -381,6 +388,7 @@ export function ChatSurface({
   workspacePath,
   workspaces = [],
   onWorkspaceChange,
+  onWorkspaceUpdated,
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
@@ -423,6 +431,7 @@ export function ChatSurface({
   readonly workspacePath?: string | null;
   readonly workspaces?: readonly { path: string; name: string; baseBranch?: string }[];
   readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
+  readonly onWorkspaceUpdated?: () => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
@@ -514,8 +523,10 @@ export function ChatSurface({
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const [preferredWorktree, setPreferredWorktree] = useState(false);
-  const [workspaceGit, setWorkspaceGit] = useState<{ ok: boolean; current: string | null } | null>(null);
-  const workspaceIsGit = workspaceGit == null ? null : workspaceGit.ok;
+  const { workspaceGit, workspaceIsGit } = useWorkspaceGit(workspacePath, {
+    refreshWhenIdle: !isStreaming,
+  });
+  const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
   const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
@@ -1362,35 +1373,12 @@ export function ChatSurface({
   }, [conversationId, convActions, setTurnStartedAt]);
 
   useEffect(() => {
-    if (!workspacePath) {
-      setWorkspaceGit(null);
-      return;
-    }
-    if (typeof clientApi.gitListBranches !== 'function') {
-      setWorkspaceGit({ ok: false, current: null });
-      return;
-    }
-    let cancelled = false;
-    setWorkspaceGit(null);
-    void clientApi.gitListBranches({ workspaceRoot: workspacePath })
-      .then((result) => {
-        if (cancelled) return;
-        const isGit = result?.ok === true;
-        setWorkspaceGit({
-          ok: isGit,
-          current: typeof result?.current === 'string' && result.current.trim() ? result.current.trim() : null,
-        });
-        if (!isGit) setPreferredWorktree(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setWorkspaceGit({ ok: false, current: null });
-        setPreferredWorktree(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setPendingBaseBranch(null);
   }, [workspacePath]);
+
+  useEffect(() => {
+    if (workspaceIsGit === false) setPreferredWorktree(false);
+  }, [workspaceIsGit]);
 
   // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
   useEffect(() => {
@@ -2259,10 +2247,12 @@ export function ChatSurface({
     setDeliveryLineKnown(true);
   }, []);
   const workspaceBaseBranch = useMemo(() => {
+    const pending = pendingBaseBranch?.trim();
+    if (pending) return pending;
     const match = workspaces.find((workspace) => workspace.path === workspacePath);
     const configured = match?.baseBranch?.trim();
     return configured ? configured : null;
-  }, [workspacePath, workspaces]);
+  }, [pendingBaseBranch, workspacePath, workspaces]);
   const boundBranch = useMemo(
     () => formatComposerBoundBranch({
       delivery: deliveryLine,
@@ -2271,6 +2261,40 @@ export function ChatSurface({
     }, { locale: isZh ? 'zh' : 'en' }),
     [conversationId, deliveryLine, deliveryLineKnown, isZh, workspaceBaseBranch, workspaceGit],
   );
+  const canSelectBoundBranch = canSelectComposerSourceBranch({
+    isDraft: isDraftConversation,
+    delivery: deliveryLine,
+  });
+  const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
+    if (!boundBranch) return [];
+    const branches = canSelectBoundBranch && workspaceGit?.ok ? workspaceGit.branches : [];
+    return buildComposerBranchOptions({
+      branches,
+      selected: boundBranch.value,
+    }).map((branch) => ({
+      value: branch,
+      label: branch === boundBranch.value ? boundBranch.label : formatComposerBranchOptionLabel(branch),
+    }));
+  }, [boundBranch, canSelectBoundBranch, workspaceGit]);
+  const handleSelectBoundBranch = useCallback((nextBranch: string) => {
+    const next = nextBranch.trim();
+    if (!next || !workspacePath || !canSelectBoundBranch) return;
+    if (next === boundBranch?.value) return;
+    const previous = boundBranch?.value ?? null;
+    setPendingBaseBranch(next);
+    void clientApi.workspaceUpdate({ path: workspacePath, baseBranch: next })
+      .then(async (result) => {
+        if (result?.ok === false) {
+          setPendingBaseBranch(previous);
+          return;
+        }
+        await onWorkspaceUpdated?.();
+        setPendingBaseBranch(null);
+      })
+      .catch(() => {
+        setPendingBaseBranch(previous);
+      });
+  }, [boundBranch?.value, canSelectBoundBranch, onWorkspaceUpdated, workspacePath]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2682,20 +2706,27 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
-            {boundBranch ? (
-              <span
-                className="composer-bound-branch"
-                title={boundBranch.title}
-                aria-label={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="6" y1="3" x2="6" y2="15" />
-                  <circle cx="18" cy="6" r="3" />
-                  <circle cx="6" cy="18" r="3" />
-                  <path d="M18 9a9 9 0 0 1-9 9" />
-                </svg>
-                <span className="composer-bound-branch-text">{boundBranch.label}</span>
-              </span>
+            {boundBranch && (workspaceGit == null || workspaceGit.ok || Boolean(deliveryLine)) ? (
+              <Dropdown
+                className="composer-dropdown composer-bound-branch"
+                value={boundBranch.value}
+                options={boundBranchOptions}
+                onChange={handleSelectBoundBranch}
+                disabled={!canSelectBoundBranch}
+                ariaLabel={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
+                title={canSelectBoundBranch
+                  ? (isZh ? `选择新任务源头，当前 ${boundBranch.title}` : `Choose the source branch. ${boundBranch.title}`)
+                  : boundBranch.title}
+                prefix={(
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="6" y1="3" x2="6" y2="15" />
+                    <circle cx="18" cy="6" r="3" />
+                    <circle cx="6" cy="18" r="3" />
+                    <path d="M18 9a9 9 0 0 1-9 9" />
+                  </svg>
+                )}
+                menuPlacement="up"
+              />
             ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"

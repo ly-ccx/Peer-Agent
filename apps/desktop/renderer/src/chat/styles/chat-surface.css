@@ -1100,30 +1100,29 @@
 }
 
 .composer-bound-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   flex: 0 1 auto;
   width: max-content;
   min-width: 0;
   max-width: 11rem;
-  height: var(--composer-addon-height);
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--composer-addon-color);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 500;
-  line-height: 1.2;
-  pointer-events: auto;
 }
 
-.composer-bound-branch svg {
+.composer-bound-branch .pa-dropdown-trigger {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0 6px;
+}
+
+.composer-bound-branch .pa-dropdown-prefix {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
+}
+
+.composer-bound-branch .pa-dropdown-prefix svg {
   opacity: 0.78;
 }
 
+.composer-bound-branch .pa-dropdown-value,
 .composer-bound-branch-text {
   min-width: 0;
   overflow: hidden;
@@ -1131,8 +1130,14 @@
   white-space: nowrap;
 }
 
-.composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
+.composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret,
+.composer-bound-branch .pa-dropdown-trigger:disabled .pa-dropdown-caret {
   display: none;
+}
+
+.composer-bound-branch .pa-dropdown-trigger:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，

@@ -736,6 +736,11 @@ function MainApp() {
     // 任务树跨区展示：只刷新全量列表，不跳走、不抢走当前任务。
     await refreshConversations(undefined, 'active');
   }, [refreshConversations]);
+  const refreshWorkspaceList = useCallback(async () => {
+    const r = await clientApi.workspaceList();
+    setWorkspaces(r.workspaces);
+    setActiveWorkspace(r.activeWorkspace);
+  }, []);
 
 
 
@@ -1171,6 +1176,7 @@ function MainApp() {
                       })));
                     }
                   }}
+                  onWorkspaceUpdated={refreshWorkspaceList}
                   isPageActive={activePage === 'chat' && !conversationDrawerOpen && collectionDrawer !== 'result'}
                   messageTarget={notificationMessageTarget}
                   />
@@ -1432,6 +1438,7 @@ function MainApp() {
                       })));
                     }
                   }}
+                      onWorkspaceUpdated={refreshWorkspaceList}
                       isPageActive={conversationDrawerOpen}
                       messageTarget={notificationMessageTarget}
                     />
