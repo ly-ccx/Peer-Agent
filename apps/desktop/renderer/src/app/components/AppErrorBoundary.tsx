@@ -67,8 +67,9 @@ export class AppErrorBoundary extends Component<Props, State> {
               justifySelf: 'start',
               padding: '8px 12px',
               borderRadius: 10,
-              border: '1px solid rgba(0,0,0,0.12)',
-              background: '#fff',
+              border: '1px solid var(--graphite-base, #1A1D21)',
+              background: 'var(--graphite-base, #1A1D21)',
+              color: 'var(--za-accent-ink, #F7F9FC)',
               cursor: 'pointer',
             }}
           >
