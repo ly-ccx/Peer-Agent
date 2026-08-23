@@ -233,6 +233,9 @@ import { createCapabilityProviderRegistry } from '@peer-agent/runtime-core';
 
 assert.equal(typeof RUNTIME_EVENT_PROTOCOL_VERSION, 'number');
 assert.equal(typeof createCapabilityProviderRegistry, 'function');
+const registry = createCapabilityProviderRegistry();
+assert.equal(typeof registry.replace, 'function');
+assert.equal(typeof registry.unregister, 'function');
 
 const host = {
   executeProvider: async () => ({

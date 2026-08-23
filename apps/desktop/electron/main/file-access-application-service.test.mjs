@@ -238,6 +238,47 @@ test('git diff handles recovered untracked files and non-repositories', async ()
   });
 });
 
+test('git range diff and branch list stay inside a known repository', async () => {
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'diff --no-color abc def') return { stdout: 'range diff' };
+      if (key === 'branch --show-current') return { stdout: 'develop\n' };
+      if (key === 'branch --format=%(refname:short)') return { stdout: 'develop\nmain\n' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.getGitRangeDiff({
+    workspaceRoot: '/repo',
+    fromRef: 'abc',
+    toRef: 'def',
+  }), {
+    ok: true,
+    status: 'ok',
+    diffText: 'range diff',
+    fromRef: 'abc',
+    toRef: 'def',
+  });
+  assert.deepEqual(await harness.service.getGitRangeDiff({
+    workspaceRoot: '/repo',
+    fromRef: '--output=/tmp/x',
+  }), {
+    ok: false,
+    status: 'invalid_ref',
+    diffText: '',
+    error: 'invalid_ref',
+  });
+  assert.deepEqual(await harness.service.listGitBranches({ workspaceRoot: '/repo' }), {
+    ok: true,
+    branches: ['develop', 'main'],
+    current: 'develop',
+    repoRoot: '/repo',
+  });
+});
+
 test('text reads preserve not-found, file-only, size, binary, and UTF-8 guards', async () => {
   const binary = Buffer.from([65, 0, 66]);
   const harness = createHarness({

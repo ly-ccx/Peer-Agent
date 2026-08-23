@@ -8,12 +8,17 @@ Host-neutral capability, permission, projection, and Evidence primitives for Pee
 npm install @peer-agent/runtime-core
 ```
 
-Use it to build a capability provider registry, project host capabilities into model-visible tools, merge grants/hooks, and create/validate Evidence without depending on Electron, TUI, filesystem, or Shell implementations.
+Use it to build a capability provider registry, project host capabilities into model-visible tools, merge grants/hooks, pack already-admitted Evidence for export, and create/validate Evidence without depending on Electron, TUI, filesystem, or Shell implementations.
 
 ```js
-import { createCapabilityProviderRegistry } from '@peer-agent/runtime-core';
+import {
+  createCapabilityProviderRegistry,
+  createEvidenceExportDocument,
+} from '@peer-agent/runtime-core';
 
 const registry = createCapabilityProviderRegistry();
+registry.register(provider);
+registry.replace(nextProvider);
 ```
 
 ## Boundary

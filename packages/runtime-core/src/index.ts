@@ -17,5 +17,6 @@ export * from './context-projection.ts';
 export * from './context-projection-lifecycle.ts';
 export * from './context-accounting-pipeline.ts';
 export * from './context-accounting-lifecycle.ts';
+export * from './context-usage-breakdown.ts';
 export * from './conversation-history-projector.ts';
 export * from './runtime-usage-accounting.ts';

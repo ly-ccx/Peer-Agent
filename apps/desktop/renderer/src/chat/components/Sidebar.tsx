@@ -18,6 +18,15 @@ import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
 import { hasRunningWorkspaces, isWorkspaceRunning } from '../state/runningWorkspaceState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
+import { useTaskOverview } from '../../app/hooks/useTaskOverview';
+import { countWorkbenchInbox } from '../state/workbenchInboxCounts';
+import { groupTasksByWorkspace } from '../state/groupTasksByWorkspace';
+import {
+  isWorkspaceTaskTreeOpen,
+  nextWorkspaceTreeToggles,
+  openWorkspaceTreeToggles,
+  UNASSIGNED_WORKSPACE_KEY,
+} from '../state/workspaceTaskTree';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 
@@ -26,6 +35,7 @@ type ConversationView = 'active' | 'archived';
 interface ConversationMeta {
   id: string;
   title: string;
+  workspacePath?: string | null;
   messageCount: number;
   updatedAt: string;
   status?: ConversationView;
@@ -54,6 +64,18 @@ interface WorkspaceInfo {
   name: string;
   absolutePath: string;
   git?: { branch?: string; isDirty?: boolean };
+}
+
+function sortWorkspaceTasks<T extends { pinnedAt?: string | null; pinnedOrder?: number | null }>(
+  items: readonly T[],
+  archived: boolean,
+): readonly T[] {
+  if (archived || items.length === 0) return items;
+  const pinned = items
+    .filter((item) => item.pinnedAt)
+    .sort((a, b) => Number(a.pinnedOrder ?? 0) - Number(b.pinnedOrder ?? 0));
+  const normal = items.filter((item) => !item.pinnedAt);
+  return [...pinned, ...normal];
 }
 
 /** 工作区名称缩写：peer_agent -> PA, peer-knowledge -> PK */
@@ -146,10 +168,6 @@ function PinIcon({ size = 13, filled = false }: { readonly size?: number; readon
 
 export function Sidebar({
   conversations,
-  conversationHasMore = false,
-  conversationNextCursor = null,
-  conversationsLoadingMore = false,
-  onLoadMoreConversations,
   activeConversationId,
   conversationView,
   runningConversationIds,
@@ -181,10 +199,6 @@ export function Sidebar({
   startupSnapshot,
 }: {
   readonly conversations: readonly ConversationMeta[];
-  readonly conversationHasMore?: boolean;
-  readonly conversationNextCursor?: string | null;
-  readonly conversationsLoadingMore?: boolean;
-  readonly onLoadMoreConversations?: () => void;
   readonly activeConversationId: string | null;
   readonly conversationView: ConversationView;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
@@ -216,7 +230,7 @@ export function Sidebar({
   readonly onOpenSettings: () => void;
   /** 顶部「工作台」：跨工作区全部行动权。 */
   readonly onOpenHome: () => void;
-  /** 下方工作区入口：传入 path，主区按该区过滤。 */
+  /** 下方工作区入口：只激活该区（新任务落点），不跳走。 */
   readonly onOpenWorkspaceHome?: (workspacePath: string) => void;
   /** 当前工作台数据范围：全局高亮工作台，区级高亮工作区行。 */
   readonly homeScope?: 'all' | 'workspace';
@@ -228,6 +242,8 @@ export function Sidebar({
   const isAnyWorkspaceRunning = hasRunningWorkspaces(runningWorkspacePaths);
   const confirm = useConfirm();
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
+  const overviewItems = useTaskOverview({ workspacePath: null, includeTerminal: false });
+  const inboxCounts = useMemo(() => countWorkbenchInbox(overviewItems), [overviewItems]);
   
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'conversation'; x: number; y: number; conversation: ConversationMeta }
@@ -240,8 +256,13 @@ export function Sidebar({
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const isFinishingRenameRef = useRef(false);
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>(() => startupSnapshot?.workspaces ?? []);
+  const groupedTasks = useMemo(
+    () => groupTasksByWorkspace(workspaces, conversations),
+    [conversations, workspaces],
+  );
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
+  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<ReadonlySet<string>>(() => new Set());
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
@@ -269,7 +290,7 @@ export function Sidebar({
     });
   }, [refreshWorkspaces]);
 
-  // 点击工作区时切到对应 active workspace，并打开工作台。
+  // 点击工作区时只切到对应 active workspace，作为新任务落点。
   const ensureWorkspaceActive = useCallback(async (wsPath: string) => {
     if (wsPath === activeWorkspace) {
       return;
@@ -287,32 +308,27 @@ export function Sidebar({
     ]);
   }, [activeWorkspace, workspaces, refreshWorkspaces, onWorkspaceChanged]);
 
-  // 点击工作区：激活该区 + 打开「该区」视图（不是顶部全局工作台）。
-  const handleOpenWorkspaceHome = useCallback(async (wsPath: string) => {
-    // 先通知 App 切到该区视图（乐观 path），再异步激活 workspace。
-    if (onOpenWorkspaceHome) {
-      onOpenWorkspaceHome(wsPath);
-    } else {
-      onOpenHome();
-    }
+  // 点击工作区：只激活该区，不跳到工作台；并展开该区任务树。
+  const handleActivateWorkspace = useCallback(async (wsPath: string) => {
+    setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, wsPath));
+    onOpenWorkspaceHome?.(wsPath);
     await ensureWorkspaceActive(wsPath);
-  }, [ensureWorkspaceActive, onOpenWorkspaceHome, onOpenHome]);
+  }, [ensureWorkspaceActive, onOpenWorkspaceHome]);
+
+  const toggleWorkspaceTree = useCallback((wsPath: string) => {
+    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath));
+  }, []);
 
   const handleAddWorkspace = useCallback(async () => {
     const result = await clientApi.workspaceAdd();
     if (result) {
       await refreshWorkspaces();
       if (result.path) {
-        if (onOpenWorkspaceHome) {
-          onOpenWorkspaceHome(result.path);
-        } else {
-          onOpenHome();
-        }
-        await ensureWorkspaceActive(result.path);
+        await handleActivateWorkspace(result.path);
       }
       onWorkspaceChanged?.();
     }
-  }, [refreshWorkspaces, onWorkspaceChanged, ensureWorkspaceActive, onOpenWorkspaceHome, onOpenHome]);
+  }, [refreshWorkspaces, onWorkspaceChanged, handleActivateWorkspace]);
 
   const handleRemoveWorkspace = useCallback(async (wsPath: string) => {
     const target = workspaces.find((ws) => ws.path === wsPath);
@@ -320,8 +336,8 @@ export function Sidebar({
     const ok = await confirm({
       title: isZh ? '移除工作区' : 'Remove workspace',
       message: isZh
-        ? `确定移除「${name}」？仅从侧边栏列表移除，不会删除磁盘上的文件。`
-        : `Remove “${name}”? This only removes it from the sidebar list and does not delete files on disk.`,
+        ? `确定移除「${name}」？该工作区下的会话记录将一并删除，磁盘上的文件不受影响。`
+        : `Remove “${name}”? Conversations under this workspace will also be deleted. Files on disk are not affected.`,
       confirmText: isZh ? '移除' : 'Remove',
       cancelText: isZh ? '取消' : 'Cancel',
       tone: 'danger',
@@ -687,6 +703,19 @@ export function Sidebar({
     );
   };
 
+  const focusedWorkspace = useMemo(() => {
+    const current = conversations.find((conversation) => conversation.id === activeConversationId);
+    if (!current) return null;
+    return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
+  }, [activeConversationId, conversations]);
+
+  const isUnassignedOpen = isWorkspaceTaskTreeOpen({
+    path: UNASSIGNED_WORKSPACE_KEY,
+    toggled: workspaceTreeToggles,
+    activeWorkspace,
+    focusedWorkspace,
+  });
+
   const contextConv = contextMenu?.kind === 'conversation' ? contextMenu.conversation : null;
   const contextWorkspace = contextMenu?.kind === 'workspace' ? contextMenu.workspace : null;
   const contextIsPinned = Boolean(contextConv?.pinnedAt);
@@ -753,6 +782,14 @@ export function Sidebar({
             <path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z" />
           </svg>
           <span>{isZh ? '工作台' : 'Workbench'}</span>
+          <span
+            className="sidebar-workbench-counts"
+            title={isZh ? '需要你处理 · 待验收' : 'Needs you · Ready to accept'}
+          >
+            {isZh
+              ? `需要你 ${inboxCounts.needsYou} · 待验收 ${inboxCounts.resultReady}`
+              : `Needs you ${inboxCounts.needsYou} · Ready ${inboxCounts.resultReady}`}
+          </span>
           {isAnyWorkspaceRunning ? (
             <span
               className="ws-running-dot"
@@ -784,40 +821,80 @@ export function Sidebar({
           <span className="sidebar-workspace-tree-count">{workspaces.length}</span>
         </div>
 
-        <div className="sidebar-workspace-tree-list">
+        <div className="sidebar-workspace-tree-list" ref={conversationListRef}>
           {workspaces.map((ws) => {
-            // activeWorkspace 始终是新任务落点；侧栏「选中高亮」仅在区级视图时显示。
+            // activeWorkspace 始终是新任务落点；点工作区只激活，不跳走。
             const isActiveWorkspace = activeWorkspace === ws.path;
             const isWorkspaceViewActive =
               activePage === 'home' && homeScope === 'workspace' && isActiveWorkspace;
             const isRunning = runningWorkspacePaths?.has(ws.path);
+            const workspaceTasks = sortWorkspaceTasks(groupedTasks.byPath.get(ws.path) ?? [], isArchivedView);
+            const isTreeOpen = isWorkspaceTaskTreeOpen({
+              path: ws.path,
+              toggled: workspaceTreeToggles,
+              activeWorkspace,
+              focusedWorkspace,
+            });
             return (
               <div
                 key={ws.path}
                 className={[
                   'sidebar-workspace-node',
-                  // 点顶部「工作台」(homeScope=all) 时不挂 is-active，避免工作区行仍高亮。
-                  isWorkspaceViewActive ? 'is-active is-home' : '',
+                  isActiveWorkspace ? 'is-active' : '',
+                  isWorkspaceViewActive ? 'is-home' : '',
+                  isTreeOpen ? '' : 'is-collapsed',
                 ].filter(Boolean).join(' ')}
               >
                 <div
                   className="sidebar-workspace-row"
                   data-project-path={ws.path}
-                  onClick={() => { void handleOpenWorkspaceHome(ws.path); }}
+                  aria-expanded={workspaceTasks.length > 0 ? isTreeOpen : undefined}
+                  onClick={() => { void handleActivateWorkspace(ws.path); }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setContextMenu({ kind: 'workspace', x: e.clientX, y: e.clientY, workspace: ws });
                   }}
                   role="button"
                   tabIndex={0}
-                  title={isZh ? '打开工作台' : 'Open workbench'}
+                  title={`${abbreviateWorkspacePath(ws.path)} · ${isZh ? '设为当前工作区' : 'Set as current workspace'}`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      void handleOpenWorkspaceHome(ws.path);
+                      void handleActivateWorkspace(ws.path);
                     }
                   }}
                 >
+                  {workspaceTasks.length > 0 ? (
+                    <button
+                      type="button"
+                      className="sidebar-workspace-chevron-btn"
+                      aria-expanded={isTreeOpen}
+                      aria-label={isTreeOpen
+                        ? (isZh ? `折叠 ${ws.name}` : `Collapse ${ws.name}`)
+                        : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleWorkspaceTree(ws.path);
+                      }}
+                    >
+                      <svg
+                        className={`sidebar-section-chevron${isTreeOpen ? '' : ' is-collapsed'}`}
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <span className="sidebar-workspace-chevron-btn" aria-hidden="true" />
+                  )}
                   <span className="sidebar-workspace-avatar" aria-hidden="true">
                     {workspaceInitials(ws.name)}
                   </span>
@@ -827,8 +904,18 @@ export function Sidebar({
                       {abbreviateWorkspacePath(ws.path)}
                     </span>
                   </span>
+                  {!isTreeOpen && workspaceTasks.length > 0 ? (
+                    <span className="sidebar-workspace-task-count" title={isZh ? `${workspaceTasks.length} 个任务` : `${workspaceTasks.length} tasks`}>
+                      {workspaceTasks.length}
+                    </span>
+                  ) : null}
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
                 </div>
+                {isTreeOpen && workspaceTasks.length > 0 ? (
+                  <div className="channel-conversation-list sidebar-workspace-tasks">
+                    {workspaceTasks.map((conv) => renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView }))}
+                  </div>
+                ) : null}
                 {projectPopoverPath === ws.path ? (
                   <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
                     <div className="sidebar-project-popover-title">{ws.name}</div>
@@ -859,6 +946,70 @@ export function Sidebar({
               </div>
             );
           })}
+
+          {groupedTasks.unassigned.length > 0 ? (
+            <div className={`sidebar-workspace-node${isUnassignedOpen ? '' : ' is-collapsed'}`}>
+              <div
+                className="sidebar-workspace-row sidebar-workspace-row--static"
+                role="button"
+                tabIndex={0}
+                aria-expanded={isUnassignedOpen}
+                title={isZh ? '未归属任务' : 'Unassigned tasks'}
+                onClick={() => {
+                  setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  className="sidebar-workspace-chevron-btn"
+                  aria-expanded={isUnassignedOpen}
+                  aria-label={isUnassignedOpen
+                    ? (isZh ? '折叠未归属' : 'Collapse unassigned')
+                    : (isZh ? '展开未归属' : 'Expand unassigned')}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY);
+                  }}
+                >
+                  <svg
+                    className={`sidebar-section-chevron${isUnassignedOpen ? '' : ' is-collapsed'}`}
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                <span className="sidebar-workspace-meta">
+                  <span className="sidebar-workspace-name">{isZh ? '未归属' : 'Unassigned'}</span>
+                </span>
+                {!isUnassignedOpen ? (
+                  <span className="sidebar-workspace-task-count">
+                    {groupedTasks.unassigned.length}
+                  </span>
+                ) : null}
+              </div>
+              {isUnassignedOpen ? (
+                <div className="channel-conversation-list sidebar-workspace-tasks">
+                  {sortWorkspaceTasks(groupedTasks.unassigned, isArchivedView).map((conv) => (
+                    renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView })
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <button type="button" className="sidebar-workspace-add" onClick={() => { void handleAddWorkspace(); }}>
             + {isZh ? '添加工作区' : 'Add Workspace'}

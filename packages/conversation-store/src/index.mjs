@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { contextAccountingModelKey } from '@peer-agent/protocol';
+import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -110,6 +110,10 @@ function normalizeModelProviderId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function normalizePreferredExecutionIsolation(value) {
+  return value === 'worktree' ? 'worktree' : 'none';
+}
+
 function normalizeStatus(value) {
   return value === 'archived' ? 'archived' : 'active';
 }
@@ -201,7 +205,8 @@ function normalizeContextSnapshot(snapshot, meta) {
   const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
   const legacyModelKey = providerBinding ?? storedModel;
   if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
-  return {
+  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
+  const normalized = {
     ...snapshot,
     version: 1,
     conversationId,
@@ -224,6 +229,9 @@ function normalizeContextSnapshot(snapshot, meta) {
     counterStatus: snapshot.counterStatus,
     updatedAt,
   };
+  if (usageBreakdown) normalized.usageBreakdown = usageBreakdown;
+  else delete normalized.usageBreakdown;
+  return normalized;
 }
 
 function projectDurableContextSnapshot(snapshot, meta) {
@@ -281,6 +289,7 @@ function projectDurableContextSnapshot(snapshot, meta) {
     ? snapshot.countCapability
     : { kind: 'observed_usage_only' };
   const counterStatus = snapshot.counterStatus === 'degraded' ? 'degraded' : 'active';
+  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
   return {
     version: 1,
     conversationId,
@@ -310,6 +319,7 @@ function projectDurableContextSnapshot(snapshot, meta) {
       source: 'provider_usage',
       observedAt: updatedAt,
     },
+    ...(usageBreakdown ? { usageBreakdown } : {}),
   };
 }
 
@@ -368,6 +378,7 @@ function normalizeMeta(meta) {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
     fastMode: meta?.fastMode === true,
+    preferredExecutionIsolation: normalizePreferredExecutionIsolation(meta?.preferredExecutionIsolation),
     effort: normalizeEffort(meta?.effort),
     modelProviderId: normalizeModelProviderId(meta?.modelProviderId),
     model,
@@ -734,7 +745,7 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode, fastMode, automationCreateContext, automationOrigin } = {}) {
+  function createConversation({ title, workspacePath, mode, fastMode, preferredExecutionIsolation, automationCreateContext, automationOrigin } = {}) {
     const now = new Date().toISOString();
     const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
     const meta = {
@@ -743,6 +754,7 @@ export function createConversationStore(options = {}) {
       workspacePath: workspacePath || null,
       mode: normalizeMode(mode),
       fastMode: fastMode === true,
+      preferredExecutionIsolation: normalizePreferredExecutionIsolation(preferredExecutionIsolation),
       // 会话级模型 + 思考模式绑定的初值（与 mode 同口径持久化）。默认 effort='default'、
       // modelProviderId=null（未绑定 → 发送时用全局默认 provider）。写入落盘 meta 使
       // createConversation 返回值与 getConversation（经 normalizeMeta）保持一致。
@@ -1421,6 +1433,34 @@ export function createConversationStore(options = {}) {
     });
   }
 
+  function deleteConversationsByWorkspace(workspacePath) {
+    const requestedWorkspace = workspacePath || null;
+    if (requestedWorkspace === null) return [];
+    const index = readIndex();
+    const kept = [];
+    const removed = [];
+    for (const meta of index) {
+      const executionWorkspace = meta.workspacePath || null;
+      const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
+      const belongs = executionWorkspace === requestedWorkspace
+        || automationWorkspace === requestedWorkspace;
+      if (belongs) removed.push(meta);
+      else kept.push(meta);
+    }
+    if (removed.length === 0) return [];
+    writeJsonl(indexFile, kept);
+    for (const meta of removed) {
+      try { if (existsSync(convFile(meta.id))) unlinkSync(convFile(meta.id)); } catch {}
+      clearStreamPatch(meta.id);
+      try {
+        const snapshotFile = contextSnapshotFile(meta.id);
+        if (existsSync(snapshotFile)) unlinkSync(snapshotFile);
+      } catch {}
+      publishChange(meta, 'deleted');
+    }
+    return removed.map((meta) => withMessageCount(meta));
+  }
+
   // 一次性迁移：如果旧 conversations.json 存在，转成 JSONL 格式
   const legacyFile = path.join(path.dirname(storeDir), 'conversations.json');
   if (existsSync(legacyFile) && !existsSync(indexFile)) {
@@ -1500,6 +1540,7 @@ export function createConversationStore(options = {}) {
     reorderPinnedConversations,
     autoArchiveConversations,
     deleteConversation: changed(deleteConversation, 'deleted'),
+    deleteConversationsByWorkspace,
     subscribeChanges,
   };
 }

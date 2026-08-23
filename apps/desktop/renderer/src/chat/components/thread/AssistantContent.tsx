@@ -1,4 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
+import { ThinkingOrb } from 'thinking-orbs';
+import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
@@ -308,6 +310,14 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
         onClick={toggleExpanded}
         aria-expanded={expanded}
       >
+        {isActive ? (
+          <ThinkingOrb
+            state="weaving"
+            size={20}
+            aria-label={isZh ? '正在思考' : 'Thinking'}
+            paused={prefersReducedMotion()}
+          />
+        ) : null}
         <span className="thinking-label">{label}</span>
         <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />

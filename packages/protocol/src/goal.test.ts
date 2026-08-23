@@ -84,7 +84,26 @@ test('deliveryBinding 能记下任务分支和 Worktree 路径，并把隔离标
   assert.equal(plan.deliveryBinding?.executionIsolation, 'worktree');
   assert.equal(
     formatGoalDeliveryRoute(plan),
-    '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.4 · 独立执行环境',
+    '来源 peer-knowledge · 交付 peer_agent · peer-goal/plan-delivery · from PeerAgent/0.0.4 · 独立执行环境',
+  );
+});
+
+test('formatGoalDeliveryRoute 有任务子分支时写成 feat · from 源头', () => {
+  assert.equal(
+    formatGoalDeliveryRoute({
+      targetRepoId: 'peer_agent',
+      targetBranch: 'develop',
+      deliveryBinding: {
+        repoId: 'peer_agent',
+        targetWorkspacePath: '/repo/peer_agent',
+        targetBranch: 'develop',
+        targetBranchSource: 'preconfigured',
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/验收合入',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }),
+    '交付 peer_agent · PeerAgent/验收合入 · from develop · 未隔离执行',
   );
 });
 
@@ -114,7 +133,7 @@ test('formatGoalDeliveryRoute 展示来源仓、交付仓和目标分支，不�
   );
 });
 
-test('formatGoalDeliveryHandoff 只在已隔离且已验收时展示交回状态', () => {
+test('formatGoalDeliveryHandoff 只在已验收且有交付线时展示交回状态', () => {
   const binding: GoalDeliveryBinding = {
     repoId: 'peer_agent',
     targetWorkspacePath: '/repo/peer_agent',
@@ -181,7 +200,12 @@ test('formatGoalDeliveryHandoff 只在已隔离且已验收时展示交回状态
   );
   assert.equal(
     formatGoalDeliveryHandoff({
-      deliveryBinding: { ...binding, executionIsolation: 'none' },
+      deliveryBinding: {
+        ...binding,
+        executionIsolation: 'none',
+        taskBranch: undefined,
+        worktreePath: undefined,
+      },
       resultAcceptance: accepted,
       deliveryHandoff: {
         status: 'delivered',
@@ -191,6 +215,23 @@ test('formatGoalDeliveryHandoff 只在已隔离且已验收时展示交回状态
       },
     }),
     undefined,
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: {
+        ...binding,
+        executionIsolation: 'none',
+        worktreePath: undefined,
+      },
+      resultAcceptance: accepted,
+      deliveryHandoff: {
+        status: 'delivered',
+        repoId: 'peer_agent',
+        targetBranch: 'PeerAgent/0.0.4',
+        updatedAt: '2026-08-14T01:01:00.000Z',
+      },
+    }),
+    '已交回 peer_agent / PeerAgent/0.0.4',
   );
   assert.equal(
     formatGoalDeliveryHandoff({

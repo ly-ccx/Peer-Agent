@@ -96,6 +96,12 @@ export interface ModelCredential {
 
 export interface ModelCredentialPort {
   resolve(request: ModelCredentialRequest): Promise<ModelCredential | null>;
+  /**
+   * Optional synchronous read for callers that must build a provider without an
+   * async boundary (e.g. the TUI runtime seeds its chat model synchronously from
+   * PEER_MODEL_* environment credentials).
+   */
+  environmentCredential?(providerId: string): ModelCredential | null;
 }
 
 export interface OpenAICompatibleProviderConfig {

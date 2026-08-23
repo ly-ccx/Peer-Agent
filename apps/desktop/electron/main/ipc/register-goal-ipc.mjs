@@ -30,6 +30,10 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
     ),
     remove: assertFunction(goalPlans?.remove, 'goalPlans.remove'),
     retryHandoff: assertFunction(goalPlans?.retryHandoff, 'goalPlans.retryHandoff'),
+    isolate: assertFunction(goalPlans?.isolate, 'goalPlans.isolate'),
+    openSite: assertFunction(goalPlans?.openSite, 'goalPlans.openSite'),
+    discardLine: assertFunction(goalPlans?.discardLine, 'goalPlans.discardLine'),
+    exportEvidence: assertFunction(goalPlans?.exportEvidence, 'goalPlans.exportEvidence'),
   };
   const runner = {
     getState: assertFunction(goalRunner?.getState, 'goalRunner.getState'),
@@ -56,6 +60,10 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
         plans.recordTaskEvidence(payload));
       ipc.handle('goalPlans:delete', (_event, payload) => plans.remove(payload));
       ipc.handle('goalPlans:retry-handoff', (_event, payload) => plans.retryHandoff(payload));
+      ipc.handle('goalPlans:isolate', (_event, payload) => plans.isolate(payload));
+      ipc.handle('goalPlans:open-site', (_event, payload) => plans.openSite(payload));
+      ipc.handle('goalPlans:discard-line', (_event, payload) => plans.discardLine(payload));
+      ipc.handle('goalPlans:export-evidence', (_event, payload) => plans.exportEvidence(payload));
     }),
     owner('goalRunner-ipc', (ipc) => {
       ipc.handle('goalRunner:get-state', (_event, payload) => runner.getState(payload));

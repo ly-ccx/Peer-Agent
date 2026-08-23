@@ -179,7 +179,11 @@ export function SettingsPage({
             onSystemInstructionsChanged={onSystemInstructionsChanged}
           />
         ) : section === 'git' ? (
-          <GitPanel i18n={i18n} onGitBranchPrefixChanged={onGitBranchPrefixChanged} />
+          <GitPanel
+            i18n={i18n}
+            workspacePath={workspacePath}
+            onGitBranchPrefixChanged={onGitBranchPrefixChanged}
+          />
         ) : section === 'shortcuts' ? (
           <ShortcutsPanel />
         ) : section === 'updates' ? (

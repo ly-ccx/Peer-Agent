@@ -215,6 +215,11 @@ export {
   normalizeGoalTiming,
 } from './goal-plan-store.mjs';
 export {
+  attachWorkspaceHeadBinding,
+  readWorkspaceHead,
+  resolveWorkspaceHead,
+} from './goal-delivery-binding.mjs';
+export {
   automationRunIsTerminal,
   createAutomationStore,
 } from './automation-store.mjs';

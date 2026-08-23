@@ -18,6 +18,7 @@ import type { DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
+import { isWorkspaceRequiredNotice, registeredWorkspacePath, workspaceRequiredNotice } from '../state/registeredWorkspace';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
@@ -45,6 +46,7 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
+import { formatComposerBoundBranch, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
@@ -119,8 +121,6 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
-import { projectChatTaskContext } from './thread/taskContext';
-import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import {
   VirtualChatTurnList,
   type VirtualChatTurnListHandle,
@@ -384,7 +384,6 @@ export function ChatSurface({
   isPageActive,
   messageTarget,
   onOpenAutomationRun,
-  onOpenTaskDetails,
   onClose,
 }: {
   readonly i18n: I18nRuntime;
@@ -418,12 +417,11 @@ export function ChatSurface({
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
-  readonly onOpenTaskDetails?: (conversationId: string) => void;
   /** Drawer host close action; surfaces as a close control in ChatHeader. */
   readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
-  readonly workspaces?: readonly { path: string; name: string }[];
+  readonly workspaces?: readonly { path: string; name: string; baseBranch?: string }[];
   readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
@@ -515,6 +513,20 @@ export function ChatSurface({
   // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
+  const [preferredWorktree, setPreferredWorktree] = useState(false);
+  const [workspaceGit, setWorkspaceGit] = useState<{ ok: boolean; current: string | null } | null>(null);
+  const workspaceIsGit = workspaceGit == null ? null : workspaceGit.ok;
+  const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
+  const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
+  const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
+    const draftComposer = conversationStore.getSnapshot(null);
+    saveComposerEntry(DRAFT_CONVERSATION_ID, {
+      draft: draftComposer.draft,
+      queue: [...draftComposer.messageQueue],
+      fastMode: patch.fastMode ?? fastMode,
+      preferredWorktree: patch.preferredWorktree ?? preferredWorktree,
+    });
+  }, [fastMode, preferredWorktree]);
   const changeFastMode = useCallback((enabled: boolean) => {
     convActions.set({ fastMode: enabled });
     if (conversationId) {
@@ -523,13 +535,12 @@ export function ChatSurface({
       });
       return;
     }
-    const draftComposer = conversationStore.getSnapshot(null);
-    saveComposerEntry(DRAFT_CONVERSATION_ID, {
-      draft: draftComposer.draft,
-      queue: [...draftComposer.messageQueue],
-      fastMode: enabled,
-    });
-  }, [convActions, conversationId]);
+    persistDraftComposer({ fastMode: enabled });
+  }, [convActions, conversationId, persistDraftComposer]);
+  const changePreferredWorktree = useCallback((enabled: boolean) => {
+    setPreferredWorktree(enabled);
+    if (!conversationId) persistDraftComposer({ preferredWorktree: enabled });
+  }, [conversationId, persistDraftComposer]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
@@ -615,6 +626,11 @@ export function ChatSurface({
       }, 6000);
     });
   }, [i18n]);
+
+  useEffect(() => {
+    if (!registeredWorkspacePath(workspacePath, workspaces)) return;
+    setAttachmentError((current) => (isWorkspaceRequiredNotice(current) ? null : current));
+  }, [workspacePath, workspaces]);
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
@@ -974,21 +990,6 @@ export function ChatSurface({
     setContextAccountingSnapshot,
   ]);
   const isZh = i18n.locale === 'zh-CN';
-  const taskOverviewItems = useTaskOverview({
-    enabled: Boolean(conversationId) && isPageActive,
-    workspacePath,
-    conversationId,
-    includeTerminal: true,
-    limit: 4,
-  });
-  const currentTaskItem = useMemo(
-    () => taskOverviewItems.find((item) => item.conversationId === conversationId),
-    [conversationId, taskOverviewItems],
-  );
-  const taskContext = useMemo(
-    () => projectChatTaskContext(currentTaskItem, isZh),
-    [currentTaskItem, isZh],
-  );
   const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
     if (!conversationId || !automationProposal) return;
     const result = await clientApi.automationProposalAct(
@@ -1020,6 +1021,11 @@ export function ChatSurface({
     })),
     [workspaces],
   );
+  const hasRegisteredWorkspace = Boolean(registeredWorkspacePath(workspacePath, workspaces));
+  const handleAddWorkspace = useCallback(async () => {
+    const result = await clientApi.workspaceAdd();
+    if (result?.path) await onWorkspaceChange?.(result.path);
+  }, [onWorkspaceChange]);
   const handleModeDropdownChange = useCallback((next: string) => {
     if (isChatMode(next)) changeMode(next);
   }, [changeMode]);
@@ -1148,6 +1154,9 @@ export function ChatSurface({
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
       ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
+    setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
+    setDeliveryLine(null);
+    setDeliveryLineKnown(false);
     const threadScrollSnapshot = conversationId
       ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
       : null;
@@ -1351,6 +1360,37 @@ export function ChatSurface({
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
+
+  useEffect(() => {
+    if (!workspacePath) {
+      setWorkspaceGit(null);
+      return;
+    }
+    if (typeof clientApi.gitListBranches !== 'function') {
+      setWorkspaceGit({ ok: false, current: null });
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceGit(null);
+    void clientApi.gitListBranches({ workspaceRoot: workspacePath })
+      .then((result) => {
+        if (cancelled) return;
+        const isGit = result?.ok === true;
+        setWorkspaceGit({
+          ok: isGit,
+          current: typeof result?.current === 'string' && result.current.trim() ? result.current.trim() : null,
+        });
+        if (!isGit) setPreferredWorktree(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWorkspaceGit({ ok: false, current: null });
+        setPreferredWorktree(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
 
   // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
   useEffect(() => {
@@ -1943,6 +1983,10 @@ export function ChatSurface({
     // 草稿态：由 main 原子创建会话、持久化首条消息并启动后台 turn。
     // ChatSurface 不再是执行中转页，命令返回后即可直接进入工作台。
     if (!conversationId) {
+      if (!registeredWorkspacePath(workspacePath, workspaces)) {
+        setAttachmentError(workspaceRequiredNotice(isZh));
+        return;
+      }
       if (creatingConversationRef.current) return;
       creatingConversationRef.current = true;
       conversationStore.setDraft(conversationId, '');
@@ -1957,6 +2001,7 @@ export function ChatSurface({
           mode,
           effort,
           fastMode,
+          preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false ? 'worktree' : 'none',
           modelProviderId,
           attachments: sentAttachments,
         });
@@ -1965,7 +2010,10 @@ export function ChatSurface({
         // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
         setAttachments(sentAttachments);
-        setAttachmentError(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        setAttachmentError(message === 'workspace_required'
+          ? workspaceRequiredNotice(isZh)
+          : message);
       } finally {
         creatingConversationRef.current = false;
       }
@@ -1994,8 +2042,12 @@ export function ChatSurface({
     enqueueMessage,
     onTaskStarted,
     workspacePath,
+    workspaces,
     mode,
+    fastMode,
     modelProviderId,
+    preferredWorktree,
+    workspaceIsGit,
     isZh,
     editingMessage,
     handleEditMessage,
@@ -2202,6 +2254,23 @@ export function ChatSurface({
   const handleGoalPlansCountChange = useCallback((count: number) => {
     setHasGoalPlan(count > 0);
   }, [setHasGoalPlan]);
+  const handleActiveDeliveryChange = useCallback((line: TaskDeliveryLine | null) => {
+    setDeliveryLine(line);
+    setDeliveryLineKnown(true);
+  }, []);
+  const workspaceBaseBranch = useMemo(() => {
+    const match = workspaces.find((workspace) => workspace.path === workspacePath);
+    const configured = match?.baseBranch?.trim();
+    return configured ? configured : null;
+  }, [workspacePath, workspaces]);
+  const boundBranch = useMemo(
+    () => formatComposerBoundBranch({
+      delivery: deliveryLine,
+      workspaceBaseBranch: (!conversationId || deliveryLineKnown) ? workspaceBaseBranch : null,
+      currentHead: (!conversationId || deliveryLineKnown) && workspaceGit?.ok ? workspaceGit.current : null,
+    }, { locale: isZh ? 'zh' : 'en' }),
+    [conversationId, deliveryLine, deliveryLineKnown, isZh, workspaceBaseBranch, workspaceGit],
+  );
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2227,78 +2296,6 @@ export function ChatSurface({
     const parts = normalized.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] || normalized;
   }, [workspacePath]);
-
-  const emptyStarterCards = useMemo(() => {
-    if (isZh) {
-      return [
-        {
-          id: 'understand',
-          title: '梳理现状',
-          prompt: workspaceLabel
-            ? `帮我梳理一下 ${workspaceLabel} 的当前状态，指出关键结构和最近值得关注的点。`
-            : '帮我梳理一下当前工作区的状态，指出关键结构和最近值得关注的点。',
-          icon: 'scan' as const,
-        },
-        {
-          id: 'goal',
-          title: '推进一个目标',
-          prompt: workspaceLabel
-            ? `我想在 ${workspaceLabel} 推进一个目标，先帮我拆成可执行步骤。`
-            : '我想推进一个目标，先帮我拆成可执行步骤。',
-          icon: 'target' as const,
-        },
-        {
-          id: 'debug',
-          title: '排查问题',
-          prompt: workspaceLabel
-            ? `我在 ${workspaceLabel} 遇到一个问题，先帮我定位可能原因和验证路径。`
-            : '我遇到一个问题，先帮我定位可能原因和验证路径。',
-          icon: 'debug' as const,
-        },
-      ];
-    }
-    return [
-      {
-        id: 'understand',
-        title: 'Understand the current state',
-        prompt: workspaceLabel
-          ? `Help me understand the current state of ${workspaceLabel}, including structure and what matters most right now.`
-          : 'Help me understand the current workspace state, including structure and what matters most right now.',
-        icon: 'scan' as const,
-      },
-      {
-        id: 'goal',
-        title: 'Drive a goal forward',
-        prompt: workspaceLabel
-          ? `I want to drive a goal in ${workspaceLabel}. Break it into executable steps first.`
-          : 'I want to drive a goal forward. Break it into executable steps first.',
-        icon: 'target' as const,
-      },
-      {
-        id: 'debug',
-        title: 'Investigate a problem',
-        prompt: workspaceLabel
-          ? `I hit a problem in ${workspaceLabel}. Help me find likely causes and a verification path.`
-          : 'I hit a problem. Help me find likely causes and a verification path.',
-        icon: 'debug' as const,
-      },
-    ];
-  }, [isZh, workspaceLabel]);
-
-  const applyEmptyStarter = useCallback((prompt: string) => {
-    if (!hasProvider) {
-      onOpenSettings();
-      return;
-    }
-    conversationStore.setDraft(conversationId, prompt);
-    requestAnimationFrame(() => {
-      const el = document.querySelector('.chat-composer textarea') as HTMLTextAreaElement | null;
-      if (!el) return;
-      el.focus();
-      const end = prompt.length;
-      el.setSelectionRange(end, end);
-    });
-  }, [conversationId, hasProvider, onOpenSettings]);
 
   const showEmptyHome = shouldShowConversationEmptyHome({
     loadStatus,
@@ -2400,10 +2397,7 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
-        taskContext={taskContext}
-        onOpenTaskDetails={conversationId && onOpenTaskDetails
-          ? () => onOpenTaskDetails(conversationId)
-          : undefined}
+        boundBranch={boundBranch}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
@@ -2457,43 +2451,6 @@ export function ChatSurface({
                 <button type="button" className="chat-empty-primary-btn" onClick={onOpenSettings}>
                   {isZh ? '连接 AI 服务' : 'Connect AI service'}
                 </button>
-              </div>
-            ) : null}
-            {hasProvider ? (
-              <div className="chat-empty-cards" aria-label={isZh ? '任务快捷入口' : 'Task starters'}>
-                {emptyStarterCards.map((card) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    className="chat-empty-card"
-                    onClick={() => applyEmptyStarter(card.prompt)}
-                  >
-                    <span className={`chat-empty-card-icon chat-empty-card-icon--${card.icon}`} aria-hidden="true">
-                      {card.icon === 'scan' ? (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="7" />
-                          <path d="m20 20-3.5-3.5" />
-                        </svg>
-                      ) : card.icon === 'target' ? (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="8" />
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v2" />
-                          <path d="M12 20v2" />
-                          <path d="M2 12h2" />
-                          <path d="M20 12h2" />
-                        </svg>
-                      ) : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 9v4" />
-                          <path d="M12 17h.01" />
-                          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-                        </svg>
-                      )}
-                    </span>
-                    <span className="chat-empty-card-title">{card.title}</span>
-                  </button>
-                ))}
               </div>
             ) : null}
           </div>
@@ -2630,7 +2587,7 @@ export function ChatSurface({
       ) : null}
 
       <div className={`chat-composer-wrap${showEmptyHome ? ' chat-composer-wrap--empty-home' : ''}`}>
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} />
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -2680,6 +2637,7 @@ export function ChatSurface({
           onAttachSessionReference={attachSessionReference}
           onAttachWorkspaceFile={attachWorkspaceFile}
           workspacePath={workspacePath}
+          canStartTask={!isDraftConversation || hasRegisteredWorkspace}
           onPrimaryAction={stableHandlePrimaryAction}
           editingMessage={editingMessage}
           onCancelEdit={stableCancelComposerEdit}
@@ -2687,21 +2645,57 @@ export function ChatSurface({
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
-            {workspacePath && workspaceOptions.length > 0 ? (
+            {isDraftConversation ? (
+              workspaceOptions.length > 0 ? (
+                <Dropdown
+                  className="composer-dropdown composer-workspace-dropdown"
+                  value={workspacePath ?? ''}
+                  placeholder={isZh ? '选择工作区' : 'Select workspace'}
+                  options={workspaceOptions}
+                  onChange={(nextWorkspacePath) => {
+                    void onWorkspaceChange?.(nextWorkspacePath);
+                  }}
+                  ariaLabel={isZh ? '工作区' : 'Workspace'}
+                  title={isZh ? '新任务必须先选择工作区' : 'Select a workspace before starting a task'}
+                  menuPlacement="up"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="composer-workspace-add"
+                  onClick={() => void handleAddWorkspace()}
+                >
+                  {isZh ? '添加工作区' : 'Add workspace'}
+                </button>
+              )
+            ) : workspacePath && workspaceOptions.length > 0 ? (
               <Dropdown
                 className="composer-dropdown composer-workspace-dropdown"
                 value={workspacePath}
                 options={workspaceOptions}
                 onChange={(nextWorkspacePath) => {
-                  if (isDraftConversation) void onWorkspaceChange?.(nextWorkspacePath);
+                  void onWorkspaceChange?.(nextWorkspacePath);
                 }}
-                disabled={!isDraftConversation}
+                disabled
                 ariaLabel={isZh ? '工作区' : 'Workspace'}
-                title={isDraftConversation
-                  ? (isZh ? '切换工作区' : 'Switch workspace')
-                  : (isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created')}
+                title={isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created'}
                 menuPlacement="up"
               />
+            ) : null}
+            {boundBranch ? (
+              <span
+                className="composer-bound-branch"
+                title={boundBranch.title}
+                aria-label={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="6" y1="3" x2="6" y2="15" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M18 9a9 9 0 0 1-9 9" />
+                </svg>
+                <span className="composer-bound-branch-text">{boundBranch.label}</span>
+              </span>
             ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
@@ -2721,6 +2715,27 @@ export function ChatSurface({
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
             />
+            {isDraftConversation && workspacePath ? (
+              <label
+                className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
+                title={
+                  workspaceIsGit === false
+                    ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
+                    : (isZh
+                      ? '在独立 Git worktree 里改代码，主工作区保持当前分支。默认关闭，之后仍可在任务里再开。'
+                      : 'Run in a Git worktree so the main workspace stays on its current branch. Off by default; you can still isolate later.')
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={preferredWorktree}
+                  disabled={workspaceIsGit === false}
+                  onChange={(event) => changePreferredWorktree(event.target.checked)}
+                  aria-label={isZh ? '隔离执行' : 'Worktree'}
+                />
+                <span>{isZh ? '隔离执行' : 'Worktree'}</span>
+              </label>
+            ) : null}
           </div>
           {homeComposerContextControls}
         </div>

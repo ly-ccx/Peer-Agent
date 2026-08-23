@@ -84,6 +84,7 @@ import {
   createAutomationStore,
   createGoalPlanStore,
   createGoalRunner,
+  resolveWorkspaceHead,
   decideIntakeConvergence,
   exportBundle,
   getDataHome,
@@ -121,8 +122,13 @@ import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
-import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
+import { createGoalWorktreeAdapter, resolveGoalSitePath } from './goal-worktree-adapter.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
+import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal-evidence-export.mjs';
+import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
+import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
+import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -424,9 +430,24 @@ const automationProposalService = createAutomationChatProposalService({
 });
 
 let goalWorktreeAdapter = null;
+let goalTaskBranchAdapter = null;
 let goalDeliveryHandoff = null;
 
+function readWorkspaceBaseBranch(workspacePath) {
+  const match = (settingsStore.getAll().workspaces || []).find((item) => item?.path === workspacePath);
+  return typeof match?.baseBranch === 'string' && match.baseBranch.trim()
+    ? match.baseBranch.trim()
+    : null;
+}
+
+function readDesktopWorkspaceHead(workspaceRoot) {
+  return resolveWorkspaceHead(workspaceRoot, {
+    preferredBranch: readWorkspaceBaseBranch(workspaceRoot) || undefined,
+  });
+}
+
 const goalPlanStore = createGoalPlanStore({
+  readWorkspaceHead: readDesktopWorkspaceHead,
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
@@ -709,12 +730,16 @@ async function listTrayRecentConversations({ limit = TRAY_RECENT_LIMIT } = {}) {
     status: 'active',
     limit: Math.min(requested, TRAY_RECENT_EXPANDED_LIMIT),
   });
-  return (Array.isArray(listed) ? listed : []).map((item) => ({
-    id: item.id,
-    title: item.title,
-    workspacePath: item.workspacePath,
-    updatedAt: item.updatedAt,
-  }));
+  return (Array.isArray(listed) ? listed : [])
+    // 过滤 workspacePath 目录已不存在（工作区已移除/临时目录已清理）的会话，
+    // 与侧栏「只显示手动添加且存在的工作区」保持同一语义。
+    .filter((item) => !item.workspacePath || existsSync(item.workspacePath))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      workspacePath: item.workspacePath,
+      updatedAt: item.updatedAt,
+    }));
 }
 
 function createAppTrayController() {
@@ -1099,7 +1124,20 @@ function parseExplorerReport(rawText, fallback = {}) {
 }
 
 goalWorktreeAdapter = createGoalWorktreeAdapter({ goalPlanStore });
-goalDeliveryHandoff = createGoalDeliveryHandoff({ goalPlanStore });
+goalTaskBranchAdapter = createGoalTaskBranchAdapter({
+  goalPlanStore,
+  resolvePrefix: () => resolveGitBranchPrefix(settingsStore.getAll().gitBranchPrefix),
+});
+goalDeliveryHandoff = createGoalDeliveryHandoff({
+  goalPlanStore,
+  resolveMergeTarget: (plan) => {
+    const root = plan?.deliveryBinding?.targetWorkspacePath || plan?.targetWorkspacePath;
+    return readWorkspaceBaseBranch(root)
+      || plan?.deliveryBinding?.targetBranch
+      || plan?.targetBranch
+      || null;
+  },
+});
 
 const llmChatService = createLlmChatService({
   llmConfigStore,
@@ -1115,6 +1153,7 @@ const llmChatService = createLlmChatService({
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
   goalWorktreeAdapter,
+  goalTaskBranchAdapter,
   // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
   ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
   broadcast: broadcastToAllWindows,
@@ -1133,8 +1172,17 @@ const chatStreamApplicationService = createChatStreamApplicationService({
 goalRunner = createGoalRunner({
   goalPlanStore,
   prepareIsolation: async (plan) => {
-    if (!plan || typeof goalWorktreeAdapter?.prepareForPlan !== 'function') return plan;
-    return goalWorktreeAdapter.prepareForPlan(plan);
+    if (!plan) return plan;
+    const conversation = plan.conversationId
+      ? conversationStore.getConversation(plan.conversationId)
+      : null;
+    return preparePlanExecutionWorkspace({
+      plan,
+      conversation,
+      ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+      prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+      isolatePlan: goalWorktreeAdapter?.isolatePlan,
+    });
   },
   chatRuntime: {
     async runGoalTurn({ plan, turnNumber }) {
@@ -1966,7 +2014,8 @@ const openPathApplicationService = createOpenPathApplicationService({
 const workspaceApplicationService = createWorkspaceApplicationService({
   getSettings: () => settingsStore.getAll(),
   mergeSettings: (patch) => settingsStore.merge(patch),
-  listConversations: (options) => conversationStore.listConversations(options),
+  deleteConversationsByWorkspace: (workspacePath) =>
+    conversationStore.deleteConversationsByWorkspace(workspacePath),
   pathExists: (candidate) => existsSync(candidate),
   basename: (candidate) => path.basename(candidate),
   getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),
@@ -2005,7 +2054,17 @@ const goalApplicationService = createGoalApplicationService({
   getPlan: (planId) => goalPlanStore.getPlan(planId),
   createPlan: (draft) => goalPlanStore.createPlan(draft),
   revisePlan: (planId, patch, options) => goalPlanStore.revisePlan(planId, patch, options),
-  recordApproval: (planId, approval) => goalPlanStore.recordApproval(planId, approval),
+  recordApproval: (planId, approval) => {
+    const plan = goalPlanStore.recordApproval(planId, approval);
+    if (approval?.decision === 'approve' && plan && typeof goalTaskBranchAdapter?.ensureTaskBranch === 'function') {
+      try {
+        return goalTaskBranchAdapter.ensureTaskBranch(plan) || plan;
+      } catch (error) {
+        console.warn('[goal-task-branch] create after approve failed:', error?.message || error);
+      }
+    }
+    return plan;
+  },
   setPlanStatus: (planId, status) => goalPlanStore.setPlanStatus(planId, status),
   markRequestedUserInput: (planId, runnerPatch) =>
     goalPlanStore.markRequestedUserInput(planId, runnerPatch),
@@ -2017,6 +2076,61 @@ const goalApplicationService = createGoalApplicationService({
   retryHandoff: (planId) => {
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
+  },
+  isolate: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found', plan: null };
+    if (typeof goalWorktreeAdapter?.isolatePlan !== 'function') {
+      return { ok: false, reason: 'unavailable', plan };
+    }
+    return goalWorktreeAdapter.isolatePlan(plan, {
+      ensureTaskBranch: (current) => {
+        if (typeof goalTaskBranchAdapter?.ensureTaskBranch !== 'function') return current;
+        return goalTaskBranchAdapter.ensureTaskBranch(current) || current;
+      },
+    });
+  },
+  openSite: async (planId, { mode } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    const site = resolveGoalSitePath(plan);
+    if (!site) return { ok: false, reason: 'no_site' };
+    return openPathApplicationService.open({
+      absPath: site,
+      mode: mode === 'editor' ? 'editor' : 'reveal',
+    });
+  },
+  discardLine: async (planId, { deleteBranch } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found', plan: null };
+    if (typeof goalWorktreeAdapter?.discardLine !== 'function') {
+      return { ok: false, reason: 'unavailable', plan };
+    }
+    return goalWorktreeAdapter.discardLine(plan, { deleteBranch: Boolean(deleteBranch) });
+  },
+  exportEvidence: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    const document = buildPlanEvidenceExport(plan, {
+      findIndexRecords: (refs) => (
+        typeof goalPlanStore.findEvidenceIndexRecords === 'function'
+          ? goalPlanStore.findEvidenceIndexRecords(refs)
+          : []
+      ),
+    });
+    if (!document) return { ok: false, reason: 'empty' };
+    const mainWindow = getPeerAgentMainWindow();
+    const result = await dialog.showSaveDialog(
+      mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+      {
+        title: '导出依据',
+        defaultPath: `peer-evidence-${String(plan.planId || 'plan').slice(0, 8)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      },
+    );
+    if (result.canceled || !result.filePath) return { ok: false, reason: 'cancelled' };
+    await writeFile(result.filePath, serializeEvidenceExportDocument(document), 'utf8');
+    return { ok: true, path: result.filePath };
   },
   startRunner: (planId, options) => goalRunner?.start(planId, options) ?? null,
   getRunnerState: (planId) => goalRunner?.getState(planId) ?? null,
@@ -2788,6 +2902,7 @@ async function handleChatStartTask({
   mode = 'goal',
   effort,
   fastMode = false,
+  preferredExecutionIsolation = 'none',
   modelProviderId,
   attachments = [],
 } = {}, sender) {
@@ -2795,11 +2910,21 @@ async function handleChatStartTask({
   if (!normalizedText && (!Array.isArray(attachments) || attachments.length === 0)) {
     throw new Error('task_text_or_attachment_required');
   }
+  const settings = settingsStore.getAll();
+  const boundWorkspacePath = resolveNewTaskWorkspacePath({
+    requested: workspacePath,
+    activeWorkspace: settings.activeWorkspace,
+    workspaces: settings.workspaces,
+  });
+  if (!boundWorkspacePath) {
+    throw new Error('workspace_required');
+  }
   const conversation = conversationStore.createConversation({
     title: String(title ?? normalizedText).slice(0, 48) || '新任务',
-    workspacePath: workspacePath ?? settingsStore.getAll().activeWorkspace ?? null,
+    workspacePath: boundWorkspacePath,
     mode,
     fastMode,
+    preferredExecutionIsolation,
   });
   if (effort !== undefined || modelProviderId !== undefined) {
     conversationStore.updateModelEffort(conversation.id, {

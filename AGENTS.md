@@ -16,7 +16,7 @@ Peer Agent follows the 端云能力代理设计原则:
 
 `模型` names a role, not a deployment location: cognition may come from a cloud provider or from a future on-device runtime. Capability execution, authorization, and Evidence remain local either way.
 
-Architecture knowledge lives in the companion knowledge base `peer-knowledge` (not in this code repo). The detailed governance baseline is in `peer-knowledge/knowledge/architecture/20-architecture-governance.md`. Existing architecture context is in:
+Architecture knowledge lives in the companion knowledge base `peer-knowledge` (not in this code repo). Product philosophy and value alignment live in `peer-knowledge/design/product/peer-product-alignment.md` — that document is the unique north star for the product chain. The detailed governance baseline is in `peer-knowledge/knowledge/architecture/20-architecture-governance.md`. Existing architecture context is in:
 
 - `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`
 - `peer-knowledge/knowledge/architecture/01-project-structure.md`

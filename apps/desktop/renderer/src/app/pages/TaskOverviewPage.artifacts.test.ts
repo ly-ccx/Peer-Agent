@@ -55,8 +55,11 @@ test('产物行内直接显示增删行数，不必悬停预览', async () => {
   );
   // 长文件名要截断，避免撑破卡片挤掉徽标与操作文案。
   assert.match(styles, /\.task-artifact-name\s*\{[^}]*truncate/s);
-  // 行距收成列表，不再用伪图标占位。
-  assert.match(styles, /\.task-artifacts-list\s*\{[^}]*space-y-0\.5/s);
+  // 行距由行自身声明：li 自带 my-1，hover 高亮四边留白不再依赖 space-y。
+  assert.match(styles, /\.task-artifact-shell\s*\{[^}]*my-1/s);
+  assert.doesNotMatch(styles, /\.task-artifacts-list\s*\{[^}]*space-y/s);
+  // 末行高亮距卡片底边 = my-1 + pb-2 = 12px，与水平 px-3 一致。
+  assert.match(styles, /\.task-artifacts-content\s*\{[^}]*pb-2\s/s);
   assert.doesNotMatch(styles, /\.task-artifact-icon\s*\{/);
 });
 

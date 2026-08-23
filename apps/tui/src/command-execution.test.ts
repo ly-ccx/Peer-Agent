@@ -105,7 +105,7 @@ describe('TUI command execution', () => {
     executeTuiCommand(newSession, subject.handlers);
 
     expect(subject.newSessionCount).toBe(1);
-    expect(subject.notices.at(-1)).toBe('New session');
+    expect(subject.notices.at(-1)).toBe('New task');
     expect(subject.state.surface).toEqual({ type: 'composer' });
   });
 

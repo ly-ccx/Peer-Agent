@@ -237,7 +237,7 @@
 
   .gwb-run-row {
     @apply grid w-full items-center gap-2.5 border-t px-4 py-3 text-left;
-    grid-template-columns: 12px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
     border-color: var(--za-line);
   }
 
@@ -254,17 +254,16 @@
     background: color-mix(in srgb, var(--za-text) 3%, transparent);
   }
 
+  /* 行首 ThinkingOrb(canvas) 容器：只负责占位对齐，动画由 orb 自绘。 */
   .gwb-run-dot {
-    @apply h-2.5 w-2.5 rounded-full border-2;
-    border-color: color-mix(in srgb, var(--za-accent) 28%, transparent);
-    border-top-color: var(--za-accent);
-    animation: gwb-run-spin 900ms linear infinite;
+    @apply flex items-center justify-center;
+    width: 20px;
+    height: 20px;
+    margin-left: -4px;
   }
 
-  @keyframes gwb-run-spin {
-    to {
-      transform: rotate(1turn);
-    }
+  .gwb-run-dot canvas {
+    display: block;
   }
 
   .gwb-run-title {

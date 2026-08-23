@@ -88,6 +88,12 @@
     contain: layout;
   }
 
+  /* 无 header 的 thread 顶部 52px 里含 macOS 交通灯预留。非 darwin 平台
+     hiddenInset 窗口没有系统交通灯，收成普通 24px，避免顶部死空白。 */
+  :root:not([data-os='darwin']) .thread:not(.thread-has-header) {
+    padding-top: var(--space-6, 24px);
+  }
+
   /* 有顶部 header 的 thread 容器不再额外保留交通灯留白,由 ChatHeader 承担。 */
   .thread.thread-has-header {
     @apply px-0 pt-0 pb-0;

@@ -579,6 +579,52 @@
   word-break: break-word;
 }
 
+.goal-plan-delivery-handoff-row,
+.goal-plan-delivery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.goal-plan-delivery-handoff {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.45;
+  color: var(--za-text-soft);
+}
+
+.goal-plan-delivery-retry,
+.goal-plan-delivery-action {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.goal-plan-delivery-retry:disabled,
+.goal-plan-delivery-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-plan-delivery-action--danger {
+  color: var(--za-warn);
+}
+
+.goal-plan-delivery-error {
+  margin: 0;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.45;
+  color: var(--za-danger);
+}
+
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;
@@ -1837,6 +1883,81 @@
 }
 
 .chat-goal-approval-error {
+  font-size: 12px;
+  color: var(--za-warn, #c0392b);
+}
+
+.chat-goal-approval-bounds {
+  font-size: 12px;
+  color: var(--za-text-muted);
+}
+
+.success-criteria-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.success-criteria-editor__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--za-text-muted);
+}
+
+.success-criteria-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.success-criteria-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.success-criteria-editor__input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius-sm, 8px);
+  background: var(--za-surface-0);
+  color: var(--za-text);
+  font-size: 13px;
+}
+
+.success-criteria-editor__remove,
+.success-criteria-editor__add {
+  border: 0;
+  background: transparent;
+  color: var(--za-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.success-criteria-editor__remove {
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+}
+
+.success-criteria-editor__add {
+  align-self: flex-start;
+  padding: 0;
+}
+
+.success-criteria-editor__add:hover:not(:disabled),
+.success-criteria-editor__remove:hover:not(:disabled) {
+  color: var(--za-text);
+}
+
+.success-criteria-editor__error {
+  margin: 0;
   font-size: 12px;
   color: var(--za-warn, #c0392b);
 }

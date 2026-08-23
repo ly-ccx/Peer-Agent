@@ -57,3 +57,86 @@
 .task-artifact-preview-portal .task-artifact-preview--image {
   padding: 0.5rem;
 }
+
+.diff-file-preview-portal {
+  position: fixed;
+  z-index: 2147483000;
+  box-sizing: border-box;
+  width: min(42rem, calc(100vw - 24px));
+  overflow: visible;
+  isolation: auto;
+  filter: none;
+  pointer-events: auto;
+  border-radius: 0.75rem;
+  box-shadow: var(--glass-modal-shadow, 0 24px 64px rgb(0 0 0 / 36%));
+}
+
+.diff-file-preview-portal.is-below::after,
+.diff-file-preview-portal.is-above::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+
+.diff-file-preview-portal.is-below::after {
+  bottom: 100%;
+}
+
+.diff-file-preview-portal.is-above::after {
+  top: 100%;
+}
+
+.diff-file-preview-portal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: var(--glass-modal-background, color-mix(in srgb, var(--za-surface-0, #1e232c) 78%, transparent));
+  backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
+  -webkit-backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
+}
+
+.diff-file-preview {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: min(22rem, calc(100vh - 1.5rem));
+  overflow: hidden;
+  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border-radius: inherit;
+  background: transparent;
+}
+
+.diff-file-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--za-line);
+}
+
+.diff-file-preview-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption);
+  color: var(--za-text);
+}
+
+.diff-file-preview .workbench-diff-pre {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--za-code-font-size, 12px);
+}
+

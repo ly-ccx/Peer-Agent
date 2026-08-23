@@ -22,6 +22,10 @@ function createHarness() {
       recordTaskEvidence: port('plans.recordTaskEvidence'),
       remove: port('plans.remove'),
       retryHandoff: port('plans.retryHandoff'),
+      isolate: port('plans.isolate'),
+      openSite: port('plans.openSite'),
+      discardLine: port('plans.discardLine'),
+      exportEvidence: port('plans.exportEvidence'),
     },
     goalRunner: {
       getState: port('runner.getState'),
@@ -45,7 +49,7 @@ function createHarness() {
   return { calls, handlers, owners };
 }
 
-test('goal owners register the exact 15 invoke channels', () => {
+test('goal owners register the exact 21 invoke channels', () => {
   const { handlers, owners } = createHarness();
   assert.deepEqual(owners, ['goalPlans-ipc', 'goalRunner-ipc']);
   assert.deepEqual([...handlers.keys()].sort(), [
@@ -53,9 +57,13 @@ test('goal owners register the exact 15 invoke channels', () => {
     'goalPlans:awaiting-counts',
     'goalPlans:create',
     'goalPlans:delete',
+    'goalPlans:discard-line',
+    'goalPlans:export-evidence',
     'goalPlans:get',
+    'goalPlans:isolate',
     'goalPlans:list',
     'goalPlans:mark-requested-user-input',
+    'goalPlans:open-site',
     'goalPlans:record-manual-confirmation',
     'goalPlans:record-task-evidence',
     'goalPlans:retry-handoff',
@@ -91,6 +99,10 @@ test('goal handlers preserve payload defaults and return values', () => {
   assert.equal(handlers.get('goalPlans:record-task-evidence')({}, payload), 'plans.recordTaskEvidence');
   assert.equal(handlers.get('goalPlans:delete')({}, payload), 'plans.remove');
   assert.equal(handlers.get('goalPlans:retry-handoff')({}, payload), 'plans.retryHandoff');
+  assert.equal(handlers.get('goalPlans:isolate')({}, payload), 'plans.isolate');
+  assert.equal(handlers.get('goalPlans:open-site')({}, payload), 'plans.openSite');
+  assert.equal(handlers.get('goalPlans:discard-line')({}, payload), 'plans.discardLine');
+  assert.equal(handlers.get('goalPlans:export-evidence')({}, payload), 'plans.exportEvidence');
   assert.equal(handlers.get('goalRunner:get-state')({}, payload), 'runner.getState');
   assert.equal(handlers.get('goalRunner:start')({}, undefined), 'runner.start');
   assert.equal(handlers.get('goalRunner:pause')({}, payload), 'runner.pause');
@@ -110,6 +122,10 @@ test('goal handlers preserve payload defaults and return values', () => {
     ['plans.recordTaskEvidence', payload],
     ['plans.remove', payload],
     ['plans.retryHandoff', payload],
+    ['plans.isolate', payload],
+    ['plans.openSite', payload],
+    ['plans.discardLine', payload],
+    ['plans.exportEvidence', payload],
     ['runner.getState', payload],
     ['runner.start', {}],
     ['runner.pause', payload],

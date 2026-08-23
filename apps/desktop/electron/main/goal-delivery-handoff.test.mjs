@@ -76,7 +76,7 @@ function boundPlan(overrides = {}) {
       targetWorkspacePath: repository,
       targetBranch: 'main',
       targetBranchSource: 'workspace_head',
-      executionIsolation: 'none',
+      executionIsolation: 'worktree',
       boundAt: '2026-08-13T16:00:00.000Z',
     },
     ...overrides,
@@ -284,5 +284,57 @@ describe('goal delivery handoff', () => {
     const retried = await handoff.retryHandoff(store.getPlan('plan-handoff-1'));
     assert.equal(retried.deliveryHandoff.status, 'delivered');
     assert.equal(readFileSync(path.join(repository, 'retry.txt'), 'utf8'), 'later\n');
+  });
+
+  it('merges a task branch without a worktree into the current merge target', async () => {
+    git(['switch', '-c', 'PeerAgent/task-1']);
+    writeFileSync(path.join(repository, 'delivered.txt'), 'from task line\n');
+    git(['add', 'delivered.txt']);
+    git(['commit', '-m', 'task work']);
+    const store = createStore(boundPlan({
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/task-1',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.targetBranch, 'main');
+    assert.equal(git(['show', 'main:delivered.txt']), 'from task line');
+  });
+
+  it('delivers onto the current workspace base branch, not the creation snapshot', async () => {
+    git(['branch', 'develop']);
+    git(['switch', '-c', 'PeerAgent/task-2']);
+    writeFileSync(path.join(repository, 'onto-develop.txt'), 'land here\n');
+    git(['add', 'onto-develop.txt']);
+    git(['commit', '-m', 'task work']);
+    const mainBefore = git(['rev-parse', 'main']);
+    const store = createStore(boundPlan({
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/task-2',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const accepted = store.setPlan(markAccepted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({
+      goalPlanStore: store,
+      resolveMergeTarget: () => 'develop',
+    }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.targetBranch, 'develop');
+    assert.equal(git(['show', 'develop:onto-develop.txt']), 'land here');
+    assert.equal(git(['rev-parse', 'main']), mainBefore);
   });
 });

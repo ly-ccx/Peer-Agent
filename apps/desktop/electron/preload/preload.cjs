@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   listEditors: () => ipcRenderer.invoke('shell:editors:list'),
   setDefaultEditor: (editorId) => ipcRenderer.invoke('shell:editors:set-default', { editorId }),
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
+  gitDiffRange: (params) => ipcRenderer.invoke('git:diff-range', params),
+  gitListBranches: (params) => ipcRenderer.invoke('git:list-branches', params),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
   readImageDataUrl: (absPath, workspaceRoot, relPath) =>
@@ -259,6 +261,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),
   goalPlansRetryHandoff: (params) => ipcRenderer.invoke('goalPlans:retry-handoff', params),
+  goalPlansIsolate: (params) => ipcRenderer.invoke('goalPlans:isolate', params),
+  goalPlansOpenSite: (params) => ipcRenderer.invoke('goalPlans:open-site', params),
+  goalPlansDiscardLine: (params) => ipcRenderer.invoke('goalPlans:discard-line', params),
+  goalPlansExportEvidence: (params) => ipcRenderer.invoke('goalPlans:export-evidence', params),
   goalPlansApprove: (params) => ipcRenderer.invoke('goalPlans:approve', params),
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
   goalPlansMarkRequestedUserInput: (params) =>

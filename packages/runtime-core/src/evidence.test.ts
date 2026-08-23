@@ -6,7 +6,11 @@ import {
   applyEvidenceRedactors,
   collectToolEvidenceRefs,
   createEvidenceBundle,
+  createEvidenceExportDocument,
+  EVIDENCE_EXPORT_KIND,
+  EVIDENCE_EXPORT_SCHEMA_VERSION,
   sanitizeHookEvidenceRecord,
+  serializeEvidenceExportDocument,
   type EvidenceRecord,
 } from './index.ts';
 
@@ -17,6 +21,29 @@ const baseRecord: EvidenceRecord = {
   createdAt: '2026-07-09T00:00:00.000Z',
   message: 'raw secret',
 };
+
+test('createEvidenceExportDocument packs admitted refs without inventing new ones', () => {
+  const document = createEvidenceExportDocument({
+    exportedAt: '2026-08-22T00:00:00.000Z',
+    source: { planId: 'plan-1', conversationId: 'conv-1' },
+    summary: '  shipped feature  ',
+    refs: [' tool-result://a ', 'tool-result://a', 'local-file://src/app.ts', ''],
+    records: [baseRecord],
+    metadata: { authorization: { planApproved: true } },
+  });
+
+  assert.deepEqual(document, {
+    kind: EVIDENCE_EXPORT_KIND,
+    schemaVersion: EVIDENCE_EXPORT_SCHEMA_VERSION,
+    exportedAt: '2026-08-22T00:00:00.000Z',
+    source: { planId: 'plan-1', conversationId: 'conv-1' },
+    summary: 'shipped feature',
+    refs: ['tool-result://a', 'local-file://src/app.ts'],
+    records: [baseRecord],
+    metadata: { authorization: { planApproved: true } },
+  });
+  assert.match(serializeEvidenceExportDocument(document), /"kind": "peer.evidence.export"/);
+});
 
 test('createEvidenceBundle normalizes portable evidence defaults', () => {
   assert.deepEqual(createEvidenceBundle({

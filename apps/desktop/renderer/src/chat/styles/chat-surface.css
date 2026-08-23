@@ -557,6 +557,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 思考态 ThinkingOrb(canvas):与 meta 文字视觉居中,不参与 shimmer。 */
+.thinking-toggle canvas {
+  flex: none;
+  margin-right: 2px;
+  vertical-align: middle;
+}
 /* 思考中:文字底色 soft,一道高光从左到右循环扫过(shimmer)。 */
 .thinking-section.active .thinking-label {
   background: linear-gradient(
@@ -583,6 +589,14 @@
   transition: transform var(--za-motion-fast) var(--za-ease-out), opacity var(--za-motion-fast);
 }
 .thinking-toggle:hover .thinking-chevron {
+  opacity: 0.9;
+}
+/* 思考中：右侧箭头默认隐藏，悬停或键盘聚焦时再显示。完成后仍走上方默认可见样式。 */
+.thinking-section.active .thinking-chevron {
+  opacity: 0;
+}
+.thinking-section.active .thinking-toggle:hover .thinking-chevron,
+.thinking-section.active .thinking-toggle:focus-visible .thinking-chevron {
   opacity: 0.9;
 }
 .thinking-body {
@@ -1027,6 +1041,96 @@
   max-width: 180px;
 }
 
+.composer-workspace-add {
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  max-width: 180px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-size: var(--composer-addon-font-size);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.composer-workspace-add:hover {
+  background: var(--composer-addon-hover-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-soft);
+}
+
+.composer-worktree-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--composer-addon-color);
+  font-size: var(--composer-addon-font-size);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.composer-worktree-toggle input {
+  margin: 0;
+  accent-color: var(--graphite-ink, currentColor);
+}
+
+.composer-worktree-toggle:hover:not(:has(input:disabled)) {
+  background: var(--composer-addon-hover-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-soft);
+}
+
+.composer-worktree-toggle.is-active {
+  color: var(--graphite-soft);
+}
+
+.composer-worktree-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.composer-bound-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 11rem;
+  height: var(--composer-addon-height);
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.2;
+  pointer-events: auto;
+}
+
+.composer-bound-branch svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.composer-bound-branch-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
   display: none;
 }
@@ -1111,13 +1215,32 @@
   align-items: center;
   gap: 6px;
 }
-/* 上下文用量：紧凑圆环 + 百分比；完整 used/total 仅通过 title/hover 展示 */
+/* 上下文用量：紧凑圆环 + 百分比；点击打开构成详情 */
+.ctx-usage-control {
+  display: inline-flex;
+  min-width: 0;
+}
 .ctx-usage {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  cursor: default;
+  height: var(--composer-addon-height);
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ctx-usage:hover,
+.ctx-usage.is-open {
+  background: var(--composer-addon-hover-bg);
+}
+.ctx-usage:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent, var(--azure-seal)) 52%, transparent);
+  outline-offset: 1px;
 }
 .ctx-ring {
   width: 12px;
@@ -1140,6 +1263,136 @@
   font-variant-numeric: tabular-nums;
   color: var(--composer-addon-color);
   line-height: 1;
+}
+
+.ctx-usage-panel {
+  position: fixed;
+  z-index: 1200;
+  visibility: hidden;
+  box-sizing: border-box;
+  width: 296px;
+  padding: 14px 16px 12px;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
+  border-radius: calc(var(--radius-md) + 4px);
+  background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
+  box-shadow:
+    0 16px 40px color-mix(in srgb, var(--graphite-deep) 14%, transparent),
+    0 2px 8px color-mix(in srgb, var(--graphite-deep) 6%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
+  --motion-enter-from: 6px;
+}
+
+.ctx-usage-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ctx-usage-panel-header h3 {
+  margin: 0;
+  color: var(--graphite-base);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.ctx-usage-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-mute);
+  cursor: pointer;
+}
+
+.ctx-usage-panel-close:hover {
+  background: var(--composer-addon-hover-bg);
+  color: var(--graphite-base);
+}
+
+.ctx-usage-panel-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+}
+
+.ctx-usage-panel-bar {
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  height: 7px;
+  margin: 12px 0 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chrome-sunken) 88%, transparent);
+}
+
+.ctx-usage-panel-bar-seg {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+
+.ctx-usage-panel-bar-seg.is-unused {
+  background: color-mix(in srgb, var(--chrome-sunken) 70%, transparent);
+}
+
+.ctx-usage-panel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ctx-usage-panel-list li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.ctx-usage-panel-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ctx-usage-panel-label {
+  color: var(--graphite-base);
+  font-size: 0.78rem;
+}
+
+.ctx-usage-panel-tokens {
+  color: var(--graphite-mute);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-usage-panel-empty,
+.ctx-usage-panel-notes {
+  margin: 8px 0 0;
+  color: var(--graphite-mute);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.ctx-usage-panel-notes p {
+  margin: 0 0 4px;
+}
+
+.ctx-usage-panel-notes p:last-child {
+  margin-bottom: 0;
 }
 .token-usage-detail {
   font-size: 0.62rem;
@@ -3121,8 +3374,11 @@
 }
 
 /* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
-   避免会话标题与红绿灯重叠。 */
-:root[data-sidebar-collapsed='true'] .app-shell:not(.is-fullscreen) .chat-header {
+   避免会话标题与红绿灯重叠。仅 darwin 生效:Windows/Linux 无系统交通灯,
+   hiddenInset 窗口左上角没有任何控件,保留 78px 只会挤压标题空间。 */
+:root[data-os='darwin'][data-sidebar-collapsed='true']
+  .app-shell:not(.is-fullscreen)
+  .chat-header {
   padding-left: 78px;
 }
 
@@ -3139,6 +3395,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 1 1 auto;
   min-width: 0;
   -webkit-app-region: no-drag;
 }
@@ -3163,6 +3420,8 @@
 }
 
 .chat-header-title {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 0.82rem;
   font-weight: 500;
   color: var(--graphite-base);
@@ -3175,6 +3434,38 @@
   padding: 2px 6px;
   border-radius: var(--radius-frost-sm);
   transition: background var(--za-motion-fast);
+}
+
+.chat-header-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 11rem;
+  color: var(--graphite-mute);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  /* 元信息，不是控件：不要做成带边框的 chip。 */
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-header-branch svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.chat-header-branch-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-header-title:hover {
@@ -3200,72 +3491,11 @@
   box-shadow: 0 0 0 2px var(--za-focus);
 }
 
-.chat-task-context {
-  -webkit-app-region: no-drag;
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  max-width: min(42vw, 440px);
-  gap: var(--space-1);
-  padding: 2px 7px 2px 5px;
-  border: 1px solid color-mix(in srgb, var(--ui-accent) 20%, var(--ui-border-subtle));
-  border-radius: var(--ui-radius-round, 999px);
-  background: color-mix(in srgb, var(--ui-accent) 7%, transparent);
-  color: var(--graphite-base);
-  font: inherit;
-  cursor: pointer;
-}
-
-.chat-task-context:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
-}
-
-.chat-task-context:focus-visible {
-  outline: 2px solid var(--za-focus);
-  outline-offset: 1px;
-}
-
-.chat-task-context__status {
-  flex: none;
-  color: var(--ui-accent, var(--azure-seal));
-  font-size: 0.7rem;
-  font-weight: 650;
-}
-
-.chat-task-context__status::before {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 4px 1px 0;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.chat-task-context__goal {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--graphite-mute);
-  font-size: 0.7rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-task-context__details {
-  flex: none;
-  color: var(--graphite-soft);
-  font-size: 0.68rem;
-}
-
-.chat-task-context__details::before {
-  content: '·';
-  margin-right: var(--space-1);
-}
-
 .chat-header-right {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  flex: 0 0 auto;
   -webkit-app-region: no-drag;
 }
 
@@ -4631,13 +4861,16 @@ button.chat-header-cap-item:focus-visible {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar .token-usage-wrap {
   margin-left: auto;
 }
 
-.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger {
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger,
+.chat-composer-wrap--empty-home .composer-workspace-add,
+.chat-composer-wrap--empty-home .composer-worktree-toggle {
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
   padding: 0 8px;
@@ -4649,7 +4882,9 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
-.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open {
+.chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open,
+.chat-composer-wrap--empty-home .composer-workspace-add:hover,
+.chat-composer-wrap--empty-home .composer-worktree-toggle:hover:not(:has(input:disabled)) {
   background: color-mix(in srgb, var(--ink-base) 6%, transparent);
 }
 

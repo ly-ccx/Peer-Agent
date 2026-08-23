@@ -35,6 +35,100 @@ function classifyLine(line: string): DiffLineKind {
   return 'ctx';
 }
 
+export interface DiffFileGroup {
+  readonly path: string;
+  readonly fromPath?: string;
+  readonly lines: readonly DiffLine[];
+}
+
+function gitPathFromHeader(rest: string): string {
+  let token = rest.trim();
+  const tab = token.indexOf('\t');
+  if (tab >= 0) token = token.slice(0, tab).trim();
+  if (token.startsWith('"') && token.endsWith('"')) {
+    token = token.slice(1, -1).replace(/\\"/g, '"');
+  }
+  if (!token || token === '/dev/null') return '';
+  return token.replace(/^[ab]\//, '');
+}
+
+function pathsFromDiffGit(line: string): { path: string; fromPath: string } | null {
+  const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+  if (!match) return null;
+  return { fromPath: match[1] ?? '', path: match[2] ?? '' };
+}
+
+/**
+ * 把 unified diff 收成「文件名 + 真正改动」。
+ * `diff --git` / `index` / `--- a/` / `+++ b/` 只是定位，不进行列表。
+ */
+export function groupDiffByFile(text: string): DiffFileGroup[] {
+  const grouped: Array<{ path: string; fromPath?: string; lines: DiffLine[] }> = [];
+  let current: { path: string; fromPath?: string; lines: DiffLine[] } | null = null;
+
+  const ensureFile = (): { path: string; fromPath?: string; lines: DiffLine[] } => {
+    if (!current) {
+      current = { path: '', lines: [] };
+      grouped.push(current);
+    }
+    return current;
+  };
+
+  for (const line of buildDiffLines(text)) {
+    if (line.kind !== 'meta') {
+      ensureFile().lines.push(line);
+      continue;
+    }
+    const raw = line.text;
+    if (raw.startsWith('diff --git')) {
+      const parsed = pathsFromDiffGit(raw);
+      current = {
+        path: parsed?.path || parsed?.fromPath || '',
+        ...(parsed && parsed.fromPath && parsed.fromPath !== parsed.path
+          ? { fromPath: parsed.fromPath }
+          : {}),
+        lines: [],
+      };
+      grouped.push(current);
+      continue;
+    }
+    if (raw.startsWith('+++ ')) {
+      const path = gitPathFromHeader(raw.slice(4));
+      if (path) ensureFile().path = path;
+      continue;
+    }
+    if (raw.startsWith('--- ')) {
+      const path = gitPathFromHeader(raw.slice(4));
+      if (path && !ensureFile().path) ensureFile().path = path;
+      continue;
+    }
+  }
+
+  return grouped.filter((file) => file.lines.length > 0 || file.path);
+}
+
+export function countDiffLineStats(lines: readonly DiffLine[]): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.kind === 'add') additions += 1;
+    else if (line.kind === 'del') deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+export function diffFileBaseName(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const slash = normalized.lastIndexOf('/');
+  return slash < 0 ? normalized : normalized.slice(slash + 1);
+}
+
+export function diffFileDisplayName(path: string, paths: readonly string[]): string {
+  const base = diffFileBaseName(path) || path;
+  const duplicates = paths.filter((item) => diffFileBaseName(item) === base).length > 1;
+  return duplicates ? path : base;
+}
+
 /**
  * 行号只在见到 unified diff 的 @@ hunk 头之后才赋值。
  * 没有 hunk 时保持 null，避免把 0 这种假行号画进 gutter。

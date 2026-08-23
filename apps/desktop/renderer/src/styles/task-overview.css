@@ -1,6 +1,6 @@
-/* TaskOverview 三页面 —— 对齐 peer-2-0 高保真首页结构。
+/* TaskOverview 三页面 —— Action Inbox。
  *
- * 首页：topline + hero(说明|统计) + 交接四列 + 双列瀑布流推进 + 结果待验收。
+ * 首页：topline + hero + 需要你处理 / 异常恢复 / 待验收；推进与讨论沉到底栏。
  * 颜色只走 --za-* token，由 [data-theme] 切换，无硬编码 fallback。
  */
 @layer components {
@@ -13,8 +13,8 @@
 
   .task-overview-scroll-region {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
-    /* 末卡离开外壳圆角裁切，避免底角被 page-layer / primary-page-shell 剃掉 */
-    padding-bottom: var(--radius-lg);
+    /* 给常驻底栏留出高度，末卡也不被外壳圆角裁切 */
+    padding-bottom: calc(var(--radius-lg) + 3.25rem);
   }
 
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::before,
@@ -44,8 +44,87 @@
     @apply mx-auto w-full max-w-5xl px-7 py-6;
   }
 
+  /* Action Inbox：主列自然滚动，底栏由 page-layer 钉住。 */
   .task-overview-page--home {
-    @apply max-w-6xl;
+    @apply mx-auto w-full max-w-6xl px-7 pb-6 pt-6;
+  }
+
+  .task-overview-background-bar {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 24;
+    display: flex;
+    min-height: 3.25rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 1.5rem;
+    border-top: 1px solid var(--za-line);
+    background: color-mix(in srgb, var(--za-app-bg) 88%, transparent);
+    backdrop-filter: blur(16px);
+    pointer-events: auto;
+  }
+
+  .task-overview-background-bar__cluster {
+    @apply inline-flex min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left;
+    color: var(--za-text);
+  }
+
+  .task-overview-background-bar__cluster:disabled,
+  .task-overview-background-bar__cluster.is-quiet {
+    cursor: default;
+    color: var(--za-text-muted);
+  }
+
+  .task-overview-background-bar__cluster:not(:disabled):hover .task-overview-background-bar__hint {
+    color: var(--za-accent);
+  }
+
+  .task-overview-background-bar__copy {
+    @apply inline-flex items-center gap-1.5 text-sm font-medium;
+  }
+
+  .task-overview-background-bar__copy b {
+    color: var(--za-accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .task-overview-background-bar__hint {
+    @apply min-w-0 truncate text-xs;
+    color: var(--za-text-muted);
+    max-width: 18rem;
+  }
+
+  .task-overview-background-bar__pulse {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--za-accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-accent) 18%, transparent);
+  }
+
+  .task-overview-background-bar__meter {
+    display: inline-flex;
+    width: 4.5rem;
+    height: 0.3rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+
+  .task-overview-background-bar__meter i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--za-accent);
+  }
+
+  .task-overview-inbox-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
   .task-overview-header-sentinel {
@@ -181,6 +260,7 @@
     @apply flex shrink-0 items-stretch gap-0;
   }
 
+  /* 原型 hero-stats：静态统计块，块间 1px 分隔线（无交互）。 */
   .task-overview-stat {
     @apply flex min-w-[4.5rem] flex-col items-start px-4 first:pl-0;
   }
@@ -918,7 +998,7 @@
   }
 
   .task-artifacts-content {
-    @apply space-y-3 border-t px-3 pb-3 pt-2;
+    @apply space-y-3 border-t px-3 pb-2 pt-2;
     border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
   }
 
@@ -932,8 +1012,14 @@
     color: var(--za-text-muted);
   }
 
+  /* 行距由行自身声明：每行 li 自带 my-1，hover 高亮的四边留白不再依赖
+     space-y 兄弟间距；去 space-y 后补上列表默认 padding/margin 重置。 */
   .task-artifacts-list {
-    @apply space-y-0.5;
+    @apply m-0 list-none p-0;
+  }
+
+  .task-artifact-shell {
+    @apply my-1;
   }
 
   .task-artifact {
@@ -1667,10 +1753,6 @@
   opacity: 0.45;
 }
 
-.conversation-result-drawer.conversation-chat-drawer .conversation-result-drawer__body {
-  @apply overflow-hidden p-0;
-}
-
 .conversation-result-drawer__body .conversation-chat-drawer-shell {
   height: 100%;
 }
@@ -1741,8 +1823,10 @@
 
 /* 结果视图在 body 内按内容高度自然排布；滚动由 drawer body 负责，避免 h-full 再叠一层百分比。 */
 .conversation-result-view {
-  @apply flex min-h-0 flex-col gap-4;
+  @apply flex min-h-0 flex-col;
+  gap: 28px;
   height: auto;
+  padding-right: 8px;
   transform-origin: center top;
   transition:
     opacity 420ms cubic-bezier(0.33, 0, 0.2, 1),
@@ -1782,6 +1866,10 @@
   }
 }
 
+.conversation-result-view__header {
+  padding-right: 32px;
+}
+
 .conversation-result-view__kicker {
   @apply text-[11px] font-medium uppercase tracking-wide;
   color: var(--za-text-muted);
@@ -1793,24 +1881,179 @@
 }
 
 .conversation-result-view__meta {
-  @apply m-0 mt-1 text-xs;
+  @apply m-0 mt-1.5 text-xs;
   color: var(--za-text-muted);
-}
-
-.conversation-result-view__section {
-  @apply rounded-2xl border p-3;
-  border-color: var(--za-line);
-  background: color-mix(in srgb, var(--za-surface-0) 92%, var(--za-text) 4%);
-}
-
-.conversation-result-view__section--grow {
-  @apply flex min-h-0 flex-col;
-  flex: 0 0 auto;
 }
 
 .conversation-result-view__section-title {
-  @apply mb-2 text-xs font-semibold;
+  @apply mb-3 text-[11px] font-semibold tracking-wide;
   color: var(--za-text-muted);
+}
+
+.conversation-result-view__criteria-block,
+.conversation-result-view__artifacts,
+.conversation-result-view__checks-block,
+.conversation-result-view__hesitations,
+.conversation-result-view__basis,
+.conversation-result-view__diff {
+  min-width: 0;
+}
+
+.conversation-result-view__site-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.conversation-result-view__site-action {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.conversation-result-view__diff-text {
+  @apply m-0 min-w-0;
+}
+
+.conversation-result-view__auth {
+  @apply m-0 mb-4 text-sm;
+  color: var(--za-text);
+}
+
+.conversation-result-view__section-title--sub {
+  margin-top: 8px;
+}
+
+.conversation-result-view__basis-list {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__basis-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--za-line);
+}
+
+.conversation-result-view__basis-item:last-child {
+  border-bottom: 0;
+}
+
+.conversation-result-view__basis-kind {
+  flex: none;
+  min-width: 2.5rem;
+  font-size: 11px;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__basis-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.conversation-result-view__basis-body em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__artifact-list {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__criteria {
+  @apply m-0 list-none p-0;
+}
+
+.conversation-result-view__criterion {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--za-line);
+  color: var(--za-text);
+}
+
+.conversation-result-view__criterion:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.conversation-result-view__criterion:first-child {
+  padding-top: 2px;
+}
+
+.conversation-result-view__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.conversation-result-view__criterion.is-passed .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--state-success, #2f8f5b) 16%, transparent);
+  color: var(--state-success, #2f8f5b);
+}
+
+.conversation-result-view__criterion.is-failed .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--state-danger, #c0392b) 14%, transparent);
+  color: var(--state-danger, #c0392b);
+}
+
+.conversation-result-view__criterion.is-pending .conversation-result-view__mark {
+  background: color-mix(in srgb, var(--za-text-muted) 12%, transparent);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__criterion-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conversation-result-view__criterion-title {
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.conversation-result-view__ref {
+  font-size: 11px;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__criterion-body em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__thread > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.conversation-result-view__thread > summary::-webkit-details-marker {
+  display: none;
 }
 
 .conversation-result-view__checks {
@@ -1898,12 +2141,21 @@
 .conversation-result-drawer__footer {
   /* 三区中的独立底部操作区：与 body 滚动区分开，贴 source 底边。 */
   @apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;
+  flex-wrap: wrap;
   margin-top: auto;
   margin-bottom: 0;
   border-top: 1px solid var(--za-line);
   background: var(--za-surface-0);
   /* 与 panel 同色底，避免底部缝隙露出不同层的 vibrancy/scrim */
   flex-shrink: 0;
+}
+
+.conversation-result-drawer__gate {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--za-warn, #c0392b);
 }
 
 .conversation-result-view__continue {
@@ -1926,79 +2178,6 @@
   background: color-mix(in srgb, #3f9a6f 18%, transparent);
   color: #2f7a57;
 }
-
-.task-details-view {
-  @apply flex flex-col gap-6 p-5;
-}
-
-.task-details-view__header {
-  @apply border-b pb-5;
-  border-color: var(--za-line);
-}
-
-.task-details-view__header > span {
-  @apply text-[11px] font-semibold uppercase tracking-[0.14em];
-  color: var(--za-accent);
-}
-
-.task-details-view__header h2 {
-  @apply mt-1 text-xl font-semibold;
-  color: var(--za-text);
-}
-
-.task-details-view__header p,
-.task-details-view__muted,
-.task-details-view__empty p,
-.task-details-plan p {
-  @apply mt-1 text-sm leading-relaxed;
-  color: var(--za-text-soft);
-}
-
-.task-details-view__section {
-  @apply flex flex-col gap-3;
-}
-
-.task-details-view__section h3 {
-  @apply text-xs font-semibold uppercase tracking-[0.12em];
-  color: var(--za-text-muted);
-}
-
-.task-details-view__empty,
-.task-details-plan {
-  @apply rounded-xl border p-4;
-  border-color: var(--za-line);
-  background: var(--za-surface-0);
-}
-
-.task-details-view__empty strong,
-.task-details-plan__heading strong {
-  color: var(--za-text);
-}
-
-.task-details-view__history {
-  @apply flex flex-col gap-3;
-}
-
-.task-details-plan__heading {
-  @apply flex items-start justify-between gap-3;
-}
-
-.task-details-plan__heading span {
-  @apply rounded-full px-2 py-0.5 text-[10px] font-medium uppercase;
-  background: color-mix(in srgb, var(--za-accent) 10%, transparent);
-  color: var(--za-accent);
-}
-
-.task-details-plan__progress {
-  @apply mt-3 flex items-center gap-3 text-xs;
-  color: var(--za-text-muted);
-}
-
-.task-details-plan__progress progress {
-  @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-full;
-  accent-color: var(--za-accent);
-}
-
 
 /* 讨论区降级：次于行动权三桶 */
 .task-overview-section--discussion {

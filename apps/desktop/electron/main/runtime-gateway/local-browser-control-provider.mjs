@@ -7,7 +7,9 @@ import {
   getActiveBrowserEntry,
   waitForActiveBrowserEntry,
 } from './browser-control-registry.mjs';
+import { createHeadlessBrowserManager } from './browser-control-headless.mjs';
 
+const electronModule = electron;
 const { webContents: electronWebContents } = electron;
 
 /**
@@ -158,8 +160,21 @@ export function createLocalBrowserControlProvider({
   resolveWebContents = (id) => electronWebContents.fromId(id),
   ensureBrowserReady = null,
   browserReadyTimeoutMs = 2_500,
+  // 后台静默浏览器支持：面板未打开时降级执行的 headless 会话管理器。
+  // 传 false 显式禁用（保持旧行为）；默认在 electron 环境可用时惰性创建。
+  headlessManager = undefined,
 } = {}) {
   const store = artifactStore ?? createBrowserArtifactStore({ userDataPath });
+  let headless = headlessManager === false ? null : headlessManager ?? null;
+  if (!headless && headlessManager !== false) {
+    try {
+      // 惰性加载：测试环境（无真实 electron BrowserWindow）注入失败则保持 null，
+      // resolveTarget 自动退回旧的"必须有可见面板"语义。
+      headless = createHeadlessBrowserManager({ electron: electronModule });
+    } catch {
+      headless = null;
+    }
+  }
 
   function resolveRegisteredTarget(conversationId) {
     const entry = getActiveBrowserEntry(conversationId);
@@ -179,15 +194,40 @@ export function createLocalBrowserControlProvider({
     // 可见 Browser 工具必须先确保当前 Conversation 的工作现场已展开。BrowserView
     // 为保留网页 Session 会持续 mounted，因此 Registry 有 entry 不代表用户看得见面板。
     // reveal ack 后再解析/等待同会话 WebContents，保持可见语义与控制目标一致。
+    //
+    // 注意：reveal 是「尽力而为」，失败不阻断——面板未打开时降级到 headless 执行
+    // （执行不依赖展示层）。
     await ensureBrowserReady?.({
       conversationId,
       focus: false,
       timeoutMs: browserReadyTimeoutMs,
-    });
+    }).catch(() => { /* 尽力 reveal：面板不在时由 headless 降级接住 */ });
     const immediate = resolveRegisteredTarget(conversationId);
     if (immediate.ok) return immediate;
-    await waitForActiveBrowserEntry(conversationId, { timeoutMs: browserReadyTimeoutMs });
-    return resolveRegisteredTarget(conversationId);
+    await waitForActiveBrowserEntry(conversationId, { timeoutMs: browserReadyTimeoutMs }).catch(() => null);
+    const registered = resolveRegisteredTarget(conversationId);
+    if (registered.ok) return registered;
+
+    // 降级路径：会话没有可见浏览器（面板未打开/已关闭），在后台静默创建
+    // headless WebContents 继续执行。headless entry 复用 registry，可见面板
+    // 之后注册时会自动接管 active 槽位。
+    if (headless) {
+      const ensured = await headless.ensureHeadlessBrowserEntry(conversationId);
+      if (ensured.ok) {
+        const wc = resolveWebContents(ensured.webContentsId);
+        if (wc && !(typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
+          return {
+            ok: true,
+            id: ensured.webContentsId,
+            wc,
+            entry: getActiveBrowserEntry(conversationId),
+            conversationId,
+            headless: true,
+          };
+        }
+      }
+    }
+    return registered;
   }
 
   function failed({ call, locale, reason, status = 'failed', dataLevel = 'D2_sensitive' }) {
@@ -258,14 +298,41 @@ export function createLocalBrowserControlProvider({
           },
         };
       } catch (err) {
-        return failed({
+        // 尽力而为：面板 reveal 失败（面板未挂载/超时）不再阻断——降级为
+        // 「后台模式」成功返回。可见面板不是浏览器工具执行的前置条件。
+        // 若 headless 可用则顺手预热，后续 navigate 等操作直接在后台执行。
+        let headlessEnsured = null;
+        if (headless) {
+          headlessEnsured = await headless.ensureHeadlessBrowserEntry(conversationId).catch(() => null);
+        }
+        return {
           call,
-          locale,
-          reason: zh
-            ? `无法打开 Browser 工作现场：${err?.message ?? String(err)}`
-            : `Unable to open the Browser workspace: ${err?.message ?? String(err)}`,
-          dataLevel: 'D1_internal',
-        });
+          permissionGrant: createPermissionGrant({
+            toolCallId: call.toolCallId,
+            granted: true,
+            scope: { kind: 'browser-panel', conversationId, ...(headlessEnsured?.ok ? { headless: true } : {}) },
+          }),
+          result: {
+            toolCallId: call.toolCallId,
+            status: 'success',
+            output: JSON.stringify({
+              status: 'background',
+              conversationId,
+              visible: false,
+              focused: false,
+              headless: Boolean(headlessEnsured?.ok),
+              note: zh
+                ? '面板未能展示（可能未挂载），已在后台准备浏览器会话；工具调用将继续在后台执行。'
+                : 'Panel could not be shown; a background browser session is prepared. Tool calls will continue headlessly.',
+            }),
+            dataLevel: 'D1_internal',
+            evidence: {
+              summary: `Browser workspace reveal failed (${err?.message ?? String(err)}); degraded to headless for conversation ${conversationId}`,
+              source: 'local.browser.control',
+              observedAt: nowIso(),
+            },
+          },
+        };
       }
     }
 
@@ -303,7 +370,10 @@ export function createLocalBrowserControlProvider({
 
     const activeEntry = getActiveBrowserEntry(context?.toolContext?.conversationId ?? null);
     const host = capabilityId === NAVIGATE ? hostOf(String(args?.url ?? '')) : hostOf(activeEntry?.url ?? '');
-    const scope = { kind: 'browser-control', capabilityId, host };
+    // headless 语义标注：active entry 是 hidden 时，授权 scope 与提示语显式携带
+    // 「后台执行」信息，保持 PermissionGrant 可审计（A 级铁律：grant 必须反映真实执行语义）。
+    const isHiddenTarget = activeEntry?.hidden === true;
+    const scope = { kind: 'browser-control', capabilityId, host, ...(isHiddenTarget ? { headless: true } : {}) };
 
     // 授权：导航类复用联网授权语义；点击/输入/截图/读DOM 在已授权的可见浏览器上执行。
     let permissionGrant = createPermissionGrant({ toolCallId: call.toolCallId, granted: true, scope });
@@ -339,14 +409,14 @@ export function createLocalBrowserControlProvider({
       }
     }
 
-    // 解析目标 WebContents（用户眼前那个可见 webview）。
+    // 解析目标 WebContents：优先会话的可见 webview；面板未打开时降级 headless。
     const target = await resolveTarget(context);
     if (!target.ok) {
       const reason =
         target.reason === 'no_active_browser'
           ? zh
-            ? '未检测到可见的内嵌浏览器，请先打开「浏览器」面板并加载一个网页。'
-            : 'No visible in-app browser detected. Open the Browser panel and load a page first.'
+            ? '未检测到可用的内嵌浏览器（面板未打开且后台浏览器不可用），请重试或打开「浏览器」面板。'
+            : 'No usable in-app browser detected (panel closed and headless fallback unavailable). Retry or open the Browser panel.'
           : zh
             ? '内嵌浏览器已不可用（可能已关闭）。'
             : 'The in-app browser is no longer available (it may have been closed).';
@@ -357,6 +427,7 @@ export function createLocalBrowserControlProvider({
     const targetIdentity = {
       conversationId: target.entry?.conversationId ?? target.conversationId,
       browserTabId: target.entry?.browserTabId ?? null,
+      ...(target.headless ? { headless: true } : {}),
     };
     const startedAt = nowIso();
 

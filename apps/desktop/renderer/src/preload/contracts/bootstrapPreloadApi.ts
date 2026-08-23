@@ -451,6 +451,27 @@ export interface BootstrapPreloadApi {
      */
     readonly resolvedFrom?: string;
   }>;
+  readonly gitDiffRange: (params: {
+    readonly workspaceRoot: string;
+    readonly fromRef: string;
+    readonly toRef?: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'ok' | 'no_changes' | 'not_git_repo' | 'invalid_ref' | 'error';
+    readonly diffText: string;
+    readonly error?: string;
+    readonly fromRef?: string;
+    readonly toRef?: string | null;
+  }>;
+  readonly gitListBranches: (params: {
+    readonly workspaceRoot: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly branches: readonly string[];
+    readonly current: string | null;
+    readonly repoRoot?: string;
+    readonly error?: string;
+  }>;
   /**
    * 校验给定路径是否对应磁盘上真实存在的文件，供渲染层判断聊天消息中的「路径样式文本」
    * 是否为真实文件引用（而非 git 分支名/仓库名/版本号等）。
@@ -889,6 +910,7 @@ export interface BootstrapPreloadApi {
       name: string;
       addedAt: string;
       linkedFolders?: readonly { path: string; name: string }[];
+      baseBranch?: string;
     }[];
     activeWorkspace: string | null;
   }>;
@@ -912,6 +934,7 @@ export interface BootstrapPreloadApi {
     path: string;
     name?: string;
     linkedFolders?: readonly { path: string; name?: string }[];
+    baseBranch?: string | null;
   }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceAddLinkedFolder: (params: { path: string }) => Promise<{
     ok: boolean;
@@ -1040,6 +1063,28 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansIsolate: (params: { planId: string }) => Promise<{
+    ok: boolean;
+    plan: GoalPlan | null;
+    reason?: string;
+  }>;
+  readonly goalPlansOpenSite: (params: {
+    planId: string;
+    mode?: 'reveal' | 'editor';
+  }) => Promise<{ ok: boolean; path?: string; reason?: string }>;
+  readonly goalPlansDiscardLine: (params: {
+    planId: string;
+    deleteBranch?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    plan: GoalPlan | null;
+    reason?: string;
+  }>;
+  readonly goalPlansExportEvidence: (params: { planId: string }) => Promise<{
+    ok: boolean;
+    path?: string;
+    reason?: string;
+  }>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
   /**

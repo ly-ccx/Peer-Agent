@@ -630,7 +630,7 @@ function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentP
         </div>
       );
     }
-    return <DiffViewer diffText={result.diffText} />;
+    return <DiffViewer diffText={result.diffText} showFileHeaders={false} />;
   };
 
   return (

@@ -227,7 +227,23 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
 
   // Seed the chat model with the selected Desktop-projected provider. Later model
   // switches resolve through the same sharedProvider seam in getProvider below.
-  const provider = sharedMetadata ? sharedProvider(modelConfig.providerId) : undefined;
+  // Environment credentials (PEER_MODEL_API_KEY, the keychain-less CLI path) build
+  // an openai-compatible provider directly from the env source.
+  const environmentSelection = modelConfig.source === 'environment'
+    ? modelConfig.credentials?.environmentCredential?.('openai-compatible')
+    : null;
+  const provider = sharedMetadata
+    ? sharedProvider(modelConfig.providerId)
+    : environmentSelection
+      ? createOpenAICompatibleProvider({
+        config: {
+          providerId: 'openai-compatible',
+          apiKey: environmentSelection.apiKey,
+          baseUrl: environmentSelection.baseUrl ?? 'https://api.openai.com/v1',
+        },
+        fetch: providerFetch,
+      })
+      : undefined;
 
   const preferredCatalogEntry = modelConfig.catalog.find((entry) => (
     entry.providerId === modelConfig.providerId

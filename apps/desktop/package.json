@@ -1,7 +1,7 @@
 {
   "name": "@peer-agent/desktop",
   "version": "0.0.6",
-  "description": "Peer Agent Desktop - AI Agent OS for Enterprise",
+  "description": "Peer Agent Desktop - local-first Task Flow Agent",
   "author": "Peer Agent Team <dev@peer-agent.local>",
   "private": true,
   "type": "module",
@@ -42,6 +42,7 @@
     "highlight.js": "^11.11.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "thinking-orbs": "^0.3.1",
     "vite": "^7.2.4",
     "yaml": "^2.9.0"
   },

@@ -46,3 +46,12 @@ test('root renderer wraps App with AppErrorBoundary', () => {
   assert.match(mainTsx, /AppErrorBoundary/);
   assert.match(mainTsx, /<AppErrorBoundary>/);
 });
+
+test('error boundary reload button pairs fill with contrasting ink', () => {
+  const src = readFileSync(join(here, 'AppErrorBoundary.tsx'), 'utf8');
+  // 全局 button { text-inherit } 会继承页面字色；暗色下 --graphite-base 是浅色，
+  // 不能再写死白底却不设 color，否则变成白底白字。
+  assert.doesNotMatch(src, /background:\s*['"]#fff['"]/);
+  assert.match(src, /background:\s*['"]var\(--graphite-base/);
+  assert.match(src, /color:\s*['"]var\(--za-accent-ink/);
+});

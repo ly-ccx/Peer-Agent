@@ -1,5 +1,5 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   packWorkStreamColumns,
   shouldPackWorkStream,
@@ -42,6 +42,13 @@ export function WorkStream<T = TaskOverviewItem>({
   const offsetsRef = useRef<FlipOffsets | null>(null);
   const widthRef = useRef(0);
   const rafRef = useRef(0);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const resolveKeyRef = useRef(resolveKey);
+  resolveKeyRef.current = resolveKey;
+  const layoutKey = items
+    .map((item) => `${resolveKey(item)}:${resolveWeight(item)}`)
+    .join('\0');
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -71,8 +78,10 @@ export function WorkStream<T = TaskOverviewItem>({
    * key 配对 —— React 跨列搬移会销毁重建 DOM 节点，元素身份不可靠，key 才是
    * 「同一张卡」的稳定真源。渲染结构已知：列的第 i 个子元素就是 columns[c][i]。
    */
-  const measureOffsets = (node: HTMLElement): FlipOffsets => {
+  const measureOffsets = useCallback((node: HTMLElement): FlipOffsets => {
     const offsets: FlipOffsets = new Map();
+    const currentItems = itemsRef.current;
+    const currentKeyOf = resolveKeyRef.current;
     if (columns) {
       const columnNodes = node.querySelectorAll<HTMLElement>(':scope > *');
       columns.forEach((column, columnIndex) => {
@@ -82,21 +91,21 @@ export function WorkStream<T = TaskOverviewItem>({
         column.forEach((item, itemIndex) => {
           const el = kids[itemIndex];
           if (el instanceof HTMLElement) {
-            offsets.set(resolveKey(item), { top: el.offsetTop, left: el.offsetLeft, el });
+            offsets.set(currentKeyOf(item), { top: el.offsetTop, left: el.offsetLeft, el });
           }
         });
       });
     } else {
       const kids = node.children;
-      items.forEach((item, index) => {
+      currentItems.forEach((item, index) => {
         const el = kids[index];
         if (el instanceof HTMLElement) {
-          offsets.set(resolveKey(item), { top: el.offsetTop, left: el.offsetLeft, el });
+          offsets.set(currentKeyOf(item), { top: el.offsetTop, left: el.offsetLeft, el });
         }
       });
     }
     return offsets;
-  };
+  }, [columns, layoutKey]);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -139,7 +148,7 @@ export function WorkStream<T = TaskOverviewItem>({
       rafRef.current = requestAnimationFrame(tick);
     }
     return () => cancelAnimationFrame(rafRef.current);
-  });
+  }, [columnCount, layoutKey, measureOffsets]);
 
   if (!columns) {
     return (

@@ -1,6 +1,6 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement, ReactNode, Ref } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
@@ -15,11 +15,14 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
+import { snapshotDeliveryLine } from '../state/taskBoundBranch';
+import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
 import { formatDuration } from '../state/format';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
+import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './goal/SuccessCriteriaEditor';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
@@ -153,6 +156,14 @@ interface GoalPlanPanelProps {
    * docked 灯条被点击。当面板已迁到 Workbench 时，由上层负责展开 Workbench 并切到 Goal tab。
    */
   readonly onRequestHostFocus?: () => void;
+  /**
+   * 当前活动计划的交付线快照。用于输入栏展示绑定分支；无绑定则报 null。
+   * 表达层只读，不把隔离/分支真值放进 renderer state。
+   */
+  readonly onActiveDeliveryChange?: (line: {
+    readonly targetBranch: string | null;
+    readonly taskBranch: string | null;
+  } | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -819,7 +830,15 @@ function criterionKindLabel(kind: GoalSuccessCriterion['kind'], isZh: boolean): 
   return isZh ? zh[kind] : en[kind];
 }
 
-function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): ReactElement {
+function GoalContractSection({
+  plan,
+  isZh,
+  editorRef,
+}: {
+  plan: GoalPlan;
+  isZh: boolean;
+  editorRef?: Ref<SuccessCriteriaEditorHandle>;
+}): ReactElement {
   const criteria = Array.isArray(plan.successCriteria) ? plan.successCriteria : [];
   const results = new Map(
     (Array.isArray(plan.criterionResults) ? plan.criterionResults : [])
@@ -827,6 +846,7 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
   );
   const inScopeCount = Array.isArray(plan.boundaries?.inScope) ? plan.boundaries.inScope.length : 0;
   const outOfScopeCount = Array.isArray(plan.boundaries?.outOfScope) ? plan.boundaries.outOfScope.length : 0;
+  const editable = plan.status === 'awaiting_approval';
 
   return (
     <section className="goal-projection goal-projection--goal" aria-label={isZh ? '目标契约' : 'Goal contract'}>
@@ -848,7 +868,9 @@ function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }):
           {isZh ? '尚未写入目标描述' : 'No goal description recorded yet'}
         </p>
       )}
-      {criteria.length > 0 ? (
+      {editable ? (
+        <SuccessCriteriaEditor ref={editorRef} plan={plan} isZh={isZh} />
+      ) : criteria.length > 0 ? (
         <ul className="goal-criteria-list">
           {criteria.map((criterion) => {
             const result = results.get(criterion.id);
@@ -1468,6 +1490,68 @@ function ExplorerItem({
   );
 }
 
+function hasDeliveryTarget(plan: GoalPlan): boolean {
+  const binding = plan.deliveryBinding;
+  if (!binding?.targetBranch || !binding.targetBranchSource) return false;
+  if (plan.activation?.kind === 'intake') return false;
+  return Boolean(binding.targetWorkspacePath || plan.targetWorkspacePath);
+}
+
+function isIsolatedPlan(plan: GoalPlan): boolean {
+  return plan.deliveryBinding?.executionIsolation === 'worktree'
+    && Boolean(plan.deliveryBinding.worktreePath?.trim());
+}
+
+function hasTaskLine(plan: GoalPlan): boolean {
+  return Boolean(plan.deliveryBinding?.taskBranch?.trim() || plan.deliveryBinding?.worktreePath?.trim());
+}
+
+async function confirmDiscardAfterStop(
+  confirm: (options: {
+    title?: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    tone?: 'default' | 'danger';
+  }) => Promise<boolean>,
+  plan: GoalPlan,
+  isZh: boolean,
+): Promise<void> {
+  if (!hasTaskLine(plan)) return;
+  const ok = await confirm({
+    title: isZh ? '删除这条线？' : 'Discard this line?',
+    message: isZh
+      ? '推进已经停了。也可以继续删除隔离目录和未合入的任务分支；已合入的提交不会被抹掉。'
+      : 'Advancing has stopped. You can also remove the isolated worktree and any unmerged task branch. Merged commits stay.',
+    confirmText: isZh ? '删除这条线' : 'Discard line',
+    cancelText: isZh ? '只停推进' : 'Stop only',
+    tone: 'danger',
+  });
+  if (!ok) return;
+  await clientApi.goalPlansDiscardLine({ planId: plan.planId, deleteBranch: true });
+}
+
+function isolateReasonCopy(reason: string | undefined, isZh: boolean): string {
+  switch (reason) {
+    case 'task_checkout_dirty':
+      return isZh
+        ? '任务分支正被主工作区占用，且还有未提交改动。先提交或收拾干净再隔离。'
+        : 'The task branch is checked out in the main workspace with uncommitted changes.';
+    case 'switch_base_failed':
+      return isZh ? '无法切回源头分支，隔离没有继续。' : 'Could not switch back to the source branch.';
+    case 'worktree_add_failed':
+      return isZh ? '创建隔离目录失败。' : 'Failed to create the isolated worktree.';
+    case 'workspace_unusable':
+      return isZh ? '目标仓库现在不可用。' : 'The target repository is not usable right now.';
+    case 'terminal':
+      return isZh ? '已经结束的任务不能再升级为隔离线。' : 'A finished task cannot be isolated.';
+    case 'no_delivery_target':
+      return isZh ? '这条任务还没有绑定交付目标。' : 'This task has no delivery target yet.';
+    default:
+      return isZh ? '隔离没有完成。' : 'Isolation did not finish.';
+  }
+}
+
 interface CompactApprovalBarProps {
   readonly plan: GoalPlan;
   readonly isZh: boolean;
@@ -1523,6 +1607,7 @@ interface PlanCardProps {
   readonly childPlans?: readonly GoalPlan[];
   readonly onNavigateToPlan?: (planId: string, taskId?: string) => void;
   readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
     plan: GoalPlan,
@@ -1547,6 +1632,7 @@ const PlanCard = memo(function PlanCard({
   childPlans = EMPTY_CHILD_PLANS,
   onNavigateToPlan,
   onNextAction,
+  criteriaEditorRef,
   onRunnerControl,
   onManualConfirm,
 }: PlanCardProps): ReactElement {
@@ -1567,6 +1653,70 @@ const PlanCard = memo(function PlanCard({
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
   const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
+  const confirm = useConfirm();
+  const [lineBusy, setLineBusy] = useState(false);
+  const [lineError, setLineError] = useState<string | null>(null);
+  const isolated = isIsolatedPlan(plan);
+  const canIsolate = hasDeliveryTarget(plan)
+    && !isolated
+    && plan.status !== 'completed'
+    && plan.status !== 'cancelled'
+    && plan.status !== 'failed';
+  const canOpenSite = hasDeliveryTarget(plan) || isolated;
+  const canDiscardLine = hasTaskLine(plan) && plan.status !== 'executing';
+  const lineDisabled = busy || isStreaming || lineBusy;
+
+  const isolateLine = useCallback(async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansIsolate({ planId: plan.planId });
+      if (result && result.ok === false) {
+        setLineError(isolateReasonCopy(result.reason, isZh));
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [isZh, plan.planId]);
+
+  const openSite = useCallback(async (mode: 'reveal' | 'editor') => {
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansOpenSite({ planId: plan.planId, mode });
+      if (result && result.ok === false) {
+        setLineError(isZh ? '打不开这条任务的现场。' : 'Could not open the task site.');
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    }
+  }, [isZh, plan.planId]);
+
+  const discardLine = useCallback(async () => {
+    const ok = await confirm({
+      title: isZh ? '删除这条线' : 'Discard this line',
+      message: isZh
+        ? '将删除隔离目录；若任务分支还没合入，也会删掉本地分支。已合入的提交不会被抹掉。'
+        : 'This removes the isolated worktree and, if it is still unmerged, the local task branch. Merged commits stay.',
+      confirmText: isZh ? '删除这条线' : 'Discard line',
+      cancelText: isZh ? '再想想' : 'Keep it',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const result = await clientApi.goalPlansDiscardLine({ planId: plan.planId, deleteBranch: true });
+      if (result && result.ok === false) {
+        setLineError(isolateReasonCopy(result.reason, isZh));
+      }
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [confirm, isZh, plan.planId]);
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1655,6 +1805,51 @@ const PlanCard = memo(function PlanCard({
               ) : null}
             </div>
           ) : null}
+          {canIsolate || canOpenSite || canDiscardLine ? (
+            <div className="goal-plan-delivery-actions">
+              {canIsolate ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-action"
+                  disabled={lineDisabled}
+                  onClick={() => void isolateLine()}
+                >
+                  {isZh ? '隔离执行' : 'Isolate'}
+                </button>
+              ) : null}
+              {canOpenSite ? (
+                <>
+                  <button
+                    type="button"
+                    className="goal-plan-delivery-action"
+                    disabled={lineDisabled}
+                    onClick={() => void openSite('reveal')}
+                  >
+                    {isZh ? '打开现场' : 'Reveal site'}
+                  </button>
+                  <button
+                    type="button"
+                    className="goal-plan-delivery-action"
+                    disabled={lineDisabled}
+                    onClick={() => void openSite('editor')}
+                  >
+                    {isZh ? '在编辑器打开' : 'Open in editor'}
+                  </button>
+                </>
+              ) : null}
+              {canDiscardLine ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-action goal-plan-delivery-action--danger"
+                  disabled={lineDisabled}
+                  onClick={() => void discardLine()}
+                >
+                  {isZh ? '删除这条线' : 'Discard line'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {lineError ? <p className="goal-plan-delivery-error">{lineError}</p> : null}
           {parentPlan ? (
             <div className="goal-plan-origin" data-goal-plan-origin>
               <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>
@@ -1673,7 +1868,7 @@ const PlanCard = memo(function PlanCard({
               {nextStepCopy.guidance}
             </div>
           ) : null}
-          <GoalContractSection plan={plan} isZh={isZh} />
+          <GoalContractSection plan={plan} isZh={isZh} editorRef={criteriaEditorRef} />
           <PlanProjectionSection
             plan={plan}
             progress={progress}
@@ -1706,7 +1901,8 @@ const PlanCard = memo(function PlanCard({
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange }: GoalPlanPanelProps): ReactElement | null {
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1722,6 +1918,13 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // - reload（goalPlans:changed 广播）路径：若基线为 0 且新数量 > 0，判定为本会话内真正新建，触发一次。
   // 切换会话时一并重置为 0（见下方 load effect），避免跨会话的脏基线导致误判。
   const prevPlanCountRef = useRef<number>(0);
+  const criteriaEditorsRef = useRef(new Map<string, SuccessCriteriaEditorHandle>());
+  const bindCriteriaEditor = useCallback((planId: string): Ref<SuccessCriteriaEditorHandle> => (
+    (handle) => {
+      if (handle) criteriaEditorsRef.current.set(planId, handle);
+      else criteriaEditorsRef.current.delete(planId);
+    }
+  ), []);
 
   // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
   // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
@@ -1916,6 +2119,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           await clientApi.goalRunnerResume({ planId: plan.planId });
         } else {
           await clientApi.goalRunnerClear({ planId: plan.planId });
+          await confirmDiscardAfterStop(confirm, plan, isZh);
         }
         await reload({ mode: 'silent' });
       } catch (err) {
@@ -1924,7 +2128,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         setBusyPlanId(null);
       }
     },
-    [reload, isZh],
+    [confirm, reload, isZh],
   );
 
   const recordManualDodConfirmation = useCallback(
@@ -1977,6 +2181,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         return;
       }
       if (plan.status === 'awaiting_approval') {
+        const saved = await criteriaEditorsRef.current.get(plan.planId)?.flush();
+        if (saved === false) return;
         await decide(plan, action === 'start' ? 'approve' : 'reject');
         return;
       }
@@ -1989,6 +2195,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         } else {
           // 与工作台一致：clear 才会真正停 runner / 后续流式，不能只写 cancelled 状态。
           await clientApi.goalRunnerClear({ planId: plan.planId });
+          await confirmDiscardAfterStop(confirm, plan, isZh);
         }
         await reload({ mode: 'silent' });
       } catch (err) {
@@ -1997,7 +2204,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         setBusyPlanId(null);
       }
     },
-    [decide, interactionActions, isZh, onRequestHostFocus, reload],
+    [confirm, decide, interactionActions, isZh, onRequestHostFocus, reload],
   );
 
   // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）
@@ -2084,6 +2291,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     const orderedListPlans = orderGoalPlansByLineage(listPlans);
     return { activePlan, mainPlan, listPlans, orderedListPlans, relations };
   }, [plans]);
+
+  useEffect(() => {
+    onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
+  }, [onActiveDeliveryChange, planViewModel.activePlan]);
 
   const navigateToPlan = useCallback((planId: string, taskId?: string) => {
     const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);
@@ -2237,6 +2448,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           {...relationFor(mainPlan)}
           onNavigateToPlan={navigateToPlan}
           onNextAction={handleNextAction}
+          criteriaEditorRef={bindCriteriaEditor(mainPlan.planId)}
           onRunnerControl={controlRunner}
           onManualConfirm={recordManualDodConfirmation}
         />
@@ -2263,6 +2475,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               {...relationFor(plan)}
               onNavigateToPlan={navigateToPlan}
               onNextAction={handleNextAction}
+              criteriaEditorRef={bindCriteriaEditor(plan.planId)}
               onRunnerControl={controlRunner}
               onManualConfirm={recordManualDodConfirmation}
             />

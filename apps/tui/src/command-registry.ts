@@ -59,7 +59,7 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   },
   { id: 'skill', label: 'Skills', description: 'Browse, enable, disable, refresh, insert, or invoke Skills', keywords: ['capability', 'manage'], action: { type: 'open-skill-picker' } },
   { id: 'mcp', label: 'MCP Servers', description: 'Manage MCP Servers and inspect tool status', keywords: ['server', 'tools', 'capability'], action: { type: 'open-mcp-picker' } },
-  { id: 'new', label: 'New session', description: 'Start a fresh empty session and return to the home screen', keywords: ['session', 'home', 'fresh', 'reset', 'create'], shortcut: 'Ctrl+X N', action: { type: 'new-session' } },
+  { id: 'new', label: 'New task', description: 'Start a fresh empty task and return to the home screen', keywords: ['session', 'task', 'home', 'fresh', 'reset', 'create'], shortcut: 'Ctrl+X N', action: { type: 'new-session' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
   {
@@ -184,7 +184,7 @@ export function buildTuiHelpSections(
         'Shift+Enter  newline',
         'Ctrl+C  cancel stream / clear draft / quit',
         'Ctrl+X then M/O/P  model / mode / permissions',
-        'Ctrl+X then N  new session',
+        'Ctrl+X then N  new task',
         'Ctrl+X then L  resume session',
         'Ctrl+X then 1/2/3  Agent / Plan / Goal',
         'Drag to select chat text to auto-copy (Ctrl/Cmd+C still works)',

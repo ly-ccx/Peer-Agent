@@ -15,7 +15,7 @@ export type ConversationListResponse<T> =
 /**
  * Keep the list and its pagination metadata in one normalized result.
  * A legacy array response cannot prove that another page exists, so it must not
- * make the sidebar offer a speculative "Load more" action.
+ * keep fetching later pages in the background.
  */
 export function normalizeConversationListPage<T>(
   response: ConversationListResponse<T>,
@@ -37,7 +37,7 @@ export function normalizeConversationListPage<T>(
   };
 }
 
-export function shouldShowConversationLoadMore(params: {
+export function shouldContinueConversationList(params: {
   readonly conversationCount: number;
   readonly hasMore: boolean;
   readonly nextCursor?: string | null;

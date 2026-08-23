@@ -215,6 +215,113 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
+  function isSafeGitRef(value) {
+    if (typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > 255) return false;
+    if (trimmed.startsWith('-') || /\s/.test(trimmed) || trimmed.includes('..') || trimmed.includes(':')) {
+      return false;
+    }
+    return /^[A-Za-z0-9._/@~^+-]+$/.test(trimmed);
+  }
+
+  async function resolveRepoRoot(workspaceRoot) {
+    if (!workspaceRoot || typeof workspaceRoot !== 'string') return null;
+    const normalized = path.normalize(workspaceRoot);
+    if (!path.isAbsolute(normalized) || !pathExists(normalized)) return null;
+    try {
+      const { stdout } = await executeGit(
+        normalized,
+        ['rev-parse', '--show-toplevel'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      const repoRoot = stdout.trim();
+      return repoRoot || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function getGitRangeDiff({ workspaceRoot, fromRef, toRef } = {}) {
+    if (!isSafeGitRef(fromRef)) {
+      return { ok: false, status: 'invalid_ref', diffText: '', error: 'invalid_ref' };
+    }
+    const endRef = typeof toRef === 'string' && toRef.trim() ? toRef.trim() : null;
+    if (endRef && !isSafeGitRef(endRef)) {
+      return { ok: false, status: 'invalid_ref', diffText: '', error: 'invalid_ref' };
+    }
+    const repoRoot = await resolveRepoRoot(workspaceRoot);
+    if (!repoRoot) {
+      return { ok: false, status: 'not_git_repo', diffText: '', error: 'not_a_git_repository' };
+    }
+    const args = endRef
+      ? ['diff', '--no-color', fromRef.trim(), endRef]
+      : ['diff', '--no-color', fromRef.trim()];
+    try {
+      const { stdout } = await executeGit(repoRoot, args, { maxBuffer: 1024 * 1024 * 32 });
+      const diffText = stdout || '';
+      return {
+        ok: true,
+        status: diffText.trim() ? 'ok' : 'no_changes',
+        diffText,
+        fromRef: fromRef.trim(),
+        toRef: endRef,
+      };
+    } catch (error) {
+      if (error && typeof error.stdout === 'string' && error.stdout.length > 0) {
+        return {
+          ok: true,
+          status: 'ok',
+          diffText: error.stdout,
+          fromRef: fromRef.trim(),
+          toRef: endRef,
+        };
+      }
+      return {
+        ok: false,
+        status: 'error',
+        diffText: '',
+        error: error?.message || String(error),
+        fromRef: fromRef.trim(),
+        toRef: endRef,
+      };
+    }
+  }
+
+  async function listGitBranches({ workspaceRoot } = {}) {
+    const repoRoot = await resolveRepoRoot(workspaceRoot);
+    if (!repoRoot) {
+      return { ok: false, branches: [], current: null, error: 'not_a_git_repository' };
+    }
+    try {
+      const { stdout: currentOut } = await executeGit(
+        repoRoot,
+        ['branch', '--show-current'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      const { stdout: listOut } = await executeGit(
+        repoRoot,
+        ['branch', '--format=%(refname:short)'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      const current = currentOut.trim() || null;
+      const branches = [...new Set(
+        String(listOut || '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean),
+      )];
+      return { ok: true, branches, current, repoRoot };
+    } catch (error) {
+      return {
+        ok: false,
+        branches: [],
+        current: null,
+        error: error?.message || String(error),
+      };
+    }
+  }
+
   function exists({ absPath, workspaceRoot, relPath } = {}) {
     try {
       if (!absPath || typeof absPath !== 'string') return { exists: false };
@@ -636,6 +743,8 @@ export function createFileAccessApplicationService(options = {}) {
 
   return Object.freeze({
     getGitDiff,
+    getGitRangeDiff,
+    listGitBranches,
     exists,
     readDirectory,
     watchDirectories,

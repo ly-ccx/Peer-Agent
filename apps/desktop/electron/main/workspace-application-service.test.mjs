@@ -25,9 +25,15 @@ function createHarness(overrides = {}) {
       calls.push(['merge', structuredClone(patch)]);
       Object.assign(state, patch);
     },
-    listConversations: (options) => {
-      calls.push(['list-conversations', options]);
-      return conversations;
+    deleteConversationsByWorkspace: (workspacePath) => {
+      calls.push(['delete-conversations', workspacePath]);
+      const removed = conversations.filter(
+        (conversation) => conversation.workspacePath === workspacePath,
+      );
+      for (const conversation of removed) {
+        conversations.splice(conversations.indexOf(conversation), 1);
+      }
+      return removed;
     },
     pathExists: (candidate) => existingPaths.has(candidate),
     basename: (candidate) => candidate.split('/').filter(Boolean).at(-1) || '/',
@@ -57,17 +63,40 @@ function createHarness(overrides = {}) {
   };
 }
 
-test('lists configured and existing discovered workspaces once', () => {
+test('lists only manually configured workspaces without conversation auto-discovery', () => {
   const { service, calls } = createHarness();
 
   assert.deepEqual(service.listWorkspaces(), {
     workspaces: [
       { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
-      { path: '/discovered', name: 'discovered', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] },
     ],
     activeWorkspace: '/configured',
   });
-  assert.deepEqual(calls, [['list-conversations', { includeMessageCount: false }]]);
+  // 侧栏不再从会话自动发现注入工作区（/discovered 即便存在也不出现）。
+  assert.deepEqual(calls, []);
+});
+
+test('removeWorkspace deletes conversations under the workspace', () => {
+  const harness = createHarness({
+    workspaces: [
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
+      { path: '/discovered', name: 'discovered', addedAt: '1970-01-01T00:00:00.000Z' },
+    ],
+  });
+
+  const result = harness.service.removeWorkspace('/discovered');
+  assert.equal(result.activeWorkspace, '/configured');
+  assert.equal(result.removedConversations, 1);
+  assert.ok(
+    harness.calls.some(([name, arg]) => name === 'delete-conversations' && arg === '/discovered'),
+  );
+
+  // 删除后 listWorkspaces 不再出现该工作区（不会话自动发现注入）。
+  const listed = harness.service.listWorkspaces();
+  assert.deepEqual(
+    listed.workspaces.map((workspace) => workspace.path),
+    ['/configured'],
+  );
 });
 
 test('reuses an existing active workspace without persistence or synchronization', () => {
@@ -176,6 +205,7 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
   assert.deepEqual(harness.service.removeWorkspace('/other'), {
     workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
     activeWorkspace: null,
+    removedConversations: 0,
   });
   assert.deepEqual(harness.calls, [
     ['merge', { activeWorkspace: '/other' }],
@@ -185,6 +215,7 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
       workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
       activeWorkspace: null,
     }],
+    ['delete-conversations', '/other'],
     ['skill-workspace', null],
   ]);
 });
@@ -265,6 +296,47 @@ test('stores, updates, and promotes linked folders without merging two projects'
     },
   });
   assert.equal(harness.state.activeWorkspace, '/code');
+});
+
+test('stores workspace baseBranch without inventing main, and switching it does not rewrite other fields', () => {
+  const harness = createHarness({
+    workspaces: [
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
+    ],
+  });
+
+  assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, undefined);
+  assert.deepEqual(harness.service.updateWorkspace({
+    path: '/configured',
+    baseBranch: 'develop',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Configured',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [],
+      baseBranch: 'develop',
+    },
+  });
+  assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, 'develop');
+  assert.deepEqual(harness.service.updateWorkspace({
+    path: '/configured',
+    name: 'Knowledge',
+  }), {
+    ok: true,
+    workspace: {
+      path: '/configured',
+      name: 'Knowledge',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      linkedFolders: [],
+      baseBranch: 'develop',
+    },
+  });
+  assert.equal(harness.service.updateWorkspace({
+    path: '/configured',
+    baseBranch: '   ',
+  }).workspace.baseBranch, undefined);
 });
 
 test('returns project metadata with basename fallback', () => {

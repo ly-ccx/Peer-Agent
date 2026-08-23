@@ -149,6 +149,28 @@ test('context snapshot is shared while revision and model still match', () => {
   }
 });
 
+test('context snapshot keeps presentation usage breakdown across reload', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'usage breakdown' });
+    store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
+    const usageBreakdown = {
+      version: 1,
+      quality: 'scaled',
+      estimatedTokens: 19_500,
+      categories: [
+        { id: 'system_prompt', tokens: 1_200 },
+        { id: 'conversation', tokens: 18_300 },
+      ],
+    };
+    store.updateContextSnapshot(conv.id, accountingSnapshot({ usageBreakdown }));
+    assert.deepEqual(store.getConversation(conv.id).contextSnapshot.usageBreakdown, usageBreakdown);
+  } finally {
+    cleanup();
+  }
+});
+
 test('context snapshot sidecar survives an older client clearing the index field', () => {
   const { store, dir, cleanup } = freshStore();
   try {

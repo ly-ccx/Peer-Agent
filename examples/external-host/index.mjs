@@ -7,8 +7,8 @@
  *   pnpm --filter @peer-agent/runtime-sdk build
  *   cd examples/external-host && npm install && npm start
  *
- * Or after packages are on npm (same VERSION as product, e.g. 0.0.1-beta.41):
- *   npm install @peer-agent/runtime-sdk@0.0.1-beta.41
+ * Or after packages are on npm (same VERSION as product):
+ *   npm install @peer-agent/runtime-sdk
  *   node index.mjs
  *
  * This example must NOT import Electron, apps/desktop, or @peer-agent/cli.
@@ -20,10 +20,57 @@ import {
   createRuntimeSdk,
   createRuntimeSessionController,
 } from '@peer-agent/runtime-sdk';
-import { createCapabilityProviderRegistry } from '@peer-agent/runtime-core';
+import {
+  createCapabilityProviderRegistry,
+  createEvidenceExportDocument,
+} from '@peer-agent/runtime-core';
 
 assert.equal(typeof RUNTIME_EVENT_PROTOCOL_VERSION, 'number');
 assert.equal(typeof createCapabilityProviderRegistry, 'function');
+
+function echoProvider(summary) {
+  return {
+    providerId: 'local.example',
+    capabilityIds: ['local.example.echo'],
+    async execute(request) {
+      return {
+        toolCallId: request.toolCall.toolCallId,
+        capabilityId: request.capabilityId,
+        status: 'completed',
+        outputPreview: { text: request.input?.text, summary },
+        evidence: {
+          evidenceId: `evidence:${request.toolCall.toolCallId}`,
+          summary,
+        },
+      };
+    },
+  };
+}
+
+const registry = createCapabilityProviderRegistry([echoProvider('before replace')]);
+registry.replace(echoProvider('after replace'));
+const providerResult = await registry.execute({
+  capabilityId: 'local.example.echo',
+  input: { text: 'hello open runtime' },
+  toolCall: {
+    toolCallId: 'tool-1',
+    capabilityId: 'local.example.echo',
+    input: { text: 'hello open runtime' },
+  },
+}, { runId: 'external-host-session' });
+assert.equal(providerResult.status, 'completed');
+assert.equal(providerResult.evidence.summary, 'after replace');
+
+const evidenceExport = createEvidenceExportDocument({
+  source: {
+    toolCallId: 'tool-1',
+    capabilityId: 'local.example.echo',
+  },
+  summary: providerResult.evidence.summary,
+  refs: ['tool-result://tool-1'],
+});
+assert.equal(evidenceExport.kind, 'peer.evidence.export');
+assert.deepEqual(evidenceExport.refs, ['tool-result://tool-1']);
 
 // Host supplies environment-specific execution. The open runtime owns ordering,
 // session/turn lifecycle, and event emission — not filesystem/network/UI.
@@ -105,6 +152,9 @@ console.log(
     {
       ok: true,
       runtimeEventProtocol: RUNTIME_EVENT_PROTOCOL_VERSION,
+      replacedProviderSummary: providerResult.evidence.summary,
+      evidenceExportKind: evidenceExport.kind,
+      evidenceExportRefs: evidenceExport.refs,
       toolResultStatus: execution.result.status,
       sessionStatus: session.status,
       pipelineStatus: pipelineResult.status,

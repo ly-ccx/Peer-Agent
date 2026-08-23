@@ -29,6 +29,7 @@ import {
   projectConversation,
   projectGoalPlan,
   projectShellBackgroundTask,
+  reuseUnchangedTaskOverviewItems,
 } from '@peer-agent/protocol';
 import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
 
@@ -1033,6 +1034,9 @@ export function createTaskOverviewAggregator({
   ) {
     throw new TypeError('automationStore.listDefinitions/listRuns must be functions');
   }
+
+  /** 按查询范围缓存投影，避免不同 workspace / conversation 的 list 相互复用。 */
+  const previousItemsByQuery = new Map();
   // listShellTasks / listProviders 可选：localToolHost 或 llmConfig 尚未就绪时静默跳过。
 
   /**
@@ -1062,6 +1066,18 @@ export function createTaskOverviewAggregator({
       ? Math.floor(query.limit)
       : DEFAULT_HOME_LIMIT;
     const nowMs = Date.now();
+    const resultReadyLimit =
+      Number.isFinite(query?.resultReadyLimit) && query.resultReadyLimit > 0
+        ? Math.floor(query.resultReadyLimit)
+        : DEFAULT_RESULT_READY_LIMIT;
+    const queryKey = JSON.stringify({
+      workspacePath,
+      conversationId,
+      includeTerminal,
+      activeWithinMs,
+      limit,
+      resultReadyLimit,
+    });
     // 每轮列表重建一次目录索引，避免把 UUID 直接甩到卡片上。
     const providerIndex =
       typeof listProviders === 'function'
@@ -1272,13 +1288,13 @@ export function createTaskOverviewAggregator({
     const sorted = sortTaskOverview(scopedItems);
     // 分桶截断（2026-08-14 修复）：result_ready 单独配额，不再挤占
     // peer_advancing / discussion 的空间；其余桶共享 limit。
-    return capTaskOverviewByBucket(
-      sorted,
-      limit,
-      Number.isFinite(query?.resultReadyLimit) && query.resultReadyLimit > 0
-        ? Math.floor(query.resultReadyLimit)
-        : DEFAULT_RESULT_READY_LIMIT,
-    );
+    const capped = capTaskOverviewByBucket(sorted, limit, resultReadyLimit);
+    // 首页无 conversationId 时只能整表重拉。按 taskId 复用未变卡片，
+    // 一路流式/秒数更新不会把其余推进卡一起换成新对象。
+    const previousItems = previousItemsByQuery.get(queryKey) ?? [];
+    const reusedItems = reuseUnchangedTaskOverviewItems(previousItems, capped);
+    previousItemsByQuery.set(queryKey, reusedItems);
+    return reusedItems;
   }
 
   function markTasksRead(params = {}) {

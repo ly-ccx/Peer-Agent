@@ -10,7 +10,7 @@ import test from 'node:test';
  *
  * 保证：
  * 1. 渲染路径引用共享分组模块（groupResultCardsByGoalThread）；
- * 2. thread 组卡内渲染 ThreadList，确认验收遍历同线全部待签项；
+ * 2. thread 组卡内渲染 ThreadList，打开依据页时带上同线待签项；
  * 3. single 组（无 rootPlanId 旧数据）走原 InboxRow 平铺路径，不套树；
  * 4. 待验收计数 = 分组后的组数（N 张同线卡算 1 项）。
  */
@@ -34,11 +34,10 @@ test('总工作台：thread 组卡内渲染同级 Goal 列表并带上同线待�
   assert.match(source, /threadNodes=\{group\.nodes\}/);
   assert.match(source, /threadPendingCount=\{group\.pendingCount\}/);
   assert.match(source, /<ThreadList nodes=\{threadNodes\}/);
-  // 确认验收一次签完同线全部待签项（与区级 0bfe454 行为对齐）。
+  // 打开依据页带上 acceptTogether，归档时一次签完同线待签项。
   assert.match(source, /collectPendingAcceptanceItems\(/);
-  assert.match(source, /for \(const pending of collectPendingAcceptanceItems\(/);
-  // 打开抽屉也带上 acceptTogether。
   assert.match(source, /acceptTogether: collectPendingAcceptanceItems\(/);
+  assert.doesNotMatch(source, /for \(const pending of collectPendingAcceptanceItems\(/);
 });
 
 test('总工作台：single 组保持原 InboxRow 平铺路径（旧数据兼容）', async () => {

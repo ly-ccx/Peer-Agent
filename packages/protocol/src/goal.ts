@@ -93,6 +93,7 @@ export function formatGoalDeliveryRoute(
   const repoId = input.deliveryBinding?.repoId?.trim() || input.targetRepoId?.trim() || undefined;
   const target = repoId || targetPath;
   const branch = input.deliveryBinding?.targetBranch?.trim() || input.targetBranch?.trim() || undefined;
+  const taskBranch = input.deliveryBinding?.taskBranch?.trim() || undefined;
   const isolation = input.deliveryBinding?.executionIsolation ?? input.executionIsolation;
   const parts: string[] = [];
   if (origin && target && origin !== target) {
@@ -103,7 +104,9 @@ export function formatGoalDeliveryRoute(
   } else if (origin) {
     parts.push(origin);
   }
-  if (branch) {
+  if (taskBranch && branch) {
+    parts.push(`${taskBranch} · from ${branch}`);
+  } else if (branch) {
     parts.push(branch);
   } else if (target || origin) {
     parts.push(locale === 'zh' ? '目标分支未确认' : 'target branch unconfirmed');
@@ -150,7 +153,7 @@ function handoffStoppedReasonLabel(
 }
 
 /**
- * 用户可见的交回状态。没隔离或没验收时不展示。
+ * 用户可见的交回状态。没交付线或没验收时不展示。
  */
 export function formatGoalDeliveryHandoff(
   input: {
@@ -163,7 +166,9 @@ export function formatGoalDeliveryHandoff(
   const locale = options?.locale === 'en' ? 'en' : 'zh';
   const acceptedAt = input.resultAcceptance?.acceptedAt;
   if (typeof acceptedAt !== 'string' || !acceptedAt.trim()) return undefined;
-  if (input.deliveryBinding?.executionIsolation !== 'worktree') return undefined;
+  const hasTaskLine = Boolean(input.deliveryBinding?.taskBranch?.trim());
+  const isolated = input.deliveryBinding?.executionIsolation === 'worktree';
+  if (!hasTaskLine && !isolated) return undefined;
   const handoff = input.deliveryHandoff;
   if (!handoff?.status || handoff.status === 'idle') return undefined;
   const target = handoffTargetLabel(handoff);

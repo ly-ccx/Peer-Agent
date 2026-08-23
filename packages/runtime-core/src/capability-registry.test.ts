@@ -62,6 +62,54 @@ test('registry routes capability prefixes', () => {
   assert.equal(registry.getProvider('mcp__server__tool')?.providerId, 'mcp');
 });
 
+test('registry replace swaps a live provider without rebuilding the registry', async () => {
+  const registry = createCapabilityProviderRegistry([createProvider()]);
+  registry.replace(createProvider({
+    async execute(request) {
+      return {
+        toolCallId: request.toolCall.toolCallId,
+        capabilityId: request.capabilityId,
+        status: 'completed',
+        outputPreview: { swapped: true },
+      };
+    },
+  }));
+
+  assert.deepEqual(registry.listProviderIds(), ['local.test']);
+  const result = await registry.execute(
+    {
+      capabilityId: 'local.test.echo',
+      input: { message: 'hello' },
+      toolCall: {
+        toolCallId: 'call_2',
+        capabilityId: 'local.test.echo',
+        input: { message: 'hello' },
+      },
+    },
+    context,
+  );
+  assert.deepEqual(result.outputPreview, { swapped: true });
+});
+
+test('registry unregister drops prefix routing and allows a later register', () => {
+  const registry = createCapabilityProviderRegistry([
+    createProvider({
+      providerId: 'mcp',
+      capabilityIds: undefined,
+      capabilityPrefix: 'mcp__',
+    }),
+  ]);
+  assert.equal(registry.unregister('mcp'), true);
+  assert.equal(registry.hasCapability('mcp__server__tool'), false);
+  assert.equal(registry.unregister('missing'), false);
+  registry.register(createProvider({
+    providerId: 'mcp',
+    capabilityIds: undefined,
+    capabilityPrefix: 'mcp__',
+  }));
+  assert.equal(registry.getProvider('mcp__server__tool')?.providerId, 'mcp');
+});
+
 test('registry rejects duplicate provider and capability ids', () => {
   assert.throws(
     () => createCapabilityProviderRegistry([createProvider(), createProvider()]),

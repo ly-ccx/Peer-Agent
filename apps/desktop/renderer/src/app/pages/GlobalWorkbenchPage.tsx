@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import { ThinkingOrb } from 'thinking-orbs';
+import { prefersReducedMotion } from '../hooks/useMotionPresence';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { collectPendingAcceptanceItems } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
@@ -360,17 +362,6 @@ export function GlobalWorkbenchPage({
                                 : undefined,
                             )
                           }
-                          onAccept={
-                            onAcceptResult && group.latest.item.source === 'goal_plan'
-                              ? () => {
-                                  for (const pending of collectPendingAcceptanceItems(
-                                    group.items.map((threadEntry) => threadEntry.item),
-                                  )) {
-                                    void handleAccept(pending);
-                                  }
-                                }
-                              : undefined
-                          }
                         />
                       </div>
                     ) : (
@@ -380,13 +371,6 @@ export function GlobalWorkbenchPage({
                         kind="accept"
                         phase={group.phase}
                         onOpen={() => handleOpenItem(group.item)}
-                        onAccept={
-                          onAcceptResult && group.item.source === 'goal_plan'
-                            ? () => {
-                                void handleAccept(group.item);
-                              }
-                            : undefined
-                        }
                       />
                     ),
                   )}
@@ -420,7 +404,14 @@ export function GlobalWorkbenchPage({
                       className="gwb-run-row"
                       onClick={() => handleOpenItem(item)}
                     >
-                      <span className="gwb-run-dot" aria-hidden="true" />
+                      <span className="gwb-run-dot" aria-hidden="true">
+                        <ThinkingOrb
+                          state="weaving"
+                          size={20}
+                          aria-label="Peer 正在推进"
+                          paused={prefersReducedMotion()}
+                        />
+                      </span>
                       <span className="gwb-run-copy">
                         <span className="gwb-run-title">{item.title}</span>
                         <span className="gwb-run-sub">
@@ -520,7 +511,6 @@ function InboxRow({
   kind,
   phase = null,
   onOpen,
-  onAccept,
   threadNodes,
   threadPendingCount,
   onOpenThreadNode,
@@ -529,7 +519,6 @@ function InboxRow({
   readonly kind: 'need' | 'accept';
   readonly phase?: AcceptancePhase | null;
   readonly onOpen: () => void;
-  readonly onAccept?: () => void;
   readonly threadNodes?: readonly ThreadListNode[];
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
@@ -566,11 +555,11 @@ function InboxRow({
 
   const cta =
     kind === 'accept'
-      ? phase == null
-        ? '确认验收'
-        : submitting
-          ? '正在交回…'
-          : '已验收 ✓'
+      ? submitting
+        ? '正在交回…'
+        : celebrating
+          ? '已归档 ✓'
+          : '查看进度'
       : item.actionLabel || '去处理';
 
   const durationLabel =
@@ -624,32 +613,16 @@ function InboxRow({
           ) : null}
         </div>
         <div className="gwb-actions">
-          {kind === 'accept' && onAccept ? (
-            <>
-              <button
-                type="button"
-                className="gwb-btn gwb-btn-ghost"
-                onClick={onOpen}
-                disabled={acceptBusy}
-              >
-                查看
-              </button>
-              <button
-                type="button"
-                className="gwb-btn gwb-btn-primary"
-                onClick={onAccept}
-                disabled={acceptBusy}
-              >
-                {submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
-                <ActionLabel label={cta} />
-              </button>
-            </>
-          ) : (
-            <button type="button" className="gwb-btn gwb-btn-primary" onClick={onOpen}>
-              <ActionLabel label={cta} />
-              {item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
-            </button>
-          )}
+          <button
+            type="button"
+            className="gwb-btn gwb-btn-primary"
+            onClick={onOpen}
+            disabled={kind === 'accept' && acceptBusy}
+          >
+            {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
+            <ActionLabel label={cta} />
+            {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
+          </button>
         </div>
       </div>
       {kind === 'accept' ? (

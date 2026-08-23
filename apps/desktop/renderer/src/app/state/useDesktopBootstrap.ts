@@ -68,7 +68,6 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
         const [workspaceInfo, conversationPage] = await Promise.all([
           directory.activeWorkspace ? clientApi.workspaceInfo({ path: directory.activeWorkspace }) : Promise.resolve(null),
           clientApi.conversationsList({
-            workspacePath: directory.activeWorkspace,
             status: 'active',
             limit: CONVERSATION_LIST_PAGE_SIZE,
             paginated: true,

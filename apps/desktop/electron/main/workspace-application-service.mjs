@@ -28,10 +28,14 @@ function normalizeLinkedFolders(folders, primaryPath, basename) {
   return result;
 }
 
+function normalizeBaseBranch(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function projectWorkspace(workspace, basename) {
   const path = normalizePath(workspace?.path);
   if (!path) return null;
-  return {
+  const projected = {
     path,
     name: typeof workspace?.name === 'string' && workspace.name.trim()
       ? workspace.name.trim()
@@ -39,12 +43,14 @@ function projectWorkspace(workspace, basename) {
     addedAt: typeof workspace?.addedAt === 'string' ? workspace.addedAt : new Date(0).toISOString(),
     linkedFolders: normalizeLinkedFolders(workspace?.linkedFolders, path, basename),
   };
+  const baseBranch = normalizeBaseBranch(workspace?.baseBranch);
+  if (baseBranch) projected.baseBranch = baseBranch;
+  return projected;
 }
 
 export function createWorkspaceApplicationService(options = {}) {
   const getSettings = assertFunction(options.getSettings, 'getSettings');
   const mergeSettings = assertFunction(options.mergeSettings, 'mergeSettings');
-  const listConversations = assertFunction(options.listConversations, 'listConversations');
   const pathExists = assertFunction(options.pathExists, 'pathExists');
   const basename = assertFunction(options.basename, 'basename');
   const getDefaultWorkspacePath = assertFunction(
@@ -59,6 +65,9 @@ export function createWorkspaceApplicationService(options = {}) {
   );
   const setSkillWorkspacePath = optionalFunction(options.setSkillWorkspacePath);
   const readProjectIndex = assertFunction(options.readProjectIndex, 'readProjectIndex');
+  const deleteConversationsByWorkspace = typeof options.deleteConversationsByWorkspace === 'function'
+    ? options.deleteConversationsByWorkspace
+    : null;
   const nowIso = options.nowIso ?? (() => new Date().toISOString());
 
   function configuredWorkspaces() {
@@ -74,25 +83,12 @@ export function createWorkspaceApplicationService(options = {}) {
 
   function listWorkspaces() {
     const all = getSettings();
+    // 侧栏只显示手动添加的工作区：移除后不再被会话自动发现重新注入。
+    // （会话与工作区的关联改由 removeWorkspace 同步清理。）
     const configured = configuredWorkspaces();
-    const knownPaths = new Set(configured.map((workspace) => workspace.path));
-    const discovered = listConversations({ includeMessageCount: false })
-      .map((conversation) => conversation.workspacePath)
-      .filter((workspacePath) => typeof workspacePath === 'string' && pathExists(workspacePath))
-      .filter((workspacePath) => {
-        if (knownPaths.has(workspacePath)) return false;
-        knownPaths.add(workspacePath);
-        return true;
-      })
-      .map((workspacePath) => ({
-        path: workspacePath,
-        name: basename(workspacePath),
-        addedAt: new Date(0).toISOString(),
-        linkedFolders: [],
-      }));
 
     return {
-      workspaces: [...configured, ...discovered],
+      workspaces: configured,
       activeWorkspace: all.activeWorkspace || null,
     };
   }
@@ -178,12 +174,19 @@ export function createWorkspaceApplicationService(options = {}) {
       ? null
       : all.activeWorkspace;
     mergeSettings({ workspaces, activeWorkspace });
+    // 同步删除该工作区下的全部会话（含 automation 会话的 origin 归属），
+    // 避免已移除工作区被侧栏自动发现或托盘「最近会话」重新捞出。
+    let removedConversations = 0;
+    if (deleteConversationsByWorkspace) {
+      const removed = deleteConversationsByWorkspace(workspacePath);
+      removedConversations = Array.isArray(removed) ? removed.length : 0;
+    }
     // Preserve the existing Desktop behavior: removal updates the Skill fallback only.
     setSkillWorkspacePath(activeWorkspace || null);
-    return { workspaces, activeWorkspace };
+    return { workspaces, activeWorkspace, removedConversations };
   }
 
-  function updateWorkspace({ path, name, linkedFolders } = {}) {
+  function updateWorkspace({ path, name, linkedFolders, baseBranch } = {}) {
     const target = normalizePath(path);
     if (!target) return { ok: false, reason: 'missing-path' };
     const workspaces = configuredWorkspaces();
@@ -194,7 +197,13 @@ export function createWorkspaceApplicationService(options = {}) {
     const nextLinked = linkedFolders === undefined
       ? current.linkedFolders
       : normalizeLinkedFolders(linkedFolders, current.path, basename);
-    workspaces[index] = { ...current, name: nextName, linkedFolders: nextLinked };
+    const nextBase = baseBranch === undefined
+      ? normalizeBaseBranch(current.baseBranch)
+      : normalizeBaseBranch(baseBranch);
+    const next = { ...current, name: nextName, linkedFolders: nextLinked };
+    if (nextBase) next.baseBranch = nextBase;
+    else delete next.baseBranch;
+    workspaces[index] = next;
     mergeSettings({ workspaces });
     return { ok: true, workspace: workspaces[index] };
   }

@@ -54,10 +54,17 @@
   box-shadow: none;
   /* 常态不画分隔线；拖拽反馈由 resizer 自身表达。 */
   border-right: none;
+  /* 顶部 40px 是 macOS 交通灯预留：仅 darwin 保留（见下方 :root[data-os] 门控）。 */
   padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+/* 非 darwin（Windows/Linux）hiddenInset 窗口没有系统交通灯，
+   顶部预留只会成为死空白：收成与全屏一致的 12px。 */
+:root:not([data-os='darwin']) .app-sidebar {
+  padding-top: var(--space-3, 12px);
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -253,7 +260,7 @@
 .sidebar-workspace-tree-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   min-height: 0;
   flex: 1;
   overflow-x: hidden;
@@ -266,20 +273,50 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .sidebar-workspace-row {
   position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 48px;
-  padding: 8px 10px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 8px 3px 4px;
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   cursor: pointer;
   transition: background var(--za-motion-fast);
   outline: none;
+}
+
+.sidebar-workspace-chevron-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--graphite-fade);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sidebar-workspace-chevron-btn:hover {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
+.sidebar-workspace-task-count {
+  flex-shrink: 0;
+  min-width: 1.1em;
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--graphite-fade);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .sidebar-workspace-row:hover {
@@ -296,13 +333,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #1f1f1f;
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -310,14 +347,16 @@
 
 .sidebar-workspace-meta {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   min-width: 0;
   flex: 1;
-  gap: 1px;
+  gap: 6px;
 }
 
 .sidebar-workspace-name {
-  font-size: 0.82rem;
+  flex: 0 1 auto;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--graphite-base);
   overflow: hidden;
@@ -326,7 +365,9 @@
 }
 
 .sidebar-workspace-path {
-  font-size: 0.68rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.62rem;
   color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -352,17 +393,41 @@
   --motion-ripple-peak: 1;
 }
 
-/* Nested workbench / conversation list under a workspace is intentionally removed.
-   Clicking the workspace row itself activates the workspace and opens the workbench. */
+.sidebar-workspace-row--static {
+  cursor: default;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.sidebar-workspace-row--static:hover {
+  background: transparent;
+}
+
+.sidebar-workspace-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 6px 6px;
+}
+
+.sidebar-workspace-tasks.channel-conversation-list .conversation-row {
+  --sidebar-conv-row-pad-x: 4px;
+  padding: 3px 8px 3px var(--sidebar-conv-row-pad-x);
+}
+
+.sidebar-workspace-tasks.channel-conversation-list .conversation-row:hover,
+.sidebar-workspace-tasks.channel-conversation-list .conversation-row:focus-within {
+  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
+}
 
 .sidebar-workspace-add {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  min-height: 36px;
-  margin-top: 4px;
-  padding: 8px 10px;
+  min-height: 28px;
+  margin-top: 2px;
+  padding: 4px 8px;
   border: 1px dashed var(--chrome-hairline);
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   background: transparent;
@@ -455,9 +520,17 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 
-/* 工作台的聚合运行状态是导航项的尾随信息，不属于标题内容。 */
-.sidebar-top .sidebar-automation-nav > .ws-running-dot {
+/* 工作台计数是导航项的尾随信息；运行点跟在计数后面。 */
+.sidebar-top .sidebar-automation-nav > .sidebar-workbench-counts {
   margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--graphite-mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sidebar-top .sidebar-automation-nav > .ws-running-dot {
+  margin-left: 6px;
 }
 
 .sidebar-top .sidebar-automation-nav:hover,
@@ -489,46 +562,8 @@
   padding: var(--space-8) var(--space-2);
 }
 
-/* ── Load more conversations ── */
-.sidebar-load-more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(100% - 4px);
-  margin: 6px 2px 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--za-line, rgba(0, 0, 0, 0.08));
-  border-radius: 10px;
-  background: transparent;
-  color: var(--pa-text-secondary, var(--graphite-soft));
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 500;
-  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
-}
-
-.sidebar-load-more:hover:not(:disabled) {
-  background: var(--za-sidebar-active-bg);
-  border-color: transparent;
-  color: var(--graphite-base);
-}
-
-.sidebar-load-more:active:not(:disabled) {
-  background: var(--za-sidebar-thread-active-bg);
-}
-
-.sidebar-load-more:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.sidebar-load-more:focus-visible {
-  outline: 2px solid var(--za-accent, #5b8def);
-  outline-offset: 1px;
-}
-
 .channel-conversation-list .conversation-row {
+  --sidebar-conv-row-pad-x: var(--space-3);
   --sidebar-conv-leading-gutter: calc(18px + var(--space-1));
   position: relative;
   display: flex;
@@ -537,7 +572,8 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  padding: 5px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
   /* Match right panel / goal list card radius so left/right no longer feel split. */
   border-radius: var(--ui-radius-panel, var(--radius-lg));
@@ -554,7 +590,7 @@
 }
 .channel-conversation-list .conversation-row:hover,
 .channel-conversation-list .conversation-row:focus-within {
-  padding-left: calc(var(--space-3) + var(--sidebar-conv-leading-gutter));
+  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
 }
 .channel-conversation-list .conversation-row:hover {
   background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
@@ -944,7 +980,7 @@
 .sidebar-conv-pin-leading {
   position: absolute;
   top: 50%;
-  left: var(--space-3);
+  left: var(--sidebar-conv-row-pad-x, var(--space-3));
   z-index: 2;
   opacity: 0;
   pointer-events: none;

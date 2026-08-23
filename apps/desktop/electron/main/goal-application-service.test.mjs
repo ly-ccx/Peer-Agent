@@ -22,6 +22,10 @@ function createHarness(overrides = {}) {
     recordTaskEvidence: port('task-evidence'),
     deletePlan: port('delete'),
     retryHandoff: port('retry-handoff'),
+    isolate: port('isolate'),
+    openSite: port('open-site'),
+    discardLine: port('discard-line'),
+    exportEvidence: port('export-evidence'),
     startRunner: port('start-runner'),
     getRunnerState: port('runner-state'),
     pauseRunner: port('pause-runner'),
@@ -90,6 +94,10 @@ test('goal plan and runner commands preserve payload mapping', () => {
   assert.equal(service.pauseRunner({ planId: 'p' }), 'pause-runner');
   assert.equal(service.resumeRunner(undefined), 'resume-runner');
   assert.equal(service.retryHandoff({ planId: 'p' }), 'retry-handoff');
+  assert.equal(service.isolate({ planId: 'p' }), 'isolate');
+  assert.equal(service.openSite({ planId: 'p', mode: 'editor' }), 'open-site');
+  assert.equal(service.discardLine({ planId: 'p', deleteBranch: true }), 'discard-line');
+  assert.equal(service.exportEvidence({ planId: 'p' }), 'export-evidence');
   assert.equal(service.clearRunner({ planId: 'p' }), 'clear-runner');
 
   assert.deepEqual(calls, [
@@ -105,6 +113,10 @@ test('goal plan and runner commands preserve payload mapping', () => {
     ['pause-runner', 'p'],
     ['resume-runner', undefined, undefined],
     ['retry-handoff', 'p'],
+    ['isolate', 'p'],
+    ['open-site', 'p', { mode: 'editor' }],
+    ['discard-line', 'p', { deleteBranch: true }],
+    ['export-evidence', 'p'],
     ['clear-runner', 'p'],
   ]);
 });

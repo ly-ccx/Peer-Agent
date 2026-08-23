@@ -114,8 +114,8 @@ describe('TUI command localization', () => {
     expect(mcp?.label).toBe('MCP 服务器');
     expect(mcp?.description).toBe('管理 MCP 服务器并查看工具状态');
     const newSession = commands.find((command) => command.id === 'new');
-    expect(newSession?.label).toBe('新会话');
-    expect(newSession?.description).toBe('开启全新空会话并回到首页');
+    expect(newSession?.label).toBe('新任务');
+    expect(newSession?.description).toBe('开启全新空任务并回到首页');
     const history = commands.find((command) => command.id === 'history');
     expect(history?.label).toBe('历史');
     expect(history?.description).toContain('Esc');

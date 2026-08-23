@@ -1,6 +1,7 @@
 import type {
   EvidenceRecord,
   EvidenceRef,
+  RuntimeCapabilityId,
   RuntimeDecision,
   RuntimeJsonObject,
 } from './contracts.ts';
@@ -113,6 +114,72 @@ function isEvidenceObject(value: unknown): value is RuntimeEvidenceObject {
 
 function asReadonlyArray<T = unknown>(value: unknown): readonly T[] {
   return Array.isArray(value) ? value : [];
+}
+
+export const EVIDENCE_EXPORT_KIND = 'peer.evidence.export';
+export const EVIDENCE_EXPORT_SCHEMA_VERSION = 1;
+
+export interface EvidenceExportSource {
+  readonly planId?: string;
+  readonly conversationId?: string;
+  readonly capabilityId?: RuntimeCapabilityId;
+  readonly toolCallId?: string;
+}
+
+export interface CreateEvidenceExportDocumentOptions {
+  readonly exportedAt?: string;
+  readonly source?: EvidenceExportSource;
+  readonly summary?: string;
+  readonly refs?: readonly EvidenceRef[];
+  readonly records?: readonly EvidenceRecord[];
+  readonly metadata?: RuntimeJsonObject;
+}
+
+export interface EvidenceExportDocument {
+  readonly kind: typeof EVIDENCE_EXPORT_KIND;
+  readonly schemaVersion: typeof EVIDENCE_EXPORT_SCHEMA_VERSION;
+  readonly exportedAt: string;
+  readonly source: EvidenceExportSource;
+  readonly summary?: string;
+  readonly refs: readonly EvidenceRef[];
+  readonly records: readonly EvidenceRecord[];
+  readonly metadata?: RuntimeJsonObject;
+}
+
+/**
+ * Pack already-admitted refs and records into a portable JSON document.
+ * This does not scan model output or enlarge the Evidence whitelist.
+ */
+export function createEvidenceExportDocument(
+  options: CreateEvidenceExportDocumentOptions = {},
+): EvidenceExportDocument {
+  const refs: EvidenceRef[] = [];
+  const seen = new Set<string>();
+  for (const ref of options.refs ?? []) {
+    if (typeof ref !== 'string') continue;
+    const trimmed = ref.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    refs.push(trimmed);
+  }
+  const document: EvidenceExportDocument = {
+    kind: EVIDENCE_EXPORT_KIND,
+    schemaVersion: EVIDENCE_EXPORT_SCHEMA_VERSION,
+    exportedAt: options.exportedAt ?? new Date().toISOString(),
+    source: options.source ?? {},
+    refs,
+    records: [...(options.records ?? [])],
+  };
+  const summary = typeof options.summary === 'string' ? options.summary.trim() : '';
+  return {
+    ...document,
+    ...(summary ? { summary } : {}),
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+  };
+}
+
+export function serializeEvidenceExportDocument(document: EvidenceExportDocument): string {
+  return `${JSON.stringify(document, null, 2)}\n`;
 }
 
 export function createEvidenceBundle(

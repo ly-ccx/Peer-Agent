@@ -52,6 +52,10 @@ export interface ChatGptOAuthTokens {
   readonly refresh?: string;
   readonly expires?: number;
   readonly accountId?: string;
+  /** Granted OAuth scopes. Grok freshness checks require `api:access` here. */
+  readonly scope?: string;
+  readonly issuer?: string;
+  readonly clientId?: string;
 }
 
 export interface SharedModelCredentialStore {

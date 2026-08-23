@@ -122,13 +122,19 @@ const INVOKE_CHANNELS = Object.freeze([
   'fs:read-dir',
   'fs:watch-dirs',
   'git:diff',
+  'git:diff-range',
+  'git:list-branches',
   'goalPlans:approve',
   'goalPlans:awaiting-counts',
   'goalPlans:create',
   'goalPlans:delete',
+  'goalPlans:discard-line',
+  'goalPlans:export-evidence',
   'goalPlans:get',
+  'goalPlans:isolate',
   'goalPlans:list',
   'goalPlans:mark-requested-user-input',
+  'goalPlans:open-site',
   'goalPlans:record-manual-confirmation',
   'goalPlans:record-task-evidence',
   'goalPlans:retry-handoff',
@@ -359,6 +365,8 @@ const FILE_ACCESS_CHANNELS = new Set([
   'fs:read-dir',
   'fs:watch-dirs',
   'git:diff',
+  'git:diff-range',
+  'git:list-branches',
 ]);
 
 function ownerFor(channel) {

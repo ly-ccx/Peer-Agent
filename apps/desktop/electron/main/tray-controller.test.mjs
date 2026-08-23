@@ -10,10 +10,10 @@ import {
 } from './tray-controller.mjs';
 
 describe('truncateTrayTitle', () => {
-  it('falls back to 新会话 for empty titles', () => {
-    assert.equal(truncateTrayTitle(''), '新会话');
-    assert.equal(truncateTrayTitle('   '), '新会话');
-    assert.equal(truncateTrayTitle(null), '新会话');
+  it('falls back to 新任务 for empty titles', () => {
+    assert.equal(truncateTrayTitle(''), '新任务');
+    assert.equal(truncateTrayTitle('   '), '新任务');
+    assert.equal(truncateTrayTitle(null), '新任务');
   });
 
   it('truncates long titles with ellipsis', () => {
@@ -60,11 +60,11 @@ describe('buildTrayMenuTemplate', () => {
     });
 
     const labels = template.map((item) => item.label).filter(Boolean);
-    assert.ok(labels.includes('最近会话'));
-    assert.ok(labels.includes('暂无会话'));
+    assert.ok(labels.includes('最近任务'));
+    assert.ok(labels.includes('暂无任务'));
     // 无溢出时不展示「更多」
     assert.equal(labels.includes('更多'), false);
-    assert.ok(labels.includes('新会话'));
+    assert.ok(labels.includes('新任务'));
     assert.ok(labels.includes('打开 Peer Agent'));
     assert.ok(labels.includes('退出 Peer Agent'));
 

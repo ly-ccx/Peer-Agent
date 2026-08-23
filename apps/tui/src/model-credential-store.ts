@@ -30,6 +30,10 @@ export interface CreateTuiSharedModelCredentialStoreOptions {
   readonly buildProfile?: 'debug' | 'release';
 }
 
+function optionalTokenString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 function parseOAuthTokens(raw: string | null): ChatGptOAuthTokens | null {
   if (!raw) return null;
   let parsed: unknown;
@@ -45,15 +49,21 @@ function parseOAuthTokens(raw: string | null): ChatGptOAuthTokens | null {
   if (typeof record.access !== 'string' || !record.access) {
     throw new Error('credential_oauth_tokens_invalid');
   }
+  const refresh = optionalTokenString(record.refresh);
+  const accountId = optionalTokenString(record.accountId);
+  const scope = optionalTokenString(record.scope);
+  const issuer = optionalTokenString(record.issuer);
+  const clientId = optionalTokenString(record.clientId);
   return {
     access: record.access,
-    ...(typeof record.refresh === 'string' ? { refresh: record.refresh } : {}),
+    ...(refresh ? { refresh } : {}),
     ...(typeof record.expires === 'number' && Number.isFinite(record.expires)
       ? { expires: record.expires }
       : {}),
-    ...(typeof record.accountId === 'string' && record.accountId
-      ? { accountId: record.accountId }
-      : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(scope ? { scope } : {}),
+    ...(issuer ? { issuer } : {}),
+    ...(clientId ? { clientId } : {}),
   };
 }
 

@@ -87,6 +87,22 @@ export function createCapabilityProviderRegistry({ providers = [] } = {}) {
     }
   }
 
+  function unregister(providerId) {
+    const existing = providersById.get(providerId);
+    if (!existing) return false;
+    coreRegistry.unregister(providerId);
+    providersById.delete(providerId);
+    for (const capabilityId of existing.capabilityIds ?? []) {
+      explicitCapabilityIds.delete(capabilityId);
+    }
+    return true;
+  }
+
+  function replace(provider) {
+    if (providersById.has(provider.providerId)) unregister(provider.providerId);
+    register(provider);
+  }
+
   function getProvider(capabilityId) {
     const coreProvider = coreRegistry.getProvider(capabilityId);
     if (!coreProvider) {
@@ -114,6 +130,8 @@ export function createCapabilityProviderRegistry({ providers = [] } = {}) {
 
   return {
     register,
+    unregister,
+    replace,
     getProvider,
     execute,
     hasCapability: (capabilityId) => explicitCapabilityIds.has(capabilityId),

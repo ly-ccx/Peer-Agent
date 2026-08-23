@@ -7,6 +7,7 @@ import type { ModelReasoningEffort } from '@peer-agent/runtime-node';
 import { createChatController } from './chat-controller.ts';
 import type { PeerExecOptions } from './cli-argv.ts';
 import { CLI_EXIT, type CliExitCode } from './cli-exit.ts';
+import { collectPlanIds, driveNewGoalPlansToSettled, type ExecGoalDriveOutcome } from './cli-exec-goal.ts';
 import { encodeExecJson, isAuthFailureReason } from './cli-output.ts';
 import { resolveExecCatalogEntry } from './cli-model-ref.ts';
 import { resolveExecToolAllowlist } from './cli-tools.ts';
@@ -200,18 +201,47 @@ export async function runPeerExec(
   };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
+
+  // Goal 自驱闭环：send() 前采集本会话计划基线，send() 后如有新计划则由
+  // 共享 Goal Runner 驱动至终态（详见 cli-exec-goal.ts 模块注释）。
+  const goalBridge = runtime.host.goalBridge;
+  const conversationIdForGoal = () => persistence.getConversationId() ?? undefined;
+  const planIdsBefore = goalBridge
+    ? collectPlanIds(goalBridge, conversationIdForGoal())
+    : new Set<string>();
+
   try {
     const sendResult = await controller.send(prompt, {
       // RuntimePipeline defaults to 64 when maxTurns is omitted.
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
     });
+
+    // 模型在本轮创建了 GoalPlan 且尚未到终态 → exec 进程内驱动到终态/停止态。
+    let goalOutcome: ExecGoalDriveOutcome | null = null;
+    if (goalBridge) {
+      goalOutcome = await driveNewGoalPlansToSettled({
+        bridge: goalBridge,
+        chat: controller,
+        getConversationId: conversationIdForGoal,
+        planIdsBefore,
+      });
+      persistence.syncSnapshot(controller.getSnapshot());
+    }
+
     persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
     const resultText = sendResult.output?.trim() || lastAssistantText(snapshot.messages);
-    const error = sendResult.status === 'completed' || sendResult.status === 'stopped'
+    // Goal 完成时进程语义为成功：send 单轮的 exhausted/误差不应污染 ok/error 字段
+    // （退出码已由 goal 分类决定，JSON 同步对齐）。
+    const goalSucceeded = goalOutcome?.drove && goalOutcome.exitKind === 'ok';
+    const error = goalSucceeded
       ? null
-      : (sendResult.reason || snapshot.error || sendResult.status);
-    const ok = sendResult.status === 'completed' || sendResult.status === 'stopped';
+      : sendResult.status === 'completed' || sendResult.status === 'stopped'
+        ? null
+        : (sendResult.reason || snapshot.error || sendResult.status);
+    const ok = goalSucceeded
+      || sendResult.status === 'completed'
+      || sendResult.status === 'stopped';
     const payload = {
       sessionId: persistence.getConversationId() ?? '',
       ok,
@@ -220,6 +250,7 @@ export async function runPeerExec(
       turns: sendResult.turns,
       durationMs: Date.now() - startedAt,
       ...(snapshot.usage ? { usage: snapshot.usage } : {}),
+      ...(goalOutcome?.report ? { goal: goalOutcome.report } : {}),
     };
 
     if (options.outputFormat === 'json') {
@@ -231,6 +262,14 @@ export async function runPeerExec(
       writeLine(io.stderr, error);
     }
 
+    // Goal 自驱结果的退出码优先级最高：计划终态/停止态是比单轮 send 状态更强的信号
+    // （goal 在 send 轮内完成时，send 可能同时报 exhausted——不应掩盖 goal 的完成）。
+    if (goalOutcome?.drove) {
+      if (goalOutcome.exitKind === 'waiting_user') return CLI_EXIT.waitingUser;
+      if (goalOutcome.exitKind === 'goal_failed') return CLI_EXIT.goalFailed;
+      if (goalOutcome.exitKind === 'ok') return CLI_EXIT.ok;
+      if (goalOutcome.exitKind === 'cancelled') return CLI_EXIT.cancelled;
+    }
     if (sendResult.status === 'exhausted') return CLI_EXIT.maxTurns;
     if (sendResult.status === 'cancelled') return CLI_EXIT.cancelled;
     if (ok) return CLI_EXIT.ok;

@@ -71,12 +71,15 @@ test('context ring renders the shared accounting snapshot without a local fallba
     /contextAccounting\?\.authoritativeInputTokens/,
   );
   assert.match(display, /contextAccounting\?\.percent/);
+  assert.match(display, /contextAccounting\?\.usageBreakdown/);
   assert.match(display, /contextAccounting\?\.counterStatus === 'degraded'/);
   assert.match(display, /Exact count drifted from provider usage/);
+  assert.match(display, /<ContextUsagePanel/);
   assert.doesNotMatch(display, /包含尚未计量的草稿|Includes uncounted draft/);
   assert.doesNotMatch(display, /contextPending\s*\?\s*'\+'\s*:/);
   assert.doesNotMatch(display, /lifetimeUsage|resolveContextOccupancyTokens|estimateDraftTokens/);
   assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);
+  assert.doesNotMatch(display, /composeContextUsageBreakdown|estimateContextTextTokens/);
 });
 
 test('send path does not seed or estimate context occupancy', async () => {
@@ -117,9 +120,33 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   assert.match(composer, /aria-pressed=\{fastMode\}/);
   assert.match(surface, /chatStartTask\(\{[\s\S]*fastMode/);
   assert.match(surface, /chatSend\(\{[^}]*fastMode/);
-  assert.match(surface, /saveComposerEntry\(DRAFT_CONVERSATION_ID,[\s\S]*fastMode: enabled/);
+  assert.match(surface, /persistDraftComposer\(\{ fastMode: enabled \}\)/);
   assert.match(surface, /loadComposerEntry\(composerId\)[\s\S]*fastMode: persisted\?\.fastMode === true/);
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
+});
+
+test('new tasks can opt into worktree isolation from the draft composer', async () => {
+  const [surface, main, service, panel] = await Promise.all([
+    readSource('./ChatSurface.tsx'),
+    readSource('../../../../electron/main/main.mjs'),
+    readSource('../../../../electron/main/llm-chat-service.mjs'),
+    readSource('./GoalPlanPanel.tsx'),
+  ]);
+
+  assert.match(surface, /composer-worktree-toggle/);
+  assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
+  assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
+  assert.match(surface, /isDraftConversation && workspacePath/);
+  assert.match(main, /preferredExecutionIsolation = 'none'/);
+  assert.match(main, /preferredExecutionIsolation,/);
+  assert.match(main, /preparePlanExecutionWorkspace/);
+  assert.match(service, /preparePlanExecutionWorkspace/);
+  assert.match(panel, /goalPlansIsolate/);
+  assert.match(surface, /composer-bound-branch/);
+  assert.match(surface, /formatComposerBoundBranch/);
+  assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
+  assert.match(panel, /onActiveDeliveryChange/);
+  assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
 });
 
 test('external conversation reload replaces or clears the shared accounting snapshot', async () => {
@@ -136,13 +163,16 @@ test('external conversation reload replaces or clears the shared accounting snap
 });
 
 test('unknown restored context renders as unknown, never zero percent', async () => {
-  const display = await readSource('./thread/TokenUsageDisplay.tsx');
+  const [display, panel] = await Promise.all([
+    readSource('./thread/TokenUsageDisplay.tsx'),
+    readSource('./thread/ContextUsagePanel.tsx'),
+  ]);
 
   assert.match(display, /resolveStickyContextDisplay/);
   assert.match(display, /lastKnown/);
   assert.match(display, /const liveCtxPercent =[\s\S]*contextAccounting\?\.percent/);
   assert.match(display, /const ctxPercent = stickyDisplay\.percent/);
-  assert.match(display, /ctxPercent == null \? '\?' : `\$\{Math\.round\(ctxPercent\)\}%`/);
   assert.match(display, /Context pending measurement/);
   assert.match(display, /emptyContext && contextAccounting == null/);
+  assert.match(panel, /percent == null \? '\?' : `\$\{Math\.round\(percent\)\}%`/);
 });

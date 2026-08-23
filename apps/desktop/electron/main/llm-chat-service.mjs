@@ -24,6 +24,7 @@ import { joinSummaryThinkingContent } from './thinking-summary-join.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
 import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import {
   createProviderAttemptStream,
   describeFetchFailure,
@@ -711,6 +712,7 @@ export function createLlmChatService({
   // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
   goalPlanStore = null,
   goalWorktreeAdapter = null,
+  goalTaskBranchAdapter = null,
   // main 注入的 Browser 工作现场 reveal 桥；Agent 工具路径创建 LocalToolHost 时需要它。
   ensureBrowserReady = null,
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
@@ -971,12 +973,23 @@ export function createLlmChatService({
     // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
     const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
     // Agent 默认（chat）与 legacy goal 均可绑定 active Goal 的 target workspace。
-    if ((mode === 'goal' || mode === 'chat') && typeof goalWorktreeAdapter?.prepareForPlan === 'function') {
+    if (mode === 'goal' || mode === 'chat') {
       try {
         const activePlan = typeof goalPlanStore?.getActivePlanByConversation === 'function'
           ? goalPlanStore.getActivePlanByConversation(conversationId)
           : null;
-        if (activePlan) await goalWorktreeAdapter.prepareForPlan(activePlan);
+        if (activePlan) {
+          const conversation = typeof conversationStore?.getConversation === 'function'
+            ? conversationStore.getConversation(conversationId)
+            : null;
+          await preparePlanExecutionWorkspace({
+            plan: activePlan,
+            conversation,
+            ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+            prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+            isolatePlan: goalWorktreeAdapter?.isolatePlan,
+          });
+        }
       } catch (error) {
         console.warn('[goal-worktree] prepare failed; writing to bound workspace:', error?.message || error);
       }

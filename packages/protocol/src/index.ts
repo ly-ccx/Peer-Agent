@@ -999,6 +999,8 @@ export * from './context-accounting.ts';
 export * from './memory.ts';
 export * from './system-context.ts';
 export * from './goal.ts';
+export * from './acceptance-close-gate.ts';
+export * from './acceptance-basis.ts';
 export * from './updater.ts';
 export * from './appshot.ts';
 export * from './automation.ts';
