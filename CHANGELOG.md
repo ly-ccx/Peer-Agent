@@ -4,18 +4,45 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-## 0.0.6 - 2026-08-19
+## 0.0.6 - 2026-08-23
 
 ### Notes
 
-- Open the `0.0.6` development line from the published `0.0.5` / `origin/main`.
-- Stamp the in-repo development version to `0.0.6`. This commit is not a published GitHub Release.
-- Extend the existing CLI Release / npm installer matrix so Linux x64 ships the same `peer` + `peer-credential-helper` archive layout as darwin-arm64.
+- Stable release that treats acceptance as a sign-off pack, keeps new tasks on the current workspace, and isolates to a worktree only when the user opts in.
+- Workbench home is a list + detail split with independent column scrolling.
+- CLI ships Linux x64 archives; `peer exec` drives Goal plans created in that run to a terminal state.
+- Docs changelog is generated from `release-notes/v0.0.6.md`.
 
 ### Added
 
-- First-class Linux x64 CLI archive `peer-linux-x64.tar.gz` on the existing `build-cli` Release path.
-- `@peer-agent/cli` postinstall now downloads `peer-linux-x64.tar.gz` on linux-x64; missing assets still fail with a clear error.
+- Acceptance sign-off pack: criteria, repo changes, leftover gates, and an Evidence close gate before one-click accept.
+- Task branches from the workspace base, with optional worktree isolation and a visible bound-branch line.
+- Workbench split layout (list + detail), conversation-grouped home cards, and independent column scroll.
+- Composer occupancy ring opens a provider-scaled request-composition breakdown.
+- Headless browser tool execution when the panel is closed.
+- First-class Linux x64 CLI archive `peer-linux-x64.tar.gz`; npm postinstall downloads it on linux-x64.
+- `peer exec` attaches the Goal Runner to plans it created and waits for a terminal or human-stop state.
+
+### Changed
+
+- New tasks stay on the chosen workspace; worktrees stay off until the conversation opts in.
+- Sidebar conversation rows are denser; the leading pin follows the row padding token.
+- Thinking uses the weaving orb; the trailing chevron appears on hover only.
+- Drop Cloud CEO and Enterprise copy from Desktop and TUI.
+
+### Fixed
+
+- Result drawer open no longer focuses/scrolls a message.
+- Removed workspaces no longer resurface; sibling workbench cards stay stable under concurrent tasks.
+- Grok OAuth keeps scope when reading shared credentials.
+- Updater install button stays alive across rechecks and sleep.
+- Error-boundary reload text is readable in dark theme.
+- Windows / Linux no longer reserve macOS traffic-light space.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.6` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.6`.
 
 ## 0.0.5 - 2026-08-19
 
