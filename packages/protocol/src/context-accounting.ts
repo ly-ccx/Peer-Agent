@@ -80,6 +80,76 @@ export interface ContextCountVerification {
 }
 
 /**
+ * Presentation composition of the last built provider request.
+ *
+ * Occupancy authority stays on `authoritativeInputTokens` / `percent`.
+ * This breakdown never invents a percentage; hosts may scale category
+ * estimates so they sum to the authoritative total.
+ */
+export const CONTEXT_USAGE_CATEGORY_IDS = [
+  'system_prompt',
+  'tool_definitions',
+  'rules',
+  'skills',
+  'mcp_tools',
+  'subagents',
+  'summarized_conversation',
+  'conversation',
+] as const;
+
+export type ContextUsageCategoryId = (typeof CONTEXT_USAGE_CATEGORY_IDS)[number];
+
+export type ContextUsageBreakdownQuality = 'projected' | 'scaled';
+
+export interface ContextUsageCategory {
+  readonly id: ContextUsageCategoryId;
+  readonly tokens: number;
+}
+
+export interface ContextUsageBreakdown {
+  readonly version: 1;
+  readonly quality: ContextUsageBreakdownQuality;
+  readonly categories: readonly ContextUsageCategory[];
+  readonly estimatedTokens: number;
+}
+
+const CONTEXT_USAGE_CATEGORY_ID_SET = new Set<string>(CONTEXT_USAGE_CATEGORY_IDS);
+
+function finitePositiveTokens(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : null;
+}
+
+/** Drop invalid persisted breakdowns instead of letting them become occupancy truth. */
+export function normalizeContextUsageBreakdown(
+  value: unknown,
+): ContextUsageBreakdown | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  if (record.quality !== 'projected' && record.quality !== 'scaled') return null;
+  if (!Array.isArray(record.categories)) return null;
+  const categories: ContextUsageCategory[] = [];
+  for (const item of record.categories) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== 'string' || !CONTEXT_USAGE_CATEGORY_ID_SET.has(row.id)) continue;
+    const tokens = finitePositiveTokens(row.tokens);
+    if (tokens == null) continue;
+    categories.push({ id: row.id as ContextUsageCategoryId, tokens });
+  }
+  const estimatedTokens = finitePositiveTokens(record.estimatedTokens);
+  if (categories.length === 0 || estimatedTokens == null) return null;
+  return {
+    version: 1,
+    quality: record.quality,
+    categories,
+    estimatedTokens,
+  };
+}
+
+/**
  * The only cross-host context-capacity state.
  *
  * Numeric occupancy is present only when it is backed by provider usage,
@@ -110,4 +180,6 @@ export interface ContextAccountingSnapshot {
   readonly nextCounted?: ContextAccountingCounted;
   readonly lastOverflow?: ContextOverflowEvidence;
   readonly verification?: ContextCountVerification;
+  /** Presentation-only request composition. Never occupancy authority. */
+  readonly usageBreakdown?: ContextUsageBreakdown;
 }

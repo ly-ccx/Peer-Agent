@@ -1,6 +1,7 @@
 import {
   resolveLlmModelOptionValues,
   type ContextAccountingSnapshot,
+  type ContextUsageBreakdown,
   type LlmProviderConfigView,
   type LlmSubscriptionQuota,
 } from '@peer-agent/protocol';
@@ -17,7 +18,6 @@ import {
   contextWindowDefinition,
   selectedModelContextWindow,
 } from '../../../app/components/llmModelConfiguration';
-import { Tooltip } from '../../../app/components/Tooltip';
 import { clientApi } from '../../../clientApi';
 import { effortLabel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
@@ -29,6 +29,7 @@ import {
   snapEffortValue,
 } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
+import { ContextUsagePanel } from './ContextUsagePanel';
 import { resolveStickyContextDisplay } from './stickyContextDisplay';
 
 /** 上下文档位标签：极简，如 500k / 1M / 272k。 */
@@ -430,11 +431,13 @@ export function TokenUsageDisplay({
       : emptyContext && contextAccounting == null
         ? 0
         : null;
+  const liveBreakdown = contextAccounting?.usageBreakdown ?? null;
   const [lastKnownContext, setLastKnownContext] = useState<{
     scopeKey: string;
     percent: number | null;
     tokens: number | null;
-  }>({ scopeKey: stickyScopeKey, percent: null, tokens: null });
+    breakdown: ContextUsageBreakdown | null;
+  }>({ scopeKey: stickyScopeKey, percent: null, tokens: null, breakdown: null });
   useEffect(() => {
     setLastKnownContext((prev) => {
       if (prev.scopeKey !== stickyScopeKey) {
@@ -442,18 +445,20 @@ export function TokenUsageDisplay({
           scopeKey: stickyScopeKey,
           percent: liveCtxPercent,
           tokens: liveContextTokens,
+          breakdown: liveBreakdown,
         };
       }
-      if (liveCtxPercent == null && liveContextTokens == null) {
+      if (liveCtxPercent == null && liveContextTokens == null && liveBreakdown == null) {
         return prev;
       }
       return {
         scopeKey: stickyScopeKey,
         percent: liveCtxPercent ?? prev.percent,
         tokens: liveContextTokens ?? prev.tokens,
+        breakdown: liveBreakdown ?? prev.breakdown,
       };
     });
-  }, [stickyScopeKey, liveCtxPercent, liveContextTokens]);
+  }, [stickyScopeKey, liveCtxPercent, liveContextTokens, liveBreakdown]);
 
   // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
@@ -494,13 +499,14 @@ export function TokenUsageDisplay({
   const stickyLastKnown =
     lastKnownContext.scopeKey === stickyScopeKey
       ? lastKnownContext
-      : { percent: null as number | null, tokens: null as number | null };
+      : { percent: null as number | null, tokens: null as number | null, breakdown: null };
   const stickyDisplay = resolveStickyContextDisplay({
     livePercent: liveCtxPercent,
     liveTokens: liveContextTokens,
     lastKnownPercent: stickyLastKnown.percent,
     lastKnownTokens: stickyLastKnown.tokens,
   });
+  const stickyBreakdown = liveBreakdown ?? stickyLastKnown.breakdown;
   const currentContextTokens = stickyDisplay.tokens;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
@@ -651,19 +657,16 @@ export function TokenUsageDisplay({
           </span>
         ) : null}
         {showContextUsage && hasCtxRing ? (
-          <Tooltip lines={ctxTooltipLines} placement="top">
-            <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
-              <span
-                className="ctx-ring"
-                style={{ '--ctx-pct': ctxPercent ?? 0 } as CSSProperties}
-                aria-hidden
-              />
-              <span className="ctx-pct">
-                {ctxPercent == null ? '?' : `${Math.round(ctxPercent)}%`}
-                {contextCounterDegraded ? '!' : ''}
-              </span>
-            </span>
-          </Tooltip>
+          <ContextUsagePanel
+            percent={ctxPercent}
+            usedTokens={currentContextTokens}
+            contextWindow={ctxWindow}
+            breakdown={stickyBreakdown}
+            isZh={isZh}
+            summaryLabel={ctxTooltip}
+            degraded={contextCounterDegraded}
+            footerLines={ctxTooltipLines.slice(1)}
+          />
         ) : showContextUsage && currentContextTokens != null && currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}

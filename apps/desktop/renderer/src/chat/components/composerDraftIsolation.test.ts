@@ -71,12 +71,15 @@ test('context ring renders the shared accounting snapshot without a local fallba
     /contextAccounting\?\.authoritativeInputTokens/,
   );
   assert.match(display, /contextAccounting\?\.percent/);
+  assert.match(display, /contextAccounting\?\.usageBreakdown/);
   assert.match(display, /contextAccounting\?\.counterStatus === 'degraded'/);
   assert.match(display, /Exact count drifted from provider usage/);
+  assert.match(display, /<ContextUsagePanel/);
   assert.doesNotMatch(display, /包含尚未计量的草稿|Includes uncounted draft/);
   assert.doesNotMatch(display, /contextPending\s*\?\s*'\+'\s*:/);
   assert.doesNotMatch(display, /lifetimeUsage|resolveContextOccupancyTokens|estimateDraftTokens/);
   assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);
+  assert.doesNotMatch(display, /composeContextUsageBreakdown|estimateContextTextTokens/);
 });
 
 test('send path does not seed or estimate context occupancy', async () => {
@@ -136,13 +139,16 @@ test('external conversation reload replaces or clears the shared accounting snap
 });
 
 test('unknown restored context renders as unknown, never zero percent', async () => {
-  const display = await readSource('./thread/TokenUsageDisplay.tsx');
+  const [display, panel] = await Promise.all([
+    readSource('./thread/TokenUsageDisplay.tsx'),
+    readSource('./thread/ContextUsagePanel.tsx'),
+  ]);
 
   assert.match(display, /resolveStickyContextDisplay/);
   assert.match(display, /lastKnown/);
   assert.match(display, /const liveCtxPercent =[\s\S]*contextAccounting\?\.percent/);
   assert.match(display, /const ctxPercent = stickyDisplay\.percent/);
-  assert.match(display, /ctxPercent == null \? '\?' : `\$\{Math\.round\(ctxPercent\)\}%`/);
   assert.match(display, /Context pending measurement/);
   assert.match(display, /emptyContext && contextAccounting == null/);
+  assert.match(panel, /percent == null \? '\?' : `\$\{Math\.round\(percent\)\}%`/);
 });

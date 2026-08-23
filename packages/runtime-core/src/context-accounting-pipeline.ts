@@ -4,6 +4,7 @@ import type {
   ContextCountCapability,
   ContextCountVerification,
   ContextOverflowEvidence,
+  ContextUsageBreakdown,
 } from '@peer-agent/protocol';
 import {
   CONTEXT_PROJECTION_CONFIG,
@@ -12,6 +13,10 @@ import {
   type CompactionDecision,
 } from './context-projection.ts';
 import type { ContextAccountingIdentity } from './context-accounting-lifecycle.ts';
+import {
+  composeContextUsageBreakdownFromRequest,
+  retainContextUsageBreakdown,
+} from './context-usage-breakdown.ts';
 
 export type {
   ContextAccountingSnapshot,
@@ -346,6 +351,10 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
   let revision = initial?.revision ?? 0;
   let phase: ContextAccountingPhase = initial?.phase ?? 'restored';
   let latestBuiltFingerprint: string | null = null;
+  let latestBuiltRequest: TRequest | null = null;
+  let lastUsageBreakdown: ContextUsageBreakdown | undefined = retainContextUsageBreakdown(
+    initial?.usageBreakdown,
+  );
 
   const contextWindow = () => finiteWindow(
     typeof options.contextWindow === 'function' ? options.contextWindow() : options.contextWindow,
@@ -388,6 +397,10 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     const authoritativeInputTokens = authority?.inputTokens ?? activeOverflowTokens;
     const pressureSource = authority?.source
       ?? (activeOverflowTokens ? 'provider_error_evidence' : 'unknown');
+    const composedBreakdown = latestBuiltRequest
+      ? composeContextUsageBreakdownFromRequest(latestBuiltRequest, authoritativeInputTokens)
+      : null;
+    if (composedBreakdown) lastUsageBreakdown = composedBreakdown;
     return {
       version: 1,
       conversationId: currentIdentity.conversationId,
@@ -415,6 +428,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       ...(activeCounted ? { nextCounted: activeCounted } : {}),
       ...(lastOverflow ? { lastOverflow } : {}),
       ...(verification ? { verification } : {}),
+      ...(lastUsageBreakdown ? { usageBreakdown: lastUsageBreakdown } : {}),
     };
   };
 
@@ -505,6 +519,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     const requestFingerprint = fingerprint(request);
     await count(request, requestFingerprint);
     latestBuiltFingerprint = requestFingerprint;
+    latestBuiltRequest = request;
     return { request, requestFingerprint };
   };
 

@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { contextAccountingModelKey } from '@peer-agent/protocol';
+import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -201,7 +201,8 @@ function normalizeContextSnapshot(snapshot, meta) {
   const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
   const legacyModelKey = providerBinding ?? storedModel;
   if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
-  return {
+  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
+  const normalized = {
     ...snapshot,
     version: 1,
     conversationId,
@@ -224,6 +225,9 @@ function normalizeContextSnapshot(snapshot, meta) {
     counterStatus: snapshot.counterStatus,
     updatedAt,
   };
+  if (usageBreakdown) normalized.usageBreakdown = usageBreakdown;
+  else delete normalized.usageBreakdown;
+  return normalized;
 }
 
 function projectDurableContextSnapshot(snapshot, meta) {
@@ -281,6 +285,7 @@ function projectDurableContextSnapshot(snapshot, meta) {
     ? snapshot.countCapability
     : { kind: 'observed_usage_only' };
   const counterStatus = snapshot.counterStatus === 'degraded' ? 'degraded' : 'active';
+  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
   return {
     version: 1,
     conversationId,
@@ -310,6 +315,7 @@ function projectDurableContextSnapshot(snapshot, meta) {
       source: 'provider_usage',
       observedAt: updatedAt,
     },
+    ...(usageBreakdown ? { usageBreakdown } : {}),
   };
 }
 

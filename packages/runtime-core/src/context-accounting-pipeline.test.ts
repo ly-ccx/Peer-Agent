@@ -237,3 +237,26 @@ test('count_only rebuilds restored authority without sending or compacting', asy
   assert.equal(result.snapshot.percent, 9);
   assert.equal(result.snapshot.pendingUncountedChanges, false);
 });
+
+test('attaches a presentation usage breakdown from the built request without changing occupancy', async () => {
+  const pipeline = createContextAccountingCompactionPipeline({
+    identity: { conversationId: 'conversation-breakdown', contentRevision: 1, modelKey: 'model-b' },
+    contextWindow: 10_000,
+    buildRequest: () => ({
+      systemPrompt: 'You are Peer Agent.',
+      messages: [{ role: 'user', content: 'please continue this task with more detail' }],
+      tools: [{ name: 'read_file', description: 'Read a file', input_schema: { type: 'object' } }],
+    }),
+    compact: async ({ state }) => ({ compacted: false, state }),
+    send: async () => ({ usage: { inputTokens: 800 } }),
+    getUsage: (response) => response.usage,
+  });
+
+  const result = await pipeline.execute({ state: { messages: [] } });
+  assert.equal(result.snapshot.authoritativeInputTokens, 800);
+  assert.equal(result.snapshot.percent, 8);
+  assert.ok(result.snapshot.usageBreakdown);
+  assert.equal(result.snapshot.usageBreakdown?.quality, 'scaled');
+  assert.equal(result.snapshot.usageBreakdown?.estimatedTokens, 800);
+  assert.ok(result.snapshot.usageBreakdown?.categories.some((row) => row.id === 'conversation'));
+});
