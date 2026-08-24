@@ -252,6 +252,13 @@ function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
 }
 
+/** 历史任务/事件可能没写 evidenceRefs；按空列表渲染，避免点开会话时读 undefined.length。 */
+function safeEvidenceRefs(
+  value: { readonly evidenceRefs?: readonly string[] | null } | null | undefined,
+): readonly string[] {
+  return Array.isArray(value?.evidenceRefs) ? value.evidenceRefs : [];
+}
+
 /** 深度优先展开任务树（含嵌套 subtasks）。 */
 function collectGoalTasks(tasks: readonly GoalTask[] | undefined): GoalTask[] {
   if (!tasks || tasks.length === 0) return [];
@@ -806,8 +813,9 @@ function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
   if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${codedValueLabel(PHASE_VALUE_LABELS, phase, isZh)}`);
   if (intent) items.push(`${isZh ? '意图' : 'intent'} ${codedValueLabel(INTENT_VALUE_LABELS, intent, isZh)}`);
   if (reason) items.push(`${isZh ? '原因' : 'reason'} ${compactMeta(reason)}`);
-  if (event.evidenceRefs.length > 0) {
-    items.push(isZh ? `证据 ×${event.evidenceRefs.length}` : `evidence ×${event.evidenceRefs.length}`);
+  const evidenceRefs = safeEvidenceRefs(event);
+  if (evidenceRefs.length > 0) {
+    items.push(isZh ? `证据 ×${evidenceRefs.length}` : `evidence ×${evidenceRefs.length}`);
   }
   return items;
 }
@@ -1093,9 +1101,10 @@ function TaskNode({
   childPlans: readonly GoalPlan[];
   onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
-  const hasEvidence = task.evidenceRefs.length > 0;
+  const evidenceRefs = safeEvidenceRefs(task);
+  const hasEvidence = evidenceRefs.length > 0;
   const [expanded, setExpanded] = useState(false);
-  const evidenceCount = task.evidenceRefs.length;
+  const evidenceCount = evidenceRefs.length;
   const summaryText = task.failureReason
     ? task.failureReason
     : task.blockedReason
@@ -1161,7 +1170,7 @@ function TaskNode({
             <div className="goal-task-detail">
               <div className="goal-task-detail-label">{isZh ? '证据' : 'Evidence'}</div>
               <ul className="goal-task-evidence-list">
-                {task.evidenceRefs.map((ref) => (
+                {evidenceRefs.map((ref) => (
                   <li key={ref} className="goal-task-evidence-item">{ref}</li>
                 ))}
               </ul>

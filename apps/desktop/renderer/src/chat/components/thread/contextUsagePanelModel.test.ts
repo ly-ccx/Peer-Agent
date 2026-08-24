@@ -55,4 +55,21 @@ describe('resolveContextUsagePanelModel', () => {
     assert.equal(model.tokenLabel, 'Pending');
     assert.deepEqual(model.rows, []);
   });
+
+  it('does not throw when a persisted breakdown omits categories', () => {
+    const model = resolveContextUsagePanelModel({
+      percent: 40,
+      usedTokens: 4_000,
+      contextWindow: 10_000,
+      breakdown: {
+        version: 1,
+        quality: 'projected',
+        estimatedTokens: 4_000,
+      } as Parameters<typeof resolveContextUsagePanelModel>[0]['breakdown'],
+      isZh: false,
+    });
+
+    assert.equal(model.rows.length, 1);
+    assert.equal(model.rows[0]?.id, 'used');
+  });
 });
