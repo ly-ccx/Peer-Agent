@@ -7,6 +7,9 @@ import {
   contentFromSegments,
   isEmptyAssistantPlaceholder,
   isEmptyUserMessage,
+  isStaleStreamTerminal,
+  isSuccessorEmptyAssistantPlaceholder,
+  shouldReportEmptyVisibleModelResponse,
   groupSegments,
   splitFinalTextGroup,
   getTextContent,
@@ -149,6 +152,82 @@ describe('isEmptyAssistantPlaceholder', () => {
     assert.equal(isEmptyAssistantPlaceholder({ role: 'assistant', content: 'hi', segments: [] }), false);
     assert.equal(isEmptyAssistantPlaceholder({ role: 'assistant', content: '', segments: [txt('x')] }), false);
     assert.equal(isEmptyAssistantPlaceholder({ role: 'user', content: '', segments: [] }), false);
+  });
+});
+
+describe('isStaleStreamTerminal × shouldReportEmptyVisibleModelResponse', () => {
+  const emptyAssistant = { role: 'assistant' as const, content: '', segments: [] };
+  const filledAssistant = { role: 'assistant' as const, content: '约定已经对齐', segments: [] };
+  const user = { role: 'user' as const, content: '开发分支切换为 0.0.7', segments: [] };
+
+  it('matching stream + stop + empty last after user → report empty visible response', () => {
+    const messages = [user, emptyAssistant];
+    assert.equal(isStaleStreamTerminal('stream-intake', 'stream-intake'), false);
+    assert.equal(isSuccessorEmptyAssistantPlaceholder(messages), false);
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'stop',
+      lastMessage: emptyAssistant,
+      messages,
+    }), true);
+  });
+
+  it('matching stream + goal_handoff + empty last after user → do not report', () => {
+    const messages = [user, emptyAssistant];
+    assert.equal(isStaleStreamTerminal('stream-intake', 'stream-intake'), false);
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'goal_handoff',
+      lastMessage: emptyAssistant,
+      messages,
+    }), false);
+  });
+
+  it('matching stream + stop + empty last after filled assistant → successor placeholder, do not report', () => {
+    const messages = [user, filledAssistant, emptyAssistant];
+    assert.equal(isStaleStreamTerminal('stream-intake', 'stream-intake'), false);
+    assert.equal(isSuccessorEmptyAssistantPlaceholder(messages), true);
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'stop',
+      lastMessage: emptyAssistant,
+      messages,
+    }), false);
+  });
+
+  it('matching stream + goal_handoff + empty last after filled assistant → do not report', () => {
+    const messages = [user, filledAssistant, emptyAssistant];
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'goal_handoff',
+      lastMessage: emptyAssistant,
+      messages,
+    }), false);
+  });
+
+  it('runner already owns stream + late intake done → stale, ignore terminal', () => {
+    const messages = [user, filledAssistant, emptyAssistant];
+    assert.equal(isStaleStreamTerminal('stream-runner', 'stream-intake'), true);
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'stop',
+      lastMessage: emptyAssistant,
+      messages,
+    }), false);
+  });
+
+  it('matching stream + filled last is never an empty visible response', () => {
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'stop',
+      lastMessage: filledAssistant,
+      messages: [user, filledAssistant],
+    }), false);
+    assert.equal(shouldReportEmptyVisibleModelResponse({
+      reason: 'goal_handoff',
+      lastMessage: filledAssistant,
+      messages: [user, filledAssistant],
+    }), false);
+  });
+
+  it('idle or missing stream ids are not stale', () => {
+    assert.equal(isStaleStreamTerminal(null, 'stream-intake'), false);
+    assert.equal(isStaleStreamTerminal('stream-runner', null), false);
+    assert.equal(isStaleStreamTerminal(null, null), false);
   });
 });
 
