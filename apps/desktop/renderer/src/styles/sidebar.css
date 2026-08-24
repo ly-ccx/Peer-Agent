@@ -572,7 +572,7 @@
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--ui-font-body);
   font-weight: 400;
   line-height: 1;
   color: var(--graphite-soft);
@@ -795,7 +795,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: inherit;
-  font-size: inherit;
+  /* Don't inherit: a layered `.conversation-row span` caption rule also hits this title. */
+  font-size: var(--ui-font-body);
   line-height: 1;
 }
 .sidebar-conv-title-input {

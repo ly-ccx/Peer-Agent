@@ -308,17 +308,19 @@
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
   }
 
-  .conversation-row strong {
+  .conversation-row strong,
+  .conversation-row .sidebar-conv-title {
     color: var(--za-text-soft);
-    font-size: var(--ui-font-control, 13px);
+    font-size: var(--ui-font-body);
     font-weight: 400;
   }
 
-  .conversation-row.active strong {
+  .conversation-row.active strong,
+  .conversation-row.active .sidebar-conv-title {
     color: var(--za-text);
   }
 
-  .conversation-row span {
+  .conversation-row span:not(.sidebar-conv-title) {
     color: var(--za-text-faint);
     font-size: var(--ui-font-caption, 11px);
     font-weight: 400;

@@ -46,6 +46,7 @@ test('conversation rows stay list geometry instead of capsules', () => {
   const layeredRow = ruleBody(chatSidebarCss, '.conversation-row');
 
   assert.match(rowBody, /align-items:\s*center;/);
+  assert.match(rowBody, /font-size:\s*var\(--ui-font-body\);/);
   assert.match(rowBody, /line-height:\s*1;/);
   assert.match(rowBody, /min-height:\s*28px;/);
   assert.match(rowBody, /padding:\s*5px var\(--sidebar-conv-row-pad-x\);/);
@@ -54,7 +55,10 @@ test('conversation rows stay list geometry instead of capsules', () => {
   assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
   assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
   assert.match(titleBody, /line-height:\s*1;/);
-  assert.match(titleBody, /font-size:\s*inherit;/);
+  assert.match(titleBody, /font-size:\s*var\(--ui-font-body\);/);
+  assert.doesNotMatch(titleBody, /font-size:\s*inherit;/);
+  assert.match(chatSidebarCss, /\.conversation-row \.sidebar-conv-title \{[\s\S]*?font-size:\s*var\(--ui-font-body\)/);
+  assert.match(chatSidebarCss, /\.conversation-row span:not\(\.sidebar-conv-title\)/);
   assert.match(timeBody, /line-height:\s*1;/);
   assert.match(timeBody, /color:\s*var\(--graphite-mute\);/);
   assert.match(layeredChannelRow, /min-height:\s*28px;/);
