@@ -407,13 +407,10 @@
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row {
-  --sidebar-conv-row-pad-x: 4px;
-  padding: 3px 8px 3px var(--sidebar-conv-row-pad-x);
-}
-
-.sidebar-workspace-tasks.channel-conversation-list .conversation-row:hover,
-.sidebar-workspace-tasks.channel-conversation-list .conversation-row:focus-within {
-  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
+  /* Keep resting left/right padding on the same token so the selected
+     capsule does not look optically heavier on one side. */
+  --sidebar-conv-row-pad-x: 8px;
+  padding: 5px var(--sidebar-conv-row-pad-x);
 }
 
 .sidebar-workspace-add {
@@ -560,7 +557,6 @@
 
 .channel-conversation-list .conversation-row {
   --sidebar-conv-row-pad-x: var(--space-3);
-  --sidebar-conv-leading-gutter: calc(18px + var(--space-1));
   position: relative;
   display: flex;
   align-items: center;
@@ -568,25 +564,22 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  min-height: 32px;
+  min-height: 28px;
   padding: 5px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
-  /* Match right panel / goal list card radius so left/right no longer feel split. */
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  /* List row, not a capsule: 8px radius on ~28px height stays a rounded rect. */
+  border-radius: var(--ui-radius-row, 8px);
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
   font-size: 0.82rem;
-  color: color-mix(in srgb, var(--graphite-base) 88%, var(--graphite-soft));
+  font-weight: 400;
+  line-height: 1;
+  color: var(--graphite-soft);
   transition:
     background var(--za-motion-fast),
     border-color var(--za-motion-fast),
-    color var(--za-motion-fast),
-    padding-left var(--za-motion-fast);
-}
-.channel-conversation-list .conversation-row:hover,
-.channel-conversation-list .conversation-row:focus-within {
-  padding-left: calc(var(--sidebar-conv-row-pad-x) + var(--sidebar-conv-leading-gutter));
+    color var(--za-motion-fast);
 }
 .channel-conversation-list .conversation-row:hover {
   background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
@@ -597,9 +590,9 @@
 .channel-conversation-list .conversation-row.active {
   background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
   border-color: transparent;
-  box-shadow: var(--shadow-soft, var(--shadow-composer));
+  box-shadow: none;
   color: var(--graphite-base);
-  font-weight: 500;
+  font-weight: 400;
 }
 .channel-conversation-list .conversation-row.is-running {
   color: var(--graphite-base);
@@ -795,13 +788,15 @@
   white-space: nowrap;
 }
 
-.sidebar-conv-title {
+.conversation-row .sidebar-conv-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: inherit;
+  font-size: inherit;
+  line-height: 1;
 }
 .sidebar-conv-title-input {
   flex: 1;
@@ -849,8 +844,7 @@
   margin-left: 6px;
   font-size: 0.65rem;
   line-height: 1;
-  /* 深色下 --graphite-mute 对比度过低；时间戳用次级文字色，保证可读且仍弱于标题。 */
-  color: var(--graphite-fade, var(--graphite-mute));
+  color: var(--graphite-mute);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -946,7 +940,7 @@
     opacity var(--za-motion-fast);
   -webkit-app-region: no-drag;
 }
-/* Active rows: edit + archive (2 buttons ≈ 18+4+18). */
+/* Active rows: pin + archive (2 buttons ≈ 18+4+18). */
 .conversation-row:hover:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-actions,
 .conversation-row:focus-within:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-actions {
   width: 44px;
@@ -973,24 +967,6 @@
   opacity: 1;
   pointer-events: auto;
 }
-.sidebar-conv-pin-leading {
-  position: absolute;
-  top: 50%;
-  left: var(--sidebar-conv-row-pad-x, var(--space-3));
-  z-index: 2;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity var(--za-motion-fast);
-  -webkit-app-region: no-drag;
-}
-.channel-conversation-list .conversation-row:hover .sidebar-conv-pin-leading,
-.channel-conversation-list .conversation-row:focus-within .sidebar-conv-pin-leading,
-.sidebar-conv-pin-leading:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-.sidebar-conv-edit,
 .sidebar-conv-pin,
 .sidebar-conv-archive,
 .sidebar-conv-restore,
@@ -1010,7 +986,6 @@
   border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
-.sidebar-conv-edit:hover,
 .sidebar-conv-pin:hover,
 .sidebar-conv-pin.active,
 .sidebar-conv-archive:hover,
