@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  goalCompactSummaryView,
   goalStatusFromSharedPlan,
   goalStatusLayout,
   goalTaskGlyph,
@@ -25,5 +26,12 @@ describe('Goal status panel interface', () => {
     expect(view?.completed).toBe(1);
     expect(view?.currentTask?.title).toBe('Render status');
     expect(goalTaskGlyph('running')).toBe('▶');
+    expect(goalCompactSummaryView(view!)).toMatchObject({
+      glyph: '▶',
+      tone: 'accent',
+      title: 'Render status',
+      progressCount: '1/2',
+      missionLabel: undefined,
+    });
   });
 });
