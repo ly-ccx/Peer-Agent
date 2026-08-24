@@ -538,20 +538,6 @@ export function Sidebar({
           setContextMenu({ kind: 'conversation', x: e.clientX, y: e.clientY, conversation: conv });
         }}
       >
-        {canTogglePin ? (
-          <button
-            type="button"
-            className={`sidebar-conv-pin sidebar-conv-pin-leading ${isPinned ? 'active' : ''}`}
-            title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-            aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-            onClick={(e) => {
-              e.stopPropagation();
-              void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id));
-            }}
-          >
-            <PinIcon filled={isPinned} />
-          </button>
-        ) : null}
         {activity.kind === 'running' ? (
           <span
             className="sidebar-conv-spinner"
@@ -665,15 +651,12 @@ export function Sidebar({
             <>
               <button
                 type="button"
-                className="sidebar-conv-edit"
-                title={isZh ? '编辑标题' : 'Edit title'}
-                aria-label={isZh ? '编辑标题' : 'Edit title'}
-                onClick={() => beginRenameConversation(conv)}
+                className={`sidebar-conv-pin ${isPinned ? 'active' : ''}`}
+                title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+                aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+                onClick={() => { void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id)); }}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
+                <PinIcon filled={isPinned} />
               </button>
               <button
                 type="button"

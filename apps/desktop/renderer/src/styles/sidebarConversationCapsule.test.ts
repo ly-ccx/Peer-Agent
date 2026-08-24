@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
 const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
+const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
   const startToken = `${selector} {`;
@@ -37,32 +38,41 @@ test('workspace conversation capsules keep resting left/right padding on one tok
   assert.doesNotMatch(body, /--sidebar-conv-row-pad-x:\s*4px;/);
 });
 
-test('conversation capsules stay compact on the vertical axis', () => {
-  const body = ruleBody(sidebarCss, '.channel-conversation-list .conversation-row');
+test('conversation capsules stay compact and vertically centered', () => {
+  const rowBody = ruleBody(sidebarCss, '.channel-conversation-list .conversation-row');
+  const titleBody = ruleBody(sidebarCss, '.conversation-row .sidebar-conv-title');
+  const timeBody = ruleBody(sidebarCss, '.sidebar-conv-time');
+  const layeredChannelRow = ruleBody(
+    chatSidebarCss,
+    '.channel-conversation-list .conversation-row',
+  );
 
-  assert.match(body, /min-height:\s*26px;/);
-  assert.match(body, /padding:\s*3px var\(--sidebar-conv-row-pad-x\);/);
-  assert.doesNotMatch(body, /min-height:\s*32px;/);
-  assert.doesNotMatch(body, /padding:\s*5px var\(--sidebar-conv-row-pad-x\)/);
+  assert.match(rowBody, /align-items:\s*center;/);
+  assert.match(rowBody, /line-height:\s*1;/);
+  assert.match(rowBody, /min-height:\s*26px;/);
+  assert.match(rowBody, /padding:\s*3px var\(--sidebar-conv-row-pad-x\);/);
+  assert.match(titleBody, /line-height:\s*1;/);
+  assert.match(titleBody, /font-size:\s*inherit;/);
+  assert.match(timeBody, /line-height:\s*1;/);
+  assert.match(layeredChannelRow, /min-height:\s*26px;/);
+  assert.doesNotMatch(rowBody, /min-height:\s*32px;/);
+  assert.doesNotMatch(layeredChannelRow, /min-h-8/);
 });
 
-test('hover and focus still reserve only the leading pin gutter', () => {
-  const pinGutter = /padding-left:\s*calc\(var\(--sidebar-conv-row-pad-x\) \+ var\(--sidebar-conv-leading-gutter\)\);/;
+test('pin lives in the trailing action slot instead of a leading gutter', () => {
+  const pinIndex = sidebarSource.indexOf('sidebar-conv-pin ${isPinned');
+  const actionsIndex = sidebarSource.indexOf('className="sidebar-conv-actions"');
+  const archiveIndex = sidebarSource.indexOf('className="sidebar-conv-archive"');
 
-  assert.match(
-    ruleBody(
-      sidebarCss,
-      '.channel-conversation-list .conversation-row:hover,\n.channel-conversation-list .conversation-row:focus-within',
-    ),
-    pinGutter,
-  );
-  assert.match(
-    ruleBody(
-      sidebarCss,
-      '.sidebar-workspace-tasks.channel-conversation-list .conversation-row:hover,\n.sidebar-workspace-tasks.channel-conversation-list .conversation-row:focus-within',
-    ),
-    pinGutter,
-  );
+  assert.notEqual(pinIndex, -1, 'expected trailing pin button');
+  assert.notEqual(actionsIndex, -1, 'expected trailing action slot');
+  assert.ok(pinIndex > actionsIndex, 'pin should render inside trailing actions');
+  assert.ok(archiveIndex > pinIndex, 'archive should stay after pin');
+  assert.doesNotMatch(sidebarSource, /sidebar-conv-pin-leading/);
+  assert.doesNotMatch(sidebarSource, /sidebar-conv-edit/);
+  assert.doesNotMatch(sidebarCss, /sidebar-conv-pin-leading/);
+  assert.doesNotMatch(sidebarCss, /--sidebar-conv-leading-gutter/);
+  assert.doesNotMatch(sidebarCss, /sidebar-conv-edit/);
   assert.match(
     sidebarCss,
     /\.conversation-row:hover:not\(\.is-editing\):not\(\.is-confirming-delete\) \.sidebar-conv-time,/,
