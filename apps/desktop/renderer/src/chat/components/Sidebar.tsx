@@ -21,12 +21,14 @@ import { useListFlip } from '../hooks/useListFlip';
 import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import { countWorkbenchInbox } from '../state/workbenchInboxCounts';
 import { groupTasksByWorkspace } from '../state/groupTasksByWorkspace';
+import { previewWorkspaceTasks } from '../state/workspaceTaskPreview';
 import {
   isWorkspaceTaskTreeOpen,
   nextWorkspaceTreeToggles,
   openWorkspaceTreeToggles,
   UNASSIGNED_WORKSPACE_KEY,
 } from '../state/workspaceTaskTree';
+import { useWorkspaceTaskPages } from '../hooks/useWorkspaceTaskPages';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 
@@ -167,9 +169,9 @@ export function Sidebar({
   onOpenSearch,
   onSelectConversation,
   onRenameConversation,
-  onArchiveConversation,
-  onRestoreConversation,
-  onDeleteConversation,
+  onArchiveConversation: archiveConversation,
+  onRestoreConversation: restoreConversation,
+  onDeleteConversation: deleteConversation,
   onPinConversation,
   onUnpinConversation,
   onReorderPinnedConversations,
@@ -242,10 +244,33 @@ export function Sidebar({
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const isFinishingRenameRef = useRef(false);
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>(() => startupSnapshot?.workspaces ?? []);
+  const {
+    mergedConversations,
+    ensurePage,
+    loadMore,
+    revealedCount,
+    pageHasMore,
+    forgetConversation,
+  } = useWorkspaceTaskPages({
+    conversations,
+    status: conversationView,
+  });
   const groupedTasks = useMemo(
-    () => groupTasksByWorkspace(workspaces, conversations),
-    [conversations, workspaces],
+    () => groupTasksByWorkspace(workspaces, mergedConversations),
+    [mergedConversations, workspaces],
   );
+  const onArchiveConversation = useCallback((id: string) => {
+    forgetConversation(id);
+    return archiveConversation(id);
+  }, [archiveConversation, forgetConversation]);
+  const onRestoreConversation = useCallback((id: string) => {
+    forgetConversation(id);
+    return restoreConversation(id);
+  }, [forgetConversation, restoreConversation]);
+  const onDeleteConversation = useCallback((id: string) => {
+    forgetConversation(id);
+    return deleteConversation(id);
+  }, [deleteConversation, forgetConversation]);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
   const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<ReadonlySet<string>>(() => new Set());
@@ -690,10 +715,10 @@ export function Sidebar({
   };
 
   const focusedWorkspace = useMemo(() => {
-    const current = conversations.find((conversation) => conversation.id === activeConversationId);
+    const current = mergedConversations.find((conversation) => conversation.id === activeConversationId);
     if (!current) return null;
     return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
-  }, [activeConversationId, conversations]);
+  }, [activeConversationId, mergedConversations]);
 
   const isUnassignedOpen = isWorkspaceTaskTreeOpen({
     path: UNASSIGNED_WORKSPACE_KEY,
@@ -701,6 +726,43 @@ export function Sidebar({
     activeWorkspace,
     focusedWorkspace,
   });
+
+  useEffect(() => {
+    for (const workspace of workspaces) {
+      if (isWorkspaceTaskTreeOpen({
+        path: workspace.path,
+        toggled: workspaceTreeToggles,
+        activeWorkspace,
+        focusedWorkspace,
+      })) {
+        ensurePage(workspace.path);
+      }
+    }
+    if (isUnassignedOpen) ensurePage(UNASSIGNED_WORKSPACE_KEY);
+  }, [
+    activeWorkspace,
+    ensurePage,
+    focusedWorkspace,
+    isUnassignedOpen,
+    workspaces,
+    workspaceTreeToggles,
+  ]);
+
+  const renderWorkspaceTaskMore = (workspaceKey: string, loadedCount: number, canShowMore: boolean) => {
+    if (!canShowMore) return null;
+    return (
+      <button
+        type="button"
+        className="sidebar-workspace-task-more"
+        onClick={(event) => {
+          event.stopPropagation();
+          loadMore(workspaceKey, loadedCount);
+        }}
+      >
+        {isZh ? '更多' : 'More'}
+      </button>
+    );
+  };
 
   const contextConv = contextMenu?.kind === 'conversation' ? contextMenu.conversation : null;
   const contextWorkspace = contextMenu?.kind === 'workspace' ? contextMenu.workspace : null;
@@ -815,6 +877,8 @@ export function Sidebar({
               activePage === 'home' && homeScope === 'workspace' && isActiveWorkspace;
             const isRunning = runningWorkspacePaths?.has(ws.path);
             const workspaceTasks = sortWorkspaceTasks(groupedTasks.byPath.get(ws.path) ?? [], isArchivedView);
+            const taskPreview = previewWorkspaceTasks(workspaceTasks, revealedCount(ws.path));
+            const canShowMore = taskPreview.canShowMore || pageHasMore(ws.path);
             const isTreeOpen = isWorkspaceTaskTreeOpen({
               path: ws.path,
               toggled: workspaceTreeToggles,
@@ -834,7 +898,7 @@ export function Sidebar({
                 <div
                   className="sidebar-workspace-row"
                   data-project-path={ws.path}
-                  aria-expanded={workspaceTasks.length > 0 ? isTreeOpen : undefined}
+                  aria-expanded={isTreeOpen}
                   onClick={() => { void handleActivateWorkspace(ws.path); }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -850,53 +914,45 @@ export function Sidebar({
                     }
                   }}
                 >
-                  {workspaceTasks.length > 0 ? (
-                    <button
-                      type="button"
-                      className="sidebar-workspace-chevron-btn"
-                      aria-expanded={isTreeOpen}
-                      aria-label={isTreeOpen
-                        ? (isZh ? `折叠 ${ws.name}` : `Collapse ${ws.name}`)
-                        : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleWorkspaceTree(ws.path);
-                      }}
+                  <button
+                    type="button"
+                    className="sidebar-workspace-chevron-btn"
+                    aria-expanded={isTreeOpen}
+                    aria-label={isTreeOpen
+                      ? (isZh ? `折叠 ${ws.name}` : `Collapse ${ws.name}`)
+                      : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleWorkspaceTree(ws.path);
+                    }}
+                  >
+                    <svg
+                      className={`sidebar-section-chevron${isTreeOpen ? '' : ' is-collapsed'}`}
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
                     >
-                      <svg
-                        className={`sidebar-section-chevron${isTreeOpen ? '' : ' is-collapsed'}`}
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="m6 9 6 6 6-6" />
-                      </svg>
-                    </button>
-                  ) : (
-                    <span className="sidebar-workspace-chevron-btn" aria-hidden="true" />
-                  )}
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
                   <span className="sidebar-workspace-meta">
                     <span className="sidebar-workspace-name">{ws.name}</span>
                     <span className="sidebar-workspace-path" title={ws.path}>
                       {abbreviateWorkspacePath(ws.path)}
                     </span>
                   </span>
-                  {!isTreeOpen && workspaceTasks.length > 0 ? (
-                    <span className="sidebar-workspace-task-count" title={isZh ? `${workspaceTasks.length} 个任务` : `${workspaceTasks.length} tasks`}>
-                      {workspaceTasks.length}
-                    </span>
-                  ) : null}
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
                 </div>
-                {isTreeOpen && workspaceTasks.length > 0 ? (
+                {isTreeOpen ? (
                   <div className="channel-conversation-list sidebar-workspace-tasks">
-                    {workspaceTasks.map((conv) => renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView }))}
+                    {taskPreview.visible.map((conv) => renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView }))}
+                    {renderWorkspaceTaskMore(ws.path, workspaceTasks.length, canShowMore)}
                   </div>
                 ) : null}
                 {projectPopoverPath === ws.path ? (
@@ -978,17 +1034,23 @@ export function Sidebar({
                 <span className="sidebar-workspace-meta">
                   <span className="sidebar-workspace-name">{isZh ? '未归属' : 'Unassigned'}</span>
                 </span>
-                {!isUnassignedOpen ? (
-                  <span className="sidebar-workspace-task-count">
-                    {groupedTasks.unassigned.length}
-                  </span>
-                ) : null}
               </div>
               {isUnassignedOpen ? (
                 <div className="channel-conversation-list sidebar-workspace-tasks">
-                  {sortWorkspaceTasks(groupedTasks.unassigned, isArchivedView).map((conv) => (
+                  {previewWorkspaceTasks(
+                    sortWorkspaceTasks(groupedTasks.unassigned, isArchivedView),
+                    revealedCount(UNASSIGNED_WORKSPACE_KEY),
+                  ).visible.map((conv) => (
                     renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView })
                   ))}
+                  {renderWorkspaceTaskMore(
+                    UNASSIGNED_WORKSPACE_KEY,
+                    groupedTasks.unassigned.length,
+                    previewWorkspaceTasks(
+                      groupedTasks.unassigned,
+                      revealedCount(UNASSIGNED_WORKSPACE_KEY),
+                    ).canShowMore || pageHasMore(UNASSIGNED_WORKSPACE_KEY),
+                  )}
                 </div>
               ) : null}
             </div>

@@ -6,7 +6,7 @@ const readSidebar = () => readFile(new URL('./Sidebar.tsx', import.meta.url), 'u
 
 test('sidebar mounts the task tree under each workspace and does not jump on workspace click', async () => {
   const source = await readSidebar();
-  assert.match(source, /groupTasksByWorkspace\(workspaces, conversations\)/);
+  assert.match(source, /groupTasksByWorkspace\(workspaces, mergedConversations\)/);
   assert.match(source, /sortWorkspaceTasks\(groupedTasks\.byPath\.get\(ws\.path\)/);
   assert.match(source, /renderConversationRow\(conv/);
   assert.match(source, /handleActivateWorkspace\(ws\.path\)/);
@@ -21,8 +21,18 @@ test('sidebar collapses workspace trees by default except the active or focused 
   assert.match(source, /toggleWorkspaceTree\(ws\.path\)/);
   assert.match(source, /sidebar-workspace-chevron-btn/);
   assert.match(source, /openWorkspaceTreeToggles\(current, wsPath\)/);
-  assert.match(source, /isTreeOpen && workspaceTasks\.length > 0/);
   assert.match(source, /UNASSIGNED_WORKSPACE_KEY/);
   assert.doesNotMatch(source, /加载更多任务/);
   assert.doesNotMatch(source, /onLoadMoreConversations/);
+});
+
+test('sidebar previews workspace tasks and loads more on demand instead of counting everything', async () => {
+  const source = await readSidebar();
+  const app = await readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
+  assert.match(source, /previewWorkspaceTasks\(workspaceTasks, revealedCount\(ws\.path\)\)/);
+  assert.match(source, /sidebar-workspace-task-more/);
+  assert.match(source, /isZh \? '更多' : 'More'/);
+  assert.doesNotMatch(source, /sidebar-workspace-task-count/);
+  assert.doesNotMatch(app, /余页在后台续拉，计数才完整/);
+  assert.doesNotMatch(app, /shouldContinueConversationList/);
 });

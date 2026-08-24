@@ -309,16 +309,6 @@
   color: var(--graphite-base);
 }
 
-.sidebar-workspace-task-count {
-  flex-shrink: 0;
-  min-width: 1.1em;
-  font-size: 0.62rem;
-  font-weight: 500;
-  color: var(--graphite-fade);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
 .sidebar-workspace-row:hover {
   background: var(--za-sidebar-active-bg, var(--chrome-sunken));
 }
@@ -392,6 +382,28 @@
   flex-direction: column;
   gap: 1px;
   padding: 2px 0 6px 6px;
+}
+
+.sidebar-workspace-task-more {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 1px 0 0;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--graphite-fade);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.sidebar-workspace-task-more:hover {
+  color: var(--graphite-base);
+  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row {

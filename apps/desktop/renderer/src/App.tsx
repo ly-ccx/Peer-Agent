@@ -35,7 +35,7 @@ import { useConversationStreamRouter } from './chat/hooks/useConversationStreamR
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
-import { normalizeConversationListPage, shouldContinueConversationList } from './chat/state/conversationListPagination';
+import { normalizeConversationListPage } from './chat/state/conversationListPagination';
 import {
   clearCompletedUnreadId,
   nextCompletedUnreadIds,
@@ -258,13 +258,6 @@ function MainApp() {
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
-  const [conversationNextCursor, setConversationNextCursor] = useState<string | null>(
-    () => startupSnapshot?.conversationNextCursor ?? null,
-  );
-  const [conversationHasMore, setConversationHasMore] = useState<boolean>(
-    () => Boolean(startupSnapshot?.conversationHasMore),
-  );
-  const [conversationsLoadingMore, setConversationsLoadingMore] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notificationMessageTarget, setNotificationMessageTarget] = useState<{
     conversationId: string;
@@ -365,8 +358,6 @@ function MainApp() {
       }
       return merged;
     });
-    setConversationNextCursor(normalized.nextCursor);
-    setConversationHasMore(normalized.hasMore);
   }, []);
 
   const refreshConversations = useCallback(async (_wsPath?: string | null, view?: ConversationView) => {
@@ -390,53 +381,6 @@ function MainApp() {
       void refreshConversations();
     },
   });
-
-  const loadMoreConversations = useCallback(async () => {
-    if (!conversationHasMore || conversationsLoadingMore || !conversationNextCursor) return;
-    const status = conversationView;
-    const seq = refreshSeqRef.current;
-    setConversationsLoadingMore(true);
-    try {
-      const page = await clientApi.conversationsList({
-        status,
-        limit: CONVERSATION_LIST_PAGE_SIZE,
-        cursor: conversationNextCursor,
-        paginated: true,
-      });
-      if (seq !== refreshSeqRef.current) return;
-      applyConversationListPage(page as any, { append: true });
-    } catch {
-    } finally {
-      setConversationsLoadingMore(false);
-    }
-  }, [
-    applyConversationListPage,
-    conversationHasMore,
-    conversationNextCursor,
-    conversationView,
-    conversationsLoadingMore,
-  ]);
-
-  // 侧栏按工作区挂任务树，不再露出「加载更多」。余页在后台续拉，计数才完整。
-  useEffect(() => {
-    if (
-      conversationsLoadingMore
-      || !shouldContinueConversationList({
-        conversationCount: conversations.length,
-        hasMore: conversationHasMore,
-        nextCursor: conversationNextCursor,
-      })
-    ) {
-      return;
-    }
-    void loadMoreConversations();
-  }, [
-    conversationHasMore,
-    conversationNextCursor,
-    conversations.length,
-    conversationsLoadingMore,
-    loadMoreConversations,
-  ]);
 
   const scheduleConversationRefresh = useCallback((wsPath?: string | null, view?: ConversationView) => {
     if (conversationRefreshTimerRef.current) clearTimeout(conversationRefreshTimerRef.current);
