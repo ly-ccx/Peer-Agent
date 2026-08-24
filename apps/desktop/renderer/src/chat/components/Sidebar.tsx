@@ -78,20 +78,6 @@ function sortWorkspaceTasks<T extends { pinnedAt?: string | null; pinnedOrder?: 
   return [...pinned, ...normal];
 }
 
-/** 工作区名称缩写：peer_agent -> PA, peer-knowledge -> PK */
-function workspaceInitials(name: string): string {
-  const parts = name.split(/[-_\s.]+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const a = parts[0][0] || '';
-    const b = parts[1][0] || '';
-    return `${a}${b}`.toUpperCase() || 'WS';
-  }
-  const alnum = name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
-  if (!alnum) return 'WS';
-  if (/[\u4e00-\u9fff]/.test(alnum)) return alnum.slice(0, 2);
-  return alnum.slice(0, 2).toUpperCase();
-}
-
 /** 按视口边界夹紧右键菜单坐标，避免贴边时被裁切。 */
 function clampContextMenuPosition(
   x: number,
@@ -895,9 +881,6 @@ export function Sidebar({
                   ) : (
                     <span className="sidebar-workspace-chevron-btn" aria-hidden="true" />
                   )}
-                  <span className="sidebar-workspace-avatar" aria-hidden="true">
-                    {workspaceInitials(ws.name)}
-                  </span>
                   <span className="sidebar-workspace-meta">
                     <span className="sidebar-workspace-name">{ws.name}</span>
                     <span className="sidebar-workspace-path" title={ws.path}>

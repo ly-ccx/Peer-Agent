@@ -329,22 +329,6 @@
   box-shadow: 0 0 0 1px var(--chrome-hairline);
 }
 
-.sidebar-workspace-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  background: #1f1f1f;
-  color: #fff;
-  font-size: 0.56rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1;
-}
-
 .sidebar-workspace-meta {
   display: flex;
   flex-direction: row;
