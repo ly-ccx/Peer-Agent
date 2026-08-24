@@ -4,12 +4,45 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-## 0.0.7 - 2026-08-23
+## 0.0.7 - 2026-08-25
 
 ### Notes
 
-- Open the `0.0.7` development line from the published `0.0.6` / `origin/main`.
-- Stamp the in-repo development version to `0.0.7`. This commit is not a published GitHub Release.
+- Stable release that splits workspace HEAD from the conversation task line, lets new tasks pick a source branch, and shows prior Goals on the result view.
+- Sidebar conversations are flat list rows; workspace names take the first line and the path moves under them.
+- CLI adds Fast mode; narrow TUI Goal summaries become a Now Playing row.
+- Docs changelog is generated from `release-notes/v0.0.7.md`.
+
+### Added
+
+- Draft composer source-branch picker that saves the workspace source without checking out git.
+- Composer / header chrome that shows workspace HEAD separately from the task line or isolation mark.
+- Prior Goals on the task result view (status, completed work, files already touched).
+- CLI Fast mode for ChatGPT / Grok OAuth (`service_tier=priority` when admission and the flag are on).
+- TUI compact Goal row restyled as Now Playing.
+
+### Changed
+
+- Sidebar conversation rows are a flat fill with the pin in the trailing actions, not a lifted capsule.
+- Workspace name uses the full first line; path stacks on the second line.
+- Sidebar titles use `--ui-font-control` so they follow appearance font-scale at chrome size.
+- Opening a conversation lands on the latest messages.
+- Startup loads a short workspace task preview instead of fetching every conversation for counts.
+- Large diffs virtualize file-index hover; TUI streaming drops the 32ms delta buffer.
+- TUI activity uses a stable `working...` highlight sweep.
+
+### Fixed
+
+- Missing `evidenceRefs` on historical Goals no longer crash the renderer.
+- Same-workspace Goal bindings no longer leave isolation or the composer chip on a stale HEAD.
+- Stale Goal handoff is not treated as an empty model reply.
+- CLI prompt-cache hits survive split Responses usage details.
+- Unused workspace avatar badges are removed.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.7` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.7`.
 
 ## 0.0.6 - 2026-08-23
 
