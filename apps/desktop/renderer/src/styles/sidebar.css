@@ -414,7 +414,7 @@
   /* Keep resting left/right padding on the same token so the selected
      capsule does not look optically heavier on one side. */
   --sidebar-conv-row-pad-x: 8px;
-  padding: 3px var(--sidebar-conv-row-pad-x);
+  padding: 5px var(--sidebar-conv-row-pad-x);
 }
 
 .sidebar-workspace-add {
@@ -568,17 +568,18 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  min-height: 26px;
-  padding: 3px var(--sidebar-conv-row-pad-x);
+  min-height: 28px;
+  padding: 5px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
-  /* Match right panel / goal list card radius so left/right no longer feel split. */
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  /* List row, not a capsule: 8px radius on ~28px height stays a rounded rect. */
+  border-radius: var(--ui-radius-row, 8px);
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
   font-size: 0.82rem;
+  font-weight: 400;
   line-height: 1;
-  color: color-mix(in srgb, var(--graphite-base) 88%, var(--graphite-soft));
+  color: var(--graphite-soft);
   transition:
     background var(--za-motion-fast),
     border-color var(--za-motion-fast),
@@ -595,7 +596,7 @@
   border-color: transparent;
   box-shadow: none;
   color: var(--graphite-base);
-  font-weight: 500;
+  font-weight: 400;
 }
 .channel-conversation-list .conversation-row.is-running {
   color: var(--graphite-base);
@@ -847,8 +848,7 @@
   margin-left: 6px;
   font-size: 0.65rem;
   line-height: 1;
-  /* 深色下 --graphite-mute 对比度过低；时间戳用次级文字色，保证可读且仍弱于标题。 */
-  color: var(--graphite-fade, var(--graphite-mute));
+  color: var(--graphite-mute);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }

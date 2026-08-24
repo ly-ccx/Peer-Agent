@@ -226,7 +226,7 @@
   }
 
   .channel-conversation-list .conversation-row {
-    min-height: 26px;
+    min-height: 28px;
     width: calc(100% - 2px);
     margin-inline: 1px;
   }
@@ -235,7 +235,7 @@
     @apply grid min-h-8 w-full items-center gap-2 px-1.5 py-0.5 text-left;
     grid-template-columns: 22px minmax(0, 1fr) 22px;
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
+    border-radius: var(--ui-radius-row, 8px);
     background: transparent;
     box-shadow: var(--ui-surface-float-shadow, none);
     transform-origin: center;

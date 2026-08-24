@@ -10,35 +10,32 @@ const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'
 const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
-  const startToken = `${selector} {`;
-  let searchFrom = 0;
-  while (searchFrom < css.length) {
-    const start = css.indexOf(startToken, searchFrom);
-    assert.notEqual(start, -1, `Expected CSS rule for ${selector}`);
-    if (start === 0 || css[start - 1] === '\n' || css[start - 1] === ' ') {
-      const bodyStart = start + startToken.length;
-      const end = css.indexOf('}', bodyStart);
-      assert.notEqual(end, -1, `Expected closing brace for ${selector}`);
-      return css.slice(bodyStart, end);
-    }
-    searchFrom = start + startToken.length;
-  }
-  assert.fail(`Expected CSS rule for ${selector}`);
+  const startToken = `\n${selector} {`;
+  const indentedToken = `\n  ${selector} {`;
+  const start = css.includes(startToken)
+    ? css.indexOf(startToken)
+    : css.indexOf(indentedToken);
+  assert.notEqual(start, -1, `Expected CSS rule for ${selector}`);
+  const token = css.includes(startToken) ? startToken : indentedToken;
+  const bodyStart = start + token.length;
+  const end = css.indexOf('}', bodyStart);
+  assert.notEqual(end, -1, `Expected closing brace for ${selector}`);
+  return css.slice(bodyStart, end);
 }
 
-test('workspace conversation capsules keep resting left/right padding on one token', () => {
+test('workspace conversation rows keep resting left/right padding on one token', () => {
   const body = ruleBody(
     sidebarCss,
     '.sidebar-workspace-tasks.channel-conversation-list .conversation-row',
   );
 
   assert.match(body, /--sidebar-conv-row-pad-x:\s*8px;/);
-  assert.match(body, /padding:\s*3px var\(--sidebar-conv-row-pad-x\);/);
+  assert.match(body, /padding:\s*5px var\(--sidebar-conv-row-pad-x\);/);
   assert.doesNotMatch(body, /padding:\s*3px 8px 3px var\(--sidebar-conv-row-pad-x\)/);
   assert.doesNotMatch(body, /--sidebar-conv-row-pad-x:\s*4px;/);
 });
 
-test('conversation capsules stay compact and vertically centered', () => {
+test('conversation rows stay list geometry instead of capsules', () => {
   const rowBody = ruleBody(sidebarCss, '.channel-conversation-list .conversation-row');
   const titleBody = ruleBody(sidebarCss, '.conversation-row .sidebar-conv-title');
   const timeBody = ruleBody(sidebarCss, '.sidebar-conv-time');
@@ -46,17 +43,35 @@ test('conversation capsules stay compact and vertically centered', () => {
     chatSidebarCss,
     '.channel-conversation-list .conversation-row',
   );
+  const layeredRow = ruleBody(chatSidebarCss, '.conversation-row');
 
   assert.match(rowBody, /align-items:\s*center;/);
   assert.match(rowBody, /line-height:\s*1;/);
-  assert.match(rowBody, /min-height:\s*26px;/);
-  assert.match(rowBody, /padding:\s*3px var\(--sidebar-conv-row-pad-x\);/);
+  assert.match(rowBody, /min-height:\s*28px;/);
+  assert.match(rowBody, /padding:\s*5px var\(--sidebar-conv-row-pad-x\);/);
+  assert.match(rowBody, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
+  assert.doesNotMatch(rowBody, /--ui-radius-panel/);
+  assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
+  assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
   assert.match(titleBody, /line-height:\s*1;/);
   assert.match(titleBody, /font-size:\s*inherit;/);
   assert.match(timeBody, /line-height:\s*1;/);
-  assert.match(layeredChannelRow, /min-height:\s*26px;/);
-  assert.doesNotMatch(rowBody, /min-height:\s*32px;/);
-  assert.doesNotMatch(layeredChannelRow, /min-h-8/);
+  assert.match(timeBody, /color:\s*var\(--graphite-mute\);/);
+  assert.match(layeredChannelRow, /min-height:\s*28px;/);
+  assert.doesNotMatch(rowBody, /min-height:\s*26px;/);
+});
+
+test('resting conversation rows keep quieter type; selected stays unbolded', () => {
+  const rowBody = ruleBody(sidebarCss, '.channel-conversation-list .conversation-row');
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+
+  assert.match(rowBody, /color:\s*var\(--graphite-soft\);/);
+  assert.match(rowBody, /font-weight:\s*400;/);
+  assert.match(activeBody, /font-weight:\s*400;/);
+  assert.doesNotMatch(activeBody, /font-weight:\s*500;/);
 });
 
 test('pin lives in the trailing action slot instead of a leading gutter', () => {
@@ -79,7 +94,7 @@ test('pin lives in the trailing action slot instead of a leading gutter', () => 
   );
 });
 
-test('selected conversation capsules stay a fill instead of a lifted card', () => {
+test('selected conversation rows stay a fill instead of a lifted card', () => {
   const activeBody = ruleBody(
     sidebarCss,
     '.channel-conversation-list .conversation-row.active',
