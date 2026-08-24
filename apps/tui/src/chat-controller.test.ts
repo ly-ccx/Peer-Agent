@@ -315,7 +315,6 @@ describe('chat controller', () => {
     const pending = controller.send('continue');
     try {
       await deltaEmitted;
-      await new Promise((resolve) => setTimeout(resolve, 50));
       const running = controller.getSnapshot();
       expect(running.status).toBe('running');
       expect(running.contextAccounting?.authoritativeInputTokens).toBe(
@@ -581,8 +580,6 @@ describe('chat controller', () => {
     });
 
     await controller.send('interleave');
-    // Stream deltas are buffered (~32ms); wait so the final text segment is flushed.
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
     const assistant = controller.getSnapshot().messages.find((message) => (
       message.role === 'assistant' && (message.segments?.length ?? 0) > 0

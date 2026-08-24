@@ -58,8 +58,6 @@ export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling' | 'compacting';
 export type ChatUsage = ModelUsage | RuntimeTurnUsage;
 
-const STREAM_BUFFER_FLUSH_MS = 32;
-
 export interface ChatCompactMeta {
   readonly phase: 'progress' | 'done';
   readonly percent?: number;
@@ -748,11 +746,6 @@ export function createChatController(options: {
   };
 
 
-  const streamDeltaBuffer: Array<{
-    readonly type: 'message.delta' | 'reasoning.delta';
-    readonly content: string;
-  }> = [];
-  let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
   // Shared per-turn accounting lifecycle owns revision order and pending
   // stream/tool changes. The TUI adapter only publishes its snapshots.
   let turnAccountingLifecycle: ContextAccountingLifecycle | null = null;
@@ -809,21 +802,12 @@ export function createChatController(options: {
     messages[messages.length - 1] = withDerivedAssistantFields(target, segments);
   };
 
-  const flushStreamDeltaBuffer = () => {
+  const applyStreamDelta = (event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string }) => {
+    if (!event.content) return;
     const startedAt = tuiPerfNow();
-    if (streamFlushTimer) {
-      clearTimeout(streamFlushTimer);
-      streamFlushTimer = null;
-    }
-    if (streamDeltaBuffer.length === 0) return;
-    const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
-    const chars = events.reduce((total, event) => total + event.content.length, 0);
     const messages = [...snapshot.messages];
-    let accounting = turnAccountingLifecycle?.current();
-    for (const event of events) {
-      appendAssistantDelta(messages, event);
-      accounting = turnAccountingLifecycle?.streamPreview(event.content) ?? accounting;
-    }
+    appendAssistantDelta(messages, event);
+    const accounting = turnAccountingLifecycle?.streamPreview(event.content);
     publish({
       ...snapshot,
       messages,
@@ -835,23 +819,10 @@ export function createChatController(options: {
     });
     recordTuiPerf('stream.flush', tuiPerfNow() - startedAt, {
       lane: 'stream',
-      count: events.length,
-      chars,
-      messages: messages.length,
-    });
-  };
-
-  const enqueueStreamDelta = (event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string }) => {
-    if (!event.content) return;
-    streamDeltaBuffer.push(event);
-    recordTuiPerf('stream.enqueue', 0, {
-      lane: 'stream',
       count: 1,
       chars: event.content.length,
-      buffered: streamDeltaBuffer.length,
+      messages: messages.length,
     });
-    if (streamFlushTimer) return;
-    streamFlushTimer = setTimeout(flushStreamDeltaBuffer, STREAM_BUFFER_FLUSH_MS);
   };
 
   options.planCoordinator?.subscribe((plan) => {
@@ -869,7 +840,6 @@ export function createChatController(options: {
     model: options.model,
     lifecycle: {
       toolResultsApplied(state, executions) {
-        flushStreamDeltaBuffer();
         const addedContentChars = executions.reduce((total, execution) => {
           try {
             return total + JSON.stringify(execution.result).length;
@@ -896,7 +866,6 @@ export function createChatController(options: {
         if (goalTurnCollector) goalTurnCollector.toolCallCount += 1;
         // Attach tool-call progress to the current assistant turn (Desktop model):
         // multiple tools share one assistant message via `tools[]` / segments.
-        flushStreamDeltaBuffer();
         const startedAt = Date.now();
         const runningTool = createToolPresentation({
           capabilityId: call.capabilityId,
@@ -974,7 +943,7 @@ export function createChatController(options: {
     events: {
       emit(event) {
         if (event.type === 'message.delta' || event.type === 'reasoning.delta') {
-          enqueueStreamDelta(event);
+          applyStreamDelta(event);
           return null;
         }
         if (event.type === 'context.accounting') {
@@ -1202,7 +1171,6 @@ export function createChatController(options: {
         )
           ? accountedTurn
           : result.state?.usage;
-        flushStreamDeltaBuffer();
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
         // turn 内自动压缩收尾(preflight/emergency):连续性 carry-forward、从 provider 历史
@@ -1301,7 +1269,6 @@ export function createChatController(options: {
           ...(failureDetail && !result.reason ? { reason: failureDetail } : {}),
         };
       } catch (error) {
-        flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
         const detail = errorMessage(error);
         if (wasCancelled) turn.cancel(detail);
@@ -1490,7 +1457,6 @@ export function createChatController(options: {
     },
     cancel() {
       if (!activeTurn) return;
-      flushStreamDeltaBuffer();
       const session = sessions.cancel(sessionId, 'cancelled_in_tui');
       publish({
         ...snapshot,
