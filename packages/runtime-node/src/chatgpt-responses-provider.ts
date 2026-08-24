@@ -115,6 +115,26 @@ function requestBody(request: ModelProviderRequest): Record<string, unknown> {
   };
 }
 
+function cachedTokenCount(details: unknown): number | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const value = Number((details as Record<string, unknown>).cached_tokens);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function extractCachedInputTokens(usage: Record<string, unknown>): number {
+  // Align Desktop openai-responses-adapter: each details object is independent.
+  // `input_tokens_details ?? prompt_tokens_details` would swallow a real hit when
+  // the first object exists but has no cached_tokens (Grok often sends an empty
+  // input_tokens_details alongside prompt_tokens_details.cached_tokens).
+  return Number(
+    cachedTokenCount(usage.input_tokens_details)
+    ?? cachedTokenCount(usage.prompt_tokens_details)
+    ?? usage.prompt_cache_hit_tokens
+    ?? usage.prompt_cache_hit
+    ?? 0,
+  );
+}
+
 function usageOf(value: unknown): ModelUsage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const usage = value as Record<string, unknown>;
@@ -123,13 +143,7 @@ function usageOf(value: unknown): ModelUsage | undefined {
   // 与 openai-chat-stream.usageFrom / Desktop openai-responses-adapter 保持同口径。
   const rawInputTokens = Number(usage.input_tokens ?? 0);
   const outputTokens = Number(usage.output_tokens ?? 0);
-  const details = usage.input_tokens_details ?? usage.prompt_tokens_details;
-  const cacheReadTokens = Number(
-    (details && typeof details === 'object' && (details as Record<string, unknown>).cached_tokens)
-    ?? usage.prompt_cache_hit_tokens
-    ?? usage.prompt_cache_hit
-    ?? 0,
-  );
+  const cacheReadTokens = extractCachedInputTokens(usage);
   return {
     inputTokens: Math.max(0, rawInputTokens - cacheReadTokens),
     outputTokens,

@@ -66,6 +66,24 @@ test('ChatGPT Responses provider reports prompt cache hit tokens in usage', asyn
   assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 2, totalTokens: 102, cacheReadTokens: 60 });
 });
 
+test('ChatGPT Responses provider reads cached_tokens from prompt_tokens_details when input_tokens_details is empty', async () => {
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://chatgpt.example/codex/',
+    tokens: { access: 'secret-access', accountId: 'account-1' },
+    fetch: async () => response([
+      'data: {"type":"response.output_text.delta","delta":"Cached"}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":2,"input_tokens_details":{},"prompt_tokens_details":{"cached_tokens":60}}}}',
+      'data: [DONE]',
+    ]),
+  });
+  const result = await provider.stream({
+    model: 'gpt-test',
+    messages: [{ role: 'user', content: 'Hi' }],
+    onEvent: () => {},
+  });
+  assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 2, totalTokens: 102, cacheReadTokens: 60 });
+});
+
 test('ChatGPT Responses provider resolves desktop credentials lazily on first request', async () => {
   let resolutions = 0;
   const provider = createChatGptResponsesProvider({
