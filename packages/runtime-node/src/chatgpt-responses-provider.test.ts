@@ -37,10 +37,43 @@ test('ChatGPT Responses provider encodes requests, streams text, tools, and usag
   assert.equal(captured.body.instructions, 'Be concise.');
   assert.equal(captured.body.model, 'gpt-test');
   assert.deepEqual(captured.body.reasoning, { effort: 'xhigh' });
+  assert.equal(captured.body.service_tier, undefined);
   assert.equal(result.content, 'Hello');
   assert.deepEqual(result.toolCalls[0], { id: 'call-1', name: 'local_file_read', arguments: '{"path":"README.md"}' });
   assert.deepEqual(result.usage, { inputTokens: 4, outputTokens: 2, totalTokens: 6 });
   assert.deepEqual(events, ['text.delta', 'tool_call.completed', 'usage']);
+});
+
+test('adds the priority service tier only when Fast mode is enabled', async () => {
+  async function captureBody(input: { readonly model: string; readonly fastMode?: boolean }) {
+    let body: Record<string, unknown> | undefined;
+    const provider = createChatGptResponsesProvider({
+      baseUrl: 'https://chatgpt.example/codex/',
+      tokens: { access: 'secret-access', accountId: 'account-1' },
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body));
+        return response([
+          'data: {"type":"response.completed","response":{}}',
+          'data: [DONE]',
+        ]);
+      },
+    });
+    await provider.stream({
+      model: input.model,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      ...(input.fastMode ? { fastMode: true } : {}),
+    });
+    return body ?? {};
+  }
+
+  const standard = await captureBody({ model: 'gpt-5.5' });
+  const fast = await captureBody({ model: 'gpt-5.5', fastMode: true });
+  const grokFast = await captureBody({ model: 'grok-4.5', fastMode: true });
+
+  assert.equal(standard.service_tier, undefined);
+  assert.equal(fast.service_tier, 'priority');
+  assert.equal(grokFast.service_tier, 'priority');
 });
 
 test('ChatGPT Responses provider reports prompt cache hit tokens in usage', async () => {

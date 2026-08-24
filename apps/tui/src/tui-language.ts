@@ -198,6 +198,8 @@ export type TuiMessageKey =
   | 'command.model.description'
   | 'command.mode.label'
   | 'command.mode.description'
+  | 'command.fast.label'
+  | 'command.fast.description'
   | 'command.permissions.label'
   | 'command.permissions.description'
   | 'command.language.label'
@@ -272,6 +274,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.model.description': '选择模型与思考强度',
     'command.mode.label': '模式',
     'command.mode.description': '选择 Agent、Plan 或 Goal',
+    'command.fast.label': 'Fast',
+    'command.fast.description': '为本会话开关 ChatGPT/Grok Fast（priority）',
     'command.permissions.label': '权限',
     'command.permissions.description': '选择本会话的权限策略',
     'command.language.label': '语言',
@@ -345,6 +349,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.model.description': 'Choose model and reasoning effort',
     'command.mode.label': 'Mode',
     'command.mode.description': 'Choose Agent, Plan, or Goal',
+    'command.fast.label': 'Fast',
+    'command.fast.description': 'Toggle ChatGPT/Grok Fast (priority) for this session',
     'command.permissions.label': 'Permissions',
     'command.permissions.description': 'Choose the session permission policy',
     'command.language.label': 'Language',

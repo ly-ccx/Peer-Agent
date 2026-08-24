@@ -673,7 +673,7 @@ describe('TUI app layout', () => {
 
   test('renders the help picker opened by /help', () => {
     expect(appSource).toContain("experience.surface.picker === 'help'");
-    expect(appSource).toContain('buildTuiHelpSections({ goalStatus }, locale)');
+    expect(appSource).toContain('buildTuiHelpSections(commandContext, locale)');
     expect(appSource).toContain('<strong>Help</strong>');
     expect(appSource).toContain('helpSections.map((section)');
   });

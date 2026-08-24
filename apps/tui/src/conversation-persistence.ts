@@ -28,6 +28,7 @@ export interface TuiConversationSummary {
 export interface TuiConversationRestore {
   readonly id: string;
   readonly mode: TuiMode;
+  readonly fastMode?: boolean;
   /** Complete UI transcript, including historical compaction boundaries. */
   readonly messages: readonly ChatMessage[];
   /** Active provider history after the latest shared compaction boundary. */
@@ -52,10 +53,11 @@ interface ConversationStore {
     params?: { status?: string },
   ): readonly Record<string, unknown>[];
   getConversation(id: string): (Record<string, unknown> & { messages?: readonly Record<string, unknown>[] }) | null;
-  createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode }): { id: string };
+  createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode; fastMode?: boolean }): { id: string };
   appendMessage(id: string, message: ChatMessage & { timestamp: number }): unknown;
   replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
   updateMode(id: string, mode: TuiMode): unknown;
+  updateFastMode?(id: string, fastMode: boolean): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
   updateContextSnapshot?(id: string, snapshot: ContextAccountingSnapshot): unknown;
   getLatestContextObservation?(
@@ -90,7 +92,8 @@ export interface TuiConversationPersistence {
   subscribeExternalChanges(listener: (conversationId: string) => void): () => void;
   syncSnapshot(snapshot: ChatSnapshot): void;
   syncModel(selection: RuntimeModelSelection): void;
-  startNewConversation(mode: TuiMode): void;
+  syncFastMode(fastMode: boolean): void;
+  startNewConversation(mode: TuiMode, fastMode?: boolean): void;
 }
 
 export function resumeTuiConversation(
@@ -555,6 +558,7 @@ function normalizeWorkspacePath(workspacePath: string): string {
 export function createTuiConversationPersistence(options: {
   readonly workspacePath: string;
   readonly initialMode: TuiMode;
+  readonly initialFastMode?: boolean;
   readonly initialModel: RuntimeModelSelection;
   readonly getContextWindow?: (selection: RuntimeModelSelection) => number | undefined;
   readonly store?: ConversationStore;
@@ -567,6 +571,7 @@ export function createTuiConversationPersistence(options: {
   const workspacePath = normalizeWorkspacePath(options.workspacePath);
   let conversationId: string | undefined;
   let mode = options.initialMode;
+  let fastMode = options.initialFastMode === true;
   let model = options.initialModel;
   let persistedMessageIds = new Set<string>();
   let usageMessageIds = new Set<string>();
@@ -576,6 +581,7 @@ export function createTuiConversationPersistence(options: {
     const conversation = store.createConversation({
       workspacePath,
       mode,
+      fastMode,
     });
     conversationId = conversation.id;
     store.updateModelEffort(conversationId, {
@@ -675,6 +681,7 @@ export function createTuiConversationPersistence(options: {
         return {
           id,
           mode: normalizeTuiMode(stored.mode, 'chat'),
+          fastMode: stored.fastMode === true,
           messages,
           modelMessages: activeContext.modelMessages,
           ...(activeContext.continuityContext
@@ -692,6 +699,7 @@ export function createTuiConversationPersistence(options: {
     resumeConversation(conversation) {
       conversationId = conversation.id;
       mode = conversation.mode;
+      fastMode = conversation.fastMode === true;
       persistedMessageIds = new Set(conversation.messages.map((message) => message.id));
       usageMessageIds = new Set();
       if (conversation.modelSelection) model = conversation.modelSelection;
@@ -848,9 +856,19 @@ export function createTuiConversationPersistence(options: {
         reportError(error);
       }
     },
-    startNewConversation(nextMode) {
+    syncFastMode(nextFastMode) {
+      fastMode = nextFastMode === true;
+      if (!conversationId) return;
+      try {
+        store.updateFastMode?.(conversationId, fastMode);
+      } catch (error) {
+        reportError(error);
+      }
+    },
+    startNewConversation(nextMode, nextFastMode) {
       conversationId = undefined;
       mode = nextMode;
+      if (nextFastMode !== undefined) fastMode = nextFastMode === true;
       persistedMessageIds = new Set();
       usageMessageIds = new Set();
     },

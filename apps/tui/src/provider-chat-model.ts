@@ -72,6 +72,7 @@ export interface CreateProviderChatModelOptions {
   readonly getModel?: () => string;
   readonly getModelKey?: () => string;
   readonly getReasoningEffort?: () => ModelReasoningEffort;
+  readonly getFastMode?: () => boolean;
   readonly getContextWindow?: () => number | undefined;
 }
 
@@ -319,6 +320,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         tools: [],
         temperature: 0.2,
         maxOutputTokens: 4096,
+        ...(options.getFastMode?.() === true ? { fastMode: true } : {}),
         onEvent(event) {
           if (event.type !== 'text.delta') return;
           streamedChars += event.content.length;
@@ -430,6 +432,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         messages: readonly ModelMessage[];
         tools: readonly ModelToolDefinition[];
         reasoningEffort?: ModelReasoningEffort;
+        fastMode?: boolean;
       }>;
       const accountingPipeline = createContextAccountingCompactionPipeline<
         PipelineState,
@@ -469,6 +472,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             messages: microcompactMessagesForContext(pipelineState.messages).messages,
             tools,
             ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
+            ...(options.getFastMode?.() === true ? { fastMode: true } : {}),
           };
         },
         async compact({ state: pipelineState, reason }) {

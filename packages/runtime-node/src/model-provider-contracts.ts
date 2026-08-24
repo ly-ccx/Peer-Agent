@@ -62,6 +62,11 @@ export interface ModelProviderRequest {
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
   readonly reasoningEffort?: ModelReasoningEffort;
+  /**
+   * Product Fast mode. ChatGPT/Grok Responses encode this as
+   * `service_tier: "priority"`. Admission (OAuth only) belongs at the caller.
+   */
+  readonly fastMode?: boolean;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ModelStreamEvent) => void;
 }

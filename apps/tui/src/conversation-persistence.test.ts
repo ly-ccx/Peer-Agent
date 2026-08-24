@@ -32,6 +32,7 @@ function createStoreRecorder() {
       },
       appendMessage(...args: unknown[]) { calls.push({ method: 'appendMessage', args }); },
       updateMode(...args: unknown[]) { calls.push({ method: 'updateMode', args }); },
+      updateFastMode(...args: unknown[]) { calls.push({ method: 'updateFastMode', args }); },
       updateModelEffort(...args: unknown[]) { calls.push({ method: 'updateModelEffort', args }); },
       addUsage(...args: unknown[]) { calls.push({ method: 'addUsage', args }); },
       updateContextSnapshot(...args: unknown[]) { calls.push({ method: 'updateContextSnapshot', args }); },
@@ -129,12 +130,43 @@ describe('TUI conversation persistence', () => {
     expect(recorder.calls.find((call) => call.method === 'createConversation')?.args[0]).toEqual({
       workspacePath: '/workspace',
       mode: 'chat',
+      fastMode: false,
     });
     expect(recorder.calls.find((call) => call.method === 'updateModelEffort')?.args[1]).toEqual({
       effort: 'high',
       modelProviderId: 'provider-a',
       model: 'model-a',
     });
+  });
+
+  test('persists Fast mode on create and later updates', () => {
+    const recorder = createStoreRecorder();
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialFastMode: true,
+      initialModel: selection,
+      store: recorder.store,
+      now: () => 123,
+    });
+
+    persistence.syncSnapshot(snapshot({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'hello' },
+        { id: 'assistant-1', role: 'assistant', content: 'world' },
+      ],
+    }));
+    persistence.syncFastMode(false);
+
+    expect(recorder.calls.find((call) => call.method === 'createConversation')?.args[0]).toEqual({
+      workspacePath: '/workspace',
+      mode: 'chat',
+      fastMode: true,
+    });
+    expect(recorder.calls.find((call) => call.method === 'updateFastMode')?.args).toEqual([
+      'conversation-1',
+      false,
+    ]);
   });
 
   test('writes scoped TUI turns through the shared lifetime and ledger transaction', () => {
@@ -349,7 +381,7 @@ describe('TUI conversation persistence', () => {
       });
       expect(calls).toContainEqual({
         method: 'createConversation',
-        args: [{ workspacePath: canonicalRoot, mode: 'chat' }],
+        args: [{ workspacePath: canonicalRoot, mode: 'chat', fastMode: false }],
       });
     } finally {
       rmSync(linkedWorkspace, { force: true });
@@ -463,6 +495,7 @@ describe('TUI conversation persistence', () => {
     expect(restored).toEqual({
       id: 'stored-1',
       mode: 'goal',
+      fastMode: false,
       messages: [
         { id: 'old-user', role: 'user', content: 'remember this' },
         { id: 'old-assistant', role: 'assistant', content: 'remembered' },

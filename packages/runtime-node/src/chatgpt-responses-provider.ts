@@ -110,6 +110,8 @@ function requestBody(request: ModelProviderRequest): Record<string, unknown> {
     ...(!request.reasoningEffort || request.reasoningEffort === 'default'
       ? {}
       : { reasoning: { effort: request.reasoningEffort } }),
+    // Fast mode is the product-facing name; OpenAI/xAI supported wire value is "priority".
+    ...(request.fastMode === true ? { service_tier: 'priority' } : {}),
     stream: true,
     store: false,
   };
