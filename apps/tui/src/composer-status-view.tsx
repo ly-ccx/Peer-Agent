@@ -269,6 +269,12 @@ function ModelEffortLabel({ status }: { readonly status: ComposerStatus }) {
       <span fg={COLOR.textSoft}>{status.model}</span>
       <StatusSeparator />
       <span fg={COLOR.textSoft}>{status.effort}</span>
+      {status.fast ? (
+        <>
+          <StatusSeparator />
+          <span fg={COLOR.accent}>fast</span>
+        </>
+      ) : null}
     </>
   );
 }

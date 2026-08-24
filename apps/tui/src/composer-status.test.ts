@@ -97,6 +97,20 @@ describe('composer status', () => {
     })).not.toHaveProperty('cache');
   });
 
+  test('surfaces Fast only when the admitted session flag is on', () => {
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'gpt-5.5',
+    })).not.toHaveProperty('fast');
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'gpt-5.5',
+      fastMode: true,
+    })).toMatchObject({ fast: true });
+  });
+
   test('uses the repository model-catalog window for supported GPT models', () => {
     expect(contextWindowForModel('gpt-5.6-sol · ChatGPT')).toBe(272_000);
     expect(contextWindowForModel('gpt-5.5')).toBe(272_000);

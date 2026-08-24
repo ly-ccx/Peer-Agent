@@ -190,6 +190,7 @@ export {
   loadSharedModelSelection,
   selectDesktopDefaultProvider,
 } from './shared-model-config.ts';
+export { effectiveFastMode, supportsFastMode } from './fast-mode.ts';
 export type { CreateChatGptResponsesProviderOptions } from './chatgpt-responses-provider.ts';
 export { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts';
 export { refreshChatGptOAuthTokens } from './chatgpt-oauth.ts';
