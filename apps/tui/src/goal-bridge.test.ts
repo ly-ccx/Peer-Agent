@@ -15,6 +15,7 @@ describe('TuiGoalBridge', () => {
     expect(source).toContain('subscribeChanges: subscribeLocalChanges');
     expect(source).toContain('localChangeListeners');
     expect(source).toContain('store.setOnChange');
+    expect(source).toContain('targetWorkspacePath: asString(options.args.targetWorkspacePath) || workspaceRoot');
     expect(source).not.toContain('findGoalPlanStorePath');
     expect(source).not.toContain('loadGoalPlanStoreFactory');
     expect(source).not.toContain('Unable to locate Desktop goal-plan-store.mjs');

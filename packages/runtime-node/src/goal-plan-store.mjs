@@ -2680,6 +2680,9 @@ export function createGoalPlanStore({
     const acceptedAt = new Date().toISOString();
     return revisePlan(planId, {
       ...patch,
+      ...(!plan.targetWorkspacePath && plan.originWorkspacePath
+        ? { targetWorkspacePath: plan.originWorkspacePath }
+        : {}),
       status: 'executing',
       workflowKind: 'goal_self_driven',
       activation: {

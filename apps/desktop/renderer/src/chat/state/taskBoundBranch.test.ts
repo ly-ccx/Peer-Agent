@@ -77,7 +77,7 @@ test('formatComposerBoundBranch previews configured baseBranch, then HEAD, and n
       delivery: null,
       currentHead: 'PeerAgent/0.0.6',
     })?.label,
-    'PeerAgent/0.0.6',
+    '0.0.6',
   );
   assert.equal(
     formatComposerBoundBranch({

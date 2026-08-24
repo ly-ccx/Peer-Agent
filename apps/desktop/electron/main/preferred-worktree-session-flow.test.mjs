@@ -13,6 +13,7 @@ test('new-task worktree preference is stored on the conversation and applied via
   ]);
 
   assert.match(main, /handleChatStartTask\([\s\S]*preferredExecutionIsolation = 'none'[\s\S]*createConversation\(\{[\s\S]*preferredExecutionIsolation/);
+  assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
   assert.match(main, /prepareIsolation: async \(plan\) => \{[\s\S]*preparePlanExecutionWorkspace/);
   assert.match(service, /preparePlanExecutionWorkspace\(\{[\s\S]*isolatePlan: goalWorktreeAdapter\?\.isolatePlan/);
   assert.match(helper, /conversationPrefersWorktree/);

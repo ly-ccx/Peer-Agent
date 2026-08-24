@@ -139,6 +139,7 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /isDraftConversation && workspacePath/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
+  assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
   assert.match(main, /preparePlanExecutionWorkspace/);
   assert.match(service, /preparePlanExecutionWorkspace/);
   assert.match(panel, /goalPlansIsolate/);

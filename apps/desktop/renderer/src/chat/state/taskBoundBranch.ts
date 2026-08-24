@@ -88,7 +88,7 @@ export function formatComposerBoundBranch(
   if (targetBranch) {
     return {
       kind: 'bound-source',
-      label: targetBranch,
+      label: compactBranchName(targetBranch) || targetBranch,
       title: isZh ? `已绑定源头 ${targetBranch}` : `Bound to ${targetBranch}`,
       value: targetBranch,
     };
@@ -98,7 +98,7 @@ export function formatComposerBoundBranch(
   const configured = Boolean(trimBranch(input.workspaceBaseBranch));
   return {
     kind: 'preview-source',
-    label: source,
+    label: compactBranchName(source) || source,
     title: configured
       ? (isZh ? `新任务将从工作区源头 ${source} 分叉` : `New tasks will fork from ${source}`)
       : (isZh ? `新任务将从当前分支 ${source} 分叉` : `New tasks will fork from the current branch ${source}`),

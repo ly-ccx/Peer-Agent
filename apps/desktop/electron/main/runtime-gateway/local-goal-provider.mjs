@@ -194,7 +194,8 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
       nonEmptyString(context.toolContext?.workspacePath);
     const targetWorkspacePath =
       nonEmptyString(args.targetWorkspacePath) ||
-      nonEmptyString(context.toolContext?.targetWorkspacePath);
+      nonEmptyString(context.toolContext?.targetWorkspacePath) ||
+      originWorkspacePath;
 
     let status = 'success';
     let payload;
