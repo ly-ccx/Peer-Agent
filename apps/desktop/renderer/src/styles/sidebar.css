@@ -411,8 +411,10 @@
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row {
-  --sidebar-conv-row-pad-x: 4px;
-  padding: 3px 8px 3px var(--sidebar-conv-row-pad-x);
+  /* Keep resting left/right padding on the same token so the selected
+     capsule does not look optically heavier on one side. */
+  --sidebar-conv-row-pad-x: 8px;
+  padding: 3px var(--sidebar-conv-row-pad-x);
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row:hover,
@@ -572,8 +574,8 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  min-height: 32px;
-  padding: 5px var(--sidebar-conv-row-pad-x);
+  min-height: 26px;
+  padding: 3px var(--sidebar-conv-row-pad-x);
   border: 1px solid transparent;
   /* Match right panel / goal list card radius so left/right no longer feel split. */
   border-radius: var(--ui-radius-panel, var(--radius-lg));
