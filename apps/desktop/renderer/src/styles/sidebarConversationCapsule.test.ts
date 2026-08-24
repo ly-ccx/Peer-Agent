@@ -6,15 +6,23 @@ import { fileURLToPath } from 'node:url';
 
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
+const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
-  const startToken = `\n${selector} {`;
-  const start = css.indexOf(startToken);
-  assert.notEqual(start, -1, `Expected CSS rule for ${selector}`);
-  const bodyStart = start + startToken.length;
-  const end = css.indexOf('}', bodyStart);
-  assert.notEqual(end, -1, `Expected closing brace for ${selector}`);
-  return css.slice(bodyStart, end);
+  const startToken = `${selector} {`;
+  let searchFrom = 0;
+  while (searchFrom < css.length) {
+    const start = css.indexOf(startToken, searchFrom);
+    assert.notEqual(start, -1, `Expected CSS rule for ${selector}`);
+    if (start === 0 || css[start - 1] === '\n' || css[start - 1] === ' ') {
+      const bodyStart = start + startToken.length;
+      const end = css.indexOf('}', bodyStart);
+      assert.notEqual(end, -1, `Expected closing brace for ${selector}`);
+      return css.slice(bodyStart, end);
+    }
+    searchFrom = start + startToken.length;
+  }
+  assert.fail(`Expected CSS rule for ${selector}`);
 }
 
 test('workspace conversation capsules keep resting left/right padding on one token', () => {
@@ -59,4 +67,20 @@ test('hover and focus still reserve only the leading pin gutter', () => {
     sidebarCss,
     /\.conversation-row:hover:not\(\.is-editing\):not\(\.is-confirming-delete\) \.sidebar-conv-time,/,
   );
+});
+
+test('selected conversation capsules stay a fill instead of a lifted card', () => {
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+  const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
+  const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
+
+  assert.match(activeBody, /box-shadow:\s*none;/);
+  assert.doesNotMatch(activeBody, /--shadow-soft|--shadow-composer/);
+  assert.match(layeredActiveBody, /box-shadow:\s*none;/);
+  assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
+  assert.match(layeredActiveHoverBody, /box-shadow:\s*none;/);
+  assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
 });
