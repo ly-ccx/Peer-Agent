@@ -156,6 +156,7 @@ import { useStreamingReport } from '../hooks/useStreamingReport';
 import { registerBrowserToolReveal } from '../state/streamRouterOwnership';
 import {
   planThreadScrollAfterMessagesChange,
+  planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
 } from '../state/threadScrollPolicy';
 import {
@@ -751,8 +752,29 @@ export function ChatSurface({
     conversationId: string;
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
+  const lastThreadOpenConversationIdRef = useRef<string | null | undefined>(undefined);
+  const previousMessageCountRef = useRef(messages.length);
   const messageNavigationRequestRef = useRef(0);
   const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
+
+  // 打开会话时在 render 阶段挂上贴底 pending，让同帧 layout restore 能等到列表挂载后再滚到底。
+  // 不能放进 conversationId 的 useEffect：那会在首帧虚拟列表已经停在顶部之后才写入 pending。
+  if (lastThreadOpenConversationIdRef.current !== conversationId) {
+    lastThreadOpenConversationIdRef.current = conversationId;
+    const openPlan = planThreadScrollOnConversationOpen({
+      hasExplicitMessageTarget: Boolean(
+        conversationId
+        && messageTarget
+        && messageTarget.conversationId === conversationId
+        && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
+      ),
+    });
+    pendingThreadScrollRestoreRef.current = conversationId && openPlan.stickToBottom
+      ? { conversationId, snapshot: null }
+      : null;
+    shouldAutoScrollRef.current = Boolean(conversationId) && openPlan.stickToBottom;
+    previousMessageCountRef.current = messages.length;
+  }
 
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentRef.current = true;
@@ -1168,15 +1190,12 @@ export function ChatSurface({
     setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
     setDeliveryLine(null);
     setDeliveryLineKnown(false);
-    const threadScrollSnapshot = conversationId
-      ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
-      : null;
-    pendingThreadScrollRestoreRef.current = conversationId
-      ? { conversationId, snapshot: threadScrollSnapshot }
-      : null;
-    const nextAtBottom = threadScrollSnapshot?.atBottom ?? true;
-    shouldAutoScrollRef.current = nextAtBottom;
-    setIsThreadAtBottom((previous) => (previous === nextAtBottom ? previous : nextAtBottom));
+    // 打开会话的默认落点（贴底）在 render 阶段写入 pendingThreadScrollRestoreRef，
+    // 避免等这个 useEffect 才挂 pending，导致加载占位上的空容器贴底被清掉后列表从顶部挂载。
+    setIsThreadAtBottom((previous) => {
+      const next = pendingThreadScrollRestoreRef.current != null;
+      return previous === next ? previous : next;
+    });
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId/toolProgress 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
@@ -1523,7 +1542,10 @@ export function ChatSurface({
     if (!pending || pending.conversationId !== conversationId) return;
     const container = threadRef.current;
     if (!container) return;
-    if (messages.length === 0 && pending.snapshot && pending.snapshot.top > 0) return;
+    // 加载占位替换虚拟列表时贴底会落到空容器并清掉 pending，随后列表从顶部挂载。
+    if (shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length })) {
+      return;
+    }
 
     const finishRestore = () => {
       if (
@@ -1539,70 +1561,59 @@ export function ChatSurface({
       pendingThreadScrollRestoreRef.current = null;
     };
 
-    if (pending.snapshot) {
-      if (pending.snapshot.atBottom) {
-        container.scrollTop = container.scrollHeight;
-        finishRestore();
-        return;
-      }
+    const pendingMessageTarget = Boolean(
+      messageTarget
+      && messageTarget.conversationId === conversationId
+      && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
+    );
+    if (pendingMessageTarget) {
+      shouldAutoScrollRef.current = false;
+      pendingThreadScrollRestoreRef.current = null;
+      return;
+    }
 
-      const anchoredTurnId = pending.snapshot.turnId;
-      const anchoredTurnIndex = anchoredTurnId
-        ? messageTurnIndex.get(anchoredTurnId)
-        : undefined;
-      if (anchoredTurnId && anchoredTurnIndex != null) {
-        scrollToTurn(anchoredTurnIndex);
-        let secondFrameId: number | null = null;
-        const firstFrameId = window.requestAnimationFrame(() => {
-          secondFrameId = window.requestAnimationFrame(() => {
-            if (
-              pendingThreadScrollRestoreRef.current !== pending
-              || conversationIdRef.current !== pending.conversationId
-            ) return;
-            const anchoredTurn = container.querySelector<HTMLElement>(
-              `[data-chat-turn-id="${CSS.escape(anchoredTurnId)}"]`,
-            );
-            if (anchoredTurn) {
-              container.scrollTop = Math.max(
-                0,
-                anchoredTurn.offsetTop + pending.snapshot!.turnOffset,
-              );
-            } else {
-              const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-              container.scrollTop = Math.min(pending.snapshot!.top, maxTop);
-            }
-            finishRestore();
-          });
-        });
-        return () => {
-          window.cancelAnimationFrame(firstFrameId);
-          if (secondFrameId != null) window.cancelAnimationFrame(secondFrameId);
-        };
-      }
-
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      container.scrollTop = Math.min(pending.snapshot.top, maxTop);
+    if (messages.length === 0) {
       finishRestore();
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom((previous) => (previous ? previous : true));
-    finishRestore();
+    scrollThreadToBottom('auto');
+
+    let cancelled = false;
+    let remaining = 2;
+    let frameId = window.requestAnimationFrame(function reaffirmOpenBottom() {
+      if (
+        cancelled
+        || pendingThreadScrollRestoreRef.current !== pending
+        || conversationIdRef.current !== pending.conversationId
+      ) return;
+      remaining -= 1;
+      scrollThreadToBottom('auto');
+      if (remaining > 0) {
+        frameId = window.requestAnimationFrame(reaffirmOpenBottom);
+        return;
+      }
+      finishRestore();
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
   }, [
     conversationId,
-    messageTurnIndex,
+    loadStatus,
+    messageTarget,
     messages,
     saveThreadScrollSnapshot,
-    scrollToTurn,
+    scrollThreadToBottom,
     updateCurrentTurnContext,
     updateThreadBottomState,
     updateVirtualViewport,
   ]);
 
   // 记录上一帧消息条数：压缩/整表重写通常会减少条数，此时旧的 index 高度缓存与新时间线错位。
-  const previousMessageCountRef = useRef(messages.length);
   useLayoutEffect(() => {
     const previousCount = previousMessageCountRef.current;
     previousMessageCountRef.current = messages.length;
