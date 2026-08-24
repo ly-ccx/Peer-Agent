@@ -229,8 +229,8 @@ function ComposerRunningStatusLabel({
   const startedAtRef = useRef(Date.now());
   const activity = runningActivityField(frame, width);
   const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
-  // Scheme D: generic running is activity + elapsed only. Real exceptional
-  // states keep a label; compacting also shows live percent + progress bar.
+  // Generic running is the stable `working...` label + elapsed only. Real
+  // exceptional states keep a label; compacting also shows live percent + bar.
   const statusLabel = runStatus === 'running'
     ? `· ${elapsed}`
     : runStatus === 'compacting'

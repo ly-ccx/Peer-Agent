@@ -7,18 +7,10 @@ export function showCacheStatus(layout: ComposerStatusLayout, status: ComposerSt
   return layout === 'wide' && status.cache !== undefined;
 }
 
-/** Footer running status, mounted above the quiet input divider. */
-
-/**
- * Crush-style neon for the activity field.
- *
- * Crush (internal/ui/anim) builds a continuous HCL gradient ramp between two
- * theme colors and, with CycleColors, loops A→B→A→B while advancing an offset
- * each frame. Peer previously stepped through 3 discrete semantic tokens, which
- * looked banded/harsh. We keep Frost accent↔info as the endpoints and sample a
- * smooth cycled ramp so glyphs shimmer instead of hard-jumping.
- */
-const NEON_RAMP_STEPS = 24;
+/** Characters of influence on either side of the highlight peak. */
+const SWEEP_FALLOFF = 2;
+/** Off-string frames so the glint fully exits before looping. */
+const SWEEP_LEAD = 6;
 
 type Rgb = readonly [number, number, number];
 type Hsl = readonly [number, number, number];
@@ -114,52 +106,25 @@ function blendColors(from: string, to: string, t: number): string {
 }
 
 /**
- * Crush makeGradientRamp(size, stops...): multi-stop continuous blend.
- * CycleColors uses A,B,A,B so the field can scroll without a hard seam.
+ * Specular highlight traveling across a stable label.
+ * `1` is the peak glyph; `0` is the resting color.
  */
-function makeGradientRamp(size: number, stops: readonly string[]): string[] {
-  if (size <= 0 || stops.length === 0) return [COLOR.accent];
-  if (stops.length === 1 || size === 1) return Array.from({ length: size }, () => stops[0] ?? COLOR.accent);
-
-  const numSegments = stops.length - 1;
-  const baseSize = Math.floor(size / numSegments);
-  const remainder = size % numSegments;
-  const ramp: string[] = [];
-
-  for (let i = 0; i < numSegments; i += 1) {
-    const from = stops[i] ?? COLOR.accent;
-    const to = stops[i + 1] ?? from;
-    const segmentSize = baseSize + (i < remainder ? 1 : 0);
-    for (let j = 0; j < segmentSize; j += 1) {
-      const t = segmentSize <= 1 ? 0 : j / segmentSize;
-      ramp.push(blendColors(from, to, t));
-    }
-  }
-  return ramp;
+export function activitySweepIntensity(index: number, frame = 0, length = 10): number {
+  if (length <= 0) return 0;
+  const period = length + SWEEP_LEAD * 2;
+  const pos = (Math.abs(frame) % period) - SWEEP_LEAD;
+  const dist = Math.abs(index - pos);
+  const t = clamp01(1 - dist / SWEEP_FALLOFF);
+  return t * t;
 }
 
-let cachedNeonKey = '';
-let cachedNeonRamp: string[] = [];
-
-function neonGradientRamp(): string[] {
-  // Live COLOR may flip light/dark; rebuild when endpoints change.
-  const from = COLOR.accent;
-  const to = COLOR.info;
-  const key = `${from}|${to}|${NEON_RAMP_STEPS}`;
-  if (key === cachedNeonKey && cachedNeonRamp.length > 0) return cachedNeonRamp;
-  // A→B→A→B mirrors crush CycleColors gradient construction.
-  cachedNeonRamp = makeGradientRamp(NEON_RAMP_STEPS * 2, [from, to, from, to]);
-  cachedNeonKey = key;
-  return cachedNeonRamp;
+/** Resting lime with a white highlight band that sweeps left → right. */
+export function activitySweepColor(index: number, frame = 0, length = 10): string {
+  const rest = blendColors(COLOR.accent, COLOR.muted, 0.35);
+  return blendColors(rest, COLOR.brandHighlight, activitySweepIntensity(index, frame, length));
 }
 
-/** Per-character neon color; `frame` scrolls the crush-style gradient. */
-export function neonActivityColor(index: number, frame = 0): string {
-  const ramp = neonGradientRamp();
-  const offset = Math.abs(index + frame) % ramp.length;
-  return ramp[offset] ?? COLOR.accent;
-}
-
+/** Footer running status, mounted above the quiet input divider. */
 export function ComposerRunningStatusBar({
   activity,
   statusLabel,
@@ -167,9 +132,10 @@ export function ComposerRunningStatusBar({
 }: {
   readonly activity: string;
   readonly statusLabel: string;
-  /** Animation frame — shifts per-character neon colors without changing glyphs. */
+  /** Animation frame — moves the highlight sweep without changing glyphs. */
   readonly frame?: number;
 }) {
+  const activityLength = [...activity].length;
   return (
     <box
       flexDirection="row"
@@ -181,7 +147,7 @@ export function ComposerRunningStatusBar({
     >
       <text wrapMode="none">
         {[...activity].map((character, index) => (
-          <span key={`${index}-${character}`} fg={neonActivityColor(index, frame)}>
+          <span key={`${index}-${character}`} fg={activitySweepColor(index, frame, activityLength)}>
             {character}
           </span>
         ))}
