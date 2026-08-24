@@ -15,7 +15,7 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
-import { snapshotDeliveryLine } from '../state/taskBoundBranch';
+import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
@@ -157,13 +157,10 @@ interface GoalPlanPanelProps {
    */
   readonly onRequestHostFocus?: () => void;
   /**
-   * 当前活动计划的交付线快照。用于输入栏展示绑定分支；无绑定则报 null。
-   * 表达层只读，不把隔离/分支真值放进 renderer state。
+   * 当前活动计划的交付线快照。用于输入栏展示任务线 / 隔离标记；无绑定则报 null。
+   * 表达层只读，隔离真值仍以 deliveryBinding 为准。
    */
-  readonly onActiveDeliveryChange?: (line: {
-    readonly targetBranch: string | null;
-    readonly taskBranch: string | null;
-  } | null) => void;
+  readonly onActiveDeliveryChange?: (line: TaskDeliveryLine | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {

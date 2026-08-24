@@ -32,7 +32,7 @@ function sameWorkspaceGit(left: WorkspaceGitState | null, right: WorkspaceGitSta
 }
 
 /**
- * Composer 绑定分支用的工作区 Git HEAD。
+ * Composer 工作区层用的 Git HEAD。
  * 路径变化、窗口重新可见、以及本轮结束后都重读，避免同窗口 checkout 后仍显示旧分支。
  */
 export function useWorkspaceGit(

@@ -1140,6 +1140,48 @@
   cursor: default;
 }
 
+.composer-workspace-head,
+.composer-task-line,
+.composer-write-mismatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 11rem;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.composer-workspace-head svg,
+.composer-task-line svg {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.composer-task-line.is-isolated,
+.chat-header-branch.is-isolated {
+  color: var(--graphite-soft);
+}
+
+.composer-write-mismatch {
+  max-width: 12rem;
+  color: var(--graphite-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
    故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
 .pa-dropdown-menu.composer-dropdown {
@@ -4875,7 +4917,10 @@ button.chat-header-cap-item:focus-visible {
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger,
 .chat-composer-wrap--empty-home .composer-workspace-add,
-.chat-composer-wrap--empty-home .composer-worktree-toggle {
+.chat-composer-wrap--empty-home .composer-worktree-toggle,
+.chat-composer-wrap--empty-home .composer-workspace-head,
+.chat-composer-wrap--empty-home .composer-task-line,
+.chat-composer-wrap--empty-home .composer-write-mismatch {
   height: var(--composer-addon-height);
   min-height: var(--composer-addon-height);
   padding: 0 8px;

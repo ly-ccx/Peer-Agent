@@ -50,8 +50,8 @@ import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '
 import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
-  formatComposerBoundBranch,
   formatComposerBranchOptionLabel,
+  planComposerGitChrome,
   type TaskDeliveryLine,
 } from '../state/taskBoundBranch';
 import {
@@ -363,6 +363,17 @@ async function loadConversationMessages(conversationId: string): Promise<{
     contextAccounting,
     automationCreateContext: conv.automationCreateContext ?? null,
   };
+}
+
+function GitBranchGlyph() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
 }
 
 export function ChatSurface({
@@ -2264,34 +2275,38 @@ export function ChatSurface({
     const configured = match?.baseBranch?.trim();
     return configured ? configured : null;
   }, [pendingBaseBranch, workspacePath, workspaces]);
-  const boundBranch = useMemo(
-    () => formatComposerBoundBranch({
+  const gitChrome = useMemo(
+    () => planComposerGitChrome({
       delivery: deliveryLine,
-      workspaceBaseBranch: (!conversationId || deliveryLineKnown) ? workspaceBaseBranch : null,
-      currentHead: (!conversationId || deliveryLineKnown) && workspaceGit?.ok ? workspaceGit.current : null,
+      workspaceBaseBranch: workspaceBaseBranch,
+      currentHead: workspaceGit?.ok ? workspaceGit.current : null,
+      isDraft: isDraftConversation,
+      deliveryKnown: isDraftConversation || deliveryLineKnown,
     }, { locale: isZh ? 'zh' : 'en' }),
-    [conversationId, deliveryLine, deliveryLineKnown, isZh, workspaceBaseBranch, workspaceGit],
+    [deliveryLine, deliveryLineKnown, isDraftConversation, isZh, workspaceBaseBranch, workspaceGit],
   );
   const canSelectBoundBranch = canSelectComposerSourceBranch({
     isDraft: isDraftConversation,
     delivery: deliveryLine,
-  });
+  }) && gitChrome.taskLine?.selectable === true;
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
-    if (!boundBranch) return [];
-    const branches = canSelectBoundBranch && workspaceGit?.ok ? workspaceGit.branches : [];
+    if (!gitChrome.taskLine?.selectable) return [];
+    const branches = workspaceGit?.ok ? workspaceGit.branches : [];
     return buildComposerBranchOptions({
       branches,
-      selected: boundBranch.value,
+      selected: gitChrome.taskLine.value,
     }).map((branch) => ({
       value: branch,
-      label: branch === boundBranch.value ? boundBranch.label : formatComposerBranchOptionLabel(branch),
+      label: branch === gitChrome.taskLine?.value
+        ? gitChrome.taskLine.label
+        : formatComposerBranchOptionLabel(branch),
     }));
-  }, [boundBranch, canSelectBoundBranch, workspaceGit]);
+  }, [gitChrome.taskLine, workspaceGit]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (!next || !workspacePath || !canSelectBoundBranch) return;
-    if (next === boundBranch?.value) return;
-    const previous = boundBranch?.value ?? null;
+    if (next === gitChrome.taskLine?.value) return;
+    const previous = gitChrome.taskLine?.value ?? null;
     setPendingBaseBranch(next);
     void clientApi.workspaceUpdate({ path: workspacePath, baseBranch: next })
       .then(async (result) => {
@@ -2305,7 +2320,7 @@ export function ChatSurface({
       .catch(() => {
         setPendingBaseBranch(previous);
       });
-  }, [boundBranch?.value, canSelectBoundBranch, onWorkspaceUpdated, workspacePath]);
+  }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2432,7 +2447,7 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
-        boundBranch={boundBranch}
+        taskLine={gitChrome.taskLine}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
@@ -2717,27 +2732,46 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
-            {boundBranch && (workspaceGit == null || workspaceGit.ok || Boolean(deliveryLine)) ? (
+            {gitChrome.workspaceHead ? (
+              <span
+                className="composer-workspace-head"
+                title={gitChrome.workspaceHead.title}
+                aria-label={gitChrome.workspaceHead.title}
+              >
+                <GitBranchGlyph />
+                <span className="composer-bound-branch-text">{gitChrome.workspaceHead.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.taskLine?.selectable ? (
               <Dropdown
                 className="composer-dropdown composer-bound-branch"
-                value={boundBranch.value}
+                value={gitChrome.taskLine.value}
                 options={boundBranchOptions}
                 onChange={handleSelectBoundBranch}
-                disabled={!canSelectBoundBranch}
-                ariaLabel={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
-                title={canSelectBoundBranch
-                  ? (isZh ? `选择新任务源头，当前 ${boundBranch.title}` : `Choose the source branch. ${boundBranch.title}`)
-                  : boundBranch.title}
-                prefix={(
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                )}
+                ariaLabel={gitChrome.taskLine.title}
+                title={gitChrome.taskLine.title}
+                prefix={<GitBranchGlyph />}
                 menuPlacement="up"
               />
+            ) : gitChrome.taskLine ? (
+              <span
+                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                data-kind={gitChrome.taskLine.kind}
+                title={gitChrome.taskLine.title}
+                aria-label={gitChrome.taskLine.title}
+              >
+                <GitBranchGlyph />
+                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.writeMismatch ? (
+              <span
+                className="composer-write-mismatch"
+                title={gitChrome.writeMismatch.title}
+                aria-label={gitChrome.writeMismatch.title}
+              >
+                {gitChrome.writeMismatch.label}
+              </span>
             ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
