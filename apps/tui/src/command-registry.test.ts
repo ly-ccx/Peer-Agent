@@ -39,6 +39,13 @@ describe('TUI command registry', () => {
     expect(resolveTuiCommandInput('/version', idle)?.action).toEqual({ type: 'show-version' });
   });
 
+  test('hides Fast unless ChatGPT/Grok OAuth is admitted, but still resolves /fast', () => {
+    expect(visibleTuiCommands(idle).map((command) => command.id)).not.toContain('fast');
+    expect(visibleTuiCommands({ goalStatus: 'none', fastAvailable: true }).map((command) => command.id))
+      .toContain('fast');
+    expect(resolveTuiCommandInput('/fast', idle)?.action).toEqual({ type: 'toggle-fast-mode' });
+  });
+
   test('filters by id, label, description, and keywords', () => {
     expect(filterTuiCommandRegistry('model', idle).map((command) => command.id)).toContain('model');
     expect(filterTuiCommandRegistry('permission', idle).map((command) => command.id)).toEqual(['permissions']);

@@ -843,6 +843,11 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.pa-dropdown-prefix {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
 .pa-dropdown-value {
   overflow: hidden;
   text-overflow: ellipsis;

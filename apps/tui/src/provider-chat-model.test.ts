@@ -114,6 +114,8 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(requests[0]?.reasoningEffort).toBeUndefined();
     expect(requests[1]?.model).toBe('model-b');
     expect(requests[1]?.reasoningEffort).toBe('high');
+    expect(requests[0]?.fastMode).toBeUndefined();
+    expect(requests[1]?.fastMode).toBeUndefined();
     const finalSnapshot = controller.getSnapshot();
     expect(finalSnapshot.contextAccounting?.modelKey).toBe('model-b');
     expect(finalSnapshot.contextAccounting?.contextWindow).toBe(500_000);
@@ -122,6 +124,32 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       + estimateTextTokens(JSON.stringify(requests[1]!.tools ?? [])),
     );
     expect(finalSnapshot.contextAccounting?.authoritativeInputTokens).toBe(sentRequestTokens);
+  });
+
+  test('forwards Fast mode onto provider stream requests', async () => {
+    const requests: ModelProviderRequest[] = [];
+    let fastMode = false;
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return completed('done');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-a',
+        getFastMode: () => fastMode,
+      }),
+    });
+
+    await controller.send('first');
+    fastMode = true;
+    await controller.send('second');
+
+    expect(requests[0]?.fastMode).toBeUndefined();
+    expect(requests[1]?.fastMode).toBe(true);
   });
 
   test('compacts before the next send when provider usage observed 498K input', async () => {

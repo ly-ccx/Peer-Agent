@@ -3053,7 +3053,12 @@ function handleChatSend({
           if (!activeGoal && typeof goalPlanStore.createIntakeContract === 'function') {
             goalPlanStore.createIntakeContract({
               conversationId,
-              ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
+              ...(conversationWorkspacePath
+                ? {
+                  originWorkspacePath: conversationWorkspacePath,
+                  targetWorkspacePath: conversationWorkspacePath,
+                }
+                : {}),
               title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
               goal,
               createdBy: 'user',
@@ -3063,7 +3068,12 @@ function handleChatSend({
             // 避免在有目标进行中的情况下产生第二条悬空 intake 契约。
             goalPlanStore.upsertGoalContract(conversationId, {
               conversationId,
-              ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
+              ...(conversationWorkspacePath
+                ? {
+                  originWorkspacePath: conversationWorkspacePath,
+                  targetWorkspacePath: conversationWorkspacePath,
+                }
+                : {}),
               title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
               goal,
               status: 'accepted',

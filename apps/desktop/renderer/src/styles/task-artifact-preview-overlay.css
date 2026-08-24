@@ -140,3 +140,9 @@
   font-size: var(--za-code-font-size, 12px);
 }
 
+.diff-file-preview-more {
+  padding: 6px 10px 8px;
+  font-size: var(--ui-font-caption);
+  color: var(--za-text-muted);
+}
+

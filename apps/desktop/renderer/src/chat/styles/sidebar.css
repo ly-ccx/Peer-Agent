@@ -226,7 +226,7 @@
   }
 
   .channel-conversation-list .conversation-row {
-    @apply min-h-8;
+    min-height: 28px;
     width: calc(100% - 2px);
     margin-inline: 1px;
   }
@@ -235,7 +235,8 @@
     @apply grid min-h-8 w-full items-center gap-2 px-1.5 py-0.5 text-left;
     grid-template-columns: 22px minmax(0, 1fr) 22px;
     border: 1px solid transparent;
-    border-radius: var(--ui-radius-panel, var(--radius-lg, 12px));
+    /* List row, not a capsule: 8px radius on ~28px height stays a rounded rect. */
+    border-radius: var(--ui-radius-row, 8px);
     background: transparent;
     box-shadow: var(--ui-surface-float-shadow, none);
     transform-origin: center;
@@ -255,14 +256,14 @@
   .conversation-row.active {
     border-color: transparent;
     background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
-    /* 与输入框同级软阴影，token 统一为 --shadow-soft */
-    box-shadow: var(--shadow-soft, var(--shadow-composer));
+    /* Selected is a fill, not a lifted card. */
+    box-shadow: none;
   }
 
   .conversation-row.active:hover {
     background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
     border-color: transparent;
-    box-shadow: var(--shadow-soft, var(--shadow-composer));
+    box-shadow: none;
   }
 
   .conversation-main {
@@ -307,17 +308,19 @@
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
   }
 
-  .conversation-row strong {
+  .conversation-row strong,
+  .conversation-row .sidebar-conv-title {
     color: var(--za-text-soft);
-    font-size: var(--ui-font-control, 13px);
+    font-size: var(--ui-font-control);
     font-weight: 400;
   }
 
-  .conversation-row.active strong {
+  .conversation-row.active strong,
+  .conversation-row.active .sidebar-conv-title {
     color: var(--za-text);
   }
 
-  .conversation-row span {
+  .conversation-row span:not(.sidebar-conv-title) {
     color: var(--za-text-faint);
     font-size: var(--ui-font-caption, 11px);
     font-weight: 400;

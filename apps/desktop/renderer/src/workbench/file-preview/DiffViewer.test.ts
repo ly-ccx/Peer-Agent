@@ -65,6 +65,11 @@ test('DiffViewer 用悬停弹层看对照，不用系统 tooltip', async () => {
   assert.match(source, /showFileIndex/);
   assert.match(source, /个文件已改/);
   assert.match(source, /createPortal/);
+  assert.match(source, /HOVER_OPEN_MS/);
+  assert.match(source, /PREVIEW_LINE_LIMIT/);
+  assert.match(source, /onDismiss/);
+  assert.match(source, /cancelHover/);
+  assert.doesNotMatch(source, /addEventListener\('scroll', updatePosition/);
   assert.match(source, /diff-file-preview-portal/);
   assert.match(source, /onMouseEnter/);
   assert.doesNotMatch(source, /title=\{file\.path\}/);

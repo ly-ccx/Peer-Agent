@@ -1907,19 +1907,28 @@ test('createIntakeContract: 建出的契约是 activation=intake 的自驱 goal�
 });
 
 test('promoteIntakeToGoal: intake 契约就地升级为 accepted_goal（明确目标分支，不新建第二条）', () => {
-  const intake = store.createIntakeContract({
+  const boundStore = createGoalPlanStore({
+    readWorkspaceHead: () => ({ branch: 'PeerAgent/0.0.6', commit: 'abc1234' }),
+  });
+  const intake = boundStore.createIntakeContract({
     conversationId: 'conv-intake-2',
     goal: '把发布流程整理成文档',
+    originWorkspacePath: '/repo/peer_agent',
   });
-  const promoted = store.promoteIntakeToGoal(intake.planId, {
+  assert.equal(intake.targetWorkspacePath, undefined);
+  assert.equal(intake.deliveryBinding, undefined);
+  const promoted = boundStore.promoteIntakeToGoal(intake.planId, {
     goal: '把发布流程整理成一篇 SOP 文档并评审',
     title: '整理发布 SOP',
   });
   assert.equal(promoted.planId, intake.planId, '必须原地升级，planId 不变');
   assert.equal(promoted.activation.kind, 'accepted_goal');
   assert.equal(promoted.activation.intakeResolution, 'goal_confirmed');
+  assert.equal(promoted.targetWorkspacePath, '/repo/peer_agent');
+  assert.equal(promoted.deliveryBinding?.targetBranch, 'PeerAgent/0.0.6');
+  assert.equal(promoted.deliveryBinding?.executionIsolation, 'none');
   // 会话下仍只有一条契约（没有产生悬空的第二条）。
-  const plans = store.listPlansByConversation('conv-intake-2');
+  const plans = boundStore.listPlansByConversation('conv-intake-2');
   assert.equal(plans.length, 1);
 });
 

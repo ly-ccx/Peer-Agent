@@ -217,6 +217,37 @@ describe('local goal provider', () => {
     assert.equal(persisted.conversationId, 'conv-goal');
   });
 
+  it('falls origin workspace back to the writable Goal target when none is given', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create_plan:origin-target',
+          capabilityId: 'local.goal.create_plan',
+          arguments: {
+            title: '同源工作区交付',
+            goal: '在当前工作区落地改动',
+            tasks: [{ title: '绑定可写仓' }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      {
+        locale: 'zh-CN',
+        toolContext: {
+          conversationId: 'conv-origin-target',
+          mode: 'goal',
+          originWorkspacePath: '/repo/peer_agent',
+        },
+      },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    const persisted = store.getPlan(payload.planId);
+    assert.equal(persisted.originWorkspacePath, '/repo/peer_agent');
+    assert.equal(persisted.targetWorkspacePath, '/repo/peer_agent');
+  });
+
   it('rejects goal.create without goal or tasks', async () => {
     const execution = await provider.executeCapability(
       {

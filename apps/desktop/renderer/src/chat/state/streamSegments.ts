@@ -223,6 +223,56 @@ export function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'con
   );
 }
 
+export const EMPTY_VISIBLE_MODEL_RESPONSE_ERROR =
+  'empty_visible_model_response: 模型已结束，但没有返回任何可见文本、思考或工具调用。';
+
+/**
+ * 迟到的旧流终态不应改写当前活跃流。
+ * Goal 交接后 Runner 会先插入空占位并换上新 streamId；intake 的 done/abort/error
+ * 若再落到同一会话，会把新占位误判成「模型空回复」。
+ */
+export function isStaleStreamTerminal(
+  currentStreamId: string | null | undefined,
+  eventStreamId: string | null | undefined,
+): boolean {
+  if (!currentStreamId || !eventStreamId) return false;
+  return currentStreamId !== eventStreamId;
+}
+
+type AssistantPlaceholderMessage = Pick<ChatMsg, 'role' | 'content' | 'segments'>;
+
+/** 空 assistant 接在已有内容的 assistant 后面：下一 tick 占位，不是本流空回复。 */
+export function isSuccessorEmptyAssistantPlaceholder(
+  messages: readonly AssistantPlaceholderMessage[] | null | undefined,
+): boolean {
+  if (!messages || messages.length < 2) return false;
+  const last = messages[messages.length - 1];
+  const previous = messages[messages.length - 2];
+  return Boolean(
+    last
+    && isEmptyAssistantPlaceholder(last)
+    && previous.role === 'assistant'
+    && !isEmptyAssistantPlaceholder(previous)
+  );
+}
+
+/**
+ * 空占位是否应投影为 empty_visible_model_response。
+ * goal_handoff 只是 Goal Runner 本 tick 交接；交接后 Runner 插入的空占位也不是空回复。
+ */
+export function shouldReportEmptyVisibleModelResponse(options: {
+  reason?: string | null;
+  lastMessage?: AssistantPlaceholderMessage | null;
+  messages?: readonly AssistantPlaceholderMessage[] | null;
+}): boolean {
+  if (options.reason === 'goal_handoff') return false;
+  const messages = options.messages;
+  const last = options.lastMessage ?? (messages && messages.length > 0 ? messages[messages.length - 1] : null);
+  if (!last || !isEmptyAssistantPlaceholder(last)) return false;
+  if (isSuccessorEmptyAssistantPlaceholder(messages ?? (last ? [last] : []))) return false;
+  return true;
+}
+
 /**
  * 判定是否为「无正文且无附件的空 user 消息」。
  * 这类消息只剩角色标签「你」，是历史残留/竞态产物；图片-only user 不算空。

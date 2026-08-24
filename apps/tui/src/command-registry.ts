@@ -5,6 +5,7 @@ export type TuiUserMode = 'chat' | 'plan' | 'goal';
 export type TuiCommandAction =
   | { readonly type: 'open-model-picker' }
   | { readonly type: 'open-mode-picker' }
+  | { readonly type: 'toggle-fast-mode' }
   | { readonly type: 'open-permission-picker' }
   | { readonly type: 'open-language-picker' }
   | { readonly type: 'open-theme-picker' }
@@ -23,6 +24,7 @@ export type TuiCommandAction =
 
 export interface TuiCommandContext {
   readonly goalStatus: 'none' | 'running' | 'paused';
+  readonly fastAvailable?: boolean;
 }
 
 export interface TuiCommandDefinition {
@@ -42,6 +44,14 @@ const GOAL_PAUSED = (context: TuiCommandContext): boolean => context.goalStatus 
 export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.freeze([
   { id: 'model', label: 'Model', description: 'Choose model and reasoning effort', keywords: ['provider', 'llm', 'effort'], shortcut: 'Ctrl+X M', action: { type: 'open-model-picker' } },
   { id: 'mode', label: 'Mode', description: 'Choose Agent or Plan', keywords: ['agent', 'chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
+  {
+    id: 'fast',
+    label: 'Fast',
+    description: 'Toggle ChatGPT/Grok Fast (priority) for this session',
+    keywords: ['priority', 'service_tier', 'speed', 'oauth'],
+    action: { type: 'toggle-fast-mode' },
+    visible: (context) => context.fastAvailable === true,
+  },
   { id: 'permissions', label: 'Permissions', description: 'Choose the session permission policy', keywords: ['access', 'approval', 'ask'], shortcut: 'Ctrl+X P', action: { type: 'open-permission-picker' } },
   {
     id: 'language',
@@ -157,12 +167,18 @@ export function resolveTuiCommandInput(
 
   // Only bare commands (no trailing argument) resolve for non-history entries.
   if (argument) return null;
-  return (
-    localizeTuiCommands(
-      TUI_COMMAND_REGISTRY.filter((command) => command.visible?.(context) ?? true),
-      locale,
-    ).find((command) => command.id === commandName) ?? null
-  );
+  const visible = localizeTuiCommands(
+    TUI_COMMAND_REGISTRY.filter((command) => command.visible?.(context) ?? true),
+    locale,
+  ).find((command) => command.id === commandName);
+  if (visible) return visible;
+  // `/fast` stays resolvable when hidden so the dispatcher can explain it is
+  // unavailable for the current auth method instead of "Unknown command".
+  if (commandName === 'fast') {
+    const fast = TUI_COMMAND_REGISTRY.find((command) => command.id === 'fast');
+    return fast ? localizeTuiCommand(fast, locale) : null;
+  }
+  return null;
 }
 
 export interface TuiHelpSection {

@@ -75,6 +75,8 @@ root.render(
     languageStore={runtime.languageStore}
     themeStore={runtime.themeStore}
     cliUpdate={cliUpdate}
+    getSessionFastMode={() => runtime.getSessionFastMode()}
+    setSessionFastMode={(value) => runtime.setSessionFastMode(value)}
     onQuit={shutdown}
   />,
 );

@@ -454,9 +454,7 @@ export function createTuiGoalBridge(options?: {
           title: deriveTitle(options.args.title, goal),
           goal,
           originWorkspacePath: workspaceRoot,
-          ...(asString(options.args.targetWorkspacePath)
-            ? { targetWorkspacePath: asString(options.args.targetWorkspacePath) }
-            : {}),
+          targetWorkspacePath: asString(options.args.targetWorkspacePath) || workspaceRoot,
           tasks,
           successCriteria: options.args.successCriteria,
           createdBy: 'agent',

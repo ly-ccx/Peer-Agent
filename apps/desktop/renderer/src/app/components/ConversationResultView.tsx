@@ -13,14 +13,29 @@ import {
   pairAcceptanceCriteria,
   resolveEvidenceLabel,
 } from './acceptanceCriteria';
+import {
+  goalHistoryStatusLabel,
+  projectTaskGoalHistory,
+} from './taskGoalHistory';
 import { projectTaskOverviewArtifacts } from '../pages/taskOverviewArtifacts';
 import { DiffViewer } from '../../workbench/file-preview/DiffViewer';
+import {
+  diffFileDisplayName,
+  groupDiffByFile,
+} from '../../workbench/file-preview/diffLines';
 
 /**
  * 工作台「查看进度」：签字包，不是执行日记。
- * 只回答对照标准、仓库里改了什么、现在还有没有让人不敢签的事。
+ * 只回答对照标准、这条任务做过哪些目标、仓库里改了什么、现在还有没有让人不敢签的事。
  * 操作区（确认归档 / 继续追问）在 Drawer footer。
  */
+
+const HISTORY_FILE_LIMIT = 8;
+
+function historyFileNames(paths: readonly string[]): readonly string[] {
+  return paths.map((path) => diffFileDisplayName(path, paths));
+}
+
 export function ConversationResultView({
   item,
   isZh = true,
@@ -37,6 +52,7 @@ export function ConversationResultView({
     readonly status: string;
     readonly diffText: string;
   } | null>(null);
+  const [conversationPlans, setConversationPlans] = useState<readonly GoalPlan[]>([]);
   const [suggestedTarget, setSuggestedTarget] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,6 +86,42 @@ export function ConversationResultView({
     };
   }, [item.source, item.taskId]);
 
+  const conversationId = item.conversationId ?? plan?.conversationId ?? null;
+  const currentPlanId = plan?.planId ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!conversationId) {
+      setConversationPlans(plan ? [plan] : []);
+      return;
+    }
+    void clientApi.goalPlansList({ conversationId }).then(
+      (plans) => {
+        if (cancelled) return;
+        const listed = Array.isArray(plans) ? plans : [];
+        setConversationPlans(listed);
+      },
+      () => {
+        if (cancelled) return;
+        setConversationPlans(plan ? [plan] : []);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, currentPlanId]);
+
+  const historyPlans = useMemo(() => {
+    if (!plan) return conversationPlans;
+    if (conversationPlans.some((entry) => entry.planId === plan.planId)) return conversationPlans;
+    return [...conversationPlans, plan];
+  }, [conversationPlans, plan]);
+
+  const goalHistory = useMemo(
+    () => projectTaskGoalHistory(historyPlans, plan?.planId ?? item.taskId),
+    [historyPlans, item.taskId, plan?.planId],
+  );
+
   const acceptanceRows = useMemo(() => pairAcceptanceCriteria(plan), [plan]);
   const closeGate = useMemo(() => {
     if (!plan) return null;
@@ -82,6 +134,10 @@ export function ConversationResultView({
   useEffect(() => {
     onCloseGateChange?.(loading ? null : closeGate);
   }, [closeGate, loading, onCloseGateChange]);
+  const currentChangedFiles = useMemo(() => {
+    if (!rangeDiff?.diffText) return [];
+    return groupDiffByFile(rangeDiff.diffText).map((file) => file.path).filter(Boolean);
+  }, [rangeDiff?.diffText]);
   const leftoverEvidence = plan?.evidenceRefs ?? [];
   const workspaceRoot = plan?.deliveryBinding?.targetWorkspacePath ?? plan?.targetWorkspacePath ?? null;
   const fromRef = plan?.deliveryBinding?.baseCommit ?? plan?.baseCommit ?? null;
@@ -167,17 +223,6 @@ export function ConversationResultView({
         {metaBits.length > 0 ? (
           <p className="conversation-result-view__meta">{metaBits.join(' · ')}</p>
         ) : null}
-        {plan?.planId ? (
-          <div className="conversation-result-view__site-actions">
-            <button
-              type="button"
-              className="conversation-result-view__site-action"
-              onClick={() => void clientApi.goalPlansExportEvidence({ planId: plan.planId })}
-            >
-              {isZh ? '导出依据' : 'Export evidence'}
-            </button>
-          </div>
-        ) : null}
       </header>
 
       <section className="conversation-result-view__criteria-block">
@@ -234,6 +279,55 @@ export function ConversationResultView({
           </p>
         )}
       </section>
+
+      {goalHistory.length > 0 ? (
+        <section className="conversation-result-view__goal-history">
+          <div className="conversation-result-view__section-title">
+            {isZh ? '做过的目标' : 'Goals on this task'}
+          </div>
+          <p className="conversation-result-view__goal-count">
+            {isZh ? `${goalHistory.length} 个目标` : `${goalHistory.length} goals`}
+          </p>
+          <ul className="conversation-result-view__goal-list">
+            {goalHistory.map((entry) => {
+              const paths = entry.isCurrent && currentChangedFiles.length > 0
+                ? currentChangedFiles
+                : entry.files;
+              const files = historyFileNames(paths);
+              const extra = files.length > HISTORY_FILE_LIMIT ? files.length - HISTORY_FILE_LIMIT : 0;
+              const visible = extra > 0 ? files.slice(0, HISTORY_FILE_LIMIT) : files;
+              return (
+                <li
+                  key={entry.planId}
+                  className={`conversation-result-view__goal-card${entry.isCurrent ? ' is-current' : ''}`}
+                >
+                  <div className="conversation-result-view__goal-kicker">
+                    {goalHistoryStatusLabel(entry.status, isZh)}
+                    {entry.isCurrent ? (isZh ? ' · 本条' : ' · current') : ''}
+                  </div>
+                  <div className="conversation-result-view__goal-title">{entry.title}</div>
+                  <div className="conversation-result-view__goal-outcome">
+                    {entry.outcome
+                      ? (isZh ? `完成：${entry.outcome}` : `Done: ${entry.outcome}`)
+                      : (isZh ? '还没有可汇总的完成项' : 'No completed outcome yet')}
+                  </div>
+                  {visible.length > 0 ? (
+                    <div className="conversation-result-view__goal-files">
+                      {isZh ? '改了 ' : 'Changed '}
+                      {visible.join(' · ')}
+                      {extra > 0 ? (isZh ? ` 等 ${files.length} 个` : ` +${extra} more`) : ''}
+                    </div>
+                  ) : (
+                    <div className="conversation-result-view__goal-files is-empty">
+                      {isZh ? '没有记下改动文件' : 'No changed files recorded'}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {showChanges ? (
         <section className="conversation-result-view__diff">

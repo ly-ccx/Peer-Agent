@@ -18,6 +18,7 @@ test('result view stays a pure content component without acceptance logic', asyn
   // 打开结果侧栏时不得调用 scrollIntoView(...)，否则会带动 drawer body 整体上滚。
   assert.doesNotMatch(source, /scrollIntoView\s*\(/);
   assert.match(source, /对照标准/);
+  assert.match(source, /做过的目标/);
   assert.match(source, /改了什么/);
   assert.match(source, /签字前要注意/);
   assert.match(source, /item\.qualityChecks/);
@@ -28,13 +29,17 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /projectTaskOverviewArtifacts/);
   assert.match(source, /listedArtifacts/);
   assert.match(source, /artifact\.kind === 'image'/);
+  assert.match(source, /projectTaskGoalHistory/);
+  assert.match(source, /goalPlansList/);
+  assert.doesNotMatch(source, /historyDiffs/);
+  assert.doesNotMatch(source, /会话一共/);
   assert.match(source, /evaluateAcceptanceCloseGate/);
   assert.match(source, /gitDiffRange/);
   assert.match(source, /建议合入/);
   assert.match(source, /goalPlansOpenSite/);
   assert.match(source, /打开现场/);
-  assert.match(source, /goalPlansExportEvidence/);
-  assert.match(source, /导出依据/);
+  assert.doesNotMatch(source, /goalPlansExportEvidence/);
+  assert.doesNotMatch(source, /导出依据/);
   assert.match(source, /conversation-result-view__diff/);
   assert.match(source, /<DiffViewer/);
   assert.match(source, /diffText=\{rangeDiff\.diffText\}/);

@@ -1890,11 +1890,67 @@
   color: var(--za-text-muted);
 }
 
+.conversation-result-view__goal-count {
+  margin: -4px 0 8px;
+  font-size: var(--ui-font-meta);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__goal-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-result-view__goal-card {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--za-line);
+}
+
+.conversation-result-view__goal-card:last-child {
+  border-bottom: 0;
+}
+
+.conversation-result-view__goal-kicker {
+  font-size: var(--ui-font-caption);
+  color: var(--za-text-muted);
+}
+
+.conversation-result-view__goal-card.is-current .conversation-result-view__goal-kicker {
+  color: var(--za-accent);
+}
+
+.conversation-result-view__goal-title {
+  margin-top: 2px;
+  font-size: var(--ui-font-control);
+  color: var(--za-text);
+}
+
+.conversation-result-view__goal-outcome {
+  margin-top: 4px;
+  font-size: var(--ui-font-meta);
+  color: var(--za-text-soft);
+  line-height: 1.5;
+}
+
+.conversation-result-view__goal-files {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-caption);
+  color: var(--za-text-muted);
+  line-height: 1.45;
+}
+
+.conversation-result-view__goal-files.is-empty {
+  font-family: inherit;
+}
+
 .conversation-result-view__criteria-block,
 .conversation-result-view__artifacts,
 .conversation-result-view__checks-block,
 .conversation-result-view__hesitations,
 .conversation-result-view__basis,
+.conversation-result-view__goal-history,
 .conversation-result-view__diff {
   min-width: 0;
 }

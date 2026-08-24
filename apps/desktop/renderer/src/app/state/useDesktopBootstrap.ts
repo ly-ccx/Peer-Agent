@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { normalizeConversationListPage } from '../../chat/state/conversationListPagination';
 
-/** 侧栏首屏只拉最近 N 条；滚动再加载更多。 */
+/** 侧栏首屏只拉最近 N 条；展开工作区或点「更多」再按工作区续拉。 */
 export const CONVERSATION_LIST_PAGE_SIZE = 40;
 
 export interface DesktopStartupSnapshot {

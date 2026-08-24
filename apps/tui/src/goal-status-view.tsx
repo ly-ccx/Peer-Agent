@@ -1,13 +1,24 @@
 import { COLOR } from './tui-theme.ts';
-import { goalStatusFromSharedPlan, goalTaskGlyph, type GoalStatusViewModel } from './goal-status-model.ts';
+import {
+  goalCompactSummaryView,
+  goalStatusFromSharedPlan,
+  goalStatusTone,
+  goalTaskGlyph,
+  type GoalStatusTone,
+  type GoalStatusViewModel,
+} from './goal-status-model.ts';
 import type { TuiGoalPlan } from './goal-plan-history.ts';
 import { selectionWindow } from './tui-experience.ts';
 
-function statusColor(status: string): string {
-  if (status === 'completed') return COLOR.success;
-  if (status === 'failed' || status === 'blocked' || status === 'waiting_user') return COLOR.danger;
-  if (status === 'running' || status === 'executing') return COLOR.diffHunk;
+function toneColor(tone: GoalStatusTone): string {
+  if (tone === 'success') return COLOR.success;
+  if (tone === 'danger') return COLOR.danger;
+  if (tone === 'accent') return COLOR.accent;
   return COLOR.muted;
+}
+
+function statusColor(status: string): string {
+  return toneColor(goalStatusTone(status));
 }
 
 export function GoalStatusPanel({
@@ -101,11 +112,27 @@ export function GoalCompactSummary({
   readonly totalPlans?: number;
   readonly onOpenHistory?: () => void;
 }) {
-  const current = view.currentTask ? ` · ${goalTaskGlyph(view.currentTask.status)} ${view.currentTask.title}` : '';
+  const compact = goalCompactSummaryView(view, { missionPosition, totalPlans });
   return (
-    <text fg={statusColor(view.status)} wrapMode="none" onMouseDown={totalPlans > 1 ? onOpenHistory : undefined}>
-      Goal {missionPosition}/{totalPlans} · tasks {view.completed}/{view.total} · {view.percent}% · {view.status}{current}
-    </text>
+    <box
+      flexDirection="row"
+      width="100%"
+      flexShrink={0}
+      justifyContent="space-between"
+      onMouseDown={totalPlans > 1 ? onOpenHistory : undefined}
+    >
+      <box flexDirection="row" flexGrow={1} minWidth={0}>
+        <text fg={toneColor(compact.tone)} wrapMode="none">{compact.glyph}</text>
+        <text fg={COLOR.text} wrapMode="none" flexGrow={1} minWidth={0}> {compact.title}</text>
+      </box>
+      <box flexDirection="row" flexShrink={0}>
+        {compact.missionLabel ? (
+          <text fg={COLOR.subtle} wrapMode="none">{compact.missionLabel}  </text>
+        ) : null}
+        <text fg={COLOR.muted} wrapMode="none">{compact.progressTrack}</text>
+        <text fg={COLOR.subtle} wrapMode="none">  {compact.progressCount}</text>
+      </box>
+    </box>
   );
 }
 

@@ -37,10 +37,14 @@ import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerg
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
 import { IDLE_COMPACTION_STATE } from '../state/types';
 import {
+  EMPTY_VISIBLE_MODEL_RESPONSE_ERROR,
   getTextContent,
   isEmptyAssistantPlaceholder,
   isEmptyUserMessage,
+  isStaleStreamTerminal,
+  isSuccessorEmptyAssistantPlaceholder,
   markDanglingToolCallsInterrupted,
+  shouldReportEmptyVisibleModelResponse,
 } from '../state/streamSegments';
 import type { ChatMsg, ThinkingKind } from '../state/types';
 import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
@@ -316,6 +320,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       ({ streamId, conversationId, reason, usage, lifetimeUsage, contextAccounting }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
+        // Goal 交接后 Runner 可能已换上新 streamId；迟到的 intake 终态不能再改写当前流。
+        if (isStaleStreamTerminal(conversationStore.getSnapshot(cid).streamId, streamId)) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
         clearRecoveryNotice(cid);
         flushBackgroundStream(cid);
@@ -335,18 +341,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               cacheRead: usage.cacheReadTokens ?? 0,
             }
           : null;
-
-        // 运行态收尾 + streamId 清理。
-        // goal_handoff 只是 Goal Runner 本 tick 交接，不是整轮用户回合结束，
-        // 必须保留 turnStartedAt，否则下一 tick / 会话切换会把计时重新归零。
-        conversationStore.setState(cid, {
-          isStreaming: false,
-          activeUsage: null,
-          pendingPermissionCalls: [],
-          toolProgress: null,
-          streamId: null,
-          ...(reason === 'goal_handoff' ? {} : { turnStartedAt: null }),
-        });
 
         if (contextAccounting?.version === 1) {
           conversationStore.setState(cid, (prev) => ({
@@ -371,16 +365,33 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           }));
         }
 
+        // 运行态收尾 + 空回复判定必须同一拍完成。
+        // 先清 streamId 再看 last 会把 Goal Runner 刚插入的空占位误判成模型空回复，
+        // 也会在交接窗口把新 streamId 清掉。
         conversationStore.setState(cid, (prev) => {
+          if (isStaleStreamTerminal(prev.streamId, streamId)) return {};
           const msgs = prev.messages as ChatMsg[];
           const last = msgs[msgs.length - 1];
-          if (last && isEmptyAssistantPlaceholder(last)) {
+          const settled = {
+            isStreaming: false,
+            activeUsage: null,
+            pendingPermissionCalls: [],
+            toolProgress: null,
+            streamId: null,
+            ...(reason === 'goal_handoff' ? {} : { turnStartedAt: null }),
+          };
+          if (shouldReportEmptyVisibleModelResponse({ reason, lastMessage: last, messages: msgs })) {
             const next = msgs.slice(0, -1);
             persistMessages(cid, next);
             return {
+              ...settled,
               messages: next,
-              streamError: 'empty_visible_model_response: 模型已结束，但没有返回任何可见文本、思考或工具调用。',
+              streamError: EMPTY_VISIBLE_MODEL_RESPONSE_ERROR,
             };
+          }
+          if (isSuccessorEmptyAssistantPlaceholder(msgs)) return {};
+          if (last && isEmptyAssistantPlaceholder(last) && reason === 'goal_handoff') {
+            return settled;
           }
           if (last?.role === 'assistant') {
             const patched: ChatMsg = {
@@ -397,9 +408,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             // matching context snapshot atomically before routing `done`.
             // Replacing the transcript here would increment contentRevision
             // and clear that snapshot immediately after it was written.
-            return { messages: updated };
+            return { ...settled, messages: updated };
           }
-          return {};
+          return settled;
         });
         onUpdatedRef.current?.(cid);
       },
@@ -421,6 +432,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
+      if (isStaleStreamTerminal(conversationStore.getSnapshot(cid).streamId, streamId)) return;
       flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         // 中断时丢弃打字机积压缓冲（而非 flush 吐完），否则用户点停止后
@@ -430,22 +442,24 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       }
       const snap = conversationStore.getSnapshot(cid);
       const turnDurationMs = snap.turnStartedAt != null ? Date.now() - snap.turnStartedAt : undefined;
-      conversationStore.setState(cid, {
-        isStreaming: false,
-        compactionState: IDLE_COMPACTION_STATE,
-        activeUsage: null,
-        pendingPermissionCalls: [],
-        toolProgress: null,
-        turnStartedAt: null,
-        streamId: null,
-      });
       conversationStore.setState(cid, (prev) => {
+        if (isStaleStreamTerminal(prev.streamId, streamId)) return {};
         const msgs = prev.messages as ChatMsg[];
         const last = msgs[msgs.length - 1];
+        const settled = {
+          isStreaming: false,
+          compactionState: IDLE_COMPACTION_STATE,
+          activeUsage: null,
+          pendingPermissionCalls: [],
+          toolProgress: null,
+          turnStartedAt: null,
+          streamId: null,
+        };
+        if (isSuccessorEmptyAssistantPlaceholder(msgs)) return {};
         if (last && isEmptyAssistantPlaceholder(last)) {
           const next = msgs.slice(0, -1);
           persistMessages(cid, next);
-          return { messages: next };
+          return { ...settled, messages: next };
         }
         // 停止时留痕：记录整轮耗时，并给未回填的 tool-call 段补写中断标记。
         if (last?.role === 'assistant') {
@@ -456,10 +470,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           };
           const updated = [...msgs.slice(0, -1), patched];
           persistMessages(cid, updated);
-          return { messages: updated };
+          return { ...settled, messages: updated };
         }
         persistMessages(cid, msgs);
-        return {};
+        return settled;
       });
       onUpdatedRef.current?.(cid);
     });
@@ -536,22 +550,13 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
+      if (isStaleStreamTerminal(conversationStore.getSnapshot(cid).streamId, streamId)) return;
       flushBackgroundStream(cid);
       if (cid === activeRef.current) {
         // 异常终止（含复读兜底自动 error）同样丢弃积压缓冲，避免残留 delta 继续涌出。
         textTypewriter.reset();
         thinkingTypewriter.reset();
       }
-      conversationStore.setState(cid, {
-        isStreaming: false,
-        compactionState: IDLE_COMPACTION_STATE,
-        activeUsage: null,
-        pendingPermissionCalls: [],
-        toolProgress: null,
-        streamError: error,
-        // 最终失败时清除“正在重试连接”横幅，避免与错误提示叠加残留。
-        providerRecoveryNotice: null,
-      });
       if (lifetimeUsage) {
         conversationStore.setState(cid, { tokenUsage: usageFromLifetime(lifetimeUsage) });
       } else if (usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens) {
@@ -573,12 +578,24 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const snap = conversationStore.getSnapshot(cid);
       const turnDurationMs = snap.turnStartedAt != null ? Date.now() - snap.turnStartedAt : undefined;
       conversationStore.setState(cid, (prev) => {
+        if (isStaleStreamTerminal(prev.streamId, streamId)) return {};
         const msgs = prev.messages as ChatMsg[];
         const last = msgs[msgs.length - 1];
+        const settled = {
+          isStreaming: false,
+          compactionState: IDLE_COMPACTION_STATE,
+          activeUsage: null,
+          pendingPermissionCalls: [],
+          toolProgress: null,
+          providerRecoveryNotice: null,
+          turnStartedAt: null,
+          streamId: null,
+        };
+        if (isSuccessorEmptyAssistantPlaceholder(msgs)) return {};
         if (last && isEmptyAssistantPlaceholder(last)) {
           const next = msgs.slice(0, -1);
           persistMessages(cid, next);
-          return { messages: next };
+          return { ...settled, messages: next, streamError: error };
         }
         // 长流中断保留：已产出内容的 assistant 消息因连接中断未自然收尾，标记 interrupted。
         if (last?.role === 'assistant') {
@@ -590,12 +607,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           };
           const updated = [...msgs.slice(0, -1), patched];
           persistMessages(cid, updated);
-          return { messages: updated };
+          return { ...settled, messages: updated, streamError: error };
         }
         persistMessages(cid, msgs);
-        return {};
+        return { ...settled, streamError: error };
       });
-      conversationStore.setState(cid, { turnStartedAt: null, streamId: null });
       onUpdatedRef.current?.(cid);
     });
 

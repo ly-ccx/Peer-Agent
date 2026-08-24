@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -31,6 +31,7 @@ export function Dropdown({
   ariaLabel,
   className,
   title,
+  prefix,
   menuPlacement = 'down',
 }: {
   readonly value: string;
@@ -41,6 +42,7 @@ export function Dropdown({
   readonly ariaLabel?: string;
   readonly className?: string;
   readonly title?: string;
+  readonly prefix?: ReactNode;
   readonly menuPlacement?: 'down' | 'up';
 }) {
   const [open, setOpen] = useState(false);
@@ -228,6 +230,7 @@ export function Dropdown({
         onClick={() => !disabled && setOpen((v) => !v)}
         onKeyDown={onTriggerKeyDown}
       >
+        {prefix ? <span className="pa-dropdown-prefix" aria-hidden>{prefix}</span> : null}
         <span className="pa-dropdown-value">{triggerLabel}</span>
         <svg
           className="pa-dropdown-caret"

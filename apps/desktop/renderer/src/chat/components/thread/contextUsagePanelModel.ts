@@ -58,7 +58,7 @@ export function resolveContextUsagePanelModel(input: Readonly<{
   readonly isZh: boolean;
 }>): ContextUsagePanelModel {
   const { percent, usedTokens, contextWindow, breakdown, isZh } = input;
-  const rows: ContextUsagePanelRow[] = breakdown?.categories.length
+  const rows: ContextUsagePanelRow[] = breakdown?.categories?.length
     ? breakdown.categories.map((row) => ({
         id: row.id,
         label: contextUsageCategoryLabel(row.id, isZh),

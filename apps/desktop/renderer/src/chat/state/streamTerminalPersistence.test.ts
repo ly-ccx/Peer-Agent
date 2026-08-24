@@ -21,4 +21,19 @@ test('normal stream completion does not rewrite durable messages after main pers
     /persistMessages\(/,
     'renderer terminal projection must not clear the context snapshot through replaceMessages',
   );
+  assert.match(
+    doneHandler,
+    /isStaleStreamTerminal\(conversationStore\.getSnapshot\(cid\)\.streamId, streamId\)/,
+    'done must ignore a late intake terminal after Goal Runner swapped streamId',
+  );
+  assert.match(
+    doneHandler,
+    /isStaleStreamTerminal\(prev\.streamId, streamId\)/,
+    'done must re-check streamId atomically before clearing it',
+  );
+  assert.match(
+    doneHandler,
+    /shouldReportEmptyVisibleModelResponse\(\{ reason, lastMessage: last, messages: msgs \}\)/,
+    'empty visible response must not fire on goal_handoff or a successor placeholder',
+  );
 });

@@ -15,7 +15,7 @@ import type {
   GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
-import { snapshotDeliveryLine } from '../state/taskBoundBranch';
+import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
@@ -157,13 +157,10 @@ interface GoalPlanPanelProps {
    */
   readonly onRequestHostFocus?: () => void;
   /**
-   * 当前活动计划的交付线快照。用于输入栏展示绑定分支；无绑定则报 null。
-   * 表达层只读，不把隔离/分支真值放进 renderer state。
+   * 当前活动计划的交付线快照。用于输入栏展示任务线 / 隔离标记；无绑定则报 null。
+   * 表达层只读，隔离真值仍以 deliveryBinding 为准。
    */
-  readonly onActiveDeliveryChange?: (line: {
-    readonly targetBranch: string | null;
-    readonly taskBranch: string | null;
-  } | null) => void;
+  readonly onActiveDeliveryChange?: (line: TaskDeliveryLine | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -250,6 +247,13 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
 
 function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
+}
+
+/** 历史任务/事件可能没写 evidenceRefs；按空列表渲染，避免点开会话时读 undefined.length。 */
+function safeEvidenceRefs(
+  value: { readonly evidenceRefs?: readonly string[] | null } | null | undefined,
+): readonly string[] {
+  return Array.isArray(value?.evidenceRefs) ? value.evidenceRefs : [];
 }
 
 /** 深度优先展开任务树（含嵌套 subtasks）。 */
@@ -806,8 +810,9 @@ function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
   if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${codedValueLabel(PHASE_VALUE_LABELS, phase, isZh)}`);
   if (intent) items.push(`${isZh ? '意图' : 'intent'} ${codedValueLabel(INTENT_VALUE_LABELS, intent, isZh)}`);
   if (reason) items.push(`${isZh ? '原因' : 'reason'} ${compactMeta(reason)}`);
-  if (event.evidenceRefs.length > 0) {
-    items.push(isZh ? `证据 ×${event.evidenceRefs.length}` : `evidence ×${event.evidenceRefs.length}`);
+  const evidenceRefs = safeEvidenceRefs(event);
+  if (evidenceRefs.length > 0) {
+    items.push(isZh ? `证据 ×${evidenceRefs.length}` : `evidence ×${evidenceRefs.length}`);
   }
   return items;
 }
@@ -1093,9 +1098,10 @@ function TaskNode({
   childPlans: readonly GoalPlan[];
   onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
-  const hasEvidence = task.evidenceRefs.length > 0;
+  const evidenceRefs = safeEvidenceRefs(task);
+  const hasEvidence = evidenceRefs.length > 0;
   const [expanded, setExpanded] = useState(false);
-  const evidenceCount = task.evidenceRefs.length;
+  const evidenceCount = evidenceRefs.length;
   const summaryText = task.failureReason
     ? task.failureReason
     : task.blockedReason
@@ -1161,7 +1167,7 @@ function TaskNode({
             <div className="goal-task-detail">
               <div className="goal-task-detail-label">{isZh ? '证据' : 'Evidence'}</div>
               <ul className="goal-task-evidence-list">
-                {task.evidenceRefs.map((ref) => (
+                {evidenceRefs.map((ref) => (
                   <li key={ref} className="goal-task-evidence-item">{ref}</li>
                 ))}
               </ul>

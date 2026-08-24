@@ -120,8 +120,49 @@ export function goalStatusFromSharedPlan(value: unknown): GoalStatusViewModel | 
 
 export function goalTaskGlyph(status: string): string {
   if (status === 'completed') return GOAL_CHROME.glyphCompleted;
-  if (status === 'running') return GOAL_CHROME.glyphRunning;
+  if (status === 'running' || status === 'executing') return GOAL_CHROME.glyphRunning;
   if (status === 'failed' || status === 'blocked' || status === 'waiting_user') return GOAL_CHROME.glyphFailed;
   if (status === 'cancelled') return GOAL_CHROME.glyphCancelled;
   return GOAL_CHROME.glyphPending;
+}
+
+export type GoalStatusTone = 'success' | 'danger' | 'accent' | 'muted';
+
+export function goalStatusTone(status: string): GoalStatusTone {
+  if (status === 'completed') return 'success';
+  if (status === 'failed' || status === 'blocked' || status === 'waiting_user') return 'danger';
+  if (status === 'running' || status === 'executing') return 'accent';
+  return 'muted';
+}
+
+export function goalProgressTrack(percent: number, width = 4): string {
+  const cols = Math.max(1, Math.floor(width));
+  const filled = Math.round(cols * Math.max(0, Math.min(100, percent)) / 100);
+  return `${'━'.repeat(filled)}${'─'.repeat(cols - filled)}`;
+}
+
+export interface GoalCompactSummaryView {
+  readonly glyph: string;
+  readonly tone: GoalStatusTone;
+  readonly title: string;
+  readonly progressTrack: string;
+  readonly progressCount: string;
+  readonly missionLabel?: string;
+}
+
+export function goalCompactSummaryView(
+  view: GoalStatusViewModel,
+  options: { readonly missionPosition?: number; readonly totalPlans?: number } = {},
+): GoalCompactSummaryView {
+  const totalPlans = options.totalPlans ?? 1;
+  const missionPosition = options.missionPosition ?? 1;
+  const liveStatus = view.currentTask?.status ?? view.status;
+  return {
+    glyph: goalTaskGlyph(liveStatus),
+    tone: goalStatusTone(liveStatus),
+    title: view.currentTask?.title ?? view.title,
+    progressTrack: goalProgressTrack(view.percent),
+    progressCount: `${view.completed}/${view.total}`,
+    missionLabel: totalPlans > 1 ? `${missionPosition}/${totalPlans}` : undefined,
+  };
 }
