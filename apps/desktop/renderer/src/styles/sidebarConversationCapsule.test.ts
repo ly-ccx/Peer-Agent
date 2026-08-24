@@ -46,7 +46,7 @@ test('conversation rows stay list geometry instead of capsules', () => {
   const layeredRow = ruleBody(chatSidebarCss, '.conversation-row');
 
   assert.match(rowBody, /align-items:\s*center;/);
-  assert.match(rowBody, /font-size:\s*var\(--ui-font-body\);/);
+  assert.match(rowBody, /font-size:\s*var\(--ui-font-control\);/);
   assert.match(rowBody, /line-height:\s*1;/);
   assert.match(rowBody, /min-height:\s*28px;/);
   assert.match(rowBody, /padding:\s*5px var\(--sidebar-conv-row-pad-x\);/);
@@ -55,9 +55,9 @@ test('conversation rows stay list geometry instead of capsules', () => {
   assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
   assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
   assert.match(titleBody, /line-height:\s*1;/);
-  assert.match(titleBody, /font-size:\s*var\(--ui-font-body\);/);
+  assert.match(titleBody, /font-size:\s*var\(--ui-font-control\);/);
   assert.doesNotMatch(titleBody, /font-size:\s*inherit;/);
-  assert.match(chatSidebarCss, /\.conversation-row \.sidebar-conv-title \{[\s\S]*?font-size:\s*var\(--ui-font-body\)/);
+  assert.match(chatSidebarCss, /\.conversation-row \.sidebar-conv-title \{[\s\S]*?font-size:\s*var\(--ui-font-control\)/);
   assert.match(chatSidebarCss, /\.conversation-row span:not\(\.sidebar-conv-title\)/);
   assert.match(timeBody, /line-height:\s*1;/);
   assert.match(timeBody, /color:\s*var\(--graphite-mute\);/);
@@ -112,4 +112,15 @@ test('selected conversation rows stay a fill instead of a lifted card', () => {
   assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
   assert.match(layeredActiveHoverBody, /box-shadow:\s*none;/);
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
+});
+
+test('workspace rows stack the path under the name so the name can use the full width', () => {
+  const metaBody = ruleBody(sidebarCss, '.sidebar-workspace-meta');
+  const nameBody = ruleBody(sidebarCss, '.sidebar-workspace-name');
+  const pathBody = ruleBody(sidebarCss, '.sidebar-workspace-path');
+
+  assert.match(metaBody, /flex-direction:\s*column;/);
+  assert.doesNotMatch(metaBody, /flex-direction:\s*row;/);
+  assert.doesNotMatch(nameBody, /flex:\s*0 1 auto;/);
+  assert.doesNotMatch(pathBody, /flex:\s*1 1 auto;/);
 });

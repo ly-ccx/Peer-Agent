@@ -281,8 +281,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 3px 8px 3px 4px;
+  min-height: 36px;
+  padding: 5px 8px 5px 4px;
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   cursor: pointer;
   transition: background var(--za-motion-fast);
@@ -321,17 +321,19 @@
 
 .sidebar-workspace-meta {
   display: flex;
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
   min-width: 0;
   flex: 1;
-  gap: 6px;
+  gap: 1px;
 }
 
 .sidebar-workspace-name {
-  flex: 0 1 auto;
-  font-size: 0.78rem;
+  min-width: 0;
+  font-size: var(--ui-font-control);
   font-weight: 600;
+  line-height: 1.2;
   color: var(--graphite-base);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -339,9 +341,9 @@
 }
 
 .sidebar-workspace-path {
-  flex: 1 1 auto;
   min-width: 0;
   font-size: 0.62rem;
+  line-height: 1.2;
   color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -572,7 +574,7 @@
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
-  font-size: var(--ui-font-body);
+  font-size: var(--ui-font-control);
   font-weight: 400;
   line-height: 1;
   color: var(--graphite-soft);
@@ -795,8 +797,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: inherit;
-  /* Don't inherit: a layered `.conversation-row span` caption rule also hits this title. */
-  font-size: var(--ui-font-body);
+  /* Same chrome token as workspace names — not body, which overshoots the tree. */
+  font-size: var(--ui-font-control);
   line-height: 1;
 }
 .sidebar-conv-title-input {

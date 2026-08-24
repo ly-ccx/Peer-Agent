@@ -311,7 +311,7 @@
   .conversation-row strong,
   .conversation-row .sidebar-conv-title {
     color: var(--za-text-soft);
-    font-size: var(--ui-font-body);
+    font-size: var(--ui-font-control);
     font-weight: 400;
   }
 
