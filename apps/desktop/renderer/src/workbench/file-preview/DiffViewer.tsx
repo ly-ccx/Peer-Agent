@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
@@ -32,6 +32,9 @@ interface ActiveDiffPreview {
   readonly anchor: HTMLElement;
 }
 
+const PREVIEW_LINE_LIMIT = 80;
+const HOVER_OPEN_MS = 180;
+
 function DiffLines({ lines }: { readonly lines: readonly DiffLine[] }) {
   return (
     <pre className="workbench-diff-pre">
@@ -54,37 +57,50 @@ function DiffLines({ lines }: { readonly lines: readonly DiffLine[] }) {
 
 function DiffFilePreviewPortal({
   active,
+  isZh,
   onKeep,
   onHide,
+  onDismiss,
 }: {
   readonly active: ActiveDiffPreview;
+  readonly isZh: boolean;
   readonly onKeep: () => void;
   readonly onHide: () => void;
+  readonly onDismiss: () => void;
 }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' } | null>(null);
   const stats = countDiffLineStats(active.file.lines);
+  const previewLines = active.file.lines.length > PREVIEW_LINE_LIMIT
+    ? active.file.lines.slice(0, PREVIEW_LINE_LIMIT)
+    : active.file.lines;
+  const hiddenCount = active.file.lines.length - previewLines.length;
 
   useLayoutEffect(() => {
-    const updatePosition = () => {
-      const previewElement = previewRef.current;
-      if (!previewElement || !active.anchor.isConnected) return;
-      const triggerRect = active.anchor.getBoundingClientRect();
-      const previewRect = previewElement.getBoundingClientRect();
-      setPosition(positionTaskArtifactPreview(
-        triggerRect,
-        { width: previewRect.width, height: previewRect.height },
-        { width: window.innerWidth, height: window.innerHeight },
-      ));
-    };
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
+    const previewElement = previewRef.current;
+    if (!previewElement || !active.anchor.isConnected) return;
+    const triggerRect = active.anchor.getBoundingClientRect();
+    const previewRect = previewElement.getBoundingClientRect();
+    setPosition(positionTaskArtifactPreview(
+      triggerRect,
+      { width: previewRect.width, height: previewRect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
   }, [active]);
+
+  useEffect(() => {
+    const hideIfOuter = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && previewRef.current?.contains(target)) return;
+      onDismiss();
+    };
+    window.addEventListener('resize', onDismiss);
+    window.addEventListener('scroll', hideIfOuter, true);
+    return () => {
+      window.removeEventListener('resize', onDismiss);
+      window.removeEventListener('scroll', hideIfOuter, true);
+    };
+  }, [onDismiss]);
 
   return createPortal(
     <div
@@ -112,7 +128,12 @@ function DiffFilePreviewPortal({
             {stats.deletions > 0 ? <b className="is-del">−{stats.deletions}</b> : null}
           </span>
         </div>
-        <DiffLines lines={active.file.lines} />
+        <DiffLines lines={previewLines} />
+        {hiddenCount > 0 ? (
+          <div className="diff-file-preview-more">
+            {isZh ? `还有 ${hiddenCount} 行` : `${hiddenCount} more lines`}
+          </div>
+        ) : null}
       </div>
     </div>,
     document.body,
@@ -127,27 +148,64 @@ function DiffFileIndex({
   readonly isZh: boolean;
 }) {
   const hideTimer = useRef<number>(0);
+  const showTimer = useRef<number>(0);
   const [active, setActive] = useState<ActiveDiffPreview | null>(null);
-  const paths = files.map((file) => file.path);
-
-  useEffect(() => () => window.clearTimeout(hideTimer.current), []);
-  useEffect(() => {
-    setActive(null);
+  const rows = useMemo(() => {
+    const paths = files.map((file) => file.path);
+    return files.map((file, index) => ({
+      file,
+      index,
+      name: diffFileDisplayName(file.path, paths),
+      stats: countDiffLineStats(file.lines),
+    }));
   }, [files]);
 
   const keepPreview = () => {
     window.clearTimeout(hideTimer.current);
+    window.clearTimeout(showTimer.current);
   };
 
   const hidePreview = () => {
+    window.clearTimeout(showTimer.current);
     window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => setActive(null), 140);
+    hideTimer.current = window.setTimeout(() => setActive(null), 80);
   };
 
+  const dismissPreview = useCallback(() => {
+    window.clearTimeout(showTimer.current);
+    window.clearTimeout(hideTimer.current);
+    setActive(null);
+  }, []);
+
   const showPreview = (file: DiffFileGroup, anchor: HTMLElement) => {
-    keepPreview();
-    setActive({ file, anchor });
+    window.clearTimeout(hideTimer.current);
+    window.clearTimeout(showTimer.current);
+    showTimer.current = window.setTimeout(() => {
+      setActive({ file, anchor });
+    }, HOVER_OPEN_MS);
   };
+
+  useEffect(() => () => {
+    window.clearTimeout(hideTimer.current);
+    window.clearTimeout(showTimer.current);
+  }, []);
+  useEffect(() => {
+    window.clearTimeout(hideTimer.current);
+    window.clearTimeout(showTimer.current);
+    setActive(null);
+  }, [files]);
+
+  useEffect(() => {
+    const cancelHover = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.diff-file-preview-portal')) return;
+      window.clearTimeout(showTimer.current);
+      window.clearTimeout(hideTimer.current);
+      setActive((current) => (current ? null : current));
+    };
+    window.addEventListener('scroll', cancelHover, true);
+    return () => window.removeEventListener('scroll', cancelHover, true);
+  }, []);
 
   return (
     <div className="diff-file-index">
@@ -155,9 +213,7 @@ function DiffFileIndex({
         <span>{isZh ? `${files.length} 个文件已改` : `${files.length} Files Changed`}</span>
       </div>
       <ul className="diff-file-index-list">
-        {files.map((file, index) => {
-          const name = diffFileDisplayName(file.path, paths);
-          const stats = countDiffLineStats(file.lines);
+        {rows.map(({ file, index, name, stats }) => {
           const isActive = active?.file === file;
           return (
             <li key={`${file.path}:${index}`}>
@@ -184,8 +240,10 @@ function DiffFileIndex({
       {active ? (
         <DiffFilePreviewPortal
           active={active}
+          isZh={isZh}
           onKeep={keepPreview}
           onHide={hidePreview}
+          onDismiss={dismissPreview}
         />
       ) : null}
     </div>
