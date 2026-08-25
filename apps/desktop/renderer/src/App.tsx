@@ -141,6 +141,8 @@ function MainApp() {
   const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const [resultCloseGate, setResultCloseGate] = useState<AcceptanceCloseVerdict | null>(null);
+  /** 证据不全时用户二次确认强制归档，供关闭动画后的 revise 写入 userOverride。 */
+  const resultAcceptanceUserOverrideRef = useRef(false);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
@@ -164,8 +166,12 @@ function MainApp() {
     setResultDrawerAcceptTogether([]);
   }, []);
 
-  const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
+  const acceptResultFromWorkbench = useCallback(async (
+    item: TaskOverviewItem,
+    options?: { readonly userOverride?: boolean },
+  ) => {
     if (item.source !== 'goal_plan' || !item.taskId) return;
+    const userOverride = options?.userOverride === true || resultAcceptanceUserOverrideRef.current;
     try {
       await clientApi.goalPlansRevise({
         planId: item.taskId,
@@ -173,9 +179,10 @@ function MainApp() {
           resultAcceptance: {
             acceptedAt: new Date().toISOString(),
             acceptedBy: 'user',
+            ...(userOverride ? { userOverride: true } : {}),
           },
         },
-        reason: 'workbench_one_click_accept',
+        reason: userOverride ? 'workbench_force_accept' : 'workbench_one_click_accept',
         changedBy: 'user',
       });
       setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
@@ -186,6 +193,8 @@ function MainApp() {
     } catch (error) {
       console.error('[workbench] accept result failed', error);
       throw error;
+    } finally {
+      if (userOverride) resultAcceptanceUserOverrideRef.current = false;
     }
   }, []);
 
@@ -368,6 +377,7 @@ function MainApp() {
         status,
         limit: CONVERSATION_LIST_PAGE_SIZE,
         paginated: true,
+        includeMessageCount: false,
       });
       // 丢弃过期响应：只有最新一次请求的结果才允许写回，避免慢请求晚返回覆盖新视图。
       if (seq !== refreshSeqRef.current) return;
@@ -475,6 +485,7 @@ function MainApp() {
           status: 'active',
           limit: CONVERSATION_LIST_PAGE_SIZE,
           paginated: true,
+        includeMessageCount: false,
         });
         applyConversationListPage(page as Parameters<typeof applyConversationListPage>[0]);
       } catch {
@@ -733,8 +744,9 @@ function MainApp() {
     setActivePage('chat');
   }, [activeWorkspace, conversationView, refreshConversations]);
 
-  const handleNewChat = useCallback(async () => {
-    const ws = registeredWorkspacePath(activeWorkspace, workspaces);
+  const handleNewChat = useCallback(async (workspacePath?: string) => {
+    const target = typeof workspacePath === 'string' ? workspacePath : activeWorkspace;
+    const ws = registeredWorkspacePath(target, workspaces);
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
     // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。
@@ -1278,45 +1290,30 @@ function MainApp() {
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;
-                            const canAccept =
-                              item.source === 'goal_plan' && Boolean(item.taskId);
-                            if (!canAccept) return null;
-                            const closeBlocked = Boolean(resultCloseGate && !resultCloseGate.ok);
                             return (
                               <footer className="conversation-result-drawer__footer">
-                                {closeBlocked && resultCloseGate?.message ? (
-                                  <p className="conversation-result-drawer__gate">{resultCloseGate.message}</p>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="task-overview-btn"
-                                  disabled={Boolean(resultAcceptancePending)}
-                                  onClick={() => {
-                                    requestClose();
-                                    if (item.conversationId) {
-                                      handleSelectConversation(String(item.conversationId));
-                                    }
-                                  }}
-                                >
-                                  {isZh ? '继续追问' : 'Follow up'}
-                                </button>
                                 <button
                                   type="button"
                                   className="task-overview-btn task-overview-btn--primary"
-                                  disabled={Boolean(resultAcceptancePending) || closeBlocked}
                                   onClick={() => {
-                                    if (resultAcceptancePending || closeBlocked) return;
-                                    setResultAcceptancePending(item);
-                                    requestClose();
+                                    void (async () => {
+                                      if (item.source === 'goal_plan' && item.taskId) {
+                                        try {
+                                          await clientApi.goalPlansMarkRequestedUserInput({
+                                            planId: item.taskId,
+                                          });
+                                        } catch {
+                                          // 重开失败也不挡回会话：用户至少还能继续说。
+                                        }
+                                      }
+                                      requestClose();
+                                      if (item.conversationId) {
+                                        handleSelectConversation(String(item.conversationId));
+                                      }
+                                    })();
                                   }}
                                 >
-                                  {resultAcceptancePending
-                                    ? isZh
-                                      ? '正在归档…'
-                                      : 'Archiving…'
-                                    : isZh
-                                      ? '确认归档'
-                                      : 'Archive'}
+                                  {isZh ? '继续追问' : 'Follow up'}
                                 </button>
                               </footer>
                             );

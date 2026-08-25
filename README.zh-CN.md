@@ -52,7 +52,7 @@
 | **CLI** | 可安装的 `@peer-agent/cli` —— 脚本化进入同一台机器 |
 
 > [!NOTE]
-> 当前正式版：**`0.0.7`**（npm `latest`）；最新已发布 beta 通道 **`0.0.5-beta.4`**。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
+> 当前正式版：**`0.0.8`**（npm `latest`）；最新已发布 beta 通道 **`0.0.5-beta.4`**。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
 
 ---
 

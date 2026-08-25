@@ -46,11 +46,13 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
+import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
   formatComposerBranchOptionLabel,
+  isSafeComposerBranchName,
   planComposerGitChrome,
   type TaskDeliveryLine,
 } from '../state/taskBoundBranch';
@@ -82,6 +84,11 @@ import {
   findNextSerializedToolCall,
   parseSerializedToolSegments,
 } from '../state/streamSegments';
+import {
+  canShowStreamResume,
+  formatStreamErrorLabel,
+  resolveStreamResumeTarget,
+} from '../state/streamResume';
 import {
   buildConversationAttachmentContext,
   buildConfigInstructionContext,
@@ -168,6 +175,7 @@ import {
   shouldHardBeginConversationLoad,
   shouldPersistEffortCorrection,
 } from '../state/conversationLoadGate';
+import { mapInChunks } from '../state/yieldToMain';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import {
   getTurnUserMessage,
@@ -262,6 +270,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
   fastMode: boolean;
+  preferredExecutionIsolation: 'none' | 'worktree';
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
@@ -273,6 +282,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     tokenUsage: null,
     mode: 'chat',
     fastMode: false,
+    preferredExecutionIsolation: 'none',
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
@@ -281,6 +291,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   const convFastMode = conv.fastMode === true;
+  const convPreferredExecutionIsolation: 'none' | 'worktree' =
+    conv.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
   // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
@@ -289,7 +301,9 @@ async function loadConversationMessages(conversationId: string): Promise<{
   const contextAccounting: ContextAccountingSnapshot | null =
     conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const loaded = conv.messages.map((m: Record<string, unknown>) => {
+  const mapped = await mapInChunks(
+    conv.messages as Record<string, unknown>[],
+    (m) => {
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
       role: (m.role as ChatMsg['role']) || 'user',
@@ -327,7 +341,10 @@ async function loadConversationMessages(conversationId: string): Promise<{
       msg.interrupted = true;
     }
     return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
+  },
+    { chunkSize: 32 },
+  );
+  const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as
@@ -345,6 +362,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
       fastMode: convFastMode,
+      preferredExecutionIsolation: convPreferredExecutionIsolation,
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
@@ -358,22 +376,12 @@ async function loadConversationMessages(conversationId: string): Promise<{
       : null,
     mode: convMode,
     fastMode: convFastMode,
+    preferredExecutionIsolation: convPreferredExecutionIsolation,
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
     automationCreateContext: conv.automationCreateContext ?? null,
   };
-}
-
-function GitBranchGlyph() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="6" y1="3" x2="6" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
 }
 
 export function ChatSurface({
@@ -535,17 +543,22 @@ export function ChatSurface({
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const [preferredWorktree, setPreferredWorktree] = useState(false);
-  const { workspaceGit, workspaceIsGit } = useWorkspaceGit(workspacePath, {
+  const { workspaceGit, workspaceIsGit, refreshWorkspaceGit } = useWorkspaceGit(workspacePath, {
     refreshWhenIdle: !isStreaming,
   });
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
-  const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
+  const persistDraftComposer = useCallback((patch: {
+    draft?: string;
+    queue?: ConversationRuntimeState['messageQueue'];
+    fastMode?: boolean;
+    preferredWorktree?: boolean;
+  }) => {
     const draftComposer = conversationStore.getSnapshot(null);
     saveComposerEntry(DRAFT_CONVERSATION_ID, {
-      draft: draftComposer.draft,
-      queue: [...draftComposer.messageQueue],
+      draft: patch.draft ?? draftComposer.draft,
+      queue: [...(patch.queue ?? draftComposer.messageQueue)],
       fastMode: patch.fastMode ?? fastMode,
       preferredWorktree: patch.preferredWorktree ?? preferredWorktree,
     });
@@ -562,7 +575,16 @@ export function ChatSurface({
   }, [convActions, conversationId, persistDraftComposer]);
   const changePreferredWorktree = useCallback((enabled: boolean) => {
     setPreferredWorktree(enabled);
-    if (!conversationId) persistDraftComposer({ preferredWorktree: enabled });
+    if (conversationId) {
+      void clientApi.conversationsUpdatePreferredExecutionIsolation({
+        id: conversationId,
+        preferredExecutionIsolation: enabled ? 'worktree' : 'none',
+      }).catch(() => {
+        // 本地 UI 仍保留选择；后续重新进入会按持久化值恢复。
+      });
+      return;
+    }
+    persistDraftComposer({ preferredWorktree: enabled });
   }, [conversationId, persistDraftComposer]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
@@ -1198,7 +1220,11 @@ export function ChatSurface({
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
       ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
-    setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
+    // 草稿页才用本地 draft 偏好；已有会话等 loadConversationMessages 恢复真实 meta，
+    // 避免先强制 false 造成「未勾选但实际仍是 worktree」的误导窗口。
+    if (!conversationId) {
+      setPreferredWorktree(persisted?.preferredWorktree === true);
+    }
     setDeliveryLine(null);
     setDeliveryLineKnown(false);
     // 打开会话的默认落点（贴底）在 render 阶段写入 pendingThreadScrollRestoreRef，
@@ -1254,6 +1280,7 @@ export function ChatSurface({
         tokenUsage: usage,
         mode: convMode,
         fastMode: convFastMode,
+        preferredExecutionIsolation: convPreferredExecutionIsolation,
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
@@ -1271,6 +1298,7 @@ export function ChatSurface({
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
       convActions.set({ fastMode: convFastMode });
+      setPreferredWorktree(convPreferredExecutionIsolation === 'worktree');
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
@@ -2002,6 +2030,10 @@ export function ChatSurface({
       conversationStore.setDraft(conversationId, '');
       setAttachments([]);
       setAttachmentError(null);
+      // 发送成功后立刻清掉共享草稿文本/队列，但保留 Fast / 隔离执行偏好。
+      // ComposerDraftControls 在 conversationId === null 时不落盘；勾选隔离执行时
+      // saveComposerEntry 也不会删除空壳，旧句子会在下次「新建任务」被灌回来。
+      persistDraftComposer({ draft: '', queue: [] });
       try {
         const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
         const started = await clientApi.chatStartTask({
@@ -2019,6 +2051,7 @@ export function ChatSurface({
       } catch (error) {
         // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
+        persistDraftComposer({ draft: text, queue: [] });
         setAttachments(sentAttachments);
         const message = error instanceof Error ? error.message : String(error);
         setAttachmentError(message === 'workspace_required'
@@ -2058,6 +2091,7 @@ export function ChatSurface({
     modelProviderId,
     preferredWorktree,
     workspaceIsGit,
+    persistDraftComposer,
     isZh,
     editingMessage,
     handleEditMessage,
@@ -2195,6 +2229,30 @@ export function ChatSurface({
     void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
+  const handleResumeStream = useCallback(() => {
+    if (isStreaming || !hasProvider) return;
+    const target = resolveStreamResumeTarget(messages);
+    if (!target) return;
+    if (target.kind === 'regenerate') {
+      void handleRegenerate(target.assistantIndex);
+      return;
+    }
+    const userMsg = messages[target.userIndex];
+    if (!userMsg || userMsg.role !== 'user') return;
+    void submitMessage(
+      userMsg.content,
+      userMsg.attachments ?? [],
+      effort,
+      messages.slice(0, target.userIndex),
+    );
+  }, [isStreaming, hasProvider, messages, handleRegenerate, submitMessage, effort]);
+
+  const handleDismissStreamError = useCallback(() => {
+    setStreamError(null);
+  }, [setStreamError]);
+
+  const showStreamResume = canShowStreamResume(streamError, messages, isStreaming);
+
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
     const contextMessages = messages.slice(0, msgIndex + 1);
@@ -2291,17 +2349,22 @@ export function ChatSurface({
   }) && gitChrome.taskLine?.selectable === true;
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
     if (!gitChrome.taskLine?.selectable) return [];
-    const branches = workspaceGit?.ok ? workspaceGit.branches : [];
+    const localGroup = isZh ? '本地分支' : 'Local';
+    const remoteGroup = isZh ? '远程分支' : 'Remote';
     return buildComposerBranchOptions({
-      branches,
+      branches: workspaceGit?.ok ? workspaceGit.branches : [],
+      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
+      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
       selected: gitChrome.taskLine.value,
-    }).map((branch) => ({
-      value: branch,
-      label: branch === gitChrome.taskLine?.value
-        ? gitChrome.taskLine.label
-        : formatComposerBranchOptionLabel(branch),
+    }).map((option) => ({
+      value: option.value,
+      label: formatComposerBranchOptionLabel(option.value),
+      group: option.kind === 'remote' ? remoteGroup : localGroup,
+      hint: option.kind === 'remote'
+        ? (isZh ? '远程' : 'remote')
+        : (isZh ? '本地' : 'local'),
     }));
-  }, [gitChrome.taskLine, workspaceGit]);
+  }, [gitChrome.taskLine, isZh, workspaceGit]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (!next || !workspacePath || !canSelectBoundBranch) return;
@@ -2321,6 +2384,28 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
+  const handleCreateBoundBranch = useCallback((rawName: string) => {
+    const name = rawName.trim();
+    if (!name || !workspacePath || !canSelectBoundBranch) return;
+    if (!isSafeComposerBranchName(name)) return;
+    const startPoint = gitChrome.taskLine?.value || workspaceGit?.current || undefined;
+    void clientApi.gitCreateBranch({
+      workspaceRoot: workspacePath,
+      name,
+      startPoint,
+    }).then((created) => {
+      if (created?.ok !== true) return;
+      handleSelectBoundBranch(name);
+      refreshWorkspaceGit();
+    }).catch(() => {});
+  }, [
+    canSelectBoundBranch,
+    gitChrome.taskLine?.value,
+    handleSelectBoundBranch,
+    refreshWorkspaceGit,
+    workspaceGit?.current,
+    workspacePath,
+  ]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2595,18 +2680,6 @@ export function ChatSurface({
             </span>
           </div>
         ) : null}
-        {streamError ? (
-          <div className="chat-stream-error">
-            <span>
-              ⚠{' '}
-              {streamError === 'repetition_detected'
-                ? isZh
-                  ? '检测到重复输出，已自动停止本轮回复。'
-                  : 'Repetitive output detected; this reply was stopped automatically.'
-                : streamError}
-            </span>
-          </div>
-        ) : null}
       </div>
 
       <MessageRail items={railItems} onSelect={scrollToMessage} i18n={i18n} />
@@ -2665,6 +2738,51 @@ export function ChatSurface({
             onRefillToComposer={refillQueuedMessageToComposer}
             onForceSend={handleForceSendQueued}
           />
+        ) : null}
+        {streamError ? (
+          <div className="chat-stream-error" role="alert">
+            <span className="chat-stream-error-icon" aria-hidden="true">
+              <svg
+                className="peer-icon"
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+            </span>
+            <span className="chat-stream-error-text">
+              {formatStreamErrorLabel(streamError, isZh)}
+            </span>
+            <div className="chat-stream-error-actions">
+              {showStreamResume ? (
+                <button
+                  type="button"
+                  className="chat-stream-error-resume"
+                  onClick={handleResumeStream}
+                  disabled={!hasProvider}
+                >
+                  {isZh ? '继续' : 'Resume'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="chat-stream-error-dismiss"
+                onClick={handleDismissStreamError}
+                aria-label={isZh ? '关闭错误提示' : 'Dismiss error'}
+              >
+                <PeerIcon name="close" size={14} />
+              </button>
+            </div>
+          </div>
         ) : null}
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
@@ -2732,6 +2850,24 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
+            <Dropdown
+              className="composer-dropdown composer-mode-dropdown"
+              value={modePickerValue(mode)}
+              options={modeOptions}
+              onChange={handleModeDropdownChange}
+              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
+              title={modeTitle(mode, isZh)}
+              menuPlacement="up"
+            />
+            <Dropdown
+              className="composer-dropdown composer-access-dropdown"
+              value={localAccessLevel}
+              options={accessLevelOptions}
+              onChange={handleAccessLevelDropdownChange}
+              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
+              title={accessLevelTitle(localAccessLevel, isZh)}
+              menuPlacement="up"
+            />
             {gitChrome.workspaceHead ? (
               <span
                 className="composer-workspace-head"
@@ -2752,6 +2888,18 @@ export function ChatSurface({
                 title={gitChrome.taskLine.title}
                 prefix={<GitBranchGlyph />}
                 menuPlacement="up"
+                searchable
+                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
+                footerAction={{
+                  label: (query) => {
+                    const name = query.trim();
+                    if (name) return isZh ? `创建 ${name}` : `Create ${name}`;
+                    return isZh ? '创建分支' : 'Create branch';
+                  },
+                  disabled: (query) => !isSafeComposerBranchName(query),
+                  onSelect: handleCreateBoundBranch,
+                }}
               />
             ) : gitChrome.taskLine ? (
               <span
@@ -2760,7 +2908,7 @@ export function ChatSurface({
                 title={gitChrome.taskLine.title}
                 aria-label={gitChrome.taskLine.title}
               >
-                <GitBranchGlyph />
+                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
                 <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
               </span>
             ) : null}
@@ -2773,39 +2921,23 @@ export function ChatSurface({
                 {gitChrome.writeMismatch.label}
               </span>
             ) : null}
-            <Dropdown
-              className="composer-dropdown composer-mode-dropdown"
-              value={modePickerValue(mode)}
-              options={modeOptions}
-              onChange={handleModeDropdownChange}
-              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
-              title={modeTitle(mode, isZh)}
-              menuPlacement="up"
-            />
-            <Dropdown
-              className="composer-dropdown composer-access-dropdown"
-              value={localAccessLevel}
-              options={accessLevelOptions}
-              onChange={handleAccessLevelDropdownChange}
-              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
-              title={accessLevelTitle(localAccessLevel, isZh)}
-              menuPlacement="up"
-            />
-            {isDraftConversation && workspacePath ? (
+            {workspacePath ? (
               <label
                 className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
                 title={
                   workspaceIsGit === false
                     ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
-                    : (isZh
-                      ? '在独立 Git worktree 里改代码，主工作区保持当前分支。默认关闭，之后仍可在任务里再开。'
-                      : 'Run in a Git worktree so the main workspace stays on its current branch. Off by default; you can still isolate later.')
+                    : isStreaming
+                      ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
+                      : (isZh
+                        ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
+                        : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
                 }
               >
                 <input
                   type="checkbox"
                   checked={preferredWorktree}
-                  disabled={workspaceIsGit === false}
+                  disabled={workspaceIsGit === false || isStreaming}
                   onChange={(event) => changePreferredWorktree(event.target.checked)}
                   aria-label={isZh ? '隔离执行' : 'Worktree'}
                 />

@@ -497,6 +497,35 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().error).toContain('turn limit');
   });
 
+  test('keeps the default agent loop unbounded like Desktop', async () => {
+    const beyondLegacyCap = 65;
+    let rounds = 0;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state) {
+        rounds += 1;
+        if (rounds <= beyondLegacyCap) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: `t${rounds}`,
+              capabilityId: 'local.file.read',
+              arguments: { path: '.' },
+            }],
+          };
+        }
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const result = await controller.send('keep going');
+    expect(result.status).toBe('completed');
+    expect(result.turns).toBe(beyondLegacyCap + 1);
+    expect(controller.getSnapshot().error).toBeUndefined();
+  });
+
   test('streams reasoning.delta into thinkingContent on the pending assistant', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),

@@ -162,6 +162,7 @@ function writeJsonl(filePath, items) {
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, items.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf8');
   renameSync(tmp, filePath);
+  jsonlReadCache.delete(filePath);
 }
 
 function writeJsonAtomic(filePath, obj) {
@@ -169,13 +170,42 @@ function writeJsonAtomic(filePath, obj) {
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
   renameSync(tmp, filePath);
+  jsonReadCache.delete(filePath);
 }
 
+/** 单文件 JSON 读缓存（plan 详情热路径，避免 overview 反复 readFile+JSON.parse）。 */
+const jsonReadCache = new Map(); // filePath -> { mtimeMs, size, value }
+
 function readJson(filePath) {
-  if (!existsSync(filePath)) return null;
+  if (!existsSync(filePath)) {
+    jsonReadCache.delete(filePath);
+    return null;
+  }
+  let stat = null;
   try {
-    return JSON.parse(readFileSync(filePath, 'utf8'));
+    stat = statSync(filePath);
   } catch {
+    jsonReadCache.delete(filePath);
+    return null;
+  }
+  const cached = jsonReadCache.get(filePath);
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size
+  ) {
+    return cached.value;
+  }
+  try {
+    const value = JSON.parse(readFileSync(filePath, 'utf8'));
+    jsonReadCache.set(filePath, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      value,
+    });
+    return value;
+  } catch {
+    jsonReadCache.delete(filePath);
     return null;
   }
 }
@@ -1713,6 +1743,15 @@ export function createGoalPlanStore({
   const changeFile = path.join(storeDir, '.changes.jsonl');
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
+  /** listPlans 归一化结果缓存：index mtime+size 未变时复用，避免反复 normalize×N。 */
+  let listPlansCache = null; // { mtimeMs, size, plans }
+  function invalidateListPlansCache() {
+    listPlansCache = null;
+  }
+  function writeIndex(items) {
+    writeJsonl(indexFile, items);
+    invalidateListPlansCache();
+  }
   // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
   // auto-start 闸门（见 goal-runner-adapter），故暴露 setOnChange 修改同一引用。
   let onChangeCallback = typeof onChange === 'function' ? onChange : null;
@@ -1869,12 +1908,12 @@ export function createGoalPlanStore({
   }
 
   // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
-  // 同时把磁盘写入合并到 300ms 窗口，降低高频 tick 的 IO 与广播放大。
+  // 同时把磁盘写入合并到 1s 窗口，降低 CLI 后台跑时跨进程 .changes.jsonl 放大。
   const runnerProgressOverlay = new Map();
   const runnerProgressTimers = new Map();
-  // soft progress IPC 合并：写盘 300ms、广播 100ms，硬状态仍即时。
+  // soft progress：同进程广播 100ms；跨进程写盘 1s。硬状态仍即时。
   const runnerProgressNotifyTimers = new Map();
-  const RUNNER_PROGRESS_PERSIST_MS = 300;
+  const RUNNER_PROGRESS_PERSIST_MS = 1000;
   const RUNNER_PROGRESS_NOTIFY_MS = 100;
 
   function clearRunnerProgressState(planId) {
@@ -2094,7 +2133,7 @@ export function createGoalPlanStore({
   function syncIndex(plan) {
     const index = readIndex().filter((m) => m.planId !== plan.planId);
     index.push(toMeta(plan));
-    writeJsonl(indexFile, index);
+    writeIndex( index);
   }
 
   function persist(plan, options = {}) {
@@ -2182,12 +2221,32 @@ export function createGoalPlanStore({
   }
 
   function listPlans() {
-    return readIndex()
+    let stat = null;
+    try {
+      stat = statSync(indexFile);
+    } catch {
+      listPlansCache = null;
+      return [];
+    }
+    if (
+      listPlansCache &&
+      listPlansCache.mtimeMs === stat.mtimeMs &&
+      listPlansCache.size === stat.size
+    ) {
+      return listPlansCache.plans.slice();
+    }
+    const plans = readIndex()
       .map(normalizePlan)
       .filter((m) => m && activeMeta(m))
       .sort((a, b) =>
         String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
       );
+    listPlansCache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      plans,
+    };
+    return plans.slice();
   }
 
   function listPlansByConversation(conversationId) {
@@ -2322,7 +2381,7 @@ export function createGoalPlanStore({
     }
 
     // 旧索引只在首次按工作区读取时补齐一次，后续切换即可直接跳过无关详情文件。
-    if (indexChanged) writeJsonl(indexFile, nextIndex);
+    if (indexChanged) writeIndex( nextIndex);
     return details;
   }
 
@@ -2466,14 +2525,36 @@ export function createGoalPlanStore({
     const goal = typeof goalText === 'string' ? goalText.replace(/\s+/g, ' ').trim() : '';
     const isAck = (value) => /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(value || '');
     const isCmd = (value) => /^[>$]\s/.test(value || '') || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(value || '') && (value || '').includes('/'));
-    let title = raw;
-    if (!title || isAck(title) || isCmd(title) || title.length > 40) {
-      // Prefer a short slice of goal when title is bad; never keep pure ack/cmd.
-      if (goal && !isAck(goal) && !isCmd(goal)) {
-        title = goal.length <= 24 ? goal : `${goal.slice(0, 24)}…`;
-      } else {
-        title = '未命名任务';
+    // 用户首句/长 goal 常被误塞进 title。标题应是短意图名，不能回退成 goal 截断。
+    const looksLikeRawUtterance = (value) => {
+      if (!value) return false;
+      if (value.length > 40) return true;
+      if (/[?？]$/.test(value) || /(?:吧|吗|呢)$/.test(value)) return true;
+      // 多子句口语长句（逗号/顿号较多）不像「动词+对象」短标题。
+      if (value.length > 18 && (value.match(/[，,、；;]/g) || []).length >= 1 && /[。.!！]/.test(value) === false) {
+        return /(?:不应该|能不能|可不可以|怎么|如何|一下|这个|那种)/.test(value);
       }
+      return false;
+    };
+    const isGoalEcho = (value) => {
+      if (!value || !goal) return false;
+      if (value === goal) return true;
+      // 旧逻辑会把 goal 截成 `${goal.slice(0, 24)}…`；只把这类截断回声当坏标题，
+      // 不要把「恰好是 goal 前缀」的合法短意图名误杀。
+      if (!(value.endsWith('…') || value.endsWith('...'))) return false;
+      const stripped = value.replace(/[.…]+$/g, '').trim();
+      return Boolean(stripped) && goal.startsWith(stripped);
+    };
+    let title = raw;
+    if (
+      !title
+      || isAck(title)
+      || isCmd(title)
+      || looksLikeRawUtterance(title)
+      || isGoalEcho(title)
+    ) {
+      // 故意不用 goal 截断兜底：否则浮动条/任务卡会继续显示用户原话。
+      title = '未命名任务';
     }
     return title;
   }
@@ -2783,6 +2864,20 @@ export function createGoalPlanStore({
     if ('manualConfirmations' in safePatch) {
       safePatch.manualConfirmations = normalizeManualConfirmations(safePatch.manualConfirmations);
     }
+    if ('title' in safePatch) {
+      const nextTitle = sanitizePlanTitle(safePatch.title, safePatch.goal ?? plan.goal);
+      const previousTitle = typeof plan.title === 'string' ? plan.title.trim() : '';
+      // 分析意图后允许刷新为更好的短标题；但空/占位/坏标题不要把已有好标题冲掉。
+      if (
+        nextTitle === '未命名任务'
+        && previousTitle
+        && previousTitle !== '未命名任务'
+      ) {
+        delete safePatch.title;
+      } else {
+        safePatch.title = nextTitle;
+      }
+    }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
       ...plan,
@@ -2936,7 +3031,7 @@ export function createGoalPlanStore({
     const nextPlan = { ...plan, runner: nextRunner, updatedAt: now, ...(timing ? { timing } : {}) };
 
     // 高频 runner 进度：内存即时可见 + 广播 runner-progress（带 runner 本地 patch），
-    // 写盘节流到 300ms，避免每个 tick 全量 list 与磁盘抖动。
+    // 写盘节流到 1s，避免 CLI 后台跑时跨进程刷新把 Desktop 打卡。
     if (changeKind === 'runner-progress') {
       const normalized = normalizePlan(nextPlan);
       const next = {
@@ -3600,7 +3695,7 @@ export function createGoalPlanStore({
     const conversationId = existing?.conversationId ?? null;
     clearRunnerProgressState(planId);
     const index = readIndex().filter((m) => m.planId !== planId);
-    writeJsonl(indexFile, index);
+    writeIndex( index);
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
@@ -3664,7 +3759,7 @@ export function createGoalPlanStore({
       (m) => normalizeConversationId(m.conversationId) !== normalizedConversationId,
     );
     // 先原子重写 index（一次写盘），再删除各计划文件。
-    writeJsonl(indexFile, remaining);
+    writeIndex( remaining);
     for (const meta of removed) {
       try {
         if (existsSync(planFile(meta.planId))) unlinkSync(planFile(meta.planId));

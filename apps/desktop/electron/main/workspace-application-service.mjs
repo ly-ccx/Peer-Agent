@@ -274,7 +274,11 @@ export function createWorkspaceApplicationService(options = {}) {
 
   function getWorkspaceInfo(workspacePath) {
     if (!workspacePath) return null;
-    return readProjectIndex({ workspaceRoot: workspacePath })?.[0] || {
+    // 热路径只要根仓库摘要：不要扫 apps/packages 再对每个子包 spawn git。
+    return readProjectIndex({
+      workspaceRoot: workspacePath,
+      includePackages: false,
+    })?.[0] || {
       name: basename(workspacePath),
       absolutePath: workspacePath,
     };

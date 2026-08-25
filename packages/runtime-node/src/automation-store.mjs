@@ -102,6 +102,35 @@ export function createAutomationStore({ storeDir = pathOf('automations'), onChan
     mkdirSync(runsDir, { recursive: true });
   }
 
+  /** listRuns 热路径缓存：避免 overview 对每个 automation 反复 readdir+读盘。 */
+  let runsListCache = null;
+
+  function invalidateRunsListCache() {
+    runsListCache = null;
+  }
+
+  function readAllRunsUncached() {
+    ensure();
+    const runs = [];
+    for (const name of readdirSync(runsDir)) {
+      if (!name.endsWith('.json')) continue;
+      const value = readJson(path.join(runsDir, name));
+      if (!value || value.schemaVersion !== SCHEMA_VERSION) continue;
+      try {
+        runs.push(validateRun(value.run));
+      } catch { /* isolate corrupt run records */ }
+    }
+    runs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return runs;
+  }
+
+  function getAllRunsCached() {
+    if (!runsListCache) {
+      runsListCache = readAllRunsUncached();
+    }
+    return runsListCache;
+  }
+
   function emit(event) {
     if (!listener) return;
     try { listener(clone(event)); } catch (error) {
@@ -225,23 +254,18 @@ export function createAutomationStore({ storeDir = pathOf('automations'), onChan
   }
 
   function listRuns({ automationId, statuses, limit, before } = {}) {
-    ensure();
     const statusSet = Array.isArray(statuses) && statuses.length ? new Set(statuses) : null;
     const beforeMs = before ? Date.parse(before) : NaN;
-    const runs = [];
-    for (const name of readdirSync(runsDir)) {
-      if (!name.endsWith('.json')) continue;
-      const value = readJson(path.join(runsDir, name));
-      if (!value || value.schemaVersion !== SCHEMA_VERSION) continue;
-      try {
-        const run = validateRun(value.run);
-        if (automationId && run.automationId !== automationId) continue;
-        if (statusSet && !statusSet.has(run.status)) continue;
-        if (Number.isFinite(beforeMs) && Date.parse(run.createdAt) >= beforeMs) continue;
-        runs.push(run);
-      } catch { /* isolate corrupt run records */ }
+    let runs = getAllRunsCached();
+    if (automationId) {
+      runs = runs.filter((run) => run.automationId === automationId);
     }
-    runs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (statusSet) {
+      runs = runs.filter((run) => statusSet.has(run.status));
+    }
+    if (Number.isFinite(beforeMs)) {
+      runs = runs.filter((run) => Date.parse(run.createdAt) < beforeMs);
+    }
     return runs.slice(0, Number.isInteger(limit) && limit > 0 ? limit : runs.length).map(clone);
   }
 
@@ -262,6 +286,7 @@ export function createAutomationStore({ storeDir = pathOf('automations'), onChan
       attentionVersion: Number.isInteger(input.attentionVersion) ? input.attentionVersion : 0,
     });
     writeJsonAtomic(runFile(runId), { schemaVersion: SCHEMA_VERSION, run });
+    invalidateRunsListCache();
     emit({ type: 'run_changed', automationId: run.automationId, runId });
     return clone(run);
   }
@@ -272,6 +297,7 @@ export function createAutomationStore({ storeDir = pathOf('automations'), onChan
     const patch = typeof updater === 'function' ? updater(clone(current)) : updater;
     const next = validateRun({ ...current, ...clone(patch), runId: current.runId, automationId: current.automationId });
     writeJsonAtomic(runFile(runId), { schemaVersion: SCHEMA_VERSION, run: next });
+    invalidateRunsListCache();
     emit({ type: 'run_changed', automationId: next.automationId, runId });
     return clone(next);
   }
@@ -280,6 +306,7 @@ export function createAutomationStore({ storeDir = pathOf('automations'), onChan
     const current = getRun(runId);
     if (!current) return false;
     rmSync(runFile(runId), { force: true });
+    invalidateRunsListCache();
     emit({ type: 'run_changed', automationId: current.automationId, runId });
     return true;
   }

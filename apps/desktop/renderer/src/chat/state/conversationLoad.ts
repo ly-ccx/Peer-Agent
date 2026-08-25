@@ -18,6 +18,7 @@ import {
   migrateToSegments,
   parseSerializedToolSegments,
 } from './streamSegments';
+import { mapInChunks } from './yieldToMain';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import type {
   ChatAttachment,
@@ -73,49 +74,54 @@ export async function loadConversationMessages(conversationId: string): Promise<
   const folded = foldCliToolMessagesForDesktop(
     (conv.messages as readonly Record<string, unknown>[]) ?? [],
   );
-  const loaded = folded.map((m: Record<string, unknown>) => {
-    const roleRaw = String(m.role ?? 'user');
-    const role: ChatMsg['role'] = roleRaw === 'assistant' || roleRaw === 'system'
-      ? roleRaw
-      : 'user';
-    const msg: ChatMsg = {
-      id: (m.id as string) || nextId(),
-      role: roleRaw === 'tool' ? 'assistant' : role,
-      content: (m.content as string) || '',
-      timestamp: m.timestamp as number | undefined,
-    };
-    if (m.segments) {
-      msg.segments = m.segments as ContentSegment[];
-    } else if (Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length) {
-      msg.segments = migrateToSegments(msg.content, m.toolCalls as ToolCallLegacy[]);
-    } else if (msg.role === 'assistant') {
-      msg.segments = parseSerializedToolSegments(msg.content);
-    }
-    if (m.usage && typeof m.usage === 'object') {
-      const u = m.usage as { input?: number; output?: number; cacheWrite?: number; cacheRead?: number };
-      msg.usage = { input: u.input ?? 0, output: u.output ?? 0, cacheWrite: u.cacheWrite ?? 0, cacheRead: u.cacheRead ?? 0 };
-      totalInput += msg.usage.input;
-      totalOutput += msg.usage.output;
-      totalCacheWrite += msg.usage.cacheWrite ?? 0;
-      totalCacheRead += msg.usage.cacheRead ?? 0;
-    }
-    if (m._compaction && typeof m._compaction === 'object') {
-      const c = m._compaction as unknown as CompactionMeta;
-      msg.compaction = c;
-    }
-    if (Array.isArray(m.attachments)) {
-      msg.attachments = m.attachments as ChatAttachment[];
-    }
-    // ADR 33: 每条消息的整轮工作时长留痕,随消息持久化,重启后仍可见。
-    if (typeof m.durationMs === 'number' && Number.isFinite(m.durationMs)) {
-      msg.durationMs = m.durationMs;
-    }
-    // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
-    if (m.interrupted === true) {
-      msg.interrupted = true;
-    }
-    return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
+  const mapped = await mapInChunks(
+    folded,
+    (m: Record<string, unknown>) => {
+      const roleRaw = String(m.role ?? 'user');
+      const role: ChatMsg['role'] = roleRaw === 'assistant' || roleRaw === 'system'
+        ? roleRaw
+        : 'user';
+      const msg: ChatMsg = {
+        id: (m.id as string) || nextId(),
+        role: roleRaw === 'tool' ? 'assistant' : role,
+        content: (m.content as string) || '',
+        timestamp: m.timestamp as number | undefined,
+      };
+      if (m.segments) {
+        msg.segments = m.segments as ContentSegment[];
+      } else if (Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length) {
+        msg.segments = migrateToSegments(msg.content, m.toolCalls as ToolCallLegacy[]);
+      } else if (msg.role === 'assistant') {
+        msg.segments = parseSerializedToolSegments(msg.content);
+      }
+      if (m.usage && typeof m.usage === 'object') {
+        const u = m.usage as { input?: number; output?: number; cacheWrite?: number; cacheRead?: number };
+        msg.usage = { input: u.input ?? 0, output: u.output ?? 0, cacheWrite: u.cacheWrite ?? 0, cacheRead: u.cacheRead ?? 0 };
+        totalInput += msg.usage.input;
+        totalOutput += msg.usage.output;
+        totalCacheWrite += msg.usage.cacheWrite ?? 0;
+        totalCacheRead += msg.usage.cacheRead ?? 0;
+      }
+      if (m._compaction && typeof m._compaction === 'object') {
+        const c = m._compaction as unknown as CompactionMeta;
+        msg.compaction = c;
+      }
+      if (Array.isArray(m.attachments)) {
+        msg.attachments = m.attachments as ChatAttachment[];
+      }
+      // ADR 33: 每条消息的整轮工作时长留痕,随消息持久化,重启后仍可见。
+      if (typeof m.durationMs === 'number' && Number.isFinite(m.durationMs)) {
+        msg.durationMs = m.durationMs;
+      }
+      // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
+      if (m.interrupted === true) {
+        msg.interrupted = true;
+      }
+      return msg;
+    },
+    { chunkSize: 32 },
+  );
+  const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   const contextAccounting: ContextAccountingSnapshot | null =
     conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。

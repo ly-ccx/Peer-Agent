@@ -234,4 +234,52 @@ describe('TUI Goal worker adapter', () => {
     });
     expect(observedInputs[0]?.continuityContext).toBeUndefined();
   });
+
+  test('keeps explorer agent loop unbounded like Desktop', async () => {
+    const beyondLegacyCap = 9;
+    let rounds = 0;
+    const model: ChatModelPort = {
+      initialize: stateFromInput,
+      runTurn(state) {
+        rounds += 1;
+        if (rounds <= beyondLegacyCap) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: `search-${rounds}`,
+              capabilityId: 'local.file.search',
+              arguments: { query: 'capability', path: 'src' },
+            }],
+          };
+        }
+        return {
+          kind: 'completed',
+          state,
+          output: JSON.stringify({
+            summary: 'Finished after many reads.',
+            evidenceRefs: ['tool-result://explorer-long'],
+            confidence: 'high',
+          }),
+        };
+      },
+      applyToolResults(state, executions) {
+        return {
+          ...state,
+          toolExecutions: [...state.toolExecutions, ...executions.map((item) => item.result)],
+        };
+      },
+    };
+    const worker = createTuiGoalWorkerAdapter({
+      model,
+      host: fakeHost([]),
+    });
+    const report = await worker.runExplorer({
+      planId: 'plan-long',
+      plan: { planId: 'plan-long' },
+      explorer: { explorerId: 'explorer-long', request: { question: 'Keep looking' } },
+    });
+    expect(report.toolCallCount).toBe(beyondLegacyCap);
+    expect(report.summary).toBe('Finished after many reads.');
+  });
 });

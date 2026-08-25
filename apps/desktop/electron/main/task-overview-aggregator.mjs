@@ -36,27 +36,22 @@ import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
 /** 工作台默认只看近 7 天活跃任务（推进中 / 待你处理）。 */
 export const DEFAULT_ACTIVE_WITHIN_MS = 7 * 24 * 60 * 60 * 1000;
 /**
- * @deprecated 不再用短窗藏 completed；存量用 RESULT_ACCEPTANCE_REQUIRED_SINCE 祖父化。
- * 保留导出以免外部 import 断裂。
+ * @deprecated 不再用短窗藏 completed。保留导出以免外部 import 断裂。
  */
 export const DEFAULT_RESULT_READY_WITHIN_MS = 0;
-/** 工作台默认最多返回条数（三桶合计）。0/不传时用此默认；result_ready 本身不单独限条。 */
+/** 工作台默认最多返回条数（三桶合计）。0/不传时用此默认。 */
 export const DEFAULT_HOME_LIMIT = 200;
 /**
- * @deprecated result_ready 不单独限流；保留导出，默认 Infinity 语义用极大值。
+ * @deprecated Goal 完成不再进 result_ready；保留导出以免外部 import 断裂。
  */
 export const DEFAULT_RESULT_READY_LIMIT = Number.MAX_SAFE_INTEGER;
 
 /**
- * 一键验收功能生效起点（ISO）。
- * 此时间点之前完成的 completed 一律祖父化为「已结束」，不进「结果待验收」，
- * 避免把历史海量任务甩给用户白点。此时间点之后的新完成项才需要工作台一键确认。
- *
- * 产品决策：存量不进待验收；上线后新会话/新完成项走工作台闭环。
+ * @deprecated 一键验收已取消。保留 cutoff 常量以免外部 import 断裂。
  */
 export const RESULT_ACCEPTANCE_REQUIRED_SINCE = '2026-08-08T11:00:00.000Z';
 
-// cancelled/failed 为历史终态；completed 未验收（且在功能上线后）→ result_ready。
+// cancelled/failed/completed 默认进历史；completed 仅在自检/交回未结束时留在工作台。
 const GOAL_HISTORY_TERMINAL_STATUSES = new Set(['cancelled', 'failed']);
 const GOAL_COMPLETED_STATUS = 'completed';
 const STALE_COMPLETED_RUNNER_STATUSES = new Set(['running', 'exploring', 'blocked']);
@@ -707,7 +702,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
 /**
  * 组装 Automation 投影快照（Definition 与最新一次 Run 联合）。
  * definition 为 automation-store.listDefinitions() 元素，
- * latestRun 为 automation-store.listRuns({ automationId, limit: 1 })[0]。
+ * latestRun 为该 automation 的最新 run（aggregator 一次 listRuns 后按 id 取）。
  */
 export function toAutomationSnapshot(definition, latestRun) {
   if (!definition || typeof definition !== 'object') return null;
@@ -747,9 +742,8 @@ export function toAutomationSnapshot(definition, latestRun) {
  * 判断 GoalPlan 是否应进入工作台 / 历史投影。
  * - 默认排除 cancelled/failed，除非 includeTerminal（历史页）。
  * - completed：
- *   - 已验收 / 存量祖父化 → 仅 includeTerminal 时纳入（历史）
- *   - 已验收但真实交回中 / 交回失败 → 工作台仍纳入
- *   - 功能上线后未验收 → 工作台纳入（result_ready），不限条数；历史页不 hydrate
+ *   - 默认进历史（includeTerminal）
+ *   - 质量自检未过线 / 真实交回中 / 交回失败 → 工作台仍纳入
  * - 其他活跃状态要求在 activeWithinMs 窗口内（activeWithinMs<=0 表示不限时）。
  * - workspacePath 过滤（target/origin 任一匹配）。
  * - 展示名固定使用 plan.title（核对后的 plan 名字）。
@@ -768,15 +762,12 @@ export function isGoalPlanInScope(plan, options = {}) {
 
   const isHistoryTerminal = GOAL_HISTORY_TERMINAL_STATUSES.has(status);
   const isCompleted = status === GOAL_COMPLETED_STATUS;
-  const isResultAccepted = isPlanResultAccepted(plan);
 
   // cancelled/failed：只在历史页
   if (isHistoryTerminal && !includeTerminal) return false;
 
-  // 已验收：工作台只留真实交回中 / 交回失败。仅有 deliveryBinding 不算正在交回。
-  if (isCompleted && isResultAccepted && !includeTerminal) {
-    if (!hasPendingDeliveryHandoff(plan)) return false;
-  }
+  // completed：默认进历史。工作台只留质量自检未过线 / 真实交回中 / 交回失败。
+  if (isCompleted && !includeTerminal && !isCompletedPlanStillLive(plan)) return false;
 
   const wanted = normalizeWorkspacePath(workspacePath);
   if (wanted) {
@@ -787,8 +778,7 @@ export function isGoalPlanInScope(plan, options = {}) {
   const updatedAt = typeof plan.updatedAt === 'string' ? plan.updatedAt : null;
 
   if (isCompleted) {
-    // 未验收：工作台全量；已验收：仅 includeTerminal 走到这里
-    // completed 不再套用 activeWithinMs 短窗（产品：result_ready 不限制）
+    // completed 不再套用 activeWithinMs 短窗：要么仍 live（自检/交回），要么只在历史页出现。
     return true;
   }
 
@@ -814,10 +804,18 @@ export function hasPendingDeliveryHandoff(plan) {
 }
 
 /**
- * 用户是否已验收结果（与 GoalPlanStatus.accepted 无关）。
- * - 显式 resultAcceptance / resultAccepted* → 已验收
- * - completed 且完成时间早于 RESULT_ACCEPTANCE_REQUIRED_SINCE → 祖父化为已结束（存量不进待验收）
- * - 功能上线后的 completed 无验收记录 → 未验收 → result_ready
+ * completed 是否仍应留在工作台（不是待验收）。
+ * 仅真实交回中 / 交回失败算 live。质量自检缺口不再把已完成项留在首页。
+ */
+export function isCompletedPlanStillLive(plan) {
+  if (!plan || typeof plan !== 'object') return false;
+  return hasPendingDeliveryHandoff(plan);
+}
+
+/**
+ * 遗留：用户是否写过验收戳。Goal 完成不再据此进入工作台。
+ * - 显式 resultAcceptance / resultAccepted* → true
+ * - completed 且完成时间早于 RESULT_ACCEPTANCE_REQUIRED_SINCE → true（存量祖父化）
  */
 export function isPlanResultAccepted(plan) {
   if (!plan || typeof plan !== 'object') return false;
@@ -953,8 +951,7 @@ export function isGoalPlanMetaCandidate(plan, options = {}) {
   const status = typeof plan.status === 'string' ? plan.status : null;
   if (!status) return false;
   if (status === GOAL_COMPLETED_STATUS) {
-    if (!isPlanResultAccepted(plan)) return !includeTerminal;
-    return includeTerminal || hasPendingDeliveryHandoff(plan);
+    return includeTerminal || isCompletedPlanStillLive(plan);
   }
   if (GOAL_HISTORY_TERMINAL_STATUSES.has(status)) return includeTerminal;
   return true;
@@ -1094,6 +1091,7 @@ export function createTaskOverviewAggregator({
       try {
         conversations = listConversations({
           status: 'active',
+          includeMessageCount: false,
           ...(conversationId ? { conversationId } : {}),
         }) ?? [];
       } catch {
@@ -1141,7 +1139,7 @@ export function createTaskOverviewAggregator({
       ? goalPlanStore.findEvidenceIndexRecords(evidenceRefs)
       : [];
     const latestPlanByConversationId = new Map();
-    const independentlyProjectedResults = [];
+    const independentlyProjectedLiveCompleted = [];
     const unlinkedPlans = [];
     // 目标线（Goal Thread）关系索引：从这批 plans 建一次，供两处 snapshot 组装共用。
     const relationIndex = buildGoalThreadRelationIndex(plans);
@@ -1153,10 +1151,13 @@ export function createTaskOverviewAggregator({
       const plan = backfillCompletedPlanQualityReview(goalPlanStore, rawPlan);
       const snapshot = toGoalPlanSnapshot(plan, { relationIndex, evidenceIndex, artifactRoots });
       const projected = snapshot ? projectGoalPlan(snapshot) : null;
-      // 验收事实属于 GoalPlan：同一会话可同时存在多个待验收结果，必须逐项投影，
-      // 不能混入 conversation 级去重后形成用户看不见的验收队列。
-      if (projected?.actionRight === 'result_ready') {
-        independentlyProjectedResults.push(plan);
+      // completed 仍 live（自检/交回）时按 GoalPlan 逐项投影，避免被会话级去重吃掉。
+      if (
+        projected
+        && plan.status === GOAL_COMPLETED_STATUS
+        && projected.actionRight !== 'terminal'
+      ) {
+        independentlyProjectedLiveCompleted.push(plan);
         continue;
       }
       const conversationId = typeof plan?.conversationId === 'string' ? plan.conversationId : '';
@@ -1172,7 +1173,7 @@ export function createTaskOverviewAggregator({
       }
     }
     for (const plan of [
-      ...independentlyProjectedResults,
+      ...independentlyProjectedLiveCompleted,
       ...latestPlanByConversationId.values(),
       ...unlinkedPlans,
     ]) {
@@ -1251,16 +1252,22 @@ export function createTaskOverviewAggregator({
     } catch {
       definitions = [];
     }
+    // 只扫一次 runs，再按 automationId 取最新；避免 N 次全目录 readdir。
+    /** @type {Map<string, object>} */
+    const latestRunByAutomationId = new Map();
+    try {
+      const allRuns = automationStore.listRuns() ?? [];
+      for (const run of allRuns) {
+        const runAutomationId = typeof run?.automationId === 'string' ? run.automationId : null;
+        if (!runAutomationId || latestRunByAutomationId.has(runAutomationId)) continue;
+        latestRunByAutomationId.set(runAutomationId, run);
+      }
+    } catch {
+      latestRunByAutomationId.clear();
+    }
     for (const definition of definitions) {
       const automationId = definition?.automationId ?? definition?.id;
-      let latestRun;
-      if (automationId) {
-        try {
-          latestRun = automationStore.listRuns({ automationId, limit: 1 })?.[0];
-        } catch {
-          latestRun = undefined;
-        }
-      }
+      const latestRun = automationId ? latestRunByAutomationId.get(automationId) : undefined;
       if (!isAutomationInScope(definition, latestRun, scope)) continue;
       const snapshot = toAutomationSnapshot(definition, latestRun);
       if (!snapshot) continue;
@@ -1286,8 +1293,7 @@ export function createTaskOverviewAggregator({
       ? items.filter((item) => item?.conversationId === conversationId)
       : items;
     const sorted = sortTaskOverview(scopedItems);
-    // 分桶截断（2026-08-14 修复）：result_ready 单独配额，不再挤占
-    // peer_advancing / discussion 的空间；其余桶共享 limit。
+    // 分桶截断：遗留 result_ready 单独配额，避免挤占 peer_advancing / needs_you。
     const capped = capTaskOverviewByBucket(sorted, limit, resultReadyLimit);
     // 首页无 conversationId 时只能整表重拉。按 taskId 复用未变卡片，
     // 一路流式/秒数更新不会把其余推进卡一起换成新对象。
@@ -1371,10 +1377,8 @@ const ACTION_RIGHT_ORDER = {
 /**
  * 按行动权分桶截断 —— 取代单一全局 slice，保证任何一桶不会被另一桶挤空。
  *
- * 回归背景（2026-08-14）：历史积压的 result_ready（无验收记录的 completed）
- * 一次性涌入时，ACTION_RIGHT_ORDER 中 result_ready 排在 peer_advancing /
- * discussion 之前，旧的全局 `sorted.slice(0, limit)` 会先截满 result_ready，
- * 把「Peer 正在推进」「讨论」整桶挤掉，工作台只剩待验收卡。
+ * 回归背景：历史积压的 result_ready 曾挤掉 peer_advancing。
+ * Goal 完成不再进入 result_ready；保留独立配额以免遗留数据再挤占推进桶。
  *
  * 契约：needs_you / peer_advancing / paused / discussion 共享主配额 limit
  * （按排序原样保留）；result_ready 单独配额（产品语义：不限条，用极大值），

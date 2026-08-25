@@ -7,7 +7,12 @@ import { fileURLToPath } from 'node:url';
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
 const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
+const tokensCss = readFileSync(join(stylesDir, 'tokens.css'), 'utf8');
 const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
+const sidebarRowSource = readFileSync(
+  join(stylesDir, '../chat/components/SidebarConversationRow.tsx'),
+  'utf8',
+);
 
 function ruleBody(css: string, selector: string) {
   const startToken = `\n${selector} {`;
@@ -79,16 +84,16 @@ test('resting conversation rows keep quieter type; selected stays unbolded', () 
 });
 
 test('pin lives in the trailing action slot instead of a leading gutter', () => {
-  const pinIndex = sidebarSource.indexOf('sidebar-conv-pin ${isPinned');
-  const actionsIndex = sidebarSource.indexOf('className="sidebar-conv-actions"');
-  const archiveIndex = sidebarSource.indexOf('className="sidebar-conv-archive"');
+  const pinIndex = sidebarRowSource.indexOf('sidebar-conv-pin ${isPinned');
+  const actionsIndex = sidebarRowSource.indexOf('className="sidebar-conv-actions"');
+  const archiveIndex = sidebarRowSource.indexOf('className="sidebar-conv-archive"');
 
   assert.notEqual(pinIndex, -1, 'expected trailing pin button');
   assert.notEqual(actionsIndex, -1, 'expected trailing action slot');
   assert.ok(pinIndex > actionsIndex, 'pin should render inside trailing actions');
   assert.ok(archiveIndex > pinIndex, 'archive should stay after pin');
-  assert.doesNotMatch(sidebarSource, /sidebar-conv-pin-leading/);
-  assert.doesNotMatch(sidebarSource, /sidebar-conv-edit/);
+  assert.doesNotMatch(sidebarRowSource, /sidebar-conv-pin-leading/);
+  assert.doesNotMatch(sidebarRowSource, /sidebar-conv-edit/);
   assert.doesNotMatch(sidebarCss, /sidebar-conv-pin-leading/);
   assert.doesNotMatch(sidebarCss, /--sidebar-conv-leading-gutter/);
   assert.doesNotMatch(sidebarCss, /sidebar-conv-edit/);
@@ -98,7 +103,7 @@ test('pin lives in the trailing action slot instead of a leading gutter', () => 
   );
 });
 
-test('selected conversation rows stay a fill instead of a lifted card', () => {
+test('selected conversation rows use a restrained ambient lift, not a card shadow', () => {
   const activeBody = ruleBody(
     sidebarCss,
     '.channel-conversation-list .conversation-row.active',
@@ -106,12 +111,83 @@ test('selected conversation rows stay a fill instead of a lifted card', () => {
   const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
   const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
 
-  assert.match(activeBody, /box-shadow:\s*none;/);
+  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(activeBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveBody, /box-shadow:\s*none;/);
+  assert.match(layeredActiveBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveHoverBody, /box-shadow:\s*none;/);
+  assert.match(layeredActiveHoverBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
+
+  assert.match(tokensCss, /--za-sidebar-active-shadow:\s*0 0 0 0\.5px/);
+});
+
+test('nested workspace session lists do not crop a single selected capsule shadow', () => {
+  const nestedListBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks.channel-conversation-list',
+  );
+  const nestedRowBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks.channel-conversation-list .conversation-row',
+  );
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+
+  assert.match(nestedListBody, /overflow:\s*visible;/);
+  assert.doesNotMatch(nestedListBody, /overflow-x:\s*hidden;/);
+  assert.doesNotMatch(nestedListBody, /overflow-y:\s*auto;/);
+  assert.match(nestedListBody, /padding:\s*6px 4px 6px 6px;/);
+  assert.doesNotMatch(nestedListBody, /padding:\s*0 var\(--space-2\);/);
+  assert.match(nestedRowBody, /--sidebar-conv-row-pad-x:\s*8px;/);
+  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
+});
+
+test('selected highlight lives on the conversation, not the workspace row', () => {
+  const workspaceActiveBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-node.is-home > .sidebar-workspace-row',
+  );
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+  const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
+  const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
+
+  assert.match(workspaceActiveBody, /background:\s*transparent;/);
+  assert.doesNotMatch(workspaceActiveBody, /--za-sidebar-active-bg|--ui-surface-selected/);
+  assert.match(activeBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(activeBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveHoverBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveHoverBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+});
+
+test('selected fill tracks frosted chrome hover across light and dark themes', () => {
+  const activeBgBindings = tokensCss.match(/--za-sidebar-active-bg:\s*[^;]+;/g) ?? [];
+  const threadActiveBgBindings =
+    tokensCss.match(/--za-sidebar-thread-active-bg:\s*[^;]+;/g) ?? [];
+
+  assert.equal(activeBgBindings.length, 4);
+  assert.equal(threadActiveBgBindings.length, 4);
+  for (const binding of [...activeBgBindings, ...threadActiveBgBindings]) {
+    assert.match(binding, /var\(--glass-chrome-hover\)/);
+  }
+
+  assert.match(tokensCss, /--glass-chrome-hover:\s*hsla\(/);
+  assert.match(tokensCss, /--ui-surface-hover:\s*var\(--za-hover\);/);
+
+  assert.match(
+    ruleBody(sidebarCss, '.channel-conversation-list .conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
+  assert.match(
+    ruleBody(chatSidebarCss, '.conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
 });
 
 test('workspace rows stack the path under the name so the name can use the full width', () => {
@@ -123,4 +199,18 @@ test('workspace rows stack the path under the name so the name can use the full 
   assert.doesNotMatch(metaBody, /flex-direction:\s*row;/);
   assert.doesNotMatch(nameBody, /flex:\s*0 1 auto;/);
   assert.doesNotMatch(pathBody, /flex:\s*1 1 auto;/);
+});
+
+test('workspace rows reveal a new-task plus on hover or focus', () => {
+  const buttonBody = ruleBody(sidebarCss, '.sidebar-workspace-new-task');
+  const hoverBody = ruleBody(sidebarCss, '.sidebar-workspace-row:hover .sidebar-workspace-new-task');
+  const focusBody = ruleBody(sidebarCss, '.sidebar-workspace-row:focus-within .sidebar-workspace-new-task');
+
+  assert.match(buttonBody, /opacity:\s*0;/);
+  assert.match(buttonBody, /pointer-events:\s*none;/);
+  assert.match(buttonBody, /margin-left:\s*auto;/);
+  assert.match(hoverBody, /opacity:\s*1;/);
+  assert.match(hoverBody, /pointer-events:\s*auto;/);
+  assert.match(focusBody, /opacity:\s*1;/);
+  assert.match(focusBody, /pointer-events:\s*auto;/);
 });

@@ -30,38 +30,30 @@ test('global workbench renders action arrows as decorative svg icons', async () 
   assert.match(styles, /\.gwb-btn-arrow/);
 });
 
-test('global workbench acceptance waits for success before celebrating and freezes order snapshot', async () => {
+test('global workbench main column no longer hosts leftover acceptance snapshots', async () => {
   const source = await readPage();
-  assert.match(source, /mergeAcceptanceTransitionItems/);
-  assert.match(source, /ACCEPTANCE_CELEBRATION_MS/);
-  assert.match(source, /ACCEPTANCE_EXIT_MS/);
-  assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
-  assert.match(source, /setAcceptanceOrderSnapshot\(resultReady\.map\(\(candidate\) => candidate\.taskId\)\)/);
-  assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
-  assert.match(source, /ParticleShatterOverlay/);
-  assert.match(source, /acceptHandlerRef\.current = handleAccept/);
-  assert.match(source, /is-shattering/);
-  assert.match(source, /is-exiting/);
+  assert.doesNotMatch(source, /mergeAcceptanceTransitionItems/);
+  assert.doesNotMatch(source, /ACCEPTANCE_CELEBRATION_MS/);
+  assert.doesNotMatch(source, /setAcceptanceOrderSnapshot/);
+  assert.doesNotMatch(source, /resultReady/);
+  assert.doesNotMatch(source, /handleAccept/);
+  assert.doesNotMatch(source, /kind="accept"/);
+  assert.match(source, /kind="need"/);
   assert.match(source, /className="gwb-type"/);
   assert.match(source, /className="gwb-body"/);
   assert.match(source, /className="gwb-chips"/);
   assert.match(source, /className="gwb-chip gwb-chip-ws"/);
   assert.doesNotMatch(source, /gwb-tag-col|gwb-item-main|gwb-meta/);
-  assert.match(source, /正在交回…/);
-  assert.match(source, /已归档 ✓/);
-  assert.match(source, /查看进度/);
   assert.doesNotMatch(source, /先看依据/);
   assert.doesNotMatch(source, /确认验收/);
-  assert.doesNotMatch(
-    source,
-    /onAccept=\{\s*onAcceptResult\s*\?\s*\(\)\s*=>\s*\{\s*void onAcceptResult\(item\);/,
-  );
 });
 
-test('global workbench acceptance failure returns the card to a retryable idle state', async () => {
+test('global workbench pulse and empty radar do not revive an accept bucket', async () => {
   const source = await readPage();
-  assert.match(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
-  assert.match(source, /disabled=\{kind === 'accept' && acceptBusy\}/);
+  assert.doesNotMatch(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
+  assert.doesNotMatch(source, /actionRight === 'result_ready'\) row\.accept/);
+  assert.match(source, /gwb-layout--empty/);
+  assert.match(source, /kind="need"/);
 });
 
 test('global workbench removes the final divider through the shatter host wrapper', async () => {
@@ -108,4 +100,34 @@ test('global workbench acceptance uses particle shatter overlay styles', async (
   const styles = await readStyles();
   assert.match(styles, /\.gwb-item--submitting/);
   assert.match(styles, /\.gwb-accept-spinner/);
+});
+
+test('empty radar stretches the main column and keeps the side ambient', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(source, /className=\{`gwb-layout\$\{showEmpty \? ' gwb-layout--empty' : ''\}`\}/);
+  assert.match(source, /现在没有需要你处理的事/);
+  assert.match(source, /Peer 正在推进 \{advancing\.length\} 个任务，你可以离开。/);
+  assert.match(source, /雷达是安静的。其余由 Peer 推进。/);
+  assert.doesNotMatch(source, /个任务由 Peer 推进中/);
+
+  assert.match(styles, /\.gwb-layout--empty\s*\{[\s\S]*items-stretch/);
+  assert.match(styles, /\.gwb-empty\s*\{[\s\S]*flex-1[\s\S]*min-height:\s*310px/);
+  assert.doesNotMatch(source, /gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
+});
+
+test('workspace pulse aggregates need and run only, not leftover acceptance', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(source, /new Map<string, \{ need: number; run: number \}>/);
+  assert.match(source, /total: counts\.need \+ counts\.run/);
+  assert.match(source, /\{row\.need\} 需你/);
+  assert.match(source, /\{row\.run\} 推进/);
+  assert.doesNotMatch(source, /row\.accept|\{row\.accept\} 验收/);
+  assert.doesNotMatch(source, /actionRight === 'result_ready'\) row\.accept/);
+  assert.doesNotMatch(styles, /\.gwb-num-ok/);
+  assert.match(styles, /grid-template-columns:\s*1\.4fr repeat\(2, 0\.8fr\)/);
+  assert.doesNotMatch(styles, /repeat\(3,/);
 });

@@ -46,5 +46,9 @@ test('draft submission receives the selected workspace path', async () => {
   assert.equal(draftWorkspaceBindings.length, 2);
   assert.match(app, /const \[draftWorkspacePath, setDraftWorkspacePath\] = useState/);
   assert.match(app, /setDraftWorkspacePath\(ws\);[\s\S]*?setActiveConversationId\(null\)/);
+  assert.match(
+    app,
+    /const handleNewChat = useCallback\(async \(workspacePath\?: string\) => \{[\s\S]*?const target = typeof workspacePath === 'string' \? workspacePath : activeWorkspace;[\s\S]*?registeredWorkspacePath\(target, workspaces\)/,
+  );
   assert.doesNotMatch(app, /workspacePreviewDefault/);
 });

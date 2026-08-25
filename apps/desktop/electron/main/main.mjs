@@ -453,15 +453,29 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
-    taskOverviewBroadcast.request({
-      reason: 'goalPlans:changed',
-      planId: payload?.planId ?? null,
-    });
+    // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
+    if (payload?.changeKind !== 'runner-progress') {
+      taskOverviewBroadcast.request({
+        reason: 'goalPlans:changed',
+        planId: payload?.planId ?? null,
+      });
+    }
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
       console.warn('[task-notification] handleGoalPlanChanged failed:', err);
     }
+    if (payload?.changeKind === 'runner-progress') {
+      return;
+    }
+    // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
+    queueMicrotask(() => {
+      try {
+        maybeSyncConversationTitleFromPlan(payload);
+      } catch (error) {
+        console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
+      }
+    });
     // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
     // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
     queueMicrotask(() => {
@@ -479,7 +493,8 @@ const goalPlanStore = createGoalPlanStore({
           const plan = goalPlanStore.getPlan(planId);
           if (!plan) return;
           if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
-          if (plan.resultAcceptance?.acceptedAt && plan.deliveryHandoff?.status !== 'delivered') return;
+          // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
+          if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
           void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
             console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
           });
@@ -1841,6 +1856,8 @@ const conversationApplicationService = createConversationApplicationService({
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
+  updatePreferredExecutionIsolation: (id, preferredExecutionIsolation) =>
+    conversationStore.updatePreferredExecutionIsolation(id, preferredExecutionIsolation),
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
@@ -2451,9 +2468,10 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
-          // 相对 hiddenInset 默认原点下移，使三点在约 40px 标题栏内垂直居中
-          //（对照 Codex 观感；仅 macOS 生效）。
-          trafficLightPosition: { x: 16, y: 18 },
+          // trafficLightPosition 是按钮簇左上角，不是圆心。
+          // 12pt 灯在 40px hiddenInset 标题栏内垂直居中：(40 - 12) / 2 = 14。
+          // y: 18 会把视觉中心压到 24px，三点会明显偏低。仅 macOS 生效。
+          trafficLightPosition: { x: 16, y: 14 },
         }
       : {}),
     titleBarStyle: 'hiddenInset',
@@ -2816,6 +2834,24 @@ function scheduleGoalDeliveryHandoff(planId, { retry = false } = {}) {
   });
 }
 
+function maybeSyncConversationTitleFromPlan(payload = {}) {
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  if (!planId || typeof goalPlanStore.getPlan !== 'function') return;
+  const plan = goalPlanStore.getPlan(planId);
+  if (!plan) return;
+  const conversationId = typeof plan.conversationId === 'string' ? plan.conversationId.trim() : '';
+  const title = typeof plan.title === 'string' ? plan.title.trim() : '';
+  if (!conversationId || !title || title === '未命名任务') return;
+  const conversation = conversationStore.getConversation?.(conversationId);
+  if (!conversation) return;
+  const titleSource = typeof conversation.titleSource === 'string' ? conversation.titleSource : '';
+  // 用户手改过的侧栏标题不覆盖；仅替换草稿/占位来源。
+  if (titleSource === 'manual') return;
+  if (titleSource && !['user_snippet', 'fallback', 'plan', ''].includes(titleSource)) return;
+  if (conversation.title === title && titleSource === 'plan') return;
+  conversationStore.updateTitle(conversationId, title, { source: 'plan' });
+}
+
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;
   if (!planId) return;
@@ -3059,7 +3095,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               createdBy: 'user',
             });
@@ -3074,7 +3111,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               status: 'accepted',
               workflowKind: 'goal_self_driven',

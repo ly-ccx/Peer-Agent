@@ -17,6 +17,7 @@ function createHarness(overrides = {}) {
     updateTitle: port('update-title'),
     updateMode: port('update-mode'),
     updateFastMode: port('update-fast-mode'),
+    updatePreferredExecutionIsolation: port('update-preferred-execution-isolation'),
     updateAutomationCreateContext: port('update-automation-create-context'),
     updateModelEffort: port('update-model-effort'),
     appendMessage: port('append-message'),
@@ -115,6 +116,10 @@ test('conversation commands preserve payload mapping and return values', () => {
   assert.equal(service.updateMode({ id: 'c', mode: 'goal' }), 'update-mode');
   assert.equal(service.updateFastMode({ id: 'c', fastMode: true }), 'update-fast-mode');
   assert.equal(
+    service.updatePreferredExecutionIsolation({ id: 'c', preferredExecutionIsolation: 'worktree' }),
+    'update-preferred-execution-isolation',
+  );
+  assert.equal(
     service.updateModelEffort({ id: 'c', effort: 'high', modelProviderId: 'provider' }),
     'update-model-effort',
   );
@@ -135,6 +140,7 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['update-title', 'c', 'New'],
     ['update-mode', 'c', 'goal'],
     ['update-fast-mode', 'c', true],
+    ['update-preferred-execution-isolation', 'c', 'worktree'],
     ['update-model-effort', 'c', { effort: 'high', modelProviderId: 'provider' }],
     ['append-message', 'c', { role: 'user' }],
     ['update-last-message', 'c', 'x'],

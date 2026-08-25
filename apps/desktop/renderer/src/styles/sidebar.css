@@ -315,8 +315,8 @@
 
 .sidebar-workspace-node.is-active > .sidebar-workspace-row,
 .sidebar-workspace-node.is-home > .sidebar-workspace-row {
-  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.04));
-  box-shadow: 0 0 0 1px var(--chrome-hairline);
+  background: transparent;
+  box-shadow: none;
 }
 
 .sidebar-workspace-meta {
@@ -353,6 +353,42 @@
 
 /* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
    柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
+.sidebar-workspace-new-task {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: none;
+  border: none;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-workspace-row:hover .sidebar-workspace-new-task {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-workspace-row:focus-within .sidebar-workspace-new-task {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-workspace-new-task:hover,
+.sidebar-workspace-new-task:focus-visible {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
 .ws-running-dot {
   position: relative;
   isolation: isolate;
@@ -384,6 +420,17 @@
   flex-direction: column;
   gap: 1px;
   padding: 2px 0 6px 6px;
+}
+
+/* Nested workspace sessions reuse channel-conversation-list, which otherwise
+   becomes a clip/scrollport with zero vertical padding. Let the workspace
+   tree scroll, and keep selected capsule shadows from being cropped when
+   this list shrinks to a single row. */
+.sidebar-workspace-tasks.channel-conversation-list {
+  flex: none;
+  overflow: visible;
+  padding: 6px 4px 6px 6px;
+  animation: none;
 }
 
 .sidebar-workspace-task-more {
@@ -515,7 +562,7 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 
-/* 工作台计数是导航项的尾随信息；运行点跟在计数后面。 */
+/* 工作台计数是导航项的尾随信息；有计数时把它推到标题右侧。 */
 .sidebar-top .sidebar-automation-nav > .sidebar-workbench-counts {
   margin-left: auto;
   font-size: 0.68rem;
@@ -524,7 +571,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* 运行点始终钉在导航行最右；没有计数时也不能贴着标题。 */
 .sidebar-top .sidebar-automation-nav > .ws-running-dot {
+  margin-left: auto;
+}
+.sidebar-top .sidebar-automation-nav > .sidebar-workbench-counts + .ws-running-dot {
   margin-left: 6px;
 }
 
@@ -590,9 +641,9 @@
   color: var(--graphite-base);
 }
 .channel-conversation-list .conversation-row.active {
-  background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
+  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
   border-color: transparent;
-  box-shadow: none;
+  box-shadow: var(--za-sidebar-active-shadow, none);
   color: var(--graphite-base);
   font-weight: 400;
 }

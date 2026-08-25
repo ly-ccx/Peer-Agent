@@ -35,7 +35,7 @@ import type {
  *
  * - needs_you：阻塞点在用户（待批准 / 待授权 / 待回答 / 待决策）。
  * - peer_advancing：Peer 正在推进，用户无需介入。
- * - result_ready：结果就绪待验收（依赖 Result Package，见 §11.5 过渡期）。
+ * - result_ready：遗留行动权（Goal 完成不再进入；交回中改挂 peer_advancing / needs_you）。
  * - paused：用户或系统主动暂停，等待恢复。
  * - terminal：终态，进历史页。
  */
@@ -77,7 +77,7 @@ export type TaskNextAction =
   | 'grant_permission' // 授权权限
   | 'answer_question' // 回答问题
   | 'decide_blocked' // 决策：调整范围或追加预算
-  | 'review_result' // 验收结果包
+  | 'review_result' // 遗留：查看结果（Goal 完成不再进入验收卡点）
   | 'resume' // 继续（paused → 恢复）
   | 'enable' // 启用（Automation definition paused/disabled）
   | 'inspect' // 查看（异常态诊断）
@@ -195,7 +195,7 @@ export interface TaskOverviewItem {
   /**
    * 任务完成时间（ISO 字符串）。
    * GoalPlan：优先 GoalTiming.completedAt；终态缺省时回落 updatedAt。
-   * 结果待验收卡片用它展示「何时完成」，与 lastActiveAt（最近活跃）语义分离。
+   * 历史完成卡片用它展示「何时完成」，与 lastActiveAt（最近活跃）语义分离。
    */
   readonly completedAt?: string;
   /**
@@ -228,8 +228,8 @@ export interface TaskOverviewItem {
   readonly actionLabel: string;
   /**
    * 目标线（Goal Thread）关系 —— 仅 source === 'goal_plan' 且计划携带
-   * 关系字段时出现。UI 依据 rootPlanId 把多条 result_ready 归组为一条
-   * 目标线；缺字段的历史计划无这些键，仍按单卡平铺（向后兼容）。
+   * 关系字段时出现。UI 依据 rootPlanId 把同线 Goal 归组；
+   * 缺字段的历史计划无这些键，仍按单卡平铺（向后兼容）。
    */
   readonly rootPlanId?: string;
   readonly parentPlanId?: string;
@@ -317,12 +317,11 @@ export interface GoalPlanProjectionSnapshot {
    */
   readonly providerLabel?: string;
   /**
-   * 是否已完成 USER ACCEPTANCE 验收（§11.3 rule 6/16 的分界）。
-   * Result Package 落地前可恒传 false（过渡期：completed 一律进
-   * result_ready，由用户在 Result Review 页手动归档）。
+   * 遗留字段：用户验收戳。Goal 完成不再据此进入 result_ready；
+   * 完成即终态，交回/自检未结束仍走 peer_advancing 或 needs_you。
    */
   readonly accepted?: boolean;
-  /** 有代码副作用时，完成门之后还要质量自检过线才能待验收。 */
+  /** 有代码副作用时，完成门之后还要质量自检过线才能进终态。 */
   readonly requiresQualityReview?: boolean;
   readonly qualityReviewStatus?: 'reviewing' | 'passed' | 'failed';
   /**
@@ -459,16 +458,16 @@ export function projectConversation(
  *  2. plan drafting → needs_you/plan_approval
  *  4. runner waiting_user → needs_you/user_input
  *  5. runner blocked | budget_exhausted → needs_you/decision
- *  6. plan completed 且未验收 → result_ready
+ *  6. plan completed：
+ *       - 交回进行中 → peer_advancing；交回失败 → needs_you/decision
+ *       - 否则直接 terminal（不再因未验收 / 自检缺口进入 result_ready）
  *  8. plan executing → peer_advancing
  *  9. runner running/compacting/resuming/exploring → peer_advancing
  * 11. plan approved/accepted（Runner 未启动）→ peer_advancing
  * 12. plan paused → paused
  * 13. runner paused → paused
  * 14. runner idle 且 plan executing → paused（异常态，提示诊断）
- * 16. plan completed（已验收）/cancelled/failed → terminal
- *      已验收但交回仍在进行（delivering / idle）或失败（stopped）时
- *      暂不进终态；仅有 deliveryRoute 不算正在交回。
+ * 16. plan cancelled/failed → terminal
  *
  * 注意 rule 14 在 rule 8 之前不会命中（executing 已被 rule 8 拦截），
  * 因此实现时将 rule 14 放在 rule 8 之后、仅当 runner 显式 idle 时生效。
@@ -555,7 +554,7 @@ export function projectGoalPlan(
 }
 
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, interrupted, accepted, deliveryHandoffStatus } = snapshot;
+  const { status, runnerStatus, interrupted, deliveryHandoffStatus } = snapshot;
 
   // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
   // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
@@ -583,51 +582,40 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
 
   // rule 16 first: 其他终态计划优先于 runner 残留态
   // （历史 failed/cancelled/completed 上的 runner.blocked 不得再进 needs_you）
-  if (status === 'completed' && accepted !== true) {
-    if (
-      snapshot.requiresQualityReview === true
-      && snapshot.qualityReviewStatus !== 'passed'
-    ) {
-      return {
-        actionRight: 'peer_advancing',
-        nextAction: 'none',
-        statusLabel: 'Peer 正在自检',
-        actionLabel: '查看 →',
-      };
+  // Goal 完成不再卡「待用户验收」；Evidence / criteria 仍在完成闸门约束。
+  if (status === 'completed') {
+    if (deliveryHandoffStatus && deliveryHandoffStatus !== 'delivered') {
+      if (deliveryHandoffStatus === 'stopped') {
+        return {
+          actionRight: 'needs_you',
+          needsYouReason: 'decision',
+          nextAction: 'decide_blocked',
+          statusLabel: '交回未完成',
+          actionLabel: '查看进度',
+        };
+      }
+      // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
+      if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
+        return {
+          actionRight: 'peer_advancing',
+          nextAction: 'none',
+          statusLabel: '正在交回目标分支',
+          actionLabel: '查看 →',
+        };
+      }
     }
-    // rule 6: 完成且未验收 → 结果就绪
-    return {
-      actionRight: 'result_ready',
-      nextAction: 'review_result',
-      statusLabel: '待用户验收',
-      actionLabel: '查看进度',
-    };
-  }
-  if (status === 'completed' && accepted === true && deliveryHandoffStatus !== 'delivered') {
-    if (deliveryHandoffStatus === 'stopped') {
-      return {
-        actionRight: 'result_ready',
-        nextAction: 'review_result',
-        statusLabel: '交回未完成',
-        actionLabel: '查看进度',
-      };
-    }
-    // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
-    if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
-      return {
-        actionRight: 'result_ready',
-        nextAction: 'none',
-        statusLabel: '正在交回目标分支',
-        actionLabel: '查看 →',
-      };
-    }
-  }
-  if (status === 'completed' || status === 'cancelled' || status === 'failed') {
     return {
       actionRight: 'terminal',
       nextAction: 'none',
-      statusLabel:
-        status === 'completed' ? '已验收' : status === 'cancelled' ? '已取消' : '已失败',
+      statusLabel: '已完成',
+      actionLabel: '查看 →',
+    };
+  }
+  if (status === 'cancelled' || status === 'failed') {
+    return {
+      actionRight: 'terminal',
+      nextAction: 'none',
+      statusLabel: status === 'cancelled' ? '已取消' : '已失败',
       actionLabel: '查看 →',
     };
   }
@@ -763,14 +751,14 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
  * 判定顺序（首个命中生效）：
  *  3. run waiting_permission → needs_you/user_input（授权权限）
  *  4. run waiting_user → needs_you/user_input（回答问题）
- *  7. 产品方案 A：run succeeded → terminal（定时/触发成功默认归档，不进工作台待验收）
+ *  7. 产品方案 A：run succeeded → terminal（定时/触发成功默认归档，不进工作台）
  * 15. definition paused/disabled → paused
  * 10. run scheduled/queued/preparing/running → peer_advancing
  * 17. run 终态（succeeded/failed/cancelled/skipped/timed_out/blocked）→ terminal
  * 18. definition completed/archived → terminal
  *
- * 说明：GoalPlan 的 result_ready + 一键验收不套用到 Automation。
- * Automation 仅在 needs_you（权限/提问）时必须进工作台；成功 Run 不进「结果待验收」。
+ * 说明：Goal 完成即终态，Automation 成功也直接终态。
+ * Automation 仅在 needs_you（权限/提问）时必须进工作台。
  */
 export function projectAutomationRun(
   snapshot: AutomationProjectionSnapshot,

@@ -122,3 +122,35 @@ test('emits structured change events without exposing mutable store state', () =
   store.updateRun(run.runId, { status: 'running', startedAt: '2026-08-05T01:00:02.000Z' });
   assert.deepEqual(events.map((event) => event.type), ['definition_changed', 'run_changed', 'run_changed']);
 });
+
+test('listRuns reuses in-memory cache until a run mutation invalidates it', () => {
+  const alpha = store.createDefinition(definitionInput({ name: 'Alpha' }), { automationId: 'automation-a' });
+  const beta = store.createDefinition(definitionInput({ name: 'Beta' }), { automationId: 'automation-b' });
+  store.createRun(runInput(alpha, { idempotencyKey: 'a-1' }), {
+    runId: 'run-a1',
+    now: '2026-08-05T01:00:00.000Z',
+  });
+  store.createRun(runInput(beta, { idempotencyKey: 'b-1' }), {
+    runId: 'run-b1',
+    now: '2026-08-05T02:00:00.000Z',
+  });
+
+  const firstAll = store.listRuns();
+  const secondAll = store.listRuns();
+  assert.deepEqual(firstAll.map((run) => run.runId), ['run-b1', 'run-a1']);
+  assert.deepEqual(secondAll.map((run) => run.runId), ['run-b1', 'run-a1']);
+  assert.notEqual(firstAll[0], secondAll[0]);
+
+  const beforeMutation = store.listRuns({ automationId: 'automation-a', limit: 1 });
+  assert.deepEqual(beforeMutation.map((run) => run.runId), ['run-a1']);
+
+  store.createRun(runInput(alpha, { idempotencyKey: 'a-2' }), {
+    runId: 'run-a2',
+    now: '2026-08-05T03:00:00.000Z',
+  });
+  assert.deepEqual(
+    store.listRuns({ automationId: 'automation-a', limit: 1 }).map((run) => run.runId),
+    ['run-a2'],
+  );
+  assert.deepEqual(store.listRuns().map((run) => run.runId), ['run-a2', 'run-b1', 'run-a1']);
+});

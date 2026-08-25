@@ -797,6 +797,16 @@ export function createConversationStore(options = {}) {
     return withMessageCount(meta);
   }
 
+  function updatePreferredExecutionIsolation(id, preferredExecutionIsolation) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    meta.preferredExecutionIsolation = normalizePreferredExecutionIsolation(preferredExecutionIsolation);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
   function updateAutomationCreateContext(id, context) {
     const index = readIndex();
     const meta = index.find((conversation) => conversation.id === id);
@@ -1521,6 +1531,7 @@ export function createConversationStore(options = {}) {
     markRead: changed(markRead, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateFastMode: changed(updateFastMode, 'metadata-updated'),
+    updatePreferredExecutionIsolation: changed(updatePreferredExecutionIsolation, 'metadata-updated'),
     updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
     updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),

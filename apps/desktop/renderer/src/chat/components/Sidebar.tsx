@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
@@ -9,27 +9,25 @@ import { abbreviateWorkspacePath } from './workspacePathDisplay';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
-import {
-  compactionProgressPercent,
-  sidebarCompactionStateLabel,
-  sidebarConversationActivity,
-} from '../state/compactionStateView';
-import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
 import { hasRunningWorkspaces, isWorkspaceRunning } from '../state/runningWorkspaceState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
-import { useTaskOverview } from '../../app/hooks/useTaskOverview';
-import { countWorkbenchInbox } from '../state/workbenchInboxCounts';
 import { groupTasksByWorkspace } from '../state/groupTasksByWorkspace';
 import { previewWorkspaceTasks } from '../state/workspaceTaskPreview';
 import {
+  emptyWorkspaceTreeToggles,
   isWorkspaceTaskTreeOpen,
+  nextWorkspaceRowClickToggles,
   nextWorkspaceTreeToggles,
   openWorkspaceTreeToggles,
+  rememberOpenWorkspaceTrees,
   UNASSIGNED_WORKSPACE_KEY,
+  type WorkspaceTreeToggles,
 } from '../state/workspaceTaskTree';
 import { useWorkspaceTaskPages } from '../hooks/useWorkspaceTaskPages';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
+import { SidebarConversationRow } from './SidebarConversationRow';
+import { SidebarWorkbenchCounts } from './SidebarWorkbenchCounts';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 
 type ConversationView = 'active' | 'archived';
@@ -96,30 +94,6 @@ function clampContextMenuPosition(
   };
 }
 
-// 将 ISO 时间戳格式化为简洁的相对时间（跟随设计稿风格：纯「X 单位」，不带「前」字）。
-// 粒度：刚刚 / X 分钟 / X 小时 / X 天 / X 周 / X 个月 / X 年。
-// 兜底：空值 / 非法日期 / 未来时间均返回「刚刚」(Now)，避免出现负数或 NaN。
-function formatRelativeTime(iso: string | null | undefined, isZh: boolean): string {
-  if (!iso) return isZh ? '刚刚' : 'Now';
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return isZh ? '刚刚' : 'Now';
-  const diffMs = Date.now() - then;
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return isZh ? '刚刚' : 'Now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return isZh ? `${min} 分钟` : `${min}m`;
-  const hour = Math.floor(min / 60);
-  if (hour < 24) return isZh ? `${hour} 小时` : `${hour}h`;
-  const day = Math.floor(hour / 24);
-  if (day < 7) return isZh ? `${day} 天` : `${day}d`;
-  const week = Math.floor(day / 7);
-  if (week < 5) return isZh ? `${week} 周` : `${week}w`;
-  const month = Math.floor(day / 30);
-  if (month < 12) return isZh ? `${month} 个月` : `${month}mo`;
-  const year = Math.floor(day / 365);
-  return isZh ? `${year} 年` : `${year}y`;
-}
-
 function PinIcon({ size = 13, filled = false }: { readonly size?: number; readonly filled?: boolean }) {
   if (filled) {
     return (
@@ -153,6 +127,8 @@ function PinIcon({ size = 13, filled = false }: { readonly size?: number; readon
     </svg>
   );
 }
+
+const emptyCompletedUnreadIds: ReadonlySet<string> = new Set();
 
 export function Sidebar({
   conversations,
@@ -201,7 +177,7 @@ export function Sidebar({
   readonly runningWorkspacePaths?: ReadonlySet<string>;
   readonly activePage: SidebarPage;
   readonly i18n: I18nRuntime;
-  readonly onNewChat: () => void;
+  readonly onNewChat: (workspacePath?: string) => void;
   readonly newTaskShortcutLabel?: string;
   readonly onOpenSearch?: () => void;
   readonly onSelectConversation: (id: string) => void;
@@ -230,8 +206,6 @@ export function Sidebar({
   const isAnyWorkspaceRunning = hasRunningWorkspaces(runningWorkspacePaths);
   const confirm = useConfirm();
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
-  const overviewItems = useTaskOverview({ workspacePath: null, includeTerminal: false });
-  const inboxCounts = useMemo(() => countWorkbenchInbox(overviewItems), [overviewItems]);
   
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'conversation'; x: number; y: number; conversation: ConversationMeta }
@@ -273,7 +247,12 @@ export function Sidebar({
   }, [deleteConversation, forgetConversation]);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
-  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<ReadonlySet<string>>(() => new Set());
+  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<WorkspaceTreeToggles>(emptyWorkspaceTreeToggles);
+  const focusedWorkspace = useMemo(() => {
+    const current = mergedConversations.find((conversation) => conversation.id === activeConversationId);
+    if (!current) return null;
+    return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
+  }, [activeConversationId, mergedConversations]);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
@@ -326,8 +305,39 @@ export function Sidebar({
     await ensureWorkspaceActive(wsPath);
   }, [ensureWorkspaceActive, onOpenWorkspaceHome]);
 
-  const toggleWorkspaceTree = useCallback((wsPath: string) => {
-    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath));
+  const handleWorkspaceRowClick = useCallback(async (wsPath: string) => {
+    const currentlyOpen = isWorkspaceTaskTreeOpen({
+      path: wsPath,
+      toggles: workspaceTreeToggles,
+      activeWorkspace,
+      focusedWorkspace,
+    });
+    const isCurrent = wsPath === activeWorkspace || wsPath === UNASSIGNED_WORKSPACE_KEY;
+    setWorkspaceTreeToggles((current) => nextWorkspaceRowClickToggles({
+      current,
+      path: wsPath,
+      activeWorkspace,
+      focusedWorkspace,
+    }));
+    if (wsPath === UNASSIGNED_WORKSPACE_KEY) return;
+    if (currentlyOpen && isCurrent) return;
+    onOpenWorkspaceHome?.(wsPath);
+    await ensureWorkspaceActive(wsPath);
+  }, [
+    activeWorkspace,
+    ensureWorkspaceActive,
+    focusedWorkspace,
+    onOpenWorkspaceHome,
+    workspaceTreeToggles,
+  ]);
+
+  const handleNewWorkspaceTask = useCallback((wsPath: string) => {
+    void handleActivateWorkspace(wsPath);
+    onNewChat(wsPath);
+  }, [handleActivateWorkspace, onNewChat]);
+
+  const toggleWorkspaceTree = useCallback((wsPath: string, currentlyOpen: boolean) => {
+    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath, currentlyOpen));
   }, []);
 
   const handleAddWorkspace = useCallback(async () => {
@@ -478,234 +488,54 @@ export function Sidebar({
     };
   }, [closeContextMenu, contextMenu]);
 
-  const renderConversationRow = (conv: ConversationMeta, options: { pinnedGroup?: boolean } = {}) => {
-    const isRunning = Boolean(runningConversationIds?.has(conv.id));
-    // 上下文压缩状态(含进度百分比)：压缩优先级高于运行点，避免运行中自动压缩时左侧列表不显示。
-    const compactionState = compactionStates?.get(conv.id);
-    const activity = sidebarConversationActivity({ isRunning, compactionState });
-    const isCompactionVisible = activity.kind === 'compaction';
-    const showCompletedUnread = shouldShowCompletedUnreadDot({
-      conversationId: conv.id,
-      isRunning,
-      isCompactionVisible,
-      completedUnreadIds: completedUnreadConversationIds,
-    });
-    const compactPercent = compactionProgressPercent(compactionState);
-    const compactLabel = sidebarCompactionStateLabel(compactionState, isZh);
-    const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
-    const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
-    const awaitingGoalPlanCount = awaitingGoalPlanCounts.get(conv.id) ?? 0;
-    const pendingSensitiveCount = pendingConfirmationCounts?.get(conv.id) ?? 0;
-    const pendingApprovalCount = awaitingGoalPlanCount + pendingSensitiveCount;
-    const pendingApprovalLabel = isZh ? '待审批' : 'Pending approval';
-    const pendingApprovalText = pendingApprovalCount > 1
-      ? `${pendingApprovalLabel} · ${pendingApprovalCount}`
-      : pendingApprovalLabel;
-    const isPinned = Boolean(conv.pinnedAt);
-    const canTogglePin = !isArchivedView;
-    const isEditing = editingConversationId === conv.id;
-    const activeState = sidebarActiveState(activePage, activeConversationId, conv.id);
-    const rowClasses = [
-      'conversation-row',
-      activeState.conversation ? 'active' : '',
-      isRunning ? 'is-running' : '',
-      isCompactionVisible ? 'is-compacting' : '',
-      showCompletedUnread ? 'has-completed-unread' : '',
-      isPinned ? 'is-pinned' : '',
-      isEditing ? 'is-editing' : '',
-      isArchivedView ? 'is-archived' : '',
-      options.pinnedGroup ? 'is-in-pinned-group' : '',
-      draggingPinnedId === conv.id ? 'is-dragging' : '',
-    ].filter(Boolean).join(' ');
+  const handleConversationContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>, conv: ConversationMeta) => {
+    setContextMenu({ kind: 'conversation', x: e.clientX, y: e.clientY, conversation: conv });
+  }, []);
 
-    return (
-      <div
-        key={conv.id}
-        data-conversation-id={conv.id}
-        className={rowClasses}
-        draggable={Boolean(options.pinnedGroup && canTogglePin)}
-        onDragStart={(e) => {
-          if (!options.pinnedGroup || !canTogglePin) return;
-          setDraggingPinnedId(conv.id);
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', conv.id);
-        }}
-        onDragOver={(e) => {
-          if (!options.pinnedGroup || !draggingPinnedId || draggingPinnedId === conv.id) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-        }}
-        onDrop={(e) => {
-          if (!options.pinnedGroup) return;
-          e.preventDefault();
-          const dragId = e.dataTransfer.getData('text/plain') || draggingPinnedId;
-          if (dragId) movePinnedConversation(dragId, conv.id);
-          setDraggingPinnedId(null);
-        }}
-        onDragEnd={() => setDraggingPinnedId(null)}
-        onClick={() => onSelectConversation(conv.id)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setContextMenu({ kind: 'conversation', x: e.clientX, y: e.clientY, conversation: conv });
-        }}
-      >
-        {activity.kind === 'running' ? (
-          <span
-            className="sidebar-conv-spinner"
-            role="img"
-            aria-label={isZh ? '运行中' : 'Running'}
-            title={isZh ? '运行中' : 'Running'}
-          />
-        ) : null}
-        {showCompletedUnread ? (
-          <span
-            className="sidebar-conv-completed-unread"
-            role="img"
-            aria-label={isZh ? '任务已完成，未读' : 'Completed, unread'}
-            title={isZh ? '任务已完成，未读' : 'Completed, unread'}
-          />
-        ) : null}
-        {isCompactionVisible ? (
-          <span className="sidebar-conv-compacting" title={compactTitle}>
-            <span
-              className="sidebar-conv-compacting-dot"
-              role="img"
-              aria-label={compactTitle}
-            />
-            {compactPercentText ? (
-              <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
-            ) : null}
-          </span>
-        ) : null}
-        {pendingApprovalCount > 0 ? (
-          <span className="sidebar-conv-awaiting" title={pendingApprovalText}>
-            {pendingApprovalText}
-          </span>
-        ) : null}
-        {editingConversationId === conv.id ? (
-          <input
-            ref={editingInputRef}
-            className="sidebar-conv-title-input"
-            value={editingTitle}
-            maxLength={80}
-            aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setEditingTitle(e.target.value)}
-            onBlur={() => { void submitRenameConversation(conv); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void submitRenameConversation(conv);
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                cancelRenameConversation();
-              }
-            }}
-          />
-        ) : (
-          <>
-            {conv.automationOrigin?.kind === 'automation_run' ? (
-              <span
-                className="sidebar-conv-automation-badge"
-                title={
-                  conv.automationOrigin.automationName
-                    ? (isZh
-                      ? `自动化：${conv.automationOrigin.automationName}`
-                      : `Automation: ${conv.automationOrigin.automationName}`)
-                    : (isZh ? '自动化会话' : 'Automation conversation')
-                }
-              >
-                {isZh ? '自动化' : 'Auto'}
-              </span>
-            ) : null}
-            <span
-              className="sidebar-conv-title"
-              title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
-              onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
-            >
-              {conv.title || (isZh ? '新对话' : 'New Chat')}
-            </span>
-          </>
-        )}
-        <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
-          {isArchivedView ? (
-            <>
-              <button
-                type="button"
-                className="sidebar-conv-delete"
-                title={isZh ? '永久删除' : 'Delete permanently'}
-                aria-label={isZh ? '永久删除' : 'Delete permanently'}
-                onClick={() => { void onDeleteConversation(conv.id); }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="M19 6l-1 14H6L5 6" />
-                  <path d="M10 11v6" />
-                  <path d="M14 11v6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="sidebar-conv-restore"
-                title={isZh ? '恢复会话' : 'Restore chat'}
-                aria-label={isZh ? '恢复会话' : 'Restore chat'}
-                onClick={() => { void onRestoreConversation(conv.id); }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 12a9 9 0 1 0 3-6.7" />
-                  <path d="M3 4v6h6" />
-                </svg>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={`sidebar-conv-pin ${isPinned ? 'active' : ''}`}
-                title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-                aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-                onClick={() => { void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id)); }}
-              >
-                <PinIcon filled={isPinned} />
-              </button>
-              <button
-                type="button"
-                className="sidebar-conv-archive"
-                title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompactionVisible ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
-                aria-label={isZh ? '归档会话' : 'Archive chat'}
-                disabled={isRunning || isCompactionVisible}
-                onClick={() => { if (!isRunning && !isCompactionVisible) void onArchiveConversation(conv.id); }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <rect x="3" y="4" width="18" height="4" rx="1" />
-                  <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
-                  <path d="M10 12h4" />
-                </svg>
-              </button>
-            </>
-          )}
-        </span>
-        <time
-          className="sidebar-conv-time"
-          dateTime={conv.updatedAt}
-          title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
-        >
-          {formatRelativeTime(conv.updatedAt, isZh)}
-        </time>
-      </div>
+  const renderConversationRow = (conv: ConversationMeta, options: { pinnedGroup?: boolean } = {}) => (
+    <SidebarConversationRow
+      key={conv.id}
+      conv={conv}
+      pinnedGroup={options.pinnedGroup}
+      isZh={isZh}
+      isArchivedView={isArchivedView}
+      activePage={activePage}
+      activeConversationId={activeConversationId}
+      isRunning={Boolean(runningConversationIds?.has(conv.id))}
+      compactionState={compactionStates?.get(conv.id)}
+      completedUnreadIds={completedUnreadConversationIds ?? emptyCompletedUnreadIds}
+      awaitingGoalPlanCount={awaitingGoalPlanCounts.get(conv.id) ?? 0}
+      pendingSensitiveCount={pendingConfirmationCounts?.get(conv.id) ?? 0}
+      editingConversationId={editingConversationId}
+      editingTitle={editingTitle}
+      editingInputRef={editingInputRef}
+      draggingPinnedId={draggingPinnedId}
+      onSelectConversation={onSelectConversation}
+      onContextMenu={handleConversationContextMenu}
+      beginRenameConversation={beginRenameConversation}
+      submitRenameConversation={submitRenameConversation}
+      cancelRenameConversation={cancelRenameConversation}
+      setEditingTitle={setEditingTitle}
+      onArchiveConversation={archiveConversation}
+      onRestoreConversation={restoreConversation}
+      onDeleteConversation={deleteConversation}
+      onPinConversation={onPinConversation}
+      onUnpinConversation={onUnpinConversation}
+      movePinnedConversation={movePinnedConversation}
+      setDraggingPinnedId={setDraggingPinnedId}
+    />
+  );
+
+
+  useEffect(() => {
+    setWorkspaceTreeToggles((current) =>
+      rememberOpenWorkspaceTrees(current, [activeWorkspace, focusedWorkspace]),
     );
-  };
-
-  const focusedWorkspace = useMemo(() => {
-    const current = mergedConversations.find((conversation) => conversation.id === activeConversationId);
-    if (!current) return null;
-    return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
-  }, [activeConversationId, mergedConversations]);
+  }, [activeWorkspace, focusedWorkspace]);
 
   const isUnassignedOpen = isWorkspaceTaskTreeOpen({
     path: UNASSIGNED_WORKSPACE_KEY,
-    toggled: workspaceTreeToggles,
+    toggles: workspaceTreeToggles,
     activeWorkspace,
     focusedWorkspace,
   });
@@ -714,7 +544,7 @@ export function Sidebar({
     for (const workspace of workspaces) {
       if (isWorkspaceTaskTreeOpen({
         path: workspace.path,
-        toggled: workspaceTreeToggles,
+        toggles: workspaceTreeToggles,
         activeWorkspace,
         focusedWorkspace,
       })) {
@@ -794,7 +624,7 @@ export function Sidebar({
           <button
             type="button"
             className="sidebar-new-chat"
-            onClick={onNewChat}
+            onClick={() => { onNewChat(); }}
             title={newTaskShortcutLabel ? `${isZh ? '新建任务' : 'New Task'} (${newTaskShortcutLabel})` : (isZh ? '新建任务' : 'New Task')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -813,14 +643,7 @@ export function Sidebar({
             <path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z" />
           </svg>
           <span>{isZh ? '工作台' : 'Workbench'}</span>
-          <span
-            className="sidebar-workbench-counts"
-            title={isZh ? '需要你处理 · 待验收' : 'Needs you · Ready to accept'}
-          >
-            {isZh
-              ? `需要你 ${inboxCounts.needsYou} · 待验收 ${inboxCounts.resultReady}`
-              : `Needs you ${inboxCounts.needsYou} · Ready ${inboxCounts.resultReady}`}
-          </span>
+          <SidebarWorkbenchCounts isZh={isZh} />
           {isAnyWorkspaceRunning ? (
             <span
               className="ws-running-dot"
@@ -864,7 +687,7 @@ export function Sidebar({
             const canShowMore = taskPreview.canShowMore || pageHasMore(ws.path);
             const isTreeOpen = isWorkspaceTaskTreeOpen({
               path: ws.path,
-              toggled: workspaceTreeToggles,
+              toggles: workspaceTreeToggles,
               activeWorkspace,
               focusedWorkspace,
             });
@@ -882,7 +705,7 @@ export function Sidebar({
                   className="sidebar-workspace-row"
                   data-project-path={ws.path}
                   aria-expanded={isTreeOpen}
-                  onClick={() => { void handleActivateWorkspace(ws.path); }}
+                  onClick={() => { void handleWorkspaceRowClick(ws.path); }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setContextMenu({ kind: 'workspace', x: e.clientX, y: e.clientY, workspace: ws });
@@ -893,7 +716,7 @@ export function Sidebar({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      void handleActivateWorkspace(ws.path);
+                      void handleWorkspaceRowClick(ws.path);
                     }
                   }}
                 >
@@ -906,7 +729,7 @@ export function Sidebar({
                       : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
                     onClick={(event) => {
                       event.stopPropagation();
-                      toggleWorkspaceTree(ws.path);
+                      toggleWorkspaceTree(ws.path, isTreeOpen);
                     }}
                   >
                     <svg
@@ -931,6 +754,20 @@ export function Sidebar({
                     </span>
                   </span>
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
+                  <button
+                    type="button"
+                    className="sidebar-workspace-new-task"
+                    title={isZh ? '新建任务' : 'New Task'}
+                    aria-label={isZh ? `在 ${ws.name} 新建任务` : `New task in ${ws.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleNewWorkspaceTask(ws.path);
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 5v14" /><path d="M5 12h14" />
+                    </svg>
+                  </button>
                 </div>
                 {isTreeOpen ? (
                   <div className="channel-conversation-list sidebar-workspace-tasks">
@@ -978,12 +815,12 @@ export function Sidebar({
                 aria-expanded={isUnassignedOpen}
                 title={isZh ? '未归属任务' : 'Unassigned tasks'}
                 onClick={() => {
-                  setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                  void handleWorkspaceRowClick(UNASSIGNED_WORKSPACE_KEY);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                    void handleWorkspaceRowClick(UNASSIGNED_WORKSPACE_KEY);
                   }
                 }}
               >
@@ -996,7 +833,7 @@ export function Sidebar({
                     : (isZh ? '展开未归属' : 'Expand unassigned')}
                   onClick={(event) => {
                     event.stopPropagation();
-                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY);
+                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY, isUnassignedOpen);
                   }}
                 >
                   <svg
@@ -1054,6 +891,16 @@ export function Sidebar({
               role="menu"
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  handleNewWorkspaceTask(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '新建任务' : 'New Task'}</span>
+              </button>
               <button
                 type="button"
                 role="menuitem"
