@@ -2466,14 +2466,36 @@ export function createGoalPlanStore({
     const goal = typeof goalText === 'string' ? goalText.replace(/\s+/g, ' ').trim() : '';
     const isAck = (value) => /^(好|好的|行|可以|认可|ok|okay|yes|yep|lgtm)([,，、\s].*)?$|^(好|好的)?[,，、\s]*就这么做[.!！。…]*$|^(就这么做)[.!！。…]*$/i.test(value || '');
     const isCmd = (value) => /^[>$]\s/.test(value || '') || (/\b(tsc|npm|pnpm|yarn|node)\b/i.test(value || '') && (value || '').includes('/'));
-    let title = raw;
-    if (!title || isAck(title) || isCmd(title) || title.length > 40) {
-      // Prefer a short slice of goal when title is bad; never keep pure ack/cmd.
-      if (goal && !isAck(goal) && !isCmd(goal)) {
-        title = goal.length <= 24 ? goal : `${goal.slice(0, 24)}…`;
-      } else {
-        title = '未命名任务';
+    // 用户首句/长 goal 常被误塞进 title。标题应是短意图名，不能回退成 goal 截断。
+    const looksLikeRawUtterance = (value) => {
+      if (!value) return false;
+      if (value.length > 40) return true;
+      if (/[?？]$/.test(value) || /(?:吧|吗|呢)$/.test(value)) return true;
+      // 多子句口语长句（逗号/顿号较多）不像「动词+对象」短标题。
+      if (value.length > 18 && (value.match(/[，,、；;]/g) || []).length >= 1 && /[。.!！]/.test(value) === false) {
+        return /(?:不应该|能不能|可不可以|怎么|如何|一下|这个|那种)/.test(value);
       }
+      return false;
+    };
+    const isGoalEcho = (value) => {
+      if (!value || !goal) return false;
+      if (value === goal) return true;
+      // 旧逻辑会把 goal 截成 `${goal.slice(0, 24)}…`；只把这类截断回声当坏标题，
+      // 不要把「恰好是 goal 前缀」的合法短意图名误杀。
+      if (!(value.endsWith('…') || value.endsWith('...'))) return false;
+      const stripped = value.replace(/[.…]+$/g, '').trim();
+      return Boolean(stripped) && goal.startsWith(stripped);
+    };
+    let title = raw;
+    if (
+      !title
+      || isAck(title)
+      || isCmd(title)
+      || looksLikeRawUtterance(title)
+      || isGoalEcho(title)
+    ) {
+      // 故意不用 goal 截断兜底：否则浮动条/任务卡会继续显示用户原话。
+      title = '未命名任务';
     }
     return title;
   }
@@ -2782,6 +2804,20 @@ export function createGoalPlanStore({
     }
     if ('manualConfirmations' in safePatch) {
       safePatch.manualConfirmations = normalizeManualConfirmations(safePatch.manualConfirmations);
+    }
+    if ('title' in safePatch) {
+      const nextTitle = sanitizePlanTitle(safePatch.title, safePatch.goal ?? plan.goal);
+      const previousTitle = typeof plan.title === 'string' ? plan.title.trim() : '';
+      // 分析意图后允许刷新为更好的短标题；但空/占位/坏标题不要把已有好标题冲掉。
+      if (
+        nextTitle === '未命名任务'
+        && previousTitle
+        && previousTitle !== '未命名任务'
+      ) {
+        delete safePatch.title;
+      } else {
+        safePatch.title = nextTitle;
+      }
     }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
