@@ -8,8 +8,44 @@ All notable changes to Peer Agent are tracked here.
 
 ### Notes
 
-- Open the `0.0.8` development line from the published `0.0.7` / `origin/main`.
-- Stamp the in-repo development version to `0.0.8`. This commit is not a published GitHub Release.
+- Stable release that turns the workbench into a cross-task radar: home shows Needs you / Peer advancing / Unread. A finished Goal is terminal — no extra result-ready acceptance bucket.
+- Empty inbox fills the main column. Isolated tasks merge the worktree back on completion; unisolated work skips the handoff gate.
+- Start a new task from a workspace row. The source-branch picker can search, group, and create branches.
+- CLI agent loops are unbounded like Desktop. Docs changelog is generated from `release-notes/v0.0.8.md`.
+
+### Added
+
+- Empty workbench radar surface that stretches the main column when nothing needs you.
+- Isolated complete-and-merge: isolated worktrees merge to the target branch on Goal completion.
+- New-task action on a workspace row (context menu / hover plus).
+- Source-branch search, grouping, and local-branch create in the composer picker.
+- Isolation glyph on isolated task lines.
+
+### Changed
+
+- Home workbench drops leftover result-ready / acceptance buckets; pulse keeps need/run only.
+- Plan titles follow intent, not the first utterance.
+- Sidebar Workbench badge shows the needs-you count only.
+- Mode and access sit before branch chrome.
+- Composer returns to the source capsule after handoff; Worktree toggle is the next-run preference.
+- Isolation cannot be toggled while a task is running.
+- Attachments render as media tiles and document cards.
+
+### Fixed
+
+- Resume the current turn after a stream or network failure.
+- Interactive CLI and Goal workers no longer inherit a 64-turn cap.
+- Other workspace groups stay open when switching sessions.
+- macOS traffic lights are centered in the 40px titlebar; the app icon fills the squircle.
+- Sidebar selection fill follows the conversation, not the whole workspace group.
+- Nested workspace shadows no longer clip; context-usage popover shadow restored.
+- Overview-list jank and tray/CLI main-thread stalls.
+- Shared new-task drafts clear after send; incomplete evidence can be force-archived.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
 
 ## 0.0.7 - 2026-08-25
 
