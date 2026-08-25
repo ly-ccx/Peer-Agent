@@ -2927,15 +2927,17 @@ export function ChatSurface({
                 title={
                   workspaceIsGit === false
                     ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
-                    : (isZh
-                      ? '下次任务是否在独立 Worktree 里执行。验收合并后这次隔离会结束，这个开关只表示下一次。'
-                      : 'Whether the next task runs in a Worktree. After acceptance, this isolation ends; the toggle only means the next run.')
+                    : isStreaming
+                      ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
+                      : (isZh
+                        ? '下次任务是否在独立 Worktree 里执行。验收合并后这次隔离会结束，这个开关只表示下一次。'
+                        : 'Whether the next task runs in a Worktree. After acceptance, this isolation ends; the toggle only means the next run.')
                 }
               >
                 <input
                   type="checkbox"
                   checked={preferredWorktree}
-                  disabled={workspaceIsGit === false}
+                  disabled={workspaceIsGit === false || isStreaming}
                   onChange={(event) => changePreferredWorktree(event.target.checked)}
                   aria-label={isZh ? '隔离执行' : 'Worktree'}
                 />
