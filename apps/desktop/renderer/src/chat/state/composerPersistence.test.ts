@@ -99,6 +99,29 @@ describe('composerPersistence', () => {
     assert.deepEqual(reopened.queue, []);
   });
 
+  it('clears shared draft text when sending while keeping worktree opt-in', () => {
+    const port = makePort({
+      composerDrafts: {
+        __draft__: { draft: '这个分支我不能选吗？', queue: [], preferredWorktree: true },
+      },
+    });
+    __setComposerSettingsPort(port);
+
+    saveComposerEntry('__draft__', { draft: '', queue: [], preferredWorktree: true });
+    flushComposerPersistence();
+
+    const written = port.writes[0].composerDrafts as Record<string, unknown>;
+    const saved = written.__draft__ as { draft: string; preferredWorktree: boolean };
+    assert.equal(saved.draft, '');
+    assert.equal(saved.preferredWorktree, true);
+
+    __setComposerSettingsPort(makePort({ composerDrafts: written }));
+    const reopened = loadComposerEntry('__draft__');
+    assert.ok(reopened);
+    assert.equal(reopened.draft, '');
+    assert.equal(reopened.preferredWorktree, true);
+  });
+
   it('persists draft + queue under the conversation id', () => {
     const port = makePort({});
     __setComposerSettingsPort(port);

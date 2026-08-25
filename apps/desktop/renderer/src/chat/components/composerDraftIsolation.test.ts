@@ -125,6 +125,14 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
 });
 
+test('sending a new task clears shared draft text while keeping isolation preference', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /persistDraftComposer\(\{ draft: '', queue: \[\] \}\)/);
+  assert.match(surface, /persistDraftComposer\(\{ draft: text, queue: \[\] \}\)/);
+  assert.match(surface, /draft: patch\.draft \?\? draftComposer\.draft/);
+  assert.match(surface, /queue: \[\.\.\.\(patch\.queue \?\? draftComposer\.messageQueue\)\]/);
+});
+
 test('new tasks can opt into worktree isolation from the draft composer', async () => {
   const [surface, main, service, panel] = await Promise.all([
     readSource('./ChatSurface.tsx'),

@@ -546,11 +546,16 @@ export function ChatSurface({
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
-  const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
+  const persistDraftComposer = useCallback((patch: {
+    draft?: string;
+    queue?: ConversationRuntimeState['messageQueue'];
+    fastMode?: boolean;
+    preferredWorktree?: boolean;
+  }) => {
     const draftComposer = conversationStore.getSnapshot(null);
     saveComposerEntry(DRAFT_CONVERSATION_ID, {
-      draft: draftComposer.draft,
-      queue: [...draftComposer.messageQueue],
+      draft: patch.draft ?? draftComposer.draft,
+      queue: [...(patch.queue ?? draftComposer.messageQueue)],
       fastMode: patch.fastMode ?? fastMode,
       preferredWorktree: patch.preferredWorktree ?? preferredWorktree,
     });
@@ -2007,6 +2012,10 @@ export function ChatSurface({
       conversationStore.setDraft(conversationId, '');
       setAttachments([]);
       setAttachmentError(null);
+      // 发送成功后立刻清掉共享草稿文本/队列，但保留 Fast / 隔离执行偏好。
+      // ComposerDraftControls 在 conversationId === null 时不落盘；勾选隔离执行时
+      // saveComposerEntry 也不会删除空壳，旧句子会在下次「新建任务」被灌回来。
+      persistDraftComposer({ draft: '', queue: [] });
       try {
         const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
         const started = await clientApi.chatStartTask({
@@ -2024,6 +2033,7 @@ export function ChatSurface({
       } catch (error) {
         // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
+        persistDraftComposer({ draft: text, queue: [] });
         setAttachments(sentAttachments);
         const message = error instanceof Error ? error.message : String(error);
         setAttachmentError(message === 'workspace_required'
@@ -2063,6 +2073,7 @@ export function ChatSurface({
     modelProviderId,
     preferredWorktree,
     workspaceIsGit,
+    persistDraftComposer,
     isZh,
     editingMessage,
     handleEditMessage,
