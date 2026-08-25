@@ -136,12 +136,10 @@ function formatRecordedTaskLine(
       kind: 'isolated',
       value: taskBranch,
       selectable: false,
-      label: compact
-        ? (isZh ? `隔离 · ${compact}` : `isolated · ${compact}`)
-        : (isZh ? '隔离' : 'isolated'),
+      label: compact ? `Worktree · ${compact}` : 'Worktree',
       title: isZh
-        ? '在独立目录执行，主工作区保持当前分支'
-        : 'Runs in an isolated directory; the main workspace stays on its current branch',
+        ? '在独立 Worktree 目录执行，主工作区保持当前分支'
+        : 'Runs in a Worktree directory; the main workspace stays on its current branch',
     };
   }
   return {

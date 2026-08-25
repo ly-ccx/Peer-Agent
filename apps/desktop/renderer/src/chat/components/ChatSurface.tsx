@@ -46,6 +46,7 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
+import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   buildComposerBranchOptions,
@@ -369,17 +370,6 @@ async function loadConversationMessages(conversationId: string): Promise<{
     contextAccounting,
     automationCreateContext: conv.automationCreateContext ?? null,
   };
-}
-
-function GitBranchGlyph() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="6" y1="3" x2="6" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
 }
 
 export function ChatSurface({
@@ -2855,7 +2845,7 @@ export function ChatSurface({
                 title={gitChrome.taskLine.title}
                 aria-label={gitChrome.taskLine.title}
               >
-                <GitBranchGlyph />
+                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
                 <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
               </span>
             ) : null}
