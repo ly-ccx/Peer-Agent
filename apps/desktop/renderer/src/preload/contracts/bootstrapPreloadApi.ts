@@ -990,7 +990,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; fastMode?: boolean; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; fastMode?: boolean; preferredExecutionIsolation?: 'none' | 'worktree'; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
@@ -998,6 +998,10 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
   readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
   readonly conversationsUpdateFastMode: (params: { id: string; fastMode: boolean }) => Promise<unknown>;
+  readonly conversationsUpdatePreferredExecutionIsolation: (params: {
+    id: string;
+    preferredExecutionIsolation: 'none' | 'worktree';
+  }) => Promise<unknown>;
   // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。effort/modelProviderId
   // 各自独立写入：用户可只切模型不切思考档，或反之。modelProviderId 为 null 表示回退
   // 到全局默认 provider。provider 被删/失效时由发送层 orderProviderCandidates 自动回退。

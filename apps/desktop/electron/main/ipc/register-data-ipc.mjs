@@ -16,6 +16,10 @@ export function createDataIpcRegistrations({ conversations, promptSnapshots, usa
     updateTitle: assertFunction(conversations?.updateTitle, 'conversations.updateTitle'),
     updateMode: assertFunction(conversations?.updateMode, 'conversations.updateMode'),
     updateFastMode: assertFunction(conversations?.updateFastMode, 'conversations.updateFastMode'),
+    updatePreferredExecutionIsolation: assertFunction(
+      conversations?.updatePreferredExecutionIsolation,
+      'conversations.updatePreferredExecutionIsolation',
+    ),
     updateModelEffort: assertFunction(
       conversations?.updateModelEffort,
       'conversations.updateModelEffort',
@@ -70,6 +74,8 @@ export function createDataIpcRegistrations({ conversations, promptSnapshots, usa
       ipc.handle('conversations:update-title', (_event, payload) => conversation.updateTitle(payload));
       ipc.handle('conversations:update-mode', (_event, payload) => conversation.updateMode(payload));
       ipc.handle('conversations:update-fast-mode', (_event, payload) => conversation.updateFastMode(payload));
+      ipc.handle('conversations:update-preferred-execution-isolation', (_event, payload) =>
+        conversation.updatePreferredExecutionIsolation(payload));
       ipc.handle('conversations:update-model-effort', (_event, payload) =>
         conversation.updateModelEffort(payload));
       ipc.handle('conversations:append-message', (_event, payload) =>

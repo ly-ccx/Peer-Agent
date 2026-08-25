@@ -12,6 +12,7 @@ export function createConversationApplicationService({
   updateTitle,
   updateMode,
   updateFastMode,
+  updatePreferredExecutionIsolation,
   updateAutomationCreateContext,
   updateModelEffort,
   appendMessage,
@@ -42,6 +43,10 @@ export function createConversationApplicationService({
     updateTitle: assertFunction(updateTitle, 'updateTitle'),
     updateMode: assertFunction(updateMode, 'updateMode'),
     updateFastMode: assertFunction(updateFastMode, 'updateFastMode'),
+    updatePreferredExecutionIsolation: assertFunction(
+      updatePreferredExecutionIsolation,
+      'updatePreferredExecutionIsolation',
+    ),
     updateAutomationCreateContext: assertFunction(
       updateAutomationCreateContext,
       'updateAutomationCreateContext',
@@ -124,6 +129,8 @@ export function createConversationApplicationService({
     updateTitle: ({ id, title }) => ports.updateTitle(id, title),
     updateMode: ({ id, mode }) => ports.updateMode(id, mode),
     updateFastMode: ({ id, fastMode }) => ports.updateFastMode(id, fastMode),
+    updatePreferredExecutionIsolation: ({ id, preferredExecutionIsolation }) =>
+      ports.updatePreferredExecutionIsolation(id, preferredExecutionIsolation),
     updateAutomationCreateContext: ({ id, context }) =>
       ports.updateAutomationCreateContext(id, context),
     updateModelEffort: ({ id, effort, modelProviderId }) =>
