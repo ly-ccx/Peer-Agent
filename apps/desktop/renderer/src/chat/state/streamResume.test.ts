@@ -91,8 +91,18 @@ describe('canShowStreamResume', () => {
 });
 
 describe('formatStreamErrorLabel', () => {
-  it('keeps the repetition copy and passes other errors through', () => {
+  it('keeps the repetition copy and humanizes common network interruptions', () => {
     assert.match(formatStreamErrorLabel('repetition_detected', true), /重复输出/);
-    assert.equal(formatStreamErrorLabel('net::ERR_NETWORK_CHANGED', true), 'net::ERR_NETWORK_CHANGED');
+    assert.equal(formatStreamErrorLabel('net::ERR_NETWORK_CHANGED', true), '网络已切换，回复中断。');
+    assert.equal(
+      formatStreamErrorLabel('net::ERR_NETWORK_CHANGED', false),
+      'Network changed; the reply was interrupted.',
+    );
+    assert.equal(formatStreamErrorLabel('fetch failed', true), '网络中断，回复未完成。');
+    assert.equal(formatStreamErrorLabel('ECONNRESET', true), '连接被重置，回复中断。');
+  });
+
+  it('passes unknown errors through unchanged', () => {
+    assert.equal(formatStreamErrorLabel('invalid api key', true), 'invalid api key');
   });
 });

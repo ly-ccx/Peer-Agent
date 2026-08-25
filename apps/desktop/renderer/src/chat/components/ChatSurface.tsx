@@ -2741,8 +2741,26 @@ export function ChatSurface({
         ) : null}
         {streamError ? (
           <div className="chat-stream-error" role="alert">
+            <span className="chat-stream-error-icon" aria-hidden="true">
+              <svg
+                className="peer-icon"
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+            </span>
             <span className="chat-stream-error-text">
-              ⚠ {formatStreamErrorLabel(streamError, isZh)}
+              {formatStreamErrorLabel(streamError, isZh)}
             </span>
             <div className="chat-stream-error-actions">
               {showStreamResume ? (
@@ -2761,7 +2779,7 @@ export function ChatSurface({
                 onClick={handleDismissStreamError}
                 aria-label={isZh ? '关闭错误提示' : 'Dismiss error'}
               >
-                ×
+                <PeerIcon name="close" size={14} />
               </button>
             </div>
           </div>

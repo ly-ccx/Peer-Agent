@@ -504,46 +504,58 @@
   animation: motion-pulse-soft 1.2s ease-in-out infinite;
 }
 
+/* Stream error strip: same quiet control surface as Composer / permission gate. */
 .chat-stream-error {
   max-width: var(--chat-content-max);
   width: 100%;
-  margin: 0 auto var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  margin: 0 auto 8px;
+  padding: 8px 12px;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  background: var(--za-danger-soft);
-  border: 1px solid color-mix(in srgb, var(--state-danger) 18%, transparent);
-  border-radius: var(--ui-radius-control, var(--radius-sm));
-  color: var(--state-danger);
-  font-size: var(--ui-font-meta, 12px);
+  align-items: center;
+  gap: 8px;
+  background: var(--za-control-fill);
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-panel, var(--za-radius));
+  color: var(--ink-base);
+  font-size: var(--ui-font-control, 13px);
+  line-height: 1.4;
+}
+.chat-stream-error-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--ink-soft);
 }
 .chat-stream-error-text {
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
+  color: var(--ink-base);
 }
 .chat-stream-error-actions {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 .chat-stream-error-resume {
   appearance: none;
-  border: 0;
-  border-radius: 999px;
-  padding: 0.2rem 0.75rem;
+  padding: 4px 12px;
+  border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  background: var(--za-control-fill-hover);
+  color: var(--ink-base);
   font: inherit;
-  font-size: var(--ui-font-meta, 12px);
-  font-weight: 600;
-  color: var(--paper-sheet, #fff);
-  background: var(--azure-seal, var(--graphite-base));
+  font-size: 12px;
+  line-height: 1.4;
   cursor: pointer;
+  transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 .chat-stream-error-resume:hover:not(:disabled) {
-  opacity: 0.88;
+  background: var(--ui-surface-hover, var(--za-hover));
+  border-color: var(--ink-soft);
 }
 .chat-stream-error-resume:disabled {
   opacity: 0.45;
@@ -551,18 +563,20 @@
 }
 .chat-stream-error-dismiss {
   appearance: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
   background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 1rem;
-  line-height: 1;
-  padding: 0.1rem 0.25rem;
+  color: var(--ink-soft);
   cursor: pointer;
-  opacity: 0.7;
 }
 .chat-stream-error-dismiss:hover {
-  opacity: 1;
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--ink-base);
 }
 
 /* ── Segments (interleaved text + tool-call groups) ── */

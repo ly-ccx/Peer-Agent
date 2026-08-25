@@ -54,11 +54,58 @@ export function resolveStreamResumeTarget(messages: readonly ChatMsg[]): StreamR
   return null;
 }
 
+const STREAM_ERROR_COPY: ReadonlyArray<{
+  readonly pattern: RegExp;
+  readonly zh: string;
+  readonly en: string;
+}> = [
+  {
+    pattern: /repetition_detected/i,
+    zh: '检测到重复输出，已自动停止本轮回复。',
+    en: 'Repetitive output detected; this reply was stopped automatically.',
+  },
+  {
+    pattern: /ERR_NETWORK_CHANGED/i,
+    zh: '网络已切换，回复中断。',
+    en: 'Network changed; the reply was interrupted.',
+  },
+  {
+    pattern: /ERR_INTERNET_DISCONNECTED/i,
+    zh: '网络已断开，回复中断。',
+    en: 'Internet disconnected; the reply was interrupted.',
+  },
+  {
+    pattern: /ERR_CONNECTION_RESET|ECONNRESET|socket hang up/i,
+    zh: '连接被重置，回复中断。',
+    en: 'The connection was reset; the reply was interrupted.',
+  },
+  {
+    pattern: /ERR_CONNECTION_REFUSED|ECONNREFUSED/i,
+    zh: '连接被拒绝，回复中断。',
+    en: 'The connection was refused; the reply was interrupted.',
+  },
+  {
+    pattern: /ERR_NAME_NOT_RESOLVED|ENOTFOUND|EAI_AGAIN/i,
+    zh: '无法解析服务器地址，回复中断。',
+    en: 'Could not resolve the server; the reply was interrupted.',
+  },
+  {
+    pattern: /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ETIMEDOUT|HeadersTimeoutError|ConnectTimeoutError/i,
+    zh: '连接超时，回复中断。',
+    en: 'The connection timed out; the reply was interrupted.',
+  },
+  {
+    pattern: /net::ERR_|ERR_NETWORK|fetch failed/i,
+    zh: '网络中断，回复未完成。',
+    en: 'Network interrupted; the reply was not finished.',
+  },
+];
+
 export function formatStreamErrorLabel(error: string, isZh: boolean): string {
-  if (error === 'repetition_detected') {
-    return isZh
-      ? '检测到重复输出，已自动停止本轮回复。'
-      : 'Repetitive output detected; this reply was stopped automatically.';
+  const text = String(error || '').trim();
+  if (!text) return text;
+  for (const entry of STREAM_ERROR_COPY) {
+    if (entry.pattern.test(text)) return isZh ? entry.zh : entry.en;
   }
   return error;
 }
