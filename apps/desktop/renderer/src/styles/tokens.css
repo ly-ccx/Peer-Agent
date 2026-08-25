@@ -233,9 +233,9 @@
   --za-hover: #F0F2F6;
   --za-active: #E5E8EE;
   --za-sidebar-bg: #F3F5F8;
-  /* Selected fill tracks hover white so it feels light, not grey/heavy. */
-  --za-sidebar-active-bg: var(--za-hover);
-  --za-sidebar-thread-active-bg: var(--za-hover);
+  /* Selected fill matches frosted chrome, not opaque paper white. */
+  --za-sidebar-active-bg: var(--glass-chrome-hover);
+  --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #DCE0E8;
   --za-sidebar-width: 264px;
   --za-inset-highlight: #FAFBFC;
@@ -486,8 +486,8 @@
   --za-hover: #1E232C;
   --za-active: #262C37;
   --za-sidebar-bg: #181C24;
-  --za-sidebar-active-bg: var(--za-hover);
-  --za-sidebar-thread-active-bg: var(--za-hover);
+  --za-sidebar-active-bg: var(--glass-chrome-hover);
+  --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #2A303B;
   --za-inset-highlight: #181C24;
   --za-focus: rgba(93, 156, 191, 0.30);
@@ -585,8 +585,8 @@
   --za-hover: #E6E9EF;
   --za-active: #CCD0DA;
   --za-sidebar-bg: #E6E9EF;
-  --za-sidebar-active-bg: var(--za-hover);
-  --za-sidebar-thread-active-bg: var(--za-hover);
+  --za-sidebar-active-bg: var(--glass-chrome-hover);
+  --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #BCC0CC;
   --za-inset-highlight: #FFFFFF;
   --za-focus: rgba(30, 102, 245, 0.30);
@@ -673,8 +673,8 @@
   --za-hover: #313244;
   --za-active: #45475A;
   --za-sidebar-bg: #181825;
-  --za-sidebar-active-bg: var(--za-hover);
-  --za-sidebar-thread-active-bg: var(--za-hover);
+  --za-sidebar-active-bg: var(--glass-chrome-hover);
+  --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #585B70;
   --za-inset-highlight: #181825;
   --za-focus: rgba(137, 180, 250, 0.30);
