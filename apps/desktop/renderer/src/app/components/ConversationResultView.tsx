@@ -251,7 +251,9 @@ export function ConversationResultView({
                     <span className="conversation-result-view__ref">
                       {evidenceLabel
                         ?? (state === 'pending'
-                          ? (isZh ? '还缺对照证据' : 'Evidence still missing')
+                          ? (isZh ? '还缺对照证据 · 点继续追问去补' : 'Evidence still missing · Follow up to supply it')
+                          : state === 'failed'
+                            ? (isZh ? '对照未通过 · 点继续追问去补' : 'Evidence failed · Follow up to fix it')
                           : (isZh ? '已对照' : 'Matched'))}
                     </span>
                     {result?.detail ? <em>{result.detail}</em> : null}

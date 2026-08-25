@@ -31,6 +31,7 @@ test('blocks close when a criterion has no result or evidence', () => {
   assert.equal(verdict.ok, false);
   assert.equal(verdict.gaps[0]?.reason, 'missing');
   assert.match(verdict.message, /测试通过/);
+  assert.match(verdict.message, /继续追问/);
 });
 
 test('blocks close when evidenceRef is not held or indexed', () => {
@@ -93,6 +94,21 @@ test('assertAcceptanceCloseGate throws a typed error', () => {
     }),
     (error: unknown) => error instanceof AcceptanceCloseGateError && error.code === 'acceptance_evidence_incomplete',
   );
+});
+
+test('assertAcceptanceCloseGate allows userOverride while evaluate still reports gaps', () => {
+  const plan = {
+    successCriteria: [criterion('c1', '缺证据')],
+    resultAcceptance: {
+      acceptedAt: '2026-08-25T00:00:00.000Z',
+      acceptedBy: 'user',
+      userOverride: true,
+    },
+  };
+  const verdict = evaluateAcceptanceCloseGate(plan);
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.message, /继续追问/);
+  assert.doesNotThrow(() => assertAcceptanceCloseGate(plan));
 });
 
 test('isAcceptanceClosePatch only fires when acceptance is newly written', () => {
