@@ -146,6 +146,7 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /planComposerGitChrome/);
   assert.match(surface, /composer-workspace-head/);
   assert.match(surface, /composer-task-line/);
+  assert.match(surface, /GitWorktreeGlyph/);
   assert.match(surface, /composer-write-mismatch/);
   assert.match(surface, /composer-bound-branch/);
   assert.match(surface, /canSelectComposerSourceBranch/);

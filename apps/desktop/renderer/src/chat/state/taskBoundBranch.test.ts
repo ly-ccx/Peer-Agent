@@ -96,7 +96,8 @@ test('isolated task lines show an isolation mark and never a write mismatch', ()
     },
   }, { locale: 'zh' });
   assert.equal(chrome.taskLine?.kind, 'isolated');
-  assert.equal(chrome.taskLine?.label, '隔离 · cli-drop-stream-buf');
+  assert.equal(chrome.taskLine?.label, 'Worktree · cli-drop-stream-buf');
+  assert.match(chrome.taskLine?.title ?? '', /Worktree/);
   assert.equal(chrome.writeMismatch, null);
 });
 
