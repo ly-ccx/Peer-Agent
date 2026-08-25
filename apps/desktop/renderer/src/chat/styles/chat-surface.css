@@ -1386,9 +1386,7 @@
   border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
   border-radius: calc(var(--radius-md) + 4px);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
-  box-shadow:
-    0 16px 40px color-mix(in srgb, var(--graphite-deep) 14%, transparent),
-    0 2px 8px color-mix(in srgb, var(--graphite-deep) 6%, transparent);
+  box-shadow: var(--glass-modal-shadow);
   backdrop-filter: blur(18px) saturate(1.08);
   animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
   --motion-enter-from: 6px;
@@ -1598,7 +1596,7 @@
   border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
   border-radius: calc(var(--radius-md) + 1px);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--graphite-deep) 12%, transparent), 0 2px 8px color-mix(in srgb, var(--graphite-deep) 5%, transparent);
+  box-shadow: var(--glass-modal-shadow);
   backdrop-filter: blur(18px) saturate(1.08);
 }
 
