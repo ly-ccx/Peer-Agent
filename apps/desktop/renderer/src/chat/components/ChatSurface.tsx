@@ -2821,6 +2821,24 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
+            <Dropdown
+              className="composer-dropdown composer-mode-dropdown"
+              value={modePickerValue(mode)}
+              options={modeOptions}
+              onChange={handleModeDropdownChange}
+              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
+              title={modeTitle(mode, isZh)}
+              menuPlacement="up"
+            />
+            <Dropdown
+              className="composer-dropdown composer-access-dropdown"
+              value={localAccessLevel}
+              options={accessLevelOptions}
+              onChange={handleAccessLevelDropdownChange}
+              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
+              title={accessLevelTitle(localAccessLevel, isZh)}
+              menuPlacement="up"
+            />
             {gitChrome.workspaceHead ? (
               <span
                 className="composer-workspace-head"
@@ -2874,24 +2892,6 @@ export function ChatSurface({
                 {gitChrome.writeMismatch.label}
               </span>
             ) : null}
-            <Dropdown
-              className="composer-dropdown composer-mode-dropdown"
-              value={modePickerValue(mode)}
-              options={modeOptions}
-              onChange={handleModeDropdownChange}
-              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
-              title={modeTitle(mode, isZh)}
-              menuPlacement="up"
-            />
-            <Dropdown
-              className="composer-dropdown composer-access-dropdown"
-              value={localAccessLevel}
-              options={accessLevelOptions}
-              onChange={handleAccessLevelDropdownChange}
-              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
-              title={accessLevelTitle(localAccessLevel, isZh)}
-              menuPlacement="up"
-            />
             {workspacePath ? (
               <label
                 className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
