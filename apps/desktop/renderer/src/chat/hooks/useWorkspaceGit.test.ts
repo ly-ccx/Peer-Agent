@@ -14,6 +14,9 @@ test('workspace git refreshes after checkout without waiting for a new workspace
   assert.match(source, /refreshWhenIdle/);
   assert.match(source, /if \(clear\) setWorkspaceGit\(null\)/);
   assert.match(source, /loadWorkspaceGit\(workspacePath, \{ clear: false \}\)/);
+  assert.match(source, /localBranches/);
+  assert.match(source, /remoteBranches/);
+  assert.match(source, /refreshWorkspaceGit/);
   assert.doesNotMatch(source, /setInterval/);
 });
 

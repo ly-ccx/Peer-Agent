@@ -288,10 +288,19 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
+  function parseGitRefLines(stdout) {
+    return [...new Set(
+      String(stdout || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean),
+    )];
+  }
+
   async function listGitBranches({ workspaceRoot } = {}) {
     const repoRoot = await resolveRepoRoot(workspaceRoot);
     if (!repoRoot) {
-      return { ok: false, branches: [], current: null, error: 'not_a_git_repository' };
+      return { ok: false, branches: [], localBranches: [], remoteBranches: [], current: null, error: 'not_a_git_repository' };
     }
     try {
       const { stdout: currentOut } = await executeGit(
@@ -299,25 +308,72 @@ export function createFileAccessApplicationService(options = {}) {
         ['branch', '--show-current'],
         { maxBuffer: 1024 * 1024 },
       );
-      const { stdout: listOut } = await executeGit(
+      const { stdout: localOut } = await executeGit(
         repoRoot,
-        ['branch', '--format=%(refname:short)'],
+        ['for-each-ref', '--format=%(refname:short)', 'refs/heads'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      const { stdout: remoteOut } = await executeGit(
+        repoRoot,
+        ['for-each-ref', '--format=%(refname:short)', 'refs/remotes'],
         { maxBuffer: 1024 * 1024 },
       );
       const current = currentOut.trim() || null;
-      const branches = [...new Set(
-        String(listOut || '')
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean),
-      )];
-      return { ok: true, branches, current, repoRoot };
+      const localBranches = parseGitRefLines(localOut);
+      const remoteBranches = parseGitRefLines(remoteOut)
+        .filter((name) => !name.endsWith('/HEAD'));
+      const branches = [...new Set([...localBranches, ...remoteBranches])];
+      return { ok: true, branches, localBranches, remoteBranches, current, repoRoot };
     } catch (error) {
       return {
         ok: false,
         branches: [],
+        localBranches: [],
+        remoteBranches: [],
         current: null,
         error: error?.message || String(error),
+      };
+    }
+  }
+
+  async function createGitBranch({ workspaceRoot, name, startPoint } = {}) {
+    const branchName = typeof name === 'string' ? name.trim() : '';
+    if (!isSafeGitRef(branchName)) {
+      return { ok: false, status: 'invalid_name', current: null, error: 'invalid_branch_name' };
+    }
+    const fromRef = typeof startPoint === 'string' ? startPoint.trim() : '';
+    if (fromRef && !isSafeGitRef(fromRef)) {
+      return { ok: false, status: 'invalid_ref', current: null, error: 'invalid_ref' };
+    }
+    const repoRoot = await resolveRepoRoot(workspaceRoot);
+    if (!repoRoot) {
+      return { ok: false, status: 'not_git_repo', current: null, error: 'not_a_git_repository' };
+    }
+    try {
+      const args = fromRef
+        ? ['branch', '--', branchName, fromRef]
+        : ['branch', '--', branchName];
+      await executeGit(repoRoot, args, { maxBuffer: 1024 * 1024 });
+      const { stdout: currentOut } = await executeGit(
+        repoRoot,
+        ['branch', '--show-current'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      return {
+        ok: true,
+        status: 'created',
+        name: branchName,
+        current: currentOut.trim() || null,
+        repoRoot,
+      };
+    } catch (error) {
+      const message = error?.message || String(error);
+      const alreadyExists = /already exists/i.test(message);
+      return {
+        ok: false,
+        status: alreadyExists ? 'already_exists' : 'error',
+        current: null,
+        error: alreadyExists ? 'branch_already_exists' : message,
       };
     }
   }
@@ -745,6 +801,7 @@ export function createFileAccessApplicationService(options = {}) {
     getGitDiff,
     getGitRangeDiff,
     listGitBranches,
+    createGitBranch,
     exists,
     readDirectory,
     watchDirectories,

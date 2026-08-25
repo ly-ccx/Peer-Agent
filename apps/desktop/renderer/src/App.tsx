@@ -141,6 +141,8 @@ function MainApp() {
   const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const [resultCloseGate, setResultCloseGate] = useState<AcceptanceCloseVerdict | null>(null);
+  /** 证据不全时用户二次确认强制归档，供关闭动画后的 revise 写入 userOverride。 */
+  const resultAcceptanceUserOverrideRef = useRef(false);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
@@ -164,8 +166,12 @@ function MainApp() {
     setResultDrawerAcceptTogether([]);
   }, []);
 
-  const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
+  const acceptResultFromWorkbench = useCallback(async (
+    item: TaskOverviewItem,
+    options?: { readonly userOverride?: boolean },
+  ) => {
     if (item.source !== 'goal_plan' || !item.taskId) return;
+    const userOverride = options?.userOverride === true || resultAcceptanceUserOverrideRef.current;
     try {
       await clientApi.goalPlansRevise({
         planId: item.taskId,
@@ -173,9 +179,10 @@ function MainApp() {
           resultAcceptance: {
             acceptedAt: new Date().toISOString(),
             acceptedBy: 'user',
+            ...(userOverride ? { userOverride: true } : {}),
           },
         },
-        reason: 'workbench_one_click_accept',
+        reason: userOverride ? 'workbench_force_accept' : 'workbench_one_click_accept',
         changedBy: 'user',
       });
       setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
@@ -186,6 +193,8 @@ function MainApp() {
     } catch (error) {
       console.error('[workbench] accept result failed', error);
       throw error;
+    } finally {
+      if (userOverride) resultAcceptanceUserOverrideRef.current = false;
     }
   }, []);
 
@@ -1292,10 +1301,21 @@ function MainApp() {
                                   className="task-overview-btn"
                                   disabled={Boolean(resultAcceptancePending)}
                                   onClick={() => {
-                                    requestClose();
-                                    if (item.conversationId) {
-                                      handleSelectConversation(String(item.conversationId));
-                                    }
+                                    void (async () => {
+                                      if (item.source === 'goal_plan' && item.taskId) {
+                                        try {
+                                          await clientApi.goalPlansMarkRequestedUserInput({
+                                            planId: item.taskId,
+                                          });
+                                        } catch {
+                                          // 重开失败也不挡回会话：用户至少还能继续说。
+                                        }
+                                      }
+                                      requestClose();
+                                      if (item.conversationId) {
+                                        handleSelectConversation(String(item.conversationId));
+                                      }
+                                    })();
                                   }}
                                 >
                                   {isZh ? '继续追问' : 'Follow up'}
@@ -1303,11 +1323,32 @@ function MainApp() {
                                 <button
                                   type="button"
                                   className="task-overview-btn task-overview-btn--primary"
-                                  disabled={Boolean(resultAcceptancePending) || closeBlocked}
+                                  disabled={Boolean(resultAcceptancePending)}
                                   onClick={() => {
-                                    if (resultAcceptancePending || closeBlocked) return;
-                                    setResultAcceptancePending(item);
-                                    requestClose();
+                                    if (resultAcceptancePending) return;
+                                    void (async () => {
+                                      let userOverride = false;
+                                      if (closeBlocked) {
+                                        const gapMessage = resultCloseGate?.message?.trim()
+                                          || (isZh
+                                            ? '还缺对照证据，不能直接归档。'
+                                            : 'Evidence is still incomplete.');
+                                        const ok = await confirm({
+                                          title: isZh ? '证据不全，仍要归档？' : 'Archive with incomplete evidence?',
+                                          message: isZh
+                                            ? `${gapMessage}\n\n确认后会强制归档，并保留缺口记录。也可改点「继续追问」去补证据。`
+                                            : `${gapMessage}\n\nThis will force-archive and keep the gap record. Or use Follow up to supply evidence.`,
+                                          confirmText: isZh ? '仍要归档' : 'Archive anyway',
+                                          cancelText: isZh ? '取消' : 'Cancel',
+                                          tone: 'danger',
+                                        });
+                                        if (!ok) return;
+                                        userOverride = true;
+                                      }
+                                      resultAcceptanceUserOverrideRef.current = userOverride;
+                                      setResultAcceptancePending(item);
+                                      requestClose();
+                                    })();
                                   }}
                                 >
                                   {resultAcceptancePending

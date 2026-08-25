@@ -2,6 +2,8 @@ export interface TaskDeliveryLine {
   readonly targetBranch: string | null;
   readonly taskBranch: string | null;
   readonly isolated: boolean;
+  /** 验收交回完成后，这次隔离已经结束，输入栏应回到源头。 */
+  readonly delivered?: boolean;
 }
 
 export type ComposerTaskLineKind = 'source' | 'task-line' | 'isolated';
@@ -79,16 +81,24 @@ export function snapshotDeliveryLine(
       readonly executionIsolation?: string | null;
       readonly worktreePath?: string | null;
     } | null;
+    readonly deliveryHandoff?: {
+      readonly status?: string | null;
+    } | null;
   } | null | undefined,
 ): TaskDeliveryLine | null {
   const binding = plan?.deliveryBinding;
   const targetBranch = trimBranch(binding?.targetBranch);
   const taskBranch = trimBranch(binding?.taskBranch);
   if (!targetBranch && !taskBranch) return null;
+  const delivered = plan?.deliveryHandoff?.status === 'delivered';
+  const isolated = !delivered
+    && binding?.executionIsolation === 'worktree'
+    && Boolean(trimBranch(binding.worktreePath));
   return {
     targetBranch,
     taskBranch,
-    isolated: binding?.executionIsolation === 'worktree' && Boolean(trimBranch(binding.worktreePath)),
+    isolated,
+    delivered,
   };
 }
 
@@ -100,7 +110,9 @@ function formatWorkspaceHead(
   return {
     value: currentHead,
     label: isZh ? `在 ${compact}` : `on ${compact}`,
-    title: isZh ? `当前工作区在 ${currentHead}` : `Workspace is on ${currentHead}`,
+    title: isZh
+      ? `当前工作区 HEAD 是 ${currentHead}。这是你现在所在的工作区，不是本地/远程标记。`
+      : `Workspace HEAD is ${currentHead}. This is where the workspace is now, not a local/remote marker.`,
   };
 }
 
@@ -116,7 +128,9 @@ function formatSourceLine(
     selectable,
     label: isZh ? `源头 ${compact}` : `from ${compact}`,
     title: selectable
-      ? (isZh ? `新任务将从 ${source} 分叉` : `New tasks will fork from ${source}`)
+      ? (isZh
+        ? `新任务将从 ${source} 分叉。本地和远程分支在菜单里分组；选这里不会切换当前工作区。`
+        : `New tasks will fork from ${source}. Local and remote branches are grouped in the menu; choosing this does not checkout.`)
       : (isZh ? `这条任务从 ${source} 分叉` : `This task forks from ${source}`),
   };
 }
@@ -132,12 +146,10 @@ function formatRecordedTaskLine(
       kind: 'isolated',
       value: taskBranch,
       selectable: false,
-      label: compact
-        ? (isZh ? `隔离 · ${compact}` : `isolated · ${compact}`)
-        : (isZh ? '隔离' : 'isolated'),
+      label: compact ? `Worktree · ${compact}` : 'Worktree',
       title: isZh
-        ? '在独立目录执行，主工作区保持当前分支'
-        : 'Runs in an isolated directory; the main workspace stays on its current branch',
+        ? '在独立 Worktree 目录执行，主工作区保持当前分支'
+        : 'Runs in a Worktree directory; the main workspace stays on its current branch',
     };
   }
   return {
@@ -172,9 +184,13 @@ export function planComposerGitChrome(
   const taskBranch = trimBranch(input.delivery?.taskBranch);
   const targetBranch = trimBranch(input.delivery?.targetBranch);
   const isolated = input.delivery?.isolated === true;
+  const delivered = input.delivery?.delivered === true;
 
   let taskLine: ComposerTaskLine | null = null;
-  if (taskBranch) {
+  if (delivered) {
+    const source = targetBranch || currentHead;
+    if (source) taskLine = formatSourceLine(source, input.isDraft, isZh);
+  } else if (taskBranch) {
     taskLine = formatRecordedTaskLine(taskBranch, isolated, isZh);
   } else if (targetBranch) {
     taskLine = formatSourceLine(targetBranch, false, isZh);
@@ -211,21 +227,61 @@ export function canSelectComposerSourceBranch(input: {
   return !trimBranch(input.delivery?.taskBranch) && !trimBranch(input.delivery?.targetBranch);
 }
 
-/** Unique local branches for the composer picker. Isolation UUID paths stay hidden unless already selected. */
+export function isSafeComposerBranchName(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 255) return false;
+  if (trimmed.startsWith('-') || /\s/.test(trimmed) || trimmed.includes('..') || trimmed.includes(':')) {
+    return false;
+  }
+  return /^[A-Za-z0-9._/@~^+-]+$/.test(trimmed);
+}
+
+export type ComposerBranchKind = 'local' | 'remote';
+
+export interface ComposerBranchOption {
+  readonly value: string;
+  readonly kind: ComposerBranchKind;
+}
+
+function looksLikeRemoteBranch(name: string, remoteBranches: ReadonlySet<string>): boolean {
+  if (remoteBranches.has(name)) return true;
+  const slash = name.indexOf('/');
+  if (slash <= 0) return false;
+  const remote = name.slice(0, slash);
+  if (remote === 'PeerAgent') return false;
+  return [...remoteBranches].some((item) => item.startsWith(`${remote}/`)) || remote === 'origin';
+}
+
+/** Unique local/remote branches for the composer picker. Isolation UUID paths stay hidden unless already selected. */
 export function buildComposerBranchOptions(input: {
   readonly branches?: readonly string[] | null;
+  readonly localBranches?: readonly string[] | null;
+  readonly remoteBranches?: readonly string[] | null;
   readonly selected?: string | null;
-}): readonly string[] {
+}): readonly ComposerBranchOption[] {
   const seen = new Set<string>();
-  const options: string[] = [];
-  const push = (raw: string | null | undefined, allowInternal: boolean) => {
+  const options: ComposerBranchOption[] = [];
+  const remoteSet = new Set(
+    (input.remoteBranches ?? []).map((item) => trimBranch(item)).filter((item): item is string => Boolean(item)),
+  );
+  const push = (
+    raw: string | null | undefined,
+    kind: ComposerBranchKind,
+    allowInternal: boolean,
+  ) => {
     const next = trimBranch(raw);
     if (!next || seen.has(next)) return;
+    if (next.endsWith('/HEAD')) return;
     if (!allowInternal && isInternalIsolationBranch(next)) return;
     seen.add(next);
-    options.push(next);
+    options.push({ value: next, kind });
   };
-  for (const branch of input.branches ?? []) push(branch, false);
-  push(input.selected, true);
+  const local = input.localBranches ?? (input.remoteBranches ? [] : input.branches);
+  for (const branch of local ?? []) push(branch, 'local', false);
+  for (const branch of input.remoteBranches ?? []) push(branch, 'remote', false);
+  const selected = trimBranch(input.selected);
+  if (selected && !seen.has(selected)) {
+    push(selected, looksLikeRemoteBranch(selected, remoteSet) ? 'remote' : 'local', true);
+  }
   return options;
 }

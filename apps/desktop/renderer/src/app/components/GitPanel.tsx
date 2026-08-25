@@ -27,7 +27,8 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
   const [savedPrefix, setSavedPrefix] = useState(branchPrefix);
   const [baseBranch, setBaseBranch] = useState('');
   const [savedBaseBranch, setSavedBaseBranch] = useState('');
-  const [branches, setBranches] = useState<readonly string[]>([]);
+  const [localBranches, setLocalBranches] = useState<readonly string[]>([]);
+  const [remoteBranches, setRemoteBranches] = useState<readonly string[]>([]);
   const [currentHead, setCurrentHead] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,7 +36,8 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
     if (!workspacePath) {
       setBaseBranch('');
       setSavedBaseBranch('');
-      setBranches([]);
+      setLocalBranches([]);
+      setRemoteBranches([]);
       setCurrentHead(null);
       return;
     }
@@ -49,11 +51,16 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
       const saved = workspace?.baseBranch?.trim() || '';
       setBaseBranch(saved);
       setSavedBaseBranch(saved);
-      const listed = git.ok ? git.branches : [];
-      const next = [...listed];
-      if (saved && !next.includes(saved)) next.unshift(saved);
-      if (git.current && !next.includes(git.current)) next.unshift(git.current);
-      setBranches(next);
+      const locals = git.ok ? [...(git.localBranches ?? git.branches ?? [])] : [];
+      const remotes = git.ok ? [...(git.remoteBranches ?? [])] : [];
+      if (git.current && !locals.includes(git.current) && !remotes.includes(git.current)) {
+        locals.unshift(git.current);
+      }
+      if (saved && !locals.includes(saved) && !remotes.includes(saved)) {
+        locals.unshift(saved);
+      }
+      setLocalBranches(locals);
+      setRemoteBranches(remotes);
       setCurrentHead(git.current);
     }, (err: unknown) => {
       if (cancelled) return;
@@ -117,19 +124,36 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
           </div>
           <div className="general-language-select">
             {workspacePath ? (
-              <select
-                value={baseBranch}
-                disabled={isSaving || branches.length === 0}
-                aria-label={i18n.t('settings.git.baseBranch')}
-                onChange={(event) => void handleSaveBaseBranch(event.target.value)}
-              >
-                <option value="">{i18n.t('settings.git.baseBranch.unset')}</option>
-                {branches.map((branch) => (
-                  <option key={branch} value={branch}>
-                    {branch === currentHead ? `${branch} (HEAD)` : branch}
-                  </option>
-                ))}
-              </select>
+              localBranches.length + remoteBranches.length > 0 ? (
+                <select
+                  value={baseBranch}
+                  disabled={isSaving}
+                  aria-label={i18n.t('settings.git.baseBranch')}
+                  onChange={(event) => void handleSaveBaseBranch(event.target.value)}
+                >
+                  <option value="">{i18n.t('settings.git.baseBranch.unset')}</option>
+                  {localBranches.length > 0 ? (
+                    <optgroup label={i18n.locale.startsWith('zh') ? '本地分支' : 'Local'}>
+                      {localBranches.map((branch) => (
+                        <option key={`local:${branch}`} value={branch}>
+                          {branch === currentHead ? `${branch} (HEAD)` : branch}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {remoteBranches.length > 0 ? (
+                    <optgroup label={i18n.locale.startsWith('zh') ? '远程分支' : 'Remote'}>
+                      {remoteBranches.map((branch) => (
+                        <option key={`remote:${branch}`} value={branch}>
+                          {branch}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </select>
+              ) : (
+                <p className="general-setting-error">{i18n.t('settings.git.baseBranch.empty')}</p>
+              )
             ) : (
               <p className="general-setting-error">{i18n.t('settings.git.baseBranch.empty')}</p>
             )}

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
 const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
+const tokensCss = readFileSync(join(stylesDir, 'tokens.css'), 'utf8');
 const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
@@ -112,6 +113,52 @@ test('selected conversation rows stay a fill instead of a lifted card', () => {
   assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
   assert.match(layeredActiveHoverBody, /box-shadow:\s*none;/);
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
+});
+
+test('selected highlight lives on the conversation, not the workspace row', () => {
+  const workspaceActiveBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-node.is-home > .sidebar-workspace-row',
+  );
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+  const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
+  const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
+
+  assert.match(workspaceActiveBody, /background:\s*transparent;/);
+  assert.doesNotMatch(workspaceActiveBody, /--za-sidebar-active-bg|--ui-surface-selected/);
+  assert.match(activeBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(activeBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveHoverBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveHoverBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+});
+
+test('selected fill tracks frosted chrome hover across light and dark themes', () => {
+  const activeBgBindings = tokensCss.match(/--za-sidebar-active-bg:\s*[^;]+;/g) ?? [];
+  const threadActiveBgBindings =
+    tokensCss.match(/--za-sidebar-thread-active-bg:\s*[^;]+;/g) ?? [];
+
+  assert.equal(activeBgBindings.length, 4);
+  assert.equal(threadActiveBgBindings.length, 4);
+  for (const binding of [...activeBgBindings, ...threadActiveBgBindings]) {
+    assert.match(binding, /var\(--glass-chrome-hover\)/);
+  }
+
+  assert.match(tokensCss, /--glass-chrome-hover:\s*hsla\(/);
+  assert.match(tokensCss, /--ui-surface-hover:\s*var\(--za-hover\);/);
+
+  assert.match(
+    ruleBody(sidebarCss, '.channel-conversation-list .conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
+  assert.match(
+    ruleBody(chatSidebarCss, '.conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
 });
 
 test('workspace rows stack the path under the name so the name can use the full width', () => {

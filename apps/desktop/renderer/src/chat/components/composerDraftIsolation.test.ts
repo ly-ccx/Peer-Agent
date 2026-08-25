@@ -125,6 +125,14 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
 });
 
+test('sending a new task clears shared draft text while keeping isolation preference', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /persistDraftComposer\(\{ draft: '', queue: \[\] \}\)/);
+  assert.match(surface, /persistDraftComposer\(\{ draft: text, queue: \[\] \}\)/);
+  assert.match(surface, /draft: patch\.draft \?\? draftComposer\.draft/);
+  assert.match(surface, /queue: \[\.\.\.\(patch\.queue \?\? draftComposer\.messageQueue\)\]/);
+});
+
 test('new tasks can opt into worktree isolation from the draft composer', async () => {
   const [surface, main, service, panel] = await Promise.all([
     readSource('./ChatSurface.tsx'),
@@ -136,7 +144,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
-  assert.match(surface, /isDraftConversation && workspacePath/);
+  assert.match(surface, /\{workspacePath \? \(/);
+  assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
+  assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
   assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
@@ -146,11 +156,16 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /planComposerGitChrome/);
   assert.match(surface, /composer-workspace-head/);
   assert.match(surface, /composer-task-line/);
+  assert.match(surface, /GitWorktreeGlyph/);
   assert.match(surface, /composer-write-mismatch/);
   assert.match(surface, /composer-bound-branch/);
   assert.match(surface, /canSelectComposerSourceBranch/);
   assert.match(surface, /buildComposerBranchOptions/);
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
+  assert.match(surface, /searchable/);
+  assert.match(surface, /gitCreateBranch/);
+  assert.match(surface, /本地分支/);
+  assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);

@@ -31,6 +31,7 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /artifact\.kind === 'image'/);
   assert.match(source, /projectTaskGoalHistory/);
   assert.match(source, /goalPlansList/);
+  assert.match(source, /点继续追问去补/);
   assert.doesNotMatch(source, /historyDiffs/);
   assert.doesNotMatch(source, /会话一共/);
   assert.match(source, /evaluateAcceptanceCloseGate/);
@@ -84,9 +85,13 @@ test('result drawer keeps 确认归档 and 继续追问, without mounting a chat
   assert.doesNotMatch(app, /getTaskContinuationAction/);
   assert.match(app, /\? '确认归档'/);
   assert.match(app, /\? '继续追问'/);
+  assert.match(app, /goalPlansMarkRequestedUserInput/);
+  assert.match(app, /userOverride/);
+  assert.match(app, /证据不全，仍要归档？/);
   assert.doesNotMatch(app, /\? '确认验收'/);
   assert.doesNotMatch(app, /\? '退回补充'/);
   assert.match(app, /closeBlocked/);
+  assert.doesNotMatch(app, /disabled=\{Boolean\(resultAcceptancePending\) \|\| closeBlocked\}/);
   assert.match(app, /conversation-result-drawer__gate/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.match(styles, /conversation-result-view__criteria/);

@@ -40,3 +40,12 @@ test('legacy conversations without fastMode reopen as non-fast', () => {
   const reopened = createConversationStore({ storeDir: dir });
   assert.equal(reopened.getConversation(created.id).fastMode, false);
 });
+
+test('preferredExecutionIsolation can be updated after the conversation exists', () => {
+  const created = store.createConversation({ title: 'pref' });
+  assert.equal(created.preferredExecutionIsolation, 'none');
+  const updated = store.updatePreferredExecutionIsolation(created.id, 'worktree');
+  assert.equal(updated.preferredExecutionIsolation, 'worktree');
+  const reopened = createConversationStore({ storeDir: dir });
+  assert.equal(reopened.getConversation(created.id).preferredExecutionIsolation, 'worktree');
+});

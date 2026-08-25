@@ -12,6 +12,8 @@ test('ChatHeader only renders Workbench controls when a provider is available', 
   assert.match(source, /\{workbench \? <WorkbenchToggle isZh=\{isZh\} \/> : null\}/);
   assert.match(source, /chat-header-branch/);
   assert.match(source, /chat-header-branch-text/);
+  assert.match(source, /GitWorktreeGlyph/);
+  assert.match(source, /GitBranchGlyph/);
   assert.doesNotMatch(source, /^\s*<SidebarToggle isZh=\{isZh\} \/>$/m);
   assert.doesNotMatch(source, /^\s*<WorkbenchToggle isZh=\{isZh\} \/>$/m);
 });

@@ -989,6 +989,11 @@ export interface GoalPlan {
   readonly resultAcceptance?: {
     readonly acceptedAt: string;
     readonly acceptedBy?: 'user' | string;
+    /**
+     * 用户在证据不全时二次确认后的强制归档覆盖。
+     * 为 true 时关闭门禁可放行，但仍应保留缺口提示供事后回看。
+     */
+    readonly userOverride?: boolean;
   };
   /** 验收后交回目标分支的结果；缺字段表示尚未交回。 */
   readonly deliveryHandoff?: GoalDeliveryHandoff;
