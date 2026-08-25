@@ -7,6 +7,16 @@ export const TRAY_RECENT_LIMIT = 5;
 /** 托盘「更多」二级菜单最多展示到第 N 条（含一级已展示的前 TRAY_RECENT_LIMIT 条）。 */
 export const TRAY_RECENT_EXPANDED_LIMIT = 20;
 export const TRAY_TITLE_MAX_CHARS = 36;
+/**
+ * 订阅驱动的托盘菜单重建延迟。
+ * CLI/跨进程变更风暴时，2s 仍可能叠到同步 git/list；抬到 5s，点击路径仍即时 refresh。
+ */
+export const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 5_000;
+/**
+ * 订阅刷新复用最近一次托盘输入的窗口。
+ * 指纹未变时跳过 listConversations/listRuns 等同步加载。
+ */
+export const TRAY_MENU_INPUT_CACHE_TTL_MS = 5_000;
 
 export function truncateTrayTitle(title, maxChars = TRAY_TITLE_MAX_CHARS) {
   const text = String(title ?? '').replace(/\s+/g, ' ').trim();
@@ -19,6 +29,37 @@ export function workspaceShortName(workspacePath) {
   if (typeof workspacePath !== 'string' || !workspacePath.trim()) return '';
   const base = path.basename(workspacePath.trim());
   return base || workspacePath.trim();
+}
+
+/** 托盘菜单内容指纹：未变时跳过 Menu.buildFromTemplate / setContextMenu。 */
+export function buildTrayMenuFingerprint({
+  recent = [],
+  recentAutomationRuns = [],
+  automationRuntime = null,
+} = {}) {
+  return JSON.stringify({
+    recent: (Array.isArray(recent) ? recent : []).map((item) => ({
+      id: item?.id ?? null,
+      title: item?.title ?? null,
+      updatedAt: item?.updatedAt ?? null,
+      workspacePath: item?.workspacePath ?? null,
+      status: item?.status ?? null,
+    })),
+    recentAutomationRuns: (Array.isArray(recentAutomationRuns) ? recentAutomationRuns : []).map((item) => ({
+      automationId: item?.automationId ?? null,
+      runId: item?.runId ?? null,
+      automationName: item?.automationName ?? null,
+      status: item?.status ?? null,
+      summary: item?.summary ?? null,
+      updatedAt: item?.updatedAt ?? null,
+    })),
+    automationRuntime: automationRuntime
+      ? {
+          activeCount: automationRuntime.activeCount ?? 0,
+          globallyPaused: Boolean(automationRuntime.globallyPaused),
+        }
+      : null,
+  });
 }
 
 /**
@@ -233,7 +274,19 @@ export function createTrayController({
     onQuit: () => handlers.onQuit?.(),
   };
 
-  async function buildMenu() {
+  let lastMenuFingerprint = null;
+  let cachedMenuInputs = null;
+  let cachedMenuInputsAt = 0;
+
+  async function loadTrayMenuInputs({ force = false } = {}) {
+    const now = Date.now();
+    if (
+      !force
+      && cachedMenuInputs
+      && now - cachedMenuInputsAt < TRAY_MENU_INPUT_CACHE_TTL_MS
+    ) {
+      return cachedMenuInputs;
+    }
     let recent = [];
     try {
       // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
@@ -250,32 +303,41 @@ export function createTrayController({
     } catch (err) {
       console.warn('[tray] listRecentAutomationRuns failed:', err);
     }
-    const template = buildTrayMenuTemplate({
-      recent,
-      recentAutomationRuns,
-      handlers: boundHandlers,
-      collapsedLimit: TRAY_RECENT_LIMIT,
-      expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
-      automationRuntime: typeof getAutomationRuntime === 'function' ? await getAutomationRuntime() : null,
-    });
-    return Menu.buildFromTemplate(template);
+    const automationRuntime = typeof getAutomationRuntime === 'function'
+      ? await getAutomationRuntime()
+      : null;
+    const inputs = { recent, recentAutomationRuns, automationRuntime };
+    cachedMenuInputs = inputs;
+    cachedMenuInputsAt = now;
+    return inputs;
   }
 
-  async function refresh() {
+  async function refresh({ force = false } = {}) {
     if (destroyed || !tray) return;
     try {
-      const menu = await buildMenu();
+      const inputs = await loadTrayMenuInputs({ force });
+      const fingerprint = buildTrayMenuFingerprint(inputs);
+      if (!force && fingerprint === lastMenuFingerprint) {
+        return;
+      }
+      const template = buildTrayMenuTemplate({
+        recent: inputs.recent,
+        recentAutomationRuns: inputs.recentAutomationRuns,
+        handlers: boundHandlers,
+        collapsedLimit: TRAY_RECENT_LIMIT,
+        expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
+        automationRuntime: inputs.automationRuntime,
+      });
+      const menu = Menu.buildFromTemplate(template);
       tray.setContextMenu(menu);
+      lastMenuFingerprint = fingerprint;
     } catch (err) {
       console.warn('[tray] refresh failed:', err);
     }
   }
 
-  // 性能治理（§12，multi-task-ui-performance-remediation.md）：tray 菜单重建包含
-  // listRecentConversations 等同步 IO，订阅驱动的刷新从 120ms 提升到 2s 退避，
-  // 避免在多任务变更风暴中参与 ~300ms 自激循环；点击/右键路径仍调用 refresh() 即时刷新。
-  const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 2_000;
-
+  // 性能治理：订阅驱动刷新抬到 5s 退避；TTL 内复用输入，跳过 listConversations/listRuns。
+  // 点击/右键路径仍调用 refresh({ force: true }) 即时刷新。
   function scheduleRefresh(delayMs = TRAY_SUBSCRIPTION_REFRESH_DELAY_MS) {
     if (destroyed) return;
     if (refreshTimer) return; // 已有排队刷新：不提前、不重置（风暴退避）
@@ -293,7 +355,7 @@ export function createTrayController({
 
   // Rebuild on open-ish interactions so Recent stays fresh without polling.
   tray.on?.('click', () => {
-    void refresh().then(() => {
+    void refresh({ force: true }).then(() => {
       // On some platforms left-click does not auto-open context menu.
       if (platform !== 'darwin' && tray && !destroyed) {
         try {
@@ -305,10 +367,10 @@ export function createTrayController({
     });
   });
   tray.on?.('right-click', () => {
-    void refresh();
+    void refresh({ force: true });
   });
 
-  void refresh();
+  void refresh({ force: true });
 
   return {
     isActive: () => Boolean(tray) && !destroyed,

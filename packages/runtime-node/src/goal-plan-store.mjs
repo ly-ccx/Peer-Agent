@@ -1908,12 +1908,12 @@ export function createGoalPlanStore({
   }
 
   // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
-  // 同时把磁盘写入合并到 300ms 窗口，降低高频 tick 的 IO 与广播放大。
+  // 同时把磁盘写入合并到 1s 窗口，降低 CLI 后台跑时跨进程 .changes.jsonl 放大。
   const runnerProgressOverlay = new Map();
   const runnerProgressTimers = new Map();
-  // soft progress IPC 合并：写盘 300ms、广播 100ms，硬状态仍即时。
+  // soft progress：同进程广播 100ms；跨进程写盘 1s。硬状态仍即时。
   const runnerProgressNotifyTimers = new Map();
-  const RUNNER_PROGRESS_PERSIST_MS = 300;
+  const RUNNER_PROGRESS_PERSIST_MS = 1000;
   const RUNNER_PROGRESS_NOTIFY_MS = 100;
 
   function clearRunnerProgressState(planId) {
@@ -3031,7 +3031,7 @@ export function createGoalPlanStore({
     const nextPlan = { ...plan, runner: nextRunner, updatedAt: now, ...(timing ? { timing } : {}) };
 
     // 高频 runner 进度：内存即时可见 + 广播 runner-progress（带 runner 本地 patch），
-    // 写盘节流到 300ms，避免每个 tick 全量 list 与磁盘抖动。
+    // 写盘节流到 1s，避免 CLI 后台跑时跨进程刷新把 Desktop 打卡。
     if (changeKind === 'runner-progress') {
       const normalized = normalizePlan(nextPlan);
       const next = {

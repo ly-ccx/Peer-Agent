@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  TRAY_MENU_INPUT_CACHE_TTL_MS,
   TRAY_RECENT_EXPANDED_LIMIT,
   TRAY_RECENT_LIMIT,
+  TRAY_SUBSCRIPTION_REFRESH_DELAY_MS,
+  buildTrayMenuFingerprint,
   buildTrayMenuTemplate,
   truncateTrayTitle,
   workspaceShortName,
@@ -171,5 +174,33 @@ describe('buildTrayMenuTemplate', () => {
     }));
     const template = buildTrayMenuTemplate({ recent });
     assert.equal(template.some((item) => item.id === 'tray-more'), false);
+  });
+});
+
+
+describe('buildTrayMenuFingerprint', () => {
+  it('is stable for equivalent menu inputs and changes when content changes', () => {
+    const base = {
+      recent: [{ id: 'c1', title: 'A', updatedAt: 't1', workspacePath: '/x', status: 'active' }],
+      recentAutomationRuns: [{ automationId: 'a1', runId: 'r1', automationName: 'Auto', status: 'running', summary: 's', updatedAt: 't2' }],
+      automationRuntime: { activeCount: 1, globallyPaused: false },
+    };
+    const first = buildTrayMenuFingerprint(base);
+    const second = buildTrayMenuFingerprint({
+      recent: [{ ...base.recent[0] }],
+      recentAutomationRuns: [{ ...base.recentAutomationRuns[0] }],
+      automationRuntime: { ...base.automationRuntime },
+    });
+    assert.equal(first, second);
+    const changed = buildTrayMenuFingerprint({
+      ...base,
+      recent: [{ ...base.recent[0], title: 'B' }],
+    });
+    assert.notEqual(first, changed);
+  });
+
+  it('uses a longer subscription refresh delay than the previous 2s storm window', () => {
+    assert.ok(TRAY_SUBSCRIPTION_REFRESH_DELAY_MS >= 5_000);
+    assert.ok(TRAY_MENU_INPUT_CACHE_TTL_MS >= 5_000);
   });
 });

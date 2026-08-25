@@ -48,7 +48,10 @@ function createHarness(overrides = {}) {
     },
     setChatWorkspacePath: (candidate) => calls.push(['chat-workspace', candidate]),
     setSkillWorkspacePath: (candidate) => calls.push(['skill-workspace', candidate]),
-    readProjectIndex: ({ workspaceRoot }) => overrides.projectIndex?.[workspaceRoot] ?? null,
+    readProjectIndex: (options) => {
+      calls.push(['read-project-index', options]);
+      return overrides.projectIndex?.[options.workspaceRoot] ?? null;
+    },
     nowIso: () => '2026-08-01T12:00:00.000Z',
   });
 
@@ -341,12 +344,17 @@ test('stores workspace baseBranch without inventing main, and switching it does 
 
 test('returns project metadata with basename fallback', () => {
   const indexed = { name: 'Indexed', absolutePath: '/indexed' };
-  const { service } = createHarness({ projectIndex: { '/indexed': [indexed] } });
+  const { service, calls } = createHarness({ projectIndex: { '/indexed': [indexed] } });
 
   assert.equal(service.getWorkspaceInfo(null), null);
   assert.equal(service.getWorkspaceInfo('/indexed'), indexed);
   assert.deepEqual(service.getWorkspaceInfo('/fallback'), {
     name: 'fallback',
     absolutePath: '/fallback',
+  });
+  const indexCalls = calls.filter((entry) => entry[0] === 'read-project-index');
+  assert.deepEqual(indexCalls[0][1], {
+    workspaceRoot: '/indexed',
+    includePackages: false,
   });
 });

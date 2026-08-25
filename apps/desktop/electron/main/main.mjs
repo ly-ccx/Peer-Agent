@@ -453,14 +453,20 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
-    taskOverviewBroadcast.request({
-      reason: 'goalPlans:changed',
-      planId: payload?.planId ?? null,
-    });
+    // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
+    if (payload?.changeKind !== 'runner-progress') {
+      taskOverviewBroadcast.request({
+        reason: 'goalPlans:changed',
+        planId: payload?.planId ?? null,
+      });
+    }
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
       console.warn('[task-notification] handleGoalPlanChanged failed:', err);
+    }
+    if (payload?.changeKind === 'runner-progress') {
+      return;
     }
     // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
     queueMicrotask(() => {
