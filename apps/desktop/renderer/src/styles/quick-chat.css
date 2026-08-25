@@ -264,21 +264,19 @@ body:has(.quick-chat-shell) {
   padding: 2px 0 0;
 }
 
-/* Compact attachment chips for Quick Chat (main chat rem sizes look oversized here). */
-.quick-chat-composer .attachment-chip {
-  gap: 6px;
-  max-width: min(100%, 220px);
-  padding: 3px 5px;
+/* Quick Chat keeps a compact media/doc strip so the overlay stays dense. */
+.quick-chat-composer .attachment-chip--doc {
+  gap: 8px;
+  max-width: min(100%, 240px);
+  padding: 7px 8px;
+  border-radius: 12px;
 }
 
-.quick-chat-composer .attachment-thumb-btn,
-.quick-chat-composer .attachment-file-icon {
+.quick-chat-composer .attachment-kind-badge {
   width: 28px;
   height: 28px;
-}
-
-.quick-chat-composer .attachment-file-icon {
-  font-size: 9px;
+  border-radius: 8px;
+  font-size: 8px;
 }
 
 .quick-chat-composer .attachment-meta {
@@ -302,16 +300,13 @@ body:has(.quick-chat-shell) {
   font-size: 12px;
 }
 
-/* Image chips follow Codex tile style even inside Quick Chat. */
-.quick-chat-composer .attachment-chip.image {
+.quick-chat-composer .attachment-chip--media {
   width: 56px;
   height: 56px;
   max-width: 56px;
-  padding: 0;
-  gap: 0;
+  border-radius: 12px;
 }
-.quick-chat-composer .attachment-chip.image .attachment-thumb-btn,
-.quick-chat-composer .attachment-chip.image .attachment-file-icon {
+.quick-chat-composer .attachment-chip--media .attachment-thumb-btn {
   width: 100%;
   height: 100%;
 }
