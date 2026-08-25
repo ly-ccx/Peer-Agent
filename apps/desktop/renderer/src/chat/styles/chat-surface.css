@@ -4766,8 +4766,8 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .chat-composer--home {
-  grid-template-rows: minmax(72px, 1fr) auto;
-  min-height: 154px;
+  grid-template-rows: minmax(96px, 1fr) auto;
+  min-height: 178px;
   padding: 10px;
   border-radius: 26px;
   box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
@@ -4813,7 +4813,6 @@ button.chat-header-cap-item:focus-visible {
 .chat-composer--compact > textarea {
   grid-area: home-text;
   width: 100%;
-  max-height: 160px;
   box-sizing: border-box;
   align-self: stretch;
   /* 左 padding 对齐 + 图标左缘：附件按钮 28px, 图标 14px → (28-14)/2 = 7px。 */
@@ -4823,7 +4822,8 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .chat-composer--home > textarea {
-  min-height: 72px;
+  min-height: 96px;
+  max-height: 240px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.5;
 }
