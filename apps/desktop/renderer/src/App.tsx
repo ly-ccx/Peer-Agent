@@ -1289,19 +1289,11 @@ function MainApp() {
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;
-                            const canAccept =
-                              item.source === 'goal_plan' && Boolean(item.taskId);
-                            if (!canAccept) return null;
-                            const closeBlocked = Boolean(resultCloseGate && !resultCloseGate.ok);
                             return (
                               <footer className="conversation-result-drawer__footer">
-                                {closeBlocked && resultCloseGate?.message ? (
-                                  <p className="conversation-result-drawer__gate">{resultCloseGate.message}</p>
-                                ) : null}
                                 <button
                                   type="button"
-                                  className="task-overview-btn"
-                                  disabled={Boolean(resultAcceptancePending)}
+                                  className="task-overview-btn task-overview-btn--primary"
                                   onClick={() => {
                                     void (async () => {
                                       if (item.source === 'goal_plan' && item.taskId) {
@@ -1321,45 +1313,6 @@ function MainApp() {
                                   }}
                                 >
                                   {isZh ? '继续追问' : 'Follow up'}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="task-overview-btn task-overview-btn--primary"
-                                  disabled={Boolean(resultAcceptancePending)}
-                                  onClick={() => {
-                                    if (resultAcceptancePending) return;
-                                    void (async () => {
-                                      let userOverride = false;
-                                      if (closeBlocked) {
-                                        const gapMessage = resultCloseGate?.message?.trim()
-                                          || (isZh
-                                            ? '还缺对照证据，不能直接归档。'
-                                            : 'Evidence is still incomplete.');
-                                        const ok = await confirm({
-                                          title: isZh ? '证据不全，仍要归档？' : 'Archive with incomplete evidence?',
-                                          message: isZh
-                                            ? `${gapMessage}\n\n确认后会强制归档，并保留缺口记录。也可改点「继续追问」去补证据。`
-                                            : `${gapMessage}\n\nThis will force-archive and keep the gap record. Or use Follow up to supply evidence.`,
-                                          confirmText: isZh ? '仍要归档' : 'Archive anyway',
-                                          cancelText: isZh ? '取消' : 'Cancel',
-                                          tone: 'danger',
-                                        });
-                                        if (!ok) return;
-                                        userOverride = true;
-                                      }
-                                      resultAcceptanceUserOverrideRef.current = userOverride;
-                                      setResultAcceptancePending(item);
-                                      requestClose();
-                                    })();
-                                  }}
-                                >
-                                  {resultAcceptancePending
-                                    ? isZh
-                                      ? '正在归档…'
-                                      : 'Archiving…'
-                                    : isZh
-                                      ? '确认归档'
-                                      : 'Archive'}
                                 </button>
                               </footer>
                             );

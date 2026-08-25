@@ -193,7 +193,7 @@ test('aggregator keeps one Task per conversation and uses plan.title as main tit
   assert.equal(items[0].currentGoalTitle, undefined);
 });
 
-test('aggregator projects every unaccepted result in one conversation as its own card', () => {
+test('aggregator 不把 completed 当待验收卡；默认工作台为空', () => {
   const plans = [
     {
       planId: 'result-old',
@@ -213,7 +213,7 @@ test('aggregator projects every unaccepted result in one conversation as its own
       planId: 'result-accepted',
       conversationId: 'conversation-results',
       status: 'completed',
-      title: '已验收结果',
+      title: '已完成结果',
       updatedAt: '2026-08-09T03:00:00.000Z',
       resultAcceptance: { acceptedAt: '2026-08-09T03:30:00.000Z' },
     },
@@ -231,14 +231,11 @@ test('aggregator projects every unaccepted result in one conversation as its own
     ],
   });
 
-  const resultIds = () =>
-    agg.listTaskOverview({ activeWithinMs: 0 })
-      .filter((item) => item.actionRight === 'result_ready')
-      .map((item) => item.taskId);
-  assert.deepEqual(resultIds(), ['result-new', 'result-old']);
-
-  plans[1].resultAcceptance = { acceptedAt: '2026-08-09T04:00:00.000Z' };
-  assert.deepEqual(resultIds(), ['result-old']);
+  const live = agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(live.filter((item) => item.actionRight === 'result_ready').length, 0);
+  assert.ok(live.every((item) => item.source === 'conversation' || item.actionRight !== 'terminal'));
+  const history = agg.listTaskOverview({ includeTerminal: true, activeWithinMs: 0 });
+  assert.ok(history.filter((item) => item.source === 'goal_plan').every((item) => item.actionRight === 'terminal'));
 });
 
 // ---------------------------------------------------------------------------
@@ -1251,10 +1248,10 @@ test('聚合器依赖校验', () => {
 const NOW = Date.parse('2026-08-08T12:00:00.000Z');
 const RECENT = '2026-08-07T12:00:00.000Z'; // 功能上线前 → 存量祖父化
 const STALE = '2026-07-01T12:00:00.000Z';
-/** 功能上线后的新完成（需一键确认） */
+/** 功能上线后的新完成（不再进工作台验收） */
 const POST_CUTOFF = '2026-08-08T11:30:00.000Z';
 
-test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收进入工作台', () => {
+test('isGoalPlanInScope：completed 默认不进工作台；自检/交回未结束才留下', () => {
   assert.equal(
     isGoalPlanInScope(
       { planId: 'p', status: 'failed', updatedAt: RECENT, targetWorkspacePath: '/x/peer_agent' },
@@ -1284,13 +1281,13 @@ test('isGoalPlanInScope：存量 completed 祖父化排除；上线后未验收�
     ),
     false,
   );
-  // 上线后未验收 completed → 工作台待验收
+  // 上线后 completed 也不进工作台（取消验收卡点）
   assert.equal(
     isGoalPlanInScope(
       { planId: 'p', status: 'completed', updatedAt: POST_CUTOFF, targetWorkspacePath: '/x/peer_agent' },
       { nowMs: NOW },
     ),
-    true,
+    false,
   );
   // 显式已验收 / 存量：历史 includeTerminal 纳入
   assert.equal(
@@ -1348,7 +1345,7 @@ test('已验收仅有 deliveryBinding 不进工作台，真实交回中仍进工
   assert.equal(isGoalPlanMetaCandidate(delivering, { includeTerminal: false }), true);
 });
 
-test('历史 includeTerminal 不把未验收 completed 当作 hydrate 候选', () => {
+test('历史 includeTerminal 把 completed 当作终态候选', () => {
   const unaccepted = {
     planId: 'unaccepted-done',
     status: 'completed',
@@ -1367,8 +1364,8 @@ test('历史 includeTerminal 不把未验收 completed 当作 hydrate 候选', (
     targetWorkspacePath: '/x/peer_agent',
   };
 
-  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: false }), true);
-  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: true }), false);
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: false }), false);
+  assert.equal(isGoalPlanMetaCandidate(unaccepted, { includeTerminal: true }), true);
   assert.equal(isGoalPlanMetaCandidate(accepted, { includeTerminal: true }), true);
   assert.equal(isGoalPlanMetaCandidate(failed, { includeTerminal: true }), true);
 });
@@ -1505,7 +1502,7 @@ test('isPlanResultAccepted：显式验收与存量祖父化', () => {
   assert.ok(POST_CUTOFF >= RESULT_ACCEPTANCE_REQUIRED_SINCE);
 });
 
-test('上线后未验收 completed 投影 result_ready；存量不进工作台', () => {
+test('completed 默认不进工作台；includeTerminal 才进历史', () => {
   const agg = createTaskOverviewAggregator({
     goalPlanStore: {
       listPlanDetails: () => [
@@ -1548,15 +1545,18 @@ test('上线后未验收 completed 投影 result_ready；存量不进工作台',
     workspacePath: '/x/peer_agent',
     activeWithinMs: 0,
   });
-  // 仅上线后未验收一条；存量与已确认不进工作台
-  assert.equal(items.length, 1);
-  assert.equal(items[0].taskId, 'done-1');
-  assert.equal(items[0].actionRight, 'result_ready');
-  assert.equal(items[0].title, '缓存命中率专项：定位并修复命中率低的问题');
-  assert.equal(items[0].conversationId, 'conv-1');
+  assert.equal(items.length, 0);
+
+  const history = agg.listTaskOverview({
+    workspacePath: '/x/peer_agent',
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+  assert.ok(history.some((item) => item.taskId === 'done-1' && item.actionRight === 'terminal'));
+  assert.ok(history.every((item) => item.actionRight === 'terminal'));
 });
 
-test('上线后 result_ready 不单独限流；存量与已验收进历史 terminal', () => {
+test('completed 不占工作台；includeTerminal 时全部进历史 terminal', () => {
   const plans = Array.from({ length: 20 }, (_, i) => ({
     planId: `done-${i}`,
     status: 'completed',
@@ -1574,7 +1574,7 @@ test('上线后 result_ready 不单独限流；存量与已验收进历史 termi
   plans.push({
     planId: 'accepted-1',
     status: 'completed',
-    title: '已验收',
+    title: '已完成',
     updatedAt: POST_CUTOFF,
     targetWorkspacePath: '/x/peer_agent',
     resultAcceptance: { acceptedAt: POST_CUTOFF, acceptedBy: 'user' },
@@ -1584,9 +1584,7 @@ test('上线后 result_ready 不单独限流；存量与已验收进历史 termi
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
   });
   const workbench = agg.listTaskOverview({ workspacePath: '/x/peer_agent', limit: 1000 });
-  assert.equal(workbench.length, 20);
-  assert.ok(workbench.every((item) => item.actionRight === 'result_ready'));
-  assert.ok(!workbench.some((i) => i.taskId === 'legacy-1' || i.taskId === 'accepted-1'));
+  assert.equal(workbench.length, 0);
 
   const history = agg.listTaskOverview({
     workspacePath: '/x/peer_agent',
@@ -1757,14 +1755,20 @@ test('listTaskOverview ignores stale waiting_user after plan completion', () => 
     },
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
   });
-  const [item] = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
-  assert.equal(item.actionRight, 'result_ready');
+  const items = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
+  assert.equal(items.length, 0);
+  const [item] = agg.listTaskOverview({
+    workspacePath: '/x/peer_agent',
+    includeTerminal: true,
+    activeWithinMs: 0,
+  });
+  assert.equal(item.actionRight, 'terminal');
   assert.equal(item.needsYouReason, undefined);
-  assert.equal(item.nextAction, 'review_result');
-  assert.equal(item.statusLabel, '待用户验收');
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, '已完成');
 });
 
-test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活跃任务并存', () => {
+test('listTaskOverview 默认排除 failed 与 completed；活跃任务仍在', () => {
   const plans = [
     {
       planId: 'old-fail',
@@ -1777,7 +1781,7 @@ test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活
     {
       planId: 'done',
       status: 'completed',
-      title: '已完成待验收',
+      title: '已完成',
       updatedAt: POST_CUTOFF,
       targetWorkspacePath: '/x/peer_agent',
       conversationId: 'c-done',
@@ -1785,7 +1789,7 @@ test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活
     {
       planId: 'legacy-done',
       status: 'completed',
-      title: '存量完成不进待验收',
+      title: '存量完成',
       updatedAt: STALE,
       targetWorkspacePath: '/x/peer_agent',
     },
@@ -1802,12 +1806,9 @@ test('listTaskOverview 默认排除 failed；上线后 completed 可验收，活
     automationStore: { listDefinitions: () => [], listRuns: () => [] },
   });
   const items = agg.listTaskOverview({ workspacePath: '/x/peer_agent', activeWithinMs: 0 });
-  assert.equal(items.length, 2);
+  assert.equal(items.length, 1);
   assert.equal(items[0].taskId, 'live');
   assert.equal(items[0].actionRight, 'needs_you');
-  assert.equal(items[1].taskId, 'done');
-  assert.equal(items[1].actionRight, 'result_ready');
-  assert.equal(items[1].title, '已完成待验收');
 });
 
 test('conversation-scoped TaskOverview never falls back to hydrating every GoalPlan', () => {
@@ -1947,8 +1948,8 @@ test('listTaskOverview 会补写已完成计划缺失的 qualityReview，并收�
   assert.equal(runnerPatch?.planId, 'plan-stuck-review');
   assert.equal(runnerPatch?.patch?.status, 'completed');
   assert.equal(items.length, 1);
-  assert.equal(items[0].actionRight, 'result_ready');
-  assert.equal(items[0].statusLabel, '待用户验收');
+  assert.equal(items[0].actionRight, 'terminal');
+  assert.equal(items[0].statusLabel, '已完成');
   assert.equal(items[0].qualityReviewStatus, 'passed');
 });
 

@@ -5,7 +5,7 @@ import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
- * 工作台页：只回答「现在轮到我做什么」。
+ * 工作台页：需要你（遇选项）、正在推进、未读。
  * 折叠头部状态 isHeaderCompact 由 TaskOverviewPage 内的实际滚动容器统一维护。
  *
  * 侧栏两套入口（勿混）：
@@ -31,7 +31,7 @@ export function HomePage({
   /** 空态「发起新任务」：跳到新建任务页（与侧栏新建任务一致）。 */
   readonly onNewTask?: () => void;
   readonly onOpenItem?: OpenTaskOverviewItem;
-  /** 工作台一键确认验收（落库 resultAcceptance）。 */
+  /** 遗留：验收入口已取消，保留 prop 以免调用方断裂。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan。 */

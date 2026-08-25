@@ -180,8 +180,8 @@ test('源码：首页按会话收成一张卡，Goal Thread 分组仍保留在�
   const source = await readPage();
   assert.match(source, /groupInboxByConversation/);
   assert.match(source, /groupResultCardsByGoalThread/);
-  assert.match(source, /<ResultCard/);
-  assert.match(source, /<h2>结果待验收<\/h2>/);
+  assert.match(source, /<h2>正在推进<\/h2>/);
+  assert.doesNotMatch(source, /<h2>结果待验收<\/h2>/);
   assert.doesNotMatch(source, /task-overview-session-card/);
   const grouping = await readGrouping();
   assert.match(grouping, /onClick=\{\(\) => onOpenItem\?\.\(node\.item\)\}/);

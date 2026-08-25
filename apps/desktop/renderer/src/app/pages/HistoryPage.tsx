@@ -36,16 +36,15 @@ function historyKindOf(item: TaskOverviewItem): Exclude<HistoryFilter, 'all'> {
   const label = item.statusLabel ?? '';
   if (label.includes('失败') || label.includes('超时') || label.includes('阻塞')) return 'failed';
   if (label.includes('取消') || label.includes('跳过')) return 'cancelled';
-  if (label.includes('归档') || label.includes('已完成') && item.source === 'automation') return 'archived';
-  if (label.includes('验收') || label.includes('完成') || label.includes('已验收')) return 'accepted';
-  // 过渡期：terminal 默认按验收展示，避免无映射时落空
+  if (label.includes('归档') || (label.includes('已完成') && item.source === 'automation')) return 'archived';
+  if (label.includes('完成') || label.includes('验收') || label.includes('已验收')) return 'accepted';
   return 'accepted';
 }
 
 function historyBadge(kind: Exclude<HistoryFilter, 'all'>): string {
   switch (kind) {
     case 'accepted':
-      return '已验收';
+      return '已完成';
     case 'archived':
       return '已归档';
     case 'cancelled':
@@ -162,7 +161,7 @@ export function HistoryPage({ workspacePath = null }: { readonly workspacePath?:
           {(
             [
               ['all', '全部'],
-              ['accepted', '已验收'],
+              ['accepted', '已完成'],
               ['archived', '已归档'],
               ['cancelled', '已取消'],
               ['failed', '失败'],

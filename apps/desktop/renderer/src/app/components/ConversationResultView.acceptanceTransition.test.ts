@@ -77,22 +77,18 @@ test('result view is criteria-first and does not remount the task thread', async
   assert.doesNotMatch(source, />子任务</);
 });
 
-test('result drawer keeps 确认归档 and 继续追问, without mounting a chat composer', async () => {
+test('result drawer keeps 继续追问 without 确认归档, and without mounting a chat composer', async () => {
   const [app, styles] = await Promise.all([readApp(), readStyles()]);
   assert.doesNotMatch(app, /revealComposer/);
   assert.doesNotMatch(app, /hideComposer/);
   assert.doesNotMatch(app, /resultComposerVisible/);
   assert.doesNotMatch(app, /getTaskContinuationAction/);
-  assert.match(app, /\? '确认归档'/);
+  assert.doesNotMatch(app, /\? '确认归档'/);
   assert.match(app, /\? '继续追问'/);
   assert.match(app, /goalPlansMarkRequestedUserInput/);
-  assert.match(app, /userOverride/);
-  assert.match(app, /证据不全，仍要归档？/);
+  assert.doesNotMatch(app, /证据不全，仍要归档？/);
   assert.doesNotMatch(app, /\? '确认验收'/);
   assert.doesNotMatch(app, /\? '退回补充'/);
-  assert.match(app, /closeBlocked/);
-  assert.doesNotMatch(app, /disabled=\{Boolean\(resultAcceptancePending\) \|\| closeBlocked\}/);
-  assert.match(app, /conversation-result-drawer__gate/);
   assert.match(styles, /conversation-result-view__checks/);
   assert.match(styles, /conversation-result-view__criteria/);
   assert.match(styles, /\.conversation-result-view__diff-text \{/);
@@ -131,19 +127,13 @@ test('result drawer always shows ConversationResultView and keeps actions below 
   assert.doesNotMatch(styles, /\.conversation-result-view__footer/);
 });
 
-test('result drawer closes first and leaves shatter to the workbench card', async () => {
+test('result drawer no longer archives from the footer', async () => {
   const source = await readApp();
   assert.doesNotMatch(source, /ParticleShatterOverlay/);
-  assert.doesNotMatch(source, /resultShatterRef/);
-  assert.doesNotMatch(source, /resultShattering/);
-  assert.doesNotMatch(source, /setResultAcceptancePhase/);
-  assert.doesNotMatch(source, /runAcceptanceTransition/);
-  assert.match(source, /setResultAcceptancePending\(item\)/);
+  assert.doesNotMatch(source, /setResultAcceptancePending\(item\)/);
   assert.match(source, /requestClose\(\)/);
-  assert.match(source, /acceptHandlerRef=\{workbenchAcceptRef\}/);
-  assert.match(source, /resolveResultDrawerAcceptanceTargets\(pending, acceptTogether\)/);
-  assert.match(source, /workbenchAcceptRef\.current\?\.\(pending\)/);
-  assert.match(source, /void acceptResultFromWorkbench\(target\)/);
+  assert.doesNotMatch(source, /\? '确认归档'/);
+  assert.match(source, /\? '继续追问'/);
 });
 
 test('result drawer no longer mounts a fullscreen shatter layer', async () => {
