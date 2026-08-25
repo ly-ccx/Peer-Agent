@@ -356,6 +356,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
       fastMode: convFastMode,
+      preferredExecutionIsolation: convPreferredExecutionIsolation,
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
@@ -1213,7 +1214,11 @@ export function ChatSurface({
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
       ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
-    setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
+    // 草稿页才用本地 draft 偏好；已有会话等 loadConversationMessages 恢复真实 meta，
+    // 避免先强制 false 造成「未勾选但实际仍是 worktree」的误导窗口。
+    if (!conversationId) {
+      setPreferredWorktree(persisted?.preferredWorktree === true);
+    }
     setDeliveryLine(null);
     setDeliveryLineKnown(false);
     // 打开会话的默认落点（贴底）在 render 阶段写入 pendingThreadScrollRestoreRef，
