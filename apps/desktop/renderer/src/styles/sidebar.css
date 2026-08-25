@@ -386,6 +386,17 @@
   padding: 2px 0 6px 6px;
 }
 
+/* Nested workspace sessions reuse channel-conversation-list, which otherwise
+   becomes a clip/scrollport with zero vertical padding. Let the workspace
+   tree scroll, and keep selected capsule shadows from being cropped when
+   this list shrinks to a single row. */
+.sidebar-workspace-tasks.channel-conversation-list {
+  flex: none;
+  overflow: visible;
+  padding: 6px 4px 6px 6px;
+  animation: none;
+}
+
 .sidebar-workspace-task-more {
   display: flex;
   align-items: center;
