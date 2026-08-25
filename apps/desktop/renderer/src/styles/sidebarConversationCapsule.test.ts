@@ -99,7 +99,7 @@ test('pin lives in the trailing action slot instead of a leading gutter', () => 
   );
 });
 
-test('selected conversation rows stay a fill instead of a lifted card', () => {
+test('selected conversation rows use a restrained ambient lift, not a card shadow', () => {
   const activeBody = ruleBody(
     sidebarCss,
     '.channel-conversation-list .conversation-row.active',
@@ -107,12 +107,14 @@ test('selected conversation rows stay a fill instead of a lifted card', () => {
   const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
   const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
 
-  assert.match(activeBody, /box-shadow:\s*none;/);
+  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(activeBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveBody, /box-shadow:\s*none;/);
+  assert.match(layeredActiveBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveHoverBody, /box-shadow:\s*none;/);
+  assert.match(layeredActiveHoverBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
+
+  assert.match(tokensCss, /--za-sidebar-active-shadow:\s*0 0 0 0\.5px/);
 });
 
 test('selected highlight lives on the conversation, not the workspace row', () => {

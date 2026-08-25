@@ -237,6 +237,8 @@
   --za-sidebar-active-bg: var(--glass-chrome-hover);
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #DCE0E8;
+  /* Restrained ambient lift — just enough to float, never a card. */
+  --za-sidebar-active-shadow: 0 0 0 0.5px rgba(26, 29, 33, 0.04), 0 1px 2px rgba(26, 29, 33, 0.05), 0 3px 8px rgba(26, 29, 33, 0.04);
   --za-sidebar-width: 264px;
   --za-inset-highlight: #FAFBFC;
   --za-focus: rgba(59, 127, 171, 0.25);
@@ -489,6 +491,7 @@
   --za-sidebar-active-bg: var(--glass-chrome-hover);
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: #2A303B;
+  --za-sidebar-active-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 10px rgba(0, 0, 0, 0.22);
   --za-inset-highlight: #181C24;
   --za-focus: rgba(93, 156, 191, 0.30);
   --za-scrollbar-thumb: rgba(73, 77, 88, 0.25);

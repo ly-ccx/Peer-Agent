@@ -256,14 +256,14 @@
   .conversation-row.active {
     border-color: transparent;
     background: var(--za-sidebar-active-bg, var(--chrome-sunken));
-    /* Selected is a fill, not a lifted card. */
-    box-shadow: none;
+    /* Soft ambient lift — restrained, not a card. */
+    box-shadow: var(--za-sidebar-active-shadow, none);
   }
 
   .conversation-row.active:hover {
     background: var(--za-sidebar-active-bg, var(--chrome-sunken));
     border-color: transparent;
-    box-shadow: none;
+    box-shadow: var(--za-sidebar-active-shadow, none);
   }
 
   .conversation-main {

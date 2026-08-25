@@ -592,7 +592,7 @@
 .channel-conversation-list .conversation-row.active {
   background: var(--za-sidebar-active-bg, var(--chrome-sunken));
   border-color: transparent;
-  box-shadow: none;
+  box-shadow: var(--za-sidebar-active-shadow, none);
   color: var(--graphite-base);
   font-weight: 400;
 }
