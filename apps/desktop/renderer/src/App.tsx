@@ -744,8 +744,9 @@ function MainApp() {
     setActivePage('chat');
   }, [activeWorkspace, conversationView, refreshConversations]);
 
-  const handleNewChat = useCallback(async () => {
-    const ws = registeredWorkspacePath(activeWorkspace, workspaces);
+  const handleNewChat = useCallback(async (workspacePath?: string) => {
+    const target = typeof workspacePath === 'string' ? workspacePath : activeWorkspace;
+    const ws = registeredWorkspacePath(target, workspaces);
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
     // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。

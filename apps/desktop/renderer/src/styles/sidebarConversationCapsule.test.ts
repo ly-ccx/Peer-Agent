@@ -200,3 +200,17 @@ test('workspace rows stack the path under the name so the name can use the full 
   assert.doesNotMatch(nameBody, /flex:\s*0 1 auto;/);
   assert.doesNotMatch(pathBody, /flex:\s*1 1 auto;/);
 });
+
+test('workspace rows reveal a new-task plus on hover or focus', () => {
+  const buttonBody = ruleBody(sidebarCss, '.sidebar-workspace-new-task');
+  const hoverBody = ruleBody(sidebarCss, '.sidebar-workspace-row:hover .sidebar-workspace-new-task');
+  const focusBody = ruleBody(sidebarCss, '.sidebar-workspace-row:focus-within .sidebar-workspace-new-task');
+
+  assert.match(buttonBody, /opacity:\s*0;/);
+  assert.match(buttonBody, /pointer-events:\s*none;/);
+  assert.match(buttonBody, /margin-left:\s*auto;/);
+  assert.match(hoverBody, /opacity:\s*1;/);
+  assert.match(hoverBody, /pointer-events:\s*auto;/);
+  assert.match(focusBody, /opacity:\s*1;/);
+  assert.match(focusBody, /pointer-events:\s*auto;/);
+});

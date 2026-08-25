@@ -353,6 +353,42 @@
 
 /* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
    柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
+.sidebar-workspace-new-task {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: none;
+  border: none;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-workspace-row:hover .sidebar-workspace-new-task {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-workspace-row:focus-within .sidebar-workspace-new-task {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-workspace-new-task:hover,
+.sidebar-workspace-new-task:focus-visible {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
 .ws-running-dot {
   position: relative;
   isolation: isolate;

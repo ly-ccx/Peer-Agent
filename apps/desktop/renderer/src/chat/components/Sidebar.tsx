@@ -173,7 +173,7 @@ export function Sidebar({
   readonly runningWorkspacePaths?: ReadonlySet<string>;
   readonly activePage: SidebarPage;
   readonly i18n: I18nRuntime;
-  readonly onNewChat: () => void;
+  readonly onNewChat: (workspacePath?: string) => void;
   readonly newTaskShortcutLabel?: string;
   readonly onOpenSearch?: () => void;
   readonly onSelectConversation: (id: string) => void;
@@ -295,6 +295,11 @@ export function Sidebar({
     onOpenWorkspaceHome?.(wsPath);
     await ensureWorkspaceActive(wsPath);
   }, [ensureWorkspaceActive, onOpenWorkspaceHome]);
+
+  const handleNewWorkspaceTask = useCallback((wsPath: string) => {
+    void handleActivateWorkspace(wsPath);
+    onNewChat(wsPath);
+  }, [handleActivateWorkspace, onNewChat]);
 
   const toggleWorkspaceTree = useCallback((wsPath: string) => {
     setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath));
@@ -584,7 +589,7 @@ export function Sidebar({
           <button
             type="button"
             className="sidebar-new-chat"
-            onClick={onNewChat}
+            onClick={() => { onNewChat(); }}
             title={newTaskShortcutLabel ? `${isZh ? '新建任务' : 'New Task'} (${newTaskShortcutLabel})` : (isZh ? '新建任务' : 'New Task')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -714,6 +719,20 @@ export function Sidebar({
                     </span>
                   </span>
                   {isRunning ? <span className="ws-running-dot" title={isZh ? '运行中' : 'Running'} /> : null}
+                  <button
+                    type="button"
+                    className="sidebar-workspace-new-task"
+                    title={isZh ? '新建任务' : 'New Task'}
+                    aria-label={isZh ? `在 ${ws.name} 新建任务` : `New task in ${ws.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleNewWorkspaceTask(ws.path);
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 5v14" /><path d="M5 12h14" />
+                    </svg>
+                  </button>
                 </div>
                 {isTreeOpen ? (
                   <div className="channel-conversation-list sidebar-workspace-tasks">
@@ -837,6 +856,16 @@ export function Sidebar({
               role="menu"
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  handleNewWorkspaceTask(contextWorkspace.path);
+                }}
+              >
+                <span>{isZh ? '新建任务' : 'New Task'}</span>
+              </button>
               <button
                 type="button"
                 role="menuitem"
