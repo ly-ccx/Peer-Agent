@@ -515,7 +515,7 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 
-/* 工作台计数是导航项的尾随信息；运行点跟在计数后面。 */
+/* 工作台计数是导航项的尾随信息；有计数时把它推到标题右侧。 */
 .sidebar-top .sidebar-automation-nav > .sidebar-workbench-counts {
   margin-left: auto;
   font-size: 0.68rem;
@@ -524,7 +524,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* 运行点始终钉在导航行最右；没有计数时也不能贴着标题。 */
 .sidebar-top .sidebar-automation-nav > .ws-running-dot {
+  margin-left: auto;
+}
+.sidebar-top .sidebar-automation-nav > .sidebar-workbench-counts + .ws-running-dot {
   margin-left: 6px;
 }
 
