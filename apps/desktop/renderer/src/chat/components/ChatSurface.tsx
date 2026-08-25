@@ -51,6 +51,7 @@ import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
   formatComposerBranchOptionLabel,
+  isSafeComposerBranchName,
   planComposerGitChrome,
   type TaskDeliveryLine,
 } from '../state/taskBoundBranch';
@@ -535,7 +536,7 @@ export function ChatSurface({
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const [preferredWorktree, setPreferredWorktree] = useState(false);
-  const { workspaceGit, workspaceIsGit } = useWorkspaceGit(workspacePath, {
+  const { workspaceGit, workspaceIsGit, refreshWorkspaceGit } = useWorkspaceGit(workspacePath, {
     refreshWhenIdle: !isStreaming,
   });
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
@@ -2291,17 +2292,22 @@ export function ChatSurface({
   }) && gitChrome.taskLine?.selectable === true;
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
     if (!gitChrome.taskLine?.selectable) return [];
-    const branches = workspaceGit?.ok ? workspaceGit.branches : [];
+    const localGroup = isZh ? '本地分支' : 'Local';
+    const remoteGroup = isZh ? '远程分支' : 'Remote';
     return buildComposerBranchOptions({
-      branches,
+      branches: workspaceGit?.ok ? workspaceGit.branches : [],
+      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
+      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
       selected: gitChrome.taskLine.value,
-    }).map((branch) => ({
-      value: branch,
-      label: branch === gitChrome.taskLine?.value
-        ? gitChrome.taskLine.label
-        : formatComposerBranchOptionLabel(branch),
+    }).map((option) => ({
+      value: option.value,
+      label: formatComposerBranchOptionLabel(option.value),
+      group: option.kind === 'remote' ? remoteGroup : localGroup,
+      hint: option.kind === 'remote'
+        ? (isZh ? '远程' : 'remote')
+        : (isZh ? '本地' : 'local'),
     }));
-  }, [gitChrome.taskLine, workspaceGit]);
+  }, [gitChrome.taskLine, isZh, workspaceGit]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (!next || !workspacePath || !canSelectBoundBranch) return;
@@ -2321,6 +2327,28 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
+  const handleCreateBoundBranch = useCallback((rawName: string) => {
+    const name = rawName.trim();
+    if (!name || !workspacePath || !canSelectBoundBranch) return;
+    if (!isSafeComposerBranchName(name)) return;
+    const startPoint = gitChrome.taskLine?.value || workspaceGit?.current || undefined;
+    void clientApi.gitCreateBranch({
+      workspaceRoot: workspacePath,
+      name,
+      startPoint,
+    }).then((created) => {
+      if (created?.ok !== true) return;
+      handleSelectBoundBranch(name);
+      refreshWorkspaceGit();
+    }).catch(() => {});
+  }, [
+    canSelectBoundBranch,
+    gitChrome.taskLine?.value,
+    handleSelectBoundBranch,
+    refreshWorkspaceGit,
+    workspaceGit?.current,
+    workspacePath,
+  ]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2752,6 +2780,18 @@ export function ChatSurface({
                 title={gitChrome.taskLine.title}
                 prefix={<GitBranchGlyph />}
                 menuPlacement="up"
+                searchable
+                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
+                footerAction={{
+                  label: (query) => {
+                    const name = query.trim();
+                    if (name) return isZh ? `创建 ${name}` : `Create ${name}`;
+                    return isZh ? '创建分支' : 'Create branch';
+                  },
+                  disabled: (query) => !isSafeComposerBranchName(query),
+                  onSelect: handleCreateBoundBranch,
+                }}
               />
             ) : gitChrome.taskLine ? (
               <span

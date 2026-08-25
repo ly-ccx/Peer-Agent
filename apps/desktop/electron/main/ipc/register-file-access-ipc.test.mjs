@@ -13,6 +13,7 @@ function createHarness() {
       getGitDiff: port('git-diff'),
       getGitRangeDiff: port('git-diff-range'),
       listGitBranches: port('git-list-branches'),
+      createGitBranch: port('git-create-branch'),
       exists: port('exists'),
       readDirectory: port('read-directory'),
       watchDirectories: port('watch-directories'),
@@ -39,6 +40,7 @@ test('file-access-ipc owns the exact governed file channel set', () => {
     'git:diff',
     'git:diff-range',
     'git:list-branches',
+    'git:create-branch',
     'fs:exists',
     'fs:read-dir',
     'fs:watch-dirs',
@@ -56,6 +58,7 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
     git: { absPath: '/repo/file' },
     range: { workspaceRoot: '/repo', fromRef: 'abc', toRef: 'def' },
     branches: { workspaceRoot: '/repo' },
+    createBranch: { workspaceRoot: '/repo', name: 'feature', startPoint: 'main' },
     exists: { absPath: '/repo/file' },
     readDirectory: { absPath: '/repo' },
     watch: { paths: ['/repo'] },
@@ -67,6 +70,7 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
   await handlers.get('git:diff')({ sender }, payloads.git);
   await handlers.get('git:diff-range')({ sender }, payloads.range);
   await handlers.get('git:list-branches')({ sender }, payloads.branches);
+  await handlers.get('git:create-branch')({ sender }, payloads.createBranch);
   handlers.get('fs:exists')({ sender }, payloads.exists);
   handlers.get('fs:read-dir')({ sender }, payloads.readDirectory);
   handlers.get('fs:watch-dirs')({ sender }, payloads.watch);
@@ -79,6 +83,7 @@ test('file-access-ipc projects payloads and returns the watcher disposer', async
     ['git-diff', payloads.git],
     ['git-diff-range', payloads.range],
     ['git-list-branches', payloads.branches],
+    ['git-create-branch', payloads.createBranch],
     ['exists', payloads.exists],
     ['read-directory', payloads.readDirectory],
     ['watch-directories', sender, payloads.watch],

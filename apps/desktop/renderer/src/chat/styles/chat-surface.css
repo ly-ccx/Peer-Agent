@@ -1194,7 +1194,7 @@
      覆盖全局 fixed 菜单的 width:var(--pa-dropdown-menu-width)，改回内容自适应。 */
   width: auto;
   min-width: max-content;
-  max-width: 220px;
+  max-width: 280px;
   /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,
      避免实心底 + 半透明层 + 错位描边叠成"双层框"。 */
   border: 1px solid var(--chrome-hairline);

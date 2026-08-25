@@ -12,6 +12,7 @@ export function createFileAccessIpcRegistrations({ fileAccess } = {}) {
     getGitDiff: assertFunction(fileAccess?.getGitDiff, 'fileAccess.getGitDiff'),
     getGitRangeDiff: assertFunction(fileAccess?.getGitRangeDiff, 'fileAccess.getGitRangeDiff'),
     listGitBranches: assertFunction(fileAccess?.listGitBranches, 'fileAccess.listGitBranches'),
+    createGitBranch: assertFunction(fileAccess?.createGitBranch, 'fileAccess.createGitBranch'),
     exists: assertFunction(fileAccess?.exists, 'fileAccess.exists'),
     readDirectory: assertFunction(fileAccess?.readDirectory, 'fileAccess.readDirectory'),
     watchDirectories: assertFunction(
@@ -30,6 +31,7 @@ export function createFileAccessIpcRegistrations({ fileAccess } = {}) {
       ipc.handle('git:diff', (_event, payload) => ports.getGitDiff(payload));
       ipc.handle('git:diff-range', (_event, payload) => ports.getGitRangeDiff(payload));
       ipc.handle('git:list-branches', (_event, payload) => ports.listGitBranches(payload));
+      ipc.handle('git:create-branch', (_event, payload) => ports.createGitBranch(payload));
       ipc.handle('fs:exists', (_event, payload) => ports.exists(payload));
       ipc.handle('fs:read-dir', (_event, payload) => ports.readDirectory(payload));
       ipc.handle('fs:watch-dirs', (event, payload) => (
