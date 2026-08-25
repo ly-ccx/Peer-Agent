@@ -162,6 +162,7 @@ function writeJsonl(filePath, items) {
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, items.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf8');
   renameSync(tmp, filePath);
+  jsonlReadCache.delete(filePath);
 }
 
 function writeJsonAtomic(filePath, obj) {
@@ -169,13 +170,42 @@ function writeJsonAtomic(filePath, obj) {
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
   renameSync(tmp, filePath);
+  jsonReadCache.delete(filePath);
 }
 
+/** 单文件 JSON 读缓存（plan 详情热路径，避免 overview 反复 readFile+JSON.parse）。 */
+const jsonReadCache = new Map(); // filePath -> { mtimeMs, size, value }
+
 function readJson(filePath) {
-  if (!existsSync(filePath)) return null;
+  if (!existsSync(filePath)) {
+    jsonReadCache.delete(filePath);
+    return null;
+  }
+  let stat = null;
   try {
-    return JSON.parse(readFileSync(filePath, 'utf8'));
+    stat = statSync(filePath);
   } catch {
+    jsonReadCache.delete(filePath);
+    return null;
+  }
+  const cached = jsonReadCache.get(filePath);
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size
+  ) {
+    return cached.value;
+  }
+  try {
+    const value = JSON.parse(readFileSync(filePath, 'utf8'));
+    jsonReadCache.set(filePath, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      value,
+    });
+    return value;
+  } catch {
+    jsonReadCache.delete(filePath);
     return null;
   }
 }
@@ -1713,6 +1743,15 @@ export function createGoalPlanStore({
   const changeFile = path.join(storeDir, '.changes.jsonl');
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
+  /** listPlans 归一化结果缓存：index mtime+size 未变时复用，避免反复 normalize×N。 */
+  let listPlansCache = null; // { mtimeMs, size, plans }
+  function invalidateListPlansCache() {
+    listPlansCache = null;
+  }
+  function writeIndex(items) {
+    writeJsonl(indexFile, items);
+    invalidateListPlansCache();
+  }
   // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
   // auto-start 闸门（见 goal-runner-adapter），故暴露 setOnChange 修改同一引用。
   let onChangeCallback = typeof onChange === 'function' ? onChange : null;
@@ -2094,7 +2133,7 @@ export function createGoalPlanStore({
   function syncIndex(plan) {
     const index = readIndex().filter((m) => m.planId !== plan.planId);
     index.push(toMeta(plan));
-    writeJsonl(indexFile, index);
+    writeIndex( index);
   }
 
   function persist(plan, options = {}) {
@@ -2182,12 +2221,32 @@ export function createGoalPlanStore({
   }
 
   function listPlans() {
-    return readIndex()
+    let stat = null;
+    try {
+      stat = statSync(indexFile);
+    } catch {
+      listPlansCache = null;
+      return [];
+    }
+    if (
+      listPlansCache &&
+      listPlansCache.mtimeMs === stat.mtimeMs &&
+      listPlansCache.size === stat.size
+    ) {
+      return listPlansCache.plans.slice();
+    }
+    const plans = readIndex()
       .map(normalizePlan)
       .filter((m) => m && activeMeta(m))
       .sort((a, b) =>
         String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
       );
+    listPlansCache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      plans,
+    };
+    return plans.slice();
   }
 
   function listPlansByConversation(conversationId) {
@@ -2322,7 +2381,7 @@ export function createGoalPlanStore({
     }
 
     // 旧索引只在首次按工作区读取时补齐一次，后续切换即可直接跳过无关详情文件。
-    if (indexChanged) writeJsonl(indexFile, nextIndex);
+    if (indexChanged) writeIndex( nextIndex);
     return details;
   }
 
@@ -3636,7 +3695,7 @@ export function createGoalPlanStore({
     const conversationId = existing?.conversationId ?? null;
     clearRunnerProgressState(planId);
     const index = readIndex().filter((m) => m.planId !== planId);
-    writeJsonl(indexFile, index);
+    writeIndex( index);
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
@@ -3700,7 +3759,7 @@ export function createGoalPlanStore({
       (m) => normalizeConversationId(m.conversationId) !== normalizedConversationId,
     );
     // 先原子重写 index（一次写盘），再删除各计划文件。
-    writeJsonl(indexFile, remaining);
+    writeIndex( remaining);
     for (const meta of removed) {
       try {
         if (existsSync(planFile(meta.planId))) unlinkSync(planFile(meta.planId));

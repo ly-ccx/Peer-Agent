@@ -377,6 +377,7 @@ function MainApp() {
         status,
         limit: CONVERSATION_LIST_PAGE_SIZE,
         paginated: true,
+        includeMessageCount: false,
       });
       // 丢弃过期响应：只有最新一次请求的结果才允许写回，避免慢请求晚返回覆盖新视图。
       if (seq !== refreshSeqRef.current) return;
@@ -484,6 +485,7 @@ function MainApp() {
           status: 'active',
           limit: CONVERSATION_LIST_PAGE_SIZE,
           paginated: true,
+        includeMessageCount: false,
         });
         applyConversationListPage(page as Parameters<typeof applyConversationListPage>[0]);
       } catch {

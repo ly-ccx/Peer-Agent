@@ -707,7 +707,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
 /**
  * 组装 Automation 投影快照（Definition 与最新一次 Run 联合）。
  * definition 为 automation-store.listDefinitions() 元素，
- * latestRun 为 automation-store.listRuns({ automationId, limit: 1 })[0]。
+ * latestRun 为该 automation 的最新 run（aggregator 一次 listRuns 后按 id 取）。
  */
 export function toAutomationSnapshot(definition, latestRun) {
   if (!definition || typeof definition !== 'object') return null;
@@ -1094,6 +1094,7 @@ export function createTaskOverviewAggregator({
       try {
         conversations = listConversations({
           status: 'active',
+          includeMessageCount: false,
           ...(conversationId ? { conversationId } : {}),
         }) ?? [];
       } catch {
@@ -1251,16 +1252,22 @@ export function createTaskOverviewAggregator({
     } catch {
       definitions = [];
     }
+    // 只扫一次 runs，再按 automationId 取最新；避免 N 次全目录 readdir。
+    /** @type {Map<string, object>} */
+    const latestRunByAutomationId = new Map();
+    try {
+      const allRuns = automationStore.listRuns() ?? [];
+      for (const run of allRuns) {
+        const runAutomationId = typeof run?.automationId === 'string' ? run.automationId : null;
+        if (!runAutomationId || latestRunByAutomationId.has(runAutomationId)) continue;
+        latestRunByAutomationId.set(runAutomationId, run);
+      }
+    } catch {
+      latestRunByAutomationId.clear();
+    }
     for (const definition of definitions) {
       const automationId = definition?.automationId ?? definition?.id;
-      let latestRun;
-      if (automationId) {
-        try {
-          latestRun = automationStore.listRuns({ automationId, limit: 1 })?.[0];
-        } catch {
-          latestRun = undefined;
-        }
-      }
+      const latestRun = automationId ? latestRunByAutomationId.get(automationId) : undefined;
       if (!isAutomationInScope(definition, latestRun, scope)) continue;
       const snapshot = toAutomationSnapshot(definition, latestRun);
       if (!snapshot) continue;

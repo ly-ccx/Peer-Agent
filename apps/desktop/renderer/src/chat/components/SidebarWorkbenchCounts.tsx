@@ -4,7 +4,7 @@ import { countWorkbenchInbox } from '../state/workbenchInboxCounts';
 
 /**
  * 工作台顶部「需要你 / 待验收」计数。
- * 单独挂载 useTaskOverview，避免 4s 轮询/推送牵动整棵会话列表重绘。
+ * 单独挂载 useTaskOverview，避免兜底轮询/推送牵动整棵会话列表重绘。
  */
 export const SidebarWorkbenchCounts = memo(function SidebarWorkbenchCounts({
   isZh,

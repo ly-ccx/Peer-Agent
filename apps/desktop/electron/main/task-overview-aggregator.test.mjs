@@ -1191,7 +1191,13 @@ test('createTaskOverviewAggregator 聚合两 store 并投影', () => {
     listDefinitions: () => [
       { automationId: 'a1', name: '发布检查', status: 'active', workspacePath: '/x/peer-knowledge' },
     ],
-    listRuns: () => [{ runId: 'r1', status: 'waiting_permission', updatedAt: '2026-08-07T03:00:00Z' }],
+    listRuns: () => [{
+      runId: 'r1',
+      automationId: 'a1',
+      status: 'waiting_permission',
+      createdAt: '2026-08-07T03:00:00Z',
+      updatedAt: '2026-08-07T03:00:00Z',
+    }],
   };
   const agg = createTaskOverviewAggregator({ goalPlanStore, automationStore });
   // activeWithinMs: 0 关闭时间窗，避免 fixture 日期相对真实 now 过期
@@ -2040,4 +2046,49 @@ test('listTaskOverview reuses sibling cards when one live durationMs changes', (
   assert.equal(secondById['plan-d'], firstById['plan-d']);
   assert.notEqual(secondById['plan-b'], firstById['plan-b']);
   assert.equal(secondById['plan-b'].title, '任务 B 进度变了');
+});
+
+
+test('automation projection lists runs once instead of per definition', () => {
+  let listRunsCalls = 0;
+  const automationStore = {
+    listDefinitions: () => ([
+      { automationId: 'a1', name: 'A1', status: 'active', workspacePath: '/x/a' },
+      { automationId: 'a2', name: 'A2', status: 'active', workspacePath: '/x/b' },
+    ]),
+    listRuns: (params = {}) => {
+      listRunsCalls += 1;
+      assert.equal(params.automationId, undefined);
+      return [
+        { runId: 'r2', automationId: 'a2', status: 'running', createdAt: '2026-08-07T04:00:00Z', updatedAt: '2026-08-07T04:00:00Z' },
+        { runId: 'r1', automationId: 'a1', status: 'waiting_permission', createdAt: '2026-08-07T03:00:00Z', updatedAt: '2026-08-07T03:00:00Z' },
+        { runId: 'r0', automationId: 'a1', status: 'succeeded', createdAt: '2026-08-07T02:00:00Z', updatedAt: '2026-08-07T02:00:00Z' },
+      ];
+    },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [] },
+    automationStore,
+  });
+  const items = agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(listRunsCalls, 1);
+  const byId = Object.fromEntries(items.filter((item) => item.source === 'automation').map((item) => [item.automationId ?? item.taskId, item]));
+  // latest run per automation
+  assert.equal(items.filter((item) => item.source === 'automation').length, 2);
+});
+
+test('conversation projection asks listConversations without messageCount backfill', () => {
+  /** @type {object|null} */
+  let seenParams = null;
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: (params) => {
+      seenParams = params;
+      return [];
+    },
+  });
+  agg.listTaskOverview({ activeWithinMs: 0 });
+  assert.equal(seenParams?.includeMessageCount, false);
+  assert.equal(seenParams?.status, 'active');
 });
