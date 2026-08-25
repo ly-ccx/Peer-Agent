@@ -12,6 +12,26 @@ test('home control strip keeps a compact left-group gap', () => {
   );
 });
 
+test('home composer textarea keeps a taller empty-state input area', () => {
+  assert.match(
+    styles,
+    /\.chat-composer--home \{[\s\S]*?grid-template-rows:\s*minmax\(96px,\s*1fr\)\s+auto;[\s\S]*?min-height:\s*178px;/,
+  );
+  assert.match(
+    styles,
+    /\.chat-composer--home > textarea \{[\s\S]*?min-height:\s*96px;[\s\S]*?max-height:\s*240px;/,
+  );
+  // Compact thread composer stays capped; shared home/compact selector no longer sets 160px.
+  assert.match(
+    styles,
+    /\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*160px;/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.chat-composer--home > textarea,\s*\.chat-composer--compact > textarea \{[^}]*max-height:\s*160px;/,
+  );
+});
+
 test('home action row bottom-aligns left controls with the send button', () => {
   // Shorter model/thinking/context chips should sit on the same baseline edge as the taller submit button.
   assert.match(
