@@ -23,10 +23,10 @@ test('main window starts hidden and reveals on ready-to-show', () => {
 test('main window pins macOS traffic light position for hiddenInset titlebar', () => {
   const src = readFileSync(root, 'utf8');
   assert.match(src, /titleBarStyle:\s*['"]hiddenInset['"]/);
-  // 锁住显式 trafficLightPosition，避免回到默认偏高原点。
+  // 锁住 40px 标题栏几何居中：12pt 簇顶边 y=14，避免回到默认偏高或 y=18 偏低。
   assert.match(
     src,
-    /trafficLightPosition:\s*\{\s*x:\s*16\s*,\s*y:\s*18\s*\}/,
+    /trafficLightPosition:\s*\{\s*x:\s*16\s*,\s*y:\s*14\s*\}/,
   );
 });
 

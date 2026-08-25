@@ -2467,9 +2467,10 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
-          // 相对 hiddenInset 默认原点下移，使三点在约 40px 标题栏内垂直居中
-          //（对照 Codex 观感；仅 macOS 生效）。
-          trafficLightPosition: { x: 16, y: 18 },
+          // trafficLightPosition 是按钮簇左上角，不是圆心。
+          // 12pt 灯在 40px hiddenInset 标题栏内垂直居中：(40 - 12) / 2 = 14。
+          // y: 18 会把视觉中心压到 24px，三点会明显偏低。仅 macOS 生效。
+          trafficLightPosition: { x: 16, y: 14 },
         }
       : {}),
     titleBarStyle: 'hiddenInset',
