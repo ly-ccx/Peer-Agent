@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
 const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
+const tokensCss = readFileSync(join(stylesDir, 'tokens.css'), 'utf8');
 const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
@@ -134,6 +135,30 @@ test('selected highlight lives on the conversation, not the workspace row', () =
   assert.doesNotMatch(layeredActiveBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
   assert.match(layeredActiveHoverBody, /background:\s*var\(--za-sidebar-active-bg/);
   assert.doesNotMatch(layeredActiveHoverBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+});
+
+test('selected fill tracks hover white across light and dark themes', () => {
+  const activeBgBindings = tokensCss.match(/--za-sidebar-active-bg:\s*[^;]+;/g) ?? [];
+  const threadActiveBgBindings =
+    tokensCss.match(/--za-sidebar-thread-active-bg:\s*[^;]+;/g) ?? [];
+
+  assert.equal(activeBgBindings.length, 4);
+  assert.equal(threadActiveBgBindings.length, 4);
+  for (const binding of [...activeBgBindings, ...threadActiveBgBindings]) {
+    assert.match(binding, /var\(--za-hover\)/);
+  }
+
+  assert.match(tokensCss, /--ui-surface-selected:\s*var\(--za-hover\);/);
+  assert.match(tokensCss, /--ui-surface-hover:\s*var\(--za-hover\);/);
+
+  assert.match(
+    ruleBody(sidebarCss, '.channel-conversation-list .conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
+  assert.match(
+    ruleBody(chatSidebarCss, '.conversation-row.active'),
+    /background:\s*var\(--za-sidebar-active-bg/,
+  );
 });
 
 test('workspace rows stack the path under the name so the name can use the full width', () => {
