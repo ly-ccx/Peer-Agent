@@ -110,26 +110,25 @@ export function GlobalWorkbenchPage({
   );
 
   const actionCount = needsYou.length;
-  // 主列只承载「待你处理」；无待办时即使 Peer 推进中/有讨论，也应展示 calm 空态，
-  // 避免中间整片留白（推进与讨论在右侧栏）。
+  // 主列只承载「待你处理」。无待办时仍占满主列高度，做成安静雷达面；
+  // 推进与讨论留在右侧，不把空态做成居中单列。
   const showEmpty = actionCount === 0;
 
-  // 工作区脉搏：按 workspaceLabel 聚合
+  // 工作区脉搏：按 workspaceLabel 聚合需你 / 推进。Goal 完成即终态，不再计验收。
   const pulse = useMemo(() => {
-    const map = new Map<string, { need: number; run: number; accept: number }>();
+    const map = new Map<string, { need: number; run: number }>();
     for (const item of items) {
       if (item.source === 'conversation') continue;
       const key = item.workspaceLabel?.trim() || '未标注工作区';
-      const row = map.get(key) ?? { need: 0, run: 0, accept: 0 };
+      const row = map.get(key) ?? { need: 0, run: 0 };
       if (item.actionRight === 'needs_you') row.need += 1;
       else if (item.actionRight === 'peer_advancing') row.run += 1;
-      else if (item.actionRight === 'result_ready') row.accept += 1;
       map.set(key, row);
     }
     return [...map.entries()]
-      .map(([name, counts]) => ({ name, ...counts, total: counts.need + counts.run + counts.accept }))
+      .map(([name, counts]) => ({ name, ...counts, total: counts.need + counts.run }))
       .filter((r) => r.total > 0)
-      .sort((a, b) => b.need - a.need || b.accept - a.accept || b.run - a.run)
+      .sort((a, b) => b.need - a.need || b.run - a.run)
       .slice(0, 6);
   }, [items]);
 
@@ -144,14 +143,18 @@ export function GlobalWorkbenchPage({
           </div>
         </header>
 
-        <div className="gwb-layout">
+        <div className={`gwb-layout${showEmpty ? ' gwb-layout--empty' : ''}`}>
           <div className="gwb-main">
             {showEmpty ? (
               <div className="gwb-empty">
                 <p>现在没有需要你处理的事</p>
                 {advancing.length > 0 ? (
-                  <p className="gwb-empty-hint">{advancing.length} 个任务由 Peer 推进中</p>
-                ) : null}
+                  <p className="gwb-empty-hint">
+                    Peer 正在推进 {advancing.length} 个任务，你可以离开。
+                  </p>
+                ) : (
+                  <p className="gwb-empty-hint">雷达是安静的。其余由 Peer 推进。</p>
+                )}
                 {onNewTask ? (
                   <button type="button" className="gwb-btn gwb-btn-primary" onClick={onNewTask}>
                     发起新任务
@@ -262,9 +265,6 @@ export function GlobalWorkbenchPage({
                         {row.need} 需你
                       </span>
                       <span className="gwb-num">{row.run} 推进</span>
-                      <span className={row.accept > 0 ? 'gwb-num gwb-num-ok' : 'gwb-num'}>
-                        {row.accept} 验收
-                      </span>
                     </button>
                   ))}
                 </div>

@@ -36,9 +36,22 @@
     grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.85fr);
   }
 
+  /* 空态：主列与右侧环境信息同高，雷达面撑住中间，避免矮卡片下大片留白。 */
+  .gwb-layout--empty {
+    @apply items-stretch;
+  }
+
+  .gwb-layout--empty .gwb-main {
+    @apply min-h-0;
+  }
+
   @media (max-width: 980px) {
     .gwb-layout {
       grid-template-columns: 1fr;
+    }
+
+    .gwb-layout--empty .gwb-empty {
+      min-height: 240px;
     }
   }
 
@@ -208,7 +221,8 @@
   }
 
   .gwb-empty {
-    @apply rounded-2xl border px-6 py-10 text-center;
+    @apply flex flex-1 flex-col items-center justify-center rounded-2xl border px-6 py-10 text-center;
+    min-height: 310px;
     border-color: var(--za-line);
     background: var(--za-surface-0);
   }
@@ -218,12 +232,12 @@
   }
 
   .gwb-empty-hint {
-    @apply mt-2 text-sm;
+    @apply mt-2 max-w-sm text-sm leading-relaxed;
     color: var(--za-text-muted);
   }
 
   .gwb-empty .gwb-btn {
-    @apply mt-4;
+    @apply mt-5;
   }
 
   .gwb-side-empty {
@@ -310,7 +324,7 @@
 
   .gwb-pulse-row {
     @apply grid w-full items-center gap-2 border-t px-4 py-2 text-left text-xs;
-    grid-template-columns: 1.2fr repeat(3, 0.7fr);
+    grid-template-columns: 1.4fr repeat(2, 0.8fr);
     border-color: color-mix(in srgb, var(--za-line) 80%, transparent);
     background: transparent;
     cursor: pointer;
@@ -337,11 +351,6 @@
   .gwb-num-alert {
     @apply font-semibold;
     color: #8a4b55;
-  }
-
-  .gwb-num-ok {
-    @apply font-semibold;
-    color: #3e7a6b;
   }
 
   /* 验收三段式动效：只叠加 phase 修饰，不改写默认 gwb-item 网格布局 */
