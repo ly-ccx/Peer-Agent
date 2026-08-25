@@ -22,6 +22,9 @@ describe('host config instructions', () => {
     assert.equal(instructions[0].content, 'Keep answers concise.');
     assert.match(instructions[1].content, /Japanese \(日本語\)/);
     assert.match(instructions[2].content, /prefix "team\/"/);
+    assert.match(instructions[2].content, /ASCII/);
+    assert.match(instructions[2].content, /Never use Chinese or other non-ASCII/);
+    assert.match(instructions[2].content, /team\/my-feature/);
   });
 
   it('omits empty optional instructions and keeps the governed branch default', () => {
@@ -36,5 +39,7 @@ describe('host config instructions', () => {
     ]);
     assert.equal(resolveGitBranchPrefix(null), 'PeerAgent/');
     assert.match(instructions[0].content, /prefix "PeerAgent\/"/);
+    assert.match(instructions[0].content, /ASCII/);
+    assert.match(instructions[0].content, /Never use Chinese or other non-ASCII/);
   });
 });

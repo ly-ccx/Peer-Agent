@@ -138,6 +138,8 @@ describe('buildGitBranchPrefixContext', () => {
       assert.equal(out[0].source, 'settings.gitBranchPrefix');
       assert.match(out[0].content, new RegExp(`prefix "${DEFAULT_GIT_BRANCH_PREFIX}"`));
       assert.match(out[0].content, /Do not apply this prefix to existing branches/);
+      assert.match(out[0].content, /ASCII/);
+      assert.match(out[0].content, /Never use Chinese or other non-ASCII/);
     }
   });
 
@@ -146,5 +148,7 @@ describe('buildGitBranchPrefixContext', () => {
     assert.equal(out.length, 1);
     assert.match(out[0].content, /prefix "team\/"/);
     assert.match(out[0].content, /team\/my-feature/);
+    assert.match(out[0].content, /ASCII/);
+    assert.match(out[0].content, /Never use Chinese or other non-ASCII/);
   });
 });

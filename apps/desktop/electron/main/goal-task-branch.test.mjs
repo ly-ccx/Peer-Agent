@@ -53,8 +53,11 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('goal task branch', () => {
   it('slugifies a title without inventing main', () => {
-    assert.equal(slugifyTaskBranchName('实现验收合入', 'plan-1'), '实现验收合入');
+    assert.equal(slugifyTaskBranchName('实现验收合入', 'plan-1'), 'plan-1');
     assert.match(slugifyTaskBranchName('Fix the gate!!!', 'plan-1'), /fix-the-gate/);
+    assert.equal(slugifyTaskBranchName('修复会话阴影截断', 'plan-shadow'), 'plan-shadow');
+    assert.equal(slugifyTaskBranchName('Fix 会话阴影 123', 'plan-1'), 'fix-123');
+    assert.match(slugifyTaskBranchName('实现验收合入', 'plan-1'), /^[a-z0-9-]+$/);
   });
 
   it('does not create a line for intake, awaiting approval, or unbound plans', () => {
@@ -101,6 +104,8 @@ describe('goal task branch', () => {
     const next = adapter.ensureTaskBranch(boundPlan());
     assert.equal(next.deliveryBinding.executionIsolation, 'none');
     assert.match(next.deliveryBinding.taskBranch, /^PeerAgent\//);
+    assert.match(next.deliveryBinding.taskBranch, /^PeerAgent\/[a-z0-9-]+$/);
+    assert.equal(next.deliveryBinding.taskBranch, 'PeerAgent/plan-task-1');
     assert.equal(next.deliveryBinding.worktreePath, undefined);
     assert.equal(recorded[0].isolation.executionIsolation, 'none');
     assert.equal(git(['rev-parse', '--verify', next.deliveryBinding.taskBranch]), git(['rev-parse', 'HEAD']));

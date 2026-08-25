@@ -51,7 +51,7 @@ export function buildGitBranchPrefixContext(gitBranchPrefix) {
   return [{
     id: 'settings.gitBranchPrefix',
     title: 'Git Branch Prefix',
-    content: `When you create a new git branch (e.g. via \`git checkout -b\` or \`git switch -c\`), always name it with the prefix "${prefix}". For example, a feature branch should be named like "${prefix}my-feature". Do not apply this prefix to existing branches you only check out.`,
+    content: `When you create a new git branch (e.g. via \`git checkout -b\` or \`git switch -c\`), always name it with the prefix "${prefix}". Use only ASCII letters, digits, and hyphens for the rest of the name (for example "${prefix}my-feature"). Never use Chinese or other non-ASCII characters in new branch names. Do not apply this prefix to existing branches you only check out.`,
     priority: 0,
     source: 'settings.gitBranchPrefix',
   }];

@@ -18,13 +18,17 @@ function defaultRunGit(cwd, args) {
   }).trim();
 }
 
-export function slugifyTaskBranchName(title, planId) {
-  const raw = String(title || planId || 'task')
+function asciiSlug(value) {
+  return String(value || '')
     .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return (raw || 'task').toLowerCase();
+}
+
+export function slugifyTaskBranchName(title, planId) {
+  return asciiSlug(title) || asciiSlug(planId) || 'task';
 }
 
 function writablePlan(plan) {
