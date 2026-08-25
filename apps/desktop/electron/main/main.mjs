@@ -462,6 +462,14 @@ const goalPlanStore = createGoalPlanStore({
     } catch (err) {
       console.warn('[task-notification] handleGoalPlanChanged failed:', err);
     }
+    // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
+    queueMicrotask(() => {
+      try {
+        maybeSyncConversationTitleFromPlan(payload);
+      } catch (error) {
+        console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
+      }
+    });
     // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
     // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
     queueMicrotask(() => {
@@ -2818,6 +2826,24 @@ function scheduleGoalDeliveryHandoff(planId, { retry = false } = {}) {
   });
 }
 
+function maybeSyncConversationTitleFromPlan(payload = {}) {
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  if (!planId || typeof goalPlanStore.getPlan !== 'function') return;
+  const plan = goalPlanStore.getPlan(planId);
+  if (!plan) return;
+  const conversationId = typeof plan.conversationId === 'string' ? plan.conversationId.trim() : '';
+  const title = typeof plan.title === 'string' ? plan.title.trim() : '';
+  if (!conversationId || !title || title === '未命名任务') return;
+  const conversation = conversationStore.getConversation?.(conversationId);
+  if (!conversation) return;
+  const titleSource = typeof conversation.titleSource === 'string' ? conversation.titleSource : '';
+  // 用户手改过的侧栏标题不覆盖；仅替换草稿/占位来源。
+  if (titleSource === 'manual') return;
+  if (titleSource && !['user_snippet', 'fallback', 'plan', ''].includes(titleSource)) return;
+  if (conversation.title === title && titleSource === 'plan') return;
+  conversationStore.updateTitle(conversationId, title, { source: 'plan' });
+}
+
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;
   if (!planId) return;
@@ -3061,7 +3087,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               createdBy: 'user',
             });
@@ -3076,7 +3103,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               status: 'accepted',
               workflowKind: 'goal_self_driven',

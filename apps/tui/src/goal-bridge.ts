@@ -166,11 +166,10 @@ function normalizeTasks(tasks: unknown): Array<Record<string, unknown>> {
   });
 }
 
-function deriveTitle(title: unknown, goal: unknown): string {
+function deriveTitle(title: unknown, _goal: unknown): string {
   const explicit = asString(title);
-  if (explicit) return explicit;
-  const goalText = asString(goal) ?? 'Untitled goal';
-  return goalText.length > 48 ? `${goalText.slice(0, 45)}...` : goalText;
+  // 不再用 goal 截断冒充标题；漏传时交由 store sanitize 落成占位名。
+  return explicit ?? '';
 }
 
 function okExecution(

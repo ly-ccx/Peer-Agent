@@ -203,19 +203,12 @@ function planExecutionStatus(status: GoalPlan['status']): ExecutionStatus {
 }
 
 /**
- * 计划标题兜底：goal_create_plan 的 title 多数情况下模型不传（为空字符串），
- * 但 goal 通常有内容。此处用 goal 的首句/截断派生一个可读标题，
- * 避免所有计划都显示「未命名计划」。仅 title 与 goal 均为空时才回退占位文案。
+ * 计划标题展示：只信 plan.title。空/占位时不再用 goal 首句冒充标题，
+ * 否则浮动条会继续显示用户原话；意图短标题由创建/修订链路写入。
  */
 function derivePlanTitle(plan: GoalPlan, isZh: boolean): string {
   const title = typeof plan.title === 'string' ? plan.title.trim() : '';
-  if (title) return title;
-  const goal = typeof plan.goal === 'string' ? plan.goal.trim() : '';
-  if (goal) {
-    const firstLine = goal.split(/\r?\n/)[0]?.trim() ?? '';
-    const source = firstLine || goal;
-    return source.length > 40 ? `${source.slice(0, 40)}…` : source;
-  }
+  if (title && title !== '未命名任务') return title;
   return isZh ? '未命名计划' : 'Untitled plan';
 }
 
