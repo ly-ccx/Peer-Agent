@@ -114,6 +114,7 @@ export interface ConversationStore {
   markRead(id: string, options?: { at?: string }): ConversationMeta | null;
   updateMode(id: string, mode: string): unknown;
   updateFastMode(id: string, fastMode: boolean): ConversationMeta | null;
+  updatePreferredExecutionIsolation(id: string, preferredExecutionIsolation: 'none' | 'worktree'): ConversationMeta | null;
   updateAutomationCreateContext(id: string, context: AutomationCreateContext | null): ConversationMeta | null;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
   updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;

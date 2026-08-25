@@ -31,6 +31,7 @@ test('snapshotDeliveryLine keeps the recorded source, task line, and isolation f
       targetBranch: 'develop',
       taskBranch: 'PeerAgent/fix-login',
       isolated: true,
+      delivered: false,
     },
   );
   assert.equal(
@@ -43,6 +44,41 @@ test('snapshotDeliveryLine keeps the recorded source, task line, and isolation f
     })?.isolated,
     false,
   );
+});
+
+test('delivered handoff is no longer current isolation and chrome returns to the source', () => {
+  assert.deepEqual(
+    snapshotDeliveryLine({
+      deliveryBinding: {
+        targetBranch: '0.0.7',
+        taskBranch: 'PeerAgent/cli-drop-stream-buf',
+        executionIsolation: 'worktree',
+        worktreePath: '/tmp/peer-goal-worktrees/cli-drop-stream-buf',
+      },
+      deliveryHandoff: { status: 'delivered' },
+    }),
+    {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: false,
+      delivered: true,
+    },
+  );
+  const chrome = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: true,
+    currentHead: '0.0.7',
+    delivery: {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: false,
+      delivered: true,
+    },
+  }, { locale: 'zh' });
+  assert.equal(chrome.taskLine?.kind, 'source');
+  assert.equal(chrome.taskLine?.label, '源头 0.0.7');
+  assert.equal(chrome.taskLine?.selectable, false);
+  assert.equal(chrome.writeMismatch, null);
 });
 
 test('draft chrome keeps workspace HEAD stable and lets the source stay selectable', () => {

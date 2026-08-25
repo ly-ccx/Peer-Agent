@@ -144,7 +144,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
-  assert.match(surface, /isDraftConversation && workspacePath/);
+  assert.match(surface, /\{workspacePath \? \(/);
+  assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
+  assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
   assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);

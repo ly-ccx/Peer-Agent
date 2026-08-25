@@ -2,6 +2,8 @@ export interface TaskDeliveryLine {
   readonly targetBranch: string | null;
   readonly taskBranch: string | null;
   readonly isolated: boolean;
+  /** 验收交回完成后，这次隔离已经结束，输入栏应回到源头。 */
+  readonly delivered?: boolean;
 }
 
 export type ComposerTaskLineKind = 'source' | 'task-line' | 'isolated';
@@ -79,16 +81,24 @@ export function snapshotDeliveryLine(
       readonly executionIsolation?: string | null;
       readonly worktreePath?: string | null;
     } | null;
+    readonly deliveryHandoff?: {
+      readonly status?: string | null;
+    } | null;
   } | null | undefined,
 ): TaskDeliveryLine | null {
   const binding = plan?.deliveryBinding;
   const targetBranch = trimBranch(binding?.targetBranch);
   const taskBranch = trimBranch(binding?.taskBranch);
   if (!targetBranch && !taskBranch) return null;
+  const delivered = plan?.deliveryHandoff?.status === 'delivered';
+  const isolated = !delivered
+    && binding?.executionIsolation === 'worktree'
+    && Boolean(trimBranch(binding.worktreePath));
   return {
     targetBranch,
     taskBranch,
-    isolated: binding?.executionIsolation === 'worktree' && Boolean(trimBranch(binding.worktreePath)),
+    isolated,
+    delivered,
   };
 }
 
@@ -174,9 +184,13 @@ export function planComposerGitChrome(
   const taskBranch = trimBranch(input.delivery?.taskBranch);
   const targetBranch = trimBranch(input.delivery?.targetBranch);
   const isolated = input.delivery?.isolated === true;
+  const delivered = input.delivery?.delivered === true;
 
   let taskLine: ComposerTaskLine | null = null;
-  if (taskBranch) {
+  if (delivered) {
+    const source = targetBranch || currentHead;
+    if (source) taskLine = formatSourceLine(source, input.isDraft, isZh);
+  } else if (taskBranch) {
     taskLine = formatRecordedTaskLine(taskBranch, isolated, isZh);
   } else if (targetBranch) {
     taskLine = formatSourceLine(targetBranch, false, isZh);

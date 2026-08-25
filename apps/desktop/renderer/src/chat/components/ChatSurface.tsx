@@ -269,6 +269,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
   fastMode: boolean;
+  preferredExecutionIsolation: 'none' | 'worktree';
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
@@ -280,6 +281,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     tokenUsage: null,
     mode: 'chat',
     fastMode: false,
+    preferredExecutionIsolation: 'none',
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
@@ -288,6 +290,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   const convFastMode = conv.fastMode === true;
+  const convPreferredExecutionIsolation: 'none' | 'worktree' =
+    conv.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
   // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
@@ -365,6 +369,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       : null,
     mode: convMode,
     fastMode: convFastMode,
+    preferredExecutionIsolation: convPreferredExecutionIsolation,
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
@@ -563,7 +568,16 @@ export function ChatSurface({
   }, [convActions, conversationId, persistDraftComposer]);
   const changePreferredWorktree = useCallback((enabled: boolean) => {
     setPreferredWorktree(enabled);
-    if (!conversationId) persistDraftComposer({ preferredWorktree: enabled });
+    if (conversationId) {
+      void clientApi.conversationsUpdatePreferredExecutionIsolation({
+        id: conversationId,
+        preferredExecutionIsolation: enabled ? 'worktree' : 'none',
+      }).catch(() => {
+        // 本地 UI 仍保留选择；后续重新进入会按持久化值恢复。
+      });
+      return;
+    }
+    persistDraftComposer({ preferredWorktree: enabled });
   }, [conversationId, persistDraftComposer]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
@@ -1255,6 +1269,7 @@ export function ChatSurface({
         tokenUsage: usage,
         mode: convMode,
         fastMode: convFastMode,
+        preferredExecutionIsolation: convPreferredExecutionIsolation,
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
@@ -1272,6 +1287,7 @@ export function ChatSurface({
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
       convActions.set({ fastMode: convFastMode });
+      setPreferredWorktree(convPreferredExecutionIsolation === 'worktree');
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
@@ -2876,15 +2892,15 @@ export function ChatSurface({
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
             />
-            {isDraftConversation && workspacePath ? (
+            {workspacePath ? (
               <label
                 className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
                 title={
                   workspaceIsGit === false
                     ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
                     : (isZh
-                      ? '在独立 Git worktree 里改代码，主工作区保持当前分支。默认关闭，之后仍可在任务里再开。'
-                      : 'Run in a Git worktree so the main workspace stays on its current branch. Off by default; you can still isolate later.')
+                      ? '下次任务是否在独立 Worktree 里执行。验收合并后这次隔离会结束，这个开关只表示下一次。'
+                      : 'Whether the next task runs in a Worktree. After acceptance, this isolation ends; the toggle only means the next run.')
                 }
               >
                 <input
