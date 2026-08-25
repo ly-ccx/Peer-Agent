@@ -9,6 +9,10 @@ const sidebarCss = readFileSync(join(stylesDir, 'sidebar.css'), 'utf8');
 const chatSidebarCss = readFileSync(join(stylesDir, '../chat/styles/sidebar.css'), 'utf8');
 const tokensCss = readFileSync(join(stylesDir, 'tokens.css'), 'utf8');
 const sidebarSource = readFileSync(join(stylesDir, '../chat/components/Sidebar.tsx'), 'utf8');
+const sidebarRowSource = readFileSync(
+  join(stylesDir, '../chat/components/SidebarConversationRow.tsx'),
+  'utf8',
+);
 
 function ruleBody(css: string, selector: string) {
   const startToken = `\n${selector} {`;
@@ -80,16 +84,16 @@ test('resting conversation rows keep quieter type; selected stays unbolded', () 
 });
 
 test('pin lives in the trailing action slot instead of a leading gutter', () => {
-  const pinIndex = sidebarSource.indexOf('sidebar-conv-pin ${isPinned');
-  const actionsIndex = sidebarSource.indexOf('className="sidebar-conv-actions"');
-  const archiveIndex = sidebarSource.indexOf('className="sidebar-conv-archive"');
+  const pinIndex = sidebarRowSource.indexOf('sidebar-conv-pin ${isPinned');
+  const actionsIndex = sidebarRowSource.indexOf('className="sidebar-conv-actions"');
+  const archiveIndex = sidebarRowSource.indexOf('className="sidebar-conv-archive"');
 
   assert.notEqual(pinIndex, -1, 'expected trailing pin button');
   assert.notEqual(actionsIndex, -1, 'expected trailing action slot');
   assert.ok(pinIndex > actionsIndex, 'pin should render inside trailing actions');
   assert.ok(archiveIndex > pinIndex, 'archive should stay after pin');
-  assert.doesNotMatch(sidebarSource, /sidebar-conv-pin-leading/);
-  assert.doesNotMatch(sidebarSource, /sidebar-conv-edit/);
+  assert.doesNotMatch(sidebarRowSource, /sidebar-conv-pin-leading/);
+  assert.doesNotMatch(sidebarRowSource, /sidebar-conv-edit/);
   assert.doesNotMatch(sidebarCss, /sidebar-conv-pin-leading/);
   assert.doesNotMatch(sidebarCss, /--sidebar-conv-leading-gutter/);
   assert.doesNotMatch(sidebarCss, /sidebar-conv-edit/);
@@ -115,6 +119,29 @@ test('selected conversation rows use a restrained ambient lift, not a card shado
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
 
   assert.match(tokensCss, /--za-sidebar-active-shadow:\s*0 0 0 0\.5px/);
+});
+
+test('nested workspace session lists do not crop a single selected capsule shadow', () => {
+  const nestedListBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks.channel-conversation-list',
+  );
+  const nestedRowBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks.channel-conversation-list .conversation-row',
+  );
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+
+  assert.match(nestedListBody, /overflow:\s*visible;/);
+  assert.doesNotMatch(nestedListBody, /overflow-x:\s*hidden;/);
+  assert.doesNotMatch(nestedListBody, /overflow-y:\s*auto;/);
+  assert.match(nestedListBody, /padding:\s*6px 4px 6px 6px;/);
+  assert.doesNotMatch(nestedListBody, /padding:\s*0 var\(--space-2\);/);
+  assert.match(nestedRowBody, /--sidebar-conv-row-pad-x:\s*8px;/);
+  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
 });
 
 test('selected highlight lives on the conversation, not the workspace row', () => {
