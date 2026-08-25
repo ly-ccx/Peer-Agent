@@ -214,7 +214,7 @@ export async function runPeerExec(
 
   try {
     const sendResult = await controller.send(prompt, {
-      // RuntimePipeline defaults to 64 when maxTurns is omitted.
+      // Match Desktop / interactive TUI: unbounded unless `--max-turns` is set.
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
     });
 
