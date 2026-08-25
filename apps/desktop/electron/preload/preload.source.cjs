@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
   gitDiffRange: (params) => ipcRenderer.invoke('git:diff-range', params),
   gitListBranches: (params) => ipcRenderer.invoke('git:list-branches', params),
+  gitCreateBranch: (params) => ipcRenderer.invoke('git:create-branch', params),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
   readImageDataUrl: (absPath, workspaceRoot, relPath) =>

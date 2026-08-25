@@ -38,6 +38,7 @@ const unavailableApi: ClientApi = {
   gitDiff: unavailableMethod('gitDiff'),
   gitDiffRange: unavailableMethod('gitDiffRange'),
   gitListBranches: unavailableMethod('gitListBranches'),
+  gitCreateBranch: unavailableMethod('gitCreateBranch'),
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),
   readImageDataUrl: unavailableMethod('readImageDataUrl'),

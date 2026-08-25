@@ -468,6 +468,20 @@ export interface BootstrapPreloadApi {
   }) => Promise<{
     readonly ok: boolean;
     readonly branches: readonly string[];
+    readonly localBranches?: readonly string[];
+    readonly remoteBranches?: readonly string[];
+    readonly current: string | null;
+    readonly repoRoot?: string;
+    readonly error?: string;
+  }>;
+  readonly gitCreateBranch: (params: {
+    readonly workspaceRoot: string;
+    readonly name: string;
+    readonly startPoint?: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'created' | 'already_exists' | 'invalid_name' | 'invalid_ref' | 'not_git_repo' | 'error';
+    readonly name?: string;
     readonly current: string | null;
     readonly repoRoot?: string;
     readonly error?: string;

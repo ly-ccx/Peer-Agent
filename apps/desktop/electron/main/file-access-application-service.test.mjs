@@ -246,7 +246,10 @@ test('git range diff and branch list stay inside a known repository', async () =
       if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
       if (key === 'diff --no-color abc def') return { stdout: 'range diff' };
       if (key === 'branch --show-current') return { stdout: 'develop\n' };
-      if (key === 'branch --format=%(refname:short)') return { stdout: 'develop\nmain\n' };
+      if (key === 'for-each-ref --format=%(refname:short) refs/heads') return { stdout: 'develop\nmain\n' };
+      if (key === 'for-each-ref --format=%(refname:short) refs/remotes') {
+        return { stdout: 'origin/HEAD\norigin/main\norigin/0.0.7\n' };
+      }
       throw new Error(`unexpected git call: ${key}`);
     },
   });
@@ -273,9 +276,54 @@ test('git range diff and branch list stay inside a known repository', async () =
   });
   assert.deepEqual(await harness.service.listGitBranches({ workspaceRoot: '/repo' }), {
     ok: true,
-    branches: ['develop', 'main'],
+    branches: ['develop', 'main', 'origin/main', 'origin/0.0.7'],
+    localBranches: ['develop', 'main'],
+    remoteBranches: ['origin/main', 'origin/0.0.7'],
     current: 'develop',
     repoRoot: '/repo',
+  });
+});
+
+test('createGitBranch writes a local ref without checking it out', async () => {
+  const calls = [];
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      calls.push(key);
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- feature origin/0.0.7') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'develop\n' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: 'feature',
+    startPoint: 'origin/0.0.7',
+  }), {
+    ok: true,
+    status: 'created',
+    name: 'feature',
+    current: 'develop',
+    repoRoot: '/repo',
+  });
+  assert.deepEqual(calls, [
+    'rev-parse --show-toplevel',
+    'branch -- feature origin/0.0.7',
+    'branch --show-current',
+  ]);
+  assert.equal(calls.some((key) => key.includes('checkout')), false);
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '--output=/tmp/x',
+  }), {
+    ok: false,
+    status: 'invalid_name',
+    current: null,
+    error: 'invalid_branch_name',
   });
 });
 

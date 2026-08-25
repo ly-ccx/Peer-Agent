@@ -159,6 +159,10 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /canSelectComposerSourceBranch/);
   assert.match(surface, /buildComposerBranchOptions/);
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
+  assert.match(surface, /searchable/);
+  assert.match(surface, /gitCreateBranch/);
+  assert.match(surface, /本地分支/);
+  assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
