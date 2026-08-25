@@ -83,6 +83,11 @@ import {
   parseSerializedToolSegments,
 } from '../state/streamSegments';
 import {
+  canShowStreamResume,
+  formatStreamErrorLabel,
+  resolveStreamResumeTarget,
+} from '../state/streamResume';
+import {
   buildConversationAttachmentContext,
   buildConfigInstructionContext,
   buildReplyLanguageContext,
@@ -2195,6 +2200,30 @@ export function ChatSurface({
     void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
+  const handleResumeStream = useCallback(() => {
+    if (isStreaming || !hasProvider) return;
+    const target = resolveStreamResumeTarget(messages);
+    if (!target) return;
+    if (target.kind === 'regenerate') {
+      void handleRegenerate(target.assistantIndex);
+      return;
+    }
+    const userMsg = messages[target.userIndex];
+    if (!userMsg || userMsg.role !== 'user') return;
+    void submitMessage(
+      userMsg.content,
+      userMsg.attachments ?? [],
+      effort,
+      messages.slice(0, target.userIndex),
+    );
+  }, [isStreaming, hasProvider, messages, handleRegenerate, submitMessage, effort]);
+
+  const handleDismissStreamError = useCallback(() => {
+    setStreamError(null);
+  }, [setStreamError]);
+
+  const showStreamResume = canShowStreamResume(streamError, messages, isStreaming);
+
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
     const contextMessages = messages.slice(0, msgIndex + 1);
@@ -2595,18 +2624,6 @@ export function ChatSurface({
             </span>
           </div>
         ) : null}
-        {streamError ? (
-          <div className="chat-stream-error">
-            <span>
-              ⚠{' '}
-              {streamError === 'repetition_detected'
-                ? isZh
-                  ? '检测到重复输出，已自动停止本轮回复。'
-                  : 'Repetitive output detected; this reply was stopped automatically.'
-                : streamError}
-            </span>
-          </div>
-        ) : null}
       </div>
 
       <MessageRail items={railItems} onSelect={scrollToMessage} i18n={i18n} />
@@ -2665,6 +2682,33 @@ export function ChatSurface({
             onRefillToComposer={refillQueuedMessageToComposer}
             onForceSend={handleForceSendQueued}
           />
+        ) : null}
+        {streamError ? (
+          <div className="chat-stream-error" role="alert">
+            <span className="chat-stream-error-text">
+              ⚠ {formatStreamErrorLabel(streamError, isZh)}
+            </span>
+            <div className="chat-stream-error-actions">
+              {showStreamResume ? (
+                <button
+                  type="button"
+                  className="chat-stream-error-resume"
+                  onClick={handleResumeStream}
+                  disabled={!hasProvider}
+                >
+                  {isZh ? '继续' : 'Resume'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="chat-stream-error-dismiss"
+                onClick={handleDismissStreamError}
+                aria-label={isZh ? '关闭错误提示' : 'Dismiss error'}
+              >
+                ×
+              </button>
+            </div>
+          </div>
         ) : null}
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
