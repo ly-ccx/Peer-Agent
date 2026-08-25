@@ -315,8 +315,8 @@
 
 .sidebar-workspace-node.is-active > .sidebar-workspace-row,
 .sidebar-workspace-node.is-home > .sidebar-workspace-row {
-  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.04));
-  box-shadow: 0 0 0 1px var(--chrome-hairline);
+  background: transparent;
+  box-shadow: none;
 }
 
 .sidebar-workspace-meta {
@@ -590,7 +590,7 @@
   color: var(--graphite-base);
 }
 .channel-conversation-list .conversation-row.active {
-  background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
+  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
   border-color: transparent;
   box-shadow: none;
   color: var(--graphite-base);

@@ -114,6 +114,28 @@ test('selected conversation rows stay a fill instead of a lifted card', () => {
   assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
 });
 
+test('selected highlight lives on the conversation, not the workspace row', () => {
+  const workspaceActiveBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-node.is-home > .sidebar-workspace-row',
+  );
+  const activeBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+  const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
+  const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
+
+  assert.match(workspaceActiveBody, /background:\s*transparent;/);
+  assert.doesNotMatch(workspaceActiveBody, /--za-sidebar-active-bg|--ui-surface-selected/);
+  assert.match(activeBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(activeBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+  assert.match(layeredActiveHoverBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(layeredActiveHoverBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
+});
+
 test('workspace rows stack the path under the name so the name can use the full width', () => {
   const metaBody = ruleBody(sidebarCss, '.sidebar-workspace-meta');
   const nameBody = ruleBody(sidebarCss, '.sidebar-workspace-name');
