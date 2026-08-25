@@ -4,6 +4,13 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## 0.0.8 - 2026-08-25
+
+### Notes
+
+- Open the `0.0.8` development line from the published `0.0.7` / `origin/main`.
+- Stamp the in-repo development version to `0.0.8`. This commit is not a published GitHub Release.
+
 ## 0.0.7 - 2026-08-25
 
 ### Notes
