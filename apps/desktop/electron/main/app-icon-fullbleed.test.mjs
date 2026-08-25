@@ -95,7 +95,18 @@ function pixel(rows, x, y) {
   return [row[i], row[i + 1], row[i + 2], row[i + 3]];
 }
 
-function assertFullBleedPng(filePath) {
+function alpha(rows, x, y) {
+  return pixel(rows, x, y)[3];
+}
+
+function firstOpaqueAlong(getter, n, threshold = 16) {
+  for (let t = 0; t < n; t += 1) {
+    if (getter(t) > threshold) return t;
+  }
+  return n;
+}
+
+function assertRoundedFullBleedPng(filePath) {
   const { width, height, rows } = readPngRgba(filePath);
   assert.equal(width, 1024, `${filePath} width`);
   assert.equal(height, 1024, `${filePath} height`);
@@ -107,31 +118,36 @@ function assertFullBleedPng(filePath) {
     [width - 1, height - 1],
   ];
   for (const [x, y] of corners) {
-    const [, , , a] = pixel(rows, x, y);
-    assert.equal(a, 255, `${filePath} corner (${x},${y}) must be opaque`);
+    assert.equal(alpha(rows, x, y), 0, `${filePath} corner (${x},${y}) must stay transparent for the original rounded mask`);
   }
 
-  let minAlpha = 255;
-  let transparent = 0;
-  for (let y = 0; y < height; y += 1) {
-    const row = rows[y];
-    for (let x = 0; x < width; x += 1) {
-      const a = row[x * 4 + 3];
-      if (a < minAlpha) minAlpha = a;
-      if (a < 255) transparent += 1;
-    }
+  const midY = Math.floor(height / 2);
+  const midX = Math.floor(width / 2);
+  const leftPad = firstOpaqueAlong((t) => alpha(rows, t, midY), width);
+  const rightPad = firstOpaqueAlong((t) => alpha(rows, width - 1 - t, midY), width);
+  const topPad = firstOpaqueAlong((t) => alpha(rows, midX, t), height);
+  const bottomPad = firstOpaqueAlong((t) => alpha(rows, midX, height - 1 - t), height);
+  for (const [name, pad] of [
+    ['left', leftPad],
+    ['right', rightPad],
+    ['top', topPad],
+    ['bottom', bottomPad],
+  ]) {
+    assert.ok(pad <= 8, `${filePath} ${name} edge padding ${pad}px is a thick frame, expected ≤ 8`);
   }
-  assert.equal(minAlpha, 255, `${filePath} must have no transparent edge`);
-  assert.equal(transparent, 0, `${filePath} must be fully opaque`);
+
+  const diagPad = firstOpaqueAlong((t) => alpha(rows, t, t), Math.min(width, height));
+  assert.ok(diagPad >= 48, `${filePath} diagonal becomes opaque at ${diagPad}px; a square icon would be ~0`);
+  assert.ok(diagPad <= 160, `${filePath} diagonal padding ${diagPad}px is too large; expected the original rounded-rect radius`);
 }
 
-describe('macOS app icon full-bleed canvas', () => {
-  it('keeps icon.png 1024×1024 with opaque corners and no transparent border', () => {
-    assertFullBleedPng(path.join(BUILD_DIR, 'icon.png'));
+describe('macOS app icon rounded full-bleed canvas', () => {
+  it('keeps icon.png 1024×1024 with original rounded corners and no thick frame', () => {
+    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon.png'));
   });
 
-  it('keeps Dock light and dark icons on the same full-bleed canvas', () => {
-    assertFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
-    assertFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
+  it('keeps Dock light and dark icons on the same rounded full-bleed canvas', () => {
+    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
+    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
   });
 });
