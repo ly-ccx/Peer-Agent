@@ -173,6 +173,7 @@ import {
   shouldHardBeginConversationLoad,
   shouldPersistEffortCorrection,
 } from '../state/conversationLoadGate';
+import { mapInChunks } from '../state/yieldToMain';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import {
   getTurnUserMessage,
@@ -294,7 +295,9 @@ async function loadConversationMessages(conversationId: string): Promise<{
   const contextAccounting: ContextAccountingSnapshot | null =
     conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const loaded = conv.messages.map((m: Record<string, unknown>) => {
+  const mapped = await mapInChunks(
+    conv.messages as Record<string, unknown>[],
+    (m) => {
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
       role: (m.role as ChatMsg['role']) || 'user',
@@ -332,7 +335,10 @@ async function loadConversationMessages(conversationId: string): Promise<{
       msg.interrupted = true;
     }
     return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
+  },
+    { chunkSize: 32 },
+  );
+  const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as

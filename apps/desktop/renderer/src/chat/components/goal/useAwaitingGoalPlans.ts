@@ -148,9 +148,17 @@ export function useAwaitingGoalPlanCounts(enabled = true): ReadonlyMap<string, n
             next.set(conversationId, n);
           }
         }
-        setCounts(next);
+        setCounts((prev) => {
+          if (prev.size !== next.size) return next;
+          for (const [conversationId, count] of next) {
+            if (prev.get(conversationId) !== count) return next;
+          }
+          return prev;
+        });
       } catch {
-        if (requestId === requestIdRef.current) setCounts(new Map());
+        if (requestId === requestIdRef.current) {
+          setCounts((prev) => (prev.size === 0 ? prev : new Map()));
+        }
       } finally {
         inFlightRef.current = null;
         if (reloadQueuedRef.current) {
