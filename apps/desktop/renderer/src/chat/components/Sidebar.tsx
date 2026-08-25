@@ -15,10 +15,14 @@ import { useListFlip } from '../hooks/useListFlip';
 import { groupTasksByWorkspace } from '../state/groupTasksByWorkspace';
 import { previewWorkspaceTasks } from '../state/workspaceTaskPreview';
 import {
+  emptyWorkspaceTreeToggles,
   isWorkspaceTaskTreeOpen,
+  nextWorkspaceRowClickToggles,
   nextWorkspaceTreeToggles,
   openWorkspaceTreeToggles,
+  rememberOpenWorkspaceTrees,
   UNASSIGNED_WORKSPACE_KEY,
+  type WorkspaceTreeToggles,
 } from '../state/workspaceTaskTree';
 import { useWorkspaceTaskPages } from '../hooks/useWorkspaceTaskPages';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
@@ -243,7 +247,12 @@ export function Sidebar({
   }, [deleteConversation, forgetConversation]);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
-  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<ReadonlySet<string>>(() => new Set());
+  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<WorkspaceTreeToggles>(emptyWorkspaceTreeToggles);
+  const focusedWorkspace = useMemo(() => {
+    const current = mergedConversations.find((conversation) => conversation.id === activeConversationId);
+    if (!current) return null;
+    return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
+  }, [activeConversationId, mergedConversations]);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
@@ -296,13 +305,39 @@ export function Sidebar({
     await ensureWorkspaceActive(wsPath);
   }, [ensureWorkspaceActive, onOpenWorkspaceHome]);
 
+  const handleWorkspaceRowClick = useCallback(async (wsPath: string) => {
+    const currentlyOpen = isWorkspaceTaskTreeOpen({
+      path: wsPath,
+      toggles: workspaceTreeToggles,
+      activeWorkspace,
+      focusedWorkspace,
+    });
+    const isCurrent = wsPath === activeWorkspace || wsPath === UNASSIGNED_WORKSPACE_KEY;
+    setWorkspaceTreeToggles((current) => nextWorkspaceRowClickToggles({
+      current,
+      path: wsPath,
+      activeWorkspace,
+      focusedWorkspace,
+    }));
+    if (wsPath === UNASSIGNED_WORKSPACE_KEY) return;
+    if (currentlyOpen && isCurrent) return;
+    onOpenWorkspaceHome?.(wsPath);
+    await ensureWorkspaceActive(wsPath);
+  }, [
+    activeWorkspace,
+    ensureWorkspaceActive,
+    focusedWorkspace,
+    onOpenWorkspaceHome,
+    workspaceTreeToggles,
+  ]);
+
   const handleNewWorkspaceTask = useCallback((wsPath: string) => {
     void handleActivateWorkspace(wsPath);
     onNewChat(wsPath);
   }, [handleActivateWorkspace, onNewChat]);
 
-  const toggleWorkspaceTree = useCallback((wsPath: string) => {
-    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath));
+  const toggleWorkspaceTree = useCallback((wsPath: string, currentlyOpen: boolean) => {
+    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath, currentlyOpen));
   }, []);
 
   const handleAddWorkspace = useCallback(async () => {
@@ -492,15 +527,15 @@ export function Sidebar({
   );
 
 
-  const focusedWorkspace = useMemo(() => {
-    const current = mergedConversations.find((conversation) => conversation.id === activeConversationId);
-    if (!current) return null;
-    return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
-  }, [activeConversationId, mergedConversations]);
+  useEffect(() => {
+    setWorkspaceTreeToggles((current) =>
+      rememberOpenWorkspaceTrees(current, [activeWorkspace, focusedWorkspace]),
+    );
+  }, [activeWorkspace, focusedWorkspace]);
 
   const isUnassignedOpen = isWorkspaceTaskTreeOpen({
     path: UNASSIGNED_WORKSPACE_KEY,
-    toggled: workspaceTreeToggles,
+    toggles: workspaceTreeToggles,
     activeWorkspace,
     focusedWorkspace,
   });
@@ -509,7 +544,7 @@ export function Sidebar({
     for (const workspace of workspaces) {
       if (isWorkspaceTaskTreeOpen({
         path: workspace.path,
-        toggled: workspaceTreeToggles,
+        toggles: workspaceTreeToggles,
         activeWorkspace,
         focusedWorkspace,
       })) {
@@ -652,7 +687,7 @@ export function Sidebar({
             const canShowMore = taskPreview.canShowMore || pageHasMore(ws.path);
             const isTreeOpen = isWorkspaceTaskTreeOpen({
               path: ws.path,
-              toggled: workspaceTreeToggles,
+              toggles: workspaceTreeToggles,
               activeWorkspace,
               focusedWorkspace,
             });
@@ -670,7 +705,7 @@ export function Sidebar({
                   className="sidebar-workspace-row"
                   data-project-path={ws.path}
                   aria-expanded={isTreeOpen}
-                  onClick={() => { void handleActivateWorkspace(ws.path); }}
+                  onClick={() => { void handleWorkspaceRowClick(ws.path); }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setContextMenu({ kind: 'workspace', x: e.clientX, y: e.clientY, workspace: ws });
@@ -681,7 +716,7 @@ export function Sidebar({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      void handleActivateWorkspace(ws.path);
+                      void handleWorkspaceRowClick(ws.path);
                     }
                   }}
                 >
@@ -694,7 +729,7 @@ export function Sidebar({
                       : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
                     onClick={(event) => {
                       event.stopPropagation();
-                      toggleWorkspaceTree(ws.path);
+                      toggleWorkspaceTree(ws.path, isTreeOpen);
                     }}
                   >
                     <svg
@@ -780,12 +815,12 @@ export function Sidebar({
                 aria-expanded={isUnassignedOpen}
                 title={isZh ? '未归属任务' : 'Unassigned tasks'}
                 onClick={() => {
-                  setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                  void handleWorkspaceRowClick(UNASSIGNED_WORKSPACE_KEY);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    setWorkspaceTreeToggles((current) => openWorkspaceTreeToggles(current, UNASSIGNED_WORKSPACE_KEY));
+                    void handleWorkspaceRowClick(UNASSIGNED_WORKSPACE_KEY);
                   }
                 }}
               >
@@ -798,7 +833,7 @@ export function Sidebar({
                     : (isZh ? '展开未归属' : 'Expand unassigned')}
                   onClick={(event) => {
                     event.stopPropagation();
-                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY);
+                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY, isUnassignedOpen);
                   }}
                 >
                   <svg

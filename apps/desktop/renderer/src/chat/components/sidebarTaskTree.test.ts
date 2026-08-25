@@ -9,19 +9,25 @@ test('sidebar mounts the task tree under each workspace and does not jump on wor
   assert.match(source, /groupTasksByWorkspace\(workspaces, mergedConversations\)/);
   assert.match(source, /sortWorkspaceTasks\(groupedTasks\.byPath\.get\(ws\.path\)/);
   assert.match(source, /renderConversationRow\(conv/);
-  assert.match(source, /handleActivateWorkspace\(ws\.path\)/);
+  assert.match(source, /handleWorkspaceRowClick\(ws\.path\)/);
+  assert.match(source, /handleActivateWorkspace\(wsPath\)/);
   assert.doesNotMatch(source, /handleOpenWorkspaceHome\(ws\.path\)/);
   assert.match(source, /设为当前工作区/);
   assert.match(source, /未归属/);
 });
 
-test('sidebar collapses workspace trees by default except the active or focused workspace', async () => {
+test('sidebar auto-opens active or focused workspace without accordion-collapsing other groups', async () => {
   const source = await readSidebar();
   assert.match(source, /isWorkspaceTaskTreeOpen\(/);
-  assert.match(source, /toggleWorkspaceTree\(ws\.path\)/);
+  assert.match(source, /toggleWorkspaceTree\(ws\.path, isTreeOpen\)/);
   assert.match(source, /sidebar-workspace-chevron-btn/);
+  assert.match(source, /handleWorkspaceRowClick\(ws\.path\)/);
+  assert.match(source, /handleWorkspaceRowClick\(UNASSIGNED_WORKSPACE_KEY\)/);
+  assert.match(source, /nextWorkspaceRowClickToggles\(/);
   assert.match(source, /openWorkspaceTreeToggles\(current, wsPath\)/);
+  assert.match(source, /rememberOpenWorkspaceTrees\(current, \[activeWorkspace, focusedWorkspace\]\)/);
   assert.match(source, /UNASSIGNED_WORKSPACE_KEY/);
+  assert.doesNotMatch(source, /toggled: workspaceTreeToggles/);
   assert.doesNotMatch(source, /加载更多任务/);
   assert.doesNotMatch(source, /onLoadMoreConversations/);
 });
