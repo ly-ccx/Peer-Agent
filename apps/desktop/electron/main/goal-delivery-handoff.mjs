@@ -44,8 +44,8 @@ async function git(cwd, args) {
   }
 }
 
-function isAccepted(plan) {
-  return Boolean(trim(plan?.resultAcceptance?.acceptedAt));
+function isCompleted(plan) {
+  return plan?.status === 'completed';
 }
 
 function isQualityReady(plan) {
@@ -167,17 +167,16 @@ export function createGoalDeliveryHandoff({
 
   function canHandoff(plan) {
     if (!plan || typeof plan !== 'object') return false;
-    if (!isAccepted(plan)) return false;
+    if (!isCompleted(plan)) return false;
     if (!isQualityReady(plan)) return false;
     const binding = plan.deliveryBinding;
     if (!binding) return false;
     const taskBranch = trim(binding.taskBranch);
     const targetBranch = mergeTargetFor(plan);
     if (!taskBranch || !targetBranch) return false;
-    if (binding.executionIsolation === 'worktree') {
-      return Boolean(trim(binding.worktreePath));
-    }
-    return binding.executionIsolation === 'none';
+    // 完成即结束：没开隔离的改动留在当前工作区，不合回。
+    // 只有独立 Worktree 才在完成后把任务线合回目标分支。
+    return binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath));
   }
   function stopPlan(plan, reason, extras = {}) {
     const binding = plan.deliveryBinding || {};

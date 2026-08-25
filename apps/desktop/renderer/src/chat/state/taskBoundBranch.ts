@@ -2,7 +2,7 @@ export interface TaskDeliveryLine {
   readonly targetBranch: string | null;
   readonly taskBranch: string | null;
   readonly isolated: boolean;
-  /** 验收交回完成后，这次隔离已经结束，输入栏应回到源头。 */
+  /** 合回目标分支完成后，这次隔离已经结束，输入栏应回到源头。 */
   readonly delivered?: boolean;
 }
 

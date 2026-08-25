@@ -493,7 +493,8 @@ const goalPlanStore = createGoalPlanStore({
           const plan = goalPlanStore.getPlan(planId);
           if (!plan) return;
           if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
-          if (plan.resultAcceptance?.acceptedAt && plan.deliveryHandoff?.status !== 'delivered') return;
+          // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
+          if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
           void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
             console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
           });

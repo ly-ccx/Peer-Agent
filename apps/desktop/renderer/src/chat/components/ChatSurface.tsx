@@ -2930,8 +2930,8 @@ export function ChatSurface({
                     : isStreaming
                       ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
                       : (isZh
-                        ? '下次任务是否在独立 Worktree 里执行。验收合并后这次隔离会结束，这个开关只表示下一次。'
-                        : 'Whether the next task runs in a Worktree. After acceptance, this isolation ends; the toggle only means the next run.')
+                        ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
+                        : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
                 }
               >
                 <input
