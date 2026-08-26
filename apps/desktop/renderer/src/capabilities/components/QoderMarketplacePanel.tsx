@@ -1,5 +1,6 @@
 import type { QoderInstallScope, QoderMarketplaceEntry, QoderMarketplacePage, QoderMarketplaceSkillDetail, QoderMarketplaceSort, QoderTaxonomyItem } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
+import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
@@ -13,14 +14,6 @@ const EMPTY_PAGE: QoderMarketplacePage = {
   totalSize: 0,
   items: [],
 };
-
-/** 筛选维度展示顺序与标题（qoder.com 官方站同款维度）。 */
-const FILTER_DIMENSIONS: readonly { readonly dimension: QoderTaxonomyItem['dimension']; readonly label: string; readonly allLabel: string }[] = [
-  { dimension: 'category', label: '分类', allLabel: '所有分类' },
-  { dimension: 'output', label: '产物类型', allLabel: '所有产物' },
-  { dimension: 'client', label: '客户端', allLabel: '所有客户端' },
-  { dimension: 'app_ecosystem', label: 'App 生态', allLabel: '所有生态' },
-];
 
 const SORT_FILTERS: readonly { readonly id: QoderMarketplaceSort; readonly label: string }[] = [
   { id: 'hot', label: '热门' },
@@ -81,9 +74,6 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const [sortBy, setSortBy] = useState<QoderMarketplaceSort>('hot');
   const [taxonomies, setTaxonomies] = useState<readonly QoderTaxonomyItem[]>([]);
   const [category, setCategory] = useState('');
-  const [output, setOutput] = useState('');
-  const [client, setClient] = useState('');
-  const [appEcosystem, setAppEcosystem] = useState('');
   const [selected, setSelected] = useState<QoderMarketplaceEntry | null>(null);
   const [detail, setDetail] = useState<(QoderMarketplaceSkillDetail & { readonly skillMd: string | null }) | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -112,7 +102,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     return () => { cancelled = true; };
   }, []);
 
-  // 筛选维度来自 taxonomies 接口（Accept-Language: zh-CN 直接返回中文标签）。
+  // 只保留分类筛选（对齐腾讯市场）。taxonomies 接口带 Accept-Language: zh-CN 直接返回中文标签。
   useEffect(() => {
     let cancelled = false;
     void clientApi.listQoderTaxonomies()
@@ -121,15 +111,15 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     return () => { cancelled = true; };
   }, []);
 
-  const taxonomyOptions = useMemo(() => {
-    const byDimension = new Map<string, QoderTaxonomyItem[]>();
-    for (const item of taxonomies) {
-      const list = byDimension.get(item.dimension) ?? [];
-      list.push(item);
-      byDimension.set(item.dimension, list);
-    }
-    return byDimension;
-  }, [taxonomies]);
+  const categoryOptions = useMemo(
+    () => [
+      { value: '', label: '所有分类' },
+      ...taxonomies
+        .filter((item) => item.dimension === 'category')
+        .map((item) => ({ value: item.code, label: item.label || item.code })),
+    ],
+    [taxonomies],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -140,15 +130,12 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
       keyword: debouncedKeyword,
       sortBy,
       categories: category ? [category] : undefined,
-      outputs: output ? [output] : undefined,
-      clients: client ? [client] : undefined,
-      appEcosystems: appEcosystem ? [appEcosystem] : undefined,
     })
       .then((value) => { if (!cancelled) { setResult(value); setError(null); } })
       .catch(() => { if (!cancelled) setError('无法访问 Qoder 市场'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [page, debouncedKeyword, sortBy, category, output, client, appEcosystem]);
+  }, [page, debouncedKeyword, sortBy, category]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); setDetailLoading(false); return; }
@@ -191,40 +178,20 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
 
   const installSummary = (entry: QoderMarketplaceEntry): string => installing === entry.skillId ? '正在安装…' : '安装';
 
-  const filterState: Record<string, string> = { category, output, client, app_ecosystem: appEcosystem };
-  const setFilterState: Record<string, (value: string) => void> = {
-    category: (value) => { setCategory(value); setPage(1); },
-    output: (value) => { setOutput(value); setPage(1); },
-    client: (value) => { setClient(value); setPage(1); },
-    app_ecosystem: (value) => { setAppEcosystem(value); setPage(1); },
-  };
-  const activeFilterCount = FILTER_DIMENSIONS.filter(({ dimension }) => filterState[dimension]).length;
-
   return (
     <section className="skill-marketplace" aria-label="Qoder 市场">
       <div className="skill-marketplace-toolbar">
         <div className="skill-marketplace-controls">
-          <input aria-label="搜索 Qoder 市场" type="search" placeholder="搜索 43,000+ 个 Qoder 技能" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+          <input aria-label="搜索 Qoder 市场" type="search" placeholder="搜索名称、描述或分类" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+          <div className="skill-marketplace-category-select">
+            <Dropdown
+              value={category}
+              options={categoryOptions}
+              ariaLabel="所有分类"
+              onChange={(value) => { setPage(1); setCategory(value); }}
+            />
+          </div>
         </div>
-        {FILTER_DIMENSIONS.map(({ dimension, label, allLabel }) => {
-          const options = taxonomyOptions.get(dimension) ?? [];
-          if (!options.length) return null;
-          return (
-            <label key={dimension} className="qoder-filter-select">
-              <span className="qoder-filter-label">{label}</span>
-              <select
-                aria-label={`按${label}筛选`}
-                value={filterState[dimension]}
-                onChange={(event) => setFilterState[dimension](event.target.value)}
-              >
-                <option value="">{allLabel}</option>
-                {options.map((option) => (
-                  <option key={option.code} value={option.code}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-          );
-        })}
       </div>
       <div className="skill-marketplace-filters" role="tablist" aria-label="市场排序">
         {SORT_FILTERS.map((filter) => (
@@ -241,13 +208,8 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         ))}
       </div>
       <div className="skill-marketplace-sync" role="status">
-        <span>qoder.com 官方市场 · 服务端实时搜索{activeFilterCount > 0 ? ` · 已启用 ${activeFilterCount} 项筛选` : ''}</span>
-        <span>
-          共 {result.totalSize.toLocaleString()} 个 Skill · 当前第 {page.toLocaleString()} / {totalPages.toLocaleString()} 页
-          {activeFilterCount > 0 ? (
-            <button type="button" className="qoder-filter-clear" onClick={() => { setCategory(''); setOutput(''); setClient(''); setAppEcosystem(''); setPage(1); }}>清除筛选</button>
-          ) : null}
-        </span>
+        <span>qoder.com 官方市场 · 服务端实时搜索</span>
+        <span>共 {result.totalSize.toLocaleString()} 个 Skill · 当前第 {page.toLocaleString()} / {totalPages.toLocaleString()} 页</span>
       </div>
       {error ? <p className="skill-marketplace-error" role="alert">{error}</p> : null}
       {loading ? <p className="skill-marketplace-empty">正在搜索 Qoder 市场…</p> : null}

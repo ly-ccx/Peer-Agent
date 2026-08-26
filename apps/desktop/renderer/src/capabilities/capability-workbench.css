@@ -1466,34 +1466,3 @@
 .skill-marketplace-toolbar .skill-marketplace-install {
   border-radius: var(--ui-radius-control);
 }
-
-/* Qoder 市场筛选下拉（分类/产物/客户端/生态），对齐现有工具栏控件规格。 */
-.qoder-filter-select {
-  @apply flex shrink-0 items-center gap-1.5;
-}
-.qoder-filter-label {
-  @apply text-[11px];
-  color: var(--za-text-muted);
-}
-.qoder-filter-select select {
-  @apply px-2.5 py-2 text-[12px];
-  min-height: 34px;
-  min-width: 108px;
-  border-radius: var(--ui-radius-control);
-  color: var(--za-text);
-  background: var(--za-surface);
-  border: 1px solid var(--za-line);
-}
-.qoder-filter-select select:focus-visible {
-  outline: 2px solid var(--za-brand);
-  outline-offset: 1px;
-}
-.qoder-filter-clear {
-  @apply ml-2 cursor-pointer rounded-full px-2 py-0.5 text-[11px];
-  color: var(--za-brand);
-  background: color-mix(in srgb, var(--za-brand) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--za-brand) 35%, transparent);
-}
-.qoder-filter-clear:hover {
-  background: color-mix(in srgb, var(--za-brand) 18%, transparent);
-}
