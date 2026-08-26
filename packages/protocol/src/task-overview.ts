@@ -179,6 +179,10 @@ export interface TaskOverviewItem {
    */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  /** ADR 69：分流 verdict；CONFLICT 时配合 deliveryHandoffConflicts 渲染收口面板。 */
+  readonly deliveryHandoffVerdict?: string;
+  /** ADR 69：CONFLICT 时的真冲突文件清单（同名文件内容不同）。 */
+  readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -296,6 +300,9 @@ export interface GoalPlanProjectionSnapshot {
   /** 用户可见的合回状态；没交付线时省略。 */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  /** ADR 69：分流 verdict / CONFLICT 冲突清单（快照透传，供 projectGoalPlan 组装）。 */
+  readonly deliveryHandoffVerdict?: string;
+  readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -528,6 +535,10 @@ export function projectGoalPlan(
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
     ...(snapshot.deliveryHandoffStatus ? { deliveryHandoffStatus: snapshot.deliveryHandoffStatus } : {}),
+    ...(snapshot.deliveryHandoffVerdict ? { deliveryHandoffVerdict: snapshot.deliveryHandoffVerdict } : {}),
+    ...(snapshot.deliveryHandoffConflicts?.length
+      ? { deliveryHandoffConflicts: snapshot.deliveryHandoffConflicts }
+      : {}),
     ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
     ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
     ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),

@@ -1085,6 +1085,27 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  /** ADR 69 P2：收口决断执行。keep_taskline 需渲染层先弹确认并回传 permissionConfirmed。 */
+  readonly goalPlansResolveHandoffConflicts: (params: {
+    planId: string;
+    resolutions: ReadonlyArray<{ path: string; choice: 'keep_taskline' | 'keep_worktree' | 'keep_both' }>;
+    permissionConfirmed?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+    delivered?: boolean;
+    applied?: ReadonlyArray<{ path: string; choice: string }>;
+    plan?: GoalPlan | null;
+  }>;
+  /** ADR 69 P2：真机预览「合并后的目标线」，返回临时 worktree 路径。 */
+  readonly goalPlansPreviewHandoffMerge: (params: {
+    planId: string;
+    resolutions?: ReadonlyArray<{ path: string; choice: string }>;
+  }) => Promise<{ ok: boolean; previewPath?: string; targetBranch?: string; reason?: string }>;
+  readonly goalPlansCleanupHandoffPreview: (params: {
+    planId: string;
+    previewPath: string;
+  }) => Promise<{ ok: boolean; reason?: string }>;
   readonly goalPlansIsolate: (params: { planId: string }) => Promise<{
     ok: boolean;
     plan: GoalPlan | null;

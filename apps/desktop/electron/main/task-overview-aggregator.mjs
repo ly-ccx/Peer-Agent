@@ -675,6 +675,11 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
     ...(plan.deliveryHandoff?.status ? { deliveryHandoffStatus: plan.deliveryHandoff.status } : {}),
+    // ADR 69：透出分流 verdict 与真冲突清单，渲染层据此把 CONFLICT 聚合为收口面板。
+    ...(plan.deliveryHandoff?.verdict ? { deliveryHandoffVerdict: plan.deliveryHandoff.verdict } : {}),
+    ...(Array.isArray(plan.deliveryHandoff?.conflicts) && plan.deliveryHandoff.conflicts.length > 0
+      ? { deliveryHandoffConflicts: plan.deliveryHandoff.conflicts }
+      : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,

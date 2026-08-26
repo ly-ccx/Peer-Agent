@@ -547,7 +547,31 @@ export interface GoalDeliveryHandoff {
   readonly taskBranch?: string;
   readonly commitSha?: string;
   readonly stoppedReason?: string;
+  /**
+   * ADR 69：合回分流 verdict。CONFLICT 时 status 为 'stopped' 且 conflicts 非空，
+   * 供收口视图批量呈现；AUTO_CLEAN/AUTO_MERGE/STALE 由系统消化，不进「需要你」。
+   */
+  readonly verdict?: GoalDeliveryHandoffVerdict;
+  /** CONFLICT 时的真冲突文件清单（同名文件内容不同，合并会覆盖工作区）。 */
+  readonly conflicts?: readonly GoalDeliveryConflict[];
   readonly updatedAt: string;
+}
+
+/** ADR 69：合回分流五类判定。 */
+export type GoalDeliveryHandoffVerdict =
+  | 'AUTO_CLEAN'
+  | 'AUTO_MERGE'
+  | 'STALE'
+  | 'CONFLICT'
+  | 'BLOCKED_ENV';
+
+/** 一条真冲突：任务线与目标工作区在同一未跟踪路径上内容不同。 */
+export interface GoalDeliveryConflict {
+  readonly path: string;
+  /** 工作区版本的 blob 摘要（用于展示/区分）。 */
+  readonly worktreeBlob?: string;
+  /** 任务线版本的 blob 摘要。 */
+  readonly taskBlob?: string;
 }
 
 export type GoalQualityCheckStatus = 'passed' | 'failed' | 'skipped';

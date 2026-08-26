@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
-import { createGoalDeliveryHandoff, triageTaskLine } from './goal-delivery-handoff.mjs';
+import { createGoalDeliveryHandoff, resolveHandoffConflicts, triageTaskLine } from './goal-delivery-handoff.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
 
 let root;
@@ -511,7 +511,10 @@ describe('goal delivery handoff', () => {
     const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
 
     assert.equal(next.deliveryHandoff.status, 'stopped');
-    assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
+    // ADR 69：真冲突从环境挡中分离——CONFLICT verdict + 冲突文件清单落进 deliveryHandoff。
+    assert.equal(next.deliveryHandoff.stoppedReason, 'merge_conflict_untracked');
+    assert.equal(next.deliveryHandoff.verdict, 'CONFLICT');
+    assert.deepEqual(next.deliveryHandoff.conflicts, [{ path: 'demo.txt' }]);
     assert.equal(readFileSync(path.join(repository, 'demo.txt'), 'utf8'), 'user has different local edits\n');
   });
 });
@@ -572,5 +575,68 @@ describe('triageTaskLine (ADR 69 分类器)', () => {
     assert.equal(res.verdict, 'BLOCKED_ENV');
     assert.equal(res.reason, 'target_checkout_dirty');
     assert.ok(res.detail.blockingEntry);
+  });
+});
+
+describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
+  function conflictPlan(repo, taskBranch, conflictPaths) {
+    return {
+      planId: 'plan-x',
+      deliveryBinding: { targetWorkspacePath: repo, targetBranch: 'main', taskBranch },
+      deliveryHandoff: { status: 'stopped', verdict: 'CONFLICT', conflicts: conflictPaths.map((p) => ({ path: p })) },
+    };
+  }
+  function makeConflictTask(name, file, taskContent) {
+    git(['switch', '-c', name]);
+    mkdirSync(path.dirname(path.join(repository, file)), { recursive: true });
+    writeFileSync(path.join(repository, file), taskContent);
+    git(['add', '-A']);
+    git(['commit', '-m', `task ${name}`]);
+    git(['switch', 'main']);
+    return name;
+  }
+
+  it('keep_taskline：暂移工作区版、ff-only 合入任务线版，delivered', async () => {
+    const task = makeConflictTask('task/kt', 'demo/p.html', 'task version\n');
+    mkdirSync(path.join(repository, 'demo'), { recursive: true });
+    writeFileSync(path.join(repository, 'demo', 'p.html'), 'user local\n'); // 未跟踪、内容不同
+    const res = await resolveHandoffConflicts({ plan: conflictPlan(repository, task, ['demo/p.html']), resolutions: [{ path: 'demo/p.html', choice: 'keep_taskline' }] });
+    assert.equal(res.ok, true);
+    assert.equal(res.delivered, true);
+    assert.equal(readFileSync(path.join(repository, 'demo', 'p.html'), 'utf8'), 'task version\n');
+    assert.equal(readFileSync(path.join(repository, 'demo', 'p.html.worktree-backup'), 'utf8'), 'user local\n');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+  });
+
+  it('keep_both：任务线版另存为 .taskline，工作区版保留，不合并', async () => {
+    const headBefore = git(['rev-parse', 'main']);
+    const task = makeConflictTask('task/kb', 'demo/q.html', 'task version\n');
+    mkdirSync(path.join(repository, 'demo'), { recursive: true });
+    writeFileSync(path.join(repository, 'demo', 'q.html'), 'user local\n');
+    const res = await resolveHandoffConflicts({ plan: conflictPlan(repository, task, ['demo/q.html']), resolutions: [{ path: 'demo/q.html', choice: 'keep_both' }] });
+    assert.equal(res.ok, true);
+    assert.equal(res.delivered, false);
+    assert.equal(readFileSync(path.join(repository, 'demo', 'q.html'), 'utf8'), 'user local\n');
+    assert.equal(readFileSync(path.join(repository, 'demo', 'q.html.taskline'), 'utf8'), 'task version\n');
+    assert.equal(git(['rev-parse', 'main']), headBefore); // 未动目标线
+  });
+
+  it('keep_worktree：不动 git 不动文件，标记已决', async () => {
+    const headBefore = git(['rev-parse', 'main']);
+    const task = makeConflictTask('task/kw', 'demo/r.html', 'task version\n');
+    mkdirSync(path.join(repository, 'demo'), { recursive: true });
+    writeFileSync(path.join(repository, 'demo', 'r.html'), 'user local\n');
+    const res = await resolveHandoffConflicts({ plan: conflictPlan(repository, task, ['demo/r.html']), resolutions: [{ path: 'demo/r.html', choice: 'keep_worktree' }] });
+    assert.equal(res.ok, true);
+    assert.equal(res.delivered, false);
+    assert.equal(readFileSync(path.join(repository, 'demo', 'r.html'), 'utf8'), 'user local\n');
+    assert.equal(git(['rev-parse', 'main']), headBefore);
+  });
+
+  it('未知冲突路径：拒绝并报 unknown_conflict_path', async () => {
+    const task = makeConflictTask('task/unk', 'demo/s.html', 'task version\n');
+    const res = await resolveHandoffConflicts({ plan: conflictPlan(repository, task, ['demo/s.html']), resolutions: [{ path: 'etc/passwd', choice: 'keep_taskline' }] });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'unknown_conflict_path');
   });
 });

@@ -17,6 +17,9 @@ export function createGoalApplicationService({
   recordTaskEvidence,
   deletePlan,
   retryHandoff,
+  resolveHandoffConflicts,
+  previewHandoffMerge,
+  cleanupHandoffPreview,
   isolate,
   openSite,
   discardLine,
@@ -105,6 +108,19 @@ export function createGoalApplicationService({
       ports.recordTaskEvidence(planId, taskId, change),
     remove,
     retryHandoff: ({ planId } = {}) => ports.retryHandoff(planId),
+    // ADR 69 P2：收口决断与真机预览（可选端口，未接线的环境返回 ok:false）。
+    resolveHandoffConflicts: ({ planId, resolutions, permissionConfirmed } = {}) =>
+      typeof ports.resolveHandoffConflicts === 'function'
+        ? ports.resolveHandoffConflicts(planId, resolutions, { permissionConfirmed: Boolean(permissionConfirmed) })
+        : { ok: false, reason: 'unavailable' },
+    previewHandoffMerge: ({ planId, resolutions } = {}) =>
+      typeof ports.previewHandoffMerge === 'function'
+        ? ports.previewHandoffMerge(planId, resolutions)
+        : { ok: false, reason: 'unavailable' },
+    cleanupHandoffPreview: ({ planId, previewPath } = {}) =>
+      typeof ports.cleanupHandoffPreview === 'function'
+        ? ports.cleanupHandoffPreview(planId, previewPath)
+        : { ok: false, reason: 'unavailable' },
     isolate: ({ planId } = {}) => ports.isolate(planId),
     openSite: ({ planId, mode } = {}) => ports.openSite(planId, { mode }),
     discardLine: ({ planId, deleteBranch } = {}) =>

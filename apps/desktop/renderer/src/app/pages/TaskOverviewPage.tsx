@@ -7,6 +7,7 @@ import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPrefere
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
+import { HandoffConflictPanel } from '../components/HandoffConflictPanel';
 import { ActionLabel } from './actionLabelDisplay';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -1288,6 +1289,12 @@ function ResultCard({
         <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
       <ArtifactList item={item} />
+      {item.deliveryHandoffVerdict === 'CONFLICT' && item.deliveryHandoffConflicts?.length ? (
+        <HandoffConflictPanel
+          planId={item.taskId}
+          conflicts={item.deliveryHandoffConflicts}
+        />
+      ) : null}
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
         <div className="work-item-actions__buttons">

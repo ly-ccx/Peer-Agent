@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -45,6 +46,12 @@ async function git(cwd, args) {
   }
 }
 
+/** 取 git 输出的原始字节（不 trim），用于 keep_both 完整落地任务线文件内容。 */
+async function gitBuffer(cwd, args) {
+  const { stdout } = await execFileAsync('git', args, { cwd, encoding: 'buffer', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  return stdout;
+}
+
 function isCompleted(plan) {
   return plan?.status === 'completed';
 }
@@ -60,6 +67,115 @@ function defaultMergeTarget(plan) {
 
 function alreadyDelivered(plan) {
   return plan?.deliveryHandoff?.status === 'delivered';
+}
+
+/** 把绝对/相对路径规整为仓库内相对路径；越界返回 null（防路径逃逸）。 */
+function relPath(repositoryRoot, p) {
+  if (!p || typeof p !== 'string') return null;
+  const rel = path.isAbsolute(p) ? path.relative(repositoryRoot, p) : p;
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return rel;
+}
+
+/**
+ * ADR 69 P2：按用户决断执行收口。仅处理「目标分支被工作区占用 + 未跟踪同名文件内容不同」的冲突。
+ * resolutions: [{ path, choice }]，choice ∈ keep_taskline | keep_worktree | keep_both。
+ *  - keep_taskline：暂移工作区版为 <path>.worktree-backup，ff-only 合并任务线，任务线版落地（动 git 目标线）。
+ *  - keep_worktree：不动 git，只把该线标记为已决（内容已在工作区，线可另行删除）。
+ *  - keep_both：任务线版另存为 <path>.taskline，工作区版保留，不合并目标线。
+ * 全部为 keep_taskline 且合并成功 → delivered；否则标记 conflict_resolved 停在原地。
+ */
+export async function resolveHandoffConflicts({ plan, resolutions, gitRunner = git }) {
+  const binding = plan?.deliveryBinding || {};
+  const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+  const targetBranch = trim(binding.targetBranch);
+  const taskBranch = trim(binding.taskBranch);
+  if (!repositoryRoot || !targetBranch || !taskBranch) return { ok: false, reason: 'missing_binding' };
+  const conflicts = plan?.deliveryHandoff?.conflicts || [];
+  const conflictPaths = new Set(conflicts.map((c) => c.path));
+  const applied = [];
+  const parked = []; // keep_taskline 待合并时被暂移的工作区文件（合并失败需恢复）
+  let needsMerge = false;
+  try {
+    for (const r of resolutions || []) {
+      const rel = relPath(repositoryRoot, r?.path);
+      if (!rel || !conflictPaths.has(rel)) return { ok: false, reason: 'unknown_conflict_path', path: r?.path };
+      const abs = path.join(repositoryRoot, rel);
+      if (r.choice === 'keep_taskline') {
+        const content = readFileSync(abs); // 工作区版字节，备份 + 失败恢复用
+        renameSync(abs, `${abs}.worktree-backup`);
+        parked.push({ abs, content });
+        needsMerge = true;
+        applied.push({ path: rel, choice: r.choice });
+      } else if (r.choice === 'keep_both') {
+        const taskContent = await gitBuffer(repositoryRoot, ['show', `${taskBranch}:${rel}`]); // 原始字节，保留尾部换行
+        writeFileSync(`${abs}.taskline`, taskContent);
+        applied.push({ path: rel, choice: r.choice });
+      } else { // keep_worktree：不动文件
+        applied.push({ path: rel, choice: 'keep_worktree' });
+      }
+    }
+    if (needsMerge) {
+      try {
+        await gitRunner(repositoryRoot, ['merge', '--ff-only', taskBranch]);
+      } catch (error) {
+        for (const { abs, content } of parked) { try { writeFileSync(abs, content); } catch { /* 尽力恢复 */ } }
+        return { ok: false, reason: 'merge_failed', detail: String(error?.message || error).slice(0, 300) };
+      }
+      const allTaskline = applied.every((a) => a.choice === 'keep_taskline');
+      if (allTaskline) {
+        const commitSha = trim(await gitRunner(repositoryRoot, ['rev-parse', 'HEAD']));
+        return { ok: true, delivered: true, commitSha, applied };
+      }
+    }
+    return { ok: true, delivered: false, applied };
+  } catch (error) {
+    return { ok: false, reason: 'resolve_failed', detail: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+/**
+ * ADR 69 P2：真机预览「合并后的目标线」。检出任务线到临时 worktree 供预览，不动主工作区。
+ * resolutions 里 keep_worktree 的路径在预览中以工作区版本覆盖（模拟取舍后的样子）。
+ * 返回 { previewPath }；调用方负责用同一函数传 cleanupOnly 或事后 rm 清理。
+ */
+export async function previewHandoffMerge({ plan, resolutions = [], gitRunner = git }) {
+  const binding = plan?.deliveryBinding || {};
+  const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+  const targetBranch = trim(binding.targetBranch);
+  const taskBranch = trim(binding.taskBranch);
+  if (!repositoryRoot || !taskBranch) return { ok: false, reason: 'missing_binding' };
+  const previewPath = path.join(os.tmpdir(), `peer-handoff-preview-${Date.now()}`);
+  try {
+    await gitRunner(repositoryRoot, ['worktree', 'add', '--detach', previewPath, taskBranch]);
+    for (const r of resolutions || []) {
+      const rel = relPath(repositoryRoot, r?.path);
+      if (!rel) continue;
+      if (r.choice === 'keep_worktree') {
+        const src = path.join(repositoryRoot, rel);
+        const dest = path.join(previewPath, rel);
+        if (existsSync(src)) {
+          mkdirSync(path.dirname(dest), { recursive: true });
+          writeFileSync(dest, readFileSync(src));
+        }
+      }
+    }
+    return { ok: true, previewPath, targetBranch };
+  } catch (error) {
+    try { await gitRunner(repositoryRoot, ['worktree', 'remove', '--force', previewPath]); } catch { /* 忽略清理失败 */ }
+    return { ok: false, reason: 'preview_failed', detail: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+/** 清理预览 worktree（渲染层关闭预览时调用）。 */
+export async function cleanupHandoffPreview({ repositoryRoot, previewPath, gitRunner = git }) {
+  if (!repositoryRoot || !previewPath) return { ok: false };
+  try {
+    await gitRunner(repositoryRoot, ['worktree', 'remove', '--force', previewPath]);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: 'cleanup_failed', detail: String(error?.message || error).slice(0, 200) };
+  }
 }
 
 /**
@@ -207,16 +323,24 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
   const occupyingTarget = checkout === targetBranch;
   if (occupyingTarget) {
     // ADR 68：脏检查分级——真改动挡，untracked 噪音只在与任务线变更集碰撞且内容不同时挡。
-    const { mergeable, identicalCollisions } = await isTargetCheckoutMergeable(
+    // ADR 69：isTargetCheckoutMergeable 内部即 triageTaskLine，triage 携带五类 verdict 与冲突清单。
+    const { mergeable, identicalCollisions, triage } = await isTargetCheckoutMergeable(
       repositoryRoot,
       taskBranch,
       targetBranch,
     );
     if (!mergeable) {
+      // CONFLICT：同名未跟踪文件内容不同，合并会覆盖工作区——透出冲突清单供收口视图呈现。
+      // BLOCKED_ENV（tracked 脏/查询失败）：维持原 stoppedReason，不附冲突清单。
+      const isConflict = triage?.verdict === 'CONFLICT';
       return {
         ok: false,
-        reason: 'target_checkout_dirty',
+        reason: isConflict ? 'merge_conflict_untracked' : 'target_checkout_dirty',
         checkout,
+        verdict: triage?.verdict,
+        conflicts: isConflict
+          ? triage.detail.collisions.filter((c) => c.kind === 'different').map((c) => ({ path: c.path }))
+          : undefined,
       };
     }
     // 同内容碰撞：git merge --ff-only 对 untracked 碰撞一律拒绝（即使字节一致），
@@ -434,6 +558,8 @@ export function createGoalDeliveryHandoff({
           targetBranch,
           taskBranch,
           commitSha,
+          ...(merged.verdict ? { verdict: merged.verdict } : {}),
+          ...(merged.conflicts ? { conflicts: merged.conflicts } : {}),
         });
       }
       return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
@@ -497,6 +623,48 @@ export function createGoalDeliveryHandoff({
     return handoffPlan(plan, { retry: true });
   }
 
+  // ADR 69 P2：收口决断执行。permissionConfirmed 由 main 经 PermissionGrant 批准后传入。
+  async function resolveConflicts(plan, resolutions, { permissionConfirmed = false } = {}) {
+    const needsGrant = (resolutions || []).some((r) => r?.choice === 'keep_taskline');
+    if (needsGrant && !permissionConfirmed) return { ok: false, reason: 'permission_required' };
+    const result = await resolveHandoffConflicts({ plan, resolutions });
+    if (!result.ok) return result;
+    const binding = plan.deliveryBinding || {};
+    const targetBranch = trim(binding.targetBranch);
+    const taskBranch = trim(binding.taskBranch);
+    if (result.delivered) {
+      return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
+        status: 'delivered',
+        deliveryMode: 'merge',
+        repoId: binding.repoId,
+        targetBranch,
+        taskBranch,
+        commitSha: result.commitSha,
+        verdict: 'CONFLICT',
+        conflicts: plan.deliveryHandoff?.conflicts,
+        resolutions: result.applied,
+        updatedAt: now(),
+      }) || plan;
+    }
+    return goalPlanStore?.recordDeliveryHandoff?.(plan.planId, {
+      ...(plan.deliveryHandoff || {}),
+      status: 'stopped',
+      stoppedReason: 'conflict_resolved',
+      resolutions: result.applied,
+      updatedAt: now(),
+    }) || plan;
+  }
+
+  async function previewMerge(plan, resolutions) {
+    return previewHandoffMerge({ plan, resolutions });
+  }
+
+  async function cleanupPreview(plan, previewPath) {
+    const binding = plan?.deliveryBinding || {};
+    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+    return cleanupHandoffPreview({ repositoryRoot, previewPath });
+  }
+
   return Object.freeze({
     canHandoff,
     canRecordDirectDelivery,
@@ -504,5 +672,8 @@ export function createGoalDeliveryHandoff({
     lockKey,
     handoffPlan,
     retryHandoff,
+    resolveConflicts,
+    previewMerge,
+    cleanupPreview,
   });
 }
