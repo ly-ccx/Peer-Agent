@@ -145,3 +145,89 @@ export interface SkillHubCategoriesResult {
   readonly count: number;
   readonly items: readonly SkillHubCategory[];
 }
+
+// ---------------------------------------------------------------------------
+// Qoder 市场（qoder.com apphub）
+//
+// 数据来自 qoder.com 官方 marketplace apphub API（无需鉴权）：
+// - 列表：GET /apphub/api/v1/marketplace/catalog/extensions?extension_types=skill
+// - 详情：GET /apphub/api/v1/marketplace/skills/{skillId}/detail
+// - 分类：GET /apphub/api/v1/marketplace/extensions/taxonomies?extension_type=skill
+// - 下载：detail.download_url（OSS zip，直链）
+// 与 SkillHub 不同：Qoder 支持服务端关键词搜索 + 分页，无需本地全量索引同步。
+// ---------------------------------------------------------------------------
+
+export type QoderMarketplaceSort = 'hot' | 'latest';
+
+export interface QoderMarketplaceEntry {
+  readonly skillId: string;
+  readonly name: string;
+  readonly nameCn: string;
+  readonly description: string;
+  readonly descriptionCn: string;
+  readonly iconUrl: string | null;
+  readonly author: string;
+  readonly authorName: string;
+  readonly installCount: number;
+  readonly category: string;
+  /** epoch 毫秒（接口返回字符串） */
+  readonly contentUpdatedAt: number;
+}
+
+export interface QoderMarketplaceQuery {
+  readonly keyword?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly sortBy?: QoderMarketplaceSort;
+}
+
+export interface QoderMarketplacePage {
+  readonly currentPage: number;
+  readonly nextPage: number | null;
+  readonly lastPage: number;
+  readonly pageSize: number;
+  readonly totalSize: number;
+  readonly items: readonly QoderMarketplaceEntry[];
+}
+
+export interface QoderMarketplaceFileNode {
+  readonly name: string;
+  readonly path: string;
+  readonly type: 'directory' | 'file';
+  readonly size: number;
+  readonly files: readonly QoderMarketplaceFileNode[];
+}
+
+export interface QoderMarketplaceSkillDetail {
+  readonly skillId: string;
+  readonly name: string;
+  readonly nameCn: string;
+  readonly description: string;
+  readonly descriptionCn: string;
+  readonly iconUrl: string | null;
+  readonly author: string;
+  readonly authorName: string;
+  readonly installCount: number;
+  readonly category: string;
+  readonly version: string;
+  readonly downloadUrl: string;
+  readonly githubPath: string | null;
+  readonly skillMd: string | null;
+  readonly fileTree: QoderMarketplaceFileNode | null;
+}
+
+export type QoderInstallScope = 'global' | 'workspace';
+
+export interface QoderInstallIdentity {
+  readonly skillId: string;
+  readonly scope?: QoderInstallScope;
+  readonly iconUrl?: string | null;
+}
+
+export interface QoderInstallResult {
+  readonly ok: boolean;
+  readonly skillId: string;
+  readonly installedSkillId: string;
+  readonly version: string;
+  readonly scope: QoderInstallScope;
+}

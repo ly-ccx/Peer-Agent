@@ -901,6 +901,9 @@ export interface BootstrapPreloadApi {
   readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
   readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
   readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
+  readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
+  readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;
+  readonly installQoderSkill: (identity: import('@peer-agent/protocol').QoderInstallIdentity) => Promise<import('@peer-agent/protocol').QoderInstallResult>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;

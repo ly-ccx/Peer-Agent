@@ -46,6 +46,7 @@ import { createLocalShellProvider } from './runtime-gateway/local-shell-provider
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
+import { createQoderApiClient, createQoderMarketplaceService } from './qoder-marketplace-service.mjs';
 import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
 import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
 import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
@@ -314,6 +315,7 @@ let skillStore = disableLocalSkill
     });
 let skillMarketplaceService;
 let skillHubMarketplaceService;
+let qoderMarketplaceService;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
@@ -2415,6 +2417,18 @@ function registerDesktopIpcHost() {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
           return skillHubMarketplaceService.listCategories();
         },
+        qoderQuery: (query) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.query(query);
+        },
+        qoderGetDetail: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.getSkillDetailWithReadme(identity);
+        },
+        qoderInstall: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.install(identity);
+        },
       },
     }),
     ...createPendingTaskIpcRegistrations({
@@ -3708,6 +3722,11 @@ function startLocalRuntime() {
     store: skillHubStore,
     installer: skillHubInstaller,
     apiClient: skillHubApiClient,
+  });
+  // Qoder 市场：qoder.com apphub 支持服务端搜索 + 分页，无需本地索引同步。
+  qoderMarketplaceService = createQoderMarketplaceService({
+    apiClient: createQoderApiClient(),
+    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
   });
   // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
   // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
