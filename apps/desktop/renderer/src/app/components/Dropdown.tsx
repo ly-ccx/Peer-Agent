@@ -12,7 +12,7 @@ export interface DropdownOption {
 
 export interface DropdownFooterAction {
   readonly label: string | ((query: string) => string);
-  readonly onSelect: (query: string) => void;
+  readonly onSelect: (query: string, highlightedValue?: string) => void;
   readonly disabled?: boolean | ((query: string) => boolean);
 }
 
@@ -172,10 +172,10 @@ export function Dropdown({
 
   const runFooter = useCallback(() => {
     if (!footerAction || footerDisabled) return false;
-    footerAction.onSelect(query);
+    footerAction.onSelect(query, visibleOptions[activeIndex]?.value);
     setOpen(false);
     return true;
-  }, [footerAction, footerDisabled, query]);
+  }, [activeIndex, footerAction, footerDisabled, query, visibleOptions]);
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     switch (event.key) {
