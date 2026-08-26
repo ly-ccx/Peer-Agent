@@ -255,6 +255,13 @@
   color: var(--graphite-fade);
 }
 
+/* Right-side meta cluster: workspace count + add-workspace icon button. */
+.sidebar-workspace-tree-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .sidebar-workspace-tree-count {
   font-size: 0.68rem;
   font-weight: 500;
@@ -487,27 +494,33 @@
   padding: 5px var(--sidebar-conv-row-pad-x);
 }
 
+/* Add-workspace icon button in the workspace tree header (Cursor-style folder-plus).
+   Formerly a full-width dashed row at the list bottom; moved to the header right
+   so it is always reachable without scrolling. Must stay no-drag (see .sidebar-top note). */
 .sidebar-workspace-add {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  min-height: 28px;
-  margin-top: 2px;
-  padding: 4px 8px;
-  border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--graphite-mute);
-  font-size: 0.78rem;
   cursor: pointer;
-  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+  -webkit-app-region: no-drag;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 
 .sidebar-workspace-add:hover {
   color: var(--graphite-base);
-  border-color: var(--graphite-mute);
   background: var(--chrome-sunken);
+}
+
+.sidebar-workspace-add:focus-visible {
+  outline: 1px solid var(--chrome-hairline);
+  outline-offset: 1px;
 }
 
 /* ── New chat / top nav (must stay no-drag so Electron titlebar drag does not steal clicks) ── */
