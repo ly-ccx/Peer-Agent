@@ -106,7 +106,19 @@ function firstOpaqueAlong(getter, n, threshold = 16) {
   return n;
 }
 
-function assertRoundedFullBleedPng(filePath) {
+function edgePads(rows, width, height) {
+  const midY = Math.floor(height / 2);
+  const midX = Math.floor(width / 2);
+  return {
+    left: firstOpaqueAlong((t) => alpha(rows, t, midY), width),
+    right: firstOpaqueAlong((t) => alpha(rows, width - 1 - t, midY), width),
+    top: firstOpaqueAlong((t) => alpha(rows, midX, t), height),
+    bottom: firstOpaqueAlong((t) => alpha(rows, midX, height - 1 - t), height),
+    diag: firstOpaqueAlong((t) => alpha(rows, t, t), Math.min(width, height)),
+  };
+}
+
+function assertOpaqueFullBleedPng(filePath) {
   const { width, height, rows } = readPngRgba(filePath);
   assert.equal(width, 1024, `${filePath} width`);
   assert.equal(height, 1024, `${filePath} height`);
@@ -118,36 +130,55 @@ function assertRoundedFullBleedPng(filePath) {
     [width - 1, height - 1],
   ];
   for (const [x, y] of corners) {
-    assert.equal(alpha(rows, x, y), 0, `${filePath} corner (${x},${y}) must stay transparent for the original rounded mask`);
+    assert.equal(alpha(rows, x, y), 255, `${filePath} corner (${x},${y}) must be opaque so Notification/Finder can apply the system squircle`);
   }
 
-  const midY = Math.floor(height / 2);
-  const midX = Math.floor(width / 2);
-  const leftPad = firstOpaqueAlong((t) => alpha(rows, t, midY), width);
-  const rightPad = firstOpaqueAlong((t) => alpha(rows, width - 1 - t, midY), width);
-  const topPad = firstOpaqueAlong((t) => alpha(rows, midX, t), height);
-  const bottomPad = firstOpaqueAlong((t) => alpha(rows, midX, height - 1 - t), height);
-  for (const [name, pad] of [
-    ['left', leftPad],
-    ['right', rightPad],
-    ['top', topPad],
-    ['bottom', bottomPad],
-  ]) {
-    assert.ok(pad <= 8, `${filePath} ${name} edge padding ${pad}px is a thick frame, expected ≤ 8`);
+  const pads = edgePads(rows, width, height);
+  for (const [name, pad] of Object.entries(pads)) {
+    assert.equal(pad, 0, `${filePath} ${name} padding ${pad}px must be 0 — icns source must fill the canvas`);
   }
 
-  const diagPad = firstOpaqueAlong((t) => alpha(rows, t, t), Math.min(width, height));
-  assert.ok(diagPad >= 48, `${filePath} diagonal becomes opaque at ${diagPad}px; a square icon would be ~0`);
-  assert.ok(diagPad <= 160, `${filePath} diagonal padding ${diagPad}px is too large; expected the original rounded-rect radius`);
+  let transparent = 0;
+  for (let y = 0; y < height; y += 1) {
+    const row = rows[y];
+    for (let x = 0; x < width; x += 1) {
+      if (row[x * 4 + 3] < 255) transparent += 1;
+    }
+  }
+  assert.equal(transparent, 0, `${filePath} must have no pre-cut rounded transparent corners`);
 }
 
-describe('macOS app icon rounded full-bleed canvas', () => {
-  it('keeps icon.png 1024×1024 with original rounded corners and no thick frame', () => {
-    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon.png'));
+function assertDockOpticalSizePng(filePath) {
+  const { width, height, rows } = readPngRgba(filePath);
+  assert.equal(width, 1024, `${filePath} width`);
+  assert.equal(height, 1024, `${filePath} height`);
+
+  const corners = [
+    [0, 0],
+    [width - 1, 0],
+    [0, height - 1],
+    [width - 1, height - 1],
+  ];
+  for (const [x, y] of corners) {
+    assert.equal(alpha(rows, x, y), 0, `${filePath} corner (${x},${y}) must stay transparent so dock.setIcon keeps the original rounded mask`);
+  }
+
+  const pads = edgePads(rows, width, height);
+  for (const name of ['left', 'right', 'top', 'bottom']) {
+    assert.ok(pads[name] >= 48, `${filePath} ${name} padding ${pads[name]}px is too tight; dock.setIcon would look a size larger than the original icon`);
+    assert.ok(pads[name] <= 120, `${filePath} ${name} padding ${pads[name]}px is a thick frame, expected the original optical size`);
+  }
+  assert.ok(pads.diag >= 110, `${filePath} diagonal becomes opaque at ${pads.diag}px; a full-bleed dock icon would be ~0–85`);
+  assert.ok(pads.diag <= 180, `${filePath} diagonal padding ${pads.diag}px is too large; expected the original rounded-rect radius`);
+}
+
+describe('macOS app icon canvases', () => {
+  it('keeps icon.png 1024×1024 fully opaque so icns/Notification use the system squircle', () => {
+    assertOpaqueFullBleedPng(path.join(BUILD_DIR, 'icon.png'));
   });
 
-  it('keeps Dock light and dark icons on the same rounded full-bleed canvas', () => {
-    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
-    assertRoundedFullBleedPng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
+  it('keeps Dock light and dark icons on the original rounded optical size', () => {
+    assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
+    assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
   });
 });
