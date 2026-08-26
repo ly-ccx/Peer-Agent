@@ -57,18 +57,29 @@ function mapFileNode(node) {
   };
 }
 
+function appendFilterParams(params, name, values, errorCode) {
+  if (values === undefined || values === null) return;
+  if (!Array.isArray(values)) throw new Error(errorCode);
+  for (const value of values) {
+    if (typeof value !== 'string' || !value.trim()) throw new Error(errorCode);
+    params.append(name, value.trim());
+  }
+}
+
 export function createQoderApiClient({
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl = globalThis.fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
-  async function requestJson(path) {
+  async function requestJson(path, { acceptLanguage = null } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const headers = { accept: 'application/json', 'user-agent': 'PeerAgent/0.0.9 (skill marketplace)' };
+      if (acceptLanguage) headers['accept-language'] = acceptLanguage;
       const response = await fetchImpl(`${baseUrl}${path}`, {
         signal: controller.signal,
-        headers: { accept: 'application/json', 'user-agent': 'PeerAgent/0.0.9 (skill marketplace)' },
+        headers,
       });
       const text = await response.text();
       let payload = null;
@@ -102,7 +113,7 @@ export function createQoderApiClient({
   }
 
   return Object.freeze({
-    async listSkills({ keyword, page = 1, pageSize = 20, sortBy = 'hot' } = {}) {
+    async listSkills({ keyword, page = 1, pageSize = 20, sortBy = 'hot', categories, outputs, clients, appEcosystems } = {}) {
       const safePage = optionalPositiveInt(page, 'page', 100000) ?? 1;
       const safePageSize = optionalPositiveInt(pageSize, 'page_size', MAX_PAGE_SIZE) ?? 20;
       const params = new URLSearchParams();
@@ -111,6 +122,10 @@ export function createQoderApiClient({
       params.append('page_size', String(safePageSize));
       if (sortBy === 'hot' || sortBy === 'latest') params.append('sort_by', sortBy);
       if (typeof keyword === 'string' && keyword.trim()) params.append('keyword', keyword.trim());
+      appendFilterParams(params, 'category', categories, 'qoder_invalid_category');
+      appendFilterParams(params, 'output', outputs, 'qoder_invalid_output');
+      appendFilterParams(params, 'client', clients, 'qoder_invalid_client');
+      appendFilterParams(params, 'app_ecosystem', appEcosystems, 'qoder_invalid_app_ecosystem');
       const payload = await requestJson(`/apphub/api/v1/marketplace/catalog/extensions?${params.toString()}`);
       const skills = payload.skills;
       if (!skills || !Array.isArray(skills.items)) throw new Error('qoder_api_invalid_payload');
@@ -124,6 +139,27 @@ export function createQoderApiClient({
         totalSize: Number.isSafeInteger(pages.total_size) ? pages.total_size : skills.items.length,
         items: skills.items.map(mapEntry),
       };
+    },
+
+    async listTaxonomies() {
+      // Accept-Language: zh-CN —— taxonomies 接口返回中文标签（如 Productivity -> 办公效率）。
+      // 注意：服务端只认 zh-CN / zh-CN,zh;q=0.9 这类区域形式，裸 "zh" 不生效。
+      const payload = await requestJson('/apphub/api/v1/marketplace/extensions/taxonomies?extension_type=skill', { acceptLanguage: 'zh-CN,zh;q=0.9' });
+      const raw = payload.taxonomies;
+      if (!Array.isArray(raw)) throw new Error('qoder_api_invalid_payload');
+      const allowed = new Set(['category', 'output', 'client', 'app_ecosystem']);
+      const items = raw
+        .filter((item) => item && typeof item === 'object' && allowed.has(item.dimension))
+        .map((item) => ({
+          dimension: item.dimension,
+          code: typeof item.code === 'string' && item.code.trim() ? item.code.trim() : '',
+          label: typeof item.label === 'string' && item.label ? item.label : (typeof item.code === 'string' ? item.code : ''),
+          description: typeof item.description === 'string' ? item.description : '',
+          sortOrder: Number.isSafeInteger(item.sort_order) ? item.sort_order : 0,
+        }))
+        .filter((item) => item.code)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+      return { count: items.length, items };
     },
 
     async getSkillDetail({ skillId }) {
@@ -174,6 +210,7 @@ export function createQoderMarketplaceService({ apiClient, installSkillFromZip }
   return Object.freeze({
     query: (query) => apiClient.listSkills(query ?? {}),
     getSkillDetail: (identity) => apiClient.getSkillDetail(identity),
+    listTaxonomies: () => apiClient.listTaxonomies(),
 
     async getSkillDetailWithReadme(identity) {
       const detail = await apiClient.getSkillDetail(identity);

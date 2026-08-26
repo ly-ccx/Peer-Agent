@@ -2429,6 +2429,10 @@ function registerDesktopIpcHost() {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
           return qoderMarketplaceService.install(identity);
         },
+        qoderListTaxonomies: () => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.listTaxonomies();
+        },
       },
     }),
     ...createPendingTaskIpcRegistrations({

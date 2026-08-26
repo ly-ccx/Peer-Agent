@@ -31,6 +31,7 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
     qoderQuery: assertFunction(skills?.qoderQuery, 'skills.qoderQuery'),
     qoderGetDetail: assertFunction(skills?.qoderGetDetail, 'skills.qoderGetDetail'),
     qoderInstall: assertFunction(skills?.qoderInstall, 'skills.qoderInstall'),
+    qoderListTaxonomies: assertFunction(skills?.qoderListTaxonomies, 'skills.qoderListTaxonomies'),
   };
 
   return Object.freeze([
@@ -57,6 +58,7 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
       ipc.handle('skills:qoder:query', (_event, query = {}) => ports.qoderQuery(query));
       ipc.handle('skills:qoder:get-detail', (_event, identity = {}) => ports.qoderGetDetail(identity));
       ipc.handle('skills:qoder:install', (_event, identity = {}) => ports.qoderInstall(identity));
+      ipc.handle('skills:qoder:list-taxonomies', () => ports.qoderListTaxonomies());
     }),
   ]);
 }

@@ -904,6 +904,7 @@ export interface BootstrapPreloadApi {
   readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
   readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;
   readonly installQoderSkill: (identity: import('@peer-agent/protocol').QoderInstallIdentity) => Promise<import('@peer-agent/protocol').QoderInstallResult>;
+  readonly listQoderTaxonomies: () => Promise<import('@peer-agent/protocol').QoderTaxonomiesResult>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;

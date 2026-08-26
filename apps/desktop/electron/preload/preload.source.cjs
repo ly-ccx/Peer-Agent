@@ -165,6 +165,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   queryQoderSkills: (query) => ipcRenderer.invoke('skills:qoder:query', query || {}),
   getQoderSkillDetail: (identity) => ipcRenderer.invoke('skills:qoder:get-detail', identity || {}),
   installQoderSkill: (identity) => ipcRenderer.invoke('skills:qoder:install', identity || {}),
+  listQoderTaxonomies: () => ipcRenderer.invoke('skills:qoder:list-taxonomies'),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),

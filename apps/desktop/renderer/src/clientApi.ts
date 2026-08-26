@@ -93,6 +93,7 @@ const unavailableApi: ClientApi = {
   queryQoderSkills: unavailableMethod('queryQoderSkills'),
   getQoderSkillDetail: unavailableMethod('getQoderSkillDetail'),
   installQoderSkill: unavailableMethod('installQoderSkill'),
+  listQoderTaxonomies: unavailableMethod('listQoderTaxonomies'),
   mcpListInstalled: unavailableMethod('mcpListInstalled'),
   mcpListCapabilities: unavailableMethod('mcpListCapabilities'),
   mcpListCredentials: unavailableMethod('mcpListCredentials'),

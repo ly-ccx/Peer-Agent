@@ -159,6 +159,24 @@ export interface SkillHubCategoriesResult {
 
 export type QoderMarketplaceSort = 'hot' | 'latest';
 
+/** 筛选维度：category（20 个分类）/ output（9 种产物）/ client（5 个客户端）/ app_ecosystem（8 个生态）。 */
+export type QoderTaxonomyDimension = 'category' | 'output' | 'client' | 'app_ecosystem';
+
+export interface QoderTaxonomyItem {
+  readonly dimension: QoderTaxonomyDimension;
+  /** 传回列表接口的 code（如 "Coding"、"document"、"github"）。 */
+  readonly code: string;
+  /** 本地化标签：taxonomies 接口支持 Accept-Language: zh，直接返回中文（如「办公效率」）。 */
+  readonly label: string;
+  readonly description: string;
+  readonly sortOrder: number;
+}
+
+export interface QoderTaxonomiesResult {
+  readonly count: number;
+  readonly items: readonly QoderTaxonomyItem[];
+}
+
 export interface QoderMarketplaceEntry {
   readonly skillId: string;
   readonly name: string;
@@ -179,6 +197,14 @@ export interface QoderMarketplaceQuery {
   readonly page?: number;
   readonly pageSize?: number;
   readonly sortBy?: QoderMarketplaceSort;
+  /** 分类筛选（如 ['Coding']；多值为 AND 关系，服务端语义）。 */
+  readonly categories?: readonly string[];
+  /** 产物类型筛选（如 ['document','code']）。 */
+  readonly outputs?: readonly string[];
+  /** 客户端筛选（如 ['qoder']）。 */
+  readonly clients?: readonly string[];
+  /** App 生态筛选（如 ['github','feishu']）。 */
+  readonly appEcosystems?: readonly string[];
 }
 
 export interface QoderMarketplacePage {

@@ -157,3 +157,74 @@ test('service requires dependencies', () => {
   assert.throws(() => createQoderMarketplaceService({}), TypeError);
   assert.throws(() => createQoderMarketplaceService({ apiClient: {} }), TypeError);
 });
+
+const TAXONOMIES_PAYLOAD = {
+  taxonomies: [
+    { dimension: 'category', code: 'Productivity', label: '办公效率', description: '', sort_order: 10 },
+    { dimension: 'category', code: 'Coding', label: '编程开发', description: '', sort_order: 80 },
+    { dimension: 'output', code: 'document', label: '文档', description: '', sort_order: 10 },
+    { dimension: 'client', code: 'qoder', label: 'Qoder IDE', description: '', sort_order: 20 },
+    { dimension: 'app_ecosystem', code: 'github', label: 'GitHub', description: '', sort_order: 50 },
+    { dimension: 'bogus', code: 'x', label: 'x', description: '', sort_order: 1 },
+    { dimension: 'category', code: '', label: 'empty-code', description: '', sort_order: 1 },
+  ],
+};
+
+test('listTaxonomies maps and filters dimensions, sorted by sortOrder', async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes('/taxonomies')) return jsonResponse(TAXONOMIES_PAYLOAD);
+    return jsonResponse(LIST_PAYLOAD);
+  };
+  const client = createQoderApiClient({ fetchImpl });
+  const result = await client.listTaxonomies();
+  assert.equal(result.count, 5);
+  const categories = result.items.filter((item) => item.dimension === 'category');
+  assert.deepEqual(categories.map((item) => item.code), ['Productivity', 'Coding']);
+  assert.equal(categories[0].label, '办公效率');
+  assert.ok(!result.items.some((item) => item.dimension === 'bogus'));
+  assert.ok(!result.items.some((item) => item.code === ''));
+});
+
+test('listTaxonomies sends Accept-Language: zh header', async () => {
+  const seenHeaders = [];
+  const fetchImpl = async (url, init) => {
+    seenHeaders.push(init?.headers?.['accept-language']);
+    if (url.includes('/taxonomies')) return jsonResponse(TAXONOMIES_PAYLOAD);
+    return jsonResponse(LIST_PAYLOAD);
+  };
+  const client = createQoderApiClient({ fetchImpl });
+  await client.listTaxonomies();
+  assert.equal(seenHeaders[0], 'zh-CN,zh;q=0.9');
+});
+
+test('listSkills appends combined filter params', async () => {
+  const { client, calls } = makeClient(LIST_PAYLOAD, DETAIL_PAYLOAD);
+  await client.listSkills({ categories: ['Coding'], outputs: ['document', 'code'], clients: ['qoder'], appEcosystems: ['github', 'feishu'] });
+  const url = calls[0];
+  assert.ok(url.includes('category=Coding'));
+  assert.ok(url.includes('output=document'));
+  assert.ok(url.includes('output=code'));
+  assert.ok(url.includes('client=qoder'));
+  assert.ok(url.includes('app_ecosystem=github'));
+  assert.ok(url.includes('app_ecosystem=feishu'));
+});
+
+test('listSkills rejects invalid filter values', async () => {
+  const { client } = makeClient(LIST_PAYLOAD, DETAIL_PAYLOAD);
+  await assert.rejects(() => client.listSkills({ categories: [''] }), /qoder_invalid_category/);
+  await assert.rejects(() => client.listSkills({ outputs: 42 }), /qoder_invalid_output/);
+  await assert.rejects(() => client.listSkills({ clients: [null] }), /qoder_invalid_client/);
+  await assert.rejects(() => client.listSkills({ appEcosystems: [''] }), /qoder_invalid_app_ecosystem/);
+});
+
+test('service exposes listTaxonomies', async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes('/taxonomies')) return jsonResponse(TAXONOMIES_PAYLOAD);
+    return jsonResponse(LIST_PAYLOAD);
+  };
+  const client = createQoderApiClient({ fetchImpl });
+  const service = createQoderMarketplaceService({ apiClient: client, installSkillFromZip: async () => ({ skillId: 'x' }) });
+  assert.equal(typeof service.listTaxonomies, 'function');
+  const result = await service.listTaxonomies();
+  assert.ok(result.count >= 0);
+});

@@ -249,6 +249,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'skills:skillhub:sync',
   'skills:qoder:get-detail',
   'skills:qoder:install',
+  'skills:qoder:list-taxonomies',
   'skills:qoder:query',
   'skills:refresh',
   'skills:unlink',

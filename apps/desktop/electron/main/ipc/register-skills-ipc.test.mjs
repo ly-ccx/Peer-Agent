@@ -32,6 +32,7 @@ function createHarness() {
       qoderQuery: port('qoder-query'),
       qoderGetDetail: port('qoder-get-detail'),
       qoderInstall: port('qoder-install'),
+      qoderListTaxonomies: port('qoder-list-taxonomies'),
     },
   });
   const handlers = new Map();
@@ -61,6 +62,7 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
     'skills:marketplace:list',
     'skills:qoder:get-detail',
     'skills:qoder:install',
+    'skills:qoder:list-taxonomies',
     'skills:qoder:query',
     'skills:refresh',
     'skills:skillhub:get-detail',
@@ -101,6 +103,7 @@ test('skills IPC preserves payload and result projection', async () => {
   assert.equal(await handlers.get('skills:qoder:query')(null, { page: 1, keyword: 'pdf' }), 'qoder-query');
   assert.equal(await handlers.get('skills:qoder:get-detail')(null, { skillId: 'official03866510' }), 'qoder-get-detail');
   assert.equal(await handlers.get('skills:qoder:install')(null, { skillId: 'official03866510' }), 'qoder-install');
+  assert.equal(await handlers.get('skills:qoder:list-taxonomies')(), 'qoder-list-taxonomies');
 
   assert.deepEqual(calls, [
     ['list'],
@@ -126,6 +129,7 @@ test('skills IPC preserves payload and result projection', async () => {
     ['qoder-query', { page: 1, keyword: 'pdf' }],
     ['qoder-get-detail', { skillId: 'official03866510' }],
     ['qoder-install', { skillId: 'official03866510' }],
+    ['qoder-list-taxonomies'],
   ]);
 });
 
