@@ -2,6 +2,22 @@
  * 右侧可展开/收起 + 可拖拽宽度的工作台。一级承载 Plan/Browser/Files/Documents。
  */
 
+/* 根 Workbench 最大化必须在 @layer 外：sidebar.css 的三栏网格是未分层规则，
+   层内 grid-template-columns 压不过侧栏收起/展开，只会把左栏和聊天藏掉、右栏仍停在原宽度。 */
+:root[data-workbench-maximized='true'] .app-layout {
+  grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
+}
+
+:root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.workbench-panel--maximized {
+  width: 100% !important;
+  max-width: none;
+}
+
 @layer components {
   .workbench-panel {
     position: relative;
@@ -24,21 +40,6 @@
   .workbench-panel:not(.workbench-panel--open) {
     width: 0 !important;
     border-left: none;
-  }
-
-  /* 根 Workbench 最大化：三栏网格只保留 Workbench，左栏与聊天栏让位但保持挂载。 */
-  :root[data-workbench-maximized='true'] .app-layout {
-    grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
-  }
-
-  :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
-    visibility: hidden;
-    pointer-events: none;
-  }
-
-  .workbench-panel--maximized {
-    width: 100% !important;
-    max-width: none;
   }
 
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */

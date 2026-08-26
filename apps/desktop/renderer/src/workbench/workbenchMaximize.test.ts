@@ -5,7 +5,34 @@ import { describe, it } from 'node:test';
 const contextSource = readFileSync(new URL('./WorkbenchContext.tsx', import.meta.url), 'utf8');
 const panelSource = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
+const sidebarStyles = readFileSync(new URL('../styles/sidebar.css', import.meta.url), 'utf8');
+const stylesEntry = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 const drawerStyles = readFileSync(new URL('../styles/task-overview.css', import.meta.url), 'utf8');
+
+function withoutLayerBlocks(css: string): string {
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  let out = '';
+  let i = 0;
+  while (i < source.length) {
+    const layer = source.indexOf('@layer', i);
+    if (layer < 0) {
+      out += source.slice(i);
+      break;
+    }
+    out += source.slice(i, layer);
+    const brace = source.indexOf('{', layer);
+    if (brace < 0) break;
+    let depth = 1;
+    let j = brace + 1;
+    while (j < source.length && depth > 0) {
+      if (source[j] === '{') depth += 1;
+      else if (source[j] === '}') depth -= 1;
+      j += 1;
+    }
+    i = j;
+  }
+  return out;
+}
 
 describe('workbench maximize behavior', () => {
   it('owns one transient maximize state in Workbench Context and preserves the stored width', () => {
@@ -28,6 +55,28 @@ describe('workbench maximize behavior', () => {
     assert.match(workbenchStyles, /grid-template-columns:\s*0 minmax\(0, 0\) minmax\(0, 1fr\)/);
     assert.match(workbenchStyles, /\.app-layout > :not\(\.workbench-panel\)[\s\S]*visibility:\s*hidden/);
     assert.match(workbenchStyles, /\.workbench-panel--maximized[\s\S]*width:\s*100% !important/);
+  });
+
+  it('keeps the maximize grid unlayered so sidebar collapse and expand cannot pin the workbench width', () => {
+    const unlayeredWorkbench = withoutLayerBlocks(workbenchStyles);
+    const unlayeredSidebar = withoutLayerBlocks(sidebarStyles);
+
+    assert.match(
+      unlayeredWorkbench,
+      /:root\[data-workbench-maximized='true'\] \.app-layout \{\s*grid-template-columns:\s*0 minmax\(0, 0\) minmax\(0, 1fr\);/,
+    );
+    assert.match(
+      unlayeredSidebar,
+      /\.app-layout \{[\s\S]*?grid-template-columns:[\s\S]*?var\(--za-workbench-current-width, 0px\);/,
+    );
+    assert.match(
+      unlayeredSidebar,
+      /:root\[data-sidebar-collapsed='true'\] \.app-layout \{\s*grid-template-columns:\s*0 minmax\(0, 1fr\) var\(--za-workbench-current-width, 0px\);/,
+    );
+    assert.match(
+      stylesEntry,
+      /@import "\.\/styles\/sidebar\.css";[\s\S]*@import "\.\/styles\/workbench\.css";/,
+    );
   });
 
   it('applies the same yielding behavior inside conversation drawers', () => {
