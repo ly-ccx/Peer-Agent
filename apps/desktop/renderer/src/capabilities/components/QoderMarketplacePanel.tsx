@@ -1,6 +1,7 @@
 import type { QoderInstallScope, QoderMarketplaceEntry, QoderMarketplacePage, QoderMarketplaceSkillDetail, QoderMarketplaceSort } from '@peer-agent/protocol';
 import { useEffect, useState } from 'react';
 import { Overlay } from '../../app/components/Overlay';
+import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
 
 const PAGE_SIZE = 20;
@@ -209,8 +210,8 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
       </nav>
       {selected ? (
-        <Overlay onClose={closeSelected} ariaLabel={`${selected.nameCn || selected.name} 详情`}>
-          {(() => {
+        <Overlay onClose={closeSelected} ariaLabel={`${selected.nameCn || selected.name} 详情`} panelClassName="skill-marketplace-detail">
+          {({ requestClose }) => (() => {
             const description = detail?.descriptionCn || detail?.description || selected.descriptionCn || selected.description;
             return (<>
               <header className="skill-detail-header">
@@ -222,11 +223,11 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                   </div>
                   <p>{selected.authorName || selected.author || 'qoder.com'}{detail?.version && detail.version !== 'unknown' ? ` · v${detail.version}` : ''}{selected.category ? ` · ${selected.category}` : ''}</p>
                 </div>
+                <button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></button>
               </header>
               <div className="skill-detail-meta">
                 <span>{selected.category || 'Uncategorized'}</span>
                 {detail?.version && detail.version !== 'unknown' ? <span>v{detail.version}</span> : null}
-                <code>{selected.skillId}</code>
               </div>
               <div className="skill-detail-content">
                 <p>{description || '暂无描述'}</p>
@@ -246,7 +247,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                 {detail?.skillMd ? (
                   <section className="skill-detail-when" aria-label="SKILL.md">
                     <h3>SKILL.md</h3>
-                    <pre>{detail.skillMd.slice(0, 4000)}{detail.skillMd.length > 4000 ? '\n…' : ''}</pre>
+                    <MarkdownMessage content={detail.skillMd.slice(0, 8000)} />
                   </section>
                 ) : null}
                 {detail?.githubPath ? (
