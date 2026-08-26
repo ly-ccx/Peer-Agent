@@ -27,4 +27,7 @@ test('composer wrap shows a stream-error Resume control above the input', async 
   assert.match(streamErrorRule, /--za-control-fill/);
   assert.doesNotMatch(streamErrorRule, /--za-danger-soft/);
   assert.doesNotMatch(streamErrorRule, /--azure-seal/);
+  assert.match(source, /restoreStreamErrorFromInterrupted/);
+  assert.match(source, /streamError 按会话桶隔离/);
+  assert.doesNotMatch(source, /切换会话时清掉上一会话的流式错误横幅/);
 });

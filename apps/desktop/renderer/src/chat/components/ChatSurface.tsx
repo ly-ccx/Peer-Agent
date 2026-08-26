@@ -90,6 +90,7 @@ import {
   canShowStreamResume,
   formatStreamErrorLabel,
   resolveStreamResumeTarget,
+  restoreStreamErrorFromInterrupted,
 } from '../state/streamResume';
 import {
   buildConversationAttachmentContext,
@@ -1210,8 +1211,8 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
-    // 切换会话时清掉上一会话的流式错误横幅，避免错误提示跨会话残留。
-    setStreamError(null);
+    // streamError 按会话桶隔离：不要在切到目标会话时把它清掉。
+    // 上一会话的横幅不会串过来；本会话若仍是中断态，加载后从 interrupted 还原。
     // 切换会话时恢复「该会话」输入框状态(草稿文本 + 待发送队列):
     // - 同会话二次进入：优先保留 conversationStore 桶内已有草稿/队列，避免被尚未落盘的空持久化冲掉；
     // - 冷启动 / 首次进入：回落 composerPersistence。
@@ -1300,6 +1301,11 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1423,6 +1429,7 @@ export function ChatSurface({
               ...(restoredAnchor != null ? { turnStartedAt: restoredAnchor } : {}),
             });
             setIsStreaming(true);
+            setStreamError(null);
           }
         }
       } catch {
@@ -1431,7 +1438,15 @@ export function ChatSurface({
       if (cancelled) return;
       // 只有 main 侧流状态已经查询完毕，才把会话标记为可发送；running=true 已在上面先恢复，
       // 因而 ready 首帧不会暴露错误的「非流式空闲」窗口。
-      convActions.commitLoad({});
+      // reattach 可能刚补上 interrupted；按当前消息再绑一次输入框提醒。
+      const loadedSnapshot = conversationStore.getSnapshot(conversationId);
+      convActions.commitLoad({
+        streamError: restoreStreamErrorFromInterrupted(
+          loadedSnapshot.messages,
+          loadedSnapshot.streamError,
+          loadedSnapshot.isStreaming,
+        ),
+      });
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
@@ -1470,6 +1485,11 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
     });
     return () => { cancelled = true; };

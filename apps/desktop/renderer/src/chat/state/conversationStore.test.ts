@@ -186,6 +186,25 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('A').messages[0].content, 'fresh');
   });
 
+  it('keeps streamError on the interrupted conversation when another conversation loads', () => {
+    const store = new ConversationStore();
+    store.setState('A', { streamError: 'net::ERR_NETWORK_CHANGED' });
+    store.setState('B', { streamError: null });
+    store.beginLoad('B');
+    assert.equal(store.getSnapshot('A').streamError, 'net::ERR_NETWORK_CHANGED');
+    assert.equal(store.getSnapshot('B').streamError, null);
+
+    const interrupted = { ...msg('a1', 'partial'), role: 'assistant' as const, interrupted: true };
+    store.beginLoad('A');
+    assert.equal(store.getSnapshot('A').streamError, null);
+    store.commitLoad('A', {
+      messages: [interrupted],
+      streamError: 'net::ERR_NETWORK_CHANGED',
+    });
+    assert.equal(store.getSnapshot('A').streamError, 'net::ERR_NETWORK_CHANGED');
+    assert.equal(store.getSnapshot('B').streamError, null);
+  });
+
   it('keeps draft and queued user messages isolated per conversation', () => {
     const store = new ConversationStore();
     store.setDraft('A', 'draft A');
