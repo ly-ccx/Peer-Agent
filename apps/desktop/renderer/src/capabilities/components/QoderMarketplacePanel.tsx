@@ -28,14 +28,15 @@ function formatInstallError(error: unknown): string {
   return '安装失败，请稍后重试';
 }
 
-function SkillAvatar({ name, iconUrl }: { readonly name: string; readonly iconUrl: string | null }) {
+function SkillAvatar({ name, iconUrl, className = 'skill-avatar' }: { readonly name: string; readonly iconUrl: string | null; readonly className?: string }) {
   const [failed, setFailed] = useState(false);
-  const className = 'skill-marketplace-avatar';
+  const src = typeof iconUrl === 'string' ? iconUrl.trim() : '';
   const letter = (name || '?').trim().charAt(0).toUpperCase() || '?';
-  if (iconUrl && !failed) {
+  useEffect(() => { setFailed(false); }, [src]);
+  if (src && !failed) {
     return (
       <span className={`${className} skill-avatar--image`} aria-hidden="true">
-        <img src={iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
       </span>
     );
   }
@@ -212,87 +213,93 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
           {(() => {
             const description = detail?.descriptionCn || detail?.description || selected.descriptionCn || selected.description;
             return (<>
-              <div className="skill-marketplace-detail-header">
-                <SkillAvatar name={selected.nameCn || selected.name} iconUrl={detail?.iconUrl ?? selected.iconUrl} />
-                <div>
-                  <h2>{selected.nameCn || selected.name}</h2>
-                  <p className="skill-marketplace-detail-subtitle">
-                    {selected.authorName || selected.author || 'qoder.com'}
-                    {detail?.version && detail.version !== 'unknown' ? ` · v${detail.version}` : ''}
-                    {selected.category ? ` · ${selected.category}` : ''}
-                  </p>
-                </div>
-              </div>
-              <p className="skill-marketplace-detail-description">{description || '暂无描述'}</p>
-              <div className="skill-marketplace-metrics" aria-label="市场统计">
-                <span className="skill-marketplace-metric">
-                  <DownloadIcon />
-                  <em>安装量</em>
-                  <strong>{selected.installCount.toLocaleString()}</strong>
-                </span>
-                <span className="skill-marketplace-metric">
-                  <DownloadIcon />
-                  <em>文件</em>
-                  <strong>{summarizeTree(detail?.fileTree ?? null) || '—'}</strong>
-                </span>
-              </div>
-              {detailLoading ? <p className="skill-marketplace-empty">正在读取详情…</p> : null}
-              {detail?.skillMd ? (
-                <section className="skill-marketplace-detail-readme" aria-label="SKILL.md">
-                  <h3>SKILL.md</h3>
-                  <pre>{detail.skillMd.slice(0, 4000)}{detail.skillMd.length > 4000 ? '\n…' : ''}</pre>
-                </section>
-              ) : null}
-              {detail?.githubPath ? (
-                <section className="skill-marketplace-detail-source" aria-label="来源">
-                  <h3>来源</h3>
-                  <p className="skill-marketplace-detail-source-note">
-                    来自 qoder.com 官方市场（apphub）。{detail.githubPath ? '上游仓库：' : ''}
-                    {detail.githubPath ? <a href={detail.githubPath} target="_blank" rel="noreferrer">{detail.githubPath}</a> : null}
-                  </p>
-                </section>
-              ) : null}
-              <div className="skill-marketplace-install-row">
-                <div className="skill-marketplace-install-actions">
-                  <span className="skill-marketplace-install-label">安装位置</span>
-                  <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={installScope === 'global'}
-                      className={installScope === 'global' ? 'is-active' : undefined}
-                      onClick={() => chooseInstallScope('global')}
-                    >
-                      全局
-                    </button>
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={installScope === 'workspace'}
-                      className={installScope === 'workspace' ? 'is-active' : undefined}
-                      disabled={!hasWorkspace}
-                      title={hasWorkspace ? '安装到当前工作区 skills/' : '当前没有打开工作区'}
-                      onClick={() => chooseInstallScope('workspace')}
-                    >
-                      当前工作区
-                    </button>
+              <header className="skill-detail-header">
+                <SkillAvatar name={selected.nameCn || selected.name} iconUrl={detail?.iconUrl ?? selected.iconUrl} className="skill-avatar skill-detail-avatar" />
+                <div className="skill-detail-heading">
+                  <div className="skill-detail-title-row">
+                    <h2>{selected.nameCn || selected.name}</h2>
+                    <span className="skill-scope-badge">Qoder</span>
                   </div>
+                  <p>{selected.authorName || selected.author || 'qoder.com'}{detail?.version && detail.version !== 'unknown' ? ` · v${detail.version}` : ''}{selected.category ? ` · ${selected.category}` : ''}</p>
                 </div>
-                <button
-                  type="button"
-                  className="skill-marketplace-install skill-marketplace-install--primary"
-                  disabled={installing === selected.skillId || (installScope === 'workspace' && !hasWorkspace)}
-                  onClick={() => void install(selected)}
-                >
-                  {installing === selected.skillId
-                    ? '正在下载并安装…'
-                    : installScope === 'workspace'
-                      ? '下载并安装到工作区'
-                      : '下载并安装到全局'}
-                </button>
-                {installError ? (
-                  <p className="skill-marketplace-install-error" role="alert">{installError}</p>
+              </header>
+              <div className="skill-detail-meta">
+                <span>{selected.category || 'Uncategorized'}</span>
+                {detail?.version && detail.version !== 'unknown' ? <span>v{detail.version}</span> : null}
+                <code>{selected.skillId}</code>
+              </div>
+              <div className="skill-detail-content">
+                <p>{description || '暂无描述'}</p>
+                <div className="skill-marketplace-metrics" aria-label="市场统计">
+                  <span className="skill-marketplace-metric">
+                    <DownloadIcon />
+                    <em>安装量</em>
+                    <strong>{selected.installCount.toLocaleString()}</strong>
+                  </span>
+                  <span className="skill-marketplace-metric">
+                    <DownloadIcon />
+                    <em>文件</em>
+                    <strong>{summarizeTree(detail?.fileTree ?? null) || '—'}</strong>
+                  </span>
+                </div>
+                {detailLoading ? <p className="skill-marketplace-empty">正在读取详情…</p> : null}
+                {detail?.skillMd ? (
+                  <section className="skill-detail-when" aria-label="SKILL.md">
+                    <h3>SKILL.md</h3>
+                    <pre>{detail.skillMd.slice(0, 4000)}{detail.skillMd.length > 4000 ? '\n…' : ''}</pre>
+                  </section>
                 ) : null}
+                {detail?.githubPath ? (
+                  <section className="skill-detail-when" aria-label="来源">
+                    <h3>来源</h3>
+                    <p>
+                      来自 qoder.com 官方市场（apphub）。上游仓库：
+                      <a href={detail.githubPath} target="_blank" rel="noreferrer">{detail.githubPath}</a>
+                    </p>
+                  </section>
+                ) : null}
+                <div className="skill-marketplace-install-row">
+                  <div className="skill-marketplace-install-actions">
+                    <span className="skill-marketplace-install-label">安装位置</span>
+                    <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={installScope === 'global'}
+                        className={installScope === 'global' ? 'is-active' : undefined}
+                        onClick={() => chooseInstallScope('global')}
+                      >
+                        全局
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={installScope === 'workspace'}
+                        className={installScope === 'workspace' ? 'is-active' : undefined}
+                        disabled={!hasWorkspace}
+                        title={hasWorkspace ? '安装到当前工作区 skills/' : '当前没有打开工作区'}
+                        onClick={() => chooseInstallScope('workspace')}
+                      >
+                        当前工作区
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="skill-marketplace-install skill-marketplace-install--primary"
+                    disabled={installing === selected.skillId || (installScope === 'workspace' && !hasWorkspace)}
+                    onClick={() => void install(selected)}
+                  >
+                    {installing === selected.skillId
+                      ? '正在下载并安装…'
+                      : installScope === 'workspace'
+                        ? '下载并安装到工作区'
+                        : '下载并安装到全局'}
+                  </button>
+                  {installError ? (
+                    <p className="skill-marketplace-install-error" role="alert">{installError}</p>
+                  ) : null}
+                </div>
               </div>
             </>);
           })()}
