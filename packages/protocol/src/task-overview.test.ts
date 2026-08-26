@@ -299,10 +299,10 @@ test('completed but still delivering stays visible as peer_advancing', () => {
     status: 'completed',
     accepted: true,
     deliveryHandoffStatus: 'delivering',
-    deliveryHandoffLabel: '正在交回目标分支',
+    deliveryHandoffLabel: '正在合进源头',
   }));
   assert.equal(item.actionRight, 'peer_advancing');
-  assert.equal(item.statusLabel, '正在交回目标分支');
+  assert.equal(item.statusLabel, '正在合进源头');
   assert.equal(item.deliveryHandoffStatus, 'delivering');
 });
 
@@ -315,7 +315,7 @@ test('completed handoff stopped stays visible as needs_you', () => {
   }));
   assert.equal(item.actionRight, 'needs_you');
   assert.equal(item.needsYouReason, 'decision');
-  assert.equal(item.statusLabel, '交回未完成');
+  assert.equal(item.statusLabel, '合不进源头');
 });
 
 test('rule 16b: cancelled / failed → terminal', () => {
@@ -600,7 +600,7 @@ test('projectGoalPlan 透传 timing.completedAt 为 completedAt', () => {
       },
     }),
   );
-  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.actionRight, 'terminal');
   assert.equal(item.completedAt, '2026-08-10T00:03:00.000Z');
   assert.equal(item.lastActiveAt, '2026-08-10T00:05:00.000Z');
 });
@@ -663,11 +663,11 @@ test('projectGoalPlan 透传交付路由，不把缺分支补成 main', () => {
   assert.notEqual(item.deliveryRoute, 'main');
 });
 
-test('projectGoalPlan 透传交回状态，没隔离或没验收时不显示', () => {
+test('projectGoalPlan 透传合回状态', () => {
   const shown = projectGoalPlan(goalSnapshot({
-    deliveryHandoffLabel: '已交回 peer_agent / PeerAgent/0.0.4',
+    deliveryHandoffLabel: '已合进 peer_agent / PeerAgent/0.0.4',
   }));
-  assert.equal(shown.deliveryHandoffLabel, '已交回 peer_agent / PeerAgent/0.0.4');
+  assert.equal(shown.deliveryHandoffLabel, '已合进 peer_agent / PeerAgent/0.0.4');
   const hidden = projectGoalPlan(goalSnapshot({}));
   assert.equal(hidden.deliveryHandoffLabel, undefined);
 });

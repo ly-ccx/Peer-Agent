@@ -496,7 +496,7 @@ test('toGoalPlanSnapshot 隔离执行时写独立执行环境，不再写未隔�
   assert.equal(snapshot.deliveryRoute?.includes('未隔离执行'), false);
 });
 
-test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不显示', () => {
+test('toGoalPlanSnapshot 有交付线即可展示合回状态，不必先验收', () => {
   const isolatedBinding = {
     repoId: 'peer_agent',
     targetWorkspacePath: '/Users/x/peer_agent',
@@ -510,13 +510,12 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
   const delivered = toGoalPlanSnapshot({
     planId: 'p-delivered',
     status: 'completed',
-    title: '已交回',
+    title: '已合进源头',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    resultAcceptance: { acceptedAt: '2026-08-14T01:00:00.000Z', acceptedBy: 'user' },
     deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'delivered',
@@ -525,18 +524,17 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
       updatedAt: '2026-08-14T01:01:00.000Z',
     },
   });
-  assert.equal(delivered.deliveryHandoffLabel, '已交回 peer_agent / PeerAgent/0.0.4');
+  assert.equal(delivered.deliveryHandoffLabel, '已合进 peer_agent / PeerAgent/0.0.4');
 
   const stopped = toGoalPlanSnapshot({
     planId: 'p-stopped',
     status: 'completed',
-    title: '交回停止',
+    title: '合不进源头',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    resultAcceptance: { acceptedAt: '2026-08-14T01:00:00.000Z', acceptedBy: 'user' },
     deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'stopped',
@@ -544,18 +542,17 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
       updatedAt: '2026-08-14T01:01:00.000Z',
     },
   });
-  assert.equal(stopped.deliveryHandoffLabel, '同一目标正在交回');
+  assert.equal(stopped.deliveryHandoffLabel, '同一目标正在合进 0.0.4');
 
   const hidden = toGoalPlanSnapshot({
     planId: 'p-hidden',
     status: 'completed',
-    title: '未验收不显示',
+    title: '没交付线不显示',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'delivered',
       repoId: 'peer_agent',

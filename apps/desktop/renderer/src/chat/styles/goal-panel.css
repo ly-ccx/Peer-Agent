@@ -312,7 +312,8 @@
   font-size: var(--ui-font-meta, 12px);
 }
 
-.goal-panel-toggle-active-progress {
+.goal-panel-toggle-active-progress,
+.goal-panel-toggle-active-handoff {
   flex: none;
   /* 扩大可 hover 命中区，避免 7/7 数字过小导致难触发 */
   padding: 2px 4px;
@@ -321,6 +322,10 @@
   color: var(--za-text-faint);
   font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
+}
+
+.goal-panel-toggle-active-handoff {
+  color: var(--za-text-soft);
 }
 
 /* 折叠灯条 hover：显示该 goal 全部步骤（每行左状态图标 + 右标题） */
@@ -577,6 +582,62 @@
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.goal-plan-merge-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--chrome-sunken, var(--za-surface-2));
+}
+
+.goal-plan-merge-route.is-blocked {
+  background: color-mix(in srgb, var(--za-warn, #3B6FAB) 12%, var(--chrome-sunken, #EBEEF3));
+}
+
+.goal-plan-merge-route.is-ok {
+  background: color-mix(in srgb, var(--state-success, #3E7A6B) 12%, var(--chrome-sunken, #EBEEF3));
+}
+
+.goal-plan-merge-node {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--za-surface-1, #fff);
+  border: 1px solid var(--chrome-hairline, var(--za-line));
+}
+
+.goal-plan-merge-k {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--za-text-faint);
+  margin-bottom: 2px;
+}
+
+.goal-plan-merge-v {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--ui-font-caption, 11px);
+  font-weight: 620;
+  color: var(--za-text);
+}
+
+.goal-plan-merge-arrow {
+  color: var(--za-text-faint);
+  font-size: 16px;
+}
+
+.goal-plan-merge-route.is-blocked .goal-plan-merge-arrow {
+  color: var(--za-warn, #3B6FAB);
 }
 
 .goal-plan-delivery-handoff-row,

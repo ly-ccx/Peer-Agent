@@ -56,7 +56,7 @@ export function resolveEvidenceLabel(
   return formatEvidenceRef(ref, isZh);
 }
 
-/** 验收页头只留工作区与交回状态，不拼 deliveryRoute / 进度分数。 */
+/** 验收页头只留工作区与合回状态，不拼 deliveryRoute / 进度分数。 */
 export function acceptancePageMeta(item: {
   readonly workspaceLabel?: string | null;
   readonly deliveryHandoffLabel?: string | null;

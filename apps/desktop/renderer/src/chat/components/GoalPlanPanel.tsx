@@ -14,7 +14,12 @@ import type {
   GoalTask,
   GoalVerifierRun,
 } from '@peer-agent/protocol';
-import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
+import {
+  formatGoalDeliveryHandoff,
+  formatGoalDeliveryHandoffLamp,
+  formatGoalDeliveryRoute,
+  projectGoalTiming,
+} from '@peer-agent/protocol';
 import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
@@ -1468,6 +1473,18 @@ function hasTaskLine(plan: GoalPlan): boolean {
   return Boolean(plan.deliveryBinding?.taskBranch?.trim() || plan.deliveryBinding?.worktreePath?.trim());
 }
 
+function compactBranchName(value?: string | null): string | undefined {
+  const branch = typeof value === 'string' ? value.trim() : '';
+  if (!branch) return undefined;
+  return branch.replace(/^PeerAgent\//, '') || branch;
+}
+
+function mergeDestination(plan: GoalPlan, isZh: boolean): string {
+  return compactBranchName(plan.deliveryHandoff?.targetBranch)
+    ?? compactBranchName(plan.deliveryBinding?.targetBranch)
+    ?? (isZh ? '源头' : 'source');
+}
+
 async function confirmDiscardAfterStop(
   confirm: (options: {
     title?: string;
@@ -1602,6 +1619,9 @@ const PlanCard = memo(function PlanCard({
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
   const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
+  const mergeDest = mergeDestination(plan, isZh);
+  const taskLineName = compactBranchName(plan.deliveryBinding?.taskBranch) ?? title;
+  const showMergeRoute = hasTaskLine(plan) || isolated;
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
@@ -1736,7 +1756,29 @@ const PlanCard = memo(function PlanCard({
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
-          {deliveryRoute ? (
+          {showMergeRoute ? (
+            <div
+              className={`goal-plan-merge-route${
+                plan.deliveryHandoff?.status === 'stopped'
+                  ? ' is-blocked'
+                  : plan.deliveryHandoff?.status === 'delivered'
+                    ? ' is-ok'
+                    : ''
+              }`}
+            >
+              <span className="goal-plan-merge-node">
+                <span className="goal-plan-merge-k">{isZh ? '任务线' : 'Task line'}</span>
+                <span className="goal-plan-merge-v">{taskLineName}</span>
+              </span>
+              <span className="goal-plan-merge-arrow" aria-hidden="true">
+                {plan.deliveryHandoff?.status === 'stopped' ? '↛' : '→'}
+              </span>
+              <span className="goal-plan-merge-node">
+                <span className="goal-plan-merge-k">{isZh ? '发版线' : 'Source line'}</span>
+                <span className="goal-plan-merge-v">{mergeDest}</span>
+              </span>
+            </div>
+          ) : deliveryRoute ? (
             <p className="goal-plan-delivery-route">{deliveryRoute}</p>
           ) : null}
           {deliveryHandoffLabel ? (
@@ -1749,7 +1791,7 @@ const PlanCard = memo(function PlanCard({
                   disabled={busy || isStreaming}
                   onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
                 >
-                  {isZh ? '重试交回' : 'Retry delivery'}
+                  {isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`}
                 </button>
               ) : null}
             </div>
@@ -2299,11 +2341,23 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                   </span>
                 ) : null}
                 <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
-                {activeProgress ? (
-                  <span className="goal-panel-toggle-active-progress">
-                    {`${activeProgress.completed}/${activeProgress.total}`}
-                  </span>
-                ) : null}
+                {(() => {
+                  const lampHandoff = formatGoalDeliveryHandoffLamp(activePlan, {
+                    locale: isZh ? 'zh' : 'en',
+                  });
+                  if (lampHandoff) {
+                    return (
+                      <span className="goal-panel-toggle-active-handoff">
+                        {lampHandoff}
+                      </span>
+                    );
+                  }
+                  return activeProgress ? (
+                    <span className="goal-panel-toggle-active-progress">
+                      {`${activeProgress.completed}/${activeProgress.total}`}
+                    </span>
+                  ) : null;
+                })()}
               </span>
             ) : null}
             {lockedOpen && !dockedToWorkbench ? null : (

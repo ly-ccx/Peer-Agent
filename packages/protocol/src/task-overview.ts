@@ -35,7 +35,7 @@ import type {
  *
  * - needs_you：阻塞点在用户（待批准 / 待授权 / 待回答 / 待决策）。
  * - peer_advancing：Peer 正在推进，用户无需介入。
- * - result_ready：遗留行动权（Goal 完成不再进入；交回中改挂 peer_advancing / needs_you）。
+ * - result_ready：遗留行动权（Goal 完成不再进入；合回中改挂 peer_advancing / needs_you）。
  * - paused：用户或系统主动暂停，等待恢复。
  * - terminal：终态，进历史页。
  */
@@ -174,8 +174,8 @@ export interface TaskOverviewItem {
    */
   readonly deliveryRoute?: string;
   /**
-   * 用户可见的交回状态：已交回 / 正在交回 / 停止原因。
-   * 没隔离或没验收时不出现。
+   * 用户可见的合回状态：已合进 / 正在合进 / 停止原因。
+   * 没交付线时不出现；停住/进行中不必先验收。
    */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
@@ -293,7 +293,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly workspaceLabel?: string;
   /** 用户可见的交付路由；缺目标分支时写「未确认」。 */
   readonly deliveryRoute?: string;
-  /** 用户可见的交回状态；没隔离或没验收时省略。 */
+  /** 用户可见的合回状态；没交付线时省略。 */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   readonly progress?: { readonly completed: number; readonly total: number };
@@ -318,7 +318,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly providerLabel?: string;
   /**
    * 遗留字段：用户验收戳。Goal 完成不再据此进入 result_ready；
-   * 完成即终态，交回/自检未结束仍走 peer_advancing 或 needs_you。
+   * 完成即终态，合回/自检未结束仍走 peer_advancing 或 needs_you。
    */
   readonly accepted?: boolean;
   /** 有代码副作用时，完成门之后还要质量自检过线才能进终态。 */
@@ -459,7 +459,7 @@ export function projectConversation(
  *  4. runner waiting_user → needs_you/user_input
  *  5. runner blocked | budget_exhausted → needs_you/decision
  *  6. plan completed：
- *       - 交回进行中 → peer_advancing；交回失败 → needs_you/decision
+ *       - 合回进行中 → peer_advancing；合回失败 → needs_you/decision
  *       - 否则直接 terminal（不再因未验收 / 自检缺口进入 result_ready）
  *  8. plan executing → peer_advancing
  *  9. runner running/compacting/resuming/exploring → peer_advancing
@@ -590,16 +590,16 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
           actionRight: 'needs_you',
           needsYouReason: 'decision',
           nextAction: 'decide_blocked',
-          statusLabel: '交回未完成',
+          statusLabel: '合不进源头',
           actionLabel: '查看进度',
         };
       }
-      // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
+      // 只有真实合回进行中才占工作台。仅有 deliveryRoute 不算正在合进。
       if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
         return {
           actionRight: 'peer_advancing',
           nextAction: 'none',
-          statusLabel: '正在交回目标分支',
+          statusLabel: '正在合进源头',
           actionLabel: '查看 →',
         };
       }

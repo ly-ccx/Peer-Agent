@@ -360,7 +360,7 @@ function InboxRow({
   const cta =
     kind === 'accept'
       ? submitting
-        ? '正在交回…'
+        ? '正在合进源头…'
         : celebrating
           ? '已归档 ✓'
           : '查看进度'

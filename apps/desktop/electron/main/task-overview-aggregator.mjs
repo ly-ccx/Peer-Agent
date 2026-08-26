@@ -793,8 +793,8 @@ export function isGoalPlanInScope(plan, options = {}) {
 }
 
 /**
- * 已验收后是否仍有真实交回进行中 / 交回失败。
- * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在交回。
+ * 是否仍有真实合回进行中 / 合回失败。
+ * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在合进。
  */
 export function hasPendingDeliveryHandoff(plan) {
   const handoffStatus = plan?.deliveryHandoff?.status;
