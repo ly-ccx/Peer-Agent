@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
-import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
+import { createGoalDeliveryHandoff, triageTaskLine } from './goal-delivery-handoff.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
 
 let root;
@@ -513,5 +513,64 @@ describe('goal delivery handoff', () => {
     assert.equal(next.deliveryHandoff.status, 'stopped');
     assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
     assert.equal(readFileSync(path.join(repository, 'demo.txt'), 'utf8'), 'user has different local edits\n');
+  });
+});
+
+describe('triageTaskLine (ADR 69 分类器)', () => {
+  /** 建一条任务线分支：从 main 拉出新分支，写入文件并提交。返回分支名。 */
+  function makeTaskBranch(name, files) {
+    git(['switch', '-c', name]);
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(repository, file)), { recursive: true });
+      writeFileSync(path.join(repository, file), content);
+    }
+    git(['add', '-A']);
+    git(['commit', '-m', `task ${name}`]);
+    git(['switch', 'main']);
+    return name;
+  }
+
+  it('AUTO_CLEAN：任务线已被目标线包含（ahead=0）→ 空壳静默清理', async () => {
+    const task = makeTaskBranch('task/empty', { 'a.txt': 'x\n' });
+    // 目标线快进包含任务线提交，使任务线 ahead=0。
+    git(['merge', '--ff-only', task]);
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'AUTO_CLEAN');
+    assert.equal(res.detail.ahead, 0);
+  });
+
+  it('AUTO_MERGE：无碰撞的新文件变更 → 可自动合', async () => {
+    const task = makeTaskBranch('task/clean', { 'new-file.txt': 'hello\n' });
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'AUTO_MERGE');
+    assert.ok(res.detail.ahead > 0);
+    assert.deepEqual(res.detail.collisions, []);
+  });
+
+  it('AUTO_MERGE：同内容未跟踪碰撞 → 可自动合（暂移后落地同一内容）', async () => {
+    const content = 'same bytes\n';
+    const task = makeTaskBranch('task/identical', { 'demo.txt': content });
+    writeFileSync(path.join(repository, 'demo.txt'), content); // 未跟踪、内容一致
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'AUTO_MERGE');
+    assert.deepEqual(res.detail.collisions, [{ path: 'demo.txt', kind: 'identical' }]);
+  });
+
+  it('CONFLICT：同名未跟踪文件内容不同 → 真冲突浮现给用户', async () => {
+    const task = makeTaskBranch('task/diff', { 'demo.txt': 'task version\n' });
+    writeFileSync(path.join(repository, 'demo.txt'), 'user local edits\n'); // 未跟踪、内容不同
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'CONFLICT');
+    assert.equal(res.reason, 'untracked_content_differs');
+    assert.deepEqual(res.detail.collisions, [{ path: 'demo.txt', kind: 'different' }]);
+  });
+
+  it('BLOCKED_ENV：目标工作区 tracked 脏 → 环境挡', async () => {
+    const task = makeTaskBranch('task/blocked', { 'b.txt': 'y\n' });
+    writeFileSync(path.join(repository, 'README.md'), 'dirty tracked edit\n'); // tracked 未提交改动
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'BLOCKED_ENV');
+    assert.equal(res.reason, 'target_checkout_dirty');
+    assert.ok(res.detail.blockingEntry);
   });
 });

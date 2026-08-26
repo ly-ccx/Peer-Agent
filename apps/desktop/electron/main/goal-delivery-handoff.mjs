@@ -63,59 +63,104 @@ function alreadyDelivered(plan) {
 }
 
 /**
+ * ADR 69：合回分流（Triage）分类器——结构化 verdict 替代布尔判定。
+ * 对每条任务线判定一次，输出五类处置，让空壳/同内容/过时被系统自动消化，
+ * 只有真冲突浮现给用户。验收对象从 O(n) 条任务线收敛为 O(1) 个目标线最终态。
+ *
+ * 判定顺序（先判无需用户的情形，把 CONFLICT 留到最后）：
+ *   AUTO_CLEAN  空壳：ahead===0，改动早已合进目标线，静默清理。
+ *   BLOCKED_ENV 环境挡：tracked 脏 / merge-base·diff 失败，需用户先处理环境。
+ *   CONFLICT    真冲突：同名未跟踪文件内容与任务线版本不同，合并会覆盖。
+ *   AUTO_MERGE  可自动合：无 tracked 脏，碰撞仅同内容未跟踪文件（或无碰撞）。
+ *   STALE       已过时：behind 超阈值且改动相对目标线当前内容已失效（另案细化）。
+ */
+
+/** 落后多少提交视为「已过时」候选阈值（STALE 的进一步失效判定见 detail）。 */
+const STALE_BEHIND_THRESHOLD = 20;
+
+export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch, gitRunner = git }) {
+  const base = {
+    reason: '',
+    detail: { ahead: 0, behind: 0, changedFiles: [], collisions: [], blockingEntry: null },
+  };
+  // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
+  // 做碰撞与逐字节内容比对。展开到单文件后逐字节比对才能命中（ADR 69 / P0 修复）。
+  const status = await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
+  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
+  const untracked = [];
+  for (const line of lines) {
+    const xy = line.slice(0, 2);
+    if (xy !== '??') {
+      // tracked 脏（modified/staged/deleted/renamed）：环境挡，真有未提交工作。
+      return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: line.slice(3).trim() } };
+    }
+    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
+  }
+
+  // 任务线相对目标线的领先/落后与变更集
+  let ahead; let behind; let changedFiles; let mergeBase;
+  try {
+    mergeBase = trim(await gitRunner(repositoryRoot, ['merge-base', targetBranch, taskBranch]));
+    ahead = Number(trim(await gitRunner(repositoryRoot, ['rev-list', '--count', `${targetBranch}..${taskBranch}`]))) || 0;
+    behind = Number(trim(await gitRunner(repositoryRoot, ['rev-list', '--count', `${taskBranch}..${targetBranch}`]))) || 0;
+    changedFiles = (await gitRunner(repositoryRoot, ['diff', '--name-only', `${mergeBase}..${taskBranch}`]))
+      .split('\n').map((p) => p.trim()).filter(Boolean);
+  } catch {
+    return { ...base, verdict: 'BLOCKED_ENV', reason: 'git_query_failed', detail: { ...base.detail, blockingEntry: 'merge-base/diff failed' } };
+  }
+  base.detail.ahead = ahead;
+  base.detail.behind = behind;
+  base.detail.changedFiles = changedFiles;
+
+  // 空壳：任务线相对目标线无领先（改动已合进目标线）。
+  if (ahead === 0) {
+    return { ...base, verdict: 'AUTO_CLEAN', reason: 'empty_shell_already_landed' };
+  }
+
+  // 与目标工作区未跟踪文件的碰撞比对（逐字节）。
+  const collisions = [];
+  for (const entry of untracked) {
+    if (!changedFiles.includes(entry)) continue; // 无碰撞：纯噪音，merge 不碰它
+    try {
+      const [worktreeBlob, taskBlob] = await Promise.all([
+        gitRunner(repositoryRoot, ['hash-object', entry]),
+        gitRunner(repositoryRoot, ['rev-parse', `${taskBranch}:${entry}`]),
+      ]);
+      const identical = trim(worktreeBlob) === trim(taskBlob);
+      collisions.push({ path: entry, kind: identical ? 'identical' : 'different' });
+    } catch {
+      collisions.push({ path: entry, kind: 'different' }); // 比对失败按真碰撞保守处理
+    }
+  }
+  base.detail.collisions = collisions;
+
+  if (collisions.some((c) => c.kind === 'different')) {
+    // 真冲突：合并会覆盖工作区内容，必须用户决断。
+    return { ...base, verdict: 'CONFLICT', reason: 'untracked_content_differs' };
+  }
+  if (collisions.length > 0 || untracked.length === 0) {
+    // 可自动合：无冲突，碰撞均为同内容（调用方暂移后 ff-only 落地同一内容）。
+    return { ...base, verdict: 'AUTO_MERGE', reason: collisions.length > 0 ? 'identical_collisions' : 'clean' };
+  }
+  // 无碰撞但有变更集：干净快进。
+  return { ...base, verdict: 'AUTO_MERGE', reason: 'clean' };
+}
+
+/**
  * ADR 68：目标检出分支的脏检查分级。
  * 1. modified / staged（含删除、重命名）→ 挡：真有未提交工作。
  * 2. untracked 且与任务线变更集无路径碰撞 → 放行：纯噪音，merge 不碰它。
  * 3. untracked 且路径碰撞 → 比内容：与任务线将写入的版本逐字节一致 → 放行
  *    （调用方暂移后 merge 落地同一内容）；不一致 → 挡。
  * 返回 { mergeable, identicalCollisions }：identicalCollisions 是需要暂移的同内容碰撞路径。
+ *
+ * ADR 69：实现升级为 triageTaskLine 的薄封装——mergeable 等价于
+ * verdict === 'AUTO_MERGE'，identicalCollisions 取自 detail.collisions 中同内容项。
  */
 async function isTargetCheckoutMergeable(repositoryRoot, taskBranch, targetBranch) {
-  const empty = { mergeable: true, identicalCollisions: [] };
-  // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
-  // 做碰撞与逐字节内容比对，会落入保守挡。展开到单文件后，目录条目分支不再出现。
-  const status = await git(repositoryRoot, ['status', '--porcelain', '-uall']);
-  if (!status) return empty;
-  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
-  const untracked = [];
-  for (const line of lines) {
-    // XY path：X/Y 任一非 '.' 且非 '?' 即 tracked 改动（含 staged）。
-    const xy = line.slice(0, 2);
-    if (xy !== '??') return { mergeable: false, identicalCollisions: [] }; // 1) 真改动
-    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
-  }
-  if (untracked.length === 0) return empty;
-  // 2) & 3) untracked：只看与任务线变更集的碰撞（-uall 已展开到单文件，无目录条目）
-  let changedPaths;
-  try {
-    const mergeBase = trim(await git(repositoryRoot, ['merge-base', targetBranch, taskBranch]));
-    changedPaths = new Set(
-      (await git(repositoryRoot, ['diff', '--name-only', `${mergeBase}..${taskBranch}`]))
-        .split('\n')
-        .map((p) => p.trim())
-        .filter(Boolean),
-    );
-  } catch {
-    return { mergeable: false, identicalCollisions: [] }; // 拿不到变更集时保守维持旧语义
-  }
-  const identicalCollisions = [];
-  for (const entry of untracked) {
-    if (!changedPaths.has(entry)) continue; // 2) 无碰撞放行
-    // 3) 碰撞比内容：untracked 文件 vs 任务线版本
-    try {
-      const [worktreeBlob, taskBlob] = await Promise.all([
-        git(repositoryRoot, ['hash-object', entry]),
-        git(repositoryRoot, ['rev-parse', `${taskBranch}:${entry}`]),
-      ]);
-      if (trim(worktreeBlob) !== trim(taskBlob)) {
-        return { mergeable: false, identicalCollisions: [] }; // 内容不同：真碰撞
-      }
-      identicalCollisions.push(entry);
-    } catch {
-      return { mergeable: false, identicalCollisions: [] }; // 任务线没有该路径或命令失败：挡
-    }
-  }
-  return { mergeable: true, identicalCollisions };
+  const triage = await triageTaskLine({ repositoryRoot, taskBranch, targetBranch });
+  const identicalCollisions = triage.detail.collisions.filter((c) => c.kind === 'identical').map((c) => c.path);
+  return { mergeable: triage.verdict === 'AUTO_MERGE', identicalCollisions, triage };
 }
 
 function alreadyStopped(plan) {
