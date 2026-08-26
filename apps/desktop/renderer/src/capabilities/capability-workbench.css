@@ -1445,6 +1445,38 @@
   }
   .skill-marketplace-pagination button:disabled { @apply cursor-not-allowed opacity-40; }
 
+  /* 页码控件（Qoder 市场）：‹ 1 2 3 4 … 312 › */
+  .skill-marketplace-pagination--pages { @apply gap-1.5; }
+  .skill-marketplace-pagination--pages .pagination-arrow {
+    @apply grid h-8 w-8 place-items-center rounded-lg text-[14px];
+    border: 1px solid var(--za-line);
+    background: var(--za-surface);
+    color: var(--za-text);
+  }
+  .skill-marketplace-pagination--pages .pagination-arrow:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--za-text) 25%, var(--za-line));
+  }
+  .skill-marketplace-pagination--pages .pagination-page {
+    @apply grid h-8 min-w-8 place-items-center rounded-lg px-1 text-[12px] font-medium;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--za-text-muted);
+  }
+  .skill-marketplace-pagination--pages .pagination-page:hover {
+    background: var(--za-surface-hover, var(--za-surface));
+    color: var(--za-text);
+  }
+  .skill-marketplace-pagination--pages .pagination-page.is-active {
+    background: var(--za-brand);
+    color: var(--za-on-brand, #fff);
+    border-color: transparent;
+  }
+  .skill-marketplace-pagination--pages .pagination-ellipsis {
+    @apply grid h-8 place-items-center px-1 text-[12px];
+    color: var(--za-text-muted);
+    user-select: none;
+  }
+
   @media (max-width: 720px) {
     .skill-marketplace-toolbar {
       @apply static mb-3 items-stretch;

@@ -118,8 +118,10 @@ export function createQoderApiClient({
       const safePageSize = optionalPositiveInt(pageSize, 'page_size', MAX_PAGE_SIZE) ?? 20;
       const params = new URLSearchParams();
       params.append('extension_types', 'skill');
-      params.append('page', String(safePage));
-      params.append('page_size', String(safePageSize));
+      // 服务端只认嵌套点号参数 pagination.current_page / pagination.page_size，
+      // 顶层 page/page_size/current_page/offset 都不生效（已实测验证）。
+      params.append('pagination.current_page', String(safePage));
+      params.append('pagination.page_size', String(safePageSize));
       if (sortBy === 'hot' || sortBy === 'latest') params.append('sort_by', sortBy);
       if (typeof keyword === 'string' && keyword.trim()) params.append('keyword', keyword.trim());
       appendFilterParams(params, 'category', categories, 'qoder_invalid_category');

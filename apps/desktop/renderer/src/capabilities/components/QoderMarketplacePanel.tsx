@@ -66,6 +66,37 @@ function summarizeTree(node: { readonly files?: readonly unknown[] } | null): st
   return total > 0 ? `${total} 个文件` : '';
 }
 
+/**
+ * 页码折叠：当前页附近 ±2，首尾页固定，中间断点用省略号。
+ * 形如：1 … 8 9 [10] 11 12 … 312
+ */
+type PageItem = { readonly key: string; readonly type: 'page'; readonly page: number } | { readonly key: string; readonly type: 'ellipsis' };
+
+function buildPageItems(current: number, total: number): readonly PageItem[] {
+  const items: PageItem[] = [];
+  const window = 2;
+  const seen = new Set<number>();
+  const push = (page: number) => {
+    if (page >= 1 && page <= total && !seen.has(page)) {
+      seen.add(page);
+      items.push({ key: `p${page}`, type: 'page', page });
+    }
+  };
+  push(1);
+  for (let delta = -window; delta <= window; delta += 1) push(current + delta);
+  push(total);
+  // 按页码排序后补省略号
+  const pages = items.filter((item): item is Extract<PageItem, { type: 'page' }> => item.type === 'page').map((item) => item.page).sort((a, b) => a - b);
+  const result: PageItem[] = [];
+  pages.forEach((pageNumber, index) => {
+    if (index > 0 && pageNumber - pages[index - 1] > 1) {
+      result.push({ key: `e${pages[index - 1]}-${pageNumber}`, type: 'ellipsis' });
+    }
+    result.push({ key: `p${pageNumber}`, type: 'page', page: pageNumber });
+  });
+  return result;
+}
+
 export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: () => void }) {
   const [result, setResult] = useState<QoderMarketplacePage>(EMPTY_PAGE);
   const [keyword, setKeyword] = useState('');
@@ -240,11 +271,27 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
           </article>
         ))}
       </div>
-      <nav className="skill-marketplace-pagination" aria-label="Qoder 市场分页">
-        <button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
-        <span>第 {page.toLocaleString()} / {totalPages.toLocaleString()} 页</span>
-        <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
-      </nav>
+      {totalPages > 1 ? (
+        <nav className="skill-marketplace-pagination skill-marketplace-pagination--pages" aria-label="Qoder 市场分页">
+          <button type="button" className="pagination-arrow" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
+          {buildPageItems(page, totalPages).map((item) =>
+            item.type === 'ellipsis' ? (
+              <span key={item.key} className="pagination-ellipsis" aria-hidden="true">…</span>
+            ) : (
+              <button
+                key={item.key}
+                type="button"
+                className={item.page === page ? 'pagination-page is-active' : 'pagination-page'}
+                aria-current={item.page === page ? 'page' : undefined}
+                onClick={() => setPage(item.page)}
+              >
+                {item.page.toLocaleString()}
+              </button>
+            ),
+          )}
+          <button type="button" className="pagination-arrow" aria-label="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>›</button>
+        </nav>
+      ) : null}
       {selected ? (
         <Overlay onClose={closeSelected} ariaLabel={`${selected.nameCn || selected.name} 详情`} panelClassName="skill-marketplace-detail">
           {({ requestClose }) => (() => {
