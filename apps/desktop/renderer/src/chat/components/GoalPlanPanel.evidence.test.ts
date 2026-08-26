@@ -50,10 +50,14 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /formatGoalDeliveryHandoffLamp/);
   assert.match(source, /goal-plan-merge-route/);
   assert.match(source, /goal-panel-toggle-active-handoff/);
+  assert.match(source, /goal-plan-head-handoff/);
+  assert.match(source, /canMergeIntoSource/);
   assert.match(source, /再试一次，合并进 \$\{mergeDest\}/);
+  assert.match(source, /合并进 \$\{mergeDest\}/);
   assert.doesNotMatch(source, /重试交回/);
   assert.doesNotMatch(source, /交回未完成/);
 
   assert.match(styles, /\.goal-plan-merge-route/);
   assert.match(styles, /\.goal-panel-toggle-active-handoff/);
+  assert.match(styles, /\.goal-plan-head-handoff/);
 });

@@ -526,7 +526,8 @@
 .goal-plan-head-timing--live {
   color: var(--za-text);
 }
-.goal-plan-head-progress {
+.goal-plan-head-progress,
+.goal-plan-head-handoff {
   flex: none;
   font-size: var(--ui-font-caption, 11px);
   color: var(--za-text-muted);
@@ -534,6 +535,11 @@
   padding: 1px 6px;
   border-radius: var(--ui-radius-round, 999px);
   background: var(--ui-surface-hover, var(--za-hover));
+}
+
+.goal-plan-head-handoff {
+  color: var(--za-text-soft);
+  font-family: var(--font-mono, monospace);
 }
 
 .goal-plan-head-caret {

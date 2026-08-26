@@ -1619,13 +1619,19 @@ const PlanCard = memo(function PlanCard({
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
   const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
+  const lampHandoff = formatGoalDeliveryHandoffLamp(plan, { locale: isZh ? 'zh' : 'en' });
   const mergeDest = mergeDestination(plan, isZh);
   const taskLineName = compactBranchName(plan.deliveryBinding?.taskBranch) ?? title;
+  const isolated = isIsolatedPlan(plan);
   const showMergeRoute = hasTaskLine(plan) || isolated;
+  const handoffStatus = plan.deliveryHandoff?.status;
+  const canMergeIntoSource = isolated
+    && plan.status === 'completed'
+    && handoffStatus !== 'delivered'
+    && handoffStatus !== 'delivering';
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
-  const isolated = isIsolatedPlan(plan);
   const canIsolate = hasDeliveryTarget(plan)
     && !isolated
     && plan.status !== 'completed'
@@ -1726,9 +1732,13 @@ const PlanCard = memo(function PlanCard({
               {elapsedLabel}
             </span>
           ) : null}
-          <span className="goal-plan-head-progress">
-            {`${progress.completed}/${progress.total}`}
-          </span>
+          {lampHandoff ? (
+            <span className="goal-plan-head-handoff">{lampHandoff}</span>
+          ) : (
+            <span className="goal-plan-head-progress">
+              {`${progress.completed}/${progress.total}`}
+            </span>
+          )}
           {lockedOpen ? null : (
             <span className="goal-plan-head-caret" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1781,17 +1791,23 @@ const PlanCard = memo(function PlanCard({
           ) : deliveryRoute ? (
             <p className="goal-plan-delivery-route">{deliveryRoute}</p>
           ) : null}
-          {deliveryHandoffLabel ? (
+          {deliveryHandoffLabel || canMergeIntoSource ? (
             <div className="goal-plan-delivery-handoff-row">
-              <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
-              {plan.deliveryHandoff?.status === 'stopped' ? (
+              {deliveryHandoffLabel ? (
+                <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
+              ) : lampHandoff ? (
+                <p className="goal-plan-delivery-handoff">{lampHandoff}</p>
+              ) : null}
+              {canMergeIntoSource ? (
                 <button
                   type="button"
                   className="goal-plan-delivery-retry"
                   disabled={busy || isStreaming}
                   onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
                 >
-                  {isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`}
+                  {handoffStatus === 'stopped'
+                    ? (isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`)
+                    : (isZh ? `合并进 ${mergeDest}` : `Merge into ${mergeDest}`)}
                 </button>
               ) : null}
             </div>
