@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -257,6 +257,36 @@ describe('goal delivery handoff', () => {
     assert.equal(next.deliveryHandoff.status, 'delivered');
     assert.equal(readFileSync(path.join(repository, 'landed.txt'), 'utf8'), 'from isolation\n');
     assert.equal(git(['status', '--porcelain']), '');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+  });
+
+  it('fast-forwards when an untracked file in a collapsed directory byte-matches the task change', async () => {
+    // 复现 bug：占用目标分支时，未跟踪目录会被 `status --porcelain` 折叠成目录条目（demo/），
+    // 旧逻辑对目录条目碰撞保守挡 target_checkout_dirty，即使内容与任务线逐字节一致。
+    // 修复后（-uall 展开到单文件）应比对内容、暂移同内容碰撞，再 ff-only 合入。
+    const content = '<!doctype html><title>version map</title>\n';
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    const isolationDir = path.join(prepared.deliveryBinding.worktreePath, 'demo');
+    mkdirSync(isolationDir, { recursive: true });
+    writeFileSync(path.join(isolationDir, 'version-map.html'), content);
+    // 用户在占用 main 的工作区里，放着同一份未跟踪内容（且所在目录此前未被 git 跟踪）。
+    const userDir = path.join(repository, 'demo');
+    mkdirSync(userDir, { recursive: true });
+    const userFile = path.join(userDir, 'version-map.html');
+    writeFileSync(userFile, content);
+    const mainBefore = git(['rev-parse', 'main']);
+
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.notEqual(git(['rev-parse', 'main']), mainBefore);
+    assert.equal(readFileSync(userFile, 'utf8'), content);
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
   });
 

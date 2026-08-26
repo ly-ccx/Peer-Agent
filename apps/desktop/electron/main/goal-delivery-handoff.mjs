@@ -72,7 +72,9 @@ function alreadyDelivered(plan) {
  */
 async function isTargetCheckoutMergeable(repositoryRoot, taskBranch, targetBranch) {
   const empty = { mergeable: true, identicalCollisions: [] };
-  const status = await git(repositoryRoot, ['status', '--porcelain']);
+  // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
+  // 做碰撞与逐字节内容比对，会落入保守挡。展开到单文件后，目录条目分支不再出现。
+  const status = await git(repositoryRoot, ['status', '--porcelain', '-uall']);
   if (!status) return empty;
   const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
   const untracked = [];
@@ -83,7 +85,7 @@ async function isTargetCheckoutMergeable(repositoryRoot, taskBranch, targetBranc
     untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
   }
   if (untracked.length === 0) return empty;
-  // 2) & 3) untracked：只看与任务线变更集的碰撞
+  // 2) & 3) untracked：只看与任务线变更集的碰撞（-uall 已展开到单文件，无目录条目）
   let changedPaths;
   try {
     const mergeBase = trim(await git(repositoryRoot, ['merge-base', targetBranch, taskBranch]));
@@ -98,15 +100,8 @@ async function isTargetCheckoutMergeable(repositoryRoot, taskBranch, targetBranc
   }
   const identicalCollisions = [];
   for (const entry of untracked) {
-    // 目录条目（以 / 结尾）按前缀碰撞判定
-    const collide = entry.endsWith('/')
-      ? [...changedPaths].some((p) => p.startsWith(entry))
-      : changedPaths.has(entry);
-    if (!collide) continue; // 2) 无碰撞放行
+    if (!changedPaths.has(entry)) continue; // 2) 无碰撞放行
     // 3) 碰撞比内容：untracked 文件 vs 任务线版本
-    if (entry.endsWith('/')) {
-      return { mergeable: false, identicalCollisions: [] }; // 目录碰撞无法逐字节比，保守挡
-    }
     try {
       const [worktreeBlob, taskBlob] = await Promise.all([
         git(repositoryRoot, ['hash-object', entry]),
