@@ -57,6 +57,10 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.doesNotMatch(source, /重试交回/);
   assert.doesNotMatch(source, /交回未完成/);
 
+  // ADR 68：合回路线图只对隔离计划渲染；非隔离（direct）计划不画合回图。
+  assert.match(source, /const showMergeRoute = isolated;/);
+  assert.doesNotMatch(source, /const showMergeRoute = hasTaskLine\(plan\) \|\| isolated;/);
+
   assert.match(styles, /\.goal-plan-merge-route/);
   assert.match(styles, /\.goal-panel-toggle-active-handoff/);
   assert.match(styles, /\.goal-plan-head-handoff/);

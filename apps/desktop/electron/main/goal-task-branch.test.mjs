@@ -80,7 +80,7 @@ describe('goal task branch', () => {
     }), false);
   });
 
-  it('creates a prefixed task branch from the bound base and records isolation none', () => {
+  it('creates a prefixed task branch for an isolated plan and records isolation worktree', () => {
     const recorded = [];
     const adapter = createGoalTaskBranchAdapter({
       resolvePrefix: () => 'PeerAgent/',
@@ -92,19 +92,41 @@ describe('goal task branch', () => {
             deliveryBinding: {
               ...boundPlan().deliveryBinding,
               ...isolation,
+              executionIsolation: isolation.executionIsolation ?? 'none',
             },
           };
         },
       },
     });
 
-    const next = adapter.ensureTaskBranch(boundPlan());
-    assert.equal(next.deliveryBinding.executionIsolation, 'none');
+    const isolatedPlan = {
+      ...boundPlan(),
+      deliveryBinding: {
+        ...boundPlan().deliveryBinding,
+        executionIsolation: 'worktree',
+      },
+    };
+    const next = adapter.ensureTaskBranch(isolatedPlan);
+    assert.equal(next.deliveryBinding.executionIsolation, 'worktree');
     assert.match(next.deliveryBinding.taskBranch, /^PeerAgent\//);
     assert.equal(next.deliveryBinding.worktreePath, undefined);
-    assert.equal(recorded[0].isolation.executionIsolation, 'none');
+    assert.equal(recorded[0].isolation.executionIsolation, 'worktree');
     assert.equal(git(['rev-parse', '--verify', next.deliveryBinding.taskBranch]), git(['rev-parse', 'HEAD']));
-    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), next.deliveryBinding.taskBranch);
+  });
+
+  it('ADR 68：非隔离（direct）计划不再创建任务线', () => {
+    // 非隔离计划没有合回动作；空壳 ref 只会误导 UI 画合回路线图。
+    assert.equal(planNeedsTaskBranch(boundPlan()), false);
+  });
+
+  it('ADR 68：隔离（worktree）计划仍创建任务线', () => {
+    assert.equal(planNeedsTaskBranch({
+      ...boundPlan(),
+      deliveryBinding: {
+        ...boundPlan().deliveryBinding,
+        executionIsolation: 'worktree',
+      },
+    }), true);
   });
 
   it('only creates the ref when the working tree is dirty', () => {
@@ -123,7 +145,14 @@ describe('goal task branch', () => {
         },
       },
     });
-    const next = adapter.ensureTaskBranch(boundPlan());
+    const isolatedPlan = {
+      ...boundPlan(),
+      deliveryBinding: {
+        ...boundPlan().deliveryBinding,
+        executionIsolation: 'worktree',
+      },
+    };
+    const next = adapter.ensureTaskBranch(isolatedPlan);
     assert.ok(next.deliveryBinding.taskBranch);
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
     assert.equal(git(['rev-parse', '--verify', next.deliveryBinding.taskBranch]), git(['rev-parse', 'main']));

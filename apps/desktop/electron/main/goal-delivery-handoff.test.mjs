@@ -260,8 +260,9 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
   });
 
-  it('stops when the occupied target checkout is dirty', async () => {
-    writeFileSync(path.join(repository, 'user-dirty.txt'), 'leave me\n');
+  it('stops when the occupied target checkout has modified tracked files', async () => {
+    // ADR 68：untracked 噪音不再挡；modified tracked 才是真脏。
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
       worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
@@ -276,11 +277,12 @@ describe('goal delivery handoff', () => {
     assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
     assert.equal(git(['rev-parse', 'main']), mainBefore);
     assert.equal(existsSync(path.join(repository, 'blocked.txt')), false);
-    assert.equal(readFileSync(path.join(repository, 'user-dirty.txt'), 'utf8'), 'leave me\n');
+    assert.equal(readFileSync(path.join(repository, 'README.md'), 'utf8'), 'user is editing\n');
   });
 
   it('retries an explicitly stopped handoff after the checkout is clean', async () => {
-    writeFileSync(path.join(repository, 'user-dirty.txt'), 'leave me\n');
+    // ADR 68：用 modified tracked 文件制造真脏；untracked 噪音不再挡合回。
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
       worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
@@ -292,7 +294,7 @@ describe('goal delivery handoff', () => {
     const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
     const stopped = await handoff.handoffPlan(accepted);
     assert.equal(stopped.deliveryHandoff.status, 'stopped');
-    rmSync(path.join(repository, 'user-dirty.txt'));
+    execFileSync('git', ['-C', repository, 'checkout', '--', 'README.md']);
     const retried = await handoff.retryHandoff(store.getPlan('plan-handoff-1'));
     assert.equal(retried.deliveryHandoff.status, 'delivered');
     assert.equal(readFileSync(path.join(repository, 'retry.txt'), 'utf8'), 'later\n');
@@ -346,5 +348,140 @@ describe('goal delivery handoff', () => {
     assert.equal(next.deliveryHandoff, undefined);
     assert.equal(git(['rev-parse', 'main']), mainBefore);
     assert.equal(existsSync(path.join(repository, 'onto-develop.txt')), true);
+  });
+
+  // ADR 68：direct 交付事实。非隔离计划完成且工作确实已落目标分支时，补写 delivered 事实。
+
+  it('records a direct delivered fact when the empty task line stays at base', async () => {
+    // 空壳任务线：ref 建了但没有独立提交（merge-base == task head == base）。
+    git(['branch', 'PeerAgent/task-3']);
+    writeFileSync(path.join(repository, 'direct-work.txt'), 'landed on main\n');
+    git(['add', 'direct-work.txt']);
+    git(['commit', '-m', 'direct work on target']);
+    const store = createStore(boundPlan({
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/task-3',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    assert.equal(handoff.canRecordDirectDelivery(completed), true);
+    const next = await handoff.handoffPlan(completed);
+
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.deliveryMode, 'direct');
+    assert.equal(next.deliveryHandoff.targetBranch, 'main');
+    assert.ok(next.deliveryHandoff.commitSha);
+    // 幂等：再次跑不产生第二条记录，也不覆盖。
+    const again = await handoff.handoffPlan(next);
+    assert.equal(again.deliveryHandoff.updatedAt, next.deliveryHandoff.updatedAt);
+  });
+
+  it('records a direct delivered fact when there is no task line and checkout is the target', async () => {
+    writeFileSync(path.join(repository, 'direct-work.txt'), 'landed on main\n');
+    git(['add', 'direct-work.txt']);
+    git(['commit', '-m', 'direct work on target']);
+    const store = createStore(boundPlan({
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'none',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(completed);
+
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.deliveryMode, 'direct');
+  });
+
+  it('does not record a direct delivered fact while the task line has unmerged work', async () => {
+    git(['switch', '-c', 'PeerAgent/task-4']);
+    writeFileSync(path.join(repository, 'pending-work.txt'), 'still on task line\n');
+    git(['add', 'pending-work.txt']);
+    git(['commit', '-m', 'pending work']);
+    git(['switch', 'main']);
+    const store = createStore(boundPlan({
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'none',
+        taskBranch: 'PeerAgent/task-4',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(completed);
+
+    assert.equal(next.deliveryHandoff, undefined);
+  });
+
+  // ADR 68：目标检出脏检查分级。untracked 噪音不再一刀切挡住合回。
+
+  it('merges while target checkout has untracked files that do not collide with the task line', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    // 任务线（worktree 内）有真实交付内容。
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'feature.txt'), 'task line feature\n');
+    // 目标检出：无关的 untracked 噪音（与任务线变更集无碰撞）。
+    writeFileSync(path.join(repository, 'noise-unrelated.txt'), 'untracked noise\n');
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(git(['show', `main:${path.basename('feature.txt')}`]).trim(), 'task line feature');
+    assert.equal(existsSync(path.join(repository, 'noise-unrelated.txt')), true);
+  });
+
+  it('merges when an untracked collision file is byte-identical to the task line version', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    // 任务线（worktree 内）交付 demo.txt。
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'demo.txt'), 'same bytes on both sides\n');
+    // 目标检出上有同名 untracked 文件，但内容与任务线版本逐字节一致。
+    writeFileSync(path.join(repository, 'demo.txt'), 'same bytes on both sides\n');
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(git(['show', 'main:demo.txt']).trim(), 'same bytes on both sides');
+    assert.equal(readFileSync(path.join(repository, 'demo.txt'), 'utf8'), 'same bytes on both sides\n');
+  });
+
+  it('stays blocked when an untracked collision file differs from the task line version', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'demo.txt'), 'task line version\n');
+    // 目标检出上同名 untracked 文件内容不同：真碰撞，必须挡。
+    writeFileSync(path.join(repository, 'demo.txt'), 'user has different local edits\n');
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+
+    assert.equal(next.deliveryHandoff.status, 'stopped');
+    assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
+    assert.equal(readFileSync(path.join(repository, 'demo.txt'), 'utf8'), 'user has different local edits\n');
   });
 });

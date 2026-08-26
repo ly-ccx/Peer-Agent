@@ -196,6 +196,12 @@ export function formatGoalDeliveryHandoff(
       : (branch ? `merging into ${branch}` : 'merging into source');
   }
   if (handoff.status === 'delivered') {
+    // ADR 68：direct 交付没有「合」的动作，用词区分，避免暗示存在合并。
+    if (handoff.deliveryMode === 'direct') {
+      return target
+        ? (locale === 'zh' ? `已随 ${target} 交付` : `delivered with ${target}`)
+        : (locale === 'zh' ? '已随源头交付' : 'delivered with source');
+    }
     return target
       ? (locale === 'zh' ? `已合进 ${target}` : `merged into ${target}`)
       : (locale === 'zh' ? '已合进源头' : 'merged into source');
@@ -222,6 +228,10 @@ export function formatGoalDeliveryHandoffLamp(
     ?? (locale === 'zh' ? '源头' : 'source');
   const handoff = input.deliveryHandoff;
   if (!handoff?.status || handoff.status === 'idle') {
+    // ADR 68：非隔离计划（无交付线语义）不显示「还没进」——它的完成即交付，没有待合回的工作。
+    const isolated = input.deliveryBinding?.executionIsolation === 'worktree';
+    const directCandidate = !isolated && input.status === 'completed';
+    if (directCandidate) return undefined;
     if (input.status === 'completed') {
       return locale === 'zh' ? `还没进 ${dest}` : `not on ${dest}`;
     }
@@ -231,6 +241,9 @@ export function formatGoalDeliveryHandoffLamp(
     return locale === 'zh' ? `正在合进 ${dest}` : `merging into ${dest}`;
   }
   if (handoff.status === 'delivered') {
+    if (handoff.deliveryMode === 'direct') {
+      return locale === 'zh' ? `已随 ${dest} 交付` : `delivered with ${dest}`;
+    }
     return locale === 'zh' ? `已进 ${dest}` : `on ${dest}`;
   }
   if (handoff.status === 'stopped') {
@@ -519,8 +532,16 @@ export type GoalQualityReviewStatus = 'reviewing' | 'passed' | 'failed';
 /** 把隔离改动合并进目标分支的结果；不做排队 UI。展示不要求先验收。 */
 export type GoalDeliveryHandoffStatus = 'idle' | 'delivering' | 'delivered' | 'stopped';
 
+/**
+ * 交付模式（ADR 68）：merge=隔离任务线合回目标分支；direct=改动直接落在当前工作区。
+ * 缺省视为 'merge'（存量记录无此字段，向后兼容）。
+ */
+export type GoalDeliveryMode = 'merge' | 'direct';
+
 export interface GoalDeliveryHandoff {
   readonly status: GoalDeliveryHandoffStatus;
+  /** 交付模式；缺省 'merge'。 */
+  readonly deliveryMode?: GoalDeliveryMode;
   readonly repoId?: string;
   readonly targetBranch?: string;
   readonly taskBranch?: string;

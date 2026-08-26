@@ -1623,7 +1623,9 @@ const PlanCard = memo(function PlanCard({
   const mergeDest = mergeDestination(plan, isZh);
   const taskLineName = compactBranchName(plan.deliveryBinding?.taskBranch) ?? title;
   const isolated = isIsolatedPlan(plan);
-  const showMergeRoute = hasTaskLine(plan) || isolated;
+  // ADR 68：合回路线图只对隔离计划画——非隔离（direct）计划没有合回动作，
+  // 画「任务线 → 发版线」会暗示一个不存在的合并。
+  const showMergeRoute = isolated;
   const handoffStatus = plan.deliveryHandoff?.status;
   const canMergeIntoSource = isolated
     && plan.status === 'completed'

@@ -256,3 +256,72 @@ test('formatGoalDeliveryHandoff 有交付线即可展示合回状态，不必先
     '已合进 peer_agent / PeerAgent/0.0.4',
   );
 });
+
+test('ADR 68：direct 交付的灯条与标签用交付语义，不出现「还没进/已合进」', () => {
+  const binding: GoalDeliveryBinding = {
+    repoId: 'peer_agent',
+    targetBranch: '0.0.9',
+    targetBranchSource: 'preconfigured',
+    executionIsolation: 'none',
+    taskBranch: 'PeerAgent/提交右侧拖拽修复',
+    boundAt: '2026-08-26T06:31:01.091Z',
+  };
+
+  // direct delivered：灯条与标签都用「已随交付」。
+  assert.equal(
+    formatGoalDeliveryHandoffLamp({
+      deliveryBinding: binding,
+      deliveryHandoff: {
+        status: 'delivered',
+        deliveryMode: 'direct',
+        targetBranch: '0.0.9',
+        updatedAt: '2026-08-26T07:00:00.000Z',
+      },
+    }),
+    '已随 0.0.9 交付',
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      deliveryHandoff: {
+        status: 'delivered',
+        deliveryMode: 'direct',
+        repoId: 'peer_agent',
+        targetBranch: '0.0.9',
+        updatedAt: '2026-08-26T07:00:00.000Z',
+      },
+    }),
+    '已随 peer_agent / 0.0.9 交付',
+  );
+
+  // 非隔离完成、还没有 handoff 记录：不显示「还没进」（完成即交付，无合回语义）。
+  assert.equal(
+    formatGoalDeliveryHandoffLamp({
+      status: 'completed',
+      deliveryBinding: binding,
+    }),
+    undefined,
+  );
+
+  // 隔离计划完成、无记录：仍显示「还没进」（确有待合回的工作）。
+  assert.equal(
+    formatGoalDeliveryHandoffLamp({
+      status: 'completed',
+      deliveryBinding: { ...binding, executionIsolation: 'worktree' },
+    }),
+    '还没进 0.0.9',
+  );
+
+  // merge 模式 delivered（缺省 deliveryMode）：维持「已进」。
+  assert.equal(
+    formatGoalDeliveryHandoffLamp({
+      deliveryBinding: { ...binding, executionIsolation: 'worktree' },
+      deliveryHandoff: {
+        status: 'delivered',
+        targetBranch: '0.0.9',
+        updatedAt: '2026-08-26T07:00:00.000Z',
+      },
+    }),
+    '已进 0.0.9',
+  );
+});
