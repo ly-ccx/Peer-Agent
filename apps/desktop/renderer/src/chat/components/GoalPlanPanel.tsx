@@ -907,8 +907,6 @@ function PlanProjectionSection({
   tasksExpanded,
   onToggleTasks,
   isZh,
-  childPlans,
-  onNavigateToPlan,
 }: {
   plan: GoalPlan;
   progress: GoalPlan['progress'];
@@ -916,8 +914,6 @@ function PlanProjectionSection({
   tasksExpanded: boolean;
   onToggleTasks: () => void;
   isZh: boolean;
-  childPlans: readonly GoalPlan[];
-  onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
   return (
     <section className="goal-projection goal-projection--plan" aria-label={isZh ? '任务计划' : 'Task plan'}>
@@ -972,8 +968,6 @@ function PlanProjectionSection({
                 task={task}
                 depth={0}
                 isZh={isZh}
-                childPlans={childPlans}
-                onNavigateToPlan={onNavigateToPlan}
               />
             ))}
           </ul>
@@ -1082,14 +1076,10 @@ function TaskNode({
   task,
   depth,
   isZh,
-  childPlans,
-  onNavigateToPlan,
 }: {
   task: GoalTask;
   depth: number;
   isZh: boolean;
-  childPlans: readonly GoalPlan[];
-  onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
   const evidenceRefs = safeEvidenceRefs(task);
   const hasEvidence = evidenceRefs.length > 0;
@@ -1104,14 +1094,10 @@ function TaskNode({
           ? `证据 ${evidenceCount} 条`
           : `${evidenceCount} evidence`
         : null;
-  const delegatedPlans = (task.childPlanIds || [])
-    .map((planId) => childPlans.find((plan) => plan.planId === planId))
-    .filter((plan): plan is GoalPlan => !!plan);
   const canExpand =
     !!task.failureReason ||
     !!task.blockedReason ||
     (task.status === 'completed' && hasEvidence) ||
-    delegatedPlans.length > 0 ||
     (task.subtasks?.length ?? 0) > 0;
   return (
     <li
@@ -1166,27 +1152,6 @@ function TaskNode({
               </ul>
             </div>
           ) : null}
-          {delegatedPlans.length > 0 ? (
-            <div className="goal-task-child-plans">
-              <div className="goal-task-detail-label">{isZh ? '派生子目标' : 'Derived goals'}</div>
-              {delegatedPlans.map((childPlan) => (
-                <button
-                  key={childPlan.planId}
-                  type="button"
-                  className="goal-task-child-plan"
-                  onClick={() => onNavigateToPlan?.(childPlan.planId)}
-                >
-                  <span className={statusClass(planExecutionStatus(childPlan.status))}>
-                    {statusLabel(planExecutionStatus(childPlan.status), isZh)}
-                  </span>
-                  <span className="goal-task-child-plan-title">{childPlan.title}</span>
-                  <span className="goal-task-child-plan-progress">
-                    {childPlan.progress.completed}/{childPlan.progress.total}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
       ) : null}
       {task.subtasks && task.subtasks.length > 0 ? (
@@ -1197,8 +1162,6 @@ function TaskNode({
               task={child}
               depth={depth + 1}
               isZh={isZh}
-              childPlans={childPlans}
-              onNavigateToPlan={onNavigateToPlan}
             />
           ))}
         </ul>
@@ -1601,10 +1564,6 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
-  readonly parentPlan?: GoalPlan;
-  readonly sourceTask?: GoalTask;
-  readonly childPlans?: readonly GoalPlan[];
-  readonly onNavigateToPlan?: (planId: string, taskId?: string) => void;
   readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
   readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
@@ -1614,11 +1573,6 @@ interface PlanCardProps {
   ) => void | Promise<void>;
 }
 
-const EMPTY_CHILD_PLANS: readonly GoalPlan[] = [];
-const EMPTY_PLAN_RELATION: Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'> = {
-  childPlans: EMPTY_CHILD_PLANS,
-};
-
 const PlanCard = memo(function PlanCard({
   plan,
   defaultExpanded,
@@ -1626,10 +1580,6 @@ const PlanCard = memo(function PlanCard({
   isStreaming,
   busy,
   isMain,
-  parentPlan,
-  sourceTask,
-  childPlans = EMPTY_CHILD_PLANS,
-  onNavigateToPlan,
   onNextAction,
   criteriaEditorRef,
   onRunnerControl,
@@ -1849,19 +1799,6 @@ const PlanCard = memo(function PlanCard({
             </div>
           ) : null}
           {lineError ? <p className="goal-plan-delivery-error">{lineError}</p> : null}
-          {parentPlan ? (
-            <div className="goal-plan-origin" data-goal-plan-origin>
-              <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>
-              <button
-                type="button"
-                className="goal-plan-origin-link"
-                onClick={() => onNavigateToPlan?.(parentPlan.planId, plan.sourceTaskId)}
-              >
-                <strong>{derivePlanTitle(parentPlan, isZh)}</strong>
-                {sourceTask ? <span>{isZh ? `任务：${sourceTask.title}` : `Task: ${sourceTask.title}`}</span> : null}
-              </button>
-            </div>
-          ) : null}
           {nextStep ? (
             <div className="goal-plan-next-guidance" role="status">
               {nextStepCopy.guidance}
@@ -1875,8 +1812,6 @@ const PlanCard = memo(function PlanCard({
             tasksExpanded={tasksExpanded}
             onToggleTasks={() => setTasksExpanded((v) => !v)}
             isZh={isZh}
-            childPlans={childPlans}
-            onNavigateToPlan={onNavigateToPlan}
           />
           <RunTraceSection plan={plan} isZh={isZh} />
           {plan.runner && plan.runner.enabled ? (
@@ -2266,48 +2201,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       null;
     const mainPlan = selectPrimaryGoalPlan(plans);
     const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
-    const plansById = new Map(plans.map((plan) => [plan.planId, plan]));
-    const childrenByParentId = new Map<string, GoalPlan[]>();
-    for (const plan of plans) {
-      if (!plan.parentPlanId) continue;
-      const children = childrenByParentId.get(plan.parentPlanId);
-      if (children) children.push(plan);
-      else childrenByParentId.set(plan.parentPlanId, [plan]);
-    }
-    const relations = new Map<string, Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'>>();
-    for (const plan of plans) {
-      const parentPlan = plan.parentPlanId ? plansById.get(plan.parentPlanId) : undefined;
-      const sourceTask = parentPlan && plan.sourceTaskId
-        ? parentPlan.tasks.find((task) => task.taskId === plan.sourceTaskId)
-        : undefined;
-      relations.set(plan.planId, {
-        parentPlan,
-        sourceTask,
-        childPlans: childrenByParentId.get(plan.planId) ?? EMPTY_CHILD_PLANS,
-      });
-    }
     // 历史清单按父子链推导顺序，但渲染为完全对齐的平铺列表，不做层级缩进。
     const orderedListPlans = orderGoalPlansByLineage(listPlans);
-    return { activePlan, mainPlan, listPlans, orderedListPlans, relations };
+    return { activePlan, mainPlan, listPlans, orderedListPlans };
   }, [plans]);
 
   useEffect(() => {
     onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
   }, [onActiveDeliveryChange, planViewModel.activePlan]);
-
-  const navigateToPlan = useCallback((planId: string, taskId?: string) => {
-    const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);
-    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    element?.focus({ preventScroll: true });
-    if (taskId) {
-      document.querySelector<HTMLElement>(`[data-goal-task-id="${CSS.escape(taskId)}"]`)?.focus({ preventScroll: true });
-    }
-  }, []);
-
-  const relationFor = useCallback(
-    (plan: GoalPlan) => planViewModel.relations.get(plan.planId) ?? EMPTY_PLAN_RELATION,
-    [planViewModel.relations],
-  );
 
   // 面板位于输入框上方：没有计划时不占位，直接隐藏。
   if (plans.length === 0) {
@@ -2444,8 +2345,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           isZh={isZh}
           isStreaming={isStreaming}
           busy={effectiveBusyPlanId === mainPlan.planId}
-          {...relationFor(mainPlan)}
-          onNavigateToPlan={navigateToPlan}
           onNextAction={handleNextAction}
           criteriaEditorRef={bindCriteriaEditor(mainPlan.planId)}
           onRunnerControl={controlRunner}
@@ -2471,8 +2370,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               isZh={isZh}
               isStreaming={isStreaming}
               busy={effectiveBusyPlanId === plan.planId}
-              {...relationFor(plan)}
-              onNavigateToPlan={navigateToPlan}
               onNextAction={handleNextAction}
               criteriaEditorRef={bindCriteriaEditor(plan.planId)}
               onRunnerControl={controlRunner}

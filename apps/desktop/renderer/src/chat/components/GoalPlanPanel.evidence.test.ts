@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const readSource = () => readFile(new URL('./GoalPlanPanel.tsx', import.meta.url), 'utf8');
+const readStyles = () => readFile(new URL('../styles/goal-panel.css', import.meta.url), 'utf8');
 
 test('GoalPlanPanel treats missing evidenceRefs as an empty list', async () => {
   const source = await readSource();
@@ -14,4 +15,30 @@ test('GoalPlanPanel treats missing evidenceRefs as an empty list', async () => {
   assert.doesNotMatch(source, /task\.evidenceRefs\.length/);
   assert.doesNotMatch(source, /event\.evidenceRefs\.length/);
   assert.doesNotMatch(source, /task\.evidenceRefs\.map\(/);
+});
+
+test('GoalPlanPanel keeps PlanCard but does not render parent origin or derived child goals', async () => {
+  const source = await readSource();
+  const styles = await readStyles();
+
+  assert.match(source, /const PlanCard = memo\(function PlanCard\(/);
+  assert.match(source, /function TaskNode\(/);
+
+  // parentPlan / childPlanIds may still exist on the stored Goal Thread,
+  // but the card and task detail no longer surface that hierarchy.
+  assert.doesNotMatch(source, /子目标 · 来自/);
+  assert.doesNotMatch(source, /Child goal · From/);
+  assert.doesNotMatch(source, /派生子目标/);
+  assert.doesNotMatch(source, /Derived goals/);
+  assert.doesNotMatch(source, /goal-plan-origin/);
+  assert.doesNotMatch(source, /goal-task-child-plan/);
+  assert.doesNotMatch(source, /parentPlan\s*[?:]/);
+  assert.doesNotMatch(source, /childPlans/);
+  assert.doesNotMatch(source, /task\.childPlanIds/);
+  assert.doesNotMatch(source, /onNavigateToPlan/);
+
+  assert.doesNotMatch(styles, /goal-plan-origin/);
+  assert.doesNotMatch(styles, /goal-task-child-plan/);
+  assert.doesNotMatch(styles, /子目标 · 来自/);
+  assert.doesNotMatch(styles, /派生子目标/);
 });

@@ -966,44 +966,6 @@
   color: var(--za-text);
 }
 
-.goal-plan-origin {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--za-line);
-  border-radius: 10px;
-  background: var(--za-surface-2);
-}
-
-.goal-plan-origin-label {
-  color: var(--za-text-faint);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.goal-plan-origin-link {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--za-text);
-  text-align: start;
-  cursor: pointer;
-}
-
-.goal-plan-origin-link span {
-  color: var(--za-text-muted);
-  font-size: 12px;
-}
-
-.goal-plan-origin-link:hover strong,
-.goal-plan-origin-link:focus-visible strong {
-  color: var(--za-accent);
-  text-decoration: underline;
-}
-
 .goal-plan-card:focus-visible,
 .goal-task:focus-visible {
   outline: 2px solid var(--za-accent);
@@ -1279,49 +1241,6 @@
   color: var(--za-text-muted);
   overflow-wrap: anywhere;
   word-break: break-all;
-}
-
-.goal-task-child-plans {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.goal-task-child-plan {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 2px 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  font-size: var(--ui-font-meta, 12px);
-}
-
-.goal-task-child-plan:focus-visible {
-  outline: none;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
-  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
-}
-
-.goal-task-child-plan-title {
-  font-size: var(--ui-font-meta, 12px);
-  line-height: 1.45;
-  color: var(--za-text);
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.goal-task-child-plan-progress {
-  flex: none;
-  font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-faint);
 }
 
 .goal-plan-empty-tasks {
