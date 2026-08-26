@@ -351,15 +351,16 @@
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
-/* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
-   柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
+/* 新建任务 +：默认叠在行尾且不占位，运行中蓝点才能贴右；hover/focus 再显现。 */
 .sidebar-workspace-new-task {
+  position: absolute;
+  right: 8px;
+  top: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin-left: auto;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
@@ -370,6 +371,8 @@
   padding: 0;
   line-height: 1;
   border-radius: var(--radius-xs);
+  transform: translateY(-50%);
+  transition: opacity var(--za-motion-fast) var(--za-ease-out);
   -webkit-app-region: no-drag;
 }
 
@@ -389,6 +392,8 @@
   color: var(--graphite-base);
 }
 
+/* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
+   柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
 .ws-running-dot {
   position: relative;
   isolation: isolate;
@@ -403,6 +408,21 @@
   --motion-ripple-scale: 2.4;
   --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 1;
+}
+
+.sidebar-workspace-row .ws-running-dot {
+  margin-left: auto;
+  transform: translateX(0);
+  transition: transform var(--za-motion-fast) var(--za-ease-out);
+}
+
+.sidebar-workspace-row:hover .ws-running-dot {
+  /* 18px 按钮 + 6px 行间距：贴右边的蓝点左滑让出 + */
+  transform: translateX(calc(-18px - 6px));
+}
+
+.sidebar-workspace-row:focus-within .ws-running-dot {
+  transform: translateX(calc(-18px - 6px));
 }
 
 .sidebar-workspace-row--static {
