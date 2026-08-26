@@ -29,6 +29,11 @@
   contain: layout paint;
 }
 
+/* 右侧栏拖拽同样关掉 grid 过渡，否则 --za-workbench-width 每帧都在 ease。 */
+:root[data-workbench-resizing='true'] .app-layout {
+  transition: none;
+}
+
 :root[data-workbench-open='true'] .app-layout {
   --za-workbench-current-width: var(--za-workbench-width, 420px);
 }

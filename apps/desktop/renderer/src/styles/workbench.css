@@ -18,6 +18,16 @@
   max-width: none;
 }
 
+/* 拖拽进行中：关掉 width/grid 过渡，并让 Electron <webview> 不再截走 pointerup。
+   必须在 @layer 外，才能压过 sidebar.css 未分层的 grid-template-columns 过渡。 */
+:root[data-workbench-resizing='true'] .app-layout,
+:root[data-workbench-resizing='true'] .workbench-panel {
+  transition: none;
+}
+:root[data-workbench-resizing='true'] .browser-webview {
+  pointer-events: none !important;
+}
+
 @layer components {
   .workbench-panel {
     position: relative;
@@ -35,6 +45,9 @@
     overflow: hidden;
     transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
     -webkit-app-region: no-drag;
+  }
+  :root[data-workbench-resizing='true'] .workbench-panel {
+    transition: none;
   }
 
   .workbench-panel:not(.workbench-panel--open) {
@@ -1676,6 +1689,9 @@
   .browser-webview[data-active='true'] {
     visibility: visible;
     pointer-events: auto;
+  }
+  :root[data-workbench-resizing='true'] .browser-webview[data-active='true'] {
+    pointer-events: none;
   }
 
   /* 错误兜底页 */

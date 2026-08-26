@@ -50,6 +50,19 @@ describe('workbench maximize behavior', () => {
     assert.match(panelSource, /maximized \? '100%' : `\$\{width\}px`/);
   });
 
+  it('captures the workbench resizer pointer and clears the drag session on cancel', () => {
+    assert.match(panelSource, /setPointerCapture\(pointerId\)/);
+    assert.match(panelSource, /addEventListener\('pointercancel', onUp\)/);
+    assert.match(panelSource, /addEventListener\('lostpointercapture', onUp\)/);
+    assert.match(panelSource, /dataset\.workbenchResizing = 'true'/);
+    assert.match(panelSource, /delete document\.documentElement\.dataset\.workbenchResizing/);
+    assert.match(panelSource, /delete resizer\.dataset\.active/);
+    assert.match(workbenchStyles, /data-workbench-resizing='true'\] \.app-layout/);
+    assert.match(workbenchStyles, /data-workbench-resizing='true'\] \.workbench-panel/);
+    assert.match(workbenchStyles, /data-workbench-resizing='true'\] \.browser-webview/);
+    assert.match(sidebarStyles, /data-workbench-resizing='true'\] \.app-layout/);
+  });
+
   it('lets the root sidebar and chat yield while the workbench occupies the full content area', () => {
     assert.match(workbenchStyles, /:root\[data-workbench-maximized='true'\] \.app-layout/);
     assert.match(workbenchStyles, /grid-template-columns:\s*0 minmax\(0, 0\) minmax\(0, 1fr\)/);
