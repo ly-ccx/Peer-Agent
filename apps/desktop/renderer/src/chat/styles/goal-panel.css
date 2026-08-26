@@ -673,6 +673,33 @@
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+/* 交付区药丸必须有三态反馈：否则看起来像一行说明文字而不是按钮。 */
+.goal-plan-delivery-retry:not(:disabled):hover,
+.goal-plan-delivery-action:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--za-text) 26%, transparent);
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text);
+}
+
+.goal-plan-delivery-retry:not(:disabled):active,
+.goal-plan-delivery-action:not(:disabled):active {
+  background: color-mix(in srgb, var(--za-text) 10%, transparent);
+}
+
+.goal-plan-delivery-retry:focus-visible,
+.goal-plan-delivery-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--za-text) 30%, transparent);
+  outline-offset: 2px;
+}
+
+/* retry 是阻塞时唯一的主操作：静止态也要一眼是按钮（更实的边框与文字）。 */
+.goal-plan-delivery-retry {
+  border-color: color-mix(in srgb, var(--za-text) 34%, transparent);
+  color: var(--za-text);
+  font-weight: 520;
 }
 
 .goal-plan-delivery-retry:disabled,
@@ -682,6 +709,13 @@
 }
 
 .goal-plan-delivery-action--danger {
+  color: var(--za-warn);
+}
+
+/* 危险操作悬停仍保持警告色，不被通用 hover 覆盖。 */
+.goal-plan-delivery-action--danger:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--za-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--za-warn) 8%, transparent);
   color: var(--za-warn);
 }
 
