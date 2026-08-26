@@ -789,11 +789,22 @@
 
 .goal-contract-current {
   position: relative;
-  padding: 10px 12px 11px;
-  border: 1px solid color-mix(in srgb, var(--za-accent) 22%, var(--ui-border-subtle, var(--za-line)));
+  padding: 10px 12px 11px 16px;
+  border: 1px solid var(--chrome-hairline, var(--ui-border-subtle, var(--za-line)));
   border-radius: var(--ui-radius-panel, 10px);
-  background: color-mix(in srgb, var(--za-accent) 7%, var(--ui-surface-raised, transparent));
+  background: var(--paper-sheet, var(--ui-surface-raised, var(--za-surface-1)));
   overflow: hidden;
+}
+
+.goal-contract-current::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--graphite-mute, var(--chrome-hairline, var(--za-text-faint)));
 }
 
 .goal-contract-text {
