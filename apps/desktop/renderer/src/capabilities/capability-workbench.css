@@ -1446,9 +1446,15 @@
   .skill-marketplace-pagination button:disabled { @apply cursor-not-allowed opacity-40; }
 
   /* 页码控件（Qoder 市场）：‹ 1 2 3 4 … 312 › */
-  .skill-marketplace-pagination--pages { @apply gap-1.5; }
+  .skill-marketplace-pagination--pages { @apply gap-1.5; width: 100%; justify-content: center; }
   .skill-marketplace-pagination--pages .pagination-arrow {
-    @apply grid h-8 w-8 place-items-center rounded-lg text-[14px];
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    width: 32px;
+    border-radius: 10px;
+    font-size: 15px;
     border: 1px solid var(--za-line);
     background: var(--za-surface);
     color: var(--za-text);
@@ -1457,7 +1463,16 @@
     border-color: color-mix(in srgb, var(--za-text) 25%, var(--za-line));
   }
   .skill-marketplace-pagination--pages .pagination-page {
-    @apply grid h-8 min-w-8 place-items-center rounded-lg px-1 text-[12px] font-medium;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    min-width: 32px;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
     border: 1px solid transparent;
     background: transparent;
     color: var(--za-text-muted);
@@ -1472,7 +1487,12 @@
     border-color: transparent;
   }
   .skill-marketplace-pagination--pages .pagination-ellipsis {
-    @apply grid h-8 place-items-center px-1 text-[12px];
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 4px;
+    font-size: 12.5px;
     color: var(--za-text-muted);
     user-select: none;
   }
