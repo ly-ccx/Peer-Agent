@@ -166,6 +166,11 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
   assert.match(surface, /searchable/);
   assert.match(surface, /gitCreateBranch/);
+  assert.match(surface, /handleOpenCreateBranchDialog/);
+  assert.match(surface, /resolveComposerCreateSourceBranch/);
+  assert.match(surface, /Create a branch from \$\{createBranchDialog\.source\}/);
+  assert.match(surface, /panelClassName="pa-confirm-dialog"/);
+  assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
   assert.match(surface, /本地分支/);
   assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);

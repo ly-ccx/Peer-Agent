@@ -236,6 +236,17 @@ export function isSafeComposerBranchName(value: string): boolean {
   return /^[A-Za-z0-9._/@~^+-]+$/.test(trimmed);
 }
 
+/** Create-from source: highlighted list row, else current selection, else workspace HEAD. */
+export function resolveComposerCreateSourceBranch(input: {
+  readonly highlighted?: string | null;
+  readonly selected?: string | null;
+  readonly currentHead?: string | null;
+}): string | null {
+  return trimBranch(input.highlighted)
+    ?? trimBranch(input.selected)
+    ?? trimBranch(input.currentHead);
+}
+
 export type ComposerBranchKind = 'local' | 'remote';
 
 export interface ComposerBranchOption {
