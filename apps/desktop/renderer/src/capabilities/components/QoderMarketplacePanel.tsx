@@ -4,6 +4,7 @@ import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
+import { buildPageItems } from './marketplace-pagination';
 
 const PAGE_SIZE = 20;
 const EMPTY_PAGE: QoderMarketplacePage = {
@@ -64,37 +65,6 @@ function summarizeTree(node: { readonly files?: readonly unknown[] } | null): st
   if (!node || !Array.isArray(node.files)) return '';
   const total = node.files.length;
   return total > 0 ? `${total} 个文件` : '';
-}
-
-/**
- * 页码折叠：当前页附近 ±2，首尾页固定，中间断点用省略号。
- * 形如：1 … 8 9 [10] 11 12 … 312
- */
-type PageItem = { readonly key: string; readonly type: 'page'; readonly page: number } | { readonly key: string; readonly type: 'ellipsis' };
-
-function buildPageItems(current: number, total: number): readonly PageItem[] {
-  const items: PageItem[] = [];
-  const window = 2;
-  const seen = new Set<number>();
-  const push = (page: number) => {
-    if (page >= 1 && page <= total && !seen.has(page)) {
-      seen.add(page);
-      items.push({ key: `p${page}`, type: 'page', page });
-    }
-  };
-  push(1);
-  for (let delta = -window; delta <= window; delta += 1) push(current + delta);
-  push(total);
-  // 按页码排序后补省略号
-  const pages = items.filter((item): item is Extract<PageItem, { type: 'page' }> => item.type === 'page').map((item) => item.page).sort((a, b) => a - b);
-  const result: PageItem[] = [];
-  pages.forEach((pageNumber, index) => {
-    if (index > 0 && pageNumber - pages[index - 1] > 1) {
-      result.push({ key: `e${pages[index - 1]}-${pageNumber}`, type: 'ellipsis' });
-    }
-    result.push({ key: `p${pageNumber}`, type: 'page', page: pageNumber });
-  });
-  return result;
 }
 
 export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: () => void }) {

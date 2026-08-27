@@ -47,7 +47,6 @@ import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
 import { createQoderApiClient, createQoderMarketplaceService } from './qoder-marketplace-service.mjs';
-import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
 import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
 import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
@@ -3755,16 +3754,12 @@ function startLocalRuntime() {
     installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),
   });
   const skillHubApiClient = createSkillHubApiClient();
-  const skillHubStore = createSkillHubMarketplaceStore({
-    filePath: path.join(userDataPath, 'marketplace', 'skillhub-index.json'),
-    apiClient: skillHubApiClient,
-  });
   const skillHubInstaller = createSkillHubVerifiedInstaller({
     apiClient: skillHubApiClient,
     installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
   });
+  // SkillHub 与 Qoder 一样走远程列表查询：搜索、分类、分页、排序都打官方接口。
   skillHubMarketplaceService = createSkillHubMarketplaceService({
-    store: skillHubStore,
     installer: skillHubInstaller,
     apiClient: skillHubApiClient,
   });
@@ -3773,15 +3768,6 @@ function startLocalRuntime() {
     apiClient: createQoderApiClient(),
     installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
   });
-  // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
-  // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
-  const skillHubSyncStatus = skillHubMarketplaceService.getStatus();
-  const skillHubIndexStale = !skillHubSyncStatus.updatedAt || Date.now() - skillHubSyncStatus.updatedAt > 24 * 60 * 60 * 1_000;
-  if (skillHubSyncStatus.status === 'error' || skillHubSyncStatus.nextPage > 1 || skillHubIndexStale) {
-    void skillHubMarketplaceService.sync().catch((error) => {
-      console.warn('[skillhub] Background marketplace sync paused:', error instanceof Error ? error.message : error);
-    });
-  }
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,

@@ -1484,8 +1484,8 @@
     color: var(--za-text);
   }
   .skill-marketplace-pagination--pages .pagination-page.is-active {
-    background: var(--za-brand);
-    color: var(--za-on-brand, #fff);
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
     border-color: transparent;
   }
   .skill-marketplace-pagination--pages .pagination-ellipsis {

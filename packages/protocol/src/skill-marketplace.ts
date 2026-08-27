@@ -48,22 +48,18 @@ export interface SkillMarketplaceInstallResult {
 }
 
 /**
- * 市场横向筛选 / 排序语义：
+ * SkillHub 官方列表排序（GET /api/skills?sortBy=）：
  * - score: 全部 / 综合评分
- * - featured: 推荐精选（认证优先，再按评分）
- * - rising: 近期飙升（近期更新 + 下载量，本地近似）
  * - downloads: 下载量
  * - stars: 收藏量
- * - created: 最近上新
- * - updated: 最近更新
+ * - installs: 安装量
+ * - updated: 最近更新（映射为官方 updated_at）
  */
 export type SkillHubMarketplaceSort =
   | 'score'
-  | 'featured'
-  | 'rising'
   | 'downloads'
   | 'stars'
-  | 'created'
+  | 'installs'
   | 'updated';
 
 export interface SkillHubMarketplaceEntry {
@@ -154,7 +150,7 @@ export interface SkillHubCategoriesResult {
 // - 详情：GET /apphub/api/v1/marketplace/skills/{skillId}/detail
 // - 分类：GET /apphub/api/v1/marketplace/extensions/taxonomies?extension_type=skill
 // - 下载：detail.download_url（OSS zip，直链）
-// 与 SkillHub 不同：Qoder 支持服务端关键词搜索 + 分页，无需本地全量索引同步。
+// SkillHub 与 Qoder 一样走服务端关键词搜索 + 分页，浏览不再依赖本地全量索引。
 // ---------------------------------------------------------------------------
 
 export type QoderMarketplaceSort = 'hot' | 'latest';
