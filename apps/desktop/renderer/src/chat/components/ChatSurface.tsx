@@ -553,6 +553,11 @@ export function ChatSurface({
   const [createBranchDialog, setCreateBranchDialog] = useState<{
     readonly source: string;
     readonly name: string;
+    readonly push: boolean;
+  } | null>(null);
+  const [branchPushNotice, setBranchPushNotice] = useState<{
+    readonly branchName: string;
+    readonly reason: string;
   } | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
@@ -2410,7 +2415,7 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
-  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null) => {
+  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null, push?: boolean) => {
     const name = rawName.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
     if (!isSafeComposerBranchName(name)) return;
@@ -2423,8 +2428,17 @@ export function ChatSurface({
       workspaceRoot: workspacePath,
       name,
       startPoint,
+      push: push !== false,
     }).then((created) => {
       if (created?.ok !== true) return;
+      if (push !== false && created.pushed === false) {
+        setBranchPushNotice({
+          branchName: name,
+          reason: created.pushError || 'push_failed',
+        });
+      } else {
+        setBranchPushNotice(null);
+      }
       handleSelectBoundBranch(name);
       refreshWorkspaceGit();
     }).catch(() => {});
@@ -2444,7 +2458,7 @@ export function ChatSurface({
       currentHead: workspaceGit?.current,
     });
     if (!source) return;
-    setCreateBranchDialog({ source, name: '' });
+    setCreateBranchDialog({ source, name: '', push: true });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
@@ -2678,6 +2692,23 @@ export function ChatSurface({
                 {providerRecoveryNotice.reason}
               </span>
             ) : null}
+          </div>
+        ) : null}
+        {branchPushNotice ? (
+          <div className="branch-push-notice" role="status">
+            <div className="provider-recovery-body">
+              {isZh
+                ? `分支 ${branchPushNotice.branchName} 已创建，但推送到远端失败：${branchPushNotice.reason}（本地分支未受影响）`
+                : `Branch ${branchPushNotice.branchName} was created, but pushing to the remote failed: ${branchPushNotice.reason} (local branch is intact)`}
+            </div>
+            <button
+              type="button"
+              className="branch-push-notice-dismiss"
+              onClick={() => setBranchPushNotice(null)}
+              aria-label={isZh ? '关闭提示' : 'Dismiss'}
+            >
+              <PeerIcon name="close" size={14} />
+            </button>
           </div>
         ) : null}
         {showCompactionNotice ? (
@@ -3009,16 +3040,29 @@ export function ChatSurface({
                   onChange={(event) => setCreateBranchDialog({
                     source: createBranchDialog.source,
                     name: event.target.value,
+                    push: createBranchDialog.push,
                   })}
                   placeholder={isZh ? '分支名' : 'Branch name'}
                   autoFocus
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' || !canConfirm) return;
                     event.preventDefault();
-                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
                     requestClose();
                   }}
                 />
+                <label className="pa-confirm-check">
+                  <input
+                    type="checkbox"
+                    checked={createBranchDialog.push}
+                    onChange={(event) => setCreateBranchDialog({
+                      source: createBranchDialog.source,
+                      name: createBranchDialog.name,
+                      push: event.target.checked,
+                    })}
+                  />
+                  <span>{isZh ? '创建后推送到远端（git push -u）' : 'Push to remote after creating (git push -u)'}</span>
+                </label>
                 <div className="pa-confirm-actions is-spread">
                   <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
                     {isZh ? '取消 Esc' : 'Cancel Esc'}
@@ -3028,7 +3072,7 @@ export function ChatSurface({
                     className="pa-confirm-btn primary"
                     disabled={!canConfirm}
                     onClick={() => {
-                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
                       requestClose();
                     }}
                   >

@@ -39,9 +39,7 @@
     padding: 8px 10px;
     border-radius: var(--ui-radius-row);
     border: 1px solid var(--pa-border-subtle, rgba(15, 23, 42, 0.12));
-    /* 背景必须走控件层 token（--za-control-fill 暗色自动切深色），裸 --surface-vellum 未定义，
-       fallback #fff 会让浅色文字落在纯白背景上不可读。 */
-    background: var(--za-control-fill);
+    background: var(--surface-vellum, #fff);
     color: var(--pa-text-primary);
     font-size: 13px;
     line-height: 1.4;
@@ -54,6 +52,26 @@
 
   .pa-confirm-input::placeholder {
     color: var(--pa-text-secondary);
+  }
+
+  /* Create-branch dialog: push-to-remote checkbox under the branch name input. */
+  .pa-confirm-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--pa-text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pa-confirm-check input {
+    accent-color: var(--za-focus);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    margin: 0;
   }
 
   .pa-confirm-actions {

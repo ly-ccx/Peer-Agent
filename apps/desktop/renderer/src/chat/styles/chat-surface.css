@@ -2869,6 +2869,33 @@
   line-height: 1.4;
   font-family: var(--font-mono);
 }
+/* Non-blocking push-failure hint after creating a branch (branch intact locally). */
+.branch-push-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--chat-content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-2) 0;
+  color: var(--za-warning-ink, var(--graphite-soft));
+  font-size: 0.78rem;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+.branch-push-notice-dismiss {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--graphite-mute);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.branch-push-notice-dismiss:hover {
+  color: var(--pa-text-primary);
+}
 .provider-recovery-meta {
   max-width: 42%;
   color: var(--graphite-mute);

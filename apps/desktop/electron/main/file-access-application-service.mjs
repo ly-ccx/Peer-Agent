@@ -336,7 +336,7 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  async function createGitBranch({ workspaceRoot, name, startPoint } = {}) {
+  async function createGitBranch({ workspaceRoot, name, startPoint, push } = {}) {
     const branchName = typeof name === 'string' ? name.trim() : '';
     if (!isSafeGitRef(branchName)) {
       return { ok: false, status: 'invalid_name', current: null, error: 'invalid_branch_name' };
@@ -349,6 +349,7 @@ export function createFileAccessApplicationService(options = {}) {
     if (!repoRoot) {
       return { ok: false, status: 'not_git_repo', current: null, error: 'not_a_git_repository' };
     }
+    let pushResult = { pushed: false, pushError: null };
     try {
       const args = fromRef
         ? ['branch', '--', branchName, fromRef]
@@ -359,12 +360,16 @@ export function createFileAccessApplicationService(options = {}) {
         ['branch', '--show-current'],
         { maxBuffer: 1024 * 1024 },
       );
+      if (push === true) {
+        pushResult = await pushGitBranch(repoRoot, branchName);
+      }
       return {
         ok: true,
         status: 'created',
         name: branchName,
         current: currentOut.trim() || null,
         repoRoot,
+        ...pushResult,
       };
     } catch (error) {
       const message = error?.message || String(error);
@@ -375,6 +380,33 @@ export function createFileAccessApplicationService(options = {}) {
         current: null,
         error: alreadyExists ? 'branch_already_exists' : message,
       };
+    }
+  }
+
+  /**
+   * Push a freshly created branch to its default remote with upstream tracking
+   * (`git push -u`). Failure is non-blocking: the local branch already exists,
+   * so we report the reason instead of throwing.
+   */
+  async function pushGitBranch(repoRoot, branchName) {
+    try {
+      const { stdout: remoteOut } = await executeGit(
+        repoRoot,
+        ['remote'],
+        { maxBuffer: 1024 * 1024 },
+      );
+      const remote = remoteOut.split('\n').map((line) => line.trim()).filter(Boolean)[0];
+      if (!remote) {
+        return { pushed: false, pushError: 'no_remote' };
+      }
+      await executeGit(
+        repoRoot,
+        ['push', '-u', '--', remote, branchName],
+        { maxBuffer: 1024 * 1024, timeout: 60_000 },
+      );
+      return { pushed: true, pushError: null };
+    } catch (error) {
+      return { pushed: false, pushError: error?.message || String(error) };
     }
   }
 

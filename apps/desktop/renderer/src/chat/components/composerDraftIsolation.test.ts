@@ -174,6 +174,14 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /本地分支/);
   assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
+  // Create-branch dialog pushes to the remote by default (opt-out checkbox).
+  assert.match(surface, /pa-confirm-check/);
+  assert.match(surface, /创建后推送到远端（git push -u）/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true \}\)/);
+  assert.match(surface, /push: push !== false,/);
+  assert.match(surface, /pushed === false/);
+  assert.match(surface, /branchPushNotice/);
+  assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
   assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
