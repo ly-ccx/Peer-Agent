@@ -3100,6 +3100,8 @@ function handleChatSend({
   modelProviderId,
   workspacePath,
   assistantMessageId,
+  // 续写中断回复：本轮不是新的用户输入，goal 路由/intake 不应把它当成新回合处理。
+  resumeInterruptedReply = false,
   contextAttachments,
   runtimeReminders,
   attachmentContext,
@@ -3123,7 +3125,15 @@ function handleChatSend({
     : continuityContext;
   let answeredRequestedUserInputPlanId = null;
   // Agent 默认（chat）与 legacy goal 共享 intake / 路由契约。
-  if ((mode === 'goal' || mode === 'chat') && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
+  // 续写中断回复不是新的用户输入：末条 assistant 的部分内容只是「继续」指令的
+  // 载体，不能触发 goal 事件路由 / intake 判别 / plan 状态迁移，否则会把
+  // 「继续」误判为用户新决策，甚至 kick stalled runner 产生第二路并发流。
+  if (
+    !resumeInterruptedReply
+    && (mode === 'goal' || mode === 'chat')
+    && conversationId
+    && typeof goalPlanStore.upsertGoalContract === 'function'
+  ) {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
       try {
@@ -3220,6 +3230,17 @@ function handleChatSend({
   const resolvedModelProviderId =
     modelProviderId
     ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
+  // 续写中断回复的运行时提醒：末条 assistant 是被网络中断截断的半截回复，
+  // 模型必须把它当作自己「未写完的话」从断点继续，而不是当作新输入重新作答。
+  const effectiveRuntimeReminders = resumeInterruptedReply
+    ? [
+        ...(Array.isArray(runtimeReminders) ? runtimeReminders : []),
+        {
+          id: 'resume-interrupted-reply',
+          content: 'The last assistant message in this conversation was truncated by a network interruption mid-generation. It is your own unfinished reply, not user input. Continue exactly where it left off to complete the same reply. Do not repeat, rewrite, summarize, or re-answer what was already generated; do not treat this as a new question or a new turn.',
+        },
+      ]
+    : runtimeReminders;
   const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: sender,
@@ -3233,16 +3254,17 @@ function handleChatSend({
     // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
     workspacePath,
     assistantMessageId,
+    resumeInterruptedReply,
     contextAttachments,
-    runtimeReminders,
+    runtimeReminders: effectiveRuntimeReminders,
     attachmentContext,
     continuityContext: resolvedContinuityContext,
     configInstructions,
     contextExtensions,
   });
-  // goal 模式首答回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
+  // goal 模式首笔回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
   // 仅在回合 resolve 后按 outcome 决定是否静默移除残留的 intake 契约。
-  if ((mode === 'goal' || mode === 'chat') && conversationId) {
+  if (!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId) {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);

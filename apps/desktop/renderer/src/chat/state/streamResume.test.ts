@@ -36,10 +36,21 @@ describe('isRetryableStreamError', () => {
 });
 
 describe('resolveStreamResumeTarget', () => {
-  it('regenerates the last interrupted assistant turn', () => {
+  it('continues the last interrupted assistant turn in place (keep message id)', () => {
     const messages = [
       message('u1', 'user', 'hello'),
       message('a1', 'assistant', 'partial', { interrupted: true }),
+    ];
+    assert.deepEqual(resolveStreamResumeTarget(messages), {
+      kind: 'continue',
+      assistantIndex: 1,
+    });
+  });
+
+  it('regenerates the last completed (non-interrupted) assistant turn', () => {
+    const messages = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'done'),
     ];
     assert.deepEqual(resolveStreamResumeTarget(messages), {
       kind: 'regenerate',

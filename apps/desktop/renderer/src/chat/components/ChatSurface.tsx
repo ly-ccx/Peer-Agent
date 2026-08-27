@@ -2273,12 +2273,74 @@ export function ChatSurface({
     void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
+  // 原地续写中断回复：不清空、不重建消息。复用被中断那条 assistant 消息的 id，
+  // 只摘掉 interrupted 标记；主进程以该消息已落盘正文/segments 为累积种子
+  // （ChatSendRequest.resumeInterruptedReply），渲染端 delta 照常追加到这条消息。
+  const handleContinueStream = useCallback(async (msgIndex: number) => {
+    if (isStreaming || !hasProvider || !conversationId) return;
+    const target = messages[msgIndex];
+    if (!target || target.role !== 'assistant') return;
+
+    // 摘标记后立即写回 store，保证重载/切会话期间 banner 不会因 interrupted 复活；
+    // 续写失败（再次中断）时主进程会重新打上 interrupted。
+    const { interrupted: _removed, ...rest } = target;
+    const resumedMessage: ChatMsg = { ...rest };
+    const nextMessages = messages.map((message, index) => (index === msgIndex ? resumedMessage : message));
+    setMessages(nextMessages);
+    setStreamError(null);
+    setActiveUsage(null);
+    setProviderRecoveryNotice(null);
+
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(nextMessages),
+    });
+
+    const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    streamIdRef.current = streamId;
+    // 计时锚点回拨到原消息时间戳：用户看到的是「同一条回复继续计时」，
+    // 与主进程 streamRecord.startedAt 的种子语义一致。
+    const turnStartedAt = resolveTurnStartedAt({
+      existing: conversationStore.getSnapshot(conversationId).turnStartedAt,
+      messages: nextMessages,
+      fallback: Date.now(),
+    }) ?? Date.now();
+    setTurnStartedAt(turnStartedAt);
+    conversationStore.routeStream(streamId, conversationId);
+    conversationStore.setState(conversationId, { streamId, turnStartedAt });
+    setIsStreaming(true);
+
+    const contextAttachments = buildConversationAttachmentContext(nextMessages.slice(0, msgIndex));
+    const configInstructions = [
+      ...buildConfigInstructionContext(systemInstructions),
+      ...buildReplyLanguageContext(replyLanguage),
+      ...buildGitBranchPrefixContext(gitBranchPrefix),
+    ];
+    void clientApi.chatSend({
+      streamId,
+      assistantMessageId: resumedMessage.id,
+      resumeInterruptedReply: true,
+      effort,
+      fastMode,
+      mode,
+      conversationId,
+      modelProviderId,
+      workspacePath,
+      contextAttachments,
+      configInstructions,
+    });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+
   const handleResumeStream = useCallback(() => {
     if (isStreaming || !hasProvider) return;
     const target = resolveStreamResumeTarget(messages);
     if (!target) return;
     if (target.kind === 'regenerate') {
       void handleRegenerate(target.assistantIndex);
+      return;
+    }
+    if (target.kind === 'continue') {
+      void handleContinueStream(target.assistantIndex);
       return;
     }
     const userMsg = messages[target.userIndex];
@@ -2289,7 +2351,7 @@ export function ChatSurface({
       effort,
       messages.slice(0, target.userIndex),
     );
-  }, [isStreaming, hasProvider, messages, handleRegenerate, submitMessage, effort]);
+  }, [isStreaming, hasProvider, messages, handleRegenerate, handleContinueStream, submitMessage, effort]);
 
   const handleDismissStreamError = useCallback(() => {
     setStreamError(null);

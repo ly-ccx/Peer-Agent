@@ -112,6 +112,8 @@ export { buildRuntimeTools };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasUnsupportedToolClaim };
 export { finalizeDanglingToolSegments, terminalDanglingNote };
+export { resolveResumeSeed };
+export { mergeUsageAmounts };
 export { sanitizeApiMessages };
 export { resolveRunWorkspacePath };
 
@@ -207,6 +209,19 @@ function hasBillableUsage(usage) {
     (usage?.cacheWriteTokens || 0) ||
     (usage?.cacheReadTokens || 0)
   );
+}
+
+/** 续写流的 usage 合并：中断前旧账 + 本轮增量（token 数量按字段相加）。 */
+function mergeUsageAmounts(seedUsage, turnUsage) {
+  const sum = (a, b) => (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0);
+  return {
+    ...(turnUsage || {}),
+    inputTokens: sum(seedUsage?.inputTokens, turnUsage?.inputTokens),
+    outputTokens: sum(seedUsage?.outputTokens, turnUsage?.outputTokens),
+    totalTokens: sum(seedUsage?.totalTokens, turnUsage?.totalTokens),
+    cacheReadTokens: sum(seedUsage?.cacheReadTokens, turnUsage?.cacheReadTokens),
+    cacheWriteTokens: sum(seedUsage?.cacheWriteTokens, turnUsage?.cacheWriteTokens),
+  };
 }
 
 function isRequestUserInputToolName(toolName) {
@@ -383,6 +398,55 @@ function finalizeDanglingToolSegments(segments, terminalStatus) {
 }
 
 /**
+ * 续写中断回复的种子解析（纯函数，便于单测）。
+ *
+ * 「网络中断 → 继续」要求原地续写：本轮 streamRecord 的累积状态以既有（interrupted）
+ * assistant 消息为初始值，delta 在其后追加；计时锚点回拨到原消息时间戳。
+ *
+ * 返回 null 的所有情形都退回「从零开始」的既有行为：
+ * - 未开启 resumeInterruptedReply（普通发送 / regenerate 不受影响）；
+ * - 缺 conversationId / assistantMessageId / store 读不到会话或消息；
+ * - 目标消息不是 assistant（防御 renderer 传错 id）。
+ *
+ * accumulatedThinking 从 segments 里的 thinking 段按「合并规则」重建：与
+ * wrapWebContentsForRuntimeEvents 的 segment join 规则一致——summary 段之间
+ * 换行分隔，非 summary 段直接拼接。这样续写后 thinking 快照（reattach 用）不丢。
+ */
+function joinThinkingSeed(segments) {
+  let acc = '';
+  let lastKind = null;
+  for (const segment of Array.isArray(segments) ? segments : []) {
+    if (!segment || segment.type !== 'thinking' || typeof segment.content !== 'string') continue;
+    const kind = segment.kind === 'summary' ? 'summary' : null;
+    if (kind === 'summary' && lastKind === 'summary' && acc) acc += '\n';
+    acc += segment.content;
+    lastKind = kind;
+  }
+  return acc;
+}
+
+function resolveResumeSeed(conversationId, assistantMessageId, { resumeInterruptedReply = false, conversationStore = null } = {}) {
+  if (!resumeInterruptedReply) return null;
+  if (!conversationId || !assistantMessageId) return null;
+  if (!conversationStore?.getConversation) return null;
+  const conversation = conversationStore.getConversation(conversationId);
+  const message = Array.isArray(conversation?.messages)
+    ? conversation.messages.find((m) => m && m.id === assistantMessageId)
+    : null;
+  if (!message || message.role !== 'assistant') return null;
+  return {
+    messageId: message.id,
+    content: typeof message.content === 'string' ? message.content : '',
+    segments: Array.isArray(message.segments) ? message.segments : [],
+    accumulatedThinking: joinThinkingSeed(message.segments),
+    usage: message.usage && typeof message.usage === 'object' ? { ...message.usage } : null,
+    timestamp: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp) && message.timestamp > 0
+      ? message.timestamp
+      : null,
+  };
+}
+
+/**
  * ADR 22: 累积代理。包裹真实 webContents,拦截流式正文/思考事件追加到 streamRecord,
  * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
  * 累积逻辑集中在单一 seam。返回的对象只需实现 send()(adapter/loop 只用到 send)。
@@ -454,9 +518,20 @@ function wrapWebContentsForRuntimeEvents(
       patch.durationMs = Math.max(0, now - streamRecord.startedAt);
     }
     if (final && hasBillableUsage(streamRecord.finalUsage)) {
-      patch.usage = { ...streamRecord.finalUsage };
+      // 续写流：usage 是「中断前旧值 + 本轮增量」的合计。覆盖会吞掉中断前
+      // 已累积的 token 账目（多轮工具调用中断后续写的场景）。
+      patch.usage = streamRecord.resumeSeedUsage && hasBillableUsage(streamRecord.resumeSeedUsage)
+        ? { ...mergeUsageAmounts(streamRecord.resumeSeedUsage, streamRecord.finalUsage) }
+        : { ...streamRecord.finalUsage };
     }
-    if (final && interrupted) patch.interrupted = true;
+    if (final && interrupted) {
+      patch.interrupted = true;
+    } else if (final && streamRecord.resumedFromMessageId) {
+      // 续写成功收尾：清掉种子消息上的 interrupted 残留，否则 updateMessageById 的
+      // spread 合并会保留旧标记，UI 永远显示「已中断」。普通（非续写）流的新消息
+      // 本来就没有该字段，不受影响。
+      patch.interrupted = false;
+    }
     try {
       if (final) {
         // 终态：全量落盘（会同步重写整份 JSONL，一次性成本可接受）并清理流式 sidecar。
@@ -947,6 +1022,10 @@ export function createLlmChatService({
     permissionPolicy = null,
     // 内部旁路流（Explorer / Verifier）：不写会话正文、不进活跃流投影，避免验收 JSON 泄漏到聊天。
     ephemeral = false,
+    // 续写中断回复：把 assistantMessageId 指向的既有（interrupted）assistant 消息
+    // 作为本轮累积种子——正文/segments 从已落盘内容继续追加，计时锚点回拨到原消息
+    // 时间戳，不重置。用于「网络中断 → 继续」的原地续写，而不是整条重写。
+    resumeInterruptedReply = false,
   }) {
     // 托管回合（Goal Runner 等）没有 renderer 再次透传 modelProviderId，但只要绑定了
     // conversationId，就必须继承该会话的模型选择。否则会静默落到全局默认 provider，
@@ -1005,6 +1084,13 @@ export function createLlmChatService({
     ];
 
     const runtimeTurn = runtimeSessions.startStream({ streamId, conversationId });
+    // 续写种子：resumeInterruptedReply 时从 store 取既有（interrupted）assistant 消息，
+    // 把已落盘的正文/segments/usage 作为本轮累积的初始状态——后续 delta 在其后追加，
+    // persistStreamRecord 的全量 patch 因此是「保留 + 追加」而不是覆盖清空。
+    const resumeSeed = resolveResumeSeed(conversationId, assistantMessageId, {
+      resumeInterruptedReply,
+      conversationStore,
+    });
     const streamRecord = {
       runtimeSessionId: runtimeTurn.sessionId,
       runtimeTurn,
@@ -1024,16 +1110,21 @@ export function createLlmChatService({
       // 可选诊断字段：本轮实际执行根（Goal target 或 origin）。
       executionWorkspacePath: runWorkspacePath,
       // 整轮 wall-clock 起点属于运行时事实。renderer 切走/重开后通过 reattach 恢复该锚点，
-      // 避免重新进入会话时计时停住或从 0 重新开始。
-      startedAt: Date.now(),
+      // 避免重新进入会话时计时停住或从 0 重新开始。续写中断回复时回拨到原消息时间戳，
+      // 用户看到的是「同一条回复继续计时」，而不是从 0 重新开始。
+      startedAt: resumeSeed?.timestamp ?? Date.now(),
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
       // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
       modelProviderId: effectiveModelProviderId ?? null,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
-      accumulatedText: '',
-      accumulatedThinking: '',
-      segments: [],
+      // 续写中断回复时以既有消息为种子（见 resolveResumeSeed），追加不清空。
+      accumulatedText: resumeSeed?.content ?? '',
+      accumulatedThinking: resumeSeed?.accumulatedThinking ?? '',
+      segments: resumeSeed?.segments ? [...resumeSeed.segments] : [],
+      resumedFromMessageId: resumeSeed?.messageId ?? null,
+      // 续写流终态时与新 usage 合并的旧账（中断前已累积的 token）。
+      resumeSeedUsage: resumeSeed?.usage ?? null,
       usageRecorded: false,
       toolCallCount: 0,
       requestedUserInput: false,
