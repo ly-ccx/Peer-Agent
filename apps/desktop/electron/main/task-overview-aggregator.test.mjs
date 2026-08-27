@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildGoalThreadRelationIndex,
   capTaskOverviewByBucket,
+  collapseEnvBlockedHandoffs,
   createTaskOverviewAggregator,
   currentStepTitleFromItem,
   displayConversationTitle,
@@ -2089,4 +2090,67 @@ test('conversation projection asks listConversations without messageCount backfi
   agg.listTaskOverview({ activeWithinMs: 0 });
   assert.equal(seenParams?.includeMessageCount, false);
   assert.equal(seenParams?.status, 'active');
+});
+
+test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-a',
+          conversationId: 'conversation-a',
+          status: 'completed',
+          title: '画高保真产品稿',
+          updatedAt: '2026-08-26T10:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
+          planId: 'plan-b',
+          conversationId: 'conversation-b',
+          status: 'completed',
+          title: '合回 Goal 卡标记',
+          updatedAt: '2026-08-26T11:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
+          planId: 'plan-conflict',
+          conversationId: 'conversation-c',
+          status: 'completed',
+          title: '真冲突任务',
+          updatedAt: '2026-08-26T12:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict_untracked',
+            verdict: 'CONFLICT',
+            conflicts: [{ path: 'demo/product-hifi.html' }],
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const envBlocked = items.filter((item) => item.deliveryHandoffVerdict === 'BLOCKED_ENV');
+  const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
+  assert.equal(envBlocked.length, 1);
+  assert.equal(envBlocked[0].title, '合不进 0.0.9');
+  assert.equal(envBlocked[0].currentGoalTitle, '2 条任务被同一源头挡住');
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].title, '真冲突任务');
+  assert.equal(typeof collapseEnvBlockedHandoffs, 'function');
 });

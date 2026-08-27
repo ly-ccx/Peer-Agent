@@ -184,7 +184,7 @@ export async function cleanupHandoffPreview({ repositoryRoot, previewPath, gitRu
  * 只有真冲突浮现给用户。验收对象从 O(n) 条任务线收敛为 O(1) 个目标线最终态。
  *
  * 判定顺序（先判无需用户的情形，把 CONFLICT 留到最后）：
- *   AUTO_CLEAN  空壳：ahead===0，改动早已合进目标线，静默清理。
+ *   AUTO_CLEAN  空壳：ahead===0，改动早已合进目标线，静默清理。先于脏检查。
  *   BLOCKED_ENV 环境挡：tracked 脏 / merge-base·diff 失败，需用户先处理环境。
  *   CONFLICT    真冲突：同名未跟踪文件内容与任务线版本不同，合并会覆盖。
  *   AUTO_MERGE  可自动合：无 tracked 脏，碰撞仅同内容未跟踪文件（或无碰撞）。
@@ -199,21 +199,9 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
     reason: '',
     detail: { ahead: 0, behind: 0, changedFiles: [], collisions: [], blockingEntry: null },
   };
-  // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
-  // 做碰撞与逐字节内容比对。展开到单文件后逐字节比对才能命中（ADR 69 / P0 修复）。
-  const status = await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
-  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
-  const untracked = [];
-  for (const line of lines) {
-    const xy = line.slice(0, 2);
-    if (xy !== '??') {
-      // tracked 脏（modified/staged/deleted/renamed）：环境挡，真有未提交工作。
-      return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: line.slice(3).trim() } };
-    }
-    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
-  }
 
-  // 任务线相对目标线的领先/落后与变更集
+  // 任务线相对目标线的领先/落后与变更集。空壳必须先于脏检查：
+  // ahead=0 时工作区脏挡的是别人的未提交改动，不是这条任务线。
   let ahead; let behind; let changedFiles; let mergeBase;
   try {
     mergeBase = trim(await gitRunner(repositoryRoot, ['merge-base', targetBranch, taskBranch]));
@@ -231,6 +219,20 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
   // 空壳：任务线相对目标线无领先（改动已合进目标线）。
   if (ahead === 0) {
     return { ...base, verdict: 'AUTO_CLEAN', reason: 'empty_shell_already_landed' };
+  }
+
+  // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
+  // 做碰撞与逐字节内容比对。展开到单文件后逐字节比对才能命中（ADR 69 / P0 修复）。
+  const status = await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
+  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
+  const untracked = [];
+  for (const line of lines) {
+    const xy = line.slice(0, 2);
+    if (xy !== '??') {
+      // tracked 脏（modified/staged/deleted/renamed）：环境挡，真有未提交工作。
+      return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: line.slice(3).trim() } };
+    }
+    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
   }
 
   // 与目标工作区未跟踪文件的碰撞比对（逐字节）。
@@ -329,6 +331,16 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
       taskBranch,
       targetBranch,
     );
+    if (triage?.verdict === 'AUTO_CLEAN') {
+      // 空壳：任务线已在目标线里，工作区脏挡不住「已进」事实。
+      return {
+        ok: true,
+        alreadyLanded: true,
+        commitSha: await git(repositoryRoot, ['rev-parse', targetBranch]),
+        checkout,
+        verdict: 'AUTO_CLEAN',
+      };
+    }
     if (!mergeable) {
       // CONFLICT：同名未跟踪文件内容不同，合并会覆盖工作区——透出冲突清单供收口视图呈现。
       // BLOCKED_ENV（tracked 脏/查询失败）：维持原 stoppedReason，不附冲突清单。
@@ -568,6 +580,7 @@ export function createGoalDeliveryHandoff({
         targetBranch,
         taskBranch,
         commitSha: merged.commitSha || commitSha,
+        ...(merged.verdict ? { verdict: merged.verdict } : {}),
         updatedAt: now(),
       }) || delivering;
     } catch (error) {

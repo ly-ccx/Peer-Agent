@@ -260,6 +260,22 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
   });
 
+  it('records delivered for an empty shell even when the occupied target checkout is dirty', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing something else\n');
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.verdict, 'AUTO_CLEAN');
+    assert.equal(readFileSync(path.join(repository, 'README.md'), 'utf8'), 'user is editing something else\n');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+  });
+
   it('fast-forwards when an untracked file in a collapsed directory byte-matches the task change', async () => {
     // 复现 bug：占用目标分支时，未跟踪目录会被 `status --porcelain` 折叠成目录条目（demo/），
     // 旧逻辑对目录条目碰撞保守挡 target_checkout_dirty，即使内容与任务线逐字节一致。
@@ -540,6 +556,16 @@ describe('triageTaskLine (ADR 69 分类器)', () => {
     const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
     assert.equal(res.verdict, 'AUTO_CLEAN');
     assert.equal(res.detail.ahead, 0);
+  });
+
+  it('AUTO_CLEAN：ahead=0 时目标工作区 tracked 脏仍记空壳，不挡成环境挡', async () => {
+    const task = makeTaskBranch('task/empty-dirty', { 'shell.txt': 'landed\n' });
+    git(['merge', '--ff-only', task]);
+    writeFileSync(path.join(repository, 'README.md'), 'unrelated dirty work\n');
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'AUTO_CLEAN');
+    assert.equal(res.detail.ahead, 0);
+    assert.equal(res.reason, 'empty_shell_already_landed');
   });
 
   it('AUTO_MERGE：无碰撞的新文件变更 → 可自动合', async () => {

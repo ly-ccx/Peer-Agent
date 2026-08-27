@@ -179,6 +179,10 @@ export interface TaskOverviewItem {
    */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  /** 合回目标分支；聚合层用它把同一源头的环境挡收成一张卡。 */
+  readonly deliveryTargetBranch?: string;
+  /** 合回停住原因；与目标分支一起作为环境挡去重键。 */
+  readonly deliveryHandoffStoppedReason?: string;
   /** ADR 69：分流 verdict；CONFLICT 时配合 deliveryHandoffConflicts 渲染收口面板。 */
   readonly deliveryHandoffVerdict?: string;
   /** ADR 69：CONFLICT 时的真冲突文件清单（同名文件内容不同）。 */
@@ -300,6 +304,8 @@ export interface GoalPlanProjectionSnapshot {
   /** 用户可见的合回状态；没交付线时省略。 */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  readonly deliveryTargetBranch?: string;
+  readonly deliveryHandoffStoppedReason?: string;
   /** ADR 69：分流 verdict / CONFLICT 冲突清单（快照透传，供 projectGoalPlan 组装）。 */
   readonly deliveryHandoffVerdict?: string;
   readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
@@ -535,6 +541,10 @@ export function projectGoalPlan(
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
     ...(snapshot.deliveryHandoffStatus ? { deliveryHandoffStatus: snapshot.deliveryHandoffStatus } : {}),
+    ...(snapshot.deliveryTargetBranch ? { deliveryTargetBranch: snapshot.deliveryTargetBranch } : {}),
+    ...(snapshot.deliveryHandoffStoppedReason
+      ? { deliveryHandoffStoppedReason: snapshot.deliveryHandoffStoppedReason }
+      : {}),
     ...(snapshot.deliveryHandoffVerdict ? { deliveryHandoffVerdict: snapshot.deliveryHandoffVerdict } : {}),
     ...(snapshot.deliveryHandoffConflicts?.length
       ? { deliveryHandoffConflicts: snapshot.deliveryHandoffConflicts }
@@ -564,8 +574,12 @@ export function projectGoalPlan(
   };
 }
 
+function isDigestibleHandoffVerdict(verdict: string | undefined): boolean {
+  return verdict === 'AUTO_CLEAN' || verdict === 'STALE';
+}
+
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, interrupted, deliveryHandoffStatus } = snapshot;
+  const { status, runnerStatus, interrupted, deliveryHandoffStatus, deliveryHandoffVerdict } = snapshot;
 
   // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
   // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
@@ -597,6 +611,15 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   if (status === 'completed') {
     if (deliveryHandoffStatus && deliveryHandoffStatus !== 'delivered') {
       if (deliveryHandoffStatus === 'stopped') {
+        // ADR 69：空壳/过时由系统消化，不再占「需要你」。
+        if (isDigestibleHandoffVerdict(deliveryHandoffVerdict)) {
+          return {
+            actionRight: 'terminal',
+            nextAction: 'none',
+            statusLabel: '已完成',
+            actionLabel: '查看 →',
+          };
+        }
         return {
           actionRight: 'needs_you',
           needsYouReason: 'decision',

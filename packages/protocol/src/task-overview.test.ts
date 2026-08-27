@@ -318,6 +318,21 @@ test('completed handoff stopped stays visible as needs_you', () => {
   assert.equal(item.statusLabel, '合不进源头');
 });
 
+test('stopped empty-shell / stale verdicts leave the workbench as completed', () => {
+  for (const verdict of ['AUTO_CLEAN', 'STALE'] as const) {
+    const item = projectGoalPlan(goalSnapshot({
+      status: 'completed',
+      accepted: true,
+      deliveryHandoffStatus: 'stopped',
+      deliveryHandoffVerdict: verdict,
+      deliveryHandoffLabel: '合不进 0.0.9',
+    }));
+    assert.equal(item.actionRight, 'terminal');
+    assert.equal(item.statusLabel, '已完成');
+    assert.notEqual(item.needsYouReason, 'decision');
+  }
+});
+
 test('rule 16b: cancelled / failed → terminal', () => {
   assert.equal(
     projectGoalPlan(goalSnapshot({ status: 'cancelled' })).actionRight,

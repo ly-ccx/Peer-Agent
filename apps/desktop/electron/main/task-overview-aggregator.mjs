@@ -675,6 +675,12 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
     ...(plan.deliveryHandoff?.status ? { deliveryHandoffStatus: plan.deliveryHandoff.status } : {}),
+    ...(plan.deliveryHandoff?.targetBranch || plan.deliveryBinding?.targetBranch
+      ? { deliveryTargetBranch: plan.deliveryHandoff?.targetBranch || plan.deliveryBinding?.targetBranch }
+      : {}),
+    ...(plan.deliveryHandoff?.stoppedReason
+      ? { deliveryHandoffStoppedReason: plan.deliveryHandoff.stoppedReason }
+      : {}),
     // ADR 69：透出分流 verdict 与真冲突清单，渲染层据此把 CONFLICT 聚合为收口面板。
     ...(plan.deliveryHandoff?.verdict ? { deliveryHandoffVerdict: plan.deliveryHandoff.verdict } : {}),
     ...(Array.isArray(plan.deliveryHandoff?.conflicts) && plan.deliveryHandoff.conflicts.length > 0
@@ -815,6 +821,46 @@ export function hasPendingDeliveryHandoff(plan) {
 export function isCompletedPlanStillLive(plan) {
   if (!plan || typeof plan !== 'object') return false;
   return hasPendingDeliveryHandoff(plan);
+}
+
+function envBlockKeyFromItem(item) {
+  if (item?.actionRight !== 'needs_you' || item?.needsYouReason !== 'decision') return null;
+  if (item.deliveryHandoffStatus !== 'stopped') return null;
+  if (item.deliveryHandoffVerdict === 'CONFLICT') return null;
+  const target = typeof item.deliveryTargetBranch === 'string' ? item.deliveryTargetBranch.trim() : '';
+  const reason = typeof item.deliveryHandoffStoppedReason === 'string'
+    ? item.deliveryHandoffStoppedReason.trim()
+    : '';
+  if (!target || !reason) return null;
+  return `${target}::${reason}`;
+}
+
+/**
+ * 同一源头、同一环境挡（如 0.0.9 未提交改动）只留一张决策卡。
+ * 真冲突（CONFLICT）仍按任务线各自呈现，因为文件清单不同。
+ */
+export function collapseEnvBlockedHandoffs(items) {
+  if (!Array.isArray(items) || items.length < 2) return items;
+  const seen = new Set();
+  const next = [];
+  for (const item of items) {
+    const key = envBlockKeyFromItem(item);
+    if (!key) {
+      next.push(item);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const blockedCount = items.filter((candidate) => envBlockKeyFromItem(candidate) === key).length;
+    next.push(blockedCount > 1
+      ? {
+          ...item,
+          title: `合不进 ${item.deliveryTargetBranch}`,
+          currentGoalTitle: `${blockedCount} 条任务被同一源头挡住`,
+        }
+      : item);
+  }
+  return next;
 }
 
 /**
@@ -1297,7 +1343,8 @@ export function createTaskOverviewAggregator({
     const scopedItems = conversationId
       ? items.filter((item) => item?.conversationId === conversationId)
       : items;
-    const sorted = sortTaskOverview(scopedItems);
+    const collapsed = collapseEnvBlockedHandoffs(scopedItems);
+    const sorted = sortTaskOverview(collapsed);
     // 分桶截断：遗留 result_ready 单独配额，避免挤占 peer_advancing / needs_you。
     const capped = capTaskOverviewByBucket(sorted, limit, resultReadyLimit);
     // 首页无 conversationId 时只能整表重拉。按 taskId 复用未变卡片，

@@ -2096,6 +2096,26 @@ const goalApplicationService = createGoalApplicationService({
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
   },
+  // ADR 69 P2：收口决断执行。keep_taskline 动 git 目标线，需渲染层先弹确认并回传 permissionConfirmed。
+  resolveHandoffConflicts: async (planId, resolutions, { permissionConfirmed = false } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.resolveConflicts !== 'function') return { ok: false, reason: 'unavailable' };
+    const result = await goalDeliveryHandoff.resolveConflicts(plan, resolutions, { permissionConfirmed });
+    return { ...result, plan: goalPlanStore.getPlan(planId) ?? plan };
+  },
+  previewHandoffMerge: async (planId, resolutions) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.previewMerge !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.previewMerge(plan, resolutions);
+  },
+  cleanupHandoffPreview: async (planId, previewPath) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.cleanupPreview !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.cleanupPreview(plan, previewPath);
+  },
   isolate: async (planId) => {
     const plan = goalPlanStore.getPlan(planId);
     if (!plan) return { ok: false, reason: 'not_found', plan: null };
