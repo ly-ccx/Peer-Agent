@@ -388,6 +388,7 @@ export class ConversationStore {
         activeUsage: null,
         pendingPermissionCalls: [],
         toolProgress: null,
+        providerRecoveryNotice: null,
         turnStartedAt: null,
         streamId: null,
       });
