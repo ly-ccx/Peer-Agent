@@ -39,7 +39,9 @@
     padding: 8px 10px;
     border-radius: var(--ui-radius-row);
     border: 1px solid var(--pa-border-subtle, rgba(15, 23, 42, 0.12));
-    background: var(--surface-vellum, #fff);
+    /* 背景必须走控件层 token（--za-control-fill 暗色自动切深色），裸 --surface-vellum 未定义，
+       fallback #fff 会让浅色文字落在纯白背景上不可读。 */
+    background: var(--za-control-fill);
     color: var(--pa-text-primary);
     font-size: 13px;
     line-height: 1.4;
