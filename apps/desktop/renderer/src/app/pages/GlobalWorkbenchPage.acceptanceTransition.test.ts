@@ -65,7 +65,9 @@ test('source env-block cards expand in place and do not open a conversation', as
   assert.match(panel, /committed\?\.detail/);
   assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);
   assert.match(panel, /blockedPlanTitles/);
-  assert.match(panel, /点名字只是认人，不打开聊天/);
+  assert.match(panel, /useConfirm/);
+  assert.doesNotMatch(panel, /点名字只是认人/);
+  assert.doesNotMatch(panel, /window\.confirm/);
   assert.doesNotMatch(panel, /onClick=\{\(\) => onOpenItem/);
   assert.doesNotMatch(panel, /unavailable/);
   assert.match(styles, /\.source-checkout-panel\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/);

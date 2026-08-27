@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { useConfirm } from './ConfirmProvider';
 
 function isSourceEnvBlock(item: TaskOverviewItem): boolean {
   return Boolean(
@@ -34,6 +35,7 @@ function sourceActionHint(
 }
 
 export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem }) {
+  const confirm = useConfirm();
   const [files, setFiles] = useState<ReadonlyArray<{ path: string; status: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +87,12 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
         permissionConfirmed: true,
       };
       if (action === 'commit') {
-        const confirmed = window.confirm(`把 ${dest} 上挡路的已跟踪改动提交掉，再把 ${planIds.length} 条任务一起合进去？`);
-        if (!confirmed) { setBusy(false); return; }
+        const ok = await confirm({
+          title: `提交 ${dest} 上的挡路改动`,
+          message: `把已跟踪改动提交掉，再把 ${planIds.length} 件事一起合进 ${dest}。`,
+          confirmText: '提交并合进',
+        });
+        if (!ok) { setBusy(false); return; }
         const committed = await clientApi.goalPlansCommitSourceCheckout(sourceParams);
         if (!committed?.ok) {
           setError(sourceActionHint('commit', {
@@ -96,8 +102,12 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
           return;
         }
       } else if (action === 'stash') {
-        const confirmed = window.confirm(`先把 ${dest} 上挡路的已跟踪改动放下，再把 ${planIds.length} 条任务一起合进去？`);
-        if (!confirmed) { setBusy(false); return; }
+        const ok = await confirm({
+          title: `先放下 ${dest} 上的挡路改动`,
+          message: `把未提交改动先放下，再把 ${planIds.length} 件事一起合进 ${dest}。`,
+          confirmText: '放下再合',
+        });
+        if (!ok) { setBusy(false); return; }
         const stashed = await clientApi.goalPlansStashSourceCheckout(sourceParams);
         if (!stashed?.ok) {
           setError(sourceActionHint('stash', stashed));
@@ -129,9 +139,6 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
             <li key={title} className="gwb-chip">{title}</li>
           ))}
         </ul>
-      ) : null}
-      {item.blockedPlanTitles?.length ? (
-        <div className="source-checkout-panel__note">点名字只是认人，不打开聊天。</div>
       ) : null}
       {files.length > 0 ? (
         <ul className="source-checkout-panel__files">
