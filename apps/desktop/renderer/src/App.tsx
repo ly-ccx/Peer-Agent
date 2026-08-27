@@ -1114,6 +1114,14 @@ function MainApp() {
                   onTaskStarted={(conversationId) => {
                     setConversationView('active');
                     setActiveConversationId(conversationId);
+                    // 任务绑定的工作区(草稿落点)可能与 activeWorkspace 不一致:
+                    // 草稿态切换工作区只写 draftWorkspacePath。会话激活后输入面板
+                    // workspacePath 来源切到 activeWorkspace,须同步为任务绑定区,
+                    // 否则"在 xxx"显示旧文件夹(与 handleSelectConversation 语义对齐)。
+                    if (draftWorkspacePath && draftWorkspacePath !== activeWorkspace) {
+                      setActiveWorkspace(draftWorkspacePath);
+                      void clientApi.workspaceSetActive({ path: draftWorkspacePath }).catch(() => {});
+                    }
                     setCollectionDrawer(null);
                     setActivePage('chat');
                     void refreshConversations(draftWorkspacePath, 'active');
