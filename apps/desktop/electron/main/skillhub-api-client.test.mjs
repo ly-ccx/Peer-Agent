@@ -25,6 +25,19 @@ test('normalizes SkillHub list responses and encodes filters', async () => {
   assert.equal(page.items[0].description, '中文简介');
   assert.match(urls[0], /page=2/);
   assert.match(urls[0], /keyword=mcp\+tools/);
+  assert.match(urls[0], /sortBy=score/);
+  assert.match(urls[0], /category=dev/);
+});
+
+test('encodes official SkillHub sortBy values including updated_at', async () => {
+  const urls = [];
+  const client = createSkillHubApiClient({ baseUrl: 'https://skillhub.test/', fetchImpl: async (url) => {
+    urls.push(String(url));
+    return jsonResponse({ data: { total: 0, skills: [] } });
+  } });
+  await client.listSkills({ page: 1, pageSize: 24, sortBy: 'updated_at', keyword: 'mcp', category: 'dev' });
+  assert.match(urls[0], /sortBy=updated_at/);
+  assert.match(urls[0], /page=1/);
 });
 
 test('skips malformed list records without weakening stable marketplace identity', async () => {
