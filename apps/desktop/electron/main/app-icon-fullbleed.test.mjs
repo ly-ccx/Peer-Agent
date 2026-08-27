@@ -165,11 +165,11 @@ function assertDockOpticalSizePng(filePath) {
 
   const pads = edgePads(rows, width, height);
   for (const name of ['left', 'right', 'top', 'bottom']) {
-    assert.ok(pads[name] >= 48, `${filePath} ${name} padding ${pads[name]}px is too tight; dock.setIcon would look a size larger than the original icon`);
-    assert.ok(pads[name] <= 120, `${filePath} ${name} padding ${pads[name]}px is a thick frame, expected the original optical size`);
+    assert.ok(pads[name] >= 80, `${filePath} ${name} padding ${pads[name]}px is too tight; dock.setIcon would still look a size larger than neighboring apps`);
+    assert.ok(pads[name] <= 140, `${filePath} ${name} padding ${pads[name]}px is a thick frame, expected a slightly inset optical size`);
   }
-  assert.ok(pads.diag >= 110, `${filePath} diagonal becomes opaque at ${pads.diag}px; a full-bleed dock icon would be ~0–85`);
-  assert.ok(pads.diag <= 180, `${filePath} diagonal padding ${pads.diag}px is too large; expected the original rounded-rect radius`);
+  assert.ok(pads.diag >= 145, `${filePath} diagonal becomes opaque at ${pads.diag}px; a full-bleed dock icon would be ~0–85`);
+  assert.ok(pads.diag <= 200, `${filePath} diagonal padding ${pads.diag}px is too large; expected a slightly inset rounded-rect`);
 }
 
 describe('macOS app icon canvases', () => {
@@ -177,7 +177,7 @@ describe('macOS app icon canvases', () => {
     assertOpaqueFullBleedPng(path.join(BUILD_DIR, 'icon.png'));
   });
 
-  it('keeps Dock light and dark icons on the original rounded optical size', () => {
+  it('keeps Dock light and dark icons slightly inset with rounded corners', () => {
     assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
     assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
   });
