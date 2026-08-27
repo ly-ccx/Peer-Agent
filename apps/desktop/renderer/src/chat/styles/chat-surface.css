@@ -2200,13 +2200,6 @@
   background: var(--paper-sheet);
   box-shadow: none;
 }
-.chat-msg-user .attachment-chip--media {
-  width: min(280px, 100%);
-  height: auto;
-  max-width: 280px;
-  aspect-ratio: 4 / 3;
-  border-radius: 18px;
-}
 
 .attachment-kind-badge {
   width: 36px;

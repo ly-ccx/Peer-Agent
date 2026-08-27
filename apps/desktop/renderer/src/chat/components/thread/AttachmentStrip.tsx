@@ -9,7 +9,7 @@ export const PEER_ATTACHMENT_DND_TYPE = 'application/x-peer-attachment-id';
 /** 按附件 id 缓存已降采样的缩略图，避免每字输入反复解码 2MB 原图 dataUrl。 */
 const attachmentThumbCache = new Map<string, string>();
 
-/** 输入区约 88px、已发送约 280px 宽；缓存 360px 边长覆盖 2x 屏。 */
+/** 输入区与已发送消息都是 88px 小图；缓存 360px 边长覆盖 2x 屏。 */
 const THUMB_EDGE_PX = 360;
 /** 小于约 64KB 的 dataUrl 直接用原图，跳过 canvas。 */
 const THUMB_SKIP_BYTES = 64 * 1024;
