@@ -476,7 +476,7 @@
 
           <h2 id="install-desktop" data-i18n="install.desktopTitle">Desktop (GUI)</h2>
           <p data-i18n="install.desktopBody">
-            Use the GitHub Release that matches your platform. Prefer the latest stable release (v0.0.8 and later) or the current beta tag used by the monorepo release pipeline.
+            Use the GitHub Release that matches your platform. Prefer the latest stable release (v0.0.9 and later) or the current beta tag used by the monorepo release pipeline.
           </p>
           <div class="table-wrap">
             <table>
@@ -904,8 +904,8 @@ Evidence owns governance.</code></pre>
           <h1 data-i18n="skill.title">Skills</h1>
           <p class="lede" data-i18n="skill.lede">
             A Skill is a reusable instruction package for the agent — not a remote tool server.
-            Peer Agent loads Skills from local packages (<code>SKILL.md</code>), manages enable/disable state,
-            and injects selected skill context into the conversation under the same Runtime governance chain.
+            Peer Agent loads Skills from local packages (<code>SKILL.md</code>), can browse Tencent SkillHub and the Qoder marketplace from Desktop,
+            manages enable/disable state, and injects selected skill context into the conversation under the same Runtime governance chain.
           </p>
 
           <h2 id="skill-what" data-i18n="skill.whatTitle">What a Skill is</h2>
@@ -934,7 +934,7 @@ Evidence owns governance.</code></pre>
                 <tr>
                   <td><strong>Skill</strong></td>
                   <td data-i18n="skill.vsSkillRole">Reusable agent playbook / instruction package</td>
-                  <td data-i18n="skill.vsSkillUser">Install, enable/disable, insert/invoke into a thread</td>
+                  <td data-i18n="skill.vsSkillUser">Install from local archives or Desktop marketplaces, enable/disable, insert/invoke into a thread</td>
                 </tr>
                 <tr>
                   <td><strong>Plugin</strong></td>
@@ -956,13 +956,14 @@ Evidence owns governance.</code></pre>
   assets/           # optional attachments
   ...</code></pre>
           <p data-i18n="skill.packageBody">
-            Install sources currently include zip and tgz archives that contain <code>SKILL.md</code> at the archive root
-            (or one top-level folder that contains it). Empty descriptions are treated as invalid noise and dropped.
+            Install sources include zip and tgz archives that contain <code>SKILL.md</code> at the archive root
+            (or one top-level folder that contains it), plus Desktop browse/install from Tencent SkillHub and the Qoder marketplace.
+            Empty descriptions are treated as invalid noise and dropped.
           </p>
 
           <h2 id="skill-lifecycle" data-i18n="skill.lifeTitle">Lifecycle on device</h2>
           <ol class="steps">
-            <li data-i18n="skill.l1"><strong>Discover / install</strong> — load from local skill roots or install from zip/tgz into the user skill store.</li>
+            <li data-i18n="skill.l1"><strong>Discover / install</strong> — load from local skill roots, install from zip/tgz, or browse Tencent SkillHub / Qoder marketplace on Desktop into the user skill store.</li>
             <li data-i18n="skill.l2"><strong>List</strong> — each skill exposes id, name, description, whenToUse, version, enabled state.</li>
             <li data-i18n="skill.l3"><strong>Enable / disable</strong> — disabled skills remain installed but stay out of the active set.</li>
             <li data-i18n="skill.l4"><strong>Borrow / link</strong> — optional source roots can expose available skills that can be linked into the local store.</li>
@@ -1254,7 +1255,7 @@ Evidence owns governance.</code></pre>
             "toc.title": "On this page", "action.copy": "Copy page", "action.copied": "Copied",
             
             "skill.title": "Skills",
-            "skill.lede": "A Skill is a reusable instruction package for the agent — not a remote tool server. Peer Agent loads Skills from local packages (SKILL.md), manages enable/disable state, and injects selected skill context into the conversation under the same Runtime governance chain.",
+            "skill.lede": "A Skill is a reusable instruction package for the agent — not a remote tool server. Peer Agent loads Skills from local packages (SKILL.md), can browse Tencent SkillHub and the Qoder marketplace from Desktop, manages enable/disable state, and injects selected skill context into the conversation under the same Runtime governance chain.",
             "skill.whatTitle": "What a Skill is",
             "skill.what1": "Package — a folder or archive containing SKILL.md (required) plus optional assets/.",
             "skill.what2": "Frontmatter — name/description, optional whenToUse, allowed-tools, license metadata.",
@@ -1266,15 +1267,15 @@ Evidence owns governance.</code></pre>
             "skill.thRole": "Role",
             "skill.thUser": "What you manage",
             "skill.vsSkillRole": "Reusable agent playbook / instruction package",
-            "skill.vsSkillUser": "Install, enable/disable, insert/invoke into a thread",
+            "skill.vsSkillUser": "Install from local archives or Desktop marketplaces, enable/disable, insert/invoke into a thread",
             "skill.vsPluginRole": "Local capability packaging & distribution unit",
             "skill.vsPluginUser": "Ship providers/adapters as packages",
             "skill.vsMcpRole": "Tool transport protocol for external tools",
             "skill.vsMcpUser": "Register/enable servers so tools can project",
             "skill.packageTitle": "Package shape",
-            "skill.packageBody": "Install sources currently include zip and tgz archives that contain SKILL.md at the archive root (or one top-level folder that contains it). Empty descriptions are treated as invalid noise and dropped.",
+            "skill.packageBody": "Install sources include zip and tgz archives that contain SKILL.md at the archive root (or one top-level folder that contains it), plus Desktop browse/install from Tencent SkillHub and the Qoder marketplace. Empty descriptions are treated as invalid noise and dropped.",
             "skill.lifeTitle": "Lifecycle on device",
-            "skill.l1": "Discover / install — load from local skill roots or install from zip/tgz into the user skill store.",
+            "skill.l1": "Discover / install — load from local skill roots, install from zip/tgz, or browse Tencent SkillHub / Qoder marketplace on Desktop into the user skill store.",
             "skill.l2": "List — each skill exposes id, name, description, whenToUse, version, enabled state.",
             "skill.l3": "Enable / disable — disabled skills remain installed but stay out of the active set.",
             "skill.l4": "Borrow / link — optional source roots can expose available skills that can be linked into the local store.",
@@ -1401,7 +1402,7 @@ Evidence owns governance.</code></pre>
             "install.title": "安装",
             "install.lede": "Desktop 与 CLI 都是一等入口。可只装其一或两者都装。设置、会话与凭证共享在 ~/.peer-agent。",
             "install.desktopTitle": "Desktop（图形界面）",
-            "install.desktopBody": "从 GitHub Releases 下载对应平台包。优先使用最新正式版（v0.0.8 及以后）或 monorepo 发布流水线对应的当前 beta tag。",
+            "install.desktopBody": "从 GitHub Releases 下载对应平台包。优先使用最新正式版（v0.0.9 及以后）或 monorepo 发布流水线对应的当前 beta tag。",
             "install.thPlat": "平台", "install.thArtifact": "典型产物", "install.thHow": "步骤",
             "install.macHow": "下载 → 打开 → 安装到应用程序",
             "install.winHow": "下载 → 运行安装器 → 启动 Peer Agent",
@@ -1566,7 +1567,7 @@ Evidence owns governance.</code></pre>
             "faq.changelog": "更新日志", "faq.download": "下载",
             
             "skill.title": "Skills",
-            "skill.lede": "Skill 是给 Agent 复用的指令包，不是远程工具服务器。Peer Agent 从本地包（SKILL.md）加载 Skills，管理启用/禁用，并在同一套 Runtime 治理链下把选中的 skill 上下文注入会话。",
+            "skill.lede": "Skill 是给 Agent 复用的指令包，不是远程工具服务器。Peer Agent 从本地包（SKILL.md）加载 Skills，Desktop 也可浏览腾讯 SkillHub 与 Qoder 技能市场，管理启用/禁用，并在同一套 Runtime 治理链下把选中的 skill 上下文注入会话。",
             "skill.whatTitle": "Skill 是什么",
             "skill.what1": "包 — 含 SKILL.md（必需）与可选 assets/ 的目录或压缩包。",
             "skill.what2": "Frontmatter — name/description，可选 whenToUse、allowed-tools、license 元数据。",
@@ -1578,15 +1579,15 @@ Evidence owns governance.</code></pre>
             "skill.thRole": "职责",
             "skill.thUser": "你管理什么",
             "skill.vsSkillRole": "可复用的 Agent playbook / 指令包",
-            "skill.vsSkillUser": "安装、启用/禁用、插入/调用到线程",
+            "skill.vsSkillUser": "从本地压缩包或 Desktop 市场安装、启用/禁用、插入/调用到线程",
             "skill.vsPluginRole": "本地能力打包与分发单元",
             "skill.vsPluginUser": "以包形式交付 provider/adapter",
             "skill.vsMcpRole": "外部工具的传输协议",
             "skill.vsMcpUser": "注册/启用 server，使工具可被投影",
             "skill.packageTitle": "包结构",
-            "skill.packageBody": "当前支持在压缩包根（或仅一层顶层目录）包含 SKILL.md 的 zip / tgz。空 description 会被视为无效噪音并丢弃。",
+            "skill.packageBody": "安装来源包括根目录（或仅一层顶层目录）包含 SKILL.md 的 zip / tgz，以及 Desktop 上的腾讯 SkillHub 与 Qoder 技能市场浏览安装。空 description 会被视为无效噪音并丢弃。",
             "skill.lifeTitle": "本机生命周期",
-            "skill.l1": "发现 / 安装 — 从本地 skill roots 加载，或从 zip/tgz 安装到用户 skill store。",
+            "skill.l1": "发现 / 安装 — 从本地 skill roots 加载、从 zip/tgz 安装，或在 Desktop 浏览腾讯 SkillHub / Qoder 市场并装入用户 skill store。",
             "skill.l2": "列表 — 每个 skill 暴露 id、name、description、whenToUse、version、enabled。",
             "skill.l3": "启用 / 禁用 — 禁用后仍保留安装，但不进入活跃集合。",
             "skill.l4": "借用 / 链接 — 可选 source roots 可暴露可 link 进本地 store 的技能。",

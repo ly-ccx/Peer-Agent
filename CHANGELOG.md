@@ -4,12 +4,42 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-## 0.0.9 - 2026-08-26
+## [0.0.9] - 2026-08-27
 
 ### Notes
 
-- Open the `0.0.9` development line from the published `0.0.8` / `origin/main`.
-- Stamp the in-repo development version to `0.0.9`. This commit is not a published GitHub Release.
+- Stable release that turns isolated-task merge-back into workbench triage: clean work merges itself, stale branches can be rebuilt, and only real conflicts wait for you.
+- Desktop Skills query Tencent SkillHub remotely and add a Qoder marketplace beside it. Installs still land in the local store and the grant chain.
+- Source merge cards stay on the workbench. Handle auto-routes them. Blocks from the same source collapse into one.
+- Creating a branch from the source picker opens a confirm dialog instead of writing immediately.
+- Docs changelog is generated from `release-notes/v0.0.9.md`.
+
+### Added
+
+- Merge-conflict triage on the workbench (auto-clean / auto-merge / stale / conflict / blocked-env) instead of per-line red cards (ADR 69).
+- Tencent SkillHub remote catalog in the Skills panel (category, keyword, pagination).
+- Qoder skill marketplace next to SkillHub, with matching detail-dialog styling.
+- Declineable demo merge-conflict cards on the workbench.
+- Create-branch confirm dialog in the source-branch picker.
+
+### Changed
+
+- Workbench Handle auto-routes merge cards into the right bucket.
+- Same-source merge blocks collapse on the workbench card.
+- Removing a workspace keeps its conversations.
+- Sidebar “add workspace” is a compact icon; session-title descenders are no longer cropped.
+- Dock cat icon is inset to match neighboring apps.
+
+### Fixed
+
+- Source merge-back uses the product confirm dialog, not a native browser prompt.
+- Demo merge conflicts can be declined instead of sticking on the workbench.
+- SkillHub and Qoder detail dialogs share spacing and radius.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
 
 ## 0.0.8 - 2026-08-25
 
