@@ -58,6 +58,7 @@ test('goal owners register the exact invoke channels', () => {
     'goalPlans:cleanup-handoff-preview',
     'goalPlans:commit-source-checkout',
     'goalPlans:create',
+    'goalPlans:decline-source-handoffs',
     'goalPlans:delete',
     'goalPlans:discard-line',
     'goalPlans:export-evidence',

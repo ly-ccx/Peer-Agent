@@ -272,6 +272,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansCommitSourceCheckout: (params) => ipcRenderer.invoke('goalPlans:commit-source-checkout', params),
   goalPlansStashSourceCheckout: (params) => ipcRenderer.invoke('goalPlans:stash-source-checkout', params),
   goalPlansRetrySourceHandoffs: (params) => ipcRenderer.invoke('goalPlans:retry-source-handoffs', params),
+  goalPlansDeclineSourceHandoffs: (params) => ipcRenderer.invoke('goalPlans:decline-source-handoffs', params),
   goalPlansResolveHandoffConflicts: (params) => ipcRenderer.invoke('goalPlans:resolve-handoff-conflicts', params),
   goalPlansPreviewHandoffMerge: (params) => ipcRenderer.invoke('goalPlans:preview-handoff-merge', params),
   goalPlansCleanupHandoffPreview: (params) => ipcRenderer.invoke('goalPlans:cleanup-handoff-preview', params),

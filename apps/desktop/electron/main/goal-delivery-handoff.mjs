@@ -26,6 +26,64 @@ function classifyGitError(error) {
   return null;
 }
 
+function parseConflictPathsFromText(text) {
+  const paths = [];
+  const seen = new Set();
+  const blob = String(text || '');
+  const patterns = [
+    /^(?:CONFLICT(?:\s*\([^)]+\))?|CONFLICTING):\s+(?:Merge conflict in |content conflict in )?(.+)$/gim,
+    /^Auto-merging (.+)$/gim,
+  ];
+  for (const pattern of patterns) {
+    for (const match of blob.matchAll(pattern)) {
+      const next = String(match[1] || '').trim();
+      if (!next || seen.has(next)) continue;
+      seen.add(next);
+      paths.push(next);
+    }
+  }
+  return paths;
+}
+
+async function listUnmergedConflicts(cwd) {
+  const paths = new Set();
+  try {
+    const raw = await gitRaw(cwd, ['ls-files', '-u', '-z']);
+    for (const entry of String(raw || '').split('\0')) {
+      if (!entry) continue;
+      const tab = entry.indexOf('\t');
+      const filePath = tab >= 0 ? entry.slice(tab + 1) : '';
+      if (filePath) paths.add(filePath);
+    }
+  } catch {
+    // 冲突清单尽力而为；abort 之后就读不到了。
+  }
+  try {
+    const diff = await gitRaw(cwd, ['diff', '--name-only', '--diff-filter=U']);
+    for (const line of String(diff || '').split('\n')) {
+      const filePath = line.trim();
+      if (filePath) paths.add(filePath);
+    }
+  } catch {
+    // ignore
+  }
+  return [...paths].map((filePath) => ({ path: filePath }));
+}
+
+function conflictStop({ reason = 'merge_conflict', checkout, error, conflicts } = {}) {
+  const stoppedReason = reason || classifyGitError(error) || 'merge_conflict';
+  const fromError = parseConflictPathsFromText(gitErrorText(error));
+  const listed = Array.isArray(conflicts) ? conflicts.map((item) => item?.path).filter(Boolean) : [];
+  const paths = [...new Set([...listed, ...fromError])];
+  return {
+    ok: false,
+    reason: stoppedReason,
+    checkout,
+    verdict: 'CONFLICT',
+    ...(paths.length ? { conflicts: paths.map((filePath) => ({ path: filePath })) } : {}),
+  };
+}
+
 function gitErrorText(error) {
   const parts = [
     error?.stderr,
@@ -54,6 +112,8 @@ async function git(cwd, args) {
     if (reason) {
       const next = new Error(reason);
       next.handoffReason = reason;
+      next.stderr = error?.stderr;
+      next.stdout = error?.stdout;
       next.cause = error;
       throw next;
     }
@@ -378,25 +438,23 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
   const canRebaseHere = isolated || checkout === taskBranch;
   if (mergeBase !== targetTip) {
     if (!canRebaseHere) {
-      return {
-        ok: false,
-        reason: 'merge_conflict',
-        checkout,
-      };
+      return conflictStop({ reason: 'merge_conflict', checkout });
     }
     try {
       await git(worktreePath, ['rebase', targetBranch]);
     } catch (error) {
+      const conflicts = await listUnmergedConflicts(worktreePath);
       try {
         await git(worktreePath, ['rebase', '--abort']);
       } catch {
         // rebase may not have started; keep the original failure
       }
-      return {
-        ok: false,
+      return conflictStop({
         reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
         checkout,
-      };
+        error,
+        conflicts,
+      });
     }
   }
 
@@ -450,6 +508,7 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
         checkout,
       };
     } catch (error) {
+      const conflicts = await listUnmergedConflicts(repositoryRoot);
       for (const { absolute, content } of parked) {
         try {
           writeFileSync(absolute, content);
@@ -457,9 +516,13 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
           // 恢复尽力而为；ff-only 失败时 merge 未写入任何文件
         }
       }
+      const reason = error?.handoffReason || classifyGitError(error) || 'merge_conflict';
+      if (reason === 'merge_conflict' || reason === 'merge_conflict_untracked') {
+        return conflictStop({ reason, checkout, error, conflicts });
+      }
       return {
         ok: false,
-        reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
+        reason,
         checkout,
       };
     }
@@ -473,9 +536,13 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
       checkout,
     };
   } catch (error) {
+    const reason = error?.handoffReason || classifyGitError(error) || 'merge_conflict';
+    if (reason === 'merge_conflict' || reason === 'merge_conflict_untracked') {
+      return conflictStop({ reason, checkout, error });
+    }
     return {
       ok: false,
-      reason: error?.handoffReason || classifyGitError(error) || 'merge_conflict',
+      reason,
       checkout,
     };
   }

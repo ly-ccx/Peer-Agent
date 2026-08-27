@@ -1110,6 +1110,11 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; verdict?: string; reason?: string }>;
     reason?: string;
   }>;
+  readonly goalPlansDeclineSourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; reason?: string }>;
+    reason?: string;
+  }>;
   /** ADR 69 P2：收口决断执行。keep_taskline 需渲染层先弹确认并回传 permissionConfirmed。 */
   readonly goalPlansResolveHandoffConflicts: (params: {
     planId: string;

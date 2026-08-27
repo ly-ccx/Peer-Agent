@@ -55,10 +55,12 @@ test('source env-block cards expand in place and do not open a conversation', as
   const panel = await readPanel();
   const styles = await readStyles();
   assert.match(source, /deliveryHandoffStoppedReason/);
-  assert.match(source, /isSourceEnvBlock/);
+  assert.match(source, /isWorkbenchHandoffCard/);
   assert.match(source, /SourceCheckoutPanel/);
   assert.match(source, /处理源头/);
-  assert.match(source, /if \(isSourceEnvBlock\(item\)\) return;/);
+  assert.match(source, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
+  assert.match(panel, /不合进/);
+  assert.match(panel, /goalPlansDeclineSourceHandoffs/);
   assert.match(source, /gwb-item--source-open/);
   assert.match(source, /sourceBlock && sourceOpen \? <SourceCheckoutPanel item=\{item\} \/>/);
   assert.match(panel, /workspacePath/);

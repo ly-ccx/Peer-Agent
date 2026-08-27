@@ -683,7 +683,9 @@ export function toGoalPlanSnapshot(plan, options = {}) {
       : {}),
     ...(workspacePath ? { deliveryWorkspacePath: workspacePath } : {}),
     // ADR 69：透出分流 verdict 与真冲突清单，渲染层据此把 CONFLICT 聚合为收口面板。
-    ...(plan.deliveryHandoff?.verdict ? { deliveryHandoffVerdict: plan.deliveryHandoff.verdict } : {}),
+    ...(handoffVerdictFromPlan(plan)
+      ? { deliveryHandoffVerdict: handoffVerdictFromPlan(plan) }
+      : {}),
     ...(Array.isArray(plan.deliveryHandoff?.conflicts) && plan.deliveryHandoff.conflicts.length > 0
       ? { deliveryHandoffConflicts: plan.deliveryHandoff.conflicts }
       : {}),
@@ -824,10 +826,24 @@ export function isCompletedPlanStillLive(plan) {
   return hasPendingDeliveryHandoff(plan);
 }
 
+function handoffVerdictFromPlan(plan) {
+  const verdict = plan?.deliveryHandoff?.verdict;
+  if (typeof verdict === 'string' && verdict.trim()) return verdict.trim();
+  const reason = plan?.deliveryHandoff?.stoppedReason;
+  if (reason === 'merge_conflict' || reason === 'merge_conflict_untracked') return 'CONFLICT';
+  return undefined;
+}
+
+function isHandoffConflictItem(item) {
+  if (item?.deliveryHandoffVerdict === 'CONFLICT') return true;
+  const reason = item?.deliveryHandoffStoppedReason;
+  return reason === 'merge_conflict' || reason === 'merge_conflict_untracked';
+}
+
 function envBlockKeyFromItem(item) {
   if (item?.actionRight !== 'needs_you' || item?.needsYouReason !== 'decision') return null;
   if (item.deliveryHandoffStatus !== 'stopped') return null;
-  if (item.deliveryHandoffVerdict === 'CONFLICT') return null;
+  if (isHandoffConflictItem(item)) return null;
   const target = typeof item.deliveryTargetBranch === 'string' ? item.deliveryTargetBranch.trim() : '';
   const workspace = typeof item.deliveryWorkspacePath === 'string' ? item.deliveryWorkspacePath.trim() : '';
   if (!target) return null;

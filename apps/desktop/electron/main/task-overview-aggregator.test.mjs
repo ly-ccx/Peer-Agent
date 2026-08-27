@@ -2172,3 +2172,89 @@ test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card',
   assert.equal(conflicts[0].title, '真冲突任务');
   assert.equal(typeof collapseEnvBlockedHandoffs, 'function');
 });
+
+test('merge_conflict without verdict is not source-block', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-rebase',
+          conversationId: 'conversation-rebase',
+          status: 'completed',
+          title: '重做版本地图交互 Demo',
+          updatedAt: '2026-08-27T06:38:14.476Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict',
+          },
+        },
+        {
+          planId: 'plan-dirty',
+          conversationId: 'conversation-dirty',
+          status: 'completed',
+          title: '源头脏文件任务',
+          updatedAt: '2026-08-27T06:38:14.476Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const sourceBlocks = items.filter((item) => String(item.taskId || '').startsWith('source-block:'));
+  const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
+  assert.equal(sourceBlocks.length, 1);
+  assert.equal(sourceBlocks[0].title, '1 件事已经做完，等进 0.0.9');
+  assert.deepEqual(sourceBlocks[0].blockedPlanIds, ['plan-dirty']);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].taskId, 'plan-rebase');
+  assert.equal(conflicts[0].title, '重做版本地图交互 Demo');
+  assert.ok(!String(conflicts[0].taskId || '').startsWith('source-block:'));
+});
+
+test('cancelled declined plans leave needs_you and are not source-block', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-declined',
+          conversationId: 'conversation-demo',
+          status: 'cancelled',
+          title: '画高保真产品稿',
+          updatedAt: '2026-08-27T07:00:00.000Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict',
+            verdict: 'CONFLICT',
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  assert.equal(items.length, 0);
+  assert.equal(items.some((item) => item.actionRight === 'needs_you'), false);
+  assert.equal(items.some((item) => String(item.taskId || '').startsWith('source-block:')), false);
+});

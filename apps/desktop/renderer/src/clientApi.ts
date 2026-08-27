@@ -169,6 +169,7 @@ const unavailableApi: ClientApi = {
   goalPlansCommitSourceCheckout: unavailableMethod('goalPlansCommitSourceCheckout'),
   goalPlansStashSourceCheckout: unavailableMethod('goalPlansStashSourceCheckout'),
   goalPlansRetrySourceHandoffs: unavailableMethod('goalPlansRetrySourceHandoffs'),
+  goalPlansDeclineSourceHandoffs: unavailableMethod('goalPlansDeclineSourceHandoffs'),
   goalPlansResolveHandoffConflicts: unavailableMethod('goalPlansResolveHandoffConflicts'),
   goalPlansPreviewHandoffMerge: unavailableMethod('goalPlansPreviewHandoffMerge'),
   goalPlansCleanupHandoffPreview: unavailableMethod('goalPlansCleanupHandoffPreview'),

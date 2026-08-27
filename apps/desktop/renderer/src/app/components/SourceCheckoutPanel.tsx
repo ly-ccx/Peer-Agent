@@ -8,11 +8,24 @@ function isSourceEnvBlock(item: TaskOverviewItem): boolean {
     item.deliveryHandoffStoppedReason
     && item.deliveryTargetBranch
     && item.blockedPlanIds?.length
-    && item.deliveryHandoffVerdict !== 'CONFLICT',
+    && item.deliveryHandoffVerdict !== 'CONFLICT'
+    && item.deliveryHandoffStoppedReason !== 'merge_conflict'
+    && item.deliveryHandoffStoppedReason !== 'merge_conflict_untracked',
   );
 }
 
-export { isSourceEnvBlock };
+function isWorkbenchHandoffCard(item: TaskOverviewItem): boolean {
+  return isSourceEnvBlock(item)
+    || Boolean(
+      item.deliveryHandoffStoppedReason
+      && item.deliveryTargetBranch
+      && (item.deliveryHandoffVerdict === 'CONFLICT'
+        || item.deliveryHandoffStoppedReason === 'merge_conflict'
+        || item.deliveryHandoffStoppedReason === 'merge_conflict_untracked'),
+    );
+}
+
+export { isSourceEnvBlock, isWorkbenchHandoffCard };
 
 function inspectHint(reason: string | undefined): string {
   if (reason === 'missing_workspace') return '找不到源头工作区，没法列出挡路文件。';
@@ -41,11 +54,17 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const dest = item.deliveryTargetBranch || '源头';
-  const planIds = item.blockedPlanIds || [];
+  const planIds = item.blockedPlanIds?.length
+    ? item.blockedPlanIds
+    : (item.taskId && !item.taskId.startsWith('source-block:') ? [item.taskId] : []);
   const workspacePath = item.deliveryWorkspacePath?.trim() || undefined;
   const inspectPlanId = planIds[0];
   const canAct = Boolean(workspacePath || inspectPlanId);
   const canRetry = planIds.length > 0;
+  const conflictFiles = item.deliveryHandoffConflicts?.map((conflict) => conflict.path).filter(Boolean) ?? [];
+  const isConflict = item.deliveryHandoffVerdict === 'CONFLICT'
+    || item.deliveryHandoffStoppedReason === 'merge_conflict'
+    || item.deliveryHandoffStoppedReason === 'merge_conflict_untracked';
 
   useEffect(() => {
     if (!canAct) {
@@ -128,15 +147,50 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
     }
   }
 
+  async function declineMerge() {
+    if (busy || planIds.length === 0) return;
+    const ok = await confirm({
+      title: `这 ${planIds.length} 件不合进 ${dest}`,
+      message: `任务线会拆掉，改动不会合进 ${dest}。本地草稿仍留在当前工作区。`,
+      confirmText: '不合进',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const declined = await clientApi.goalPlansDeclineSourceHandoffs({ planIds });
+      const stillWaiting = (declined.results || []).filter((result) => !result.ok).length;
+      if (stillWaiting > 0) setError(`还有 ${stillWaiting} 条没拿掉。`);
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="source-checkout-panel" data-testid="source-checkout-panel">
       <div className="source-checkout-panel__head">
-        {dest} 上还有未提交的改动，这 {planIds.length} 件事等着合进去。
+        {isConflict
+          ? `这 ${planIds.length} 件和 ${dest} 上的同一份文件内容不同，合不进去。`
+          : `${dest} 上还有未提交的改动，这 ${planIds.length} 件事等着合进去。`}
       </div>
       {item.blockedPlanTitles?.length ? (
         <ul className="source-checkout-panel__files" aria-label="等合进的任务">
           {item.blockedPlanTitles.map((title) => (
             <li key={title} className="gwb-chip">{title}</li>
+          ))}
+        </ul>
+      ) : item.title ? (
+        <ul className="source-checkout-panel__files" aria-label="等合进的任务">
+          <li className="gwb-chip">{item.title}</li>
+        </ul>
+      ) : null}
+      {isConflict && conflictFiles.length > 0 ? (
+        <ul className="source-checkout-panel__files">
+          {conflictFiles.map((filePath) => (
+            <li key={filePath} className="gwb-chip">{filePath}</li>
           ))}
         </ul>
       ) : null}
@@ -148,7 +202,11 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
         </ul>
       ) : (
         <div className="source-checkout-panel__empty">
-          {loaded ? (error || '源头上没有已跟踪的未提交改动。可以直接再试一次。') : '正在看挡路文件…'}
+          {loaded
+            ? (error || (isConflict
+              ? (conflictFiles.length > 0 ? null : `这几件和 ${dest} 上的同一份文件内容不同。`)
+              : '源头上没有已跟踪的未提交改动。可以直接再试一次。'))
+            : '正在看挡路文件…'}
         </div>
       )}
       {error && files.length > 0 ? <div className="source-checkout-panel__note">{error}</div> : null}
@@ -168,6 +226,14 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
           onClick={() => void afterSourceReady('stash')}
         >
           先放下再合
+        </button>
+        <button
+          type="button"
+          className="gwb-btn"
+          disabled={busy || !canRetry}
+          onClick={() => void declineMerge()}
+        >
+          {`这 ${planIds.length} 件不合进 ${dest}`}
         </button>
         <button
           type="button"

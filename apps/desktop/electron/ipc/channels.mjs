@@ -145,6 +145,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'goalPlans:commit-source-checkout',
   'goalPlans:stash-source-checkout',
   'goalPlans:retry-source-handoffs',
+  'goalPlans:decline-source-handoffs',
   'goalPlans:resolve-handoff-conflicts',
   'goalPlans:preview-handoff-merge',
   'goalPlans:cleanup-handoff-preview',

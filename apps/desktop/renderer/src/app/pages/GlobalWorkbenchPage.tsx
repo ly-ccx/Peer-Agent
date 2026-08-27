@@ -14,7 +14,7 @@ import {
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { PeerIcon } from '../../ui/icons';
-import { isSourceEnvBlock, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
+import { isWorkbenchHandoffCard, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
 import { ActionLabel } from './actionLabelDisplay';
 
 function workspaceBasename(workspacePath: string): string {
@@ -61,7 +61,7 @@ export function GlobalWorkbenchPage({
   const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
-    if (isSourceEnvBlock(item)) return;
+    if (isWorkbenchHandoffCard(item)) return;
     if (
       item.source === 'shell_background' ||
       item.nextAction === 'open_background_thread'
@@ -332,7 +332,7 @@ function InboxRow({
   const [sourceOpen, setSourceOpen] = useState(false);
   const sourceBlock = kind === 'need'
     && Boolean(item.deliveryHandoffStoppedReason)
-    && isSourceEnvBlock(item);
+    && isWorkbenchHandoffCard(item);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   useShatterExitCollapse(kind === 'accept' ? phase : null, hostRef);

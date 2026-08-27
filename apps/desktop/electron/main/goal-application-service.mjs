@@ -18,6 +18,7 @@ export function createGoalApplicationService({
   deletePlan,
   retryHandoff,
   retrySourceHandoffs,
+  declineSourceHandoffs,
   inspectSourceCheckout,
   commitSourceCheckout,
   stashSourceCheckout,
@@ -61,6 +62,7 @@ export function createGoalApplicationService({
     deletePlan: assertFunction(deletePlan, 'deletePlan'),
     retryHandoff: assertFunction(retryHandoff, 'retryHandoff'),
     retrySourceHandoffs,
+    declineSourceHandoffs,
     inspectSourceCheckout,
     commitSourceCheckout,
     stashSourceCheckout,
@@ -141,6 +143,10 @@ export function createGoalApplicationService({
     retrySourceHandoffs: ({ planIds } = {}) =>
       typeof ports.retrySourceHandoffs === 'function'
         ? ports.retrySourceHandoffs(planIds)
+        : { ok: false, reason: 'unavailable' },
+    declineSourceHandoffs: ({ planIds } = {}) =>
+      typeof ports.declineSourceHandoffs === 'function'
+        ? ports.declineSourceHandoffs(planIds)
         : { ok: false, reason: 'unavailable' },
     // ADR 69 P2：收口决断与真机预览（可选端口，未接线的环境返回 ok:false）。
     resolveHandoffConflicts: ({ planId, resolutions, permissionConfirmed } = {}) =>

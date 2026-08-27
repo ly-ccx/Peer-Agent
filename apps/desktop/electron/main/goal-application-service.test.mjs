@@ -22,6 +22,7 @@ function createHarness(overrides = {}) {
     recordTaskEvidence: port('task-evidence'),
     deletePlan: port('delete'),
     retryHandoff: port('retry-handoff'),
+    declineSourceHandoffs: port('decline-source'),
     inspectSourceCheckout: port('inspect-source'),
     isolate: port('isolate'),
     openSite: port('open-site'),
@@ -95,6 +96,7 @@ test('goal plan and runner commands preserve payload mapping', () => {
   assert.equal(service.pauseRunner({ planId: 'p' }), 'pause-runner');
   assert.equal(service.resumeRunner(undefined), 'resume-runner');
   assert.equal(service.retryHandoff({ planId: 'p' }), 'retry-handoff');
+  assert.equal(service.declineSourceHandoffs({ planIds: ['p'] }), 'decline-source');
   assert.equal(
     service.inspectSourceCheckout({ workspacePath: '/tmp/repo' }),
     'inspect-source',
@@ -118,6 +120,7 @@ test('goal plan and runner commands preserve payload mapping', () => {
     ['pause-runner', 'p'],
     ['resume-runner', undefined, undefined],
     ['retry-handoff', 'p'],
+    ['decline-source', ['p']],
     ['inspect-source', undefined, { workspacePath: '/tmp/repo' }],
     ['isolate', 'p'],
     ['open-site', 'p', { mode: 'editor' }],

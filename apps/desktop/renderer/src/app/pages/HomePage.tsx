@@ -2,7 +2,7 @@ import { useCallback, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
-import { isSourceEnvBlock } from '../components/SourceCheckoutPanel';
+import { isWorkbenchHandoffCard } from '../components/SourceCheckoutPanel';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
 /**
@@ -45,7 +45,7 @@ export function HomePage({
   const isGlobal = !workspacePath;
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
-    if (isSourceEnvBlock(item)) return;
+    if (isWorkbenchHandoffCard(item)) return;
     // 后台 shell 线程：打开右侧「后台线程」Tab，不跳会话。
     if (
       item.source === 'shell_background' ||

@@ -2116,6 +2116,35 @@ const goalApplicationService = createGoalApplicationService({
     const plans = ids.map((planId) => goalPlanStore.getPlan(planId)).filter(Boolean);
     return goalDeliveryHandoff.retryHandoffs(plans);
   },
+  declineSourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    const results = [];
+    for (const planId of ids) {
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan) {
+        results.push({ planId, ok: false, reason: 'not_found' });
+        continue;
+      }
+      try {
+        if (typeof goalWorktreeAdapter?.discardLine === 'function') {
+          await goalWorktreeAdapter.discardLine(plan, { deleteBranch: true });
+        }
+        const cancelled = goalPlanStore.setPlanStatus(planId, 'cancelled') || goalPlanStore.getPlan(planId) || plan;
+        results.push({
+          planId,
+          ok: cancelled?.status === 'cancelled',
+          status: cancelled?.status,
+        });
+      } catch (error) {
+        results.push({
+          planId,
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error || 'decline_failed'),
+        });
+      }
+    }
+    return { ok: results.every((result) => result.ok), results };
+  },
   // ADR 69 P2：收口决断执行。keep_taskline 动 git 目标线，需渲染层先弹确认并回传 permissionConfirmed。
   resolveHandoffConflicts: async (planId, resolutions, { permissionConfirmed = false } = {}) => {
     const plan = goalPlanStore.getPlan(planId);

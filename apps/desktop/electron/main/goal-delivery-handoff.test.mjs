@@ -161,7 +161,7 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['show', 'main:delivered.txt']), 'from isolation');
   });
 
-  it('stops on rebase conflict when the target branch moved', async () => {
+  it('rebase conflict records CONFLICT and conflict files when the target branch moved', async () => {
     checkoutDetachedFromTarget();
     const store = createStore(boundPlan());
     const worktreeAdapter = createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts });
@@ -182,6 +182,9 @@ describe('goal delivery handoff', () => {
     const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
     assert.equal(next.deliveryHandoff.status, 'stopped');
     assert.equal(next.deliveryHandoff.stoppedReason, 'merge_conflict');
+    assert.equal(next.deliveryHandoff.verdict, 'CONFLICT');
+    assert.ok(Array.isArray(next.deliveryHandoff.conflicts));
+    assert.ok(next.deliveryHandoff.conflicts.some((item) => item.path === 'conflict.txt'));
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), checkoutBefore);
   });
 

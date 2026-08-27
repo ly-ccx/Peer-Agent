@@ -34,6 +34,7 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
     commitSourceCheckout: goalPlans?.commitSourceCheckout,
     stashSourceCheckout: goalPlans?.stashSourceCheckout,
     retrySourceHandoffs: goalPlans?.retrySourceHandoffs,
+    declineSourceHandoffs: goalPlans?.declineSourceHandoffs,
     // ADR 69 P2：收口决断与真机预览（可选，未接线的环境返回 ok:false，不 assert）。
     resolveHandoffConflicts: goalPlans?.resolveHandoffConflicts,
     previewHandoffMerge: goalPlans?.previewHandoffMerge,
@@ -77,6 +78,8 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
         typeof plans.stashSourceCheckout === 'function' ? plans.stashSourceCheckout(payload) : unavailable());
       ipc.handle('goalPlans:retry-source-handoffs', (_event, payload) =>
         typeof plans.retrySourceHandoffs === 'function' ? plans.retrySourceHandoffs(payload) : unavailable());
+      ipc.handle('goalPlans:decline-source-handoffs', (_event, payload) =>
+        typeof plans.declineSourceHandoffs === 'function' ? plans.declineSourceHandoffs(payload) : unavailable());
       ipc.handle('goalPlans:resolve-handoff-conflicts', (_event, payload) =>
         typeof plans.resolveHandoffConflicts === 'function' ? plans.resolveHandoffConflicts(payload) : unavailable());
       ipc.handle('goalPlans:preview-handoff-merge', (_event, payload) =>
