@@ -349,6 +349,31 @@ describe('conversationStore', () => {
     assert.equal(store.resolveConversation('stream-active'), 'B');
   });
 
+  it('settleInactiveStreams also clears the provider recovery notice on inactive streams', () => {
+    const store = new ConversationStore();
+    store.routeStream('stream-stale', 'A');
+    store.routeStream('stream-active', 'B');
+    store.setState('A', {
+      isStreaming: true,
+      streamId: 'stream-stale',
+      providerRecoveryNotice: {
+        kind: 'connection',
+        status: 'retrying',
+        attempt: 1,
+        maxRetries: 3,
+        delayMs: 500,
+        reason: 'connect timeout',
+      },
+    });
+    store.setState('B', { isStreaming: true, streamId: 'stream-active' });
+
+    store.settleInactiveStreams(['stream-active']);
+
+    // 回归锁：终态收敛必须清掉重试横幅（用户停止 / 流结束后横幅不得残留）。
+    assert.equal(store.getSnapshot('A').providerRecoveryNotice, null);
+    assert.equal(store.getSnapshot('A').isStreaming, false);
+  });
+
   it('routes an explicitly identified compaction event to A while a new B stays idle', () => {
     const store = new ConversationStore();
     store.routeStream('stream-A', 'A');
