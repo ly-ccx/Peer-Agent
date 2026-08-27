@@ -395,7 +395,7 @@ function InboxRow({
         ref={cardRef}
         className={`gwb-item particle-shatter-source${shattering ? ' is-shattering' : ''}${
           kind === 'accept' && phase === 'submitting' ? ' gwb-item--submitting' : ''
-        }`}
+        }${sourceBlock && sourceOpen ? ' gwb-item--source-open' : ''}`}
       >
         <div className="gwb-type">
           <span className={`gwb-tag gwb-tag-${kind === 'accept' ? 'accept' : 'need'}`}>{tag}</span>
@@ -423,7 +423,6 @@ function InboxRow({
           {threadNodes && threadNodes.length > 0 ? (
             <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenThreadNode} />
           ) : null}
-          {sourceBlock && sourceOpen ? <SourceCheckoutPanel item={item} /> : null}
         </div>
         <div className="gwb-actions">
           <button
@@ -437,6 +436,7 @@ function InboxRow({
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>
+        {sourceBlock && sourceOpen ? <SourceCheckoutPanel item={item} /> : null}
       </div>
       {kind === 'accept' ? (
         <ParticleShatterOverlay active={shattering} targetRef={cardRef} />

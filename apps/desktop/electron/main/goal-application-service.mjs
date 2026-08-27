@@ -60,6 +60,13 @@ export function createGoalApplicationService({
     recordTaskEvidence: assertFunction(recordTaskEvidence, 'recordTaskEvidence'),
     deletePlan: assertFunction(deletePlan, 'deletePlan'),
     retryHandoff: assertFunction(retryHandoff, 'retryHandoff'),
+    retrySourceHandoffs,
+    inspectSourceCheckout,
+    commitSourceCheckout,
+    stashSourceCheckout,
+    resolveHandoffConflicts,
+    previewHandoffMerge,
+    cleanupHandoffPreview,
     isolate: assertFunction(isolate, 'isolate'),
     openSite: assertFunction(openSite, 'openSite'),
     discardLine: assertFunction(discardLine, 'discardLine'),
@@ -112,17 +119,24 @@ export function createGoalApplicationService({
       ports.recordTaskEvidence(planId, taskId, change),
     remove,
     retryHandoff: ({ planId } = {}) => ports.retryHandoff(planId),
-    inspectSourceCheckout: ({ planId } = {}) =>
+    inspectSourceCheckout: ({ planId, workspacePath } = {}) =>
       typeof ports.inspectSourceCheckout === 'function'
-        ? ports.inspectSourceCheckout(planId)
+        ? ports.inspectSourceCheckout(planId, { workspacePath })
         : { ok: false, reason: 'unavailable' },
-    commitSourceCheckout: ({ planId, message, permissionConfirmed } = {}) =>
+    commitSourceCheckout: ({ planId, message, permissionConfirmed, workspacePath } = {}) =>
       typeof ports.commitSourceCheckout === 'function'
-        ? ports.commitSourceCheckout(planId, { message, permissionConfirmed: Boolean(permissionConfirmed) })
+        ? ports.commitSourceCheckout(planId, {
+          message,
+          permissionConfirmed: Boolean(permissionConfirmed),
+          workspacePath,
+        })
         : { ok: false, reason: 'unavailable' },
-    stashSourceCheckout: ({ planId, permissionConfirmed } = {}) =>
+    stashSourceCheckout: ({ planId, permissionConfirmed, workspacePath } = {}) =>
       typeof ports.stashSourceCheckout === 'function'
-        ? ports.stashSourceCheckout(planId, { permissionConfirmed: Boolean(permissionConfirmed) })
+        ? ports.stashSourceCheckout(planId, {
+          permissionConfirmed: Boolean(permissionConfirmed),
+          workspacePath,
+        })
         : { ok: false, reason: 'unavailable' },
     retrySourceHandoffs: ({ planIds } = {}) =>
       typeof ports.retrySourceHandoffs === 'function'

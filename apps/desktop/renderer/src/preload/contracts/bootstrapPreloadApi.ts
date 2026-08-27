@@ -1085,19 +1085,24 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
-  readonly goalPlansInspectSourceCheckout: (params: { planId: string }) => Promise<{
+  readonly goalPlansInspectSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+  }) => Promise<{
     ok: boolean;
     branch?: string;
     files?: ReadonlyArray<{ path: string; status: string }>;
     reason?: string;
   }>;
   readonly goalPlansCommitSourceCheckout: (params: {
-    planId: string;
+    planId?: string;
+    workspacePath?: string;
     message?: string;
     permissionConfirmed?: boolean;
   }) => Promise<{ ok: boolean; reason?: string }>;
   readonly goalPlansStashSourceCheckout: (params: {
-    planId: string;
+    planId?: string;
+    workspacePath?: string;
     permissionConfirmed?: boolean;
   }) => Promise<{ ok: boolean; reason?: string }>;
   readonly goalPlansRetrySourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{

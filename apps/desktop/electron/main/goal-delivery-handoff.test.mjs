@@ -682,6 +682,14 @@ describe('source checkout actions', () => {
     assert.ok(res.files.some((file) => file.path === 'README.md'));
   });
 
+  it('inspects from an explicit workspace even without a plan', async () => {
+    writeFileSync(path.join(repository, 'README.md'), 'blocking work\n');
+    const res = await createGoalDeliveryHandoff({ goalPlanStore: createStore(boundPlan()) })
+      .inspectSource(null, { repositoryRoot: repository });
+    assert.equal(res.ok, true);
+    assert.ok(res.files.some((file) => file.path === 'README.md'));
+  });
+
   it('retries all blocked task lines after parking the source checkout', async () => {
     const first = boundPlan({ planId: 'plan-handoff-1' });
     const second = boundPlan({ planId: 'plan-handoff-2' });

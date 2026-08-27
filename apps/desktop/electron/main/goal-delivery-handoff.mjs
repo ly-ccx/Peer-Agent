@@ -694,24 +694,30 @@ export function createGoalDeliveryHandoff({
     return handoffPlan(plan, { retry: true });
   }
 
-  async function inspectSource(plan) {
+  async function inspectSource(plan, { repositoryRoot } = {}) {
     const binding = plan?.deliveryBinding || {};
-    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
-    return inspectSourceCheckout({ repositoryRoot });
+    const root = trim(repositoryRoot)
+      || trim(binding.targetWorkspacePath)
+      || trim(plan?.targetWorkspacePath);
+    return inspectSourceCheckout({ repositoryRoot: root });
   }
 
-  async function commitSource(plan, { message, permissionConfirmed = false } = {}) {
+  async function commitSource(plan, { message, permissionConfirmed = false, repositoryRoot } = {}) {
     if (!permissionConfirmed) return { ok: false, reason: 'permission_required' };
     const binding = plan?.deliveryBinding || {};
-    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
-    return commitSourceCheckout({ repositoryRoot, message });
+    const root = trim(repositoryRoot)
+      || trim(binding.targetWorkspacePath)
+      || trim(plan?.targetWorkspacePath);
+    return commitSourceCheckout({ repositoryRoot: root, message });
   }
 
-  async function stashSource(plan, { permissionConfirmed = false } = {}) {
+  async function stashSource(plan, { permissionConfirmed = false, repositoryRoot } = {}) {
     if (!permissionConfirmed) return { ok: false, reason: 'permission_required' };
     const binding = plan?.deliveryBinding || {};
-    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
-    return stashSourceCheckout({ repositoryRoot });
+    const root = trim(repositoryRoot)
+      || trim(binding.targetWorkspacePath)
+      || trim(plan?.targetWorkspacePath);
+    return stashSourceCheckout({ repositoryRoot: root });
   }
 
   async function retryHandoffs(plans) {

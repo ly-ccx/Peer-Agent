@@ -2096,23 +2096,20 @@ const goalApplicationService = createGoalApplicationService({
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
   },
-  inspectSourceCheckout: async (planId) => {
-    const plan = goalPlanStore.getPlan(planId);
-    if (!plan) return { ok: false, reason: 'not_found' };
+  inspectSourceCheckout: async (planId, { workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
     if (typeof goalDeliveryHandoff?.inspectSource !== 'function') return { ok: false, reason: 'unavailable' };
-    return goalDeliveryHandoff.inspectSource(plan);
+    return goalDeliveryHandoff.inspectSource(plan, { repositoryRoot: workspacePath });
   },
-  commitSourceCheckout: async (planId, { message, permissionConfirmed = false } = {}) => {
-    const plan = goalPlanStore.getPlan(planId);
-    if (!plan) return { ok: false, reason: 'not_found' };
+  commitSourceCheckout: async (planId, { message, permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
     if (typeof goalDeliveryHandoff?.commitSource !== 'function') return { ok: false, reason: 'unavailable' };
-    return goalDeliveryHandoff.commitSource(plan, { message, permissionConfirmed });
+    return goalDeliveryHandoff.commitSource(plan, { message, permissionConfirmed, repositoryRoot: workspacePath });
   },
-  stashSourceCheckout: async (planId, { permissionConfirmed = false } = {}) => {
-    const plan = goalPlanStore.getPlan(planId);
-    if (!plan) return { ok: false, reason: 'not_found' };
+  stashSourceCheckout: async (planId, { permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
     if (typeof goalDeliveryHandoff?.stashSource !== 'function') return { ok: false, reason: 'unavailable' };
-    return goalDeliveryHandoff.stashSource(plan, { permissionConfirmed });
+    return goalDeliveryHandoff.stashSource(plan, { permissionConfirmed, repositoryRoot: workspacePath });
   },
   retrySourceHandoffs: async (planIds) => {
     const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];

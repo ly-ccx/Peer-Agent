@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const readPage = () => readFile(new URL('./GlobalWorkbenchPage.tsx', import.meta.url), 'utf8');
+const readPanel = () =>
+  readFile(new URL('../components/SourceCheckoutPanel.tsx', import.meta.url), 'utf8');
 const readStyles = () =>
   readFile(new URL('../../styles/global-workbench.css', import.meta.url), 'utf8');
 
@@ -50,11 +52,21 @@ test('global workbench main column no longer hosts leftover acceptance snapshots
 
 test('source env-block cards expand in place and do not open a conversation', async () => {
   const source = await readPage();
+  const panel = await readPanel();
+  const styles = await readStyles();
   assert.match(source, /deliveryHandoffStoppedReason/);
   assert.match(source, /isSourceEnvBlock/);
   assert.match(source, /SourceCheckoutPanel/);
   assert.match(source, /处理源头/);
   assert.match(source, /if \(isSourceEnvBlock\(item\)\) return;/);
+  assert.match(source, /gwb-item--source-open/);
+  assert.match(source, /sourceBlock && sourceOpen \? <SourceCheckoutPanel item=\{item\} \/>/);
+  assert.match(panel, /workspacePath/);
+  assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);
+  assert.doesNotMatch(panel, /blockedPlanTitles/);
+  assert.doesNotMatch(panel, /unavailable/);
+  assert.match(styles, /\.source-checkout-panel\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/);
+  assert.doesNotMatch(styles, /\.source-checkout-panel\s*\{[\s\S]*#9a7340/);
 });
 
 test('global workbench pulse and empty radar do not revive an accept bucket', async () => {

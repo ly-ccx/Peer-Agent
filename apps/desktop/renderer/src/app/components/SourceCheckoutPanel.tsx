@@ -13,61 +13,86 @@ function isSourceEnvBlock(item: TaskOverviewItem): boolean {
 
 export { isSourceEnvBlock };
 
+function inspectHint(reason: string | undefined): string {
+  if (reason === 'missing_workspace') return '找不到源头工作区，没法列出挡路文件。';
+  return '没法列出挡路文件。提交、放下或再试一次仍然可以继续。';
+}
+
 export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem }) {
   const [files, setFiles] = useState<ReadonlyArray<{ path: string; status: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const dest = item.deliveryTargetBranch || '源头';
   const planIds = item.blockedPlanIds || [];
+  const workspacePath = item.deliveryWorkspacePath?.trim() || undefined;
   const inspectPlanId = planIds[0];
+  const canAct = Boolean(workspacePath || inspectPlanId);
+  const canRetry = planIds.length > 0;
 
   useEffect(() => {
-    if (!inspectPlanId) return;
+    if (!canAct) {
+      setLoaded(true);
+      setError('找不到源头工作区，没法列出挡路文件。');
+      return;
+    }
     let cancelled = false;
-    void clientApi.goalPlansInspectSourceCheckout({ planId: inspectPlanId }).then((res) => {
+    void clientApi.goalPlansInspectSourceCheckout({
+      ...(inspectPlanId ? { planId: inspectPlanId } : {}),
+      ...(workspacePath ? { workspacePath } : {}),
+    }).then((res) => {
       if (cancelled) return;
-      if (res?.ok && Array.isArray(res.files)) setFiles(res.files);
-      else setError(res?.reason ?? '没法列出挡路文件');
+      setLoaded(true);
+      if (res?.ok && Array.isArray(res.files)) {
+        setFiles(res.files);
+        setError(null);
+      } else {
+        setFiles([]);
+        setError(inspectHint(res?.reason));
+      }
     }).catch((err) => {
-      if (!cancelled) setError(String(err instanceof Error ? err.message : err));
+      if (cancelled) return;
+      setLoaded(true);
+      setFiles([]);
+      setError(inspectHint(err instanceof Error ? err.message : undefined));
     });
     return () => { cancelled = true; };
-  }, [inspectPlanId]);
+  }, [canAct, inspectPlanId, workspacePath]);
 
   async function afterSourceReady(action: 'commit' | 'stash' | 'retry') {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
+      const sourceParams = {
+        ...(inspectPlanId ? { planId: inspectPlanId } : {}),
+        ...(workspacePath ? { workspacePath } : {}),
+        permissionConfirmed: true,
+      };
       if (action === 'commit') {
         const confirmed = window.confirm(`把 ${dest} 上挡路的已跟踪改动提交掉，再把 ${planIds.length} 条任务一起合进去？`);
         if (!confirmed) { setBusy(false); return; }
-        const committed = await clientApi.goalPlansCommitSourceCheckout({
-          planId: inspectPlanId,
-          permissionConfirmed: true,
-        });
+        const committed = await clientApi.goalPlansCommitSourceCheckout(sourceParams);
         if (!committed?.ok) {
-          setError(committed?.reason ?? '提交失败');
+          setError(committed?.reason === 'permission_required' ? '需要你确认后再提交。' : '提交没成功。');
           return;
         }
       } else if (action === 'stash') {
-        const confirmed = window.confirm(`先把 ${dest} 上未提交的改动放下，再把 ${planIds.length} 条任务一起合进去？`);
+        const confirmed = window.confirm(`先把 ${dest} 上挡路的已跟踪改动放下，再把 ${planIds.length} 条任务一起合进去？`);
         if (!confirmed) { setBusy(false); return; }
-        const stashed = await clientApi.goalPlansStashSourceCheckout({
-          planId: inspectPlanId,
-          permissionConfirmed: true,
-        });
+        const stashed = await clientApi.goalPlansStashSourceCheckout(sourceParams);
         if (!stashed?.ok) {
-          setError(stashed?.reason ?? '放下失败');
+          setError(stashed?.reason === 'permission_required' ? '需要你确认后再放下。' : '放下没成功。');
           return;
         }
       }
       const retried = await clientApi.goalPlansRetrySourceHandoffs({ planIds });
       if (!retried?.ok) {
-        setError(retried?.reason ?? '再合失败');
+        setError('再合失败。');
         return;
       }
       const stillBlocked = (retried.results || []).filter((result) => !result.ok).length;
-      if (stillBlocked > 0) setError(`还有 ${stillBlocked} 条没合进去`);
+      if (stillBlocked > 0) setError(`还有 ${stillBlocked} 条没合进去。`);
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -83,34 +108,36 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
       {files.length > 0 ? (
         <ul className="source-checkout-panel__files">
           {files.map((file) => (
-            <li key={file.path}>{file.path}</li>
+            <li key={file.path} className="gwb-chip">{file.path}</li>
           ))}
         </ul>
       ) : (
-        <div className="source-checkout-panel__empty">正在看挡路文件…</div>
+        <div className="source-checkout-panel__empty">
+          {loaded ? (error || '源头上没有已跟踪的未提交改动。可以直接再试一次。') : '正在看挡路文件…'}
+        </div>
       )}
-      {item.blockedPlanTitles?.length ? (
-        <details className="source-checkout-panel__tasks">
-          <summary>都有哪些任务</summary>
-          <ul>
-            {item.blockedPlanTitles.map((title) => (
-              <li key={title}>{title}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-      {error ? <div className="source-checkout-panel__error">{error}</div> : null}
+      {error && files.length > 0 ? <div className="source-checkout-panel__note">{error}</div> : null}
       <div className="source-checkout-panel__actions">
-        <button type="button" disabled={busy || !inspectPlanId} onClick={() => void afterSourceReady('commit')}>
+        <button
+          type="button"
+          className="gwb-btn gwb-btn-ghost"
+          disabled={busy || !canAct}
+          onClick={() => void afterSourceReady('commit')}
+        >
           提交这些改动
         </button>
-        <button type="button" disabled={busy || !inspectPlanId} onClick={() => void afterSourceReady('stash')}>
+        <button
+          type="button"
+          className="gwb-btn gwb-btn-ghost"
+          disabled={busy || !canAct}
+          onClick={() => void afterSourceReady('stash')}
+        >
           先放下再合
         </button>
         <button
           type="button"
-          className="source-checkout-panel__apply"
-          disabled={busy || planIds.length === 0}
+          className="gwb-btn gwb-btn-primary"
+          disabled={busy || !canRetry}
           onClick={() => void afterSourceReady('retry')}
         >
           {busy ? '处理中…' : `再试一次，${planIds.length} 条一起合进 ${dest}`}
