@@ -4,6 +4,7 @@ import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { formatSkillHubInstallError } from '../skillHubInstallError';
+import { buildPageItems } from './marketplace-pagination';
 
 const PAGE_SIZE = 24;
 const EMPTY_PAGE: SkillHubMarketplacePage = {
@@ -16,11 +17,10 @@ const EMPTY_PAGE: SkillHubMarketplacePage = {
 
 const MARKET_FILTERS: readonly { readonly id: SkillHubMarketplaceSort; readonly label: string }[] = [
   { id: 'score', label: '全部' },
-  { id: 'featured', label: '推荐精选' },
-  { id: 'rising', label: '近期飙升' },
   { id: 'downloads', label: '下载量' },
   { id: 'stars', label: '收藏量' },
-  { id: 'created', label: '最近上新' },
+  { id: 'installs', label: '安装量' },
+  { id: 'updated', label: '最近更新' },
 ];
 
 /** 远程分类字典未就绪时的中文回退（接口 name 优先）。 */
@@ -142,62 +142,22 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     setLoading(true);
     void clientApi.querySkillHubSkills({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword, category, sortBy })
       .then((value) => { if (!cancelled) { setResult(value); setError(null); } })
-      .catch(() => { if (!cancelled) setError('无法读取 SkillHub 本地索引'); })
+      .catch(() => { if (!cancelled) setError('无法读取腾讯市场'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [page, debouncedKeyword, category, sortBy]);
 
-  useEffect(() => {
-    if (!syncing && result.sync.status !== 'syncing') return;
-
-    let cancelled = false;
-    let queryInFlight = false;
-    const queryCurrentPage = async () => {
-      if (queryInFlight) return;
-      queryInFlight = true;
-      try {
-        const next = await clientApi.querySkillHubSkills({
-          page,
-          pageSize: PAGE_SIZE,
-          keyword: debouncedKeyword,
-          category,
-          sortBy,
-        });
-        if (cancelled) return;
-        setResult(next);
-        const nextPageCount = Math.max(1, Math.ceil(next.total / PAGE_SIZE));
-        if (page > nextPageCount) setPage(nextPageCount);
-      } catch {
-        if (!cancelled) setError('无法刷新 SkillHub 本地索引');
-      } finally {
-        queryInFlight = false;
-      }
-    };
-
-    void queryCurrentPage();
-    const timer = window.setInterval(() => { void queryCurrentPage(); }, 1_500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [page, debouncedKeyword, category, sortBy, syncing, result.sync.status]);
-
   const refresh = async () => {
     setSyncing(true); setError(null);
     try {
-      const status = await clientApi.syncSkillHubSkills();
       const [next, nextCategories] = await Promise.all([
         clientApi.querySkillHubSkills({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword, category, sortBy }),
         clientApi.listSkillHubCategories().catch(() => categories),
       ]);
-      setResult({ ...next, sync: status });
+      setResult(next);
       if (Array.isArray(nextCategories)) setCategories(nextCategories);
     } catch {
-      const next = await clientApi.querySkillHubSkills({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword, category, sortBy }).catch(() => null);
-      if (next) setResult(next);
-      setError(next?.sync.indexed
-        ? `SkillHub 同步暂停，继续显示已索引的 ${next.sync.indexed.toLocaleString()} 条记录`
-        : 'SkillHub 暂时无法同步，请稍后重试');
+      setError('腾讯市场暂时无法刷新，请稍后重试');
     } finally { setSyncing(false); }
   };
 
@@ -241,17 +201,12 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   };
 
   const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
-  const syncActive = syncing || result.sync.status === 'syncing';
   const skippedText = result.sync.skipped > 0 ? ` · 跳过 ${result.sync.skipped.toLocaleString()} 条异常记录` : '';
-  const syncText = syncActive
-    ? `正在同步 ${result.sync.indexed.toLocaleString()} / ${result.sync.total.toLocaleString()}${skippedText}`
-    : result.sync.status === 'error'
-      ? `同步已暂停 · 已索引 ${result.sync.indexed.toLocaleString()}${skippedText}`
-      : result.sync.updatedAt
-        ? `已索引 ${result.sync.indexed.toLocaleString()}${skippedText} · ${new Date(result.sync.updatedAt).toLocaleString()}`
-        : result.sync.indexed > 0
-          ? `部分索引 ${result.sync.indexed.toLocaleString()}${skippedText}`
-          : '正在建立本地索引';
+  const syncText = syncing
+    ? `正在刷新腾讯市场${skippedText}`
+    : result.sync.updatedAt
+      ? `远程 ${result.total.toLocaleString()} 条${skippedText} · ${new Date(result.sync.updatedAt).toLocaleString()}`
+      : '直接查询腾讯市场';
 
   return (
     <section className="skill-marketplace" aria-label="Skill 市场">
@@ -266,7 +221,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
               onChange={(value) => { setPage(1); setCategory(value); }}
             />
           </div>
-          <button type="button" className="skill-marketplace-install" disabled={syncActive} onClick={() => void refresh()}>{syncActive ? '同步中…' : '同步'}</button>
+          <button type="button" className="skill-marketplace-install" disabled={syncing} onClick={() => void refresh()}>{syncing ? '刷新中…' : '刷新'}</button>
         </div>
       </div>
       <div className="skill-marketplace-filters" role="tablist" aria-label="市场筛选">
@@ -283,10 +238,10 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
           </button>
         ))}
       </div>
-      <div className="skill-marketplace-sync" role="status"><span>{syncText}</span><span>远程总量 {result.sync.total.toLocaleString()} · 当前结果 {result.total.toLocaleString()}</span></div>
+      <div className="skill-marketplace-sync" role="status"><span>{syncText}</span><span>当前结果 {result.total.toLocaleString()}</span></div>
       {error ? <p className="skill-marketplace-error" role="alert">{error}</p> : null}
-      {loading ? <p className="skill-marketplace-empty">正在读取本地索引…</p> : null}
-      {!loading && result.items.length === 0 ? <p className="skill-marketplace-empty">{syncActive ? '正在同步首批 Skill，请稍候…' : '没有匹配的 Skill。'}</p> : null}
+      {loading ? <p className="skill-marketplace-empty">正在查询腾讯市场…</p> : null}
+      {!loading && result.items.length === 0 ? <p className="skill-marketplace-empty">{syncing ? '正在刷新，请稍候…' : '没有匹配的 Skill。'}</p> : null}
       <div className="skill-marketplace-grid">
         {result.items.map((entry) => (
           <article className="skill-marketplace-card" key={entry.catalogId}>
@@ -315,11 +270,27 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
           </article>
         ))}
       </div>
-      <nav className="skill-marketplace-pagination" aria-label="市场分页">
-        <button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
-        <span>第 {page.toLocaleString()} / {totalPages.toLocaleString()} 页</span>
-        <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
-      </nav>
+      {totalPages > 1 ? (
+        <nav className="skill-marketplace-pagination skill-marketplace-pagination--pages" aria-label="腾讯市场分页">
+          <button type="button" className="pagination-arrow" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
+          {buildPageItems(page, totalPages).map((item) =>
+            item.type === 'ellipsis' ? (
+              <span key={item.key} className="pagination-ellipsis" aria-hidden="true">…</span>
+            ) : (
+              <button
+                key={item.key}
+                type="button"
+                className={item.page === page ? 'pagination-page is-active' : 'pagination-page'}
+                aria-current={item.page === page ? 'page' : undefined}
+                onClick={() => setPage(item.page)}
+              >
+                {item.page.toLocaleString()}
+              </button>
+            ),
+          )}
+          <button type="button" className="pagination-arrow" aria-label="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>›</button>
+        </nav>
+      ) : null}
       {selected ? (
         <Overlay onClose={closeSelected} ariaLabel={selected.name} panelClassName="skill-marketplace-detail">
           {({ requestClose }) => (<>

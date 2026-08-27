@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildGoalThreadRelationIndex,
   capTaskOverviewByBucket,
+  collapseEnvBlockedHandoffs,
   createTaskOverviewAggregator,
   currentStepTitleFromItem,
   displayConversationTitle,
@@ -496,7 +497,7 @@ test('toGoalPlanSnapshot 隔离执行时写独立执行环境，不再写未隔�
   assert.equal(snapshot.deliveryRoute?.includes('未隔离执行'), false);
 });
 
-test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不显示', () => {
+test('toGoalPlanSnapshot 有交付线即可展示合回状态，不必先验收', () => {
   const isolatedBinding = {
     repoId: 'peer_agent',
     targetWorkspacePath: '/Users/x/peer_agent',
@@ -510,13 +511,12 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
   const delivered = toGoalPlanSnapshot({
     planId: 'p-delivered',
     status: 'completed',
-    title: '已交回',
+    title: '已合进源头',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    resultAcceptance: { acceptedAt: '2026-08-14T01:00:00.000Z', acceptedBy: 'user' },
     deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'delivered',
@@ -525,18 +525,17 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
       updatedAt: '2026-08-14T01:01:00.000Z',
     },
   });
-  assert.equal(delivered.deliveryHandoffLabel, '已交回 peer_agent / PeerAgent/0.0.4');
+  assert.equal(delivered.deliveryHandoffLabel, '已合进 peer_agent / PeerAgent/0.0.4');
 
   const stopped = toGoalPlanSnapshot({
     planId: 'p-stopped',
     status: 'completed',
-    title: '交回停止',
+    title: '合不进源头',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    resultAcceptance: { acceptedAt: '2026-08-14T01:00:00.000Z', acceptedBy: 'user' },
     deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'stopped',
@@ -544,18 +543,17 @@ test('toGoalPlanSnapshot 已隔离且已验收时展示交回状态，否则不�
       updatedAt: '2026-08-14T01:01:00.000Z',
     },
   });
-  assert.equal(stopped.deliveryHandoffLabel, '同一目标正在交回');
+  assert.equal(stopped.deliveryHandoffLabel, '同一目标正在合进 0.0.4');
 
   const hidden = toGoalPlanSnapshot({
     planId: 'p-hidden',
     status: 'completed',
-    title: '未验收不显示',
+    title: '没交付线不显示',
     originWorkspacePath: '/Users/x/peer-knowledge',
     targetWorkspacePath: '/Users/x/peer_agent',
     targetRepoId: 'peer_agent',
     targetBranch: 'PeerAgent/0.0.4',
     targetBranchSource: 'workspace_head',
-    deliveryBinding: isolatedBinding,
     deliveryHandoff: {
       status: 'delivered',
       repoId: 'peer_agent',
@@ -2092,4 +2090,171 @@ test('conversation projection asks listConversations without messageCount backfi
   agg.listTaskOverview({ activeWithinMs: 0 });
   assert.equal(seenParams?.includeMessageCount, false);
   assert.equal(seenParams?.status, 'active');
+});
+
+test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-a',
+          conversationId: 'conversation-a',
+          status: 'completed',
+          title: '画高保真产品稿',
+          updatedAt: '2026-08-26T10:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
+          planId: 'plan-b',
+          conversationId: 'conversation-b',
+          status: 'completed',
+          title: '合回 Goal 卡标记',
+          updatedAt: '2026-08-26T11:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
+          planId: 'plan-lock',
+          conversationId: 'conversation-lock',
+          status: 'completed',
+          title: '清理过期 Worktree',
+          updatedAt: '2026-08-26T12:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'git_lock',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
+          planId: 'plan-conflict',
+          conversationId: 'conversation-c',
+          status: 'completed',
+          title: '真冲突任务',
+          updatedAt: '2026-08-26T12:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict_untracked',
+            verdict: 'CONFLICT',
+            conflicts: [{ path: 'demo/product-hifi.html' }],
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const envBlocked = items.filter((item) => item.deliveryHandoffVerdict === 'BLOCKED_ENV');
+  const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
+  assert.equal(envBlocked.length, 1);
+  assert.equal(envBlocked[0].title, '3 件事已经做完，等进 0.0.9');
+  assert.equal(envBlocked[0].currentGoalTitle, '挡住它们的是这条线上的未提交改动');
+  assert.equal(envBlocked[0].conversationId, undefined);
+  assert.equal(envBlocked[0].deliveryTargetBranch, '0.0.9');
+  assert.deepEqual(envBlocked[0].blockedPlanIds, ['plan-a', 'plan-b', 'plan-lock']);
+  assert.deepEqual(envBlocked[0].blockedPlanTitles, ['画高保真产品稿', '合回 Goal 卡标记', '清理过期 Worktree']);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].title, '真冲突任务');
+  assert.equal(typeof collapseEnvBlockedHandoffs, 'function');
+});
+
+test('merge_conflict without verdict is not source-block', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-rebase',
+          conversationId: 'conversation-rebase',
+          status: 'completed',
+          title: '重做版本地图交互 Demo',
+          updatedAt: '2026-08-27T06:38:14.476Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict',
+          },
+        },
+        {
+          planId: 'plan-dirty',
+          conversationId: 'conversation-dirty',
+          status: 'completed',
+          title: '源头脏文件任务',
+          updatedAt: '2026-08-27T06:38:14.476Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'target_checkout_dirty',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  const sourceBlocks = items.filter((item) => String(item.taskId || '').startsWith('source-block:'));
+  const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
+  assert.equal(sourceBlocks.length, 1);
+  assert.equal(sourceBlocks[0].title, '1 件事已经做完，等进 0.0.9');
+  assert.deepEqual(sourceBlocks[0].blockedPlanIds, ['plan-dirty']);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].taskId, 'plan-rebase');
+  assert.equal(conflicts[0].title, '重做版本地图交互 Demo');
+  assert.ok(!String(conflicts[0].taskId || '').startsWith('source-block:'));
+});
+
+test('cancelled declined plans leave needs_you and are not source-block', () => {
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: {
+      listPlanDetails: () => [
+        {
+          planId: 'plan-declined',
+          conversationId: 'conversation-demo',
+          status: 'cancelled',
+          title: '画高保真产品稿',
+          updatedAt: '2026-08-27T07:00:00.000Z',
+          deliveryBinding: {
+            targetBranch: '0.0.9',
+            targetWorkspacePath: '/Users/liangyin/Documents/DEV/github/peer_agent',
+          },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'merge_conflict',
+            verdict: 'CONFLICT',
+          },
+        },
+      ],
+    },
+    conversationStore: { listConversations: () => [] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+  });
+  const items = agg.listTaskOverview({ includeTerminal: false, activeWithinMs: 0 });
+  assert.equal(items.length, 0);
+  assert.equal(items.some((item) => item.actionRight === 'needs_you'), false);
+  assert.equal(items.some((item) => String(item.taskId || '').startsWith('source-block:')), false);
 });

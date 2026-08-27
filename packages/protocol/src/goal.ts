@@ -128,60 +128,126 @@ function handoffTargetLabel(handoff: GoalDeliveryHandoff): string | undefined {
   return undefined;
 }
 
+function compactBranchName(value: string | null | undefined): string | undefined {
+  const branch = typeof value === 'string' ? value.trim() : '';
+  if (!branch) return undefined;
+  return branch.replace(/^PeerAgent\//, '') || branch;
+}
+
+function compactHandoffBranch(handoff: GoalDeliveryHandoff): string | undefined {
+  return compactBranchName(handoff.targetBranch);
+}
+
 function handoffStoppedReasonLabel(
   reason: string | undefined,
   locale: 'zh' | 'en',
+  branch?: string,
 ): string {
+  const dest = branch || (locale === 'zh' ? '源头' : 'the source line');
   switch (reason) {
     case 'target_branch_moved':
-      return locale === 'zh' ? '目标分支已更新' : 'target branch moved';
+      return locale === 'zh' ? `${dest} 已更新` : 'target branch moved';
     case 'same_target_busy':
-      return locale === 'zh' ? '同一目标正在交回' : 'same target is delivering';
+      return locale === 'zh' ? `同一目标正在合进 ${dest}` : 'same target is merging';
     case 'merge_conflict':
-      return locale === 'zh' ? '交回时发生冲突' : 'delivery conflicted';
+      return locale === 'zh' ? `合并进 ${dest} 时发生冲突` : 'merge into source conflicted';
     case 'target_checkout_dirty':
       return locale === 'zh'
-        ? '你正在目标分支上，还有未提交改动，交回已暂停'
-        : 'target checkout is dirty; delivery paused';
+        ? `你正在 ${dest} 上改别的东西，还没提交。没法把这条任务合进去。`
+        : `You still have uncommitted work on ${dest}, so this task cannot merge in.`;
     case 'git_timeout':
-      return locale === 'zh' ? '交回超时，可重试' : 'delivery timed out; retry available';
+      return locale === 'zh' ? `合并进 ${dest} 超时，可重试` : 'merge timed out; retry available';
     case 'git_lock':
       return locale === 'zh' ? '仓库正被占用，可重试' : 'repository is locked; retry available';
     default:
-      return locale === 'zh' ? '交回已停止' : 'delivery stopped';
+      return locale === 'zh' ? `合不进 ${dest}` : `cannot merge into ${dest}`;
   }
 }
 
+function hasDeliveryLine(input: {
+  readonly deliveryBinding?: GoalDeliveryBinding | null;
+}): boolean {
+  return Boolean(input.deliveryBinding?.taskBranch?.trim())
+    || input.deliveryBinding?.executionIsolation === 'worktree';
+}
+
 /**
- * 用户可见的交回状态。没交付线或没验收时不展示。
+ * 用户可见的合回状态。没交付线时不展示；停住/进行中不必先验收。
  */
 export function formatGoalDeliveryHandoff(
   input: {
     readonly deliveryHandoff?: GoalDeliveryHandoff | null;
+    /** 保留给调用方透传；合回展示不再看验收戳。 */
     readonly resultAcceptance?: { readonly acceptedAt?: string | null } | null;
     readonly deliveryBinding?: GoalDeliveryBinding | null;
   },
   options?: { readonly locale?: 'zh' | 'en' },
 ): string | undefined {
   const locale = options?.locale === 'en' ? 'en' : 'zh';
-  const acceptedAt = input.resultAcceptance?.acceptedAt;
-  if (typeof acceptedAt !== 'string' || !acceptedAt.trim()) return undefined;
-  const hasTaskLine = Boolean(input.deliveryBinding?.taskBranch?.trim());
-  const isolated = input.deliveryBinding?.executionIsolation === 'worktree';
-  if (!hasTaskLine && !isolated) return undefined;
+  if (!hasDeliveryLine(input)) return undefined;
   const handoff = input.deliveryHandoff;
   if (!handoff?.status || handoff.status === 'idle') return undefined;
   const target = handoffTargetLabel(handoff);
+  const branch = compactHandoffBranch(handoff)
+    ?? compactBranchName(input.deliveryBinding?.targetBranch);
   if (handoff.status === 'delivering') {
-    return locale === 'zh' ? '正在交回目标分支' : 'delivering to target branch';
+    return locale === 'zh'
+      ? (branch ? `正在合进 ${branch}` : '正在合进源头')
+      : (branch ? `merging into ${branch}` : 'merging into source');
   }
   if (handoff.status === 'delivered') {
+    // ADR 68：direct 交付没有「合」的动作，用词区分，避免暗示存在合并。
+    if (handoff.deliveryMode === 'direct') {
+      return target
+        ? (locale === 'zh' ? `已随 ${target} 交付` : `delivered with ${target}`)
+        : (locale === 'zh' ? '已随源头交付' : 'delivered with source');
+    }
     return target
-      ? (locale === 'zh' ? `已交回 ${target}` : `delivered to ${target}`)
-      : (locale === 'zh' ? '已交回目标分支' : 'delivered to target branch');
+      ? (locale === 'zh' ? `已合进 ${target}` : `merged into ${target}`)
+      : (locale === 'zh' ? '已合进源头' : 'merged into source');
   }
   if (handoff.status === 'stopped') {
-    return handoffStoppedReasonLabel(handoff.stoppedReason, locale);
+    return handoffStoppedReasonLabel(handoff.stoppedReason, locale, branch);
+  }
+  return undefined;
+}
+
+/** 灯条用的短合回状态：合不进 / 还没进 / 已进源头。 */
+export function formatGoalDeliveryHandoffLamp(
+  input: {
+    readonly deliveryHandoff?: GoalDeliveryHandoff | null;
+    readonly deliveryBinding?: GoalDeliveryBinding | null;
+    readonly status?: GoalPlanStatus | null;
+  },
+  options?: { readonly locale?: 'zh' | 'en' },
+): string | undefined {
+  const locale = options?.locale === 'en' ? 'en' : 'zh';
+  if (!hasDeliveryLine(input)) return undefined;
+  const dest = compactBranchName(input.deliveryHandoff?.targetBranch)
+    ?? compactBranchName(input.deliveryBinding?.targetBranch)
+    ?? (locale === 'zh' ? '源头' : 'source');
+  const handoff = input.deliveryHandoff;
+  if (!handoff?.status || handoff.status === 'idle') {
+    // ADR 68：非隔离计划（无交付线语义）不显示「还没进」——它的完成即交付，没有待合回的工作。
+    const isolated = input.deliveryBinding?.executionIsolation === 'worktree';
+    const directCandidate = !isolated && input.status === 'completed';
+    if (directCandidate) return undefined;
+    if (input.status === 'completed') {
+      return locale === 'zh' ? `还没进 ${dest}` : `not on ${dest}`;
+    }
+    return undefined;
+  }
+  if (handoff.status === 'delivering') {
+    return locale === 'zh' ? `正在合进 ${dest}` : `merging into ${dest}`;
+  }
+  if (handoff.status === 'delivered') {
+    if (handoff.deliveryMode === 'direct') {
+      return locale === 'zh' ? `已随 ${dest} 交付` : `delivered with ${dest}`;
+    }
+    return locale === 'zh' ? `已进 ${dest}` : `on ${dest}`;
+  }
+  if (handoff.status === 'stopped') {
+    return locale === 'zh' ? `合不进 ${dest}` : `blocked from ${dest}`;
   }
   return undefined;
 }
@@ -463,17 +529,49 @@ export type GoalRunnerPhase =
 
 export type GoalQualityReviewStatus = 'reviewing' | 'passed' | 'failed';
 
-/** 验收后把隔离改动交回目标分支的结果；不做排队 UI。 */
+/** 把隔离改动合并进目标分支的结果；不做排队 UI。展示不要求先验收。 */
 export type GoalDeliveryHandoffStatus = 'idle' | 'delivering' | 'delivered' | 'stopped';
+
+/**
+ * 交付模式（ADR 68）：merge=隔离任务线合回目标分支；direct=改动直接落在当前工作区。
+ * 缺省视为 'merge'（存量记录无此字段，向后兼容）。
+ */
+export type GoalDeliveryMode = 'merge' | 'direct';
 
 export interface GoalDeliveryHandoff {
   readonly status: GoalDeliveryHandoffStatus;
+  /** 交付模式；缺省 'merge'。 */
+  readonly deliveryMode?: GoalDeliveryMode;
   readonly repoId?: string;
   readonly targetBranch?: string;
   readonly taskBranch?: string;
   readonly commitSha?: string;
   readonly stoppedReason?: string;
+  /**
+   * ADR 69：合回分流 verdict。CONFLICT 时 status 为 'stopped' 且 conflicts 非空，
+   * 供收口视图批量呈现；AUTO_CLEAN/AUTO_MERGE/STALE 由系统消化，不进「需要你」。
+   */
+  readonly verdict?: GoalDeliveryHandoffVerdict;
+  /** CONFLICT 时的真冲突文件清单（同名文件内容不同，合并会覆盖工作区）。 */
+  readonly conflicts?: readonly GoalDeliveryConflict[];
   readonly updatedAt: string;
+}
+
+/** ADR 69：合回分流五类判定。 */
+export type GoalDeliveryHandoffVerdict =
+  | 'AUTO_CLEAN'
+  | 'AUTO_MERGE'
+  | 'STALE'
+  | 'CONFLICT'
+  | 'BLOCKED_ENV';
+
+/** 一条真冲突：任务线与目标工作区在同一未跟踪路径上内容不同。 */
+export interface GoalDeliveryConflict {
+  readonly path: string;
+  /** 工作区版本的 blob 摘要（用于展示/区分）。 */
+  readonly worktreeBlob?: string;
+  /** 任务线版本的 blob 摘要。 */
+  readonly taskBlob?: string;
 }
 
 export type GoalQualityCheckStatus = 'passed' | 'failed' | 'skipped';
@@ -995,7 +1093,7 @@ export interface GoalPlan {
      */
     readonly userOverride?: boolean;
   };
-  /** 验收后交回目标分支的结果；缺字段表示尚未交回。 */
+  /** 合并进目标分支的结果；缺字段表示尚未合回。展示不要求先验收。 */
   readonly deliveryHandoff?: GoalDeliveryHandoff;
   /** 对齐 system-context.ts 的 epoch */
   readonly promptContextEpochId?: string;

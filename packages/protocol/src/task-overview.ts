@@ -35,7 +35,7 @@ import type {
  *
  * - needs_you：阻塞点在用户（待批准 / 待授权 / 待回答 / 待决策）。
  * - peer_advancing：Peer 正在推进，用户无需介入。
- * - result_ready：遗留行动权（Goal 完成不再进入；交回中改挂 peer_advancing / needs_you）。
+ * - result_ready：遗留行动权（Goal 完成不再进入；合回中改挂 peer_advancing / needs_you）。
  * - paused：用户或系统主动暂停，等待恢复。
  * - terminal：终态，进历史页。
  */
@@ -174,11 +174,28 @@ export interface TaskOverviewItem {
    */
   readonly deliveryRoute?: string;
   /**
-   * 用户可见的交回状态：已交回 / 正在交回 / 停止原因。
-   * 没隔离或没验收时不出现。
+   * 用户可见的合回状态：已合进 / 正在合进 / 停止原因。
+   * 没交付线时不出现；停住/进行中不必先验收。
    */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  /** 合回目标分支；聚合层用它把同一源头的环境挡收成一张卡。 */
+  readonly deliveryTargetBranch?: string;
+  /** 合回停住原因；与目标分支一起作为环境挡去重键。 */
+  readonly deliveryHandoffStoppedReason?: string;
+  /**
+   * 源头环境挡卡：被同一源头挡住的任务线。有值时这张卡代表源头，不是某条 Goal 会话。
+   * 主按钮不得用 conversationId 打开聊天。
+   */
+  readonly blockedPlanIds?: readonly string[];
+  /** 被挡任务线标题，供源头卡展开「都有哪些」。 */
+  readonly blockedPlanTitles?: readonly string[];
+  /** 源头工作区绝对路径；源头动作（列脏文件 / 提交 / stash / 批量再合）用它，不跟会话走。 */
+  readonly deliveryWorkspacePath?: string;
+  /** ADR 69：分流 verdict；CONFLICT 时配合 deliveryHandoffConflicts 渲染收口面板。 */
+  readonly deliveryHandoffVerdict?: string;
+  /** ADR 69：CONFLICT 时的真冲突文件清单（同名文件内容不同）。 */
+  readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
   /** 状态描述（原型卡片中部，如「Peer 正在验证」「等待权限」）。 */
   readonly statusLabel: string;
   /** 执行异常的可展示原因；仅异常/暂停投影存在，不承载控制状态。 */
@@ -293,9 +310,17 @@ export interface GoalPlanProjectionSnapshot {
   readonly workspaceLabel?: string;
   /** 用户可见的交付路由；缺目标分支时写「未确认」。 */
   readonly deliveryRoute?: string;
-  /** 用户可见的交回状态；没隔离或没验收时省略。 */
+  /** 用户可见的合回状态；没交付线时省略。 */
   readonly deliveryHandoffLabel?: string;
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
+  readonly deliveryTargetBranch?: string;
+  readonly deliveryHandoffStoppedReason?: string;
+  readonly blockedPlanIds?: readonly string[];
+  readonly blockedPlanTitles?: readonly string[];
+  readonly deliveryWorkspacePath?: string;
+  /** ADR 69：分流 verdict / CONFLICT 冲突清单（快照透传，供 projectGoalPlan 组装）。 */
+  readonly deliveryHandoffVerdict?: string;
+  readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
   readonly progress?: { readonly completed: number; readonly total: number };
   /** 叶子步骤投影；无任务树时省略。 */
   readonly planSteps?: readonly TaskOverviewPlanStep[];
@@ -318,7 +343,7 @@ export interface GoalPlanProjectionSnapshot {
   readonly providerLabel?: string;
   /**
    * 遗留字段：用户验收戳。Goal 完成不再据此进入 result_ready；
-   * 完成即终态，交回/自检未结束仍走 peer_advancing 或 needs_you。
+   * 完成即终态，合回/自检未结束仍走 peer_advancing 或 needs_you。
    */
   readonly accepted?: boolean;
   /** 有代码副作用时，完成门之后还要质量自检过线才能进终态。 */
@@ -459,7 +484,7 @@ export function projectConversation(
  *  4. runner waiting_user → needs_you/user_input
  *  5. runner blocked | budget_exhausted → needs_you/decision
  *  6. plan completed：
- *       - 交回进行中 → peer_advancing；交回失败 → needs_you/decision
+ *       - 合回进行中 → peer_advancing；合回失败 → needs_you/decision
  *       - 否则直接 terminal（不再因未验收 / 自检缺口进入 result_ready）
  *  8. plan executing → peer_advancing
  *  9. runner running/compacting/resuming/exploring → peer_advancing
@@ -528,6 +553,17 @@ export function projectGoalPlan(
     ...(snapshot.deliveryRoute ? { deliveryRoute: snapshot.deliveryRoute } : {}),
     ...(snapshot.deliveryHandoffLabel ? { deliveryHandoffLabel: snapshot.deliveryHandoffLabel } : {}),
     ...(snapshot.deliveryHandoffStatus ? { deliveryHandoffStatus: snapshot.deliveryHandoffStatus } : {}),
+    ...(snapshot.deliveryTargetBranch ? { deliveryTargetBranch: snapshot.deliveryTargetBranch } : {}),
+    ...(snapshot.deliveryHandoffStoppedReason
+      ? { deliveryHandoffStoppedReason: snapshot.deliveryHandoffStoppedReason }
+      : {}),
+    ...(snapshot.blockedPlanIds?.length ? { blockedPlanIds: snapshot.blockedPlanIds } : {}),
+    ...(snapshot.blockedPlanTitles?.length ? { blockedPlanTitles: snapshot.blockedPlanTitles } : {}),
+    ...(snapshot.deliveryWorkspacePath ? { deliveryWorkspacePath: snapshot.deliveryWorkspacePath } : {}),
+    ...(snapshot.deliveryHandoffVerdict ? { deliveryHandoffVerdict: snapshot.deliveryHandoffVerdict } : {}),
+    ...(snapshot.deliveryHandoffConflicts?.length
+      ? { deliveryHandoffConflicts: snapshot.deliveryHandoffConflicts }
+      : {}),
     ...(snapshot.requiresQualityReview ? { requiresQualityReview: true } : {}),
     ...(snapshot.qualityReviewStatus ? { qualityReviewStatus: snapshot.qualityReviewStatus } : {}),
     ...(snapshot.qualityChecks?.length ? { qualityChecks: snapshot.qualityChecks } : {}),
@@ -553,8 +589,12 @@ export function projectGoalPlan(
   };
 }
 
+function isDigestibleHandoffVerdict(verdict: string | undefined): boolean {
+  return verdict === 'AUTO_CLEAN' || verdict === 'STALE';
+}
+
 function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecision {
-  const { status, runnerStatus, interrupted, deliveryHandoffStatus } = snapshot;
+  const { status, runnerStatus, interrupted, deliveryHandoffStatus, deliveryHandoffVerdict } = snapshot;
 
   // 未消费的网络/流式中断是当前行动权事实，优先于 completed/result_ready。
   // 用户显式 resume 后 store 会原子清除此事实，再按正常计划状态投影。
@@ -586,20 +626,29 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   if (status === 'completed') {
     if (deliveryHandoffStatus && deliveryHandoffStatus !== 'delivered') {
       if (deliveryHandoffStatus === 'stopped') {
+        // ADR 69：空壳/过时由系统消化，不再占「需要你」。
+        if (isDigestibleHandoffVerdict(deliveryHandoffVerdict)) {
+          return {
+            actionRight: 'terminal',
+            nextAction: 'none',
+            statusLabel: '已完成',
+            actionLabel: '查看 →',
+          };
+        }
         return {
           actionRight: 'needs_you',
           needsYouReason: 'decision',
           nextAction: 'decide_blocked',
-          statusLabel: '交回未完成',
+          statusLabel: '合不进源头',
           actionLabel: '查看进度',
         };
       }
-      // 只有真实交回进行中才占工作台。仅有 deliveryRoute 不算正在交回。
+      // 只有真实合回进行中才占工作台。仅有 deliveryRoute 不算正在合进。
       if (deliveryHandoffStatus === 'delivering' || deliveryHandoffStatus === 'idle') {
         return {
           actionRight: 'peer_advancing',
           nextAction: 'none',
-          statusLabel: '正在交回目标分支',
+          statusLabel: '正在合进源头',
           actionLabel: '查看 →',
         };
       }

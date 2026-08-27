@@ -15,6 +15,7 @@ import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
+import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
@@ -54,6 +55,7 @@ import {
   formatComposerBranchOptionLabel,
   isSafeComposerBranchName,
   planComposerGitChrome,
+  resolveComposerCreateSourceBranch,
   type TaskDeliveryLine,
 } from '../state/taskBoundBranch';
 import {
@@ -88,6 +90,7 @@ import {
   canShowStreamResume,
   formatStreamErrorLabel,
   resolveStreamResumeTarget,
+  restoreStreamErrorFromInterrupted,
 } from '../state/streamResume';
 import {
   buildConversationAttachmentContext,
@@ -547,6 +550,10 @@ export function ChatSurface({
     refreshWhenIdle: !isStreaming,
   });
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
+  const [createBranchDialog, setCreateBranchDialog] = useState<{
+    readonly source: string;
+    readonly name: string;
+  } | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
   const persistDraftComposer = useCallback((patch: {
@@ -1204,8 +1211,8 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
-    // 切换会话时清掉上一会话的流式错误横幅，避免错误提示跨会话残留。
-    setStreamError(null);
+    // streamError 按会话桶隔离：不要在切到目标会话时把它清掉。
+    // 上一会话的横幅不会串过来；本会话若仍是中断态，加载后从 interrupted 还原。
     // 切换会话时恢复「该会话」输入框状态(草稿文本 + 待发送队列):
     // - 同会话二次进入：优先保留 conversationStore 桶内已有草稿/队列，避免被尚未落盘的空持久化冲掉；
     // - 冷启动 / 首次进入：回落 composerPersistence。
@@ -1294,6 +1301,11 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1417,6 +1429,7 @@ export function ChatSurface({
               ...(restoredAnchor != null ? { turnStartedAt: restoredAnchor } : {}),
             });
             setIsStreaming(true);
+            setStreamError(null);
           }
         }
       } catch {
@@ -1425,7 +1438,15 @@ export function ChatSurface({
       if (cancelled) return;
       // 只有 main 侧流状态已经查询完毕，才把会话标记为可发送；running=true 已在上面先恢复，
       // 因而 ready 首帧不会暴露错误的「非流式空闲」窗口。
-      convActions.commitLoad({});
+      // reattach 可能刚补上 interrupted；按当前消息再绑一次输入框提醒。
+      const loadedSnapshot = conversationStore.getSnapshot(conversationId);
+      convActions.commitLoad({
+        streamError: restoreStreamErrorFromInterrupted(
+          loadedSnapshot.messages,
+          loadedSnapshot.streamError,
+          loadedSnapshot.isStreaming,
+        ),
+      });
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
@@ -1464,6 +1485,11 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
     });
     return () => { cancelled = true; };
@@ -2384,11 +2410,15 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
-  const handleCreateBoundBranch = useCallback((rawName: string) => {
+  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null) => {
     const name = rawName.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
     if (!isSafeComposerBranchName(name)) return;
-    const startPoint = gitChrome.taskLine?.value || workspaceGit?.current || undefined;
+    const startPoint = resolveComposerCreateSourceBranch({
+      highlighted: sourceBranch,
+      selected: gitChrome.taskLine?.value,
+      currentHead: workspaceGit?.current,
+    }) ?? undefined;
     void clientApi.gitCreateBranch({
       workspaceRoot: workspacePath,
       name,
@@ -2406,6 +2436,16 @@ export function ChatSurface({
     workspaceGit?.current,
     workspacePath,
   ]);
+  const handleOpenCreateBranchDialog = useCallback((highlightedValue?: string) => {
+    if (!canSelectBoundBranch) return;
+    const source = resolveComposerCreateSourceBranch({
+      highlighted: highlightedValue,
+      selected: gitChrome.taskLine?.value,
+      currentHead: workspaceGit?.current,
+    });
+    if (!source) return;
+    setCreateBranchDialog({ source, name: '' });
+  }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2892,13 +2932,10 @@ export function ChatSurface({
                 searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
                 emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
                 footerAction={{
-                  label: (query) => {
-                    const name = query.trim();
-                    if (name) return isZh ? `创建 ${name}` : `Create ${name}`;
-                    return isZh ? '创建分支' : 'Create branch';
+                  label: isZh ? '创建分支' : 'Create branch',
+                  onSelect: (_query, highlightedValue) => {
+                    handleOpenCreateBranchDialog(highlightedValue);
                   },
-                  disabled: (query) => !isSafeComposerBranchName(query),
-                  onSelect: handleCreateBoundBranch,
                 }}
               />
             ) : gitChrome.taskLine ? (
@@ -2950,6 +2987,59 @@ export function ChatSurface({
         </>
         ) : null}
       </div>
+      {createBranchDialog ? (
+        <Overlay
+          onClose={() => setCreateBranchDialog(null)}
+          ariaLabel={isZh ? '创建分支' : 'Create Branch'}
+          panelClassName="pa-confirm-dialog"
+        >
+          {({ requestClose }) => {
+            const canConfirm = isSafeComposerBranchName(createBranchDialog.name);
+            return (
+              <div className="pa-confirm-body">
+                <h2 className="pa-confirm-title">{isZh ? '创建分支' : 'Create Branch'}</h2>
+                <p className="pa-confirm-message">
+                  {isZh
+                    ? `从 ${createBranchDialog.source} 创建分支`
+                    : `Create a branch from ${createBranchDialog.source}`}
+                </p>
+                <input
+                  className="pa-confirm-input"
+                  value={createBranchDialog.name}
+                  onChange={(event) => setCreateBranchDialog({
+                    source: createBranchDialog.source,
+                    name: event.target.value,
+                  })}
+                  placeholder={isZh ? '分支名' : 'Branch name'}
+                  autoFocus
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' || !canConfirm) return;
+                    event.preventDefault();
+                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                    requestClose();
+                  }}
+                />
+                <div className="pa-confirm-actions is-spread">
+                  <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
+                    {isZh ? '取消 Esc' : 'Cancel Esc'}
+                  </button>
+                  <button
+                    type="button"
+                    className="pa-confirm-btn primary"
+                    disabled={!canConfirm}
+                    onClick={() => {
+                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                      requestClose();
+                    }}
+                  >
+                    {isZh ? '确认' : 'Confirm'}
+                  </button>
+                </div>
+              </div>
+            );
+          }}
+        </Overlay>
+      ) : null}
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
       ) : null}

@@ -312,7 +312,8 @@
   font-size: var(--ui-font-meta, 12px);
 }
 
-.goal-panel-toggle-active-progress {
+.goal-panel-toggle-active-progress,
+.goal-panel-toggle-active-handoff {
   flex: none;
   /* 扩大可 hover 命中区，避免 7/7 数字过小导致难触发 */
   padding: 2px 4px;
@@ -321,6 +322,10 @@
   color: var(--za-text-faint);
   font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
+}
+
+.goal-panel-toggle-active-handoff {
+  color: var(--za-text-soft);
 }
 
 /* 折叠灯条 hover：显示该 goal 全部步骤（每行左状态图标 + 右标题） */
@@ -521,7 +526,8 @@
 .goal-plan-head-timing--live {
   color: var(--za-text);
 }
-.goal-plan-head-progress {
+.goal-plan-head-progress,
+.goal-plan-head-handoff {
   flex: none;
   font-size: var(--ui-font-caption, 11px);
   color: var(--za-text-muted);
@@ -529,6 +535,11 @@
   padding: 1px 6px;
   border-radius: var(--ui-radius-round, 999px);
   background: var(--ui-surface-hover, var(--za-hover));
+}
+
+.goal-plan-head-handoff {
+  color: var(--za-text-soft);
+  font-family: var(--font-mono, monospace);
 }
 
 .goal-plan-head-caret {
@@ -579,6 +590,62 @@
   word-break: break-word;
 }
 
+.goal-plan-merge-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--chrome-sunken, var(--za-surface-2));
+}
+
+.goal-plan-merge-route.is-blocked {
+  background: color-mix(in srgb, var(--za-warn, #3B6FAB) 12%, var(--chrome-sunken, #EBEEF3));
+}
+
+.goal-plan-merge-route.is-ok {
+  background: color-mix(in srgb, var(--state-success, #3E7A6B) 12%, var(--chrome-sunken, #EBEEF3));
+}
+
+.goal-plan-merge-node {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--za-surface-1, #fff);
+  border: 1px solid var(--chrome-hairline, var(--za-line));
+}
+
+.goal-plan-merge-k {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--za-text-faint);
+  margin-bottom: 2px;
+}
+
+.goal-plan-merge-v {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--ui-font-caption, 11px);
+  font-weight: 620;
+  color: var(--za-text);
+}
+
+.goal-plan-merge-arrow {
+  color: var(--za-text-faint);
+  font-size: 16px;
+}
+
+.goal-plan-merge-route.is-blocked .goal-plan-merge-arrow {
+  color: var(--za-warn, #3B6FAB);
+}
+
 .goal-plan-delivery-handoff-row,
 .goal-plan-delivery-actions {
   display: flex;
@@ -606,6 +673,33 @@
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+/* 交付区药丸必须有三态反馈：否则看起来像一行说明文字而不是按钮。 */
+.goal-plan-delivery-retry:not(:disabled):hover,
+.goal-plan-delivery-action:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--za-text) 26%, transparent);
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text);
+}
+
+.goal-plan-delivery-retry:not(:disabled):active,
+.goal-plan-delivery-action:not(:disabled):active {
+  background: color-mix(in srgb, var(--za-text) 10%, transparent);
+}
+
+.goal-plan-delivery-retry:focus-visible,
+.goal-plan-delivery-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--za-text) 30%, transparent);
+  outline-offset: 2px;
+}
+
+/* retry 是阻塞时唯一的主操作：静止态也要一眼是按钮（更实的边框与文字）。 */
+.goal-plan-delivery-retry {
+  border-color: color-mix(in srgb, var(--za-text) 34%, transparent);
+  color: var(--za-text);
+  font-weight: 520;
 }
 
 .goal-plan-delivery-retry:disabled,
@@ -615,6 +709,13 @@
 }
 
 .goal-plan-delivery-action--danger {
+  color: var(--za-warn);
+}
+
+/* 危险操作悬停仍保持警告色，不被通用 hover 覆盖。 */
+.goal-plan-delivery-action--danger:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--za-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--za-warn) 8%, transparent);
   color: var(--za-warn);
 }
 
@@ -721,12 +822,7 @@
 }
 
 .goal-contract-current {
-  position: relative;
-  padding: 10px 12px 11px;
-  border: 1px solid color-mix(in srgb, var(--za-accent) 22%, var(--ui-border-subtle, var(--za-line)));
-  border-radius: var(--ui-radius-panel, 10px);
-  background: color-mix(in srgb, var(--za-accent) 7%, var(--ui-surface-raised, transparent));
-  overflow: hidden;
+  padding: 0;
 }
 
 .goal-contract-text {
@@ -740,9 +836,8 @@
 
 .goal-contract-text--current {
   color: var(--za-text);
-  font-size: var(--ui-font-body, 14px);
-  line-height: 1.6;
-  font-weight: 600;
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
 }
 
 .goal-contract-text--empty {
@@ -964,44 +1059,6 @@
 .goal-run-trace-toggle:hover {
   background: var(--ui-surface-hover, var(--za-hover));
   color: var(--za-text);
-}
-
-.goal-plan-origin {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--za-line);
-  border-radius: 10px;
-  background: var(--za-surface-2);
-}
-
-.goal-plan-origin-label {
-  color: var(--za-text-faint);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.goal-plan-origin-link {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--za-text);
-  text-align: start;
-  cursor: pointer;
-}
-
-.goal-plan-origin-link span {
-  color: var(--za-text-muted);
-  font-size: 12px;
-}
-
-.goal-plan-origin-link:hover strong,
-.goal-plan-origin-link:focus-visible strong {
-  color: var(--za-accent);
-  text-decoration: underline;
 }
 
 .goal-plan-card:focus-visible,
@@ -1279,49 +1336,6 @@
   color: var(--za-text-muted);
   overflow-wrap: anywhere;
   word-break: break-all;
-}
-
-.goal-task-child-plans {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.goal-task-child-plan {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 2px 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  font-size: var(--ui-font-meta, 12px);
-}
-
-.goal-task-child-plan:focus-visible {
-  outline: none;
-  border-radius: var(--ui-radius-control, var(--za-radius-sm));
-  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
-}
-
-.goal-task-child-plan-title {
-  font-size: var(--ui-font-meta, 12px);
-  line-height: 1.45;
-  color: var(--za-text);
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.goal-task-child-plan-progress {
-  flex: none;
-  font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-faint);
 }
 
 .goal-plan-empty-tasks {

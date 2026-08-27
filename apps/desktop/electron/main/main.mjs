@@ -46,7 +46,7 @@ import { createLocalShellProvider } from './runtime-gateway/local-shell-provider
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
-import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
+import { createQoderApiClient, createQoderMarketplaceService } from './qoder-marketplace-service.mjs';
 import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
 import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
@@ -314,6 +314,7 @@ let skillStore = disableLocalSkill
     });
 let skillMarketplaceService;
 let skillHubMarketplaceService;
+let qoderMarketplaceService;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
@@ -2031,8 +2032,6 @@ const openPathApplicationService = createOpenPathApplicationService({
 const workspaceApplicationService = createWorkspaceApplicationService({
   getSettings: () => settingsStore.getAll(),
   mergeSettings: (patch) => settingsStore.merge(patch),
-  deleteConversationsByWorkspace: (workspacePath) =>
-    conversationStore.deleteConversationsByWorkspace(workspacePath),
   pathExists: (candidate) => existsSync(candidate),
   basename: (candidate) => path.basename(candidate),
   getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),
@@ -2093,6 +2092,76 @@ const goalApplicationService = createGoalApplicationService({
   retryHandoff: (planId) => {
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
+  },
+  inspectSourceCheckout: async (planId, { workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.inspectSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.inspectSource(plan, { repositoryRoot: workspacePath });
+  },
+  commitSourceCheckout: async (planId, { message, permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.commitSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.commitSource(plan, { message, permissionConfirmed, repositoryRoot: workspacePath });
+  },
+  stashSourceCheckout: async (planId, { permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.stashSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.stashSource(plan, { permissionConfirmed, repositoryRoot: workspacePath });
+  },
+  retrySourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    if (typeof goalDeliveryHandoff?.retryHandoffs !== 'function') return { ok: false, reason: 'unavailable' };
+    const plans = ids.map((planId) => goalPlanStore.getPlan(planId)).filter(Boolean);
+    return goalDeliveryHandoff.retryHandoffs(plans);
+  },
+  declineSourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    const results = [];
+    for (const planId of ids) {
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan) {
+        results.push({ planId, ok: false, reason: 'not_found' });
+        continue;
+      }
+      try {
+        if (typeof goalWorktreeAdapter?.discardLine === 'function') {
+          await goalWorktreeAdapter.discardLine(plan, { deleteBranch: true });
+        }
+        const cancelled = goalPlanStore.setPlanStatus(planId, 'cancelled') || goalPlanStore.getPlan(planId) || plan;
+        results.push({
+          planId,
+          ok: cancelled?.status === 'cancelled',
+          status: cancelled?.status,
+        });
+      } catch (error) {
+        results.push({
+          planId,
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error || 'decline_failed'),
+        });
+      }
+    }
+    return { ok: results.every((result) => result.ok), results };
+  },
+  // ADR 69 P2：收口决断执行。keep_taskline 动 git 目标线，需渲染层先弹确认并回传 permissionConfirmed。
+  resolveHandoffConflicts: async (planId, resolutions, { permissionConfirmed = false } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.resolveConflicts !== 'function') return { ok: false, reason: 'unavailable' };
+    const result = await goalDeliveryHandoff.resolveConflicts(plan, resolutions, { permissionConfirmed });
+    return { ...result, plan: goalPlanStore.getPlan(planId) ?? plan };
+  },
+  previewHandoffMerge: async (planId, resolutions) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.previewMerge !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.previewMerge(plan, resolutions);
+  },
+  cleanupHandoffPreview: async (planId, previewPath) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.cleanupPreview !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.cleanupPreview(plan, previewPath);
   },
   isolate: async (planId) => {
     const plan = goalPlanStore.getPlan(planId);
@@ -2414,6 +2483,22 @@ function registerDesktopIpcHost() {
         skillHubListCategories: () => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
           return skillHubMarketplaceService.listCategories();
+        },
+        qoderQuery: (query) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.query(query);
+        },
+        qoderGetDetail: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.getSkillDetailWithReadme(identity);
+        },
+        qoderInstall: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.install(identity);
+        },
+        qoderListTaxonomies: () => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.listTaxonomies();
         },
       },
     }),
@@ -3696,28 +3781,20 @@ function startLocalRuntime() {
     installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),
   });
   const skillHubApiClient = createSkillHubApiClient();
-  const skillHubStore = createSkillHubMarketplaceStore({
-    filePath: path.join(userDataPath, 'marketplace', 'skillhub-index.json'),
-    apiClient: skillHubApiClient,
-  });
   const skillHubInstaller = createSkillHubVerifiedInstaller({
     apiClient: skillHubApiClient,
     installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
   });
+  // SkillHub 与 Qoder 一样走远程列表查询：搜索、分类、分页、排序都打官方接口。
   skillHubMarketplaceService = createSkillHubMarketplaceService({
-    store: skillHubStore,
     installer: skillHubInstaller,
     apiClient: skillHubApiClient,
   });
-  // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
-  // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
-  const skillHubSyncStatus = skillHubMarketplaceService.getStatus();
-  const skillHubIndexStale = !skillHubSyncStatus.updatedAt || Date.now() - skillHubSyncStatus.updatedAt > 24 * 60 * 60 * 1_000;
-  if (skillHubSyncStatus.status === 'error' || skillHubSyncStatus.nextPage > 1 || skillHubIndexStale) {
-    void skillHubMarketplaceService.sync().catch((error) => {
-      console.warn('[skillhub] Background marketplace sync paused:', error instanceof Error ? error.message : error);
-    });
-  }
+  // Qoder 市场：qoder.com apphub 支持服务端搜索 + 分页，无需本地索引同步。
+  qoderMarketplaceService = createQoderMarketplaceService({
+    apiClient: createQoderApiClient(),
+    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+  });
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,

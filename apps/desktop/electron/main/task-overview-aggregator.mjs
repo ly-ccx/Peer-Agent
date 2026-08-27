@@ -675,6 +675,20 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(formatGoalDeliveryRoute(plan) ? { deliveryRoute: formatGoalDeliveryRoute(plan) } : {}),
     ...(formatGoalDeliveryHandoff(plan) ? { deliveryHandoffLabel: formatGoalDeliveryHandoff(plan) } : {}),
     ...(plan.deliveryHandoff?.status ? { deliveryHandoffStatus: plan.deliveryHandoff.status } : {}),
+    ...(plan.deliveryHandoff?.targetBranch || plan.deliveryBinding?.targetBranch
+      ? { deliveryTargetBranch: plan.deliveryHandoff?.targetBranch || plan.deliveryBinding?.targetBranch }
+      : {}),
+    ...(plan.deliveryHandoff?.stoppedReason
+      ? { deliveryHandoffStoppedReason: plan.deliveryHandoff.stoppedReason }
+      : {}),
+    ...(workspacePath ? { deliveryWorkspacePath: workspacePath } : {}),
+    // ADR 69：透出分流 verdict 与真冲突清单，渲染层据此把 CONFLICT 聚合为收口面板。
+    ...(handoffVerdictFromPlan(plan)
+      ? { deliveryHandoffVerdict: handoffVerdictFromPlan(plan) }
+      : {}),
+    ...(Array.isArray(plan.deliveryHandoff?.conflicts) && plan.deliveryHandoff.conflicts.length > 0
+      ? { deliveryHandoffConflicts: plan.deliveryHandoff.conflicts }
+      : {}),
     progress,
     ...(planSteps ? { planSteps } : {}),
     updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : undefined,
@@ -793,8 +807,8 @@ export function isGoalPlanInScope(plan, options = {}) {
 }
 
 /**
- * 已验收后是否仍有真实交回进行中 / 交回失败。
- * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在交回。
+ * 是否仍有真实合回进行中 / 合回失败。
+ * 只看 deliveryHandoff.status；仅有 deliveryBinding / deliveryRoute 不算正在合进。
  */
 export function hasPendingDeliveryHandoff(plan) {
   const handoffStatus = plan?.deliveryHandoff?.status;
@@ -810,6 +824,65 @@ export function hasPendingDeliveryHandoff(plan) {
 export function isCompletedPlanStillLive(plan) {
   if (!plan || typeof plan !== 'object') return false;
   return hasPendingDeliveryHandoff(plan);
+}
+
+function handoffVerdictFromPlan(plan) {
+  const verdict = plan?.deliveryHandoff?.verdict;
+  if (typeof verdict === 'string' && verdict.trim()) return verdict.trim();
+  const reason = plan?.deliveryHandoff?.stoppedReason;
+  if (reason === 'merge_conflict' || reason === 'merge_conflict_untracked') return 'CONFLICT';
+  return undefined;
+}
+
+function isHandoffConflictItem(item) {
+  if (item?.deliveryHandoffVerdict === 'CONFLICT') return true;
+  const reason = item?.deliveryHandoffStoppedReason;
+  return reason === 'merge_conflict' || reason === 'merge_conflict_untracked';
+}
+
+function envBlockKeyFromItem(item) {
+  if (item?.actionRight !== 'needs_you' || item?.needsYouReason !== 'decision') return null;
+  if (item.deliveryHandoffStatus !== 'stopped') return null;
+  if (isHandoffConflictItem(item)) return null;
+  const target = typeof item.deliveryTargetBranch === 'string' ? item.deliveryTargetBranch.trim() : '';
+  const workspace = typeof item.deliveryWorkspacePath === 'string' ? item.deliveryWorkspacePath.trim() : '';
+  if (!target) return null;
+  return `${workspace}::${target}`;
+}
+
+/**
+ * 同一源头、同一环境挡（如 0.0.9 未提交改动）只留一张决策卡。
+ * 真冲突（CONFLICT）仍按任务线各自呈现，因为文件清单不同。
+ */
+export function collapseEnvBlockedHandoffs(items) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  const seen = new Set();
+  const next = [];
+  for (const item of items) {
+    const key = envBlockKeyFromItem(item);
+    if (!key) {
+      next.push(item);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const blocked = items.filter((candidate) => envBlockKeyFromItem(candidate) === key);
+    const blockedPlanIds = blocked.map((candidate) => candidate.taskId).filter(Boolean);
+    const blockedPlanTitles = blocked.map((candidate) => candidate.title).filter(Boolean);
+    const {
+      conversationId: _conversationId,
+      ...withoutConversation
+    } = item;
+    next.push({
+      ...withoutConversation,
+      taskId: `source-block:${key}`,
+      title: `${blocked.length} 件事已经做完，等进 ${item.deliveryTargetBranch}`,
+      currentGoalTitle: '挡住它们的是这条线上的未提交改动',
+      blockedPlanIds,
+      blockedPlanTitles,
+    });
+  }
+  return next;
 }
 
 /**
@@ -1292,7 +1365,8 @@ export function createTaskOverviewAggregator({
     const scopedItems = conversationId
       ? items.filter((item) => item?.conversationId === conversationId)
       : items;
-    const sorted = sortTaskOverview(scopedItems);
+    const collapsed = collapseEnvBlockedHandoffs(scopedItems);
+    const sorted = sortTaskOverview(collapsed);
     // 分桶截断：遗留 result_ready 单独配额，避免挤占 peer_advancing / needs_you。
     const capped = capTaskOverviewByBucket(sorted, limit, resultReadyLimit);
     // 首页无 conversationId 时只能整表重拉。按 taskId 复用未变卡片，

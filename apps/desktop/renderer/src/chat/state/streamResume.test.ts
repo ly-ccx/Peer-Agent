@@ -6,6 +6,8 @@ import {
   formatStreamErrorLabel,
   isRetryableStreamError,
   resolveStreamResumeTarget,
+  restoreStreamErrorFromInterrupted,
+  RESTORED_INTERRUPTED_STREAM_ERROR,
 } from './streamResume.ts';
 
 function message(
@@ -104,5 +106,66 @@ describe('formatStreamErrorLabel', () => {
 
   it('passes unknown errors through unchanged', () => {
     assert.equal(formatStreamErrorLabel('invalid api key', true), 'invalid api key');
+  });
+});
+
+describe('restoreStreamErrorFromInterrupted', () => {
+  it('restores a readable network banner from an interrupted assistant turn', () => {
+    const messages = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'partial', { interrupted: true }),
+    ];
+    assert.equal(
+      restoreStreamErrorFromInterrupted(messages, null),
+      RESTORED_INTERRUPTED_STREAM_ERROR,
+    );
+    assert.equal(
+      formatStreamErrorLabel(restoreStreamErrorFromInterrupted(messages, null)!, true),
+      '网络中断，回复未完成。',
+    );
+    assert.equal(
+      canShowStreamResume(restoreStreamErrorFromInterrupted(messages, null), messages, false),
+      true,
+    );
+  });
+
+  it('keeps a live network error when switching back to the same interrupted turn', () => {
+    const messages = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'partial', { interrupted: true }),
+    ];
+    assert.equal(
+      restoreStreamErrorFromInterrupted(messages, 'net::ERR_NETWORK_CHANGED'),
+      'net::ERR_NETWORK_CHANGED',
+    );
+    assert.equal(
+      formatStreamErrorLabel('net::ERR_NETWORK_CHANGED', true),
+      '网络已切换，回复中断。',
+    );
+  });
+
+  it('does not leak a leftover banner onto a conversation that is not interrupted', () => {
+    const continued = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'done'),
+    ];
+    const userAbort = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'partial'),
+    ];
+    assert.equal(restoreStreamErrorFromInterrupted(continued, 'fetch failed'), null);
+    assert.equal(restoreStreamErrorFromInterrupted(userAbort, 'fetch failed'), null);
+    assert.equal(restoreStreamErrorFromInterrupted([], 'fetch failed'), null);
+  });
+
+  it('does not restore a banner while the conversation is still streaming', () => {
+    const messages = [
+      message('u1', 'user', 'hello'),
+      message('a1', 'assistant', 'partial', { interrupted: true }),
+    ];
+    assert.equal(
+      restoreStreamErrorFromInterrupted(messages, 'net::ERR_NETWORK_CHANGED', true),
+      null,
+    );
   });
 });

@@ -39,6 +39,12 @@ function writablePlan(plan) {
 export function planNeedsTaskBranch(plan) {
   if (!writablePlan(plan)) return false;
   if (trim(plan.deliveryBinding?.taskBranch)) return false;
+  // ADR 68：非隔离计划不建空壳任务线——它没有合回动作，空 ref 只会误导
+  // UI 画出「任务线 → 发版线」路线图。隔离（worktree）计划仍需要任务线承载交付。
+  if (plan.deliveryBinding?.executionIsolation != null
+    && plan.deliveryBinding.executionIsolation !== 'worktree') {
+    return false;
+  }
   const workspace = trim(plan.deliveryBinding?.targetWorkspacePath) || trim(plan.targetWorkspacePath);
   const base = trim(plan.deliveryBinding?.targetBranch) || trim(plan.targetBranch);
   return Boolean(workspace && base);
@@ -115,7 +121,9 @@ export function createGoalTaskBranchAdapter({
 
     if (typeof goalPlanStore?.recordDeliveryIsolation === 'function') {
       return goalPlanStore.recordDeliveryIsolation(plan.planId, {
-        executionIsolation: 'none',
+        // ADR 68：保留计划已声明的隔离模式；只有未声明时才落 'none'。
+        // 隔离（worktree）计划的任务线由 worktree 链路使用，不能被拉回 none。
+        executionIsolation: plan.deliveryBinding?.executionIsolation === 'worktree' ? 'worktree' : 'none',
         taskBranch: name,
         worktreePath: undefined,
       }) || plan;

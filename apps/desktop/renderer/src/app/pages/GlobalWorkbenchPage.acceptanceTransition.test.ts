@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const readPage = () => readFile(new URL('./GlobalWorkbenchPage.tsx', import.meta.url), 'utf8');
+const readPanel = () =>
+  readFile(new URL('../components/SourceCheckoutPanel.tsx', import.meta.url), 'utf8');
 const readStyles = () =>
   readFile(new URL('../../styles/global-workbench.css', import.meta.url), 'utf8');
 
@@ -46,6 +48,40 @@ test('global workbench main column no longer hosts leftover acceptance snapshots
   assert.doesNotMatch(source, /gwb-tag-col|gwb-item-main|gwb-meta/);
   assert.doesNotMatch(source, /先看依据/);
   assert.doesNotMatch(source, /确认验收/);
+});
+
+test('source env-block cards expand in place and do not open a conversation', async () => {
+  const source = await readPage();
+  const panel = await readPanel();
+  const styles = await readStyles();
+  assert.match(source, /deliveryHandoffStoppedReason/);
+  assert.match(source, /isWorkbenchHandoffCard/);
+  assert.match(source, /SourceCheckoutPanel/);
+  assert.match(source, /sourceOpen \? '收起' : '处理'/);
+  assert.doesNotMatch(source, /处理源头/);
+  assert.doesNotMatch(source, /收起源头/);
+  assert.match(source, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
+  assert.match(panel, /不合进/);
+  assert.match(panel, /goalPlansDeclineSourceHandoffs/);
+  assert.match(panel, /提交并合进/);
+  assert.match(panel, /合进 \$\{dest\}/);
+  assert.doesNotMatch(panel, /提交这些改动/);
+  assert.doesNotMatch(panel, /先放下再合/);
+  assert.doesNotMatch(panel, /再试一次/);
+  assert.match(source, /gwb-item--source-open/);
+  assert.match(source, /sourceBlock && sourceOpen \? <SourceCheckoutPanel item=\{item\} \/>/);
+  assert.match(panel, /workspacePath/);
+  assert.match(panel, /committed\.detail/);
+  assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);
+  assert.match(panel, /blockedPlanTitles/);
+  assert.match(panel, /useConfirm/);
+  assert.doesNotMatch(panel, /点名字只是认人/);
+  assert.doesNotMatch(panel, /window\.confirm/);
+  assert.doesNotMatch(panel, /onClick=\{\(\) => onOpenItem/);
+  assert.match(panel, /这台桌面还没接上源头检查/);
+  assert.doesNotMatch(panel, /setError\(['"]unavailable['"]\)/);
+  assert.match(styles, /\.source-checkout-panel\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/);
+  assert.doesNotMatch(styles, /\.source-checkout-panel\s*\{[\s\S]*#9a7340/);
 });
 
 test('global workbench pulse and empty radar do not revive an accept bucket', async () => {

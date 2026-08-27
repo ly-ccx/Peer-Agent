@@ -7,6 +7,7 @@ import {
   formatComposerBranchOptionLabel,
   isInternalIsolationBranch,
   planComposerGitChrome,
+  resolveComposerCreateSourceBranch,
   sameComposerBranchRef,
   snapshotDeliveryLine,
 } from './taskBoundBranch.ts';
@@ -244,4 +245,31 @@ test('composer branch options hide isolation UUID paths unless already selected'
     ],
   );
   assert.equal(formatComposerBranchOptionLabel('PeerAgent/0.0.6'), '0.0.6');
+});
+
+test('create-from source prefers the highlighted list row over current selection', () => {
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      highlighted: 'PeerAgent/0.0.5',
+      selected: 'main',
+      currentHead: '0.0.7',
+    }),
+    'PeerAgent/0.0.5',
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      highlighted: '  ',
+      selected: 'main',
+      currentHead: '0.0.7',
+    }),
+    'main',
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      highlighted: null,
+      selected: null,
+      currentHead: '0.0.7',
+    }),
+    '0.0.7',
+  );
 });

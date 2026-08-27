@@ -478,4 +478,33 @@
       transition: none !important;
     }
   }
+
+  .gwb-item--source-open {
+    align-items: start;
+    padding-bottom: 1rem;
+  }
+
+  .source-checkout-panel {
+    @apply mt-1 flex flex-col gap-2;
+    grid-column: 1 / -1;
+  }
+
+  .source-checkout-panel__head {
+    @apply text-sm;
+    color: var(--za-text-soft);
+  }
+
+  .source-checkout-panel__files {
+    @apply m-0 flex list-none flex-wrap gap-1.5 p-0;
+  }
+
+  .source-checkout-panel__empty,
+  .source-checkout-panel__note {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .source-checkout-panel__actions {
+    @apply flex flex-wrap items-center justify-end gap-2;
+  }
 }

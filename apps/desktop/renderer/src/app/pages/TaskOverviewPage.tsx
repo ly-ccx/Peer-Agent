@@ -7,6 +7,7 @@ import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPrefere
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
+import { HandoffConflictPanel } from '../components/HandoffConflictPanel';
 import { ActionLabel } from './actionLabelDisplay';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -543,7 +544,7 @@ function HeroLayout({
 
     try {
       await onAcceptResult(item);
-      // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
+      // 合回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
     } catch {
       setAcceptanceTransitions((prev) => {
         if (!(item.taskId in prev)) return prev;
@@ -1263,9 +1264,9 @@ function ResultCard({
           {celebrating
             ? '验收完成，任务已圆满结束'
             : phase === 'submitting' || item.deliveryHandoffStatus === 'delivering'
-              ? '正在交回目标分支'
+              ? (item.deliveryHandoffLabel || '正在合进源头')
               : item.deliveryHandoffStatus === 'stopped'
-                ? (item.deliveryHandoffLabel || '交回未完成')
+                ? (item.deliveryHandoffLabel || '合不进源头')
                 : '等待验收'}
         </span>
         {threadNodes && threadNodes.length > 0 ? (
@@ -1288,13 +1289,19 @@ function ResultCard({
         <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
       <ArtifactList item={item} />
+      {item.deliveryHandoffVerdict === 'CONFLICT' && item.deliveryHandoffConflicts?.length ? (
+        <HandoffConflictPanel
+          planId={item.taskId}
+          conflicts={item.deliveryHandoffConflicts}
+        />
+      ) : null}
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
         <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
             <span className="result-card-spinner" aria-hidden="true" />
-            正在交回…
+            正在合进源头…
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>

@@ -901,6 +901,10 @@ export interface BootstrapPreloadApi {
   readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
   readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
   readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
+  readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
+  readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;
+  readonly installQoderSkill: (identity: import('@peer-agent/protocol').QoderInstallIdentity) => Promise<import('@peer-agent/protocol').QoderInstallResult>;
+  readonly listQoderTaxonomies: () => Promise<import('@peer-agent/protocol').QoderTaxonomiesResult>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;
@@ -1081,6 +1085,57 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansInspectSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+  }) => Promise<{
+    ok: boolean;
+    branch?: string;
+    files?: ReadonlyArray<{ path: string; status: string }>;
+    reason?: string;
+  }>;
+  readonly goalPlansCommitSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+    message?: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+  readonly goalPlansStashSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+  readonly goalPlansRetrySourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; verdict?: string; reason?: string }>;
+    reason?: string;
+  }>;
+  readonly goalPlansDeclineSourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; reason?: string }>;
+    reason?: string;
+  }>;
+  /** ADR 69 P2：收口决断执行。keep_taskline 需渲染层先弹确认并回传 permissionConfirmed。 */
+  readonly goalPlansResolveHandoffConflicts: (params: {
+    planId: string;
+    resolutions: ReadonlyArray<{ path: string; choice: 'keep_taskline' | 'keep_worktree' | 'keep_both' }>;
+    permissionConfirmed?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+    delivered?: boolean;
+    applied?: ReadonlyArray<{ path: string; choice: string }>;
+    plan?: GoalPlan | null;
+  }>;
+  /** ADR 69 P2：真机预览「合并后的目标线」，返回临时 worktree 路径。 */
+  readonly goalPlansPreviewHandoffMerge: (params: {
+    planId: string;
+    resolutions?: ReadonlyArray<{ path: string; choice: string }>;
+  }) => Promise<{ ok: boolean; previewPath?: string; targetBranch?: string; reason?: string }>;
+  readonly goalPlansCleanupHandoffPreview: (params: {
+    planId: string;
+    previewPath: string;
+  }) => Promise<{ ok: boolean; reason?: string }>;
   readonly goalPlansIsolate: (params: { planId: string }) => Promise<{
     ok: boolean;
     plan: GoalPlan | null;

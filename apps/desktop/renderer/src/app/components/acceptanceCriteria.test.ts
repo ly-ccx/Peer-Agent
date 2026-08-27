@@ -50,9 +50,9 @@ test('acceptance page meta keeps workspace and handoff, not a route dump', () =>
   assert.deepEqual(
     acceptancePageMeta({
       workspaceLabel: 'peer_agent',
-      deliveryHandoffLabel: '正在交回目标分支',
+      deliveryHandoffLabel: '正在合进源头',
     }),
-    ['peer_agent', '正在交回目标分支'],
+    ['peer_agent', '正在合进源头'],
   );
   assert.deepEqual(acceptancePageMeta({ workspaceLabel: '  ', deliveryHandoffLabel: null }), []);
 });

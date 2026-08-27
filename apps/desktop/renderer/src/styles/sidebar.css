@@ -29,6 +29,11 @@
   contain: layout paint;
 }
 
+/* 右侧栏拖拽同样关掉 grid 过渡，否则 --za-workbench-width 每帧都在 ease。 */
+:root[data-workbench-resizing='true'] .app-layout {
+  transition: none;
+}
+
 :root[data-workbench-open='true'] .app-layout {
   --za-workbench-current-width: var(--za-workbench-width, 420px);
 }
@@ -250,6 +255,13 @@
   color: var(--graphite-fade);
 }
 
+/* Right-side meta cluster: workspace count + add-workspace icon button. */
+.sidebar-workspace-tree-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .sidebar-workspace-tree-count {
   font-size: 0.68rem;
   font-weight: 500;
@@ -351,15 +363,16 @@
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
-/* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
-   柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
+/* 新建任务 +：默认叠在行尾且不占位，运行中蓝点才能贴右；hover/focus 再显现。 */
 .sidebar-workspace-new-task {
+  position: absolute;
+  right: 8px;
+  top: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin-left: auto;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
@@ -370,6 +383,8 @@
   padding: 0;
   line-height: 1;
   border-radius: var(--radius-xs);
+  transform: translateY(-50%);
+  transition: opacity var(--za-motion-fast) var(--za-ease-out);
   -webkit-app-region: no-drag;
 }
 
@@ -389,6 +404,8 @@
   color: var(--graphite-base);
 }
 
+/* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
+   柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
 .ws-running-dot {
   position: relative;
   isolation: isolate;
@@ -403,6 +420,21 @@
   --motion-ripple-scale: 2.4;
   --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 1;
+}
+
+.sidebar-workspace-row .ws-running-dot {
+  margin-left: auto;
+  transform: translateX(0);
+  transition: transform var(--za-motion-fast) var(--za-ease-out);
+}
+
+.sidebar-workspace-row:hover .ws-running-dot {
+  /* 18px 按钮 + 6px 行间距：贴右边的蓝点左滑让出 + */
+  transform: translateX(calc(-18px - 6px));
+}
+
+.sidebar-workspace-row:focus-within .ws-running-dot {
+  transform: translateX(calc(-18px - 6px));
 }
 
 .sidebar-workspace-row--static {
@@ -462,27 +494,33 @@
   padding: 5px var(--sidebar-conv-row-pad-x);
 }
 
+/* Add-workspace icon button in the workspace tree header (Cursor-style folder-plus).
+   Formerly a full-width dashed row at the list bottom; moved to the header right
+   so it is always reachable without scrolling. Must stay no-drag (see .sidebar-top note). */
 .sidebar-workspace-add {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  min-height: 28px;
-  margin-top: 2px;
-  padding: 4px 8px;
-  border: 1px dashed var(--chrome-hairline);
-  border-radius: var(--ui-radius-panel, var(--radius-lg));
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--graphite-mute);
-  font-size: 0.78rem;
   cursor: pointer;
-  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+  -webkit-app-region: no-drag;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 
 .sidebar-workspace-add:hover {
   color: var(--graphite-base);
-  border-color: var(--graphite-mute);
   background: var(--chrome-sunken);
+}
+
+.sidebar-workspace-add:focus-visible {
+  outline: 1px solid var(--chrome-hairline);
+  outline-offset: 1px;
 }
 
 /* ── New chat / top nav (must stay no-drag so Electron titlebar drag does not steal clicks) ── */
@@ -850,7 +888,9 @@
   color: inherit;
   /* Same chrome token as workspace names — not body, which overshoots the tree. */
   font-size: var(--ui-font-control);
-  line-height: 1;
+  /* line-height must clear the descender (g/y/p/q) inside the overflow-hidden box;
+     workspace labels use 1.2 for the same reason. */
+  line-height: 1.2;
 }
 .sidebar-conv-title-input {
   flex: 1;

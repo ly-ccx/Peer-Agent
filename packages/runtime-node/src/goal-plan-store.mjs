@@ -1435,11 +1435,14 @@ function normalizeQualityReview(value) {
 }
 
 const DELIVERY_HANDOFF_STATUSES = new Set(['idle', 'delivering', 'delivered', 'stopped']);
+const DELIVERY_MODES = new Set(['merge', 'direct']);
 
 function normalizeDeliveryHandoff(value) {
   if (!value || typeof value !== 'object') return undefined;
   if (!DELIVERY_HANDOFF_STATUSES.has(value.status)) return undefined;
   const handoff = { status: value.status };
+  // ADR 68：交付模式；缺省 merge（存量数据无此字段）。
+  if (DELIVERY_MODES.has(value.deliveryMode)) handoff.deliveryMode = value.deliveryMode;
   const repoId = normalizeOptionalName(value.repoId);
   if (repoId) handoff.repoId = repoId;
   const targetBranch = normalizeOptionalName(value.targetBranch);

@@ -59,7 +59,7 @@ test('conversation rows stay list geometry instead of capsules', () => {
   assert.doesNotMatch(rowBody, /--ui-radius-panel/);
   assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
   assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
-  assert.match(titleBody, /line-height:\s*1;/);
+  assert.match(titleBody, /line-height:\s*1\.2;/);
   assert.match(titleBody, /font-size:\s*var\(--ui-font-control\);/);
   assert.doesNotMatch(titleBody, /font-size:\s*inherit;/);
   assert.match(chatSidebarCss, /\.conversation-row \.sidebar-conv-title \{[\s\S]*?font-size:\s*var\(--ui-font-control\)/);
@@ -201,16 +201,26 @@ test('workspace rows stack the path under the name so the name can use the full 
   assert.doesNotMatch(pathBody, /flex:\s*1 1 auto;/);
 });
 
-test('workspace rows reveal a new-task plus on hover or focus', () => {
+test('workspace rows hide the new-task plus off-flow so the running dot can sit flush right', () => {
   const buttonBody = ruleBody(sidebarCss, '.sidebar-workspace-new-task');
   const hoverBody = ruleBody(sidebarCss, '.sidebar-workspace-row:hover .sidebar-workspace-new-task');
   const focusBody = ruleBody(sidebarCss, '.sidebar-workspace-row:focus-within .sidebar-workspace-new-task');
+  const restDotBody = ruleBody(sidebarCss, '.sidebar-workspace-row .ws-running-dot');
+  const hoverDotBody = ruleBody(sidebarCss, '.sidebar-workspace-row:hover .ws-running-dot');
+  const focusDotBody = ruleBody(sidebarCss, '.sidebar-workspace-row:focus-within .ws-running-dot');
 
+  assert.match(buttonBody, /position:\s*absolute;/);
+  assert.match(buttonBody, /right:\s*8px;/);
   assert.match(buttonBody, /opacity:\s*0;/);
   assert.match(buttonBody, /pointer-events:\s*none;/);
-  assert.match(buttonBody, /margin-left:\s*auto;/);
+  assert.doesNotMatch(buttonBody, /margin-left:\s*auto;/);
   assert.match(hoverBody, /opacity:\s*1;/);
   assert.match(hoverBody, /pointer-events:\s*auto;/);
   assert.match(focusBody, /opacity:\s*1;/);
   assert.match(focusBody, /pointer-events:\s*auto;/);
+
+  assert.match(restDotBody, /margin-left:\s*auto;/);
+  assert.match(restDotBody, /transform:\s*translateX\(0\);/);
+  assert.match(hoverDotBody, /transform:\s*translateX\(calc\(-18px - 6px\)\);/);
+  assert.match(focusDotBody, /transform:\s*translateX\(calc\(-18px - 6px\)\);/);
 });

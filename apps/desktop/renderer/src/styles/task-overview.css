@@ -2426,6 +2426,98 @@
   color: var(--za-accent);
 }
 
+/* ADR 69 P2：合回收口面板——真冲突聚合为一次收口决断。 */
+.handoff-conflict-panel {
+  margin: 10px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--za-accent, #7c6cff) 28%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--za-accent, #7c6cff) 6%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.handoff-conflict-panel__head {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--za-fg, #e8e8ec);
+}
+.handoff-conflict-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.handoff-conflict-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.handoff-conflict-panel__path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--za-fg-dim, #a3a3ad);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handoff-conflict-panel__choices {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.handoff-conflict-panel__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--za-fg, #e8e8ec);
+  cursor: pointer;
+}
+.handoff-conflict-panel__preview,
+.handoff-conflict-panel__error {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.handoff-conflict-panel__preview {
+  background: color-mix(in srgb, var(--za-ok, #34c759) 12%, transparent);
+  color: var(--za-ok, #34c759);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.handoff-conflict-panel__error {
+  background: color-mix(in srgb, var(--za-danger, #ff453a) 12%, transparent);
+  color: var(--za-danger, #ff453a);
+}
+.handoff-conflict-panel__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.handoff-conflict-panel__actions button {
+  font-size: 12.5px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--za-fg-dim, #a3a3ad) 30%, transparent);
+  background: transparent;
+  color: var(--za-fg, #e8e8ec);
+  cursor: pointer;
+}
+.handoff-conflict-panel__actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.handoff-conflict-panel__actions .handoff-conflict-panel__apply {
+  background: var(--za-accent, #7c6cff);
+  border-color: transparent;
+  color: #fff;
+}
+
 /* Hover preview chrome lives in task-artifact-preview-overlay.css so
    body-portaled cards keep radius/shadow after later styles load. */
 

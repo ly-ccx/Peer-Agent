@@ -14,6 +14,7 @@ import {
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { PeerIcon } from '../../ui/icons';
+import { isWorkbenchHandoffCard, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
 import { ActionLabel } from './actionLabelDisplay';
 
 function workspaceBasename(workspacePath: string): string {
@@ -60,6 +61,7 @@ export function GlobalWorkbenchPage({
   const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
+    if (isWorkbenchHandoffCard(item)) return;
     if (
       item.source === 'shell_background' ||
       item.nextAction === 'open_background_thread'
@@ -327,6 +329,10 @@ function InboxRow({
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const sourceBlock = kind === 'need'
+    && Boolean(item.deliveryHandoffStoppedReason)
+    && isWorkbenchHandoffCard(item);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   useShatterExitCollapse(kind === 'accept' ? phase : null, hostRef);
@@ -355,16 +361,20 @@ function InboxRow({
           : threadPendingCount && threadPendingCount > 1
             ? `${item.statusLabel || '等待验收'} · ${threadPendingCount} 项待签`
             : item.statusLabel || '等待验收'
-      : item.statusLabel;
+      : sourceBlock
+        ? `${item.blockedPlanIds?.length || 1} 件事`
+        : item.statusLabel;
 
   const cta =
     kind === 'accept'
       ? submitting
-        ? '正在交回…'
+        ? '正在合进源头…'
         : celebrating
           ? '已归档 ✓'
           : '查看进度'
-      : item.actionLabel || '去处理';
+      : sourceBlock
+        ? (sourceOpen ? '收起' : '处理')
+        : item.actionLabel || '去处理';
 
   const durationLabel =
     typeof item.durationMs === 'number' &&
@@ -387,7 +397,7 @@ function InboxRow({
         ref={cardRef}
         className={`gwb-item particle-shatter-source${shattering ? ' is-shattering' : ''}${
           kind === 'accept' && phase === 'submitting' ? ' gwb-item--submitting' : ''
-        }`}
+        }${sourceBlock && sourceOpen ? ' gwb-item--source-open' : ''}`}
       >
         <div className="gwb-type">
           <span className={`gwb-tag gwb-tag-${kind === 'accept' ? 'accept' : 'need'}`}>{tag}</span>
@@ -395,19 +405,25 @@ function InboxRow({
         </div>
         <div className="gwb-body">
           <div className="gwb-title">{item.title}</div>
-          {item.currentGoalTitle ? (
+          {sourceBlock ? (
+            <div className="gwb-desc">
+              {item.currentGoalTitle || '挡住它们的是这条线上的未提交改动'}
+            </div>
+          ) : item.currentGoalTitle ? (
             <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
           ) : null}
           <div className="gwb-chips">
             {item.workspaceLabel ? (
               <span className="gwb-chip gwb-chip-ws">{item.workspaceLabel}</span>
             ) : null}
-            {item.planProgress ? (
+            {sourceBlock ? (
+              <span className="gwb-chip">{item.blockedPlanIds?.length || 1} 件事</span>
+            ) : item.planProgress ? (
               <span className="gwb-chip">
                 {item.planProgress.completed} / {item.planProgress.total}
               </span>
             ) : null}
-            {durationLabel ? (
+            {!sourceBlock && durationLabel ? (
               <span className="gwb-chip gwb-chip-duration">耗时 {durationLabel}</span>
             ) : null}
             <span className="gwb-chip">{timeLabel}</span>
@@ -420,7 +436,7 @@ function InboxRow({
           <button
             type="button"
             className="gwb-btn gwb-btn-primary"
-            onClick={onOpen}
+            onClick={sourceBlock ? () => setSourceOpen((open) => !open) : onOpen}
             disabled={kind === 'accept' && acceptBusy}
           >
             {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
@@ -428,6 +444,7 @@ function InboxRow({
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>
+        {sourceBlock && sourceOpen ? <SourceCheckoutPanel item={item} /> : null}
       </div>
       {kind === 'accept' ? (
         <ParticleShatterOverlay active={shattering} targetRef={cardRef} />

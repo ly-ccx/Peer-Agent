@@ -118,3 +118,30 @@ export function canShowStreamResume(
   if (isStreaming || !String(error || '').trim()) return false;
   return resolveStreamResumeTarget(messages) !== null;
 }
+
+/**
+ * Fallback streamError when an interrupted assistant turn is reloaded
+ * without a live in-memory banner. `fetch failed` maps to the generic
+ * network-interrupt copy in formatStreamErrorLabel.
+ */
+export const RESTORED_INTERRUPTED_STREAM_ERROR = 'fetch failed';
+
+function lastAssistantIsInterrupted(messages: readonly ChatMsg[]): boolean {
+  const last = messages[messages.length - 1];
+  return last?.role === 'assistant' && last.interrupted === true;
+}
+
+/**
+ * Bind the composer interrupt banner to the loaded turn.
+ * - Last assistant is still interrupted: keep a live error, or restore a generic network one.
+ * - Turn continued / user abort (no interrupted flag): do not show a leftover banner.
+ */
+export function restoreStreamErrorFromInterrupted(
+  messages: readonly ChatMsg[],
+  existingError: string | null | undefined,
+  isStreaming = false,
+): string | null {
+  if (isStreaming || !lastAssistantIsInterrupted(messages)) return null;
+  const trimmed = String(existingError || '').trim();
+  return trimmed || RESTORED_INTERRUPTED_STREAM_ERROR;
+}

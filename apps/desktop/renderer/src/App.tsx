@@ -12,6 +12,7 @@ import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
+import { isWorkbenchHandoffCard } from './app/components/SourceCheckoutPanel';
 import {
   resolveResultDrawerAcceptanceTargets,
   type OpenResultOptions,
@@ -996,6 +997,7 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
+                        if (isWorkbenchHandoffCard(item)) return;
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
                           return;
@@ -1029,6 +1031,7 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
+                        if (isWorkbenchHandoffCard(item)) return;
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
                           return;
