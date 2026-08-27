@@ -18,6 +18,21 @@ function inspectHint(reason: string | undefined): string {
   return '没法列出挡路文件。提交、放下或再试一次仍然可以继续。';
 }
 
+function sourceActionHint(
+  action: 'commit' | 'stash' | 'retry',
+  result: { reason?: string; detail?: string } | null | undefined,
+): string {
+  const detail = result?.detail?.trim();
+  if (result?.reason === 'permission_required') {
+    return action === 'stash' ? '需要你确认后再放下。' : '需要你确认后再提交。';
+  }
+  if (result?.reason === 'nothing_to_commit') return '源头没有已跟踪的未提交改动，可以直接再试一次。';
+  if (detail) return detail;
+  if (action === 'commit') return '提交没成功。';
+  if (action === 'stash') return '放下没成功。';
+  return '再合失败。';
+}
+
 export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem }) {
   const [files, setFiles] = useState<ReadonlyArray<{ path: string; status: string }>>([]);
   const [busy, setBusy] = useState(false);
@@ -74,7 +89,10 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
         if (!confirmed) { setBusy(false); return; }
         const committed = await clientApi.goalPlansCommitSourceCheckout(sourceParams);
         if (!committed?.ok) {
-          setError(committed?.reason === 'permission_required' ? '需要你确认后再提交。' : '提交没成功。');
+          setError(sourceActionHint('commit', {
+            reason: committed?.reason,
+            detail: committed?.detail,
+          }));
           return;
         }
       } else if (action === 'stash') {
@@ -82,13 +100,13 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
         if (!confirmed) { setBusy(false); return; }
         const stashed = await clientApi.goalPlansStashSourceCheckout(sourceParams);
         if (!stashed?.ok) {
-          setError(stashed?.reason === 'permission_required' ? '需要你确认后再放下。' : '放下没成功。');
+          setError(sourceActionHint('stash', stashed));
           return;
         }
       }
       const retried = await clientApi.goalPlansRetrySourceHandoffs({ planIds });
       if (!retried?.ok) {
-        setError('再合失败。');
+        setError(sourceActionHint('retry', retried));
         return;
       }
       const stillBlocked = (retried.results || []).filter((result) => !result.ok).length;
@@ -103,7 +121,7 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
   return (
     <div className="source-checkout-panel" data-testid="source-checkout-panel">
       <div className="source-checkout-panel__head">
-        {dest} 上还有未提交的改动，挡住了 {planIds.length} 条任务。
+        {dest} 上还有未提交的改动，{planIds.length} 条任务等着合进去。
       </div>
       {files.length > 0 ? (
         <ul className="source-checkout-panel__files">

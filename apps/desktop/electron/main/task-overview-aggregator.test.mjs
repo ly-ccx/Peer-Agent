@@ -2125,6 +2125,20 @@ test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card',
           },
         },
         {
+          planId: 'plan-lock',
+          conversationId: 'conversation-lock',
+          status: 'completed',
+          title: '清理过期 Worktree',
+          updatedAt: '2026-08-26T12:00:00.000Z',
+          deliveryBinding: { targetBranch: '0.0.9' },
+          deliveryHandoff: {
+            status: 'stopped',
+            targetBranch: '0.0.9',
+            stoppedReason: 'git_lock',
+            verdict: 'BLOCKED_ENV',
+          },
+        },
+        {
           planId: 'plan-conflict',
           conversationId: 'conversation-c',
           status: 'completed',
@@ -2148,12 +2162,12 @@ test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card',
   const envBlocked = items.filter((item) => item.deliveryHandoffVerdict === 'BLOCKED_ENV');
   const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
   assert.equal(envBlocked.length, 1);
-  assert.equal(envBlocked[0].title, '合不进 0.0.9');
-  assert.equal(envBlocked[0].currentGoalTitle, '2 条任务被同一源头挡住');
+  assert.equal(envBlocked[0].title, '源头有未提交的改动');
+  assert.equal(envBlocked[0].currentGoalTitle, '3 条任务要合进 0.0.9');
   assert.equal(envBlocked[0].conversationId, undefined);
   assert.equal(envBlocked[0].deliveryTargetBranch, '0.0.9');
-  assert.deepEqual(envBlocked[0].blockedPlanIds, ['plan-a', 'plan-b']);
-  assert.deepEqual(envBlocked[0].blockedPlanTitles, ['画高保真产品稿', '合回 Goal 卡标记']);
+  assert.deepEqual(envBlocked[0].blockedPlanIds, ['plan-a', 'plan-b', 'plan-lock']);
+  assert.deepEqual(envBlocked[0].blockedPlanTitles, ['画高保真产品稿', '合回 Goal 卡标记', '清理过期 Worktree']);
   assert.equal(conflicts.length, 1);
   assert.equal(conflicts[0].title, '真冲突任务');
   assert.equal(typeof collapseEnvBlockedHandoffs, 'function');

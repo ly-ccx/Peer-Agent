@@ -1099,12 +1099,12 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     workspacePath?: string;
     message?: string;
     permissionConfirmed?: boolean;
-  }) => Promise<{ ok: boolean; reason?: string }>;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
   readonly goalPlansStashSourceCheckout: (params: {
     planId?: string;
     workspacePath?: string;
     permissionConfirmed?: boolean;
-  }) => Promise<{ ok: boolean; reason?: string }>;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
   readonly goalPlansRetrySourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
     ok: boolean;
     results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; verdict?: string; reason?: string }>;

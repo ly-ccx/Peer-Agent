@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import {
   createGoalDeliveryHandoff,
+  commitSourceCheckout,
   inspectSourceCheckout,
   resolveHandoffConflicts,
   stashSourceCheckout,
@@ -688,6 +689,27 @@ describe('source checkout actions', () => {
       .inspectSource(null, { repositoryRoot: repository });
     assert.equal(res.ok, true);
     assert.ok(res.files.some((file) => file.path === 'README.md'));
+  });
+
+  it('commitSourceCheckout treats nothing to commit as ready instead of a failure', async () => {
+    const res = await commitSourceCheckout({ repositoryRoot: repository });
+    assert.equal(res.ok, true);
+    assert.equal(res.reason, 'nothing_to_commit');
+  });
+
+  it('commitSourceCheckout surfaces the git stderr when a source commit actually fails', async () => {
+    const res = await commitSourceCheckout({
+      repositoryRoot: repository,
+      gitRunner: async (_cwd, args) => {
+        if (args[0] === 'add') return '';
+        const error = new Error('Command failed: git commit');
+        error.stderr = 'error: pathspec \'README.md\' did not match any file(s) known to git';
+        throw error;
+      },
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'commit_failed');
+    assert.match(res.detail, /pathspec/);
   });
 
   it('retries all blocked task lines after parking the source checkout', async () => {

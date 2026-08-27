@@ -58,10 +58,12 @@ test('source env-block cards expand in place and do not open a conversation', as
   assert.match(source, /isSourceEnvBlock/);
   assert.match(source, /SourceCheckoutPanel/);
   assert.match(source, /处理源头/);
+  assert.match(source, /源头有未提交的改动/);
   assert.match(source, /if \(isSourceEnvBlock\(item\)\) return;/);
   assert.match(source, /gwb-item--source-open/);
   assert.match(source, /sourceBlock && sourceOpen \? <SourceCheckoutPanel item=\{item\} \/>/);
   assert.match(panel, /workspacePath/);
+  assert.match(panel, /committed\?\.detail/);
   assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);
   assert.doesNotMatch(panel, /blockedPlanTitles/);
   assert.doesNotMatch(panel, /unavailable/);

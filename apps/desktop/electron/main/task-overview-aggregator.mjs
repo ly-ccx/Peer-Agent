@@ -829,11 +829,9 @@ function envBlockKeyFromItem(item) {
   if (item.deliveryHandoffStatus !== 'stopped') return null;
   if (item.deliveryHandoffVerdict === 'CONFLICT') return null;
   const target = typeof item.deliveryTargetBranch === 'string' ? item.deliveryTargetBranch.trim() : '';
-  const reason = typeof item.deliveryHandoffStoppedReason === 'string'
-    ? item.deliveryHandoffStoppedReason.trim()
-    : '';
-  if (!target || !reason) return null;
-  return `${target}::${reason}`;
+  const workspace = typeof item.deliveryWorkspacePath === 'string' ? item.deliveryWorkspacePath.trim() : '';
+  if (!target) return null;
+  return `${workspace}::${target}`;
 }
 
 /**
@@ -862,9 +860,9 @@ export function collapseEnvBlockedHandoffs(items) {
     next.push({
       ...withoutConversation,
       taskId: `source-block:${key}`,
-      title: `合不进 ${item.deliveryTargetBranch}`,
+      title: '源头有未提交的改动',
       currentGoalTitle: blocked.length > 1
-        ? `${blocked.length} 条任务被同一源头挡住`
+        ? `${blocked.length} 条任务要合进 ${item.deliveryTargetBranch}`
         : (item.currentGoalTitle || item.title),
       blockedPlanIds,
       blockedPlanTitles,

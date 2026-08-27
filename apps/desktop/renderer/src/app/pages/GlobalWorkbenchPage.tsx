@@ -361,7 +361,9 @@ function InboxRow({
           : threadPendingCount && threadPendingCount > 1
             ? `${item.statusLabel || '等待验收'} · ${threadPendingCount} 项待签`
             : item.statusLabel || '等待验收'
-      : item.statusLabel;
+      : sourceBlock
+        ? '处理源头'
+        : item.statusLabel;
 
   const cta =
     kind === 'accept'
@@ -402,8 +404,14 @@ function InboxRow({
           <span className="gwb-type-note">{typeNote}</span>
         </div>
         <div className="gwb-body">
-          <div className="gwb-title">{item.title}</div>
-          {item.currentGoalTitle ? (
+          <div className="gwb-title">{sourceBlock ? '源头有未提交的改动' : item.title}</div>
+          {sourceBlock ? (
+            <div className="gwb-desc">
+              {item.deliveryTargetBranch
+                ? `${item.blockedPlanIds?.length || 1} 条任务要合进 ${item.deliveryTargetBranch}`
+                : (item.currentGoalTitle || item.title)}
+            </div>
+          ) : item.currentGoalTitle ? (
             <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
           ) : null}
           <div className="gwb-chips">

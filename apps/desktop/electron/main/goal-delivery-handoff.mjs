@@ -22,8 +22,19 @@ function classifyGitError(error) {
   const message = String(error?.stderr || error?.message || error);
   if (/timed?\s*out|ETIMEDOUT/i.test(message)) return 'git_timeout';
   if (/index\.lock|unable to create .*lock|Another git process/i.test(message)) return 'git_lock';
-  if (/conflict|CONFLICT|failed/i.test(message)) return 'merge_conflict';
+  if (/conflict|CONFLICT/i.test(message)) return 'merge_conflict';
   return null;
+}
+
+function gitErrorText(error) {
+  const parts = [
+    error?.stderr,
+    error?.stdout,
+    error?.cause?.stderr,
+    error?.cause?.message,
+    error?.message,
+  ].filter((value) => typeof value === 'string' && value.trim());
+  return parts.join('\n').trim() || String(error || '');
 }
 
 async function gitRaw(cwd, args) {
@@ -104,13 +115,22 @@ export async function inspectSourceCheckout({ repositoryRoot, gitRunner = git })
  */
 export async function commitSourceCheckout({ repositoryRoot, message, gitRunner = git }) {
   if (!repositoryRoot) return { ok: false, reason: 'missing_workspace' };
+  const run = gitRunner === git
+    ? (args) => gitRaw(repositoryRoot, args)
+    : (args) => gitRunner(repositoryRoot, args);
   try {
-    await gitRunner(repositoryRoot, ['add', '-u']);
-    const commitMessage = trim(message) || 'chore: commit blocking work on the source line';
-    await gitRunner(repositoryRoot, ['commit', '-m', commitMessage]);
+    await run(['add', '-u']);
+  } catch (error) {
+    return { ok: false, reason: 'commit_failed', detail: gitErrorText(error).slice(0, 300) };
+  }
+  const commitMessage = trim(message) || 'chore: commit blocking work on the source line';
+  try {
+    await run(['commit', '-m', commitMessage]);
     return { ok: true };
   } catch (error) {
-    return { ok: false, reason: 'commit_failed', detail: String(error?.message || error).slice(0, 300) };
+    const detail = gitErrorText(error);
+    if (/nothing to commit/i.test(detail)) return { ok: true, reason: 'nothing_to_commit' };
+    return { ok: false, reason: 'commit_failed', detail: detail.slice(0, 300) };
   }
 }
 
