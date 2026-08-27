@@ -65,9 +65,6 @@ export function createWorkspaceApplicationService(options = {}) {
   );
   const setSkillWorkspacePath = optionalFunction(options.setSkillWorkspacePath);
   const readProjectIndex = assertFunction(options.readProjectIndex, 'readProjectIndex');
-  const deleteConversationsByWorkspace = typeof options.deleteConversationsByWorkspace === 'function'
-    ? options.deleteConversationsByWorkspace
-    : null;
   const nowIso = options.nowIso ?? (() => new Date().toISOString());
 
   function configuredWorkspaces() {
@@ -84,7 +81,7 @@ export function createWorkspaceApplicationService(options = {}) {
   function listWorkspaces() {
     const all = getSettings();
     // 侧栏只显示手动添加的工作区：移除后不再被会话自动发现重新注入。
-    // （会话与工作区的关联改由 removeWorkspace 同步清理。）
+    // 会话记录本身保留；重新添加同一项目后仍可继续使用。
     const configured = configuredWorkspaces();
 
     return {
@@ -174,16 +171,10 @@ export function createWorkspaceApplicationService(options = {}) {
       ? null
       : all.activeWorkspace;
     mergeSettings({ workspaces, activeWorkspace });
-    // 同步删除该工作区下的全部会话（含 automation 会话的 origin 归属），
-    // 避免已移除工作区被侧栏自动发现或托盘「最近会话」重新捞出。
-    let removedConversations = 0;
-    if (deleteConversationsByWorkspace) {
-      const removed = deleteConversationsByWorkspace(workspacePath);
-      removedConversations = Array.isArray(removed) ? removed.length : 0;
-    }
+    // 只从侧栏拿掉工作区，不删除会话；磁盘文件也不动。
     // Preserve the existing Desktop behavior: removal updates the Skill fallback only.
     setSkillWorkspacePath(activeWorkspace || null);
-    return { workspaces, activeWorkspace, removedConversations };
+    return { workspaces, activeWorkspace };
   }
 
   function updateWorkspace({ path, name, linkedFolders, baseBranch } = {}) {

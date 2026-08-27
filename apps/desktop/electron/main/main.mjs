@@ -2032,8 +2032,6 @@ const openPathApplicationService = createOpenPathApplicationService({
 const workspaceApplicationService = createWorkspaceApplicationService({
   getSettings: () => settingsStore.getAll(),
   mergeSettings: (patch) => settingsStore.merge(patch),
-  deleteConversationsByWorkspace: (workspacePath) =>
-    conversationStore.deleteConversationsByWorkspace(workspacePath),
   pathExists: (candidate) => existsSync(candidate),
   basename: (candidate) => path.basename(candidate),
   getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),

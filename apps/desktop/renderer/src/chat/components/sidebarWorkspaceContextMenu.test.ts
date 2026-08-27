@@ -36,4 +36,6 @@ test('workspace rows open a context menu instead of an inline remove button', ()
     sidebarSource,
     /void handleRemoveWorkspace\(contextWorkspace\.path\)/,
   );
+  assert.match(sidebarSource, /会话记录会保留/);
+  assert.doesNotMatch(sidebarSource, /会话记录将一并删除/);
 });

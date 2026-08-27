@@ -357,8 +357,8 @@ export function Sidebar({
     const ok = await confirm({
       title: isZh ? '移除工作区' : 'Remove workspace',
       message: isZh
-        ? `确定移除「${name}」？该工作区下的会话记录将一并删除，磁盘上的文件不受影响。`
-        : `Remove “${name}”? Conversations under this workspace will also be deleted. Files on disk are not affected.`,
+        ? `确定从列表移除「${name}」？会话记录会保留，磁盘上的文件不受影响。`
+        : `Remove “${name}” from the list? Conversations are kept. Files on disk are not affected.`,
       confirmText: isZh ? '移除' : 'Remove',
       cancelText: isZh ? '取消' : 'Cancel',
       tone: 'danger',

@@ -25,16 +25,6 @@ function createHarness(overrides = {}) {
       calls.push(['merge', structuredClone(patch)]);
       Object.assign(state, patch);
     },
-    deleteConversationsByWorkspace: (workspacePath) => {
-      calls.push(['delete-conversations', workspacePath]);
-      const removed = conversations.filter(
-        (conversation) => conversation.workspacePath === workspacePath,
-      );
-      for (const conversation of removed) {
-        conversations.splice(conversations.indexOf(conversation), 1);
-      }
-      return removed;
-    },
     pathExists: (candidate) => existingPaths.has(candidate),
     basename: (candidate) => candidate.split('/').filter(Boolean).at(-1) || '/',
     getDefaultWorkspacePath: () => '/home/user/PeerAgent',
@@ -59,6 +49,7 @@ function createHarness(overrides = {}) {
     service,
     calls,
     state,
+    conversations,
     existingPaths,
     setSelection(value) {
       selection = value;
@@ -79,7 +70,7 @@ test('lists only manually configured workspaces without conversation auto-discov
   assert.deepEqual(calls, []);
 });
 
-test('removeWorkspace deletes conversations under the workspace', () => {
+test('removeWorkspace keeps conversations under the workspace', () => {
   const harness = createHarness({
     workspaces: [
       { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
@@ -89,12 +80,17 @@ test('removeWorkspace deletes conversations under the workspace', () => {
 
   const result = harness.service.removeWorkspace('/discovered');
   assert.equal(result.activeWorkspace, '/configured');
-  assert.equal(result.removedConversations, 1);
-  assert.ok(
-    harness.calls.some(([name, arg]) => name === 'delete-conversations' && arg === '/discovered'),
+  assert.equal(result.removedConversations, undefined);
+  assert.equal(
+    harness.calls.some(([name]) => name === 'delete-conversations'),
+    false,
+  );
+  assert.deepEqual(
+    harness.conversations.map((conversation) => conversation.workspacePath),
+    ['/configured', '/discovered', '/missing', null],
   );
 
-  // 删除后 listWorkspaces 不再出现该工作区（不会话自动发现注入）。
+  // 移除后 listWorkspaces 不再出现该工作区（不会话自动发现注入）。
   const listed = harness.service.listWorkspaces();
   assert.deepEqual(
     listed.workspaces.map((workspace) => workspace.path),
@@ -208,7 +204,6 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
   assert.deepEqual(harness.service.removeWorkspace('/other'), {
     workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
     activeWorkspace: null,
-    removedConversations: 0,
   });
   assert.deepEqual(harness.calls, [
     ['merge', { activeWorkspace: '/other' }],
@@ -218,7 +213,6 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
       workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
       activeWorkspace: null,
     }],
-    ['delete-conversations', '/other'],
     ['skill-workspace', null],
   ]);
 });
