@@ -362,7 +362,7 @@ function InboxRow({
             ? `${item.statusLabel || '等待验收'} · ${threadPendingCount} 项待签`
             : item.statusLabel || '等待验收'
       : sourceBlock
-        ? '处理源头'
+        ? `${item.blockedPlanIds?.length || 1} 件事`
         : item.statusLabel;
 
   const cta =
@@ -404,12 +404,10 @@ function InboxRow({
           <span className="gwb-type-note">{typeNote}</span>
         </div>
         <div className="gwb-body">
-          <div className="gwb-title">{sourceBlock ? '源头有未提交的改动' : item.title}</div>
+          <div className="gwb-title">{item.title}</div>
           {sourceBlock ? (
             <div className="gwb-desc">
-              {item.deliveryTargetBranch
-                ? `${item.blockedPlanIds?.length || 1} 条任务要合进 ${item.deliveryTargetBranch}`
-                : (item.currentGoalTitle || item.title)}
+              {item.currentGoalTitle || '挡住它们的是这条线上的未提交改动'}
             </div>
           ) : item.currentGoalTitle ? (
             <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
@@ -418,12 +416,14 @@ function InboxRow({
             {item.workspaceLabel ? (
               <span className="gwb-chip gwb-chip-ws">{item.workspaceLabel}</span>
             ) : null}
-            {item.planProgress ? (
+            {sourceBlock ? (
+              <span className="gwb-chip">{item.blockedPlanIds?.length || 1} 件事</span>
+            ) : item.planProgress ? (
               <span className="gwb-chip">
                 {item.planProgress.completed} / {item.planProgress.total}
               </span>
             ) : null}
-            {durationLabel ? (
+            {!sourceBlock && durationLabel ? (
               <span className="gwb-chip gwb-chip-duration">耗时 {durationLabel}</span>
             ) : null}
             <span className="gwb-chip">{timeLabel}</span>

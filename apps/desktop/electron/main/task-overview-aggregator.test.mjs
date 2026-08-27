@@ -2162,8 +2162,8 @@ test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card',
   const envBlocked = items.filter((item) => item.deliveryHandoffVerdict === 'BLOCKED_ENV');
   const conflicts = items.filter((item) => item.deliveryHandoffVerdict === 'CONFLICT');
   assert.equal(envBlocked.length, 1);
-  assert.equal(envBlocked[0].title, '源头有未提交的改动');
-  assert.equal(envBlocked[0].currentGoalTitle, '3 条任务要合进 0.0.9');
+  assert.equal(envBlocked[0].title, '3 件事已经做完，等进 0.0.9');
+  assert.equal(envBlocked[0].currentGoalTitle, '挡住它们的是这条线上的未提交改动');
   assert.equal(envBlocked[0].conversationId, undefined);
   assert.equal(envBlocked[0].deliveryTargetBranch, '0.0.9');
   assert.deepEqual(envBlocked[0].blockedPlanIds, ['plan-a', 'plan-b', 'plan-lock']);

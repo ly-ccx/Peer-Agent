@@ -860,10 +860,8 @@ export function collapseEnvBlockedHandoffs(items) {
     next.push({
       ...withoutConversation,
       taskId: `source-block:${key}`,
-      title: '源头有未提交的改动',
-      currentGoalTitle: blocked.length > 1
-        ? `${blocked.length} 条任务要合进 ${item.deliveryTargetBranch}`
-        : (item.currentGoalTitle || item.title),
+      title: `${blocked.length} 件事已经做完，等进 ${item.deliveryTargetBranch}`,
+      currentGoalTitle: '挡住它们的是这条线上的未提交改动',
       blockedPlanIds,
       blockedPlanTitles,
     });

@@ -121,8 +121,18 @@ export function SourceCheckoutPanel({ item }: { readonly item: TaskOverviewItem 
   return (
     <div className="source-checkout-panel" data-testid="source-checkout-panel">
       <div className="source-checkout-panel__head">
-        {dest} 上还有未提交的改动，{planIds.length} 条任务等着合进去。
+        {dest} 上还有未提交的改动，这 {planIds.length} 件事等着合进去。
       </div>
+      {item.blockedPlanTitles?.length ? (
+        <ul className="source-checkout-panel__files" aria-label="等合进的任务">
+          {item.blockedPlanTitles.map((title) => (
+            <li key={title} className="gwb-chip">{title}</li>
+          ))}
+        </ul>
+      ) : null}
+      {item.blockedPlanTitles?.length ? (
+        <div className="source-checkout-panel__note">点名字只是认人，不打开聊天。</div>
+      ) : null}
       {files.length > 0 ? (
         <ul className="source-checkout-panel__files">
           {files.map((file) => (
