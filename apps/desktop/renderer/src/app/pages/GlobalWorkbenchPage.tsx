@@ -14,6 +14,7 @@ import {
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
 import { PeerIcon } from '../../ui/icons';
+import { isSourceEnvBlock, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
 import { ActionLabel } from './actionLabelDisplay';
 
 function workspaceBasename(workspacePath: string): string {
@@ -60,6 +61,7 @@ export function GlobalWorkbenchPage({
   const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
+    if (isSourceEnvBlock(item)) return;
     if (
       item.source === 'shell_background' ||
       item.nextAction === 'open_background_thread'
@@ -327,6 +329,10 @@ function InboxRow({
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const sourceBlock = kind === 'need'
+    && Boolean(item.deliveryHandoffStoppedReason)
+    && isSourceEnvBlock(item);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   useShatterExitCollapse(kind === 'accept' ? phase : null, hostRef);
@@ -364,7 +370,9 @@ function InboxRow({
         : celebrating
           ? '已归档 ✓'
           : '查看进度'
-      : item.actionLabel || '去处理';
+      : sourceBlock
+        ? (sourceOpen ? '收起源头' : '处理源头')
+        : item.actionLabel || '去处理';
 
   const durationLabel =
     typeof item.durationMs === 'number' &&
@@ -415,12 +423,13 @@ function InboxRow({
           {threadNodes && threadNodes.length > 0 ? (
             <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenThreadNode} />
           ) : null}
+          {sourceBlock && sourceOpen ? <SourceCheckoutPanel item={item} /> : null}
         </div>
         <div className="gwb-actions">
           <button
             type="button"
             className="gwb-btn gwb-btn-primary"
-            onClick={onOpen}
+            onClick={sourceBlock ? () => setSourceOpen((open) => !open) : onOpen}
             disabled={kind === 'accept' && acceptBusy}
           >
             {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}

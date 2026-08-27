@@ -48,6 +48,15 @@ test('global workbench main column no longer hosts leftover acceptance snapshots
   assert.doesNotMatch(source, /确认验收/);
 });
 
+test('source env-block cards expand in place and do not open a conversation', async () => {
+  const source = await readPage();
+  assert.match(source, /deliveryHandoffStoppedReason/);
+  assert.match(source, /isSourceEnvBlock/);
+  assert.match(source, /SourceCheckoutPanel/);
+  assert.match(source, /处理源头/);
+  assert.match(source, /if \(isSourceEnvBlock\(item\)\) return;/);
+});
+
 test('global workbench pulse and empty radar do not revive an accept bucket', async () => {
   const source = await readPage();
   assert.doesNotMatch(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);

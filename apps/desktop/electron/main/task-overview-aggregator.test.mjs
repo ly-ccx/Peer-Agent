@@ -2150,6 +2150,10 @@ test('same-source BLOCKED_ENV handoffs collapse to one workbench decision card',
   assert.equal(envBlocked.length, 1);
   assert.equal(envBlocked[0].title, '合不进 0.0.9');
   assert.equal(envBlocked[0].currentGoalTitle, '2 条任务被同一源头挡住');
+  assert.equal(envBlocked[0].conversationId, undefined);
+  assert.equal(envBlocked[0].deliveryTargetBranch, '0.0.9');
+  assert.deepEqual(envBlocked[0].blockedPlanIds, ['plan-a', 'plan-b']);
+  assert.deepEqual(envBlocked[0].blockedPlanTitles, ['画高保真产品稿', '合回 Goal 卡标记']);
   assert.equal(conflicts.length, 1);
   assert.equal(conflicts[0].title, '真冲突任务');
   assert.equal(typeof collapseEnvBlockedHandoffs, 'function');

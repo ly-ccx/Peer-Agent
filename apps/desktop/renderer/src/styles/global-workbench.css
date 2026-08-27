@@ -478,4 +478,48 @@
       transition: none !important;
     }
   }
+
+  .source-checkout-panel {
+    @apply mt-3 flex flex-col gap-2 rounded-xl border px-3 py-3;
+    border-color: color-mix(in srgb, #9a7340 28%, var(--za-line));
+    background: color-mix(in srgb, #9a7340 6%, transparent);
+    grid-column: 1 / -1;
+  }
+
+  .source-checkout-panel__head {
+    @apply text-[13px] font-medium;
+    color: var(--za-ink);
+  }
+
+  .source-checkout-panel__files,
+  .source-checkout-panel__tasks ul {
+    @apply m-0 flex list-none flex-col gap-1 p-0 font-mono text-[12px];
+    color: var(--za-ink-2, color-mix(in srgb, var(--za-ink) 70%, transparent));
+  }
+
+  .source-checkout-panel__empty,
+  .source-checkout-panel__error {
+    @apply text-[12px];
+  }
+
+  .source-checkout-panel__error {
+    color: #b42318;
+  }
+
+  .source-checkout-panel__actions {
+    @apply flex flex-wrap justify-end gap-2;
+  }
+
+  .source-checkout-panel__actions button {
+    @apply rounded-lg border px-3 py-1.5 text-[12.5px];
+    border-color: var(--za-line);
+    background: transparent;
+    color: var(--za-ink);
+  }
+
+  .source-checkout-panel__apply {
+    background: var(--za-ink) !important;
+    color: var(--za-paper, #fff) !important;
+    border-color: transparent !important;
+  }
 }

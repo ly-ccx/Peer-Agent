@@ -17,6 +17,10 @@ export function createGoalApplicationService({
   recordTaskEvidence,
   deletePlan,
   retryHandoff,
+  retrySourceHandoffs,
+  inspectSourceCheckout,
+  commitSourceCheckout,
+  stashSourceCheckout,
   resolveHandoffConflicts,
   previewHandoffMerge,
   cleanupHandoffPreview,
@@ -108,6 +112,22 @@ export function createGoalApplicationService({
       ports.recordTaskEvidence(planId, taskId, change),
     remove,
     retryHandoff: ({ planId } = {}) => ports.retryHandoff(planId),
+    inspectSourceCheckout: ({ planId } = {}) =>
+      typeof ports.inspectSourceCheckout === 'function'
+        ? ports.inspectSourceCheckout(planId)
+        : { ok: false, reason: 'unavailable' },
+    commitSourceCheckout: ({ planId, message, permissionConfirmed } = {}) =>
+      typeof ports.commitSourceCheckout === 'function'
+        ? ports.commitSourceCheckout(planId, { message, permissionConfirmed: Boolean(permissionConfirmed) })
+        : { ok: false, reason: 'unavailable' },
+    stashSourceCheckout: ({ planId, permissionConfirmed } = {}) =>
+      typeof ports.stashSourceCheckout === 'function'
+        ? ports.stashSourceCheckout(planId, { permissionConfirmed: Boolean(permissionConfirmed) })
+        : { ok: false, reason: 'unavailable' },
+    retrySourceHandoffs: ({ planIds } = {}) =>
+      typeof ports.retrySourceHandoffs === 'function'
+        ? ports.retrySourceHandoffs(planIds)
+        : { ok: false, reason: 'unavailable' },
     // ADR 69 P2：收口决断与真机预览（可选端口，未接线的环境返回 ok:false）。
     resolveHandoffConflicts: ({ planId, resolutions, permissionConfirmed } = {}) =>
       typeof ports.resolveHandoffConflicts === 'function'

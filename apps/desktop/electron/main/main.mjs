@@ -2096,6 +2096,30 @@ const goalApplicationService = createGoalApplicationService({
     scheduleGoalDeliveryHandoff(planId, { retry: true });
     return goalPlanStore.getPlan(planId) ?? null;
   },
+  inspectSourceCheckout: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.inspectSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.inspectSource(plan);
+  },
+  commitSourceCheckout: async (planId, { message, permissionConfirmed = false } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.commitSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.commitSource(plan, { message, permissionConfirmed });
+  },
+  stashSourceCheckout: async (planId, { permissionConfirmed = false } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.stashSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.stashSource(plan, { permissionConfirmed });
+  },
+  retrySourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    if (typeof goalDeliveryHandoff?.retryHandoffs !== 'function') return { ok: false, reason: 'unavailable' };
+    const plans = ids.map((planId) => goalPlanStore.getPlan(planId)).filter(Boolean);
+    return goalDeliveryHandoff.retryHandoffs(plans);
+  },
   // ADR 69 P2：收口决断执行。keep_taskline 动 git 目标线，需渲染层先弹确认并回传 permissionConfirmed。
   resolveHandoffConflicts: async (planId, resolutions, { permissionConfirmed = false } = {}) => {
     const plan = goalPlanStore.getPlan(planId);

@@ -681,6 +681,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     ...(plan.deliveryHandoff?.stoppedReason
       ? { deliveryHandoffStoppedReason: plan.deliveryHandoff.stoppedReason }
       : {}),
+    ...(workspacePath ? { deliveryWorkspacePath: workspacePath } : {}),
     // ADR 69：透出分流 verdict 与真冲突清单，渲染层据此把 CONFLICT 聚合为收口面板。
     ...(plan.deliveryHandoff?.verdict ? { deliveryHandoffVerdict: plan.deliveryHandoff.verdict } : {}),
     ...(Array.isArray(plan.deliveryHandoff?.conflicts) && plan.deliveryHandoff.conflicts.length > 0
@@ -840,7 +841,7 @@ function envBlockKeyFromItem(item) {
  * 真冲突（CONFLICT）仍按任务线各自呈现，因为文件清单不同。
  */
 export function collapseEnvBlockedHandoffs(items) {
-  if (!Array.isArray(items) || items.length < 2) return items;
+  if (!Array.isArray(items) || items.length === 0) return items;
   const seen = new Set();
   const next = [];
   for (const item of items) {
@@ -851,14 +852,23 @@ export function collapseEnvBlockedHandoffs(items) {
     }
     if (seen.has(key)) continue;
     seen.add(key);
-    const blockedCount = items.filter((candidate) => envBlockKeyFromItem(candidate) === key).length;
-    next.push(blockedCount > 1
-      ? {
-          ...item,
-          title: `合不进 ${item.deliveryTargetBranch}`,
-          currentGoalTitle: `${blockedCount} 条任务被同一源头挡住`,
-        }
-      : item);
+    const blocked = items.filter((candidate) => envBlockKeyFromItem(candidate) === key);
+    const blockedPlanIds = blocked.map((candidate) => candidate.taskId).filter(Boolean);
+    const blockedPlanTitles = blocked.map((candidate) => candidate.title).filter(Boolean);
+    const {
+      conversationId: _conversationId,
+      ...withoutConversation
+    } = item;
+    next.push({
+      ...withoutConversation,
+      taskId: `source-block:${key}`,
+      title: `合不进 ${item.deliveryTargetBranch}`,
+      currentGoalTitle: blocked.length > 1
+        ? `${blocked.length} 条任务被同一源头挡住`
+        : (item.currentGoalTitle || item.title),
+      blockedPlanIds,
+      blockedPlanTitles,
+    });
   }
   return next;
 }

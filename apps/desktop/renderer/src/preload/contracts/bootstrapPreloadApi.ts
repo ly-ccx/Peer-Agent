@@ -1085,6 +1085,26 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansInspectSourceCheckout: (params: { planId: string }) => Promise<{
+    ok: boolean;
+    branch?: string;
+    files?: ReadonlyArray<{ path: string; status: string }>;
+    reason?: string;
+  }>;
+  readonly goalPlansCommitSourceCheckout: (params: {
+    planId: string;
+    message?: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string }>;
+  readonly goalPlansStashSourceCheckout: (params: {
+    planId: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string }>;
+  readonly goalPlansRetrySourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; verdict?: string; reason?: string }>;
+    reason?: string;
+  }>;
   /** ADR 69 P2：收口决断执行。keep_taskline 需渲染层先弹确认并回传 permissionConfirmed。 */
   readonly goalPlansResolveHandoffConflicts: (params: {
     planId: string;

@@ -6,7 +6,13 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
-import { createGoalDeliveryHandoff, resolveHandoffConflicts, triageTaskLine } from './goal-delivery-handoff.mjs';
+import {
+  createGoalDeliveryHandoff,
+  inspectSourceCheckout,
+  resolveHandoffConflicts,
+  stashSourceCheckout,
+  triageTaskLine,
+} from './goal-delivery-handoff.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
 
 let root;
@@ -664,5 +670,41 @@ describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
     const res = await resolveHandoffConflicts({ plan: conflictPlan(repository, task, ['demo/s.html']), resolutions: [{ path: 'etc/passwd', choice: 'keep_taskline' }] });
     assert.equal(res.ok, false);
     assert.equal(res.reason, 'unknown_conflict_path');
+  });
+});
+
+describe('source checkout actions', () => {
+  it('inspects tracked dirty files on the occupied source checkout', async () => {
+    writeFileSync(path.join(repository, 'README.md'), 'blocking work\n');
+    const res = await inspectSourceCheckout({ repositoryRoot: repository });
+    assert.equal(res.ok, true);
+    assert.equal(res.branch, 'main');
+    assert.ok(res.files.some((file) => file.path === 'README.md'));
+  });
+
+  it('retries all blocked task lines after parking the source checkout', async () => {
+    const first = boundPlan({ planId: 'plan-handoff-1' });
+    const second = boundPlan({ planId: 'plan-handoff-2' });
+    const store = createStore(first);
+    store.setPlan(second);
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    await isolation.prepareForPlan(store.getPlan('plan-handoff-2'));
+    store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    store.setPlan(markCompleted(store.getPlan('plan-handoff-2')));
+    writeFileSync(path.join(repository, 'README.md'), 'park me\n');
+    const parked = await stashSourceCheckout({ repositoryRoot: repository });
+    assert.equal(parked.ok, true);
+    const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoffs([
+      store.getPlan('plan-handoff-1'),
+      store.getPlan('plan-handoff-2'),
+    ]);
+    assert.equal(retried.ok, true);
+    assert.equal(retried.results.every((result) => result.ok), true);
+    assert.equal(store.getPlan('plan-handoff-1').deliveryHandoff.status, 'delivered');
+    assert.equal(store.getPlan('plan-handoff-2').deliveryHandoff.status, 'delivered');
   });
 });

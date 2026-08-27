@@ -183,6 +183,15 @@ export interface TaskOverviewItem {
   readonly deliveryTargetBranch?: string;
   /** 合回停住原因；与目标分支一起作为环境挡去重键。 */
   readonly deliveryHandoffStoppedReason?: string;
+  /**
+   * 源头环境挡卡：被同一源头挡住的任务线。有值时这张卡代表源头，不是某条 Goal 会话。
+   * 主按钮不得用 conversationId 打开聊天。
+   */
+  readonly blockedPlanIds?: readonly string[];
+  /** 被挡任务线标题，供源头卡展开「都有哪些」。 */
+  readonly blockedPlanTitles?: readonly string[];
+  /** 源头工作区绝对路径；源头动作（列脏文件 / 提交 / stash / 批量再合）用它，不跟会话走。 */
+  readonly deliveryWorkspacePath?: string;
   /** ADR 69：分流 verdict；CONFLICT 时配合 deliveryHandoffConflicts 渲染收口面板。 */
   readonly deliveryHandoffVerdict?: string;
   /** ADR 69：CONFLICT 时的真冲突文件清单（同名文件内容不同）。 */
@@ -306,6 +315,9 @@ export interface GoalPlanProjectionSnapshot {
   readonly deliveryHandoffStatus?: GoalDeliveryHandoffStatus;
   readonly deliveryTargetBranch?: string;
   readonly deliveryHandoffStoppedReason?: string;
+  readonly blockedPlanIds?: readonly string[];
+  readonly blockedPlanTitles?: readonly string[];
+  readonly deliveryWorkspacePath?: string;
   /** ADR 69：分流 verdict / CONFLICT 冲突清单（快照透传，供 projectGoalPlan 组装）。 */
   readonly deliveryHandoffVerdict?: string;
   readonly deliveryHandoffConflicts?: readonly { readonly path: string }[];
@@ -545,6 +557,9 @@ export function projectGoalPlan(
     ...(snapshot.deliveryHandoffStoppedReason
       ? { deliveryHandoffStoppedReason: snapshot.deliveryHandoffStoppedReason }
       : {}),
+    ...(snapshot.blockedPlanIds?.length ? { blockedPlanIds: snapshot.blockedPlanIds } : {}),
+    ...(snapshot.blockedPlanTitles?.length ? { blockedPlanTitles: snapshot.blockedPlanTitles } : {}),
+    ...(snapshot.deliveryWorkspacePath ? { deliveryWorkspacePath: snapshot.deliveryWorkspacePath } : {}),
     ...(snapshot.deliveryHandoffVerdict ? { deliveryHandoffVerdict: snapshot.deliveryHandoffVerdict } : {}),
     ...(snapshot.deliveryHandoffConflicts?.length
       ? { deliveryHandoffConflicts: snapshot.deliveryHandoffConflicts }

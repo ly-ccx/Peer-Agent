@@ -26,14 +26,18 @@ function classifyGitError(error) {
   return null;
 }
 
+async function gitRaw(cwd, args) {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  return String(stdout || '');
+}
+
 async function git(cwd, args) {
   try {
-    const { stdout } = await execFileAsync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      timeout: 30_000,
-    });
-    return String(stdout || '').trim();
+    return (await gitRaw(cwd, args)).trim();
   } catch (error) {
     const reason = classifyGitError(error);
     if (reason) {
@@ -67,6 +71,60 @@ function defaultMergeTarget(plan) {
 
 function alreadyDelivered(plan) {
   return plan?.deliveryHandoff?.status === 'delivered';
+}
+
+function parsePorcelainPath(line) {
+  return line.slice(3).trim().replace(/^"(.*)"$/, '$1');
+}
+
+/**
+ * 源头环境挡：列出目标工作区挡路的 tracked 改动（不含未跟踪噪音）。
+ */
+export async function inspectSourceCheckout({ repositoryRoot, gitRunner = git }) {
+  if (!repositoryRoot) return { ok: false, reason: 'missing_workspace' };
+  try {
+    const branch = trim(await gitRunner(repositoryRoot, ['rev-parse', '--abbrev-ref', 'HEAD']));
+    const rawStatus = gitRunner === git
+      ? await gitRaw(repositoryRoot, ['status', '--porcelain', '-uall'])
+      : await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
+    const files = String(rawStatus || '')
+      .split('\n')
+      .filter((line) => line.length >= 4)
+      .filter((line) => line.slice(0, 2) !== '??')
+      .map((line) => ({ path: parsePorcelainPath(line), status: line.slice(0, 2).trim() || line.slice(0, 2) }))
+      .filter((entry) => entry.path);
+    return { ok: true, branch, files };
+  } catch (error) {
+    return { ok: false, reason: 'inspect_failed', detail: String(error?.message || error).slice(0, 200) };
+  }
+}
+
+/**
+ * 提交源头挡路的 tracked 改动。不把未跟踪噪音加进去。
+ */
+export async function commitSourceCheckout({ repositoryRoot, message, gitRunner = git }) {
+  if (!repositoryRoot) return { ok: false, reason: 'missing_workspace' };
+  try {
+    await gitRunner(repositoryRoot, ['add', '-u']);
+    const commitMessage = trim(message) || 'chore: commit blocking work on the source line';
+    await gitRunner(repositoryRoot, ['commit', '-m', commitMessage]);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: 'commit_failed', detail: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+/**
+ * 把源头未提交工作先放下，好让任务线合进来。
+ */
+export async function stashSourceCheckout({ repositoryRoot, gitRunner = git }) {
+  if (!repositoryRoot) return { ok: false, reason: 'missing_workspace' };
+  try {
+    await gitRunner(repositoryRoot, ['stash', 'push', '-m', 'peer: park source checkout to merge task lines']);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: 'stash_failed', detail: String(error?.message || error).slice(0, 300) };
+  }
 }
 
 /** 把绝对/相对路径规整为仓库内相对路径；越界返回 null（防路径逃逸）。 */
@@ -636,6 +694,49 @@ export function createGoalDeliveryHandoff({
     return handoffPlan(plan, { retry: true });
   }
 
+  async function inspectSource(plan) {
+    const binding = plan?.deliveryBinding || {};
+    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+    return inspectSourceCheckout({ repositoryRoot });
+  }
+
+  async function commitSource(plan, { message, permissionConfirmed = false } = {}) {
+    if (!permissionConfirmed) return { ok: false, reason: 'permission_required' };
+    const binding = plan?.deliveryBinding || {};
+    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+    return commitSourceCheckout({ repositoryRoot, message });
+  }
+
+  async function stashSource(plan, { permissionConfirmed = false } = {}) {
+    if (!permissionConfirmed) return { ok: false, reason: 'permission_required' };
+    const binding = plan?.deliveryBinding || {};
+    const repositoryRoot = trim(binding.targetWorkspacePath) || trim(plan?.targetWorkspacePath);
+    return stashSourceCheckout({ repositoryRoot });
+  }
+
+  async function retryHandoffs(plans) {
+    const list = Array.isArray(plans) ? plans.filter((plan) => plan?.planId) : [];
+    const results = [];
+    for (const plan of list) {
+      try {
+        const next = await retryHandoff(plan);
+        results.push({
+          planId: plan.planId,
+          ok: next?.deliveryHandoff?.status === 'delivered',
+          status: next?.deliveryHandoff?.status,
+          verdict: next?.deliveryHandoff?.verdict,
+        });
+      } catch (error) {
+        results.push({
+          planId: plan.planId,
+          ok: false,
+          reason: String(error?.message || error).slice(0, 200),
+        });
+      }
+    }
+    return { ok: true, results };
+  }
+
   // ADR 69 P2：收口决断执行。permissionConfirmed 由 main 经 PermissionGrant 批准后传入。
   async function resolveConflicts(plan, resolutions, { permissionConfirmed = false } = {}) {
     const needsGrant = (resolutions || []).some((r) => r?.choice === 'keep_taskline');
@@ -685,6 +786,10 @@ export function createGoalDeliveryHandoff({
     lockKey,
     handoffPlan,
     retryHandoff,
+    retryHandoffs,
+    inspectSource,
+    commitSource,
+    stashSource,
     resolveConflicts,
     previewMerge,
     cleanupPreview,
