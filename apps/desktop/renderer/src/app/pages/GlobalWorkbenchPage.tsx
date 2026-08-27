@@ -373,7 +373,7 @@ function InboxRow({
           ? '已归档 ✓'
           : '查看进度'
       : sourceBlock
-        ? (sourceOpen ? '收起源头' : '处理源头')
+        ? (sourceOpen ? '收起' : '处理')
         : item.actionLabel || '去处理';
 
   const durationLabel =
