@@ -59,7 +59,7 @@ test('conversation rows stay list geometry instead of capsules', () => {
   assert.doesNotMatch(rowBody, /--ui-radius-panel/);
   assert.match(layeredRow, /border-radius:\s*var\(--ui-radius-row, 8px\);/);
   assert.doesNotMatch(layeredRow, /--ui-radius-panel/);
-  assert.match(titleBody, /line-height:\s*1;/);
+  assert.match(titleBody, /line-height:\s*1\.2;/);
   assert.match(titleBody, /font-size:\s*var\(--ui-font-control\);/);
   assert.doesNotMatch(titleBody, /font-size:\s*inherit;/);
   assert.match(chatSidebarCss, /\.conversation-row \.sidebar-conv-title \{[\s\S]*?font-size:\s*var\(--ui-font-control\)/);

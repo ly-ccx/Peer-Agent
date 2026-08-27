@@ -888,7 +888,9 @@
   color: inherit;
   /* Same chrome token as workspace names — not body, which overshoots the tree. */
   font-size: var(--ui-font-control);
-  line-height: 1;
+  /* line-height must clear the descender (g/y/p/q) inside the overflow-hidden box;
+     workspace labels use 1.2 for the same reason. */
+  line-height: 1.2;
 }
 .sidebar-conv-title-input {
   flex: 1;
