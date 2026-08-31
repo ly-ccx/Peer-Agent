@@ -48,17 +48,18 @@ test('global workbench main column no longer hosts leftover acceptance snapshots
   assert.doesNotMatch(source, /确认验收/);
 });
 
-test('source env-block cards expand in place and do not open a conversation', async () => {
+test('source env-block cards keep checkout actions but open the related conversation', async () => {
   const source = await readPage();
   const panel = await readPanel();
   const styles = await readStyles();
   assert.match(source, /deliveryHandoffStoppedReason/);
   assert.match(source, /isWorkbenchHandoffCard/);
   assert.match(source, /SourceCheckoutPanel/);
-  assert.match(source, /sourceOpen \? '收起' : '处理'/);
+  assert.match(source, /sourceBlock\s*\n\s*\? '去对话'/);
+  assert.doesNotMatch(source, /sourceOpen \? '收起' : '处理'/);
   assert.doesNotMatch(source, /处理源头/);
   assert.doesNotMatch(source, /收起源头/);
-  assert.match(source, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
+  assert.doesNotMatch(source, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
   assert.match(panel, /不合进/);
   assert.match(panel, /goalPlansDeclineSourceHandoffs/);
   assert.match(panel, /提交并合进/);
@@ -66,8 +67,7 @@ test('source env-block cards expand in place and do not open a conversation', as
   assert.doesNotMatch(panel, /提交这些改动/);
   assert.doesNotMatch(panel, /先放下再合/);
   assert.doesNotMatch(panel, /再试一次/);
-  assert.match(source, /gwb-item--source-open/);
-  assert.match(source, /sourceBlock && sourceOpen \? <SourceCheckoutPanel item=\{item\} \/>/);
+  assert.match(source, /sourceBlock \? <SourceCheckoutPanel item=\{item\} \/>/);
   assert.match(panel, /workspacePath/);
   assert.match(panel, /committed\.detail/);
   assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);

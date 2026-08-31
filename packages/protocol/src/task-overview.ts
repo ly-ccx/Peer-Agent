@@ -185,7 +185,7 @@ export interface TaskOverviewItem {
   readonly deliveryHandoffStoppedReason?: string;
   /**
    * 源头环境挡卡：被同一源头挡住的任务线。有值时这张卡代表源头，不是某条 Goal 会话。
-   * 主按钮不得用 conversationId 打开聊天。
+   * 主按钮应打开被挡任务对应的对话，而不是原地结束。
    */
   readonly blockedPlanIds?: readonly string[];
   /** 被挡任务线标题，供源头卡展开「都有哪些」。 */

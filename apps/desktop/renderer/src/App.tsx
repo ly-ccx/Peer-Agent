@@ -12,11 +12,11 @@ import { GlobalWorkbenchPage } from './app/pages/GlobalWorkbenchPage';
 import { TasksPage } from './app/pages/TasksPage';
 import { HistoryPage } from './app/pages/HistoryPage';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { isWorkbenchHandoffCard } from './app/components/SourceCheckoutPanel';
 import {
   resolveResultDrawerAcceptanceTargets,
   type OpenResultOptions,
 } from './app/state/resultDrawerAcceptance';
+import { resolveWorkbenchConversationId } from './app/state/openWorkbenchConversation';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -998,18 +998,18 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
-                        if (isWorkbenchHandoffCard(item)) return;
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
                           return;
                         }
-                        const conversationId = item.conversationId;
-                        if (conversationId) {
-                          handleSelectConversation(String(conversationId));
-                          focusTaskRelatedMessage(item);
-                          return;
-                        }
-                        openCollectionDrawer('tasks');
+                        void resolveWorkbenchConversationId(item).then((conversationId) => {
+                          if (conversationId) {
+                            handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
+                            focusTaskRelatedMessage({ ...item, conversationId });
+                            return;
+                          }
+                          openCollectionDrawer('tasks');
+                        });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}
@@ -1035,18 +1035,18 @@ function MainApp() {
                         void handleNewChat();
                       }}
                       onOpenItem={(item: TaskOverviewItem, options?: OpenResultOptions) => {
-                        if (isWorkbenchHandoffCard(item)) return;
                         if (item.actionRight === 'result_ready') {
                           openResultDrawer(item, options);
                           return;
                         }
-                        const conversationId = item.conversationId;
-                        if (conversationId) {
-                          handleSelectConversation(String(conversationId));
-                          focusTaskRelatedMessage(item);
-                          return;
-                        }
-                        openCollectionDrawer('tasks');
+                        void resolveWorkbenchConversationId(item).then((conversationId) => {
+                          if (conversationId) {
+                            handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
+                            focusTaskRelatedMessage({ ...item, conversationId });
+                            return;
+                          }
+                          openCollectionDrawer('tasks');
+                        });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}

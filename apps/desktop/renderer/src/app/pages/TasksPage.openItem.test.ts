@@ -57,7 +57,9 @@ test('result_ready opens the drawer without focusing; other rights open the main
   for (const handler of openItemHandlers) {
     assert.match(handler, /result_ready'\) \{[\s\S]*?openResultDrawer\(item, options\);\s*\n\s*return;/);
     assert.doesNotMatch(handler, /openResultDrawer\(item, options\);\s*focusTaskRelatedMessage\(item\)/);
-    assert.match(handler, /handleSelectConversation\(String\(conversationId\)\);\s*focusTaskRelatedMessage\(item\)/);
+    assert.match(handler, /resolveWorkbenchConversationId\(item\)/);
+    assert.match(handler, /handleSelectConversation\(String\(conversationId\), item\.deliveryWorkspacePath \?\? null\);/);
+    assert.match(handler, /focusTaskRelatedMessage\(\{ \.\.\.item, conversationId \}\)/);
   }
   assert.match(appSource, /setNotificationMessageTarget\(\{/);
   assert.match(appSource, /resolveTaskRelatedMessageId\(item\)/);

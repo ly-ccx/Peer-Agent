@@ -65,7 +65,6 @@ export function GlobalWorkbenchPage({
   const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
-    if (isWorkbenchHandoffCard(item)) return;
     if (
       item.source === 'shell_background' ||
       item.nextAction === 'open_background_thread'
@@ -373,7 +372,6 @@ function InboxRow({
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
-  const [sourceOpen, setSourceOpen] = useState(false);
   const sourceBlock = kind === 'need'
     && Boolean(item.deliveryHandoffStoppedReason)
     && isWorkbenchHandoffCard(item);
@@ -417,7 +415,7 @@ function InboxRow({
           ? '已归档 ✓'
           : '查看进度'
       : sourceBlock
-        ? (sourceOpen ? '收起' : '处理')
+        ? '去对话'
         : item.actionLabel || '去处理';
 
   const durationLabel =
@@ -441,7 +439,7 @@ function InboxRow({
         ref={cardRef}
         className={`gwb-item particle-shatter-source${shattering ? ' is-shattering' : ''}${
           kind === 'accept' && phase === 'submitting' ? ' gwb-item--submitting' : ''
-        }${sourceBlock && sourceOpen ? ' gwb-item--source-open' : ''}`}
+        }`}
       >
         <div className="gwb-type">
           <span className={`gwb-tag gwb-tag-${kind === 'accept' ? 'accept' : 'need'}`}>{tag}</span>
@@ -480,7 +478,7 @@ function InboxRow({
           <button
             type="button"
             className="gwb-btn gwb-btn-primary"
-            onClick={sourceBlock ? () => setSourceOpen((open) => !open) : onOpen}
+            onClick={() => { void onOpen(); }}
             disabled={kind === 'accept' && acceptBusy}
           >
             {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
@@ -488,7 +486,7 @@ function InboxRow({
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>
-        {sourceBlock && sourceOpen ? <SourceCheckoutPanel item={item} /> : null}
+        {sourceBlock ? <SourceCheckoutPanel item={item} /> : null}
       </div>
       {kind === 'accept' ? (
         <ParticleShatterOverlay active={shattering} targetRef={cardRef} />
