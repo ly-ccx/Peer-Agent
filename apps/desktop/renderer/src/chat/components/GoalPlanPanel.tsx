@@ -1494,25 +1494,6 @@ function isPlanArchivedToSource(plan: GoalPlan): boolean {
   return plan.deliveryHandoff?.status === 'delivered';
 }
 
-type GoalStripQuickAction = 'continue-fix' | 'merge';
-
-function planStripQuickAction(plan: GoalPlan): GoalStripQuickAction | null {
-  if (isPlanArchivedToSource(plan)) return null;
-  const isolated = isIsolatedPlan(plan);
-  const handoffStatus = plan.deliveryHandoff?.status;
-  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
-  if (qualityReviewPending) return 'continue-fix';
-  if (
-    isolated
-    && plan.status === 'completed'
-    && handoffStatus !== 'delivered'
-    && handoffStatus !== 'delivering'
-  ) {
-    return 'merge';
-  }
-  return null;
-}
-
 async function confirmDiscardAfterStop(
   confirm: (options: {
     title?: string;
@@ -1557,68 +1538,6 @@ function isolateReasonCopy(reason: string | undefined, isZh: boolean): string {
     default:
       return isZh ? '隔离没有完成。' : 'Isolation did not finish.';
   }
-}
-
-function GoalStripPlanRow({
-  plan,
-  isZh,
-  busy,
-  isStreaming,
-  onNextAction,
-  onMerge,
-}: {
-  readonly plan: GoalPlan;
-  readonly isZh: boolean;
-  readonly busy: boolean;
-  readonly isStreaming: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
-  readonly onMerge: (plan: GoalPlan) => void | Promise<void>;
-}): ReactElement {
-  const title = derivePlanTitle(plan, isZh);
-  const lampHandoff = formatGoalDeliveryHandoffLamp(plan, { locale: isZh ? 'zh' : 'en' });
-  const archived = isPlanArchivedToSource(plan);
-  const quickAction = planStripQuickAction(plan);
-  const mergeDest = mergeDestination(plan, isZh);
-  const status = archived
-    ? (lampHandoff ?? (isZh ? '已归档' : 'Archived'))
-    : (lampHandoff ?? (isZh ? '还没归档' : 'Not archived'));
-  return (
-    <span
-      className={`goal-panel-toggle-plan${archived ? ' is-archived' : ' is-open'}`}
-      data-goal-plan-id={plan.planId}
-    >
-      <span className="goal-panel-toggle-plan-title">{title}</span>
-      <span className="goal-panel-toggle-plan-status">{status}</span>
-      {quickAction === 'continue-fix' ? (
-        <button
-          type="button"
-          className="goal-panel-toggle-plan-action"
-          disabled={busy || isStreaming}
-          onClick={(event) => {
-            event.stopPropagation();
-            void onNextAction(plan, 'continue-fix');
-          }}
-        >
-          {isZh ? '继续修' : 'Continue fixing'}
-        </button>
-      ) : null}
-      {quickAction === 'merge' ? (
-        <button
-          type="button"
-          className="goal-panel-toggle-plan-action"
-          disabled={busy || isStreaming}
-          onClick={(event) => {
-            event.stopPropagation();
-            void onMerge(plan);
-          }}
-        >
-          {plan.deliveryHandoff?.status === 'stopped'
-            ? (isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`)
-            : (isZh ? `合并进 ${mergeDest}` : `Merge into ${mergeDest}`)}
-        </button>
-      ) : null}
-    </span>
-  );
 }
 
 interface CompactApprovalBarProps {
@@ -2325,25 +2244,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     [confirm, decide, interactionActions, isZh, onRequestHostFocus, reload],
   );
 
-  const mergePlanIntoSource = useCallback(async (plan: GoalPlan) => {
-    setBusyPlanId(plan.planId);
-    setError(null);
-    try {
-      const next = await clientApi.goalPlansRetryHandoff({ planId: plan.planId });
-      const reason = next && typeof next === 'object'
-        ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
-        : null;
-      const stopped = next && typeof next === 'object'
-        && next.deliveryHandoff?.status === 'stopped';
-      if (stopped && reason) setError(reason);
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : isZh ? '合回失败' : 'Merge failed');
-    } finally {
-      setBusyPlanId(null);
-    }
-  }, [isZh, reload]);
-
   // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）
   // 仍用面板自身的 busyPlanId/error。任一来源 busy 即视为该计划 busy。
   const effectiveBusyPlanId = approvalBusyPlanId ?? busyPlanId;
@@ -2420,6 +2320,12 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
   const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   const { activePlan, mainPlan, listPlans, orderedListPlans } = planViewModel;
+  const activeProgress = activePlan ? safeProgress(activePlan) : null;
+  const hasUnarchivedHint = Boolean(
+    activePlan
+    && isPlanArchivedToSource(activePlan)
+    && plans.some((plan) => plan.planId !== activePlan.planId && !isPlanArchivedToSource(plan)),
+  );
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
@@ -2487,19 +2393,42 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
             <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
             <span className="goal-panel-toggle-summary">{summary}</span>
             {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
-            {(dockedToWorkbench || !expanded) && plans.length > 0 ? (
-              <span className="goal-panel-toggle-plans" onClick={(event) => event.stopPropagation()}>
-                {plans.map((plan) => (
-                  <GoalStripPlanRow
-                    key={plan.planId}
-                    plan={plan}
-                    isZh={isZh}
-                    busy={effectiveBusyPlanId === plan.planId}
-                    isStreaming={isStreaming}
-                    onNextAction={handleNextAction}
-                    onMerge={mergePlanIntoSource}
-                  />
-                ))}
+            {(dockedToWorkbench || !expanded) && activePlan ? (
+              <span className="goal-panel-toggle-active">
+                {activePlan.status === 'executing' ? (
+                  <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
+                ) : dockedCompleted ? (
+                  <span
+                    className="goal-panel-toggle-active-check"
+                    aria-label={isZh ? '已完成' : 'Completed'}
+                    role="img"
+                  >
+                    ✓
+                  </span>
+                ) : null}
+                <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
+                {(() => {
+                  const lampHandoff = formatGoalDeliveryHandoffLamp(activePlan, {
+                    locale: isZh ? 'zh' : 'en',
+                  });
+                  if (lampHandoff) {
+                    return (
+                      <span className="goal-panel-toggle-active-handoff">
+                        {lampHandoff}
+                      </span>
+                    );
+                  }
+                  return activeProgress ? (
+                    <span className="goal-panel-toggle-active-progress">
+                      {`${activeProgress.completed}/${activeProgress.total}`}
+                    </span>
+                  ) : null;
+                })()}
+                {hasUnarchivedHint ? (
+                  <span className="goal-panel-toggle-active-handoff">
+                    {isZh ? '有未归档' : 'Unarchived remaining'}
+                  </span>
+                ) : null}
               </span>
             ) : null}
             {lockedOpen && !dockedToWorkbench ? null : (

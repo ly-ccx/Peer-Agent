@@ -49,11 +49,8 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
 
   assert.match(source, /formatGoalDeliveryHandoffLamp/);
   assert.match(source, /goal-plan-merge-route/);
-  assert.match(source, /goal-panel-toggle-plans/);
+  assert.match(source, /goal-panel-toggle-active/);
   assert.match(source, /goal-plan-head-handoff/);
-  assert.match(source, /goal-panel-toggle-plan/);
-  assert.match(source, /GoalStripPlanRow/);
-  assert.match(source, /planStripQuickAction/);
   assert.match(source, /canMergeIntoSource/);
   assert.match(source, /qualityReviewPending/);
   assert.match(source, /mergeIntoSource/);
@@ -65,8 +62,10 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /isZh \? '继续修' : 'Continue fixing'/);
   assert.match(source, /onNextAction\(plan, 'continue-fix'\)/);
   assert.match(source, /continueFixingMessage\(plan\.planId, isZh\)/);
-  assert.match(source, /isZh \? '还没归档' : 'Not archived'/);
-  assert.match(source, /onMerge=\{mergePlanIntoSource\}/);
+  assert.match(source, /isZh \? '有未归档' : 'Unarchived remaining'/);
+  assert.match(source, /hasUnarchivedHint/);
+  assert.doesNotMatch(source, /GoalStripPlanRow/);
+  assert.doesNotMatch(source, /goal-panel-toggle-plans/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,120}onNextAction\(plan, 'adjust'\)/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,80}mergeIntoSource\(\)/);
   assert.doesNotMatch(source, /重试交回/);
@@ -77,9 +76,10 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.doesNotMatch(source, /const showMergeRoute = hasTaskLine\(plan\) \|\| isolated;/);
 
   assert.match(styles, /\.goal-plan-merge-route/);
+  assert.match(styles, /\.goal-panel-toggle-active-handoff/);
   assert.match(styles, /\.goal-plan-head-handoff/);
-  assert.match(styles, /\.goal-panel-toggle-plans/);
-  assert.match(styles, /\.goal-panel-toggle-plan-action/);
+  assert.doesNotMatch(styles, /\.goal-panel-toggle-plans\b/);
+  assert.doesNotMatch(styles, /\.goal-panel-toggle-plan-action\b/);
 });
 
 test('goal task list tooltip pins width and wraps titles instead of oscillating ellipsis', async () => {
