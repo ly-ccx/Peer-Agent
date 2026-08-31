@@ -60,7 +60,9 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /合并进 \$\{mergeDest\}/);
   assert.match(source, /qualityReviewPending \? \(/);
   assert.match(source, /isZh \? '继续修' : 'Continue fixing'/);
-  assert.match(source, /onNextAction\(plan, 'adjust'\)/);
+  assert.match(source, /onNextAction\(plan, 'continue-fix'\)/);
+  assert.match(source, /continueFixingMessage\(plan\.planId, isZh\)/);
+  assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,120}onNextAction\(plan, 'adjust'\)/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,80}mergeIntoSource\(\)/);
   assert.doesNotMatch(source, /重试交回/);
   assert.doesNotMatch(source, /交回未完成/);

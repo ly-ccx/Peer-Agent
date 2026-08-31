@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { GoalPlan } from '@peer-agent/protocol';
-import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goalPlanNextActions.ts';
+import { continueFixingMessage, getGoalPlanNextStep, goalPlanNextStepCopy } from './goalPlanNextActions.ts';
 
 function plan(overrides: Partial<GoalPlan>): GoalPlan {
   return {
@@ -43,5 +43,18 @@ describe('goal plan next actions', () => {
     assert.match(copy.guidance, /开始执行/);
     assert.match(copy.guidance, /调整计划/);
     assert.match(copy.guidance, /取消计划/);
+  });
+
+  it('continue-fix message includes the Goal planId and does not reuse adjust copy', () => {
+    const copy = goalPlanNextStepCopy(true);
+    const message = continueFixingMessage('plan-1', true);
+    assert.match(message, /planId=plan-1/);
+    assert.match(message, /继续修这条 Goal/);
+    assert.doesNotMatch(message, /我想调整计划/);
+    assert.equal(copy.adjustmentMessage, '我想调整计划。请先不要执行，询问我需要修改哪些内容。');
+    assert.equal(
+      continueFixingMessage('plan-1', false),
+      'Continue fixing this Goal (planId=plan-1). Quality review has not passed; finish the missing checks, then merge.',
+    );
   });
 });

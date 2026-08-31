@@ -29,7 +29,12 @@ import { InteractionActionsContext, InteractionStreamingContext } from './thread
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './goal/SuccessCriteriaEditor';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
-import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
+import {
+  continueFixingMessage,
+  getGoalPlanNextStep,
+  goalPlanNextStepCopy,
+  type GoalPlanNextAction,
+} from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { orderGoalPlansByLineage } from './goal/goalPlanOrder';
 
@@ -1536,7 +1541,7 @@ interface CompactApprovalBarProps {
   readonly isZh: boolean;
   readonly busy: boolean;
   readonly isStreaming: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
 }
 
 /** The chat-bottom approval surface deliberately stays to one compact row. */
@@ -1581,7 +1586,7 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
   readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
@@ -1825,7 +1830,7 @@ const PlanCard = memo(function PlanCard({
                   type="button"
                   className="goal-plan-delivery-retry"
                   disabled={lineDisabled || isStreaming}
-                  onClick={() => void onNextAction(plan, 'adjust')}
+                  onClick={() => void onNextAction(plan, 'continue-fix')}
                 >
                   {isZh ? '继续修' : 'Continue fixing'}
                 </button>
@@ -2197,7 +2202,12 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   });
 
   const handleNextAction = useCallback(
-    async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
+    async (plan: GoalPlan, action: GoalPlanNextAction) => {
+      if (action === 'continue-fix') {
+        interactionActions?.onSelectOption(continueFixingMessage(plan.planId, isZh));
+        onRequestHostFocus?.();
+        return;
+      }
       if (action === 'adjust') {
         interactionActions?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
         onRequestHostFocus?.();
