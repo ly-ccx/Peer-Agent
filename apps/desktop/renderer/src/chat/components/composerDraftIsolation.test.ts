@@ -141,6 +141,8 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('./GoalPlanPanel.tsx'),
   ]);
 
+  assert.match(surface, /composer-context-row[\s\S]*<ComposerDraftControls/);
+  assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
   assert.ok(surface.includes('disabled={workspaceIsGit === false || isStreaming}'));

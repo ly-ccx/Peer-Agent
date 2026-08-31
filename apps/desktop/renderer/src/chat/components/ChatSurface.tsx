@@ -2933,32 +2933,7 @@ export function ChatSurface({
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
         <>
-        <ComposerDraftControls
-          conversationId={conversationId}
-          variant={showEmptyHome ? 'home' : 'conversation'}
-          hasProvider={hasProvider}
-          isBusy={isBusy}
-          isStreaming={isStreaming}
-          isZh={isZh}
-          attachments={attachments}
-          attachmentError={attachmentError}
-          messageQueue={messageQueue}
-          onRemoveAttachment={removeAttachment}
-          onReorderAttachment={reorderAttachment}
-          onPreviewImage={setImagePreview}
-          onPaste={handlePaste}
-          onAddFiles={addFiles}
-          onAttachSessionReference={attachSessionReference}
-          onAttachWorkspaceFile={attachWorkspaceFile}
-          workspacePath={workspacePath}
-          canStartTask={!isDraftConversation || hasRegisteredWorkspace}
-          onPrimaryAction={stableHandlePrimaryAction}
-          editingMessage={editingMessage}
-          onCancelEdit={stableCancelComposerEdit}
-          homeModelSlot={homeComposerModelControls}
-        />
-        <div className="chat-composer-toolbar">
-          <div className="chat-composer-toolbar-left">
+        <div className="composer-context-row">
             {isDraftConversation ? (
               workspaceOptions.length > 0 ? (
                 <Dropdown
@@ -2971,7 +2946,7 @@ export function ChatSurface({
                   }}
                   ariaLabel={isZh ? '工作区' : 'Workspace'}
                   title={isZh ? '新任务必须先选择工作区' : 'Select a workspace before starting a task'}
-                  menuPlacement="up"
+                  menuPlacement="down"
                 />
               ) : (
                 <button
@@ -2993,27 +2968,9 @@ export function ChatSurface({
                 disabled
                 ariaLabel={isZh ? '工作区' : 'Workspace'}
                 title={isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created'}
-                menuPlacement="up"
+                menuPlacement="down"
               />
             ) : null}
-            <Dropdown
-              className="composer-dropdown composer-mode-dropdown"
-              value={modePickerValue(mode)}
-              options={modeOptions}
-              onChange={handleModeDropdownChange}
-              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
-              title={modeTitle(mode, isZh)}
-              menuPlacement="up"
-            />
-            <Dropdown
-              className="composer-dropdown composer-access-dropdown"
-              value={localAccessLevel}
-              options={accessLevelOptions}
-              onChange={handleAccessLevelDropdownChange}
-              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
-              title={accessLevelTitle(localAccessLevel, isZh)}
-              menuPlacement="up"
-            />
             {gitChrome.workspaceHead ? (
               <span
                 className="composer-workspace-head"
@@ -3033,7 +2990,7 @@ export function ChatSurface({
                 ariaLabel={gitChrome.taskLine.title}
                 title={gitChrome.taskLine.title}
                 prefix={<GitBranchGlyph />}
-                menuPlacement="up"
+                menuPlacement="down"
                 searchable
                 searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
                 emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
@@ -3087,6 +3044,51 @@ export function ChatSurface({
                 <span>{isZh ? '隔离执行' : 'Worktree'}</span>
               </label>
             ) : null}
+        </div>
+        <ComposerDraftControls
+          conversationId={conversationId}
+          variant={showEmptyHome ? 'home' : 'conversation'}
+          hasProvider={hasProvider}
+          isBusy={isBusy}
+          isStreaming={isStreaming}
+          isZh={isZh}
+          attachments={attachments}
+          attachmentError={attachmentError}
+          messageQueue={messageQueue}
+          onRemoveAttachment={removeAttachment}
+          onReorderAttachment={reorderAttachment}
+          onPreviewImage={setImagePreview}
+          onPaste={handlePaste}
+          onAddFiles={addFiles}
+          onAttachSessionReference={attachSessionReference}
+          onAttachWorkspaceFile={attachWorkspaceFile}
+          workspacePath={workspacePath}
+          canStartTask={!isDraftConversation || hasRegisteredWorkspace}
+          onPrimaryAction={stableHandlePrimaryAction}
+          editingMessage={editingMessage}
+          onCancelEdit={stableCancelComposerEdit}
+          homeModelSlot={homeComposerModelControls}
+        />
+        <div className="chat-composer-toolbar">
+          <div className="chat-composer-toolbar-left">
+            <Dropdown
+              className="composer-dropdown composer-mode-dropdown"
+              value={modePickerValue(mode)}
+              options={modeOptions}
+              onChange={handleModeDropdownChange}
+              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
+              title={modeTitle(mode, isZh)}
+              menuPlacement="up"
+            />
+            <Dropdown
+              className="composer-dropdown composer-access-dropdown"
+              value={localAccessLevel}
+              options={accessLevelOptions}
+              onChange={handleAccessLevelDropdownChange}
+              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
+              title={accessLevelTitle(localAccessLevel, isZh)}
+              menuPlacement="up"
+            />
           </div>
           {homeComposerContextControls}
         </div>
