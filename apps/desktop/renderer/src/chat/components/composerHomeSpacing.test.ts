@@ -23,6 +23,17 @@ test('source and isolation sit above the composer card', () => {
   );
 });
 
+test('isolation toggle pins to the right of the context row', () => {
+  assert.match(
+    styles,
+    /\.composer-context-row \.composer-worktree-toggle \{[\s\S]*?margin-left:\s*auto;/,
+  );
+  assert.match(
+    styles,
+    /\.chat-composer-wrap--empty-home \.composer-context-row \.composer-worktree-toggle \{[\s\S]*?margin-left:\s*auto;/,
+  );
+});
+
 test('workspace picker stays in the toolbar under the composer', () => {
   assert.match(
     styles,

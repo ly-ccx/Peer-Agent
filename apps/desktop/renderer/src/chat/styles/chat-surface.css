@@ -1159,6 +1159,11 @@
   cursor: pointer;
 }
 
+.composer-context-row .composer-worktree-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .composer-worktree-toggle input {
   margin: 0;
   accent-color: var(--graphite-ink, currentColor);
@@ -5038,6 +5043,11 @@ button.chat-header-cap-item:focus-visible {
   max-width: var(--chat-content-max);
   margin: 0 auto 6px;
   padding: 0 10px;
+}
+
+.chat-composer-wrap--empty-home .composer-context-row .composer-worktree-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar {
