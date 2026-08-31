@@ -2688,8 +2688,14 @@
   line-height: 1.5;
   padding: 6px 8px;
   outline: none;
-  max-height: 120px;
+  /* Grow with wrapped content; rows={1} is only the empty-state floor. */
+  field-sizing: content;
+  height: auto;
+  max-height: 20lh;
+  overflow-x: hidden;
   overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
   font-family: var(--font-sans);
 }
 .chat-composer textarea::placeholder {
@@ -4912,18 +4918,18 @@ button.chat-header-cap-item:focus-visible {
   padding: 0 7px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.45;
+  max-height: 20lh;
+  overflow-wrap: anywhere;
 }
 
 .chat-composer--home > textarea {
   min-height: 96px;
-  max-height: 240px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.5;
 }
 
 .chat-composer--compact > textarea {
   min-height: 28px;
-  max-height: 160px;
 }
 
 /* 操作栏必须是真实 flex 容器，否则子项会被拆散并受 order 干扰。 */

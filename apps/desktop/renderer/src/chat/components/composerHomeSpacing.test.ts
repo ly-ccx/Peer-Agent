@@ -48,16 +48,24 @@ test('home composer textarea keeps a taller empty-state input area', () => {
   );
   assert.match(
     styles,
-    /\.chat-composer--home > textarea \{[\s\S]*?min-height:\s*96px;[\s\S]*?max-height:\s*240px;/,
+    /\.chat-composer--home > textarea \{[\s\S]*?min-height:\s*96px;/,
   );
-  // Compact thread composer stays capped; shared home/compact selector no longer sets 160px.
   assert.match(
     styles,
-    /\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*160px;/,
+    /\.chat-composer textarea \{[\s\S]*?field-sizing:\s*content;[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+  // Home and compact share the 20-line cap so neither stays locked to one overflowing row.
+  assert.match(
+    styles,
+    /\.chat-composer--home > textarea,\s*\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+  assert.match(
+    styles,
+    /\.chat-composer--compact > textarea \{[\s\S]*?min-height:\s*28px;/,
   );
   assert.doesNotMatch(
     styles,
-    /\.chat-composer--home > textarea,\s*\.chat-composer--compact > textarea \{[^}]*max-height:\s*160px;/,
+    /\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*160px;/,
   );
 });
 

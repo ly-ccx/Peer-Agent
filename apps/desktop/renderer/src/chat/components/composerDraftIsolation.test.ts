@@ -42,14 +42,19 @@ test('draft input stays in the composer leaf and never becomes context token aut
 });
 
 test('composer auto-sizing stays in CSS and does not force layout on every draft character', async () => {
-  const [controls, styles] = await Promise.all([
+  const [controls, liveStyles, legacyStyles] = await Promise.all([
     readSource('./ComposerDraftControls.tsx'),
+    readSource('../styles/chat-surface.css'),
     readSource('../styles/chat-composer.css'),
   ]);
 
   assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
-  assert.match(styles, /field-sizing:\s*content/);
-  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*200px/);
+  // Live composer is `.chat-composer`; autosize must land on that selector, not only the unused cloud class.
+  assert.match(
+    liveStyles,
+    /\.chat-composer textarea \{[\s\S]*?field-sizing:\s*content;[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+  assert.match(legacyStyles, /field-sizing:\s*content/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
