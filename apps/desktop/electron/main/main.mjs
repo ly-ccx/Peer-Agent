@@ -519,6 +519,8 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
+  // llmChatService 在本聚合器之后才创建；list 时惰性读取，避免启动环依赖。
+  listActiveStreams: () => llmChatService?.listActiveStreams?.() ?? [],
   artifactRoots: {
     shell: path.join(dataHome, 'shell-artifacts'),
     browser: path.join(dataHome, 'browser-artifacts'),
