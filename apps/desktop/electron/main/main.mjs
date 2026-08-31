@@ -2091,9 +2091,13 @@ const goalApplicationService = createGoalApplicationService({
   recordTaskEvidence: (planId, taskId, change) =>
     goalPlanStore.recordTaskEvidence(planId, taskId, change),
   deletePlan: (planId) => goalPlanStore.deletePlan(planId),
-  retryHandoff: (planId) => {
-    scheduleGoalDeliveryHandoff(planId, { retry: true });
-    return goalPlanStore.getPlan(planId) ?? null;
+  retryHandoff: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return null;
+    if (typeof goalDeliveryHandoff?.retryHandoff === 'function') {
+      return await goalDeliveryHandoff.retryHandoff(plan);
+    }
+    return plan;
   },
   inspectSourceCheckout: async (planId, { workspacePath } = {}) => {
     const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;

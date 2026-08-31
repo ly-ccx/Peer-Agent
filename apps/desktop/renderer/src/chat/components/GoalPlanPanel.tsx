@@ -1694,6 +1694,24 @@ const PlanCard = memo(function PlanCard({
       setLineBusy(false);
     }
   }, [confirm, isZh, plan.planId]);
+
+  const mergeIntoSource = useCallback(async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const next = await clientApi.goalPlansRetryHandoff({ planId: plan.planId });
+      const reason = next && typeof next === 'object'
+        ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
+        : null;
+      const stopped = next && typeof next === 'object'
+        && next.deliveryHandoff?.status === 'stopped';
+      if (stopped && reason) setLineError(reason);
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [isZh, plan.planId]);
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1804,8 +1822,8 @@ const PlanCard = memo(function PlanCard({
                 <button
                   type="button"
                   className="goal-plan-delivery-retry"
-                  disabled={busy || isStreaming}
-                  onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
+                  disabled={lineDisabled}
+                  onClick={() => void mergeIntoSource()}
                 >
                   {handoffStatus === 'stopped'
                     ? (isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`)

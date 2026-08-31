@@ -378,6 +378,17 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', 'main']), git(['merge-base', 'main', 'PeerAgent/task-1']));
   });
 
+  it('retryHandoff writes quality_review_pending instead of staying silent', async () => {
+    const store = createStore(boundPlan({ qualityReview: undefined }));
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const automatic = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(completed);
+    assert.equal(automatic.deliveryHandoff, undefined);
+
+    const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoff(completed);
+    assert.equal(retried.deliveryHandoff.status, 'stopped');
+    assert.equal(retried.deliveryHandoff.stoppedReason, 'quality_review_pending');
+  });
+
   it('does not merge a completed unisolated Goal onto a later workspace base', async () => {
     git(['branch', 'develop']);
     git(['switch', '-c', 'PeerAgent/task-2']);
