@@ -13,9 +13,11 @@ import {
 } from '../state/acceptanceTransition';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
-import { PeerIcon } from '../../ui/icons';
 import { isWorkbenchHandoffCard, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
 import { ActionLabel } from './actionLabelDisplay';
+import { listPinnedConversations } from '../../chat/state/listPinnedConversations';
+import type { PinnedConversationMeta } from '../../chat/state/pinnedConversationList';
+import { workspaceLabelFromPath } from '../../chat/components/workspacePathDisplay';
 
 function workspaceBasename(workspacePath: string): string {
   const normalized = workspacePath.replace(/[/\\]+$/, '');
@@ -35,14 +37,15 @@ type AcceptanceTransition = {
 };
 
 export function GlobalWorkbenchPage({
-  onOpenTasks,
-  onOpenHistory,
+  onOpenTasks: _onOpenTasks,
+  onOpenHistory: _onOpenHistory,
   onNewTask,
   onOpenItem,
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
   onOpenWorkspace,
+  onOpenPinnedConversation,
   enabled = true,
 }: {
   readonly onOpenTasks?: () => void;
@@ -54,6 +57,7 @@ export function GlobalWorkbenchPage({
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   /** 点击「工作区脉搏」行：切到对应区级工作台。 */
   readonly onOpenWorkspace?: (workspacePath: string) => void;
+  readonly onOpenPinnedConversation?: (id: string, workspacePath?: string | null) => void;
   readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
@@ -111,10 +115,33 @@ export function GlobalWorkbenchPage({
     [items],
   );
 
-  const actionCount = needsYou.length;
-  // 主列只承载「待你处理」。无待办时仍占满主列高度，做成安静雷达面；
-  // 推进与讨论留在右侧，不把空态做成居中单列。
-  const showEmpty = actionCount === 0;
+  const [pinnedConversations, setPinnedConversations] = useState<readonly PinnedConversationMeta[]>([]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const loadPinned = async () => {
+      try {
+        const next = await listPinnedConversations();
+        if (!cancelled) setPinnedConversations(next);
+      } catch {
+        if (!cancelled) setPinnedConversations([]);
+      }
+    };
+    void loadPinned();
+    const unsubscribe = clientApi.onConversationsChanged(() => {
+      void loadPinned();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [enabled]);
+
+  const inProgressCount = needsYou.length + advancing.length;
+  // 主列承载当前激活内容：进行中（需要你 + Peer 推进）和 pin。
+  // 只有进行中和 Pin 都空时才显示空态，避免独立空栏挡住推进中的任务。
+  const showEmpty = inProgressCount === 0 && pinnedConversations.length === 0;
 
   // 工作区脉搏：按 workspaceLabel 聚合需你 / 推进。Goal 完成即终态，不再计验收。
   const pulse = useMemo(() => {
@@ -149,14 +176,8 @@ export function GlobalWorkbenchPage({
           <div className="gwb-main">
             {showEmpty ? (
               <div className="gwb-empty">
-                <p>现在没有需要你处理的事</p>
-                {advancing.length > 0 ? (
-                  <p className="gwb-empty-hint">
-                    Peer 正在推进 {advancing.length} 个任务，你可以离开。
-                  </p>
-                ) : (
-                  <p className="gwb-empty-hint">雷达是安静的。其余由 Peer 推进。</p>
-                )}
+                <p>现在没有进行中的工作</p>
+                <p className="gwb-empty-hint">雷达是安静的。Pin 会话和进行中的任务会显示在这里。</p>
                 {onNewTask ? (
                   <button type="button" className="gwb-btn gwb-btn-primary" onClick={onNewTask}>
                     发起新任务
@@ -165,23 +186,100 @@ export function GlobalWorkbenchPage({
               </div>
             ) : null}
 
-            {needsYou.length > 0 ? (
+            {inProgressCount > 0 ? (
               <section className="gwb-panel">
                 <div className="gwb-panel-head gwb-side-head">
                   <div className="gwb-side-head-left">
-                    <span className="gwb-side-label">需要你</span>
-                    <span className="gwb-side-count">{needsYou.length} 项 · 选项 / 决策 / 权限</span>
+                    <span className="gwb-side-label">进行中</span>
+                    <span className="gwb-side-count">
+                      {needsYou.length} 需你 · {advancing.length} 推进
+                    </span>
                   </div>
                 </div>
-                <div className="gwb-list">
-                  {needsYou.map((item) => (
-                    <InboxRow
-                      key={item.taskId}
-                      item={item}
-                      kind="need"
-                      onOpen={() => handleOpenItem(item)}
-                    />
-                  ))}
+                {needsYou.length > 0 ? (
+                  <div className="gwb-list">
+                    {needsYou.map((item) => (
+                      <InboxRow
+                        key={item.taskId}
+                        item={item}
+                        kind="need"
+                        onOpen={() => handleOpenItem(item)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {advancing.length > 0 ? (
+                  <div className="gwb-run-list">
+                    {advancing.map((item) => (
+                      <button
+                        key={item.taskId}
+                        type="button"
+                        className="gwb-run-row"
+                        onClick={() => handleOpenItem(item)}
+                      >
+                        <span className="gwb-run-dot" aria-hidden="true">
+                          <ThinkingOrb
+                            state="weaving"
+                            size={20}
+                            aria-label="Peer 正在推进"
+                            paused={prefersReducedMotion()}
+                          />
+                        </span>
+                        <span className="gwb-run-copy">
+                          <span className="gwb-run-title">{item.title}</span>
+                          <span className="gwb-run-sub">
+                            {[item.workspaceLabel, item.statusLabel].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        {item.planProgress ? (
+                          <span className="gwb-run-pct" aria-live="polite" aria-atomic="true">
+                            <span
+                              key={`${item.planProgress.completed}/${item.planProgress.total}`}
+                              className="gwb-run-pct-value"
+                            >
+                              {item.planProgress.completed}/{item.planProgress.total}
+                            </span>
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {pinnedConversations.length > 0 ? (
+              <section className="gwb-panel">
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">Pin</span>
+                    <span className="gwb-side-count">{pinnedConversations.length} 个会话</span>
+                  </div>
+                </div>
+                <div className="gwb-run-list">
+                  {pinnedConversations.map((conv) => {
+                    const workspaceLabel = workspaceLabelFromPath(conv.workspacePath);
+                    return (
+                      <button
+                        key={conv.id}
+                        type="button"
+                        className="gwb-run-row"
+                        onClick={() => onOpenPinnedConversation?.(conv.id, conv.workspacePath)}
+                      >
+                        <span className="gwb-pin-mark" aria-hidden="true">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                          </svg>
+                        </span>
+                        <span className="gwb-run-copy">
+                          <span className="gwb-run-title">{conv.title || '未命名会话'}</span>
+                          {workspaceLabel ? (
+                            <span className="gwb-run-sub">{workspaceLabel}</span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}
@@ -189,60 +287,6 @@ export function GlobalWorkbenchPage({
           </div>
 
           <aside className="gwb-side">
-            <section className="gwb-panel">
-              <div className="gwb-panel-head gwb-side-head">
-                <div className="gwb-side-head-left">
-                  <span className="gwb-side-label">PEER 推进</span>
-                  <span className="gwb-side-count">{advancing.length} 个任务</span>
-                </div>
-                {onOpenTasks ? (
-                  <button type="button" className="gwb-link" onClick={onOpenTasks}>
-                    查看全部
-                    <PeerIcon name="chevronRight" size={14} className="gwb-link-arrow" />
-                  </button>
-                ) : null}
-              </div>
-              {advancing.length === 0 ? (
-                <div className="gwb-side-empty">当前没有推进中的任务</div>
-              ) : (
-                <div className="gwb-run-list">
-                  {advancing.slice(0, 6).map((item) => (
-                    <button
-                      key={item.taskId}
-                      type="button"
-                      className="gwb-run-row"
-                      onClick={() => handleOpenItem(item)}
-                    >
-                      <span className="gwb-run-dot" aria-hidden="true">
-                        <ThinkingOrb
-                          state="weaving"
-                          size={20}
-                          aria-label="Peer 正在推进"
-                          paused={prefersReducedMotion()}
-                        />
-                      </span>
-                      <span className="gwb-run-copy">
-                        <span className="gwb-run-title">{item.title}</span>
-                        <span className="gwb-run-sub">
-                          {[item.workspaceLabel, item.statusLabel].filter(Boolean).join(' · ')}
-                        </span>
-                      </span>
-                      {item.planProgress ? (
-                        <span className="gwb-run-pct" aria-live="polite" aria-atomic="true">
-                          <span
-                            key={`${item.planProgress.completed}/${item.planProgress.total}`}
-                            className="gwb-run-pct-value"
-                          >
-                            {item.planProgress.completed}/{item.planProgress.total}
-                          </span>
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-
             {pulse.length > 0 ? (
               <section className="gwb-panel gwb-pulse">
                 <div className="gwb-panel-head gwb-side-head">

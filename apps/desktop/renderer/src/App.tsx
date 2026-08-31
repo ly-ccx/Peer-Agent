@@ -805,11 +805,12 @@ function MainApp() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleNewChat, newTaskShortcut]);
 
-  const handleSelectConversation = useCallback((id: string) => {
+  const handleSelectConversation = useCallback((id: string, workspacePath?: string | null) => {
     const target = conversations.find((conversation) => conversation.id === id);
-    if (target?.workspacePath && target.workspacePath !== activeWorkspace) {
-      setActiveWorkspace(target.workspacePath);
-      void clientApi.workspaceSetActive({ path: target.workspacePath }).catch(() => {});
+    const nextWorkspacePath = workspacePath ?? target?.workspacePath;
+    if (nextWorkspacePath && nextWorkspacePath !== activeWorkspace) {
+      setActiveWorkspace(nextWorkspacePath);
+      void clientApi.workspaceSetActive({ path: nextWorkspacePath }).catch(() => {});
     }
     setActiveConversationId(id);
     setConversationDrawerOpen(false);
@@ -1019,6 +1020,9 @@ function MainApp() {
                         setActiveWorkspace(workspacePath);
                         setHomeScope('workspace');
                         setActivePage('home');
+                      }}
+                      onOpenPinnedConversation={(id, workspacePath) => {
+                        handleSelectConversation(id, workspacePath);
                       }}
                     />
                   ) : (

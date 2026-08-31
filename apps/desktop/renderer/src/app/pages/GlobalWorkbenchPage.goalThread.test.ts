@@ -23,7 +23,7 @@ test('总工作台：主列不再渲染待验收 Goal Thread 分组', async () =
   assert.doesNotMatch(source, /groupResultCardsByGoalThread/);
   assert.doesNotMatch(source, /resultGroups/);
   assert.doesNotMatch(source, /displayedResults/);
-  assert.match(source, /gwb-side-count">\{needsYou\.length\} 项/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
 });
 
 test('总工作台：主列 InboxRow 只走需要你，不带同线待签', async () => {

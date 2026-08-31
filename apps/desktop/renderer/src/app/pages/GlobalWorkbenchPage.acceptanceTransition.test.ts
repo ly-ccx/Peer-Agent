@@ -12,10 +12,8 @@ test('advancing count has one overview entry and no duplicate hero summary', asy
   const source = await readPage();
   const styles = await readStyles();
 
-  assert.match(
-    source,
-    /<span className="gwb-side-label">PEER 推进<\/span>\s*<span className="gwb-side-count">\{advancing\.length\} 个任务<\/span>/,
-  );
+  assert.match(source, /<span className="gwb-side-label">进行中<\/span>/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
   assert.doesNotMatch(source, /个任务在推进|gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
   assert.doesNotMatch(styles, /\.gwb-calm-card|\.gwb-calm-title|\.gwb-calm-dot/);
 });
@@ -143,14 +141,27 @@ test('empty radar stretches the main column and keeps the side ambient', async (
   const styles = await readStyles();
 
   assert.match(source, /className=\{`gwb-layout\$\{showEmpty \? ' gwb-layout--empty' : ''\}`\}/);
-  assert.match(source, /现在没有需要你处理的事/);
-  assert.match(source, /Peer 正在推进 \{advancing\.length\} 个任务，你可以离开。/);
-  assert.match(source, /雷达是安静的。其余由 Peer 推进。/);
+  assert.match(source, /现在没有进行中的工作/);
+  assert.match(source, /Pin 会话和进行中的任务会显示在这里/);
+  assert.doesNotMatch(source, /现在没有需要你处理的事/);
+  assert.doesNotMatch(source, /Peer 正在推进 \{advancing\.length\} 个任务，你可以离开。/);
   assert.doesNotMatch(source, /个任务由 Peer 推进中/);
 
   assert.match(styles, /\.gwb-layout--empty\s*\{[\s\S]*items-stretch/);
   assert.match(styles, /\.gwb-empty\s*\{[\s\S]*flex-1[\s\S]*min-height:\s*310px/);
   assert.doesNotMatch(source, /gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
+});
+
+test('home workbench merges in-progress work and shows pinned conversations', async () => {
+  const source = await readPage();
+  assert.match(source, /<span className="gwb-side-label">进行中<\/span>/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
+  assert.match(source, /inProgressCount > 0/);
+  assert.match(source, /pinnedConversations\.length > 0/);
+  assert.match(source, /listPinnedConversations/);
+  assert.match(source, /onOpenPinnedConversation\?\.\(conv\.id, conv\.workspacePath\)/);
+  assert.doesNotMatch(source, /gwb-side-label">PEER 推进/);
+  assert.doesNotMatch(source, /gwb-side-label">需要你/);
 });
 
 test('workspace pulse aggregates need and run only, not leftover acceptance', async () => {

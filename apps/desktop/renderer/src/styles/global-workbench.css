@@ -280,6 +280,14 @@
     display: block;
   }
 
+  .gwb-pin-mark {
+    @apply flex items-center justify-center;
+    width: 20px;
+    height: 20px;
+    margin-left: -4px;
+    color: var(--za-text-muted);
+  }
+
   .gwb-run-title {
     @apply block truncate font-semibold;
     font-size: var(--ui-font-control, 13px);
