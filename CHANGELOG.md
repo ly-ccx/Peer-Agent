@@ -4,6 +4,41 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## [0.0.10] - 2026-08-31
+
+### Notes
+
+- Stable release that unsticks the conversation composer: it grows with the draft, up to 20 lines, and wraps long unspaced strings instead of overflowing sideways.
+- Workbench Handle jumps into the related conversation instead of expanding a merge card in place.
+- Dragging the workbench wider first collapses the sidebar, then goes fullscreen.
+- The sidebar adds a Pin tab; newly created branches are pushed to the remote; Goals that fail quality review can Continue fixing.
+
+### Features
+
+- Conversation composer auto-grows from one line to 20 lines before scrolling.
+- Sidebar Pin tab lists pinned chats separately from workspaces.
+- Workbench Handle opens the related thread for merge/blocked cards.
+- Progressive workbench fullscreen: ~60% width collapses the left sidebar; ~80% enters fullscreen.
+- Branches created in the source picker are pushed to the remote immediately.
+- Continue fixing a Goal keeps the same planId when quality review has not passed.
+
+### Improved
+
+- Empty-home composer is taller, with workspace/branch context sitting above the input.
+- Goal next actions are clearer: start, adjust, cancel, and Continue fixing.
+
+### Fixed
+
+- Conversation composer no longer stays locked to one overflowing row.
+- Retry banners no longer linger after a terminal state; zero-countdown copy is corrected.
+- Confirm-dialog inputs follow the theme fill instead of flashing white on dark UI.
+- Starting a task syncs the active workspace to the task binding.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
+
 ## [0.0.9] - 2026-08-27
 
 ### Notes
