@@ -141,17 +141,18 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('./GoalPlanPanel.tsx'),
   ]);
 
-  assert.match(surface, /composer-context-row[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /workspaceIsGit === false/);
+  assert.match(surface, /workspaceIsGit === true \? \([\s\S]*composer-context-row[\s\S]*<ComposerDraftControls/);
   assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
   assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
   assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
   assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
-  assert.ok(surface.includes('disabled={workspaceIsGit === false || isStreaming}'));
+  assert.ok(surface.includes('disabled={isStreaming}'));
+  assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);
   assert.match(surface, /当前任务正在执行，无法更改隔离环境/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
-  assert.match(surface, /\{workspacePath \? \(/);
   assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
   assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);

@@ -2933,6 +2933,8 @@ export function ChatSurface({
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
         <>
+        {/* 没有 Git 时（workspaceIsGit === false）整排不渲染，不要露出禁用的隔离开关。 */}
+        {workspaceIsGit === true ? (
         <div className="composer-context-row">
             {gitChrome.workspaceHead ? (
               <span
@@ -2984,30 +2986,27 @@ export function ChatSurface({
                 {gitChrome.writeMismatch.label}
               </span>
             ) : null}
-            {workspacePath ? (
-              <label
-                className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
-                title={
-                  workspaceIsGit === false
-                    ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
-                    : isStreaming
-                      ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
-                      : (isZh
-                        ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
-                        : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={preferredWorktree}
-                  disabled={workspaceIsGit === false || isStreaming}
-                  onChange={(event) => changePreferredWorktree(event.target.checked)}
-                  aria-label={isZh ? '隔离执行' : 'Worktree'}
-                />
-                <span>{isZh ? '隔离执行' : 'Worktree'}</span>
-              </label>
-            ) : null}
+            <label
+              className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
+              title={
+                isStreaming
+                  ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
+                  : (isZh
+                    ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
+                    : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
+              }
+            >
+              <input
+                type="checkbox"
+                checked={preferredWorktree}
+                disabled={isStreaming}
+                onChange={(event) => changePreferredWorktree(event.target.checked)}
+                aria-label={isZh ? '隔离执行' : 'Worktree'}
+              />
+              <span>{isZh ? '隔离执行' : 'Worktree'}</span>
+            </label>
         </div>
+        ) : null}
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
