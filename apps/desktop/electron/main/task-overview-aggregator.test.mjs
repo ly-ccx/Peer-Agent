@@ -565,6 +565,65 @@ test('toGoalPlanSnapshot 有交付线即可展示合回状态，不必先验收'
 });
 
 
+test('aggregator projects a live conversation over a stale blocked runner as peer_advancing', () => {
+  const plan = {
+    planId: 'plan-live-blocked',
+    conversationId: 'conversation-live',
+    title: '补齐漏迁接口',
+    status: 'executing',
+    updatedAt: '2026-08-09T02:00:00.000Z',
+    targetWorkspacePath: '/work/peer_agent',
+    runner: { status: 'blocked', blockedReason: 'permission_required' },
+    progress: { completed: 4, total: 6 },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [plan] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-live',
+        title: '补齐漏迁接口',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T02:00:00.000Z',
+      },
+    ],
+    listActiveStreams: () => [{ conversationId: 'conversation-live', streamId: 's1' }],
+  });
+  const item = agg.listTaskOverview({ activeWithinMs: 0 })[0];
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.statusLabel, 'Peer 正在推进');
+});
+
+test('aggregator keeps waiting_user as a question even when the conversation is live', () => {
+  const plan = {
+    planId: 'plan-live-question',
+    conversationId: 'conversation-live',
+    title: '等你选',
+    status: 'executing',
+    updatedAt: '2026-08-09T02:00:00.000Z',
+    targetWorkspacePath: '/work/peer_agent',
+    runner: { status: 'waiting_user', blockedReason: 'requested_user_input' },
+  };
+  const agg = createTaskOverviewAggregator({
+    goalPlanStore: { listPlanDetails: () => [plan] },
+    automationStore: { listDefinitions: () => [], listRuns: () => [] },
+    listConversations: () => [
+      {
+        id: 'conversation-live',
+        title: '等你选',
+        workspacePath: '/work/peer_agent',
+        updatedAt: '2026-08-09T02:00:00.000Z',
+      },
+    ],
+    listActiveStreams: () => [{ conversationId: 'conversation-live', streamId: 's1' }],
+  });
+  const item = agg.listTaskOverview({ activeWithinMs: 0 })[0];
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+});
+
 test('toGoalPlanSnapshot classifies renderer unavailability as a system-owned blocker', () => {
   const snapshot = toGoalPlanSnapshot({
     planId: 'p-system-blocked',

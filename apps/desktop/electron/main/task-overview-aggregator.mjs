@@ -662,6 +662,7 @@ export function toGoalPlanSnapshot(plan, options = {}) {
     systemBlocked: status !== GOAL_COMPLETED_STATUS
       && plan.runner?.status === 'blocked'
       && isRecoverableSystemGoalBlocker(plan.runner?.blockedReason),
+    ...(options.conversationLive === true ? { conversationLive: true } : {}),
     interrupted: Boolean(
       plan.runner?.interruption &&
       !(plan.runner.interruption.recoverable === true && plan.runner.status === 'running'),
@@ -1091,6 +1092,7 @@ export function createTaskOverviewAggregator({
   listConversations,
   listShellTasks,
   listProviders,
+  listActiveStreams,
   markTaskRead,
   artifactRoots = {},
 } = {}) {
@@ -1207,6 +1209,16 @@ export function createTaskOverviewAggregator({
     plans = expandGoalThreadRelatives(goalPlanStore, plans, {
       includeConversationSiblings: !conversationId && !includeTerminal,
     });
+    const liveConversationIds = new Set();
+    try {
+      const streams = typeof listActiveStreams === 'function' ? listActiveStreams() : [];
+      for (const stream of Array.isArray(streams) ? streams : []) {
+        const id = typeof stream?.conversationId === 'string' ? stream.conversationId : '';
+        if (id) liveConversationIds.add(id);
+      }
+    } catch {
+      // 活流端口未就绪时静默跳过，投影退回只看 runner 态。
+    }
     const evidenceRefs = collectPlanEvidenceRefs(plans);
     const evidenceIndex = typeof goalPlanStore.findEvidenceIndexRecords === 'function'
       ? goalPlanStore.findEvidenceIndexRecords(evidenceRefs)
@@ -1259,6 +1271,7 @@ export function createTaskOverviewAggregator({
         relationIndex,
         evidenceIndex,
         artifactRoots,
+        conversationLive: conversationId ? liveConversationIds.has(conversationId) : false,
       });
       if (!snapshot) continue;
       // nowMs 与列表过滤时钟一致，保证 durationMs 与 active 窗同源。

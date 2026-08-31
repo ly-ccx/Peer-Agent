@@ -302,6 +302,11 @@ export interface GoalPlanProjectionSnapshot {
   readonly runnerStatus?: GoalRunnerStatus;
   /** Runner 阻塞是否由系统基础设施持有，而不是用户行动权。 */
   readonly systemBlocked?: boolean;
+  /**
+   * 同一会话此刻是否有前台活流（正在输出 / 调工具 / compact）。
+   * 由聚合层从 listActiveStreams 写入；协议层只认这个布尔事实。
+   */
+  readonly conversationLive?: boolean;
   /** Runner 上存在尚未被 resume 消费的网络/流式中断事实。 */
   readonly interrupted?: boolean;
   /** 持久化中断事实中的用户可展示原因。 */
@@ -690,11 +695,13 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   }
   const planStillActive =
     status === 'executing' || status === 'accepted' || status === 'approved';
+  const conversationLive = snapshot.conversationLive === true;
   const recoverableSystemBlocked = runnerStatus === 'blocked'
     && snapshot.systemBlocked === true;
   // System infrastructure failures are not user decisions. A foreground turn may
   // take over this blocker; until then expose an inspectable interruption.
-  if (planStillActive && recoverableSystemBlocked) {
+  // A live foreground stream already holds execution — do not keep asking the user.
+  if (planStillActive && recoverableSystemBlocked && !conversationLive) {
     return {
       actionRight: 'paused',
       nextAction: 'inspect',
@@ -703,6 +710,7 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
     };
   }
   // rule 4: Runner 已明确把行动权交给用户，不再展示为“Peer 正在推进”。
+  // waiting_user is a precise question; a live stream must not swallow it.
   if (planStillActive && runnerStatus === 'waiting_user') {
     return {
       actionRight: 'needs_you',
@@ -714,8 +722,10 @@ function decideGoalPlan(snapshot: GoalPlanProjectionSnapshot): ProjectionDecisio
   }
   // rule 5: 仅活跃计划上的 Runner 实时求助才进 needs_you
   // （plan 必须仍在推进：executing/accepted/approved；历史僵尸 blocked 不进）
+  // 同一会话已有前台活流时，执行权在会话里，不要把过期 blocked 投成决策卡。
   if (
     planStillActive &&
+    !conversationLive &&
     (runnerStatus === 'blocked' || runnerStatus === 'budget_exhausted')
   ) {
     return {

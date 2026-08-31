@@ -166,6 +166,48 @@ test('rule 5: runner blocked → needs_you / decision', () => {
   assert.equal(item.statusLabel, '执行受阻');
 });
 
+test('live conversation stream outranks stale blocked as peer_advancing', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'blocked',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, 'Peer 正在推进');
+});
+
+test('live conversation stream outranks recoverable system blocker', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'blocked',
+      systemBlocked: true,
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, 'Peer 正在推进');
+});
+
+test('waiting_user is not swallowed by a live conversation stream', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'waiting_user',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
 test('recoverable system blocker does not become a user decision', () => {
   const item = projectGoalPlan(
     goalSnapshot({
@@ -178,6 +220,19 @@ test('recoverable system blocker does not become a user decision', () => {
   assert.equal(item.needsYouReason, undefined);
   assert.equal(item.nextAction, 'inspect');
   assert.equal(item.statusLabel, '系统执行中断');
+});
+
+test('live conversation stream outranks budget_exhausted as peer_advancing', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'budget_exhausted',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.statusLabel, 'Peer 正在推进');
 });
 
 test('rule 5b: runner budget_exhausted → needs_you / decision', () => {
