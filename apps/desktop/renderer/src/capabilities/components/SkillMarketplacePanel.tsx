@@ -142,7 +142,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     setLoading(true);
     void clientApi.querySkillHubSkills({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword, category, sortBy })
       .then((value) => { if (!cancelled) { setResult(value); setError(null); } })
-      .catch(() => { if (!cancelled) setError('无法读取腾讯市场'); })
+      .catch(() => { if (!cancelled) setError('无法读取 skillhub 市场'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [page, debouncedKeyword, category, sortBy]);
@@ -157,7 +157,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
       setResult(next);
       if (Array.isArray(nextCategories)) setCategories(nextCategories);
     } catch {
-      setError('腾讯市场暂时无法刷新，请稍后重试');
+      setError('skillhub 市场暂时无法刷新，请稍后重试');
     } finally { setSyncing(false); }
   };
 
@@ -203,10 +203,10 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
   const skippedText = result.sync.skipped > 0 ? ` · 跳过 ${result.sync.skipped.toLocaleString()} 条异常记录` : '';
   const syncText = syncing
-    ? `正在刷新腾讯市场${skippedText}`
+    ? `正在刷新 skillhub 市场${skippedText}`
     : result.sync.updatedAt
       ? `远程 ${result.total.toLocaleString()} 条${skippedText} · ${new Date(result.sync.updatedAt).toLocaleString()}`
-      : '直接查询腾讯市场';
+      : '直接查询 skillhub 市场';
 
   return (
     <section className="skill-marketplace" aria-label="Skill 市场">
@@ -240,7 +240,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
       </div>
       <div className="skill-marketplace-sync" role="status"><span>{syncText}</span><span>当前结果 {result.total.toLocaleString()}</span></div>
       {error ? <p className="skill-marketplace-error" role="alert">{error}</p> : null}
-      {loading ? <p className="skill-marketplace-empty">正在查询腾讯市场…</p> : null}
+      {loading ? <p className="skill-marketplace-empty">正在查询 skillhub 市场…</p> : null}
       {!loading && result.items.length === 0 ? <p className="skill-marketplace-empty">{syncing ? '正在刷新，请稍候…' : '没有匹配的 Skill。'}</p> : null}
       <div className="skill-marketplace-grid">
         {result.items.map((entry) => (
@@ -271,7 +271,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         ))}
       </div>
       {totalPages > 1 ? (
-        <nav className="skill-marketplace-pagination skill-marketplace-pagination--pages" aria-label="腾讯市场分页">
+        <nav className="skill-marketplace-pagination skill-marketplace-pagination--pages" aria-label="skillhub 市场分页">
           <button type="button" className="pagination-arrow" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
           {buildPageItems(page, totalPages).map((item) =>
             item.type === 'ellipsis' ? (

@@ -18,7 +18,7 @@ export function SkillsPanel({
   return (
     <div className="skill-panel">
       <nav className="skill-view-tabs" aria-label="Skill 视图">
-        <button type="button" className={view === 'marketplace' ? 'active' : ''} onClick={() => setView('marketplace')}>腾讯市场</button>
+        <button type="button" className={view === 'marketplace' ? 'active' : ''} onClick={() => setView('marketplace')}>skillhub 市场</button>
         <button type="button" className={view === 'qoder' ? 'active' : ''} onClick={() => setView('qoder')}>Qoder 市场</button>
         <button type="button" className={view === 'installed' ? 'active' : ''} onClick={() => setView('installed')}>已安装</button>
       </nav>
