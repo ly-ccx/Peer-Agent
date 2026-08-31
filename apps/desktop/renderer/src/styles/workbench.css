@@ -18,6 +18,8 @@
   max-width: none;
 }
 
+/* 全屏拖回仍握着分隔条：视觉保持 100%，内部宽度继续跟手；低于滞回后再退出全屏。 */
+
 /* 拖拽进行中：关掉 width/grid 过渡，并让 Electron <webview> 不再截走 pointerup。
    必须在 @layer 外，才能压过 sidebar.css 未分层的 grid-template-columns 过渡。 */
 :root[data-workbench-resizing='true'] .app-layout,

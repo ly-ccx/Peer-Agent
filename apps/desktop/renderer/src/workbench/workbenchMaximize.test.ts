@@ -42,11 +42,11 @@ describe('workbench maximize behavior', () => {
     assert.doesNotMatch(contextSource, /maximized[\s\S]{0,80}schedulePersist\(\)/);
   });
 
-  it('renders an accessible maximize and restore toggle and disables resizing while maximized', () => {
+  it('renders an accessible maximize and restore toggle and keeps the resizer while maximized', () => {
     assert.match(panelSource, /aria-label=\{maximized \?/);
     assert.match(panelSource, /aria-pressed=\{maximized\}/);
     assert.match(panelSource, /onClick=\{\(\) => setMaximized\(!maximized\)\}/);
-    assert.match(panelSource, /\{open && !maximized \? \(/);
+    assert.match(panelSource, /\{open \? \(/);
     assert.match(panelSource, /maximized \? '100%' : `\$\{width\}px`/);
   });
 
