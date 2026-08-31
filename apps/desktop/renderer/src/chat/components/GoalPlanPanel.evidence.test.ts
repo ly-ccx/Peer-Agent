@@ -65,3 +65,23 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(styles, /\.goal-panel-toggle-active-handoff/);
   assert.match(styles, /\.goal-plan-head-handoff/);
 });
+
+test('goal task list tooltip pins width and wraps titles instead of oscillating ellipsis', async () => {
+  const styles = await readStyles();
+  const titleBlock = styles.match(
+    /\.goal-panel-toggle-progress-tooltip__title \{[\s\S]*?\n\}/,
+  )?.[0] ?? '';
+  const listBlock = styles.match(
+    /\.goal-panel-toggle-progress-tooltip--list \{[\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(
+    styles,
+    /\.app-tooltip:has\(\.goal-panel-toggle-progress-tooltip--list\) \{/,
+  );
+  assert.match(styles, /width:\s*min\(320px,\s*calc\(100vw - 24px\)\)/);
+  assert.match(listBlock, /width:\s*100%/);
+  assert.match(titleBlock, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(titleBlock, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(titleBlock, /white-space:\s*nowrap/);
+});
