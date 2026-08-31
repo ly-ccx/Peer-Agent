@@ -29,6 +29,8 @@ import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 import { SidebarConversationRow } from './SidebarConversationRow';
 import { SidebarWorkbenchCounts } from './SidebarWorkbenchCounts';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
+import { listPinnedConversations } from '../state/listPinnedConversations';
+import { selectPinnedConversations } from '../state/pinnedConversationList';
 
 type ConversationView = 'active' | 'archived';
 
@@ -254,6 +256,8 @@ export function Sidebar({
     return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
   }, [activeConversationId, mergedConversations]);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  const [sidebarListTab, setSidebarListTab] = useState<'workspaces' | 'pinned'>('workspaces');
+  const [allPinnedConversations, setAllPinnedConversations] = useState<readonly ConversationMeta[]>([]);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
   const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null);
@@ -428,9 +432,37 @@ export function Sidebar({
     await onRenameConversation(conv.id, nextTitle);
   }, [editingTitle, finishRenameConversation, onRenameConversation]);
 
-  const pinnedConversations = useMemo(() => conversations
-    .filter((conv) => !isArchivedView && conv.pinnedAt)
-    .sort((a, b) => Number(a.pinnedOrder ?? 0) - Number(b.pinnedOrder ?? 0)), [conversations, isArchivedView]);
+  const pinnedConversations = useMemo(
+    () => (isArchivedView ? [] : selectPinnedConversations(conversations)),
+    [conversations, isArchivedView],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPinned = async () => {
+      try {
+        const next = await listPinnedConversations();
+        if (!cancelled) setAllPinnedConversations(next as ConversationMeta[]);
+      } catch {
+        if (!cancelled) setAllPinnedConversations([]);
+      }
+    };
+    void loadPinned();
+    const unsubscribe = clientApi.onConversationsChanged(() => {
+      void loadPinned();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const pinTabConversations = useMemo(() => {
+    const byId = new Map<string, ConversationMeta>();
+    for (const conv of allPinnedConversations) byId.set(conv.id, conv);
+    for (const conv of pinnedConversations) byId.set(conv.id, conv);
+    return selectPinnedConversations([...byId.values()]);
+  }, [allPinnedConversations, pinnedConversations]);
   const normalConversations = useMemo(
     () => isArchivedView ? conversations : conversations.filter((conv) => !conv.pinnedAt),
     [conversations, isArchivedView],
@@ -492,11 +524,12 @@ export function Sidebar({
     setContextMenu({ kind: 'conversation', x: e.clientX, y: e.clientY, conversation: conv });
   }, []);
 
-  const renderConversationRow = (conv: ConversationMeta, options: { pinnedGroup?: boolean } = {}) => (
+  const renderConversationRow = (conv: ConversationMeta, options: { pinnedGroup?: boolean; showWorkspace?: boolean } = {}) => (
     <SidebarConversationRow
       key={conv.id}
       conv={conv}
       pinnedGroup={options.pinnedGroup}
+      showWorkspace={options.showWorkspace}
       isZh={isZh}
       isArchivedView={isArchivedView}
       activePage={activePage}
@@ -671,25 +704,58 @@ export function Sidebar({
 
       <div className="sidebar-workspace-tree">
         <div className="sidebar-workspace-tree-header">
-          <span className="sidebar-workspace-tree-label">{isZh ? '工作区' : 'WORKSPACE'}</span>
-          <span className="sidebar-workspace-tree-meta">
-            <span className="sidebar-workspace-tree-count">{workspaces.length}</span>
+          <div className="sidebar-list-tabs" role="tablist" aria-label={isZh ? '会话列表' : 'Conversation lists'}>
             <button
               type="button"
-              className="sidebar-workspace-add"
-              title={isZh ? '添加工作区' : 'Add workspace'}
-              aria-label={isZh ? '添加工作区' : 'Add workspace'}
-              onClick={() => { void handleAddWorkspace(); }}
+              role="tab"
+              aria-selected={sidebarListTab === 'workspaces'}
+              className={`sidebar-list-tab${sidebarListTab === 'workspaces' ? ' is-active' : ''}`}
+              onClick={() => setSidebarListTab('workspaces')}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-                <path d="M12 10v6" />
-                <path d="M9 13h6" />
-              </svg>
+              {isZh ? '工作区' : 'Workspaces'}
             </button>
-          </span>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidebarListTab === 'pinned'}
+              className={`sidebar-list-tab${sidebarListTab === 'pinned' ? ' is-active' : ''}`}
+              onClick={() => setSidebarListTab('pinned')}
+            >
+              {isZh ? 'Pin' : 'Pin'}
+              {pinTabConversations.length > 0 ? (
+                <span className="sidebar-workspace-tree-count">{pinTabConversations.length}</span>
+              ) : null}
+            </button>
+          </div>
+          {sidebarListTab === 'workspaces' ? (
+            <span className="sidebar-workspace-tree-meta">
+              <span className="sidebar-workspace-tree-count">{workspaces.length}</span>
+              <button
+                type="button"
+                className="sidebar-workspace-add"
+                title={isZh ? '添加工作区' : 'Add workspace'}
+                aria-label={isZh ? '添加工作区' : 'Add workspace'}
+                onClick={() => { void handleAddWorkspace(); }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                  <path d="M12 10v6" />
+                  <path d="M9 13h6" />
+                </svg>
+              </button>
+            </span>
+          ) : null}
         </div>
 
+        {sidebarListTab === 'pinned' ? (
+          <div className="sidebar-workspace-tree-list sidebar-pin-tab-list channel-conversation-list" ref={conversationListRef}>
+            {pinTabConversations.length === 0 ? (
+              <div className="sidebar-pin-empty">{isZh ? '还没有 Pin 会话' : 'No pinned chats yet'}</div>
+            ) : (
+              pinTabConversations.map((conv) => renderConversationRow(conv, { pinnedGroup: true, showWorkspace: true }))
+            )}
+          </div>
+        ) : (
         <div className="sidebar-workspace-tree-list" ref={conversationListRef}>
           {workspaces.map((ws) => {
             // activeWorkspace 始终是新任务落点；点工作区只激活，不跳走。
@@ -891,6 +957,7 @@ export function Sidebar({
             </div>
           ) : null}
         </div>
+        )}
       </div>
 
 

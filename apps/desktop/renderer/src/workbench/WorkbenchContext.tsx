@@ -18,6 +18,7 @@ import {
   type BrowserSessionMap,
   type BrowserSessionState,
 } from './browserSessionState';
+import { clampWorkbenchWidth } from './workbenchResizeStages';
 import {
   createDocumentSessionState,
   createDocumentTabSession,
@@ -63,8 +64,15 @@ export interface WorkbenchFilesTarget {
 
 export const WORKBENCH_DEFAULT_WIDTH = 600;
 export const WORKBENCH_MIN_WIDTH = 320;
+/** 键盘 Home / 旧调用仍可用；拖拽上限改走窗口宽度，不再被 900px 卡住。 */
 export const WORKBENCH_MAX_WIDTH = 900;
-export const WORKBENCH_MAX_VW_RATIO = 0.55;
+/** 渐进式拖拽：0.6 自动收左栏，0.8 自动全屏；反向带滞回。 */
+export {
+  WORKBENCH_MAXIMIZE_RATIO,
+  WORKBENCH_MAXIMIZE_RESTORE_RATIO,
+  WORKBENCH_SIDEBAR_COLLAPSE_RATIO,
+  WORKBENCH_SIDEBAR_RESTORE_RATIO,
+} from './workbenchResizeStages';
 export const MAIN_MIN_WIDTH = 480;
 /** 主区恢复到该宽度以上时，才把「自动收起」的左栏自动展开回来（滞回，防回弹横跳）。 */
 export const MAIN_RESTORE_WIDTH = 520;
@@ -157,12 +165,8 @@ type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationI
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
 function clampWidth(value: number): number {
-  const vwLimit =
-    typeof window !== 'undefined'
-      ? Math.min(WORKBENCH_MAX_WIDTH, Math.floor(window.innerWidth * WORKBENCH_MAX_VW_RATIO))
-      : WORKBENCH_MAX_WIDTH;
-  const upper = Math.max(WORKBENCH_MIN_WIDTH, vwLimit);
-  return Math.min(upper, Math.max(WORKBENCH_MIN_WIDTH, Math.round(value)));
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : WORKBENCH_MAX_WIDTH;
+  return clampWorkbenchWidth(value, viewportWidth, WORKBENCH_MIN_WIDTH);
 }
 
 function clampSidebarWidth(value: number): number {

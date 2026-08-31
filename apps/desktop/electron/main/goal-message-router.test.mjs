@@ -178,24 +178,61 @@ test('applyGoalMessageRoute lets a foreground continuation take over a recoverab
   assert.equal(calls[0][2].phase, 'orient');
 });
 
-test('applyGoalMessageRoute preserves user-owned and unknown blockers', () => {
-  for (const blockedReason of ['permission_required', 'product decision required']) {
-    const blockedPlan = {
-      ...activeGoalPlan,
-      runner: { status: 'blocked', phase: 'blocked', blockedReason },
-    };
-    const route = routeGoalMessage({ messageText: '补充一些背景', activeGoalPlan: blockedPlan });
-    let resumeCount = 0;
-    applyGoalMessageRoute({
-      route,
-      activeGoalPlan: blockedPlan,
-      goalPlanStore: {
-        resumeRunner() { resumeCount += 1; },
-        appendRunEvent() {},
+test('applyGoalMessageRoute lets a foreground continuation take over a stale product blocker', () => {
+  const blockedPlan = {
+    ...activeGoalPlan,
+    runner: {
+      status: 'blocked',
+      phase: 'blocked',
+      blockedReason: 'permission_required',
+    },
+  };
+  const route = routeGoalMessage({ messageText: '补充一些背景', activeGoalPlan: blockedPlan });
+  const calls = [];
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan: blockedPlan,
+    goalPlanStore: {
+      resumeRunner(planId, patch) {
+        calls.push(['resume', planId, patch]);
       },
-    });
-    assert.equal(resumeCount, 0, blockedReason);
-  }
+      appendRunEvent(planId, event) {
+        calls.push(['event', planId, event]);
+      },
+    },
+  });
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'event']);
+  assert.equal(calls[0][1], 'goal-1');
+  assert.equal(calls[0][2].intent, 'execute');
+  assert.equal(calls[0][2].phase, 'orient');
+});
+
+test('applyGoalMessageRoute does not resume requested_user_input via stale-blocker takeover', () => {
+  const waitingPlan = {
+    ...activeGoalPlan,
+    runner: {
+      status: 'waiting_user',
+      blockedReason: 'requested_user_input',
+    },
+  };
+  const route = routeGoalMessage({ messageText: '选第二个', activeGoalPlan: waitingPlan });
+  let resumeCount = 0;
+  let consumeCount = 0;
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan: waitingPlan,
+    goalPlanStore: {
+      consumeRequestedUserInput() {
+        consumeCount += 1;
+        return waitingPlan;
+      },
+      resumeRunner() { resumeCount += 1; },
+      appendRunEvent() {},
+    },
+  });
+  assert.equal(consumeCount, 1);
+  assert.equal(resumeCount, 0);
 });
 
 test('routeGoalMessage routes requirement overrides to the current Goal', () => {

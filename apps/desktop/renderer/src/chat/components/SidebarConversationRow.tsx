@@ -7,6 +7,7 @@ import {
 } from '../state/compactionStateView';
 import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
+import { workspaceLabelFromPath } from './workspacePathDisplay';
 
 export type SidebarConversationMeta = {
   readonly id: string;
@@ -86,6 +87,7 @@ function PinIcon({ size = 13, filled = false }: { readonly size?: number; readon
 export type SidebarConversationRowProps = {
   readonly conv: SidebarConversationMeta;
   readonly pinnedGroup?: boolean;
+  readonly showWorkspace?: boolean;
   readonly isZh: boolean;
   readonly isArchivedView: boolean;
   readonly activePage: SidebarPage;
@@ -120,6 +122,7 @@ export type SidebarConversationRowProps = {
 export const SidebarConversationRow = memo(function SidebarConversationRow({
   conv,
   pinnedGroup = false,
+  showWorkspace = false,
   isZh,
   isArchivedView,
   activePage,
@@ -287,6 +290,11 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
           >
             {conv.title || (isZh ? '新对话' : 'New Chat')}
           </span>
+          {showWorkspace && workspaceLabelFromPath(conv.workspacePath) ? (
+            <span className="sidebar-conv-workspace" title={conv.workspacePath ?? undefined}>
+              {workspaceLabelFromPath(conv.workspacePath)}
+            </span>
+          ) : null}
         </>
       )}
       <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>

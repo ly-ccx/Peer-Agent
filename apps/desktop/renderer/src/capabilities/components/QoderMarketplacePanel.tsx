@@ -103,7 +103,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     return () => { cancelled = true; };
   }, []);
 
-  // 只保留分类筛选（对齐腾讯市场）。taxonomies 接口带 Accept-Language: zh-CN 直接返回中文标签。
+  // 只保留分类筛选（对齐 skillhub 市场）。taxonomies 接口带 Accept-Language: zh-CN 直接返回中文标签。
   useEffect(() => {
     let cancelled = false;
     void clientApi.listQoderTaxonomies()

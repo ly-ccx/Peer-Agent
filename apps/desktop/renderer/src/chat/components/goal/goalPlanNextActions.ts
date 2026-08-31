@@ -1,6 +1,6 @@
 import type { GoalPlan } from '@peer-agent/protocol';
 
-export type GoalPlanNextAction = 'start' | 'adjust' | 'cancel';
+export type GoalPlanNextAction = 'start' | 'adjust' | 'cancel' | 'continue-fix';
 
 export interface GoalPlanNextStep {
   readonly kind: 'approval';
@@ -41,4 +41,12 @@ export function goalPlanNextStepCopy(isZh: boolean): {
         cancel: 'Cancel plan',
         adjustmentMessage: 'I want to adjust the plan. Do not execute it yet; ask what I want to change.',
       };
+}
+
+/** 「继续修」发出的用户消息必须带上这条 Goal 的 planId，对话才能对上要修哪一条。 */
+export function continueFixingMessage(planId: string, isZh: boolean): string {
+  const id = planId.trim();
+  return isZh
+    ? `继续修这条 Goal（planId=${id}）。质量自检还没过线，请对照缺的检查补上后再合回。`
+    : `Continue fixing this Goal (planId=${id}). Quality review has not passed; finish the missing checks, then merge.`;
 }

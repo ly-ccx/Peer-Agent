@@ -159,6 +159,18 @@ function handoffStoppedReasonLabel(
       return locale === 'zh' ? `合并进 ${dest} 超时，可重试` : 'merge timed out; retry available';
     case 'git_lock':
       return locale === 'zh' ? '仓库正被占用，可重试' : 'repository is locked; retry available';
+    case 'quality_review_pending':
+      return locale === 'zh'
+        ? '质量自检还没过线，没法合进发版线。点「继续修」，把缺的检查补上后再合。'
+        : 'Quality review has not passed, so this cannot merge yet. Tap Continue fixing to finish the missing checks, then merge.';
+    case 'missing_task_commits':
+      return locale === 'zh'
+        ? '任务线还没有可合入的提交。改动还在工作区里，先提交再合并。'
+        : 'the task line has no commits to merge; commit the work first';
+    case 'missing_worktree':
+      return locale === 'zh'
+        ? '找不到这条任务的隔离现场，没法合并。'
+        : 'the isolated worktree is missing, so this cannot merge';
     default:
       return locale === 'zh' ? `合不进 ${dest}` : `cannot merge into ${dest}`;
   }
@@ -212,7 +224,7 @@ export function formatGoalDeliveryHandoff(
   return undefined;
 }
 
-/** 灯条用的短合回状态：合不进 / 还没进 / 已进源头。 */
+/** 灯条用的短合回状态：合不进 / 还没归档 / 已归档到源头。 */
 export function formatGoalDeliveryHandoffLamp(
   input: {
     readonly deliveryHandoff?: GoalDeliveryHandoff | null;
@@ -244,7 +256,7 @@ export function formatGoalDeliveryHandoffLamp(
     if (handoff.deliveryMode === 'direct') {
       return locale === 'zh' ? `已随 ${dest} 交付` : `delivered with ${dest}`;
     }
-    return locale === 'zh' ? `已进 ${dest}` : `on ${dest}`;
+    return locale === 'zh' ? `已归档到 ${dest}` : `archived to ${dest}`;
   }
   if (handoff.status === 'stopped') {
     return locale === 'zh' ? `合不进 ${dest}` : `blocked from ${dest}`;

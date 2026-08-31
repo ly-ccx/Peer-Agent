@@ -29,7 +29,12 @@ import { InteractionActionsContext, InteractionStreamingContext } from './thread
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './goal/SuccessCriteriaEditor';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
-import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
+import {
+  continueFixingMessage,
+  getGoalPlanNextStep,
+  goalPlanNextStepCopy,
+  type GoalPlanNextAction,
+} from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { orderGoalPlansByLineage } from './goal/goalPlanOrder';
 
@@ -1485,6 +1490,10 @@ function mergeDestination(plan: GoalPlan, isZh: boolean): string {
     ?? (isZh ? '源头' : 'source');
 }
 
+function isPlanArchivedToSource(plan: GoalPlan): boolean {
+  return plan.deliveryHandoff?.status === 'delivered';
+}
+
 async function confirmDiscardAfterStop(
   confirm: (options: {
     title?: string;
@@ -1536,7 +1545,7 @@ interface CompactApprovalBarProps {
   readonly isZh: boolean;
   readonly busy: boolean;
   readonly isStreaming: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
 }
 
 /** The chat-bottom approval surface deliberately stays to one compact row. */
@@ -1581,7 +1590,7 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
   readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
@@ -1627,10 +1636,12 @@ const PlanCard = memo(function PlanCard({
   // 画「任务线 → 发版线」会暗示一个不存在的合并。
   const showMergeRoute = isolated;
   const handoffStatus = plan.deliveryHandoff?.status;
+  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
   const canMergeIntoSource = isolated
     && plan.status === 'completed'
     && handoffStatus !== 'delivered'
-    && handoffStatus !== 'delivering';
+    && handoffStatus !== 'delivering'
+    && !qualityReviewPending;
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
@@ -1694,6 +1705,24 @@ const PlanCard = memo(function PlanCard({
       setLineBusy(false);
     }
   }, [confirm, isZh, plan.planId]);
+
+  const mergeIntoSource = useCallback(async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const next = await clientApi.goalPlansRetryHandoff({ planId: plan.planId });
+      const reason = next && typeof next === 'object'
+        ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
+        : null;
+      const stopped = next && typeof next === 'object'
+        && next.deliveryHandoff?.status === 'stopped';
+      if (stopped && reason) setLineError(reason);
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [isZh, plan.planId]);
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1800,12 +1829,21 @@ const PlanCard = memo(function PlanCard({
               ) : lampHandoff ? (
                 <p className="goal-plan-delivery-handoff">{lampHandoff}</p>
               ) : null}
-              {canMergeIntoSource ? (
+              {qualityReviewPending ? (
                 <button
                   type="button"
                   className="goal-plan-delivery-retry"
-                  disabled={busy || isStreaming}
-                  onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
+                  disabled={lineDisabled || isStreaming}
+                  onClick={() => void onNextAction(plan, 'continue-fix')}
+                >
+                  {isZh ? '继续修' : 'Continue fixing'}
+                </button>
+              ) : canMergeIntoSource ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-retry"
+                  disabled={lineDisabled}
+                  onClick={() => void mergeIntoSource()}
                 >
                   {handoffStatus === 'stopped'
                     ? (isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`)
@@ -2168,7 +2206,12 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   });
 
   const handleNextAction = useCallback(
-    async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
+    async (plan: GoalPlan, action: GoalPlanNextAction) => {
+      if (action === 'continue-fix') {
+        interactionActions?.onSelectOption(continueFixingMessage(plan.planId, isZh));
+        onRequestHostFocus?.();
+        return;
+      }
       if (action === 'adjust') {
         interactionActions?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
         onRequestHostFocus?.();
@@ -2278,6 +2321,11 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   const { activePlan, mainPlan, listPlans, orderedListPlans } = planViewModel;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
+  const hasUnarchivedHint = Boolean(
+    activePlan
+    && isPlanArchivedToSource(activePlan)
+    && plans.some((plan) => plan.planId !== activePlan.planId && !isPlanArchivedToSource(plan)),
+  );
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
@@ -2376,6 +2424,11 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                     </span>
                   ) : null;
                 })()}
+                {hasUnarchivedHint ? (
+                  <span className="goal-panel-toggle-active-handoff">
+                    {isZh ? '有未归档' : 'Unarchived remaining'}
+                  </span>
+                ) : null}
               </span>
             ) : null}
             {lockedOpen && !dockedToWorkbench ? null : (

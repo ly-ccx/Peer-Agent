@@ -308,6 +308,8 @@ test('createGitBranch writes a local ref without checking it out', async () => {
     name: 'feature',
     current: 'develop',
     repoRoot: '/repo',
+    pushed: false,
+    pushError: null,
   });
   assert.deepEqual(calls, [
     'rev-parse --show-toplevel',
@@ -315,6 +317,7 @@ test('createGitBranch writes a local ref without checking it out', async () => {
     'branch --show-current',
   ]);
   assert.equal(calls.some((key) => key.includes('checkout')), false);
+  assert.equal(calls.some((key) => key.includes('push')), false);
 
   assert.deepEqual(await harness.service.createGitBranch({
     workspaceRoot: '/repo',
@@ -325,6 +328,90 @@ test('createGitBranch writes a local ref without checking it out', async () => {
     current: null,
     error: 'invalid_branch_name',
   });
+});
+
+test('createGitBranch with push creates the branch then pushes with upstream tracking', async () => {
+  const calls = [];
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      calls.push(key);
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- 0.0.11 origin/main') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'main\n' };
+      if (key === 'remote') return { stdout: 'origin\nupstream\n' };
+      if (key === 'push -u -- origin 0.0.11') return { stdout: '' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '0.0.11',
+    startPoint: 'origin/main',
+    push: true,
+  }), {
+    ok: true,
+    status: 'created',
+    name: '0.0.11',
+    current: 'main',
+    repoRoot: '/repo',
+    pushed: true,
+    pushError: null,
+  });
+  assert.deepEqual(calls.slice(-2), ['remote', 'push -u -- origin 0.0.11']);
+});
+
+test('createGitBranch push failure is non-blocking and reports the reason', async () => {
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- 0.0.11') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'main\n' };
+      if (key === 'remote') return { stdout: 'origin\n' };
+      if (key === 'push -u -- origin 0.0.11') {
+        throw new Error('fatal: Authentication failed');
+      }
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  const result = await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '0.0.11',
+    push: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'created');
+  assert.equal(result.pushed, false);
+  assert.match(result.pushError, /Authentication failed/);
+});
+
+test('createGitBranch push without any remote reports no_remote', async () => {
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- 0.0.11') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'main\n' };
+      if (key === 'remote') return { stdout: '' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  const result = await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '0.0.11',
+    push: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'created');
+  assert.equal(result.pushed, false);
+  assert.equal(result.pushError, 'no_remote');
 });
 
 test('text reads preserve not-found, file-only, size, binary, and UTF-8 guards', async () => {

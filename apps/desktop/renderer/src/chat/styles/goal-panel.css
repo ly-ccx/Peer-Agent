@@ -337,10 +337,22 @@
   min-width: 0;
 }
 
+/*
+ * 列表气泡必须有确定宽度。只有 max-width 时，外壳按内容 shrink-to-fit，
+ * 标题 nowrap+ellipsis 一截断就把固有宽度算短，外壳跟着收，省略号消失，
+ * 全文又撑破上限——「方法」和「...」会来回跳。
+ */
+.app-tooltip:has(.goal-panel-toggle-progress-tooltip--list) {
+  width: min(320px, calc(100vw - 24px));
+  max-width: min(320px, calc(100vw - 24px));
+}
+
 .goal-panel-toggle-progress-tooltip--list {
   display: block;
-  max-width: 320px;
-  min-width: 160px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
 }
 
 .goal-panel-toggle-progress-tooltip__list {
@@ -354,7 +366,7 @@
 
 .goal-panel-toggle-progress-tooltip__row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
 }
@@ -401,10 +413,9 @@
 }
 
 .goal-panel-toggle-progress-tooltip__title {
+  flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   color: var(--za-text, #e8ecf5);
   font-size: 12px;
   line-height: 1.3;

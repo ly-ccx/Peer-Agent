@@ -478,6 +478,8 @@ export interface BootstrapPreloadApi {
     readonly workspaceRoot: string;
     readonly name: string;
     readonly startPoint?: string;
+    /** After creating the local branch, push it with upstream tracking (git push -u). */
+    readonly push?: boolean;
   }) => Promise<{
     readonly ok: boolean;
     readonly status: 'created' | 'already_exists' | 'invalid_name' | 'invalid_ref' | 'not_git_repo' | 'error';
@@ -485,6 +487,10 @@ export interface BootstrapPreloadApi {
     readonly current: string | null;
     readonly repoRoot?: string;
     readonly error?: string;
+    /** Present when push was requested: whether the push reached the remote. */
+    readonly pushed?: boolean;
+    /** Non-blocking push failure reason (e.g. 'no_remote' or the git error message). */
+    readonly pushError?: string | null;
   }>;
   /**
    * 校验给定路径是否对应磁盘上真实存在的文件，供渲染层判断聊天消息中的「路径样式文本」

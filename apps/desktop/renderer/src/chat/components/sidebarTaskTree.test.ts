@@ -42,3 +42,14 @@ test('sidebar previews workspace tasks and loads more on demand instead of count
   assert.doesNotMatch(app, /余页在后台续拉，计数才完整/);
   assert.doesNotMatch(app, /shouldContinueConversationList/);
 });
+
+test('sidebar pin tab lists all pinned conversations with workspace labels', async () => {
+  const source = await readSidebar();
+  const row = await readFile(new URL('./SidebarConversationRow.tsx', import.meta.url), 'utf8');
+  assert.match(source, /sidebar-list-tab/);
+  assert.match(source, /setSidebarListTab\('pinned'\)/);
+  assert.match(source, /pinTabConversations/);
+  assert.match(source, /showWorkspace: true/);
+  assert.match(row, /showWorkspace && workspaceLabelFromPath\(conv\.workspacePath\)/);
+  assert.match(row, /sidebar-conv-workspace/);
+});

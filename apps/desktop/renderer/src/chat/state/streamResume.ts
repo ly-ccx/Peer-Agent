@@ -10,7 +10,13 @@ function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'content' |
 
 export type StreamResumeTarget =
   | { readonly kind: 'regenerate'; readonly assistantIndex: number }
-  | { readonly kind: 'retry-user'; readonly userIndex: number };
+  | { readonly kind: 'retry-user'; readonly userIndex: number }
+  /**
+   * 原地续写：末条 assistant 被 `interrupted: true` 标记（网络中断等截断）。
+   * 「继续」不应清空已生成内容整条重写，而是把该消息作为累积种子续写——
+   * 消息 id 不变，渲染端 delta 会继续追加到这条消息上。
+   */
+  | { readonly kind: 'continue'; readonly assistantIndex: number };
 
 const RETRYABLE_STREAM_ERROR_PATTERNS = [
   /fetch failed/i,
@@ -38,6 +44,11 @@ export function isRetryableStreamError(error: string | null | undefined): boolea
  * Pick the current-session resume path:
  * - last real assistant turn → regenerate that reply (keeps prior user + history)
  * - last user with no assistant (empty placeholder already stripped) → resend that user
+ *
+ * Interrupted marker (network cut etc.) refines the assistant branch: an interrupted
+ * partial reply must continue in place (`continue`) instead of being wiped by a
+ * regenerate — that is the whole point of the「继续」button on the error banner.
+ * A normal completed assistant turn keeps the historical `regenerate` behavior.
  */
 export function resolveStreamResumeTarget(messages: readonly ChatMsg[]): StreamResumeTarget | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -45,6 +56,9 @@ export function resolveStreamResumeTarget(messages: readonly ChatMsg[]): StreamR
     if (!message) continue;
     if (isEmptyAssistantPlaceholder(message)) continue;
     if (message.role === 'assistant') {
+      if (message.interrupted === true) {
+        return { kind: 'continue', assistantIndex: index };
+      }
       return { kind: 'regenerate', assistantIndex: index };
     }
     if (message.role === 'user') {

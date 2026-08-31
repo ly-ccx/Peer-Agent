@@ -49,11 +49,25 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
 
   assert.match(source, /formatGoalDeliveryHandoffLamp/);
   assert.match(source, /goal-plan-merge-route/);
-  assert.match(source, /goal-panel-toggle-active-handoff/);
+  assert.match(source, /goal-panel-toggle-active/);
   assert.match(source, /goal-plan-head-handoff/);
   assert.match(source, /canMergeIntoSource/);
+  assert.match(source, /qualityReviewPending/);
+  assert.match(source, /mergeIntoSource/);
+  assert.match(source, /await clientApi.goalPlansRetryHandoff/);
+  assert.match(source, /deliveryHandoff\?\.status === 'stopped'/);
   assert.match(source, /再试一次，合并进 \$\{mergeDest\}/);
   assert.match(source, /合并进 \$\{mergeDest\}/);
+  assert.match(source, /qualityReviewPending \? \(/);
+  assert.match(source, /isZh \? '继续修' : 'Continue fixing'/);
+  assert.match(source, /onNextAction\(plan, 'continue-fix'\)/);
+  assert.match(source, /continueFixingMessage\(plan\.planId, isZh\)/);
+  assert.match(source, /isZh \? '有未归档' : 'Unarchived remaining'/);
+  assert.match(source, /hasUnarchivedHint/);
+  assert.doesNotMatch(source, /GoalStripPlanRow/);
+  assert.doesNotMatch(source, /goal-panel-toggle-plans/);
+  assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,120}onNextAction\(plan, 'adjust'\)/);
+  assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,80}mergeIntoSource\(\)/);
   assert.doesNotMatch(source, /重试交回/);
   assert.doesNotMatch(source, /交回未完成/);
 
@@ -64,4 +78,26 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(styles, /\.goal-plan-merge-route/);
   assert.match(styles, /\.goal-panel-toggle-active-handoff/);
   assert.match(styles, /\.goal-plan-head-handoff/);
+  assert.doesNotMatch(styles, /\.goal-panel-toggle-plans\b/);
+  assert.doesNotMatch(styles, /\.goal-panel-toggle-plan-action\b/);
+});
+
+test('goal task list tooltip pins width and wraps titles instead of oscillating ellipsis', async () => {
+  const styles = await readStyles();
+  const titleBlock = styles.match(
+    /\.goal-panel-toggle-progress-tooltip__title \{[\s\S]*?\n\}/,
+  )?.[0] ?? '';
+  const listBlock = styles.match(
+    /\.goal-panel-toggle-progress-tooltip--list \{[\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(
+    styles,
+    /\.app-tooltip:has\(\.goal-panel-toggle-progress-tooltip--list\) \{/,
+  );
+  assert.match(styles, /width:\s*min\(320px,\s*calc\(100vw - 24px\)\)/);
+  assert.match(listBlock, /width:\s*100%/);
+  assert.match(titleBlock, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(titleBlock, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(titleBlock, /white-space:\s*nowrap/);
 });

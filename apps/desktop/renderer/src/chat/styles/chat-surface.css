@@ -1015,6 +1015,22 @@
   background: var(--chrome-canvas);
 }
 
+.composer-context-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: var(--chat-content-max);
+  min-width: 0;
+  margin: 0 auto 4px;
+  padding: 0 var(--space-1);
+  flex-wrap: wrap;
+  color: var(--composer-addon-color);
+}
+
+.composer-context-row:not(:has(*)) {
+  display: none;
+}
+
 .chat-composer-toolbar {
   display: flex;
   align-items: center;
@@ -1141,6 +1157,11 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.composer-context-row .composer-worktree-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .composer-worktree-toggle input {
@@ -2667,8 +2688,14 @@
   line-height: 1.5;
   padding: 6px 8px;
   outline: none;
-  max-height: 120px;
+  /* Grow with wrapped content; rows={1} is only the empty-state floor. */
+  field-sizing: content;
+  height: auto;
+  max-height: 20lh;
+  overflow-x: hidden;
   overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
   font-family: var(--font-sans);
 }
 .chat-composer textarea::placeholder {
@@ -2868,6 +2895,33 @@
   flex: 1;
   line-height: 1.4;
   font-family: var(--font-mono);
+}
+/* Non-blocking push-failure hint after creating a branch (branch intact locally). */
+.branch-push-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--chat-content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-2) 0;
+  color: var(--za-warning-ink, var(--graphite-soft));
+  font-size: 0.78rem;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+.branch-push-notice-dismiss {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--graphite-mute);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.branch-push-notice-dismiss:hover {
+  color: var(--pa-text-primary);
 }
 .provider-recovery-meta {
   max-width: 42%;
@@ -4734,7 +4788,7 @@ button.chat-header-cap-item:focus-visible {
   background: var(--chrome-canvas);
 }
 
-.chat-composer-wrap--empty-home > :not(.chat-composer):not(.chat-composer-toolbar) {
+.chat-composer-wrap--empty-home > :not(.chat-composer):not(.chat-composer-toolbar):not(.composer-context-row) {
   max-width: var(--chat-content-max);
   margin-right: auto;
   margin-left: auto;
@@ -4864,18 +4918,18 @@ button.chat-header-cap-item:focus-visible {
   padding: 0 7px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.45;
+  max-height: 20lh;
+  overflow-wrap: anywhere;
 }
 
 .chat-composer--home > textarea {
   min-height: 96px;
-  max-height: 240px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.5;
 }
 
 .chat-composer--compact > textarea {
   min-height: 28px;
-  max-height: 160px;
 }
 
 /* 操作栏必须是真实 flex 容器，否则子项会被拆散并受 order 干扰。 */
@@ -4986,6 +5040,20 @@ button.chat-header-cap-item:focus-visible {
   padding: 0 8px;
   color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
+}
+
+.chat-composer-wrap--empty-home .composer-context-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: var(--chat-content-max);
+  margin: 0 auto 6px;
+  padding: 0 10px;
+}
+
+.chat-composer-wrap--empty-home .composer-context-row .composer-worktree-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar {

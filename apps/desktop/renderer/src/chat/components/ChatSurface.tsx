@@ -202,6 +202,18 @@ function useStableCallback<T extends (...args: never[]) => unknown>(callback: T)
   return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
 }
 
+// 重试倒计时文案：归零后说「正在重连」，避免本地倒计时钳在 0 时
+// 长时间显示「约 0s 后重试」让用户误以为卡死。
+function formatRetryCountdownLabel(remainingSeconds: number): string {
+  if (remainingSeconds <= 0) return '正在重连…';
+  return `约 ${remainingSeconds}s 后重试`;
+}
+
+function formatRetryCountdownLabelEn(remainingSeconds: number): string {
+  if (remainingSeconds <= 0) return 'reconnecting…';
+  return `in about ${remainingSeconds}s`;
+}
+
 function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
   const text = msg.content.trim().replace(/\s+/g, ' ');
   if (text) return text;
@@ -553,6 +565,11 @@ export function ChatSurface({
   const [createBranchDialog, setCreateBranchDialog] = useState<{
     readonly source: string;
     readonly name: string;
+    readonly push: boolean;
+  } | null>(null);
+  const [branchPushNotice, setBranchPushNotice] = useState<{
+    readonly branchName: string;
+    readonly reason: string;
   } | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
@@ -686,6 +703,7 @@ export function ChatSurface({
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
+  // 倒计时归零后文案切换为「正在重连…」，表达"等待本次尝试结果"而不是卡在"约 0s"。
   const [connectionRetryRemainingSeconds, setConnectionRetryRemainingSeconds] = useState<number | null>(null);
   useEffect(() => {
     if (
@@ -2255,12 +2273,74 @@ export function ChatSurface({
     void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
+  // 原地续写中断回复：不清空、不重建消息。复用被中断那条 assistant 消息的 id，
+  // 只摘掉 interrupted 标记；主进程以该消息已落盘正文/segments 为累积种子
+  // （ChatSendRequest.resumeInterruptedReply），渲染端 delta 照常追加到这条消息。
+  const handleContinueStream = useCallback(async (msgIndex: number) => {
+    if (isStreaming || !hasProvider || !conversationId) return;
+    const target = messages[msgIndex];
+    if (!target || target.role !== 'assistant') return;
+
+    // 摘标记后立即写回 store，保证重载/切会话期间 banner 不会因 interrupted 复活；
+    // 续写失败（再次中断）时主进程会重新打上 interrupted。
+    const { interrupted: _removed, ...rest } = target;
+    const resumedMessage: ChatMsg = { ...rest };
+    const nextMessages = messages.map((message, index) => (index === msgIndex ? resumedMessage : message));
+    setMessages(nextMessages);
+    setStreamError(null);
+    setActiveUsage(null);
+    setProviderRecoveryNotice(null);
+
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(nextMessages),
+    });
+
+    const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    streamIdRef.current = streamId;
+    // 计时锚点回拨到原消息时间戳：用户看到的是「同一条回复继续计时」，
+    // 与主进程 streamRecord.startedAt 的种子语义一致。
+    const turnStartedAt = resolveTurnStartedAt({
+      existing: conversationStore.getSnapshot(conversationId).turnStartedAt,
+      messages: nextMessages,
+      fallback: Date.now(),
+    }) ?? Date.now();
+    setTurnStartedAt(turnStartedAt);
+    conversationStore.routeStream(streamId, conversationId);
+    conversationStore.setState(conversationId, { streamId, turnStartedAt });
+    setIsStreaming(true);
+
+    const contextAttachments = buildConversationAttachmentContext(nextMessages.slice(0, msgIndex));
+    const configInstructions = [
+      ...buildConfigInstructionContext(systemInstructions),
+      ...buildReplyLanguageContext(replyLanguage),
+      ...buildGitBranchPrefixContext(gitBranchPrefix),
+    ];
+    void clientApi.chatSend({
+      streamId,
+      assistantMessageId: resumedMessage.id,
+      resumeInterruptedReply: true,
+      effort,
+      fastMode,
+      mode,
+      conversationId,
+      modelProviderId,
+      workspacePath,
+      contextAttachments,
+      configInstructions,
+    });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+
   const handleResumeStream = useCallback(() => {
     if (isStreaming || !hasProvider) return;
     const target = resolveStreamResumeTarget(messages);
     if (!target) return;
     if (target.kind === 'regenerate') {
       void handleRegenerate(target.assistantIndex);
+      return;
+    }
+    if (target.kind === 'continue') {
+      void handleContinueStream(target.assistantIndex);
       return;
     }
     const userMsg = messages[target.userIndex];
@@ -2271,7 +2351,7 @@ export function ChatSurface({
       effort,
       messages.slice(0, target.userIndex),
     );
-  }, [isStreaming, hasProvider, messages, handleRegenerate, submitMessage, effort]);
+  }, [isStreaming, hasProvider, messages, handleRegenerate, handleContinueStream, submitMessage, effort]);
 
   const handleDismissStreamError = useCallback(() => {
     setStreamError(null);
@@ -2410,7 +2490,7 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
-  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null) => {
+  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null, push?: boolean) => {
     const name = rawName.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
     if (!isSafeComposerBranchName(name)) return;
@@ -2423,8 +2503,17 @@ export function ChatSurface({
       workspaceRoot: workspacePath,
       name,
       startPoint,
+      push: push !== false,
     }).then((created) => {
       if (created?.ok !== true) return;
+      if (push !== false && created.pushed === false) {
+        setBranchPushNotice({
+          branchName: name,
+          reason: created.pushError || 'push_failed',
+        });
+      } else {
+        setBranchPushNotice(null);
+      }
       handleSelectBoundBranch(name);
       refreshWorkspaceGit();
     }).catch(() => {});
@@ -2444,7 +2533,7 @@ export function ChatSurface({
       currentHead: workspaceGit?.current,
     });
     if (!source) return;
-    setCreateBranchDialog({ source, name: '' });
+    setCreateBranchDialog({ source, name: '', push: true });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
@@ -2661,8 +2750,8 @@ export function ChatSurface({
               {providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
-                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，约 ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s 后重试）`
-                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, in about ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s)`
+                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，${formatRetryCountdownLabel(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))}）`
+                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, ${formatRetryCountdownLabelEn(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))})`
                   : isZh
                     ? '连接已恢复，正在继续生成'
                     : 'Connection recovered; continuing generation'
@@ -2678,6 +2767,23 @@ export function ChatSurface({
                 {providerRecoveryNotice.reason}
               </span>
             ) : null}
+          </div>
+        ) : null}
+        {branchPushNotice ? (
+          <div className="branch-push-notice" role="status">
+            <div className="provider-recovery-body">
+              {isZh
+                ? `分支 ${branchPushNotice.branchName} 已创建，但推送到远端失败：${branchPushNotice.reason}（本地分支未受影响）`
+                : `Branch ${branchPushNotice.branchName} was created, but pushing to the remote failed: ${branchPushNotice.reason} (local branch is intact)`}
+            </div>
+            <button
+              type="button"
+              className="branch-push-notice-dismiss"
+              onClick={() => setBranchPushNotice(null)}
+              aria-label={isZh ? '关闭提示' : 'Dismiss'}
+            >
+              <PeerIcon name="close" size={14} />
+            </button>
           </div>
         ) : null}
         {showCompactionNotice ? (
@@ -2827,6 +2933,80 @@ export function ChatSurface({
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
         <>
+        {/* 没有 Git 时（workspaceIsGit === false）整排不渲染，不要露出禁用的隔离开关。 */}
+        {workspaceIsGit === true ? (
+        <div className="composer-context-row">
+            {gitChrome.workspaceHead ? (
+              <span
+                className="composer-workspace-head"
+                title={gitChrome.workspaceHead.title}
+                aria-label={gitChrome.workspaceHead.title}
+              >
+                <GitBranchGlyph />
+                <span className="composer-bound-branch-text">{gitChrome.workspaceHead.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.taskLine?.selectable ? (
+              <Dropdown
+                className="composer-dropdown composer-bound-branch"
+                value={gitChrome.taskLine.value}
+                options={boundBranchOptions}
+                onChange={handleSelectBoundBranch}
+                ariaLabel={gitChrome.taskLine.title}
+                title={gitChrome.taskLine.title}
+                prefix={<GitBranchGlyph />}
+                menuPlacement="down"
+                searchable
+                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
+                footerAction={{
+                  label: isZh ? '创建分支' : 'Create branch',
+                  onSelect: (_query, highlightedValue) => {
+                    handleOpenCreateBranchDialog(highlightedValue);
+                  },
+                }}
+              />
+            ) : gitChrome.taskLine ? (
+              <span
+                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                data-kind={gitChrome.taskLine.kind}
+                title={gitChrome.taskLine.title}
+                aria-label={gitChrome.taskLine.title}
+              >
+                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.writeMismatch ? (
+              <span
+                className="composer-write-mismatch"
+                title={gitChrome.writeMismatch.title}
+                aria-label={gitChrome.writeMismatch.title}
+              >
+                {gitChrome.writeMismatch.label}
+              </span>
+            ) : null}
+            <label
+              className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
+              title={
+                isStreaming
+                  ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
+                  : (isZh
+                    ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
+                    : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
+              }
+            >
+              <input
+                type="checkbox"
+                checked={preferredWorktree}
+                disabled={isStreaming}
+                onChange={(event) => changePreferredWorktree(event.target.checked)}
+                aria-label={isZh ? '隔离执行' : 'Worktree'}
+              />
+              <span>{isZh ? '隔离执行' : 'Worktree'}</span>
+            </label>
+        </div>
+        ) : null}
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
@@ -2908,79 +3088,6 @@ export function ChatSurface({
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
             />
-            {gitChrome.workspaceHead ? (
-              <span
-                className="composer-workspace-head"
-                title={gitChrome.workspaceHead.title}
-                aria-label={gitChrome.workspaceHead.title}
-              >
-                <GitBranchGlyph />
-                <span className="composer-bound-branch-text">{gitChrome.workspaceHead.label}</span>
-              </span>
-            ) : null}
-            {gitChrome.taskLine?.selectable ? (
-              <Dropdown
-                className="composer-dropdown composer-bound-branch"
-                value={gitChrome.taskLine.value}
-                options={boundBranchOptions}
-                onChange={handleSelectBoundBranch}
-                ariaLabel={gitChrome.taskLine.title}
-                title={gitChrome.taskLine.title}
-                prefix={<GitBranchGlyph />}
-                menuPlacement="up"
-                searchable
-                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
-                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
-                footerAction={{
-                  label: isZh ? '创建分支' : 'Create branch',
-                  onSelect: (_query, highlightedValue) => {
-                    handleOpenCreateBranchDialog(highlightedValue);
-                  },
-                }}
-              />
-            ) : gitChrome.taskLine ? (
-              <span
-                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
-                data-kind={gitChrome.taskLine.kind}
-                title={gitChrome.taskLine.title}
-                aria-label={gitChrome.taskLine.title}
-              >
-                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
-                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
-              </span>
-            ) : null}
-            {gitChrome.writeMismatch ? (
-              <span
-                className="composer-write-mismatch"
-                title={gitChrome.writeMismatch.title}
-                aria-label={gitChrome.writeMismatch.title}
-              >
-                {gitChrome.writeMismatch.label}
-              </span>
-            ) : null}
-            {workspacePath ? (
-              <label
-                className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
-                title={
-                  workspaceIsGit === false
-                    ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
-                    : isStreaming
-                      ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
-                      : (isZh
-                        ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
-                        : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={preferredWorktree}
-                  disabled={workspaceIsGit === false || isStreaming}
-                  onChange={(event) => changePreferredWorktree(event.target.checked)}
-                  aria-label={isZh ? '隔离执行' : 'Worktree'}
-                />
-                <span>{isZh ? '隔离执行' : 'Worktree'}</span>
-              </label>
-            ) : null}
           </div>
           {homeComposerContextControls}
         </div>
@@ -3009,16 +3116,29 @@ export function ChatSurface({
                   onChange={(event) => setCreateBranchDialog({
                     source: createBranchDialog.source,
                     name: event.target.value,
+                    push: createBranchDialog.push,
                   })}
                   placeholder={isZh ? '分支名' : 'Branch name'}
                   autoFocus
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' || !canConfirm) return;
                     event.preventDefault();
-                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
                     requestClose();
                   }}
                 />
+                <label className="pa-confirm-check">
+                  <input
+                    type="checkbox"
+                    checked={createBranchDialog.push}
+                    onChange={(event) => setCreateBranchDialog({
+                      source: createBranchDialog.source,
+                      name: createBranchDialog.name,
+                      push: event.target.checked,
+                    })}
+                  />
+                  <span>{isZh ? '创建后推送到远端（git push -u）' : 'Push to remote after creating (git push -u)'}</span>
+                </label>
                 <div className="pa-confirm-actions is-spread">
                   <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
                     {isZh ? '取消 Esc' : 'Cancel Esc'}
@@ -3028,7 +3148,7 @@ export function ChatSurface({
                     className="pa-confirm-btn primary"
                     disabled={!canConfirm}
                     onClick={() => {
-                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source);
+                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
                       requestClose();
                     }}
                   >

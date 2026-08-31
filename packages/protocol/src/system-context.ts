@@ -142,6 +142,13 @@ export interface ChatSendRequest {
    * 在终态事件时回写——这是「正文持久化真值下沉主进程」的链路锚点。
    */
   readonly assistantMessageId?: string;
+  /**
+   * 续写中断回复：true 表示本轮不是新的用户输入，而是把 assistantMessageId 指向的
+   * 既有（interrupted）assistant 消息作为累积种子——主进程以该消息已落盘的正文/
+   * segments 为初始状态继续追加，计时回拨到原消息时间戳，不重置；goal 路由也
+   * 不应把它当成新用户回合处理。
+   */
+  readonly resumeInterruptedReply?: boolean;
   readonly effort?: string;
   /** Request-scoped OpenAI Fast mode; defaults to false when omitted. */
   readonly fastMode?: boolean;

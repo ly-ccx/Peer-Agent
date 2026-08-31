@@ -255,6 +255,40 @@
   color: var(--graphite-fade);
 }
 
+.sidebar-list-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar-list-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--graphite-fade);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sidebar-list-tab.is-active {
+  color: var(--graphite-ink, var(--graphite-base));
+  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.05));
+}
+
+.sidebar-pin-empty {
+  padding: var(--space-4) var(--space-3);
+  color: var(--graphite-mute);
+  font-size: 0.78rem;
+}
+
 /* Right-side meta cluster: workspace count + add-workspace icon button. */
 .sidebar-workspace-tree-meta {
   display: inline-flex;
@@ -890,6 +924,18 @@
   font-size: var(--ui-font-control);
   /* line-height must clear the descender (g/y/p/q) inside the overflow-hidden box;
      workspace labels use 1.2 for the same reason. */
+  line-height: 1.2;
+}
+
+.conversation-row .sidebar-conv-workspace {
+  flex: 0 1 auto;
+  max-width: 42%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--graphite-mute);
+  font-size: 0.62rem;
   line-height: 1.2;
 }
 .sidebar-conv-title-input {

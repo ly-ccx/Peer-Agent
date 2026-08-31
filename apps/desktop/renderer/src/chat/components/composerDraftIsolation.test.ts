@@ -42,14 +42,19 @@ test('draft input stays in the composer leaf and never becomes context token aut
 });
 
 test('composer auto-sizing stays in CSS and does not force layout on every draft character', async () => {
-  const [controls, styles] = await Promise.all([
+  const [controls, liveStyles, legacyStyles] = await Promise.all([
     readSource('./ComposerDraftControls.tsx'),
+    readSource('../styles/chat-surface.css'),
     readSource('../styles/chat-composer.css'),
   ]);
 
   assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
-  assert.match(styles, /field-sizing:\s*content/);
-  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*200px/);
+  // Live composer is `.chat-composer`; autosize must land on that selector, not only the unused cloud class.
+  assert.match(
+    liveStyles,
+    /\.chat-composer textarea \{[\s\S]*?field-sizing:\s*content;[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+  assert.match(legacyStyles, /field-sizing:\s*content/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
@@ -141,12 +146,18 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('./GoalPlanPanel.tsx'),
   ]);
 
+  assert.match(surface, /workspaceIsGit === false/);
+  assert.match(surface, /workspaceIsGit === true \? \([\s\S]*composer-context-row[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
+  assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
+  assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
-  assert.ok(surface.includes('disabled={workspaceIsGit === false || isStreaming}'));
+  assert.ok(surface.includes('disabled={isStreaming}'));
+  assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);
   assert.match(surface, /当前任务正在执行，无法更改隔离环境/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
-  assert.match(surface, /\{workspacePath \? \(/);
   assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
   assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
@@ -174,6 +185,14 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /本地分支/);
   assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
+  // Create-branch dialog pushes to the remote by default (opt-out checkbox).
+  assert.match(surface, /pa-confirm-check/);
+  assert.match(surface, /创建后推送到远端（git push -u）/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true \}\)/);
+  assert.match(surface, /push: push !== false,/);
+  assert.match(surface, /pushed === false/);
+  assert.match(surface, /branchPushNotice/);
+  assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
   assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
