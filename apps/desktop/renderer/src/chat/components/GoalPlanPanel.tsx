@@ -1627,10 +1627,12 @@ const PlanCard = memo(function PlanCard({
   // 画「任务线 → 发版线」会暗示一个不存在的合并。
   const showMergeRoute = isolated;
   const handoffStatus = plan.deliveryHandoff?.status;
+  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
   const canMergeIntoSource = isolated
     && plan.status === 'completed'
     && handoffStatus !== 'delivered'
-    && handoffStatus !== 'delivering';
+    && handoffStatus !== 'delivering'
+    && !qualityReviewPending;
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
@@ -1818,7 +1820,16 @@ const PlanCard = memo(function PlanCard({
               ) : lampHandoff ? (
                 <p className="goal-plan-delivery-handoff">{lampHandoff}</p>
               ) : null}
-              {canMergeIntoSource ? (
+              {qualityReviewPending ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-retry"
+                  disabled={lineDisabled || isStreaming}
+                  onClick={() => void onNextAction(plan, 'adjust')}
+                >
+                  {isZh ? '继续修' : 'Continue fixing'}
+                </button>
+              ) : canMergeIntoSource ? (
                 <button
                   type="button"
                   className="goal-plan-delivery-retry"

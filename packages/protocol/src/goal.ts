@@ -161,8 +161,8 @@ function handoffStoppedReasonLabel(
       return locale === 'zh' ? '仓库正被占用，可重试' : 'repository is locked; retry available';
     case 'quality_review_pending':
       return locale === 'zh'
-        ? '质量自检还没过线，没法合进发版线。'
-        : 'quality review has not passed, so this cannot merge yet';
+        ? '质量自检还没过线，没法合进发版线。点「继续修」，把缺的检查补上后再合。'
+        : 'Quality review has not passed, so this cannot merge yet. Tap Continue fixing to finish the missing checks, then merge.';
     case 'missing_task_commits':
       return locale === 'zh'
         ? '任务线还没有可合入的提交。改动还在工作区里，先提交再合并。'

@@ -184,7 +184,7 @@ test('formatGoalDeliveryHandoff 有交付线即可展示合回状态，不必先
         updatedAt: '2026-08-14T01:01:00.000Z',
       },
     }),
-    '质量自检还没过线，没法合进发版线。',
+    '质量自检还没过线，没法合进发版线。点「继续修」，把缺的检查补上后再合。',
   );
   assert.equal(
     formatGoalDeliveryHandoff({
