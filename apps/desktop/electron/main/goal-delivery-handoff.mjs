@@ -582,6 +582,21 @@ export function createGoalDeliveryHandoff({
     return binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath));
   }
 
+  function handoffGateReason(plan) {
+    if (!plan || typeof plan !== 'object') return 'missing_plan';
+    if (!isCompleted(plan)) return 'plan_not_completed';
+    if (!isQualityReady(plan)) return 'quality_review_pending';
+    const binding = plan.deliveryBinding;
+    if (!binding) return 'missing_binding';
+    const taskBranch = trim(binding.taskBranch);
+    const targetBranch = mergeTargetFor(plan);
+    if (!taskBranch || !targetBranch) return 'missing_binding';
+    if (!(binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath)))) {
+      return 'missing_worktree';
+    }
+    return null;
+  }
+
   /**
    * ADR 68：direct 交付事实判定。
    * 非隔离计划完成且质量过关时，改动已直接落在当前工作区——写入 delivered 事实，
@@ -677,7 +692,9 @@ export function createGoalDeliveryHandoff({
     const operationRoot = isolated ? worktreePath : repositoryRoot;
     if (!repositoryRoot || !existsSync(repositoryRoot)) return plan;
     if (!operationRoot || !existsSync(operationRoot)) return plan;
-    if (isolated && (!worktreePath || !existsSync(worktreePath))) return plan;
+    if (isolated && (!worktreePath || !existsSync(worktreePath))) {
+      return stopPlan(plan, 'missing_worktree', { targetBranch, taskBranch });
+    }
 
     const key = lockKey(plan);
     if (!key) return plan;
@@ -738,13 +755,18 @@ export function createGoalDeliveryHandoff({
 
   function handoffPlan(plan, { retry = false } = {}) {
     if (!plan || typeof plan !== 'object') return Promise.resolve(plan);
-    if (!canHandoff(plan) || alreadyDelivered(plan)) {
+    if (alreadyDelivered(plan)) return Promise.resolve(plan);
+    if (!canHandoff(plan)) {
       // ADR 68：非隔离计划没有合回动作，但完成即已直接交付——补写事实（幂等）。
       if (canRecordDirectDelivery(plan)) {
         return recordDirectDelivery(plan).catch((error) => {
           console.warn('[goal-handoff] direct delivery record failed:', error?.message || error);
           return plan;
         });
+      }
+      if (retry) {
+        const reason = handoffGateReason(plan);
+        if (reason) return Promise.resolve(stopPlan(plan, reason));
       }
       return Promise.resolve(plan);
     }

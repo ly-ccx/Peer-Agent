@@ -179,6 +179,30 @@ test('formatGoalDeliveryHandoff 有交付线即可展示合回状态，不必先
       deliveryBinding: binding,
       deliveryHandoff: {
         status: 'stopped',
+        stoppedReason: 'quality_review_pending',
+        targetBranch: 'PeerAgent/0.0.4',
+        updatedAt: '2026-08-14T01:01:00.000Z',
+      },
+    }),
+    '质量自检还没过线，没法合进发版线。',
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      deliveryHandoff: {
+        status: 'stopped',
+        stoppedReason: 'missing_task_commits',
+        targetBranch: 'PeerAgent/0.0.4',
+        updatedAt: '2026-08-14T01:01:00.000Z',
+      },
+    }),
+    '任务线还没有可合入的提交。改动还在工作区里，先提交再合并。',
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      deliveryHandoff: {
+        status: 'stopped',
         targetBranch: 'PeerAgent/0.0.4',
         stoppedReason: 'target_branch_moved',
         updatedAt: '2026-08-14T01:01:00.000Z',

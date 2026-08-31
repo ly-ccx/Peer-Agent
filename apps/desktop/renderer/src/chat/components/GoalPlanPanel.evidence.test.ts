@@ -52,6 +52,9 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /goal-panel-toggle-active-handoff/);
   assert.match(source, /goal-plan-head-handoff/);
   assert.match(source, /canMergeIntoSource/);
+  assert.match(source, /mergeIntoSource/);
+  assert.match(source, /await clientApi.goalPlansRetryHandoff/);
+  assert.match(source, /deliveryHandoff\?\.status === 'stopped'/);
   assert.match(source, /再试一次，合并进 \$\{mergeDest\}/);
   assert.match(source, /合并进 \$\{mergeDest\}/);
   assert.doesNotMatch(source, /重试交回/);
