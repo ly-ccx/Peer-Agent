@@ -189,9 +189,8 @@
 /* caret 固定指向右(›)，作为「点击进入/查看」指示符，不随展开态旋转。
    展开/收起状态由右侧 Workbench 分栏是否出现来表达，无需箭头方向反馈。 */
 
-/* 当折叠态存在活跃计划块时，由 .goal-panel-toggle-active 的 margin-left:auto 负责把
-   「活跃标题 + caret」整组推到最右；此时 caret 不能再各自吸收一份剩余空间（否则两段
-   auto 会把活跃标题夹在中间），改用紧贴 active 的小间距。 */
+/* 折叠条右侧是计划列表时，caret 紧贴列表，不要再吃一份剩余空间。 */
+.goal-panel-toggle-plans + .goal-panel-toggle-caret,
 .goal-panel-toggle-active + .goal-panel-toggle-caret {
   margin-left: 8px;
 }
@@ -203,6 +202,62 @@
 
 .goal-panel-toggle:disabled:hover {
   background: transparent;
+}
+
+.goal-panel-toggle-plans {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(72%, 640px);
+  overflow-x: auto;
+}
+
+.goal-panel-toggle-plan {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 280px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--za-text-soft) 8%, transparent);
+}
+
+.goal-panel-toggle-plan-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-meta, 12px);
+}
+
+.goal-panel-toggle-plan-status {
+  flex: none;
+  color: var(--za-text-faint);
+  font-size: var(--ui-font-caption, 11px);
+}
+
+.goal-panel-toggle-plan.is-archived .goal-panel-toggle-plan-status {
+  color: var(--za-text-soft);
+}
+
+.goal-panel-toggle-plan-action {
+  flex: none;
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--za-text-soft) 12%, transparent);
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 11px);
+  cursor: pointer;
+}
+
+.goal-panel-toggle-plan-action:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* A：折叠态在 header 直接显示活跃计划标题 + X/Y 迷你进度。 */

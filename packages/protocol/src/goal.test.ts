@@ -336,7 +336,7 @@ test('ADR 68：direct 交付的灯条与标签用交付语义，不出现「还�
     '还没进 0.0.9',
   );
 
-  // merge 模式 delivered（缺省 deliveryMode）：维持「已进」。
+  // merge 模式 delivered（缺省 deliveryMode）：灯条说「已归档到」。
   assert.equal(
     formatGoalDeliveryHandoffLamp({
       deliveryBinding: { ...binding, executionIsolation: 'worktree' },
@@ -346,6 +346,6 @@ test('ADR 68：direct 交付的灯条与标签用交付语义，不出现「还�
         updatedAt: '2026-08-26T07:00:00.000Z',
       },
     }),
-    '已进 0.0.9',
+    '已归档到 0.0.9',
   );
 });

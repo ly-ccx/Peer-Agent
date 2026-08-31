@@ -224,7 +224,7 @@ export function formatGoalDeliveryHandoff(
   return undefined;
 }
 
-/** 灯条用的短合回状态：合不进 / 还没进 / 已进源头。 */
+/** 灯条用的短合回状态：合不进 / 还没归档 / 已归档到源头。 */
 export function formatGoalDeliveryHandoffLamp(
   input: {
     readonly deliveryHandoff?: GoalDeliveryHandoff | null;
@@ -256,7 +256,7 @@ export function formatGoalDeliveryHandoffLamp(
     if (handoff.deliveryMode === 'direct') {
       return locale === 'zh' ? `已随 ${dest} 交付` : `delivered with ${dest}`;
     }
-    return locale === 'zh' ? `已进 ${dest}` : `on ${dest}`;
+    return locale === 'zh' ? `已归档到 ${dest}` : `archived to ${dest}`;
   }
   if (handoff.status === 'stopped') {
     return locale === 'zh' ? `合不进 ${dest}` : `blocked from ${dest}`;
