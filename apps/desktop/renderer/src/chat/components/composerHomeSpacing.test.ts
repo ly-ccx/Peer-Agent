@@ -12,7 +12,7 @@ test('home control strip keeps a compact left-group gap', () => {
   );
 });
 
-test('workspace context sits above the composer card, not in the action bar', () => {
+test('source and isolation sit above the composer card', () => {
   assert.match(
     styles,
     /\.composer-context-row \{[\s\S]*?margin:\s*0 auto 4px;/,
@@ -20,6 +20,13 @@ test('workspace context sits above the composer card, not in the action bar', ()
   assert.match(
     styles,
     /\.chat-composer-wrap--empty-home \.composer-context-row \{[\s\S]*?margin:\s*0 auto 6px;/,
+  );
+});
+
+test('workspace picker stays in the toolbar under the composer', () => {
+  assert.match(
+    styles,
+    /\.chat-composer-toolbar \{[\s\S]*?margin:\s*var\(--space-2\) auto 0;/,
   );
 });
 

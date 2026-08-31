@@ -142,6 +142,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   ]);
 
   assert.match(surface, /composer-context-row[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
+  assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
   assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);

@@ -2934,43 +2934,6 @@ export function ChatSurface({
         {!(showEmptyHome && !hasProvider) ? (
         <>
         <div className="composer-context-row">
-            {isDraftConversation ? (
-              workspaceOptions.length > 0 ? (
-                <Dropdown
-                  className="composer-dropdown composer-workspace-dropdown"
-                  value={workspacePath ?? ''}
-                  placeholder={isZh ? '选择工作区' : 'Select workspace'}
-                  options={workspaceOptions}
-                  onChange={(nextWorkspacePath) => {
-                    void onWorkspaceChange?.(nextWorkspacePath);
-                  }}
-                  ariaLabel={isZh ? '工作区' : 'Workspace'}
-                  title={isZh ? '新任务必须先选择工作区' : 'Select a workspace before starting a task'}
-                  menuPlacement="down"
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="composer-workspace-add"
-                  onClick={() => void handleAddWorkspace()}
-                >
-                  {isZh ? '添加工作区' : 'Add workspace'}
-                </button>
-              )
-            ) : workspacePath && workspaceOptions.length > 0 ? (
-              <Dropdown
-                className="composer-dropdown composer-workspace-dropdown"
-                value={workspacePath}
-                options={workspaceOptions}
-                onChange={(nextWorkspacePath) => {
-                  void onWorkspaceChange?.(nextWorkspacePath);
-                }}
-                disabled
-                ariaLabel={isZh ? '工作区' : 'Workspace'}
-                title={isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created'}
-                menuPlacement="down"
-              />
-            ) : null}
             {gitChrome.workspaceHead ? (
               <span
                 className="composer-workspace-head"
@@ -3071,6 +3034,43 @@ export function ChatSurface({
         />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
+            {isDraftConversation ? (
+              workspaceOptions.length > 0 ? (
+                <Dropdown
+                  className="composer-dropdown composer-workspace-dropdown"
+                  value={workspacePath ?? ''}
+                  placeholder={isZh ? '选择工作区' : 'Select workspace'}
+                  options={workspaceOptions}
+                  onChange={(nextWorkspacePath) => {
+                    void onWorkspaceChange?.(nextWorkspacePath);
+                  }}
+                  ariaLabel={isZh ? '工作区' : 'Workspace'}
+                  title={isZh ? '新任务必须先选择工作区' : 'Select a workspace before starting a task'}
+                  menuPlacement="up"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="composer-workspace-add"
+                  onClick={() => void handleAddWorkspace()}
+                >
+                  {isZh ? '添加工作区' : 'Add workspace'}
+                </button>
+              )
+            ) : workspacePath && workspaceOptions.length > 0 ? (
+              <Dropdown
+                className="composer-dropdown composer-workspace-dropdown"
+                value={workspacePath}
+                options={workspaceOptions}
+                onChange={(nextWorkspacePath) => {
+                  void onWorkspaceChange?.(nextWorkspacePath);
+                }}
+                disabled
+                ariaLabel={isZh ? '工作区' : 'Workspace'}
+                title={isZh ? '会话创建后不能切换工作区' : 'Workspace cannot be changed after the conversation is created'}
+                menuPlacement="up"
+              />
+            ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
