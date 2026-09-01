@@ -264,6 +264,32 @@ test('listOpenAICompatibleModels keeps provider catalog when registry fetch fail
   assert.deepEqual(res.models, [{ id: 'unknown-chat', label: 'unknown-chat' }]);
 });
 
+test('listOpenAICompatibleModels rewrites DeepSeek Anthropic chat roots to the OpenAI catalog URL', async () => {
+  let seenUrl = '';
+  let seenHeaders = null;
+  const res = await listOpenAICompatibleModels({
+    baseUrl: 'https://api.deepseek.com/anthropic',
+    wire: 'anthropic-messages',
+    apiKey: 'deepseek-test-key',
+    headers: { 'x-api-key': 'deepseek-test-key', 'anthropic-version': '2023-06-01' },
+    fetchImpl: async (url, init) => {
+      seenUrl = String(url);
+      seenHeaders = init.headers;
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] }),
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://api.deepseek.com/models');
+  assert.doesNotMatch(seenUrl, /\/anthropic\/v1\/models/);
+  assert.equal(seenHeaders.Authorization, 'Bearer deepseek-test-key');
+  assert.equal(seenHeaders['x-api-key'], undefined);
+  assert.equal(seenHeaders['anthropic-version'], undefined);
+  assert.equal(res.source, 'remote');
+  assert.deepEqual(res.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+});
+
 test('listOpenAICompatibleModels derives Anthropic and Gemini model endpoints', async () => {
   const urls = [];
   const okResponse = { ok: true, json: async () => ({ data: [{ id: 'claude-sonnet-4-5', created_at: '2025-01-01T00:00:00Z' }] }) };
@@ -322,12 +348,37 @@ test('listModelCatalogForChannel routes DeepSeek catalog to the OpenAI plane wit
     },
   });
   assert.equal(seenUrl, 'https://api.deepseek.com/models');
+  assert.doesNotMatch(seenUrl, /\/anthropic\/v1\/models/);
   assert.equal(seenHeaders.Authorization, 'Bearer deepseek-test-key');
   assert.equal(seenHeaders['x-api-key'], undefined);
   assert.equal(seenHeaders['anthropic-version'], undefined);
   assert.equal(seenHeaders['Content-Type'], undefined);
   assert.equal(res.source, 'remote');
   assert.deepEqual(res.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+});
+
+test('listModelCatalogForChannel still rewrites DeepSeek Anthropic roots when catalog override is missing', async () => {
+  let seenUrl = '';
+  let seenHeaders = null;
+  const res = await listModelCatalogForChannel({
+    baseUrl: 'https://api.deepseek.com/anthropic',
+    wire: 'anthropic-messages',
+    apiKey: 'deepseek-test-key',
+    headers: { 'x-api-key': 'deepseek-test-key', 'anthropic-version': '2023-06-01' },
+    fetchImpl: async (url, init) => {
+      seenUrl = String(url);
+      seenHeaders = init.headers;
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] }),
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://api.deepseek.com/models');
+  assert.doesNotMatch(seenUrl, /\/anthropic\/v1\/models/);
+  assert.equal(seenHeaders.Authorization, 'Bearer deepseek-test-key');
+  assert.equal(seenHeaders['x-api-key'], undefined);
+  assert.equal(res.source, 'remote');
 });
 
 test('listModelCatalogForChannel falls back to the built-in DeepSeek catalog and keeps the error', async () => {

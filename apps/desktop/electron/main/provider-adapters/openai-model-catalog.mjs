@@ -1,5 +1,9 @@
 import { enrichModelsWithRegistry, fetchModelsDevRegistry } from './models-dev-registry.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import {
+  DEEPSEEK_ANTHROPIC_BASE_URL,
+  DEEPSEEK_OPENAI_BASE_URL,
+} from '../provider-channels.mjs';
 
 // OpenAI 订阅(ChatGPT OAuth)模型目录(ADR 28)。
 //
@@ -133,6 +137,45 @@ const DEEPSEEK_FALLBACK_CATALOG = Object.freeze([
     maxOutputTokens: 64_000,
   }),
 ]);
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const target = String(name).toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return undefined;
+}
+
+/**
+ * DeepSeek Anthropic 平面没有 /v1/models。目录必须改写到 OpenAI 平面
+ * (GET https://api.deepseek.com/models + Bearer)，即使调用方漏传 modelCatalog 覆盖。
+ * 官方 Anthropic 根地址不受影响。
+ */
+function rewriteDeepSeekCatalogRequest({ baseUrl, wire, headers = {}, apiKey } = {}) {
+  const root = String(baseUrl || '').replace(/\/+$/, '');
+  if (!root) return { root, wire, headers: { ...headers } };
+  const anthropicRoot = String(DEEPSEEK_ANTHROPIC_BASE_URL).replace(/\/+$/, '');
+  const openaiRoot = String(DEEPSEEK_OPENAI_BASE_URL).replace(/\/+$/, '');
+  const isDeepSeekAnthropic = root === anthropicRoot
+    || root.startsWith(`${anthropicRoot}/`)
+    || (/^https?:\/\/api\.deepseek\.com(?:\/|$)/i.test(root) && /\/anthropic(?:\/|$)/i.test(root));
+  if (!isDeepSeekAnthropic) {
+    return { root, wire, headers: { ...headers } };
+  }
+  const nextHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (lower === 'x-api-key' || lower === 'anthropic-version' || lower === 'content-type') continue;
+    nextHeaders[key] = value;
+  }
+  const existingAuth = headerValue(headers, 'authorization');
+  const bearer = String(apiKey || '').trim()
+    || String(existingAuth || '').replace(/^Bearer\s+/i, '').trim()
+    || String(headerValue(headers, 'x-api-key') || '').trim();
+  if (bearer) nextHeaders.Authorization = `Bearer ${bearer}`;
+  return { root: openaiRoot, wire: 'openai-chat', headers: nextHeaders };
+}
 
 // 订阅 codex 端点真正可用的模型前缀。仅 gpt-5 家族。
 function isSubscriptionUsableModel(id) {
@@ -306,19 +349,21 @@ export async function listOpenAICompatibleModels({
     });
   }
   const doFetch = fetchImpl || fetchWithConnectionRecovery;
-  const root = String(baseUrl || '').replace(/\/+$/, '');
+  const rewritten = rewriteDeepSeekCatalogRequest({ baseUrl, wire, headers, apiKey });
+  const root = rewritten.root;
+  const catalogWire = rewritten.wire;
   if (!root) throw new Error('base_url_not_configured');
 
-  const reqHeaders = { ...headers };
+  const reqHeaders = { ...rewritten.headers };
   // GET 列模型无请求体,去掉只对 POST 有意义的 Content-Type,避免部分网关校验报错。
   for (const key of Object.keys(reqHeaders)) {
     if (key.toLowerCase() === 'content-type') delete reqHeaders[key];
   }
 
   let url;
-  if (wire === 'gemini') {
+  if (catalogWire === 'gemini') {
     url = `${root}/models${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
-  } else if (wire === 'anthropic-messages') {
+  } else if (catalogWire === 'anthropic-messages') {
     url = `${root}/v1/models`;
   } else {
     url = `${root}/models`;
@@ -335,7 +380,7 @@ export async function listOpenAICompatibleModels({
   }
   const data = await res.json();
   const providerModels = sortNewestFirst(
-    normalizeApiModelList(data, wire).filter((m) => isLikelyChatModel(m.id)),
+    normalizeApiModelList(data, catalogWire).filter((m) => isLikelyChatModel(m.id)),
   );
   // A provider fetch mock should not accidentally become the registry transport too.
   // Production calls use global fetch; tests can opt in with registryFetchImpl.
