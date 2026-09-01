@@ -450,6 +450,161 @@ describe('goal delivery handoff', () => {
     assert.equal(again.deliveryHandoff.updatedAt, next.deliveryHandoff.updatedAt);
   });
 
+  it('reconciles a stopped handoff with a cleaned worktree when the task line fully landed (startup backfill)', async () => {
+    // 复现时序竞态：完成瞬间质检未回填 → stopped(quality_review_pending)，
+    // 之后工作树被清理（目录已不存在），启动对账应按 git 事实补记 delivered。
+    const store = createStore(boundPlan({
+      status: 'completed',
+      qualityReview: { status: 'passed' },
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        // 空壳任务线（无独立提交），对应"任务线已被目标线包含"。
+        taskBranch: 'PeerAgent/task-reconcile-1',
+        worktreePath: path.join(worktrees, 'gone-worktree'),
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+      deliveryHandoff: {
+        status: 'stopped',
+        repoId: 'live-repo',
+        targetBranch: 'main',
+        taskBranch: 'PeerAgent/task-reconcile-1',
+        stoppedReason: 'quality_review_pending',
+        updatedAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    git(['branch', 'PeerAgent/task-reconcile-1']);
+    assert.equal(existsSync(path.join(worktrees, 'gone-worktree')), false);
+
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const result = await handoff.reconcileStoppedHandoff(store.getPlan('plan-handoff-1'));
+
+    assert.equal(result.ok, true);
+    const next = store.getPlan('plan-handoff-1');
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(next.deliveryHandoff.deliveryMode, 'direct');
+    assert.equal(next.deliveryHandoff.targetBranch, 'main');
+    // 幂等：重复对账不覆盖已 delivered 的记录。
+    const second = await handoff.reconcileStoppedHandoff(next);
+    assert.equal(second.ok, false);
+    assert.equal(second.reason, 'not_stopped');
+    assert.equal(store.getPlan('plan-handoff-1').deliveryHandoff.updatedAt, next.deliveryHandoff.updatedAt);
+  });
+
+  it('does not reconcile a stopped handoff when the task line still has unmerged work', async () => {
+    git(['switch', '-c', 'PeerAgent/task-reconcile-2']);
+    writeFileSync(path.join(repository, 'unmerged.txt'), 'still on task line\n');
+    git(['add', 'unmerged.txt']);
+    git(['commit', '-m', 'unmerged work']);
+    git(['switch', 'main']);
+    const store = createStore(boundPlan({
+      status: 'completed',
+      qualityReview: { status: 'passed' },
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        taskBranch: 'PeerAgent/task-reconcile-2',
+        worktreePath: path.join(worktrees, 'gone-worktree-2'),
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+      deliveryHandoff: {
+        status: 'stopped',
+        repoId: 'live-repo',
+        targetBranch: 'main',
+        taskBranch: 'PeerAgent/task-reconcile-2',
+        stoppedReason: 'quality_review_pending',
+        updatedAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    assert.equal(existsSync(path.join(worktrees, 'gone-worktree-2')), false);
+
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const result = await handoff.reconcileStoppedHandoff(store.getPlan('plan-handoff-1'));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'not_landed');
+    // 未合入的工作不允许被补记成已合入：状态保持 stopped 原样。
+    const next = store.getPlan('plan-handoff-1');
+    assert.equal(next.deliveryHandoff.status, 'stopped');
+    assert.equal(next.deliveryHandoff.stoppedReason, 'quality_review_pending');
+  });
+
+  it('routes reconcile to the retry path while the worktree is still present', async () => {
+    const store = createStore(boundPlan({
+      status: 'completed',
+      qualityReview: { status: 'passed' },
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        worktreePath: repository,
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+      deliveryHandoff: {
+        status: 'stopped',
+        repoId: 'live-repo',
+        targetBranch: 'main',
+        stoppedReason: 'target_checkout_dirty',
+        updatedAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const result = await handoff.reconcileStoppedHandoff(store.getPlan('plan-handoff-1'));
+
+    // 工作树在场 → 不属于"已清理"场景，转正常 retry 链路判定（不补记 direct 事实）。
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'worktree_present');
+    assert.equal(store.getPlan('plan-handoff-1').deliveryHandoff.status, 'stopped');
+  });
+
+  it('reconcileStoppedHandoffs bulk-runs and reports per-plan results', async () => {
+    git(['branch', 'PeerAgent/task-bulk-1']);
+    const store = createStore(boundPlan({
+      status: 'completed',
+      qualityReview: { status: 'passed' },
+      planId: 'plan-bulk-1',
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        taskBranch: 'PeerAgent/task-bulk-1',
+        worktreePath: path.join(worktrees, 'gone-bulk'),
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+      deliveryHandoff: {
+        status: 'stopped',
+        repoId: 'live-repo',
+        targetBranch: 'main',
+        taskBranch: 'PeerAgent/task-bulk-1',
+        stoppedReason: 'quality_review_pending',
+        updatedAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    const executingPlan = boundPlan();
+    const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
+    const results = await handoff.reconcileStoppedHandoffs([
+      store.getPlan('plan-bulk-1'),
+      executingPlan,
+    ]);
+
+    assert.equal(results.length, 2);
+    assert.equal(results[0].planId, 'plan-bulk-1');
+    assert.equal(results[0].delivered, true);
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].reason, 'not_stopped');
+    assert.equal(store.getPlan('plan-bulk-1').deliveryHandoff.status, 'delivered');
+  });
+
   it('records a direct delivered fact when there is no task line and checkout is the target', async () => {
     writeFileSync(path.join(repository, 'direct-work.txt'), 'landed on main\n');
     git(['add', 'direct-work.txt']);
