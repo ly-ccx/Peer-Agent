@@ -48,6 +48,7 @@ export function Dropdown({
   className,
   title,
   prefix,
+  triggerLabel: triggerLabelOverride,
   menuPlacement = 'down',
   searchable = false,
   searchPlaceholder,
@@ -63,6 +64,8 @@ export function Dropdown({
   readonly className?: string;
   readonly title?: string;
   readonly prefix?: ReactNode;
+  /** Closed trigger text. Menu items still use each option's own label. */
+  readonly triggerLabel?: string;
   readonly menuPlacement?: 'down' | 'up';
   readonly searchable?: boolean;
   readonly searchPlaceholder?: string;
@@ -80,7 +83,7 @@ export function Dropdown({
   const listId = useId();
 
   const selected = options.find((o) => o.value === value);
-  const triggerLabel = selected?.label ?? placeholder ?? value;
+  const triggerLabel = triggerLabelOverride ?? selected?.label ?? placeholder ?? value;
   const normalizedQuery = query.trim().toLowerCase();
   const visibleOptions = useMemo(
     () => options.filter((option) => optionMatchesQuery(option, normalizedQuery)),

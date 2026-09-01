@@ -2965,6 +2965,7 @@ export function ChatSurface({
                 value={gitChrome.taskLine.value}
                 options={boundBranchOptions}
                 onChange={handleSelectBoundBranch}
+                triggerLabel={gitChrome.taskLine.label}
                 ariaLabel={gitChrome.taskLine.title}
                 title={gitChrome.taskLine.title}
                 prefix={<GitBranchGlyph />}
