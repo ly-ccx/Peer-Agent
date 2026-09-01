@@ -63,6 +63,53 @@ function hostOf(url) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function computeViewportPoint(cssPoint, viewport = {}) {
+  const dpr = Number.isFinite(viewport.devicePixelRatio) && viewport.devicePixelRatio > 0
+    ? viewport.devicePixelRatio
+    : 1;
+  const scale = Number.isFinite(viewport.visualViewportScale) && viewport.visualViewportScale > 0
+    ? viewport.visualViewportScale
+    : 1;
+  const scrollX = Number.isFinite(viewport.scrollX) ? viewport.scrollX : 0;
+  const scrollY = Number.isFinite(viewport.scrollY) ? viewport.scrollY : 0;
+  // 契约：坐标统一用逻辑坐标，不乘 dpr/scale 放大；底层负责物理像素换算。
+  const x = Math.round(cssPoint.x ?? 0);
+  const y = Math.round(cssPoint.y ?? 0);
+  return {
+    x,
+    y,
+    css: { x: Math.round(cssPoint.x ?? 0), y: Math.round(cssPoint.y ?? 0) },
+    dpr,
+    visualViewportScale: scale,
+    scroll: { x: scrollX, y: scrollY },
+  };
+}
+
+async function waitForElementStable(wc, selector, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 1500;
+  const pollMs = opts.pollMs ?? 120;
+  const js = (el) => `(() => { const e = document.querySelector(${JSON.stringify(el)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })()`;
+  const deadline = Date.now() + timeoutMs;
+  let prev = null;
+  while (Date.now() < deadline) {
+    const sample = await wc.executeJavaScript(js(selector), true);
+    if (!sample) return false;
+    if (prev) {
+      const stable = prev.x === sample.x && prev.y === sample.y &&
+        prev.x0 === sample.x0 && prev.y0 === sample.y0 &&
+        prev.w === sample.w && prev.h === sample.h;
+      if (stable) return true;
+    }
+    prev = sample;
+    await sleep(pollMs);
+  }
+  return false;
+}
+
 function buildImagePreview(image) {
   if (!image || typeof image.getSize !== 'function' || typeof image.toDataURL !== 'function') return null;
   const sourceSize = image.getSize();
@@ -454,21 +501,28 @@ export function createLocalBrowserControlProvider({
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         let point = { x: Number(args.x), y: Number(args.y) };
         let locatedBy = 'point';
+        let viewportMeta = {};
         if (selector) {
           const located = await wc.executeJavaScript(
-            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({block:'center',inline:'center'}); const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) }; })()`,
+            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({block:'center',inline:'center'}); const r = el.getBoundingClientRect(); const vv = window.visualViewport; return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 }; })()`,
             true,
           );
           if (!located) {
             return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-          point = located;
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
           locatedBy = 'selector';
+          viewportMeta = normalized;
+          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
         }
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         wc.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, x: point.x, y: point.y, ...targetIdentity };
-        output = { action: 'click', locatedBy, x: point.x, y: point.y, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        output = { action: 'click', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : `坐标 (${point.x}, ${point.y})`}。`
           : `Clicked ${selector ? `element "${selector}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
@@ -478,6 +532,7 @@ export function createLocalBrowserControlProvider({
         const clear = args.clear === true;
         const submit = args.submit === true;
         if (selector) {
+          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
           const focused = await wc.executeJavaScript(
             `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true; })()`,
             true,
