@@ -1239,6 +1239,43 @@ const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
   },
 };
 
+// OpenCode Go 按模型族的思考档位契约（在 wire 级能力之上做模型级覆盖）。
+// GLM-5.3 系（如 glm-5.3-flash）是常开思考模型，上游 400 [1210] 明确：
+// 思考不可关闭，reasoning_effort 仅接受 low / high / max。
+// UI 五档（off/low/default/high/xhigh）全部显式映射，编码层不再把
+// default→medium、xhigh→xhigh 等非法档位发给上游；off 降为 low（最省思考）。
+const OPENCODE_GO_MODEL_REASONING_PROFILES = [
+  {
+    match: /glm[-_.]?5\.3/i,
+    reasoning: {
+      supported: true,
+      paramStyle: 'openai-effort',
+      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      defaultEffort: 'low',
+      effortMap: {
+        off: 'low',
+        low: 'low',
+        default: 'low',
+        medium: 'high',
+        high: 'high',
+        max: 'max',
+        xhigh: 'max',
+      },
+    },
+  },
+];
+
+function applyOpenCodeGoModelReasoningProfile(capabilities, model) {
+  const name = String(model || '').trim();
+  if (!name) return;
+  const profile = OPENCODE_GO_MODEL_REASONING_PROFILES.find((entry) => entry.match.test(name));
+  if (!profile) return;
+  capabilities.reasoning = {
+    ...profile.reasoning,
+    effortMap: { ...profile.reasoning.effortMap },
+  };
+}
+
 export function listChannelDescriptors() {
   return Object.values(CHANNEL_DESCRIPTORS).map((descriptor) => structuredClone(descriptor));
 }
@@ -1462,6 +1499,11 @@ export function resolveChannel(config = {}) {
       || descriptor.capabilities
       || {},
   );
+  // OpenCode Go: 常开思考模型（GLM-5.3 系等）在 wire 级能力之上追加按模型档位契约，
+  // 先于用户覆盖应用，config.reasoningEffortMap 仍可显式改写。
+  if (isOpenCodeGo) {
+    applyOpenCodeGoModelReasoningProfile(capabilities, config.model);
+  }
   if (config.supportsReasoning !== undefined) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
