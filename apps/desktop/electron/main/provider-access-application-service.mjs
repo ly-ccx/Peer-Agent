@@ -5,7 +5,7 @@ import { listSubscriptionModels, listModelCatalogForChannel } from './provider-a
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
 import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
-import { resolveChannel } from './provider-channels.mjs';
+import { resolveChannel, resolveModelCatalogRequestConfig } from './provider-channels.mjs';
 import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 
 function assertFunction(value, label) {
@@ -27,6 +27,7 @@ const DEFAULT_OPERATIONS = Object.freeze({
   preferGeminiModel,
   listQoderModels,
   resolveChannel,
+  resolveModelCatalogRequestConfig,
   resolveGeminiCodeAssistProjectId,
 });
 
@@ -258,13 +259,29 @@ export function createProviderAccessApplicationService({
         apiKey: config.apiKey,
         customHeaders: config.customHeaders,
       });
+      // 与已落盘渠道(listModels 路径)共用目录平面判定：
+      // channelId 指向声明目录平面的渠道(如 DeepSeek)时同样切平面并按需兜底；
+      // 自定义网关(仅传 baseUrl)不带覆盖，保持纯远程行为。
+      const catalogConfig = ops.resolveModelCatalogRequestConfig({
+        channelId: config.channelId,
+        authMethod: 'api_key',
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        customHeaders: config.customHeaders,
+      });
       const { models, source, error } = await ops.listModelCatalogForChannel({
         baseUrl: resolved.baseUrl,
         headers: resolved.headers,
         wire: resolved.wire,
         apiKey: config.apiKey,
-        // 表单模式没有已落盘渠道上下文，走历史纯远程行为(失败即报错)。
-        modelCatalog: undefined,
+        modelCatalog: catalogConfig.modelCatalogOverride
+          ? {
+              channelId: catalogConfig.channelId,
+              wire: catalogConfig.wire,
+              baseUrl: catalogConfig.baseUrl,
+              headers: catalogConfig.headers,
+            }
+          : undefined,
       });
       return { success: true, models, source, ...(error ? { error } : {}) };
     } catch (error) {
