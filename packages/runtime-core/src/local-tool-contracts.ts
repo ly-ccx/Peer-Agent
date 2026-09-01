@@ -92,6 +92,8 @@ export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS = Object.freeze({
   browserReadDom: defineToolContract('browser_read_dom', 'local.web.control.readDom'),
   browserHover: defineToolContract('browser_hover', 'local.web.control.hover'),
   browserScroll: defineToolContract('browser_scroll', 'local.web.control.scroll'),
+  browserKey: defineToolContract('browser_key', 'local.web.control.key'),
+  browserDrag: defineToolContract('browser_drag', 'local.web.control.drag'),
 });
 
 export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACT_LIST = Object.freeze(

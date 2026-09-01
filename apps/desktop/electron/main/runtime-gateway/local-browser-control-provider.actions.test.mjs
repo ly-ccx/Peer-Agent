@@ -6,7 +6,9 @@ import {
 } from './browser-control-registry.mjs';
 import {
   createLocalBrowserControlProvider,
+  interpolateDragPath,
   normalizeScrollAlignment,
+  parseBrowserKeySpec,
 } from './local-browser-control-provider.mjs';
 
 function createActionWebContents() {
@@ -229,4 +231,134 @@ test('scroll without selector or delta fails recoverably', async () => {
     ?? execution.result.reason
     ?? '';
   assert.match(String(reason), /deltaX\/deltaY|block\/inline|selector/);
+});
+
+test('parseBrowserKeySpec 白名单与修饰键', () => {
+  assert.equal(parseBrowserKeySpec('Enter').keyName, 'Return');
+  assert.equal(parseBrowserKeySpec('Tab').ok, true);
+  assert.deepEqual(parseBrowserKeySpec('Meta+K').modifiers, {
+    alt: false,
+    control: false,
+    meta: true,
+    shift: false,
+  });
+  assert.equal(parseBrowserKeySpec('Meta+K').keyName, 'K');
+  assert.equal(parseBrowserKeySpec('F12').ok, false);
+  assert.equal(parseBrowserKeySpec('Shift').ok, false);
+});
+
+test('interpolateDragPath 至少 3 步且含起终点', () => {
+  const path = interpolateDragPath({ x: 0, y: 0 }, { x: 10, y: 0 }, 6);
+  assert.ok(path.length >= 3 && path.length <= 8);
+  assert.deepEqual(path[0], { x: 0, y: 0 });
+  assert.deepEqual(path[path.length - 1], { x: 10, y: 0 });
+});
+
+test('key sends Enter after optional selector focus', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 47,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-key',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.key', 'browser_key', { keys: ['Enter'], selector: '#field' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.deepEqual(execution.result.outputPreview.keys, ['Enter']);
+  assert.ok(browser.scripts.some((expr) => expr.includes('el.focus()')));
+  assert.ok(browser.inputEvents.some((event) => event.type === 'keyDown' && event.keyCode === 'Return'));
+  assert.ok(browser.inputEvents.some((event) => event.type === 'keyUp' && event.keyCode === 'Return'));
+});
+
+test('key rejects unknown names recoverably', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 48,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-key-fail',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.key', 'browser_key', { keys: ['F12'] }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  const reason = execution.result.outputPreview?.reason ?? '';
+  assert.match(String(reason), /Unsupported key|F12/);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('drag from/to coordinates interpolates mouse path', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 49,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-drag',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.drag', 'browser_drag', {
+      fromX: 10,
+      fromY: 20,
+      toX: 40,
+      toY: 80,
+    }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.action, 'drag');
+  assert.equal(browser.inputEvents[0].type, 'mouseDown');
+  assert.equal(browser.inputEvents[browser.inputEvents.length - 1].type, 'mouseUp');
+  assert.ok(browser.inputEvents.filter((event) => event.type === 'mouseMove').length >= 2);
+  assert.equal(browser.inputEvents[0].x, 10);
+  assert.equal(browser.inputEvents[browser.inputEvents.length - 1].x, 40);
+});
+
+test('drag from selector to selector uses locator chain', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 50,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-drag-sel',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.drag', 'browser_drag', {
+      fromSelector: '#src',
+      toSelector: 'frame:0 #dst',
+    }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.from.locatedBy, 'selector');
+  assert.equal(execution.result.outputPreview.to.locatedBy, 'selector');
+  assert.ok(browser.scripts.some((expr) => expr.includes('querySelector("#src")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('querySelector("#dst")')));
 });

@@ -87,6 +87,8 @@ test('Desktop-only browser contracts are explicit and excluded from shared parit
     { toolName: 'browser_read_dom', capabilityId: 'local.web.control.readDom' },
     { toolName: 'browser_hover', capabilityId: 'local.web.control.hover' },
     { toolName: 'browser_scroll', capabilityId: 'local.web.control.scroll' },
+    { toolName: 'browser_key', capabilityId: 'local.web.control.key' },
+    { toolName: 'browser_drag', capabilityId: 'local.web.control.drag' },
   ]);
 
   for (const contract of DESKTOP_ONLY_LOCAL_TOOL_CONTRACT_LIST) {

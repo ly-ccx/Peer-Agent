@@ -55,3 +55,21 @@ test('browser_hover and browser_scroll are registered as Desktop-only browser to
   assert.ok(scroll.inputSchema.properties.deltaY);
   assert.ok(scroll.inputSchema.properties.block);
 });
+
+test('browser_key and browser_drag are registered as Desktop-only browser tools', () => {
+  assert.equal(BROWSER_TOOL_NAMES.key, 'browser_key');
+  assert.equal(BROWSER_TOOL_NAMES.drag, 'browser_drag');
+  assert.equal(BROWSER_CAPABILITY_TO_TOOL['local.web.control.key'], 'browser_key');
+  assert.equal(BROWSER_CAPABILITY_TO_TOOL['local.web.control.drag'], 'browser_drag');
+
+  const registry = createRuntimeToolRegistry();
+  const key = registry.getTool('browser_key');
+  const drag = registry.getTool('browser_drag');
+  assert.ok(key);
+  assert.ok(drag);
+  assert.equal(key.capabilityId, 'local.web.control.key');
+  assert.equal(drag.capabilityId, 'local.web.control.drag');
+  assert.ok(key.inputSchema.properties.keys);
+  assert.ok(drag.inputSchema.properties.fromSelector);
+  assert.ok(drag.inputSchema.properties.toX);
+});

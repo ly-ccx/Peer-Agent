@@ -78,6 +78,8 @@ const NON_IDEMPOTENT_WRITE_TOOLS = new Set([
   'browser_navigate',
   'browser_hover',
   'browser_scroll',
+  'browser_key',
+  'browser_drag',
   'request_explorer',
   'request_user_input',
 ]);

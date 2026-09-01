@@ -26,6 +26,8 @@ export const BROWSER_TOOL_NAMES = Object.freeze({
   readDom: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.toolName,
   hover: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.toolName,
   scroll: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.toolName,
+  key: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey.toolName,
+  drag: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag.toolName,
 });
 
 /**
@@ -41,6 +43,8 @@ export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.capabilityId]: BROWSER_TOOL_NAMES.readDom,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.capabilityId]: BROWSER_TOOL_NAMES.hover,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.capabilityId]: BROWSER_TOOL_NAMES.scroll,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey.capabilityId]: BROWSER_TOOL_NAMES.key,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag.capabilityId]: BROWSER_TOOL_NAMES.drag,
 });
 
 const BROWSER_CONTROL_MODE_SCOPES = Object.freeze(['chat', 'goal']);
@@ -95,6 +99,20 @@ const SCROLL_PROMPT = [
   'its nearest scrollable ancestor (supports frame:N prefix). Use "deltaX"/"deltaY" for incremental',
   'scroll, or "block"/"inline" (start|center|end|nearest) to scrollIntoView. Without a selector,',
   'the document viewport scrolls. Prefer element scroll over whole-page jumps.',
+].join(' ');
+
+const KEY_PROMPT = [
+  'Send keyboard keys or shortcuts in the visible in-app browser. Provide "keys" as an ordered',
+  'array of whitelist names: Tab, Enter, Escape, Backspace, Delete, ArrowUp/Down/Left/Right,',
+  'Home, End, PageUp, PageDown, Space, or Modifier+Key (Meta|Control|Alt|Shift). Optionally',
+  'focus a CSS "selector" first (supports frame:N). This is not for typing text; use browser_type',
+  'for character insertion. Enter may submit forms.',
+].join(' ');
+
+const DRAG_PROMPT = [
+  'Drag from a source to a target in the visible in-app browser. Provide fromSelector or',
+  'fromX/fromY, and toSelector or toX/toY. Uses mouseDown, interpolated mouseMove steps, then',
+  'mouseUp. Selectors support frame:N. For sliders, reorder, and canvas pan — not HTML5 file drop.',
 ].join(' ');
 
 const BROWSER_CONTROL_RUNTIME = Object.freeze({
@@ -316,6 +334,70 @@ function scrollTool() {
   };
 }
 
+function keyTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.key,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey),
+    prompt: () => KEY_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ordered whitelist key names, e.g. ["Tab"], ["Enter"], ["Meta+K"].',
+        },
+        selector: {
+          type: 'string',
+          description: 'Optional CSS selector to focus before sending keys. Supports frame:N prefix.',
+        },
+      },
+      required: ['keys'],
+      additionalProperties: false,
+    },
+  };
+}
+
+function dragTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.drag,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag),
+    prompt: () => DRAG_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromSelector: {
+          type: 'string',
+          description: 'CSS selector of the drag source. Supports optional frame:N prefix.',
+        },
+        fromX: {
+          type: 'number',
+          description: 'Viewport X of the drag source (used when fromSelector is omitted).',
+        },
+        fromY: {
+          type: 'number',
+          description: 'Viewport Y of the drag source (used when fromSelector is omitted).',
+        },
+        toSelector: {
+          type: 'string',
+          description: 'CSS selector of the drag target. Supports optional frame:N prefix.',
+        },
+        toX: {
+          type: 'number',
+          description: 'Viewport X of the drag target (used when toSelector is omitted).',
+        },
+        toY: {
+          type: 'number',
+          description: 'Viewport Y of the drag target (used when toSelector is omitted).',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
 export const BROWSER_TOOL_DEFINITIONS = [
   openPanelTool(),
   navigateTool(),
@@ -325,4 +407,6 @@ export const BROWSER_TOOL_DEFINITIONS = [
   readDomTool(),
   hoverTool(),
   scrollTool(),
+  keyTool(),
+  dragTool(),
 ];

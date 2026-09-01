@@ -39,8 +39,10 @@ const SCREENSHOT = 'local.web.control.screenshot';
 const READ_DOM = 'local.web.control.readDom';
 const HOVER = 'local.web.control.hover';
 const SCROLL = 'local.web.control.scroll';
+const KEY = 'local.web.control.key';
+const DRAG = 'local.web.control.drag';
 
-const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM, HOVER, SCROLL]);
+const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM, HOVER, SCROLL, KEY, DRAG]);
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
@@ -163,6 +165,118 @@ export function normalizeScrollAlignment(value) {
   return SCROLL_ALIGNMENTS.has(trimmed) ? trimmed : '';
 }
 
+const NAMED_KEYS = Object.freeze({
+  tab: 'Tab',
+  enter: 'Return',
+  return: 'Return',
+  escape: 'Escape',
+  esc: 'Escape',
+  backspace: 'Backspace',
+  delete: 'Delete',
+  arrowup: 'Up',
+  arrowdown: 'Down',
+  arrowleft: 'Left',
+  arrowright: 'Right',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+  home: 'Home',
+  end: 'End',
+  pageup: 'PageUp',
+  pagedown: 'PageDown',
+  space: 'Space',
+});
+
+const MODIFIER_ALIASES = Object.freeze({
+  meta: 'meta',
+  cmd: 'meta',
+  command: 'meta',
+  control: 'control',
+  ctrl: 'control',
+  alt: 'alt',
+  option: 'alt',
+  shift: 'shift',
+});
+
+export function parseBrowserKeySpec(raw) {
+  if (typeof raw !== 'string') return { ok: false, reason: 'empty' };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, reason: 'empty' };
+  const parts = trimmed.split('+').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return { ok: false, reason: 'empty' };
+  const modifiers = { alt: false, control: false, meta: false, shift: false };
+  let keyName = '';
+  for (let i = 0; i < parts.length; i += 1) {
+    const token = parts[i];
+    const lower = token.toLowerCase();
+    const modifier = MODIFIER_ALIASES[lower];
+    if (modifier) {
+      if (i === parts.length - 1) return { ok: false, reason: 'modifier_only' };
+      modifiers[modifier] = true;
+      continue;
+    }
+    if (i !== parts.length - 1) return { ok: false, reason: 'unknown', token };
+    if (NAMED_KEYS[lower]) {
+      keyName = NAMED_KEYS[lower];
+    } else if (/^[a-z0-9]$/i.test(token)) {
+      keyName = token.toUpperCase();
+    } else {
+      return { ok: false, reason: 'unknown', token };
+    }
+  }
+  if (!keyName) return { ok: false, reason: 'empty' };
+  return { ok: true, keyName, modifiers, label: trimmed };
+}
+
+export function interpolateDragPath(from, to, steps = 6) {
+  const count = Math.max(3, Math.min(8, Math.round(Number(steps) || 6)));
+  const path = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = i / (count - 1);
+    path.push({
+      x: Math.round(from.x + (to.x - from.x) * t),
+      y: Math.round(from.y + (to.y - from.y) * t),
+    });
+  }
+  return path;
+}
+
+async function locatePointFromSelector(wc, selector) {
+  const located = await wc.executeJavaScript(
+    buildElementJs(selector, `
+      el.scrollIntoView({block:'center',inline:'center'});
+      const r = el.getBoundingClientRect();
+      const vv = window.visualViewport;
+      return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+    `),
+    true,
+  );
+  if (!located) return null;
+  const normalized = computeViewportPoint(
+    { x: located.x, y: located.y },
+    { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+  );
+  await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+  return { point: { x: normalized.x, y: normalized.y }, viewport: normalized };
+}
+
+function dispatchBrowserKey(wc, spec) {
+  const { keyName, modifiers } = spec;
+  const payload = {
+    type: 'keyDown',
+    keyCode: keyName,
+    modifiers: Object.entries(modifiers).filter(([, on]) => on).map(([name]) => name),
+  };
+  wc.sendInputEvent(payload);
+  if (keyName === 'Return') {
+    wc.sendInputEvent({ type: 'char', keyCode: '\r', modifiers: payload.modifiers });
+  } else if (keyName === 'Space') {
+    wc.sendInputEvent({ type: 'char', keyCode: ' ', modifiers: payload.modifiers });
+  }
+  wc.sendInputEvent({ ...payload, type: 'keyUp' });
+}
+
 function buildImagePreview(image) {
   if (!image || typeof image.getSize !== 'function' || typeof image.toDataURL !== 'function') return null;
   const sourceSize = image.getSize();
@@ -252,6 +366,10 @@ function permissionReason(capabilityId, { host, locale }) {
       return zh ? `请求在内嵌浏览器（${host}）中悬停元素` : `Requesting to hover in the in-app browser (${host})`;
     case SCROLL:
       return zh ? `请求滚动内嵌浏览器（${host}）` : `Requesting to scroll the in-app browser (${host})`;
+    case KEY:
+      return zh ? `请求在内嵌浏览器（${host}）中发送按键` : `Requesting to send keys in the in-app browser (${host})`;
+    case DRAG:
+      return zh ? `请求在内嵌浏览器（${host}）中拖拽` : `Requesting to drag in the in-app browser (${host})`;
     default:
       return zh ? '请求操控内嵌浏览器' : 'Requesting to control the in-app browser';
   }
@@ -665,6 +783,82 @@ export function createLocalBrowserControlProvider({
         evidenceSummary = zh
           ? `已滚动内嵌浏览器${selector ? `元素「${selector}」` : '视口'}${useIntoView ? '（scrollIntoView）' : `（Δx=${deltaX}, Δy=${deltaY}）`}。`
           : `Scrolled ${selector ? `element "${selector}"` : 'the viewport'} in the in-app browser${useIntoView ? ' via scrollIntoView' : ` by Δx=${deltaX}, Δy=${deltaY}`}.`;
+      } else if (capabilityId === KEY) {
+        const rawKeys = Array.isArray(args.keys) ? args.keys : [];
+        if (rawKeys.length === 0) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 keys 数组。' : 'Provide a keys array.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const parsed = [];
+        for (const raw of rawKeys) {
+          const spec = parseBrowserKeySpec(raw);
+          if (!spec.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `不支持的按键：${String(raw)}` : `Unsupported key: ${String(raw)}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          parsed.push(spec);
+        }
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        if (selector) {
+          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const focused = await wc.executeJavaScript(
+            buildElementJs(selector, 'el.focus(); return true;'),
+            true,
+          );
+          if (!focused) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+        }
+        for (const spec of parsed) dispatchBrowserKey(wc, spec);
+        const labels = parsed.map((spec) => spec.label);
+        outputPreview = { status: 'success', action: 'key', keys: labels, selector: selector || undefined, ...targetIdentity };
+        output = { action: 'key', keys: labels, selector: selector || undefined, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器发送按键 ${labels.join(', ')}${selector ? `（先聚焦「${selector}」）` : ''}。`
+          : `Sent keys ${labels.join(', ')} in the in-app browser${selector ? ` after focusing "${selector}"` : ''}.`;
+      } else if (capabilityId === DRAG) {
+        const fromSelector = typeof args.fromSelector === 'string' ? args.fromSelector.trim() : '';
+        const toSelector = typeof args.toSelector === 'string' ? args.toSelector.trim() : '';
+        let fromPoint = { x: Number(args.fromX), y: Number(args.fromY) };
+        let toPoint = { x: Number(args.toX), y: Number(args.toY) };
+        let fromLocatedBy = 'point';
+        let toLocatedBy = 'point';
+        if (fromSelector) {
+          const located = await locatePointFromSelector(wc, fromSelector);
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到拖拽起点：${fromSelector}` : `No drag source matched selector: ${fromSelector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          fromPoint = located.point;
+          fromLocatedBy = 'selector';
+        } else if (!Number.isFinite(fromPoint.x) || !Number.isFinite(fromPoint.y)) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 fromSelector 或 fromX/fromY。' : 'Provide fromSelector or fromX/fromY.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        if (toSelector) {
+          const located = await locatePointFromSelector(wc, toSelector);
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到拖拽终点：${toSelector}` : `No drag target matched selector: ${toSelector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          toPoint = located.point;
+          toLocatedBy = 'selector';
+        } else if (!Number.isFinite(toPoint.x) || !Number.isFinite(toPoint.y)) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 toSelector 或 toX/toY。' : 'Provide toSelector or toX/toY.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const path = interpolateDragPath(fromPoint, toPoint);
+        wc.sendInputEvent({ type: 'mouseDown', x: fromPoint.x, y: fromPoint.y, button: 'left', clickCount: 1 });
+        for (const step of path.slice(1)) {
+          wc.sendInputEvent({ type: 'mouseMove', x: step.x, y: step.y });
+        }
+        wc.sendInputEvent({ type: 'mouseUp', x: toPoint.x, y: toPoint.y, button: 'left', clickCount: 1 });
+        outputPreview = {
+          status: 'success',
+          action: 'drag',
+          from: { ...fromPoint, locatedBy: fromLocatedBy, selector: fromSelector || undefined },
+          to: { ...toPoint, locatedBy: toLocatedBy, selector: toSelector || undefined },
+          steps: path.length,
+          ...targetIdentity,
+        };
+        output = { action: 'drag', from: fromPoint, to: toPoint, steps: path.length, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器从 (${fromPoint.x}, ${fromPoint.y}) 拖到 (${toPoint.x}, ${toPoint.y})。`
+          : `Dragged from (${fromPoint.x}, ${fromPoint.y}) to (${toPoint.x}, ${toPoint.y}) in the in-app browser.`;
       } else if (capabilityId === TYPE) {
         const text = String(args.text);
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
