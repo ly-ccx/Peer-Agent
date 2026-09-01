@@ -14,8 +14,13 @@ import type {
   GoalTask,
   GoalVerifierRun,
 } from '@peer-agent/protocol';
-import { formatGoalDeliveryHandoff, formatGoalDeliveryRoute, projectGoalTiming } from '@peer-agent/protocol';
-import { snapshotDeliveryLine } from '../state/taskBoundBranch';
+import {
+  formatGoalDeliveryHandoff,
+  formatGoalDeliveryHandoffLamp,
+  formatGoalDeliveryRoute,
+  projectGoalTiming,
+} from '@peer-agent/protocol';
+import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
 import { useConfirm } from '../../app/components/ConfirmProvider';
 import { Tooltip } from '../../app/components/Tooltip';
 import { clientApi } from '../../clientApi';
@@ -24,7 +29,12 @@ import { InteractionActionsContext, InteractionStreamingContext } from './thread
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { SuccessCriteriaEditor, type SuccessCriteriaEditorHandle } from './goal/SuccessCriteriaEditor';
 import { shouldShowGoalCompletionFeedback } from './goal/goalCompletionFeedback';
-import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
+import {
+  continueFixingMessage,
+  getGoalPlanNextStep,
+  goalPlanNextStepCopy,
+  type GoalPlanNextAction,
+} from './goal/goalPlanNextActions';
 import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { orderGoalPlansByLineage } from './goal/goalPlanOrder';
 
@@ -157,13 +167,10 @@ interface GoalPlanPanelProps {
    */
   readonly onRequestHostFocus?: () => void;
   /**
-   * 当前活动计划的交付线快照。用于输入栏展示绑定分支；无绑定则报 null。
-   * 表达层只读，不把隔离/分支真值放进 renderer state。
+   * 当前活动计划的交付线快照。用于输入栏展示任务线 / 隔离标记；无绑定则报 null。
+   * 表达层只读，隔离真值仍以 deliveryBinding 为准。
    */
-  readonly onActiveDeliveryChange?: (line: {
-    readonly targetBranch: string | null;
-    readonly taskBranch: string | null;
-  } | null) => void;
+  readonly onActiveDeliveryChange?: (line: TaskDeliveryLine | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -206,19 +213,12 @@ function planExecutionStatus(status: GoalPlan['status']): ExecutionStatus {
 }
 
 /**
- * 计划标题兜底：goal_create_plan 的 title 多数情况下模型不传（为空字符串），
- * 但 goal 通常有内容。此处用 goal 的首句/截断派生一个可读标题，
- * 避免所有计划都显示「未命名计划」。仅 title 与 goal 均为空时才回退占位文案。
+ * 计划标题展示：只信 plan.title。空/占位时不再用 goal 首句冒充标题，
+ * 否则浮动条会继续显示用户原话；意图短标题由创建/修订链路写入。
  */
 function derivePlanTitle(plan: GoalPlan, isZh: boolean): string {
   const title = typeof plan.title === 'string' ? plan.title.trim() : '';
-  if (title) return title;
-  const goal = typeof plan.goal === 'string' ? plan.goal.trim() : '';
-  if (goal) {
-    const firstLine = goal.split(/\r?\n/)[0]?.trim() ?? '';
-    const source = firstLine || goal;
-    return source.length > 40 ? `${source.slice(0, 40)}…` : source;
-  }
+  if (title && title !== '未命名任务') return title;
   return isZh ? '未命名计划' : 'Untitled plan';
 }
 
@@ -250,6 +250,13 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
 
 function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
+}
+
+/** 历史任务/事件可能没写 evidenceRefs；按空列表渲染，避免点开会话时读 undefined.length。 */
+function safeEvidenceRefs(
+  value: { readonly evidenceRefs?: readonly string[] | null } | null | undefined,
+): readonly string[] {
+  return Array.isArray(value?.evidenceRefs) ? value.evidenceRefs : [];
 }
 
 /** 深度优先展开任务树（含嵌套 subtasks）。 */
@@ -806,8 +813,9 @@ function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
   if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${codedValueLabel(PHASE_VALUE_LABELS, phase, isZh)}`);
   if (intent) items.push(`${isZh ? '意图' : 'intent'} ${codedValueLabel(INTENT_VALUE_LABELS, intent, isZh)}`);
   if (reason) items.push(`${isZh ? '原因' : 'reason'} ${compactMeta(reason)}`);
-  if (event.evidenceRefs.length > 0) {
-    items.push(isZh ? `证据 ×${event.evidenceRefs.length}` : `evidence ×${event.evidenceRefs.length}`);
+  const evidenceRefs = safeEvidenceRefs(event);
+  if (evidenceRefs.length > 0) {
+    items.push(isZh ? `证据 ×${evidenceRefs.length}` : `evidence ×${evidenceRefs.length}`);
   }
   return items;
 }
@@ -909,8 +917,6 @@ function PlanProjectionSection({
   tasksExpanded,
   onToggleTasks,
   isZh,
-  childPlans,
-  onNavigateToPlan,
 }: {
   plan: GoalPlan;
   progress: GoalPlan['progress'];
@@ -918,8 +924,6 @@ function PlanProjectionSection({
   tasksExpanded: boolean;
   onToggleTasks: () => void;
   isZh: boolean;
-  childPlans: readonly GoalPlan[];
-  onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
   return (
     <section className="goal-projection goal-projection--plan" aria-label={isZh ? '任务计划' : 'Task plan'}>
@@ -974,8 +978,6 @@ function PlanProjectionSection({
                 task={task}
                 depth={0}
                 isZh={isZh}
-                childPlans={childPlans}
-                onNavigateToPlan={onNavigateToPlan}
               />
             ))}
           </ul>
@@ -1084,18 +1086,15 @@ function TaskNode({
   task,
   depth,
   isZh,
-  childPlans,
-  onNavigateToPlan,
 }: {
   task: GoalTask;
   depth: number;
   isZh: boolean;
-  childPlans: readonly GoalPlan[];
-  onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
-  const hasEvidence = task.evidenceRefs.length > 0;
+  const evidenceRefs = safeEvidenceRefs(task);
+  const hasEvidence = evidenceRefs.length > 0;
   const [expanded, setExpanded] = useState(false);
-  const evidenceCount = task.evidenceRefs.length;
+  const evidenceCount = evidenceRefs.length;
   const summaryText = task.failureReason
     ? task.failureReason
     : task.blockedReason
@@ -1105,14 +1104,10 @@ function TaskNode({
           ? `证据 ${evidenceCount} 条`
           : `${evidenceCount} evidence`
         : null;
-  const delegatedPlans = (task.childPlanIds || [])
-    .map((planId) => childPlans.find((plan) => plan.planId === planId))
-    .filter((plan): plan is GoalPlan => !!plan);
   const canExpand =
     !!task.failureReason ||
     !!task.blockedReason ||
     (task.status === 'completed' && hasEvidence) ||
-    delegatedPlans.length > 0 ||
     (task.subtasks?.length ?? 0) > 0;
   return (
     <li
@@ -1161,31 +1156,10 @@ function TaskNode({
             <div className="goal-task-detail">
               <div className="goal-task-detail-label">{isZh ? '证据' : 'Evidence'}</div>
               <ul className="goal-task-evidence-list">
-                {task.evidenceRefs.map((ref) => (
+                {evidenceRefs.map((ref) => (
                   <li key={ref} className="goal-task-evidence-item">{ref}</li>
                 ))}
               </ul>
-            </div>
-          ) : null}
-          {delegatedPlans.length > 0 ? (
-            <div className="goal-task-child-plans">
-              <div className="goal-task-detail-label">{isZh ? '派生子目标' : 'Derived goals'}</div>
-              {delegatedPlans.map((childPlan) => (
-                <button
-                  key={childPlan.planId}
-                  type="button"
-                  className="goal-task-child-plan"
-                  onClick={() => onNavigateToPlan?.(childPlan.planId)}
-                >
-                  <span className={statusClass(planExecutionStatus(childPlan.status))}>
-                    {statusLabel(planExecutionStatus(childPlan.status), isZh)}
-                  </span>
-                  <span className="goal-task-child-plan-title">{childPlan.title}</span>
-                  <span className="goal-task-child-plan-progress">
-                    {childPlan.progress.completed}/{childPlan.progress.total}
-                  </span>
-                </button>
-              ))}
             </div>
           ) : null}
         </div>
@@ -1198,8 +1172,6 @@ function TaskNode({
               task={child}
               depth={depth + 1}
               isZh={isZh}
-              childPlans={childPlans}
-              onNavigateToPlan={onNavigateToPlan}
             />
           ))}
         </ul>
@@ -1506,6 +1478,22 @@ function hasTaskLine(plan: GoalPlan): boolean {
   return Boolean(plan.deliveryBinding?.taskBranch?.trim() || plan.deliveryBinding?.worktreePath?.trim());
 }
 
+function compactBranchName(value?: string | null): string | undefined {
+  const branch = typeof value === 'string' ? value.trim() : '';
+  if (!branch) return undefined;
+  return branch.replace(/^PeerAgent\//, '') || branch;
+}
+
+function mergeDestination(plan: GoalPlan, isZh: boolean): string {
+  return compactBranchName(plan.deliveryHandoff?.targetBranch)
+    ?? compactBranchName(plan.deliveryBinding?.targetBranch)
+    ?? (isZh ? '源头' : 'source');
+}
+
+function isPlanArchivedToSource(plan: GoalPlan): boolean {
+  return plan.deliveryHandoff?.status === 'delivered';
+}
+
 async function confirmDiscardAfterStop(
   confirm: (options: {
     title?: string;
@@ -1557,7 +1545,7 @@ interface CompactApprovalBarProps {
   readonly isZh: boolean;
   readonly busy: boolean;
   readonly isStreaming: boolean;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
 }
 
 /** The chat-bottom approval surface deliberately stays to one compact row. */
@@ -1602,11 +1590,7 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
-  readonly parentPlan?: GoalPlan;
-  readonly sourceTask?: GoalTask;
-  readonly childPlans?: readonly GoalPlan[];
-  readonly onNavigateToPlan?: (planId: string, taskId?: string) => void;
-  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: GoalPlanNextAction) => void | Promise<void>;
   readonly criteriaEditorRef?: Ref<SuccessCriteriaEditorHandle>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
@@ -1615,11 +1599,6 @@ interface PlanCardProps {
   ) => void | Promise<void>;
 }
 
-const EMPTY_CHILD_PLANS: readonly GoalPlan[] = [];
-const EMPTY_PLAN_RELATION: Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'> = {
-  childPlans: EMPTY_CHILD_PLANS,
-};
-
 const PlanCard = memo(function PlanCard({
   plan,
   defaultExpanded,
@@ -1627,10 +1606,6 @@ const PlanCard = memo(function PlanCard({
   isStreaming,
   busy,
   isMain,
-  parentPlan,
-  sourceTask,
-  childPlans = EMPTY_CHILD_PLANS,
-  onNavigateToPlan,
   onNextAction,
   criteriaEditorRef,
   onRunnerControl,
@@ -1653,10 +1628,23 @@ const PlanCard = memo(function PlanCard({
   const title = derivePlanTitle(plan, isZh);
   const deliveryRoute = formatGoalDeliveryRoute(plan, { locale: isZh ? 'zh' : 'en' });
   const deliveryHandoffLabel = formatGoalDeliveryHandoff(plan, { locale: isZh ? 'zh' : 'en' });
+  const lampHandoff = formatGoalDeliveryHandoffLamp(plan, { locale: isZh ? 'zh' : 'en' });
+  const mergeDest = mergeDestination(plan, isZh);
+  const taskLineName = compactBranchName(plan.deliveryBinding?.taskBranch) ?? title;
+  const isolated = isIsolatedPlan(plan);
+  // ADR 68：合回路线图只对隔离计划画——非隔离（direct）计划没有合回动作，
+  // 画「任务线 → 发版线」会暗示一个不存在的合并。
+  const showMergeRoute = isolated;
+  const handoffStatus = plan.deliveryHandoff?.status;
+  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
+  const canMergeIntoSource = isolated
+    && plan.status === 'completed'
+    && handoffStatus !== 'delivered'
+    && handoffStatus !== 'delivering'
+    && !qualityReviewPending;
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
-  const isolated = isIsolatedPlan(plan);
   const canIsolate = hasDeliveryTarget(plan)
     && !isolated
     && plan.status !== 'completed'
@@ -1717,6 +1705,24 @@ const PlanCard = memo(function PlanCard({
       setLineBusy(false);
     }
   }, [confirm, isZh, plan.planId]);
+
+  const mergeIntoSource = useCallback(async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const next = await clientApi.goalPlansRetryHandoff({ planId: plan.planId });
+      const reason = next && typeof next === 'object'
+        ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
+        : null;
+      const stopped = next && typeof next === 'object'
+        && next.deliveryHandoff?.status === 'stopped';
+      if (stopped && reason) setLineError(reason);
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLineBusy(false);
+    }
+  }, [isZh, plan.planId]);
   const timingLive = Boolean(
     plan.timing?.startedAt
     && !plan.timing?.completedAt
@@ -1757,9 +1763,13 @@ const PlanCard = memo(function PlanCard({
               {elapsedLabel}
             </span>
           ) : null}
-          <span className="goal-plan-head-progress">
-            {`${progress.completed}/${progress.total}`}
-          </span>
+          {lampHandoff ? (
+            <span className="goal-plan-head-handoff">{lampHandoff}</span>
+          ) : (
+            <span className="goal-plan-head-progress">
+              {`${progress.completed}/${progress.total}`}
+            </span>
+          )}
           {lockedOpen ? null : (
             <span className="goal-plan-head-caret" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1787,20 +1797,57 @@ const PlanCard = memo(function PlanCard({
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
-          {deliveryRoute ? (
+          {showMergeRoute ? (
+            <div
+              className={`goal-plan-merge-route${
+                plan.deliveryHandoff?.status === 'stopped'
+                  ? ' is-blocked'
+                  : plan.deliveryHandoff?.status === 'delivered'
+                    ? ' is-ok'
+                    : ''
+              }`}
+            >
+              <span className="goal-plan-merge-node">
+                <span className="goal-plan-merge-k">{isZh ? '任务线' : 'Task line'}</span>
+                <span className="goal-plan-merge-v">{taskLineName}</span>
+              </span>
+              <span className="goal-plan-merge-arrow" aria-hidden="true">
+                {plan.deliveryHandoff?.status === 'stopped' ? '↛' : '→'}
+              </span>
+              <span className="goal-plan-merge-node">
+                <span className="goal-plan-merge-k">{isZh ? '发版线' : 'Source line'}</span>
+                <span className="goal-plan-merge-v">{mergeDest}</span>
+              </span>
+            </div>
+          ) : deliveryRoute ? (
             <p className="goal-plan-delivery-route">{deliveryRoute}</p>
           ) : null}
-          {deliveryHandoffLabel ? (
+          {deliveryHandoffLabel || canMergeIntoSource ? (
             <div className="goal-plan-delivery-handoff-row">
-              <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
-              {plan.deliveryHandoff?.status === 'stopped' ? (
+              {deliveryHandoffLabel ? (
+                <p className="goal-plan-delivery-handoff">{deliveryHandoffLabel}</p>
+              ) : lampHandoff ? (
+                <p className="goal-plan-delivery-handoff">{lampHandoff}</p>
+              ) : null}
+              {qualityReviewPending ? (
                 <button
                   type="button"
                   className="goal-plan-delivery-retry"
-                  disabled={busy || isStreaming}
-                  onClick={() => void clientApi.goalPlansRetryHandoff({ planId: plan.planId })}
+                  disabled={lineDisabled || isStreaming}
+                  onClick={() => void onNextAction(plan, 'continue-fix')}
                 >
-                  {isZh ? '重试交回' : 'Retry delivery'}
+                  {isZh ? '继续修' : 'Continue fixing'}
+                </button>
+              ) : canMergeIntoSource ? (
+                <button
+                  type="button"
+                  className="goal-plan-delivery-retry"
+                  disabled={lineDisabled}
+                  onClick={() => void mergeIntoSource()}
+                >
+                  {handoffStatus === 'stopped'
+                    ? (isZh ? `再试一次，合并进 ${mergeDest}` : `Retry merge into ${mergeDest}`)
+                    : (isZh ? `合并进 ${mergeDest}` : `Merge into ${mergeDest}`)}
                 </button>
               ) : null}
             </div>
@@ -1850,19 +1897,6 @@ const PlanCard = memo(function PlanCard({
             </div>
           ) : null}
           {lineError ? <p className="goal-plan-delivery-error">{lineError}</p> : null}
-          {parentPlan ? (
-            <div className="goal-plan-origin" data-goal-plan-origin>
-              <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>
-              <button
-                type="button"
-                className="goal-plan-origin-link"
-                onClick={() => onNavigateToPlan?.(parentPlan.planId, plan.sourceTaskId)}
-              >
-                <strong>{derivePlanTitle(parentPlan, isZh)}</strong>
-                {sourceTask ? <span>{isZh ? `任务：${sourceTask.title}` : `Task: ${sourceTask.title}`}</span> : null}
-              </button>
-            </div>
-          ) : null}
           {nextStep ? (
             <div className="goal-plan-next-guidance" role="status">
               {nextStepCopy.guidance}
@@ -1876,8 +1910,6 @@ const PlanCard = memo(function PlanCard({
             tasksExpanded={tasksExpanded}
             onToggleTasks={() => setTasksExpanded((v) => !v)}
             isZh={isZh}
-            childPlans={childPlans}
-            onNavigateToPlan={onNavigateToPlan}
           />
           <RunTraceSection plan={plan} isZh={isZh} />
           {plan.runner && plan.runner.enabled ? (
@@ -2174,7 +2206,12 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   });
 
   const handleNextAction = useCallback(
-    async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
+    async (plan: GoalPlan, action: GoalPlanNextAction) => {
+      if (action === 'continue-fix') {
+        interactionActions?.onSelectOption(continueFixingMessage(plan.planId, isZh));
+        onRequestHostFocus?.();
+        return;
+      }
       if (action === 'adjust') {
         interactionActions?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
         onRequestHostFocus?.();
@@ -2267,48 +2304,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       null;
     const mainPlan = selectPrimaryGoalPlan(plans);
     const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
-    const plansById = new Map(plans.map((plan) => [plan.planId, plan]));
-    const childrenByParentId = new Map<string, GoalPlan[]>();
-    for (const plan of plans) {
-      if (!plan.parentPlanId) continue;
-      const children = childrenByParentId.get(plan.parentPlanId);
-      if (children) children.push(plan);
-      else childrenByParentId.set(plan.parentPlanId, [plan]);
-    }
-    const relations = new Map<string, Pick<PlanCardProps, 'parentPlan' | 'sourceTask' | 'childPlans'>>();
-    for (const plan of plans) {
-      const parentPlan = plan.parentPlanId ? plansById.get(plan.parentPlanId) : undefined;
-      const sourceTask = parentPlan && plan.sourceTaskId
-        ? parentPlan.tasks.find((task) => task.taskId === plan.sourceTaskId)
-        : undefined;
-      relations.set(plan.planId, {
-        parentPlan,
-        sourceTask,
-        childPlans: childrenByParentId.get(plan.planId) ?? EMPTY_CHILD_PLANS,
-      });
-    }
     // 历史清单按父子链推导顺序，但渲染为完全对齐的平铺列表，不做层级缩进。
     const orderedListPlans = orderGoalPlansByLineage(listPlans);
-    return { activePlan, mainPlan, listPlans, orderedListPlans, relations };
+    return { activePlan, mainPlan, listPlans, orderedListPlans };
   }, [plans]);
 
   useEffect(() => {
     onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
   }, [onActiveDeliveryChange, planViewModel.activePlan]);
-
-  const navigateToPlan = useCallback((planId: string, taskId?: string) => {
-    const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);
-    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    element?.focus({ preventScroll: true });
-    if (taskId) {
-      document.querySelector<HTMLElement>(`[data-goal-task-id="${CSS.escape(taskId)}"]`)?.focus({ preventScroll: true });
-    }
-  }, []);
-
-  const relationFor = useCallback(
-    (plan: GoalPlan) => planViewModel.relations.get(plan.planId) ?? EMPTY_PLAN_RELATION,
-    [planViewModel.relations],
-  );
 
   // 面板位于输入框上方：没有计划时不占位，直接隐藏。
   if (plans.length === 0) {
@@ -2318,6 +2321,11 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   const { activePlan, mainPlan, listPlans, orderedListPlans } = planViewModel;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
+  const hasUnarchivedHint = Boolean(
+    activePlan
+    && isPlanArchivedToSource(activePlan)
+    && plans.some((plan) => plan.planId !== activePlan.planId && !isPlanArchivedToSource(plan)),
+  );
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
@@ -2399,9 +2407,26 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                   </span>
                 ) : null}
                 <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
-                {activeProgress ? (
-                  <span className="goal-panel-toggle-active-progress">
-                    {`${activeProgress.completed}/${activeProgress.total}`}
+                {(() => {
+                  const lampHandoff = formatGoalDeliveryHandoffLamp(activePlan, {
+                    locale: isZh ? 'zh' : 'en',
+                  });
+                  if (lampHandoff) {
+                    return (
+                      <span className="goal-panel-toggle-active-handoff">
+                        {lampHandoff}
+                      </span>
+                    );
+                  }
+                  return activeProgress ? (
+                    <span className="goal-panel-toggle-active-progress">
+                      {`${activeProgress.completed}/${activeProgress.total}`}
+                    </span>
+                  ) : null;
+                })()}
+                {hasUnarchivedHint ? (
+                  <span className="goal-panel-toggle-active-handoff">
+                    {isZh ? '有未归档' : 'Unarchived remaining'}
                   </span>
                 ) : null}
               </span>
@@ -2445,8 +2470,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           isZh={isZh}
           isStreaming={isStreaming}
           busy={effectiveBusyPlanId === mainPlan.planId}
-          {...relationFor(mainPlan)}
-          onNavigateToPlan={navigateToPlan}
           onNextAction={handleNextAction}
           criteriaEditorRef={bindCriteriaEditor(mainPlan.planId)}
           onRunnerControl={controlRunner}
@@ -2472,8 +2495,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               isZh={isZh}
               isStreaming={isStreaming}
               busy={effectiveBusyPlanId === plan.planId}
-              {...relationFor(plan)}
-              onNavigateToPlan={navigateToPlan}
               onNextAction={handleNextAction}
               criteriaEditorRef={bindCriteriaEditor(plan.planId)}
               onRunnerControl={controlRunner}

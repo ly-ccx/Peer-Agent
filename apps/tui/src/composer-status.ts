@@ -20,6 +20,7 @@ export interface ComposerStatusInput {
   readonly locale?: TuiLocale;
   readonly modelLabel: string;
   readonly reasoningEffort?: string;
+  readonly fastMode?: boolean;
   readonly contextWindow?: number;
   /**
    * Desktop TokenUsageDisplay.tokenUsage analogue: conversation lifetime totals.
@@ -51,6 +52,7 @@ export interface ComposerStatus {
   /** Short effort level for footer display, e.g. high / low / auto. */
   readonly effort: string;
   readonly reasoning: string;
+  readonly fast?: boolean;
   readonly cache?: string;
   readonly cachePercent?: number;
   readonly context: string;
@@ -207,6 +209,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     model: modelIdFromLabel(input.modelLabel),
     effort: input.reasoningEffort?.trim() || 'auto',
     reasoning: `reasoning ${input.reasoningEffort?.trim() || 'auto'}`,
+    ...(input.fastMode === true ? { fast: true } : {}),
     ...(cachePercent === undefined ? {} : { cache: `cache ${cachePercent}%`, cachePercent }),
     ...context,
   };

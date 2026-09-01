@@ -30,6 +30,15 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
     ),
     remove: assertFunction(goalPlans?.remove, 'goalPlans.remove'),
     retryHandoff: assertFunction(goalPlans?.retryHandoff, 'goalPlans.retryHandoff'),
+    inspectSourceCheckout: goalPlans?.inspectSourceCheckout,
+    commitSourceCheckout: goalPlans?.commitSourceCheckout,
+    stashSourceCheckout: goalPlans?.stashSourceCheckout,
+    retrySourceHandoffs: goalPlans?.retrySourceHandoffs,
+    declineSourceHandoffs: goalPlans?.declineSourceHandoffs,
+    // ADR 69 P2：收口决断与真机预览（可选，未接线的环境返回 ok:false，不 assert）。
+    resolveHandoffConflicts: goalPlans?.resolveHandoffConflicts,
+    previewHandoffMerge: goalPlans?.previewHandoffMerge,
+    cleanupHandoffPreview: goalPlans?.cleanupHandoffPreview,
     isolate: assertFunction(goalPlans?.isolate, 'goalPlans.isolate'),
     openSite: assertFunction(goalPlans?.openSite, 'goalPlans.openSite'),
     discardLine: assertFunction(goalPlans?.discardLine, 'goalPlans.discardLine'),
@@ -60,6 +69,23 @@ export function createGoalIpcRegistrations({ goalPlans, goalRunner } = {}) {
         plans.recordTaskEvidence(payload));
       ipc.handle('goalPlans:delete', (_event, payload) => plans.remove(payload));
       ipc.handle('goalPlans:retry-handoff', (_event, payload) => plans.retryHandoff(payload));
+      const unavailable = () => ({ ok: false, reason: 'unavailable' });
+      ipc.handle('goalPlans:inspect-source-checkout', (_event, payload) =>
+        typeof plans.inspectSourceCheckout === 'function' ? plans.inspectSourceCheckout(payload) : unavailable());
+      ipc.handle('goalPlans:commit-source-checkout', (_event, payload) =>
+        typeof plans.commitSourceCheckout === 'function' ? plans.commitSourceCheckout(payload) : unavailable());
+      ipc.handle('goalPlans:stash-source-checkout', (_event, payload) =>
+        typeof plans.stashSourceCheckout === 'function' ? plans.stashSourceCheckout(payload) : unavailable());
+      ipc.handle('goalPlans:retry-source-handoffs', (_event, payload) =>
+        typeof plans.retrySourceHandoffs === 'function' ? plans.retrySourceHandoffs(payload) : unavailable());
+      ipc.handle('goalPlans:decline-source-handoffs', (_event, payload) =>
+        typeof plans.declineSourceHandoffs === 'function' ? plans.declineSourceHandoffs(payload) : unavailable());
+      ipc.handle('goalPlans:resolve-handoff-conflicts', (_event, payload) =>
+        typeof plans.resolveHandoffConflicts === 'function' ? plans.resolveHandoffConflicts(payload) : unavailable());
+      ipc.handle('goalPlans:preview-handoff-merge', (_event, payload) =>
+        typeof plans.previewHandoffMerge === 'function' ? plans.previewHandoffMerge(payload) : unavailable());
+      ipc.handle('goalPlans:cleanup-handoff-preview', (_event, payload) =>
+        typeof plans.cleanupHandoffPreview === 'function' ? plans.cleanupHandoffPreview(payload) : unavailable());
       ipc.handle('goalPlans:isolate', (_event, payload) => plans.isolate(payload));
       ipc.handle('goalPlans:open-site', (_event, payload) => plans.openSite(payload));
       ipc.handle('goalPlans:discard-line', (_event, payload) => plans.discardLine(payload));

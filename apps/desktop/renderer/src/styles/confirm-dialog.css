@@ -32,11 +32,73 @@
     word-break: break-word;
   }
 
+  .pa-confirm-input {
+    width: 100%;
+    margin-top: 4px;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: var(--ui-radius-row);
+    border: 1px solid var(--pa-border-subtle, rgba(15, 23, 42, 0.12));
+    background: var(--surface-vellum, #fff);
+    color: var(--pa-text-primary);
+    font-size: 13px;
+    line-height: 1.4;
+    outline: none;
+  }
+
+  .pa-confirm-input:focus {
+    border-color: var(--za-focus);
+  }
+
+  .pa-confirm-input::placeholder {
+    color: var(--pa-text-secondary);
+  }
+
+  /* Create-branch dialog: push-to-remote checkbox under the branch name input. */
+  .pa-confirm-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--pa-text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pa-confirm-check input {
+    accent-color: var(--za-focus);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .pa-confirm-field {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .pa-confirm-field-label {
+    display: block;
+    font-size: 12.5px;
+    color: var(--pa-text-secondary);
+  }
+
+  .pa-confirm-field .pa-confirm-input {
+    margin-top: 4px;
+  }
+
   .pa-confirm-actions {
     margin-top: 8px;
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+  }
+
+  .pa-confirm-actions.is-spread {
+    justify-content: space-between;
+    align-items: center;
   }
 
   .pa-confirm-btn {
@@ -60,7 +122,7 @@
     color: var(--pa-text-secondary);
   }
 
-  .pa-confirm-btn.ghost:hover {
+  .pa-confirm-btn.ghost:hover:not(:disabled) {
     background: var(--surface-vellum-active);
     color: var(--pa-text-primary);
   }
@@ -70,7 +132,7 @@
     color: var(--pa-surface-card);
   }
 
-  .pa-confirm-btn.primary:hover {
+  .pa-confirm-btn.primary:hover:not(:disabled) {
     opacity: 0.88;
   }
 
@@ -80,8 +142,13 @@
     color: #fff;
   }
 
-  .pa-confirm-btn.danger:hover {
+  .pa-confirm-btn.danger:hover:not(:disabled) {
     opacity: 0.9;
+  }
+
+  .pa-confirm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .pa-confirm-btn:focus-visible {

@@ -468,9 +468,33 @@ export interface BootstrapPreloadApi {
   }) => Promise<{
     readonly ok: boolean;
     readonly branches: readonly string[];
+    readonly localBranches?: readonly string[];
+    readonly remoteBranches?: readonly string[];
     readonly current: string | null;
     readonly repoRoot?: string;
     readonly error?: string;
+  }>;
+  readonly gitCreateBranch: (params: {
+    readonly workspaceRoot: string;
+    readonly name: string;
+    readonly startPoint?: string;
+    /** After creating the local branch, push it with upstream tracking (git push -u). */
+    readonly push?: boolean;
+    /** Remote name to push to (defaults to the first configured remote). */
+    readonly upstreamRemote?: string;
+    /** Remote branch name to track (defaults to the local branch name). */
+    readonly upstreamBranch?: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'created' | 'already_exists' | 'invalid_name' | 'invalid_ref' | 'not_git_repo' | 'error';
+    readonly name?: string;
+    readonly current: string | null;
+    readonly repoRoot?: string;
+    readonly error?: string;
+    /** Present when push was requested: whether the push reached the remote. */
+    readonly pushed?: boolean;
+    /** Non-blocking push failure reason (e.g. 'no_remote' or the git error message). */
+    readonly pushError?: string | null;
   }>;
   /**
    * 校验给定路径是否对应磁盘上真实存在的文件，供渲染层判断聊天消息中的「路径样式文本」
@@ -887,6 +911,10 @@ export interface BootstrapPreloadApi {
   readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
   readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
   readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
+  readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
+  readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;
+  readonly installQoderSkill: (identity: import('@peer-agent/protocol').QoderInstallIdentity) => Promise<import('@peer-agent/protocol').QoderInstallResult>;
+  readonly listQoderTaxonomies: () => Promise<import('@peer-agent/protocol').QoderTaxonomiesResult>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;
@@ -990,7 +1018,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; fastMode?: boolean; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; fastMode?: boolean; preferredExecutionIsolation?: 'none' | 'worktree'; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
@@ -998,6 +1026,10 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   // 进入 mode-source，再写入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
   readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
   readonly conversationsUpdateFastMode: (params: { id: string; fastMode: boolean }) => Promise<unknown>;
+  readonly conversationsUpdatePreferredExecutionIsolation: (params: {
+    id: string;
+    preferredExecutionIsolation: 'none' | 'worktree';
+  }) => Promise<unknown>;
   // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。effort/modelProviderId
   // 各自独立写入：用户可只切模型不切思考档，或反之。modelProviderId 为 null 表示回退
   // 到全局默认 provider。provider 被删/失效时由发送层 orderProviderCandidates 自动回退。
@@ -1063,6 +1095,57 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     changedBy?: string;
   }) => Promise<GoalPlan>;
   readonly goalPlansRetryHandoff: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansInspectSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+  }) => Promise<{
+    ok: boolean;
+    branch?: string;
+    files?: ReadonlyArray<{ path: string; status: string }>;
+    reason?: string;
+  }>;
+  readonly goalPlansCommitSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+    message?: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+  readonly goalPlansStashSourceCheckout: (params: {
+    planId?: string;
+    workspacePath?: string;
+    permissionConfirmed?: boolean;
+  }) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+  readonly goalPlansRetrySourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; verdict?: string; reason?: string }>;
+    reason?: string;
+  }>;
+  readonly goalPlansDeclineSourceHandoffs: (params: { planIds: readonly string[] }) => Promise<{
+    ok: boolean;
+    results?: ReadonlyArray<{ planId: string; ok: boolean; status?: string; reason?: string }>;
+    reason?: string;
+  }>;
+  /** ADR 69 P2：收口决断执行。keep_taskline 需渲染层先弹确认并回传 permissionConfirmed。 */
+  readonly goalPlansResolveHandoffConflicts: (params: {
+    planId: string;
+    resolutions: ReadonlyArray<{ path: string; choice: 'keep_taskline' | 'keep_worktree' | 'keep_both' }>;
+    permissionConfirmed?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+    delivered?: boolean;
+    applied?: ReadonlyArray<{ path: string; choice: string }>;
+    plan?: GoalPlan | null;
+  }>;
+  /** ADR 69 P2：真机预览「合并后的目标线」，返回临时 worktree 路径。 */
+  readonly goalPlansPreviewHandoffMerge: (params: {
+    planId: string;
+    resolutions?: ReadonlyArray<{ path: string; choice: string }>;
+  }) => Promise<{ ok: boolean; previewPath?: string; targetBranch?: string; reason?: string }>;
+  readonly goalPlansCleanupHandoffPreview: (params: {
+    planId: string;
+    previewPath: string;
+  }) => Promise<{ ok: boolean; reason?: string }>;
   readonly goalPlansIsolate: (params: { planId: string }) => Promise<{
     ok: boolean;
     plan: GoalPlan | null;

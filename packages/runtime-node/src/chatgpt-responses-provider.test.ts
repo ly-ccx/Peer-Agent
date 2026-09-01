@@ -37,10 +37,43 @@ test('ChatGPT Responses provider encodes requests, streams text, tools, and usag
   assert.equal(captured.body.instructions, 'Be concise.');
   assert.equal(captured.body.model, 'gpt-test');
   assert.deepEqual(captured.body.reasoning, { effort: 'xhigh' });
+  assert.equal(captured.body.service_tier, undefined);
   assert.equal(result.content, 'Hello');
   assert.deepEqual(result.toolCalls[0], { id: 'call-1', name: 'local_file_read', arguments: '{"path":"README.md"}' });
   assert.deepEqual(result.usage, { inputTokens: 4, outputTokens: 2, totalTokens: 6 });
   assert.deepEqual(events, ['text.delta', 'tool_call.completed', 'usage']);
+});
+
+test('adds the priority service tier only when Fast mode is enabled', async () => {
+  async function captureBody(input: { readonly model: string; readonly fastMode?: boolean }) {
+    let body: Record<string, unknown> | undefined;
+    const provider = createChatGptResponsesProvider({
+      baseUrl: 'https://chatgpt.example/codex/',
+      tokens: { access: 'secret-access', accountId: 'account-1' },
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body));
+        return response([
+          'data: {"type":"response.completed","response":{}}',
+          'data: [DONE]',
+        ]);
+      },
+    });
+    await provider.stream({
+      model: input.model,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      ...(input.fastMode ? { fastMode: true } : {}),
+    });
+    return body ?? {};
+  }
+
+  const standard = await captureBody({ model: 'gpt-5.5' });
+  const fast = await captureBody({ model: 'gpt-5.5', fastMode: true });
+  const grokFast = await captureBody({ model: 'grok-4.5', fastMode: true });
+
+  assert.equal(standard.service_tier, undefined);
+  assert.equal(fast.service_tier, 'priority');
+  assert.equal(grokFast.service_tier, 'priority');
 });
 
 test('ChatGPT Responses provider reports prompt cache hit tokens in usage', async () => {
@@ -63,6 +96,24 @@ test('ChatGPT Responses provider reports prompt cache hit tokens in usage', asyn
     onEvent: () => {},
   });
   // 缓存命中 60/100：inputTokens 互斥扣减（净 40），cacheReadTokens 单独记账，totalTokens 保持上游毛口径。
+  assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 2, totalTokens: 102, cacheReadTokens: 60 });
+});
+
+test('ChatGPT Responses provider reads cached_tokens from prompt_tokens_details when input_tokens_details is empty', async () => {
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://chatgpt.example/codex/',
+    tokens: { access: 'secret-access', accountId: 'account-1' },
+    fetch: async () => response([
+      'data: {"type":"response.output_text.delta","delta":"Cached"}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":2,"input_tokens_details":{},"prompt_tokens_details":{"cached_tokens":60}}}}',
+      'data: [DONE]',
+    ]),
+  });
+  const result = await provider.stream({
+    model: 'gpt-test',
+    messages: [{ role: 'user', content: 'Hi' }],
+    onEvent: () => {},
+  });
   assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 2, totalTokens: 102, cacheReadTokens: 60 });
 });
 

@@ -15,6 +15,7 @@ import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
+import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
@@ -46,12 +47,17 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
+import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
-  formatComposerBoundBranch,
+  defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
+  isSafeComposerBranchName,
+  parseComposerUpstreamSpec,
+  planComposerGitChrome,
+  resolveComposerCreateSourceBranch,
   type TaskDeliveryLine,
 } from '../state/taskBoundBranch';
 import {
@@ -82,6 +88,12 @@ import {
   findNextSerializedToolCall,
   parseSerializedToolSegments,
 } from '../state/streamSegments';
+import {
+  canShowStreamResume,
+  formatStreamErrorLabel,
+  resolveStreamResumeTarget,
+  restoreStreamErrorFromInterrupted,
+} from '../state/streamResume';
 import {
   buildConversationAttachmentContext,
   buildConfigInstructionContext,
@@ -156,6 +168,7 @@ import { useStreamingReport } from '../hooks/useStreamingReport';
 import { registerBrowserToolReveal } from '../state/streamRouterOwnership';
 import {
   planThreadScrollAfterMessagesChange,
+  planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
 } from '../state/threadScrollPolicy';
 import {
@@ -167,6 +180,7 @@ import {
   shouldHardBeginConversationLoad,
   shouldPersistEffortCorrection,
 } from '../state/conversationLoadGate';
+import { mapInChunks } from '../state/yieldToMain';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import {
   getTurnUserMessage,
@@ -188,6 +202,18 @@ function useStableCallback<T extends (...args: never[]) => unknown>(callback: T)
     callbackRef.current = callback;
   }, [callback]);
   return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
+}
+
+// 重试倒计时文案：归零后说「正在重连」，避免本地倒计时钳在 0 时
+// 长时间显示「约 0s 后重试」让用户误以为卡死。
+function formatRetryCountdownLabel(remainingSeconds: number): string {
+  if (remainingSeconds <= 0) return '正在重连…';
+  return `约 ${remainingSeconds}s 后重试`;
+}
+
+function formatRetryCountdownLabelEn(remainingSeconds: number): string {
+  if (remainingSeconds <= 0) return 'reconnecting…';
+  return `in about ${remainingSeconds}s`;
 }
 
 function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
@@ -261,6 +287,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
   fastMode: boolean;
+  preferredExecutionIsolation: 'none' | 'worktree';
   effort: EffortLevel;
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
@@ -272,6 +299,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     tokenUsage: null,
     mode: 'chat',
     fastMode: false,
+    preferredExecutionIsolation: 'none',
     effort: 'default',
     modelProviderId: null,
     contextAccounting: null,
@@ -280,6 +308,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   const convFastMode = conv.fastMode === true;
+  const convPreferredExecutionIsolation: 'none' | 'worktree' =
+    conv.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
   // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
@@ -288,7 +318,9 @@ async function loadConversationMessages(conversationId: string): Promise<{
   const contextAccounting: ContextAccountingSnapshot | null =
     conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const loaded = conv.messages.map((m: Record<string, unknown>) => {
+  const mapped = await mapInChunks(
+    conv.messages as Record<string, unknown>[],
+    (m) => {
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
       role: (m.role as ChatMsg['role']) || 'user',
@@ -326,7 +358,10 @@ async function loadConversationMessages(conversationId: string): Promise<{
       msg.interrupted = true;
     }
     return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
+  },
+    { chunkSize: 32 },
+  );
+  const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as
@@ -344,6 +379,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
       fastMode: convFastMode,
+      preferredExecutionIsolation: convPreferredExecutionIsolation,
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
@@ -357,6 +393,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       : null,
     mode: convMode,
     fastMode: convFastMode,
+    preferredExecutionIsolation: convPreferredExecutionIsolation,
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
@@ -523,17 +560,32 @@ export function ChatSurface({
   const { mode, setMode, changeMode } = useConversationMode(conversationId);
   const fastMode = convState.fastMode;
   const [preferredWorktree, setPreferredWorktree] = useState(false);
-  const { workspaceGit, workspaceIsGit } = useWorkspaceGit(workspacePath, {
+  const { workspaceGit, workspaceIsGit, refreshWorkspaceGit } = useWorkspaceGit(workspacePath, {
     refreshWhenIdle: !isStreaming,
   });
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
+  const [createBranchDialog, setCreateBranchDialog] = useState<{
+    readonly source: string;
+    readonly name: string;
+    readonly push: boolean;
+    readonly upstream: string;
+  } | null>(null);
+  const [branchPushNotice, setBranchPushNotice] = useState<{
+    readonly branchName: string;
+    readonly reason: string;
+  } | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
-  const persistDraftComposer = useCallback((patch: { fastMode?: boolean; preferredWorktree?: boolean }) => {
+  const persistDraftComposer = useCallback((patch: {
+    draft?: string;
+    queue?: ConversationRuntimeState['messageQueue'];
+    fastMode?: boolean;
+    preferredWorktree?: boolean;
+  }) => {
     const draftComposer = conversationStore.getSnapshot(null);
     saveComposerEntry(DRAFT_CONVERSATION_ID, {
-      draft: draftComposer.draft,
-      queue: [...draftComposer.messageQueue],
+      draft: patch.draft ?? draftComposer.draft,
+      queue: [...(patch.queue ?? draftComposer.messageQueue)],
       fastMode: patch.fastMode ?? fastMode,
       preferredWorktree: patch.preferredWorktree ?? preferredWorktree,
     });
@@ -550,7 +602,16 @@ export function ChatSurface({
   }, [convActions, conversationId, persistDraftComposer]);
   const changePreferredWorktree = useCallback((enabled: boolean) => {
     setPreferredWorktree(enabled);
-    if (!conversationId) persistDraftComposer({ preferredWorktree: enabled });
+    if (conversationId) {
+      void clientApi.conversationsUpdatePreferredExecutionIsolation({
+        id: conversationId,
+        preferredExecutionIsolation: enabled ? 'worktree' : 'none',
+      }).catch(() => {
+        // 本地 UI 仍保留选择；后续重新进入会按持久化值恢复。
+      });
+      return;
+    }
+    persistDraftComposer({ preferredWorktree: enabled });
   }, [conversationId, persistDraftComposer]);
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
@@ -645,6 +706,7 @@ export function ChatSurface({
 
   // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
   // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
+  // 倒计时归零后文案切换为「正在重连…」，表达"等待本次尝试结果"而不是卡在"约 0s"。
   const [connectionRetryRemainingSeconds, setConnectionRetryRemainingSeconds] = useState<number | null>(null);
   useEffect(() => {
     if (
@@ -751,8 +813,29 @@ export function ChatSurface({
     conversationId: string;
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
+  const lastThreadOpenConversationIdRef = useRef<string | null | undefined>(undefined);
+  const previousMessageCountRef = useRef(messages.length);
   const messageNavigationRequestRef = useRef(0);
   const lastAppliedMessageTargetRequestId = useRef<number | null>(null);
+
+  // 打开会话时在 render 阶段挂上贴底 pending，让同帧 layout restore 能等到列表挂载后再滚到底。
+  // 不能放进 conversationId 的 useEffect：那会在首帧虚拟列表已经停在顶部之后才写入 pending。
+  if (lastThreadOpenConversationIdRef.current !== conversationId) {
+    lastThreadOpenConversationIdRef.current = conversationId;
+    const openPlan = planThreadScrollOnConversationOpen({
+      hasExplicitMessageTarget: Boolean(
+        conversationId
+        && messageTarget
+        && messageTarget.conversationId === conversationId
+        && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
+      ),
+    });
+    pendingThreadScrollRestoreRef.current = conversationId && openPlan.stickToBottom
+      ? { conversationId, snapshot: null }
+      : null;
+    shouldAutoScrollRef.current = Boolean(conversationId) && openPlan.stickToBottom;
+    previousMessageCountRef.current = messages.length;
+  }
 
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentRef.current = true;
@@ -1149,8 +1232,8 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
-    // 切换会话时清掉上一会话的流式错误横幅，避免错误提示跨会话残留。
-    setStreamError(null);
+    // streamError 按会话桶隔离：不要在切到目标会话时把它清掉。
+    // 上一会话的横幅不会串过来；本会话若仍是中断态，加载后从 interrupted 还原。
     // 切换会话时恢复「该会话」输入框状态(草稿文本 + 待发送队列):
     // - 同会话二次进入：优先保留 conversationStore 桶内已有草稿/队列，避免被尚未落盘的空持久化冲掉；
     // - 冷启动 / 首次进入：回落 composerPersistence。
@@ -1165,18 +1248,19 @@ export function ChatSurface({
       messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
       ...(conversationId ? {} : { fastMode: persisted?.fastMode === true }),
     });
-    setPreferredWorktree(!conversationId && persisted?.preferredWorktree === true);
+    // 草稿页才用本地 draft 偏好；已有会话等 loadConversationMessages 恢复真实 meta，
+    // 避免先强制 false 造成「未勾选但实际仍是 worktree」的误导窗口。
+    if (!conversationId) {
+      setPreferredWorktree(persisted?.preferredWorktree === true);
+    }
     setDeliveryLine(null);
     setDeliveryLineKnown(false);
-    const threadScrollSnapshot = conversationId
-      ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
-      : null;
-    pendingThreadScrollRestoreRef.current = conversationId
-      ? { conversationId, snapshot: threadScrollSnapshot }
-      : null;
-    const nextAtBottom = threadScrollSnapshot?.atBottom ?? true;
-    shouldAutoScrollRef.current = nextAtBottom;
-    setIsThreadAtBottom((previous) => (previous === nextAtBottom ? previous : nextAtBottom));
+    // 打开会话的默认落点（贴底）在 render 阶段写入 pendingThreadScrollRestoreRef，
+    // 避免等这个 useEffect 才挂 pending，导致加载占位上的空容器贴底被清掉后列表从顶部挂载。
+    setIsThreadAtBottom((previous) => {
+      const next = pendingThreadScrollRestoreRef.current != null;
+      return previous === next ? previous : next;
+    });
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId/toolProgress 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
@@ -1224,6 +1308,7 @@ export function ChatSurface({
         tokenUsage: usage,
         mode: convMode,
         fastMode: convFastMode,
+        preferredExecutionIsolation: convPreferredExecutionIsolation,
         effort: convEffort,
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
@@ -1237,10 +1322,16 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
       convActions.set({ fastMode: convFastMode });
+      setPreferredWorktree(convPreferredExecutionIsolation === 'worktree');
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
@@ -1359,6 +1450,7 @@ export function ChatSurface({
               ...(restoredAnchor != null ? { turnStartedAt: restoredAnchor } : {}),
             });
             setIsStreaming(true);
+            setStreamError(null);
           }
         }
       } catch {
@@ -1367,7 +1459,15 @@ export function ChatSurface({
       if (cancelled) return;
       // 只有 main 侧流状态已经查询完毕，才把会话标记为可发送；running=true 已在上面先恢复，
       // 因而 ready 首帧不会暴露错误的「非流式空闲」窗口。
-      convActions.commitLoad({});
+      // reattach 可能刚补上 interrupted；按当前消息再绑一次输入框提醒。
+      const loadedSnapshot = conversationStore.getSnapshot(conversationId);
+      convActions.commitLoad({
+        streamError: restoreStreamErrorFromInterrupted(
+          loadedSnapshot.messages,
+          loadedSnapshot.streamError,
+          loadedSnapshot.isStreaming,
+        ),
+      });
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
@@ -1406,6 +1506,11 @@ export function ChatSurface({
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        streamError: restoreStreamErrorFromInterrupted(
+          loaded,
+          conversationStore.getSnapshot(conversationId).streamError,
+          conversationStore.getSnapshot(conversationId).isStreaming,
+        ),
       });
     });
     return () => { cancelled = true; };
@@ -1523,7 +1628,10 @@ export function ChatSurface({
     if (!pending || pending.conversationId !== conversationId) return;
     const container = threadRef.current;
     if (!container) return;
-    if (messages.length === 0 && pending.snapshot && pending.snapshot.top > 0) return;
+    // 加载占位替换虚拟列表时贴底会落到空容器并清掉 pending，随后列表从顶部挂载。
+    if (shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length })) {
+      return;
+    }
 
     const finishRestore = () => {
       if (
@@ -1539,70 +1647,59 @@ export function ChatSurface({
       pendingThreadScrollRestoreRef.current = null;
     };
 
-    if (pending.snapshot) {
-      if (pending.snapshot.atBottom) {
-        container.scrollTop = container.scrollHeight;
-        finishRestore();
-        return;
-      }
+    const pendingMessageTarget = Boolean(
+      messageTarget
+      && messageTarget.conversationId === conversationId
+      && lastAppliedMessageTargetRequestId.current !== messageTarget.requestId,
+    );
+    if (pendingMessageTarget) {
+      shouldAutoScrollRef.current = false;
+      pendingThreadScrollRestoreRef.current = null;
+      return;
+    }
 
-      const anchoredTurnId = pending.snapshot.turnId;
-      const anchoredTurnIndex = anchoredTurnId
-        ? messageTurnIndex.get(anchoredTurnId)
-        : undefined;
-      if (anchoredTurnId && anchoredTurnIndex != null) {
-        scrollToTurn(anchoredTurnIndex);
-        let secondFrameId: number | null = null;
-        const firstFrameId = window.requestAnimationFrame(() => {
-          secondFrameId = window.requestAnimationFrame(() => {
-            if (
-              pendingThreadScrollRestoreRef.current !== pending
-              || conversationIdRef.current !== pending.conversationId
-            ) return;
-            const anchoredTurn = container.querySelector<HTMLElement>(
-              `[data-chat-turn-id="${CSS.escape(anchoredTurnId)}"]`,
-            );
-            if (anchoredTurn) {
-              container.scrollTop = Math.max(
-                0,
-                anchoredTurn.offsetTop + pending.snapshot!.turnOffset,
-              );
-            } else {
-              const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-              container.scrollTop = Math.min(pending.snapshot!.top, maxTop);
-            }
-            finishRestore();
-          });
-        });
-        return () => {
-          window.cancelAnimationFrame(firstFrameId);
-          if (secondFrameId != null) window.cancelAnimationFrame(secondFrameId);
-        };
-      }
-
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      container.scrollTop = Math.min(pending.snapshot.top, maxTop);
+    if (messages.length === 0) {
       finishRestore();
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom((previous) => (previous ? previous : true));
-    finishRestore();
+    scrollThreadToBottom('auto');
+
+    let cancelled = false;
+    let remaining = 2;
+    let frameId = window.requestAnimationFrame(function reaffirmOpenBottom() {
+      if (
+        cancelled
+        || pendingThreadScrollRestoreRef.current !== pending
+        || conversationIdRef.current !== pending.conversationId
+      ) return;
+      remaining -= 1;
+      scrollThreadToBottom('auto');
+      if (remaining > 0) {
+        frameId = window.requestAnimationFrame(reaffirmOpenBottom);
+        return;
+      }
+      finishRestore();
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
   }, [
     conversationId,
-    messageTurnIndex,
+    loadStatus,
+    messageTarget,
     messages,
     saveThreadScrollSnapshot,
-    scrollToTurn,
+    scrollThreadToBottom,
     updateCurrentTurnContext,
     updateThreadBottomState,
     updateVirtualViewport,
   ]);
 
   // 记录上一帧消息条数：压缩/整表重写通常会减少条数，此时旧的 index 高度缓存与新时间线错位。
-  const previousMessageCountRef = useRef(messages.length);
   useLayoutEffect(() => {
     const previousCount = previousMessageCountRef.current;
     previousMessageCountRef.current = messages.length;
@@ -1980,6 +2077,10 @@ export function ChatSurface({
       conversationStore.setDraft(conversationId, '');
       setAttachments([]);
       setAttachmentError(null);
+      // 发送成功后立刻清掉共享草稿文本/队列，但保留 Fast / 隔离执行偏好。
+      // ComposerDraftControls 在 conversationId === null 时不落盘；勾选隔离执行时
+      // saveComposerEntry 也不会删除空壳，旧句子会在下次「新建任务」被灌回来。
+      persistDraftComposer({ draft: '', queue: [] });
       try {
         const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
         const started = await clientApi.chatStartTask({
@@ -1997,6 +2098,7 @@ export function ChatSurface({
       } catch (error) {
         // 启动失败：恢复草稿与附件，用户可重试。
         conversationStore.setDraft(null, text);
+        persistDraftComposer({ draft: text, queue: [] });
         setAttachments(sentAttachments);
         const message = error instanceof Error ? error.message : String(error);
         setAttachmentError(message === 'workspace_required'
@@ -2036,6 +2138,7 @@ export function ChatSurface({
     modelProviderId,
     preferredWorktree,
     workspaceIsGit,
+    persistDraftComposer,
     isZh,
     editingMessage,
     handleEditMessage,
@@ -2173,6 +2276,92 @@ export function ChatSurface({
     void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, fastMode, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
+  // 原地续写中断回复：不清空、不重建消息。复用被中断那条 assistant 消息的 id，
+  // 只摘掉 interrupted 标记；主进程以该消息已落盘正文/segments 为累积种子
+  // （ChatSendRequest.resumeInterruptedReply），渲染端 delta 照常追加到这条消息。
+  const handleContinueStream = useCallback(async (msgIndex: number) => {
+    if (isStreaming || !hasProvider || !conversationId) return;
+    const target = messages[msgIndex];
+    if (!target || target.role !== 'assistant') return;
+
+    // 摘标记后立即写回 store，保证重载/切会话期间 banner 不会因 interrupted 复活；
+    // 续写失败（再次中断）时主进程会重新打上 interrupted。
+    const { interrupted: _removed, ...rest } = target;
+    const resumedMessage: ChatMsg = { ...rest };
+    const nextMessages = messages.map((message, index) => (index === msgIndex ? resumedMessage : message));
+    setMessages(nextMessages);
+    setStreamError(null);
+    setActiveUsage(null);
+    setProviderRecoveryNotice(null);
+
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(nextMessages),
+    });
+
+    const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    streamIdRef.current = streamId;
+    // 计时锚点回拨到原消息时间戳：用户看到的是「同一条回复继续计时」，
+    // 与主进程 streamRecord.startedAt 的种子语义一致。
+    const turnStartedAt = resolveTurnStartedAt({
+      existing: conversationStore.getSnapshot(conversationId).turnStartedAt,
+      messages: nextMessages,
+      fallback: Date.now(),
+    }) ?? Date.now();
+    setTurnStartedAt(turnStartedAt);
+    conversationStore.routeStream(streamId, conversationId);
+    conversationStore.setState(conversationId, { streamId, turnStartedAt });
+    setIsStreaming(true);
+
+    const contextAttachments = buildConversationAttachmentContext(nextMessages.slice(0, msgIndex));
+    const configInstructions = [
+      ...buildConfigInstructionContext(systemInstructions),
+      ...buildReplyLanguageContext(replyLanguage),
+      ...buildGitBranchPrefixContext(gitBranchPrefix),
+    ];
+    void clientApi.chatSend({
+      streamId,
+      assistantMessageId: resumedMessage.id,
+      resumeInterruptedReply: true,
+      effort,
+      fastMode,
+      mode,
+      conversationId,
+      modelProviderId,
+      workspacePath,
+      contextAttachments,
+      configInstructions,
+    });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, fastMode, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+
+  const handleResumeStream = useCallback(() => {
+    if (isStreaming || !hasProvider) return;
+    const target = resolveStreamResumeTarget(messages);
+    if (!target) return;
+    if (target.kind === 'regenerate') {
+      void handleRegenerate(target.assistantIndex);
+      return;
+    }
+    if (target.kind === 'continue') {
+      void handleContinueStream(target.assistantIndex);
+      return;
+    }
+    const userMsg = messages[target.userIndex];
+    if (!userMsg || userMsg.role !== 'user') return;
+    void submitMessage(
+      userMsg.content,
+      userMsg.attachments ?? [],
+      effort,
+      messages.slice(0, target.userIndex),
+    );
+  }, [isStreaming, hasProvider, messages, handleRegenerate, handleContinueStream, submitMessage, effort]);
+
+  const handleDismissStreamError = useCallback(() => {
+    setStreamError(null);
+  }, [setStreamError]);
+
+  const showStreamResume = canShowStreamResume(streamError, messages, isStreaming);
+
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
     const contextMessages = messages.slice(0, msgIndex + 1);
@@ -2253,34 +2442,43 @@ export function ChatSurface({
     const configured = match?.baseBranch?.trim();
     return configured ? configured : null;
   }, [pendingBaseBranch, workspacePath, workspaces]);
-  const boundBranch = useMemo(
-    () => formatComposerBoundBranch({
+  const gitChrome = useMemo(
+    () => planComposerGitChrome({
       delivery: deliveryLine,
-      workspaceBaseBranch: (!conversationId || deliveryLineKnown) ? workspaceBaseBranch : null,
-      currentHead: (!conversationId || deliveryLineKnown) && workspaceGit?.ok ? workspaceGit.current : null,
+      workspaceBaseBranch: workspaceBaseBranch,
+      currentHead: workspaceGit?.ok ? workspaceGit.current : null,
+      isDraft: isDraftConversation,
+      deliveryKnown: isDraftConversation || deliveryLineKnown,
     }, { locale: isZh ? 'zh' : 'en' }),
-    [conversationId, deliveryLine, deliveryLineKnown, isZh, workspaceBaseBranch, workspaceGit],
+    [deliveryLine, deliveryLineKnown, isDraftConversation, isZh, workspaceBaseBranch, workspaceGit],
   );
   const canSelectBoundBranch = canSelectComposerSourceBranch({
     isDraft: isDraftConversation,
     delivery: deliveryLine,
-  });
+  }) && gitChrome.taskLine?.selectable === true;
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
-    if (!boundBranch) return [];
-    const branches = canSelectBoundBranch && workspaceGit?.ok ? workspaceGit.branches : [];
+    if (!gitChrome.taskLine?.selectable) return [];
+    const localGroup = isZh ? '本地分支' : 'Local';
+    const remoteGroup = isZh ? '远程分支' : 'Remote';
     return buildComposerBranchOptions({
-      branches,
-      selected: boundBranch.value,
-    }).map((branch) => ({
-      value: branch,
-      label: branch === boundBranch.value ? boundBranch.label : formatComposerBranchOptionLabel(branch),
+      branches: workspaceGit?.ok ? workspaceGit.branches : [],
+      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
+      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
+      selected: gitChrome.taskLine.value,
+    }).map((option) => ({
+      value: option.value,
+      label: formatComposerBranchOptionLabel(option.value),
+      group: option.kind === 'remote' ? remoteGroup : localGroup,
+      hint: option.kind === 'remote'
+        ? (isZh ? '远程' : 'remote')
+        : (isZh ? '本地' : 'local'),
     }));
-  }, [boundBranch, canSelectBoundBranch, workspaceGit]);
+  }, [gitChrome.taskLine, isZh, workspaceGit]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (!next || !workspacePath || !canSelectBoundBranch) return;
-    if (next === boundBranch?.value) return;
-    const previous = boundBranch?.value ?? null;
+    if (next === gitChrome.taskLine?.value) return;
+    const previous = gitChrome.taskLine?.value ?? null;
     setPendingBaseBranch(next);
     void clientApi.workspaceUpdate({ path: workspacePath, baseBranch: next })
       .then(async (result) => {
@@ -2294,7 +2492,62 @@ export function ChatSurface({
       .catch(() => {
         setPendingBaseBranch(previous);
       });
-  }, [boundBranch?.value, canSelectBoundBranch, onWorkspaceUpdated, workspacePath]);
+  }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
+  const handleCreateBoundBranch = useCallback((
+    rawName: string,
+    sourceBranch?: string | null,
+    push?: boolean,
+    rawUpstream?: string | null,
+  ) => {
+    const name = rawName.trim();
+    if (!name || !workspacePath || !canSelectBoundBranch) return;
+    if (!isSafeComposerBranchName(name)) return;
+    const shouldPush = push !== false;
+    const upstream = shouldPush ? parseComposerUpstreamSpec(rawUpstream, name) : null;
+    if (shouldPush && !upstream) return;
+    const startPoint = resolveComposerCreateSourceBranch({
+      highlighted: sourceBranch,
+      selected: gitChrome.taskLine?.value,
+      currentHead: workspaceGit?.current,
+    }) ?? undefined;
+    void clientApi.gitCreateBranch({
+      workspaceRoot: workspacePath,
+      name,
+      startPoint,
+      push: shouldPush,
+      upstreamRemote: upstream?.remote,
+      upstreamBranch: upstream?.branch,
+    }).then((created) => {
+      if (created?.ok !== true) return;
+      if (push !== false && created.pushed === false) {
+        setBranchPushNotice({
+          branchName: name,
+          reason: created.pushError || 'push_failed',
+        });
+      } else {
+        setBranchPushNotice(null);
+      }
+      handleSelectBoundBranch(name);
+      refreshWorkspaceGit();
+    }).catch(() => {});
+  }, [
+    canSelectBoundBranch,
+    gitChrome.taskLine?.value,
+    handleSelectBoundBranch,
+    refreshWorkspaceGit,
+    workspaceGit?.current,
+    workspacePath,
+  ]);
+  const handleOpenCreateBranchDialog = useCallback((highlightedValue?: string) => {
+    if (!canSelectBoundBranch) return;
+    const source = resolveComposerCreateSourceBranch({
+      highlighted: highlightedValue,
+      selected: gitChrome.taskLine?.value,
+      currentHead: workspaceGit?.current,
+    });
+    if (!source) return;
+    setCreateBranchDialog({ source, name: '', push: true, upstream: '' });
+  }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -2421,7 +2674,7 @@ export function ChatSurface({
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
         localAccessLevel={localAccessLevel}
-        boundBranch={boundBranch}
+        taskLine={gitChrome.taskLine}
         editTriggerRef={headerEditTriggerRef}
         onOpenTools={onOpenTools}
         onRename={!isDraftConversation && onRenameConversation && conversationId
@@ -2510,8 +2763,8 @@ export function ChatSurface({
               {providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
-                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，约 ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s 后重试）`
-                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, in about ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s)`
+                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，${formatRetryCountdownLabel(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))}）`
+                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, ${formatRetryCountdownLabelEn(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))})`
                   : isZh
                     ? '连接已恢复，正在继续生成'
                     : 'Connection recovered; continuing generation'
@@ -2527,6 +2780,23 @@ export function ChatSurface({
                 {providerRecoveryNotice.reason}
               </span>
             ) : null}
+          </div>
+        ) : null}
+        {branchPushNotice ? (
+          <div className="branch-push-notice" role="status">
+            <div className="provider-recovery-body">
+              {isZh
+                ? `分支 ${branchPushNotice.branchName} 已创建，但推送到远端失败：${branchPushNotice.reason}（本地分支未受影响）`
+                : `Branch ${branchPushNotice.branchName} was created, but pushing to the remote failed: ${branchPushNotice.reason} (local branch is intact)`}
+            </div>
+            <button
+              type="button"
+              className="branch-push-notice-dismiss"
+              onClick={() => setBranchPushNotice(null)}
+              aria-label={isZh ? '关闭提示' : 'Dismiss'}
+            >
+              <PeerIcon name="close" size={14} />
+            </button>
           </div>
         ) : null}
         {showCompactionNotice ? (
@@ -2566,18 +2836,6 @@ export function ChatSurface({
                 </span>
                 <span className="compaction-wave" />
               </span>
-            </span>
-          </div>
-        ) : null}
-        {streamError ? (
-          <div className="chat-stream-error">
-            <span>
-              ⚠{' '}
-              {streamError === 'repetition_detected'
-                ? isZh
-                  ? '检测到重复输出，已自动停止本轮回复。'
-                  : 'Repetitive output detected; this reply was stopped automatically.'
-                : streamError}
             </span>
           </div>
         ) : null}
@@ -2640,9 +2898,128 @@ export function ChatSurface({
             onForceSend={handleForceSendQueued}
           />
         ) : null}
+        {streamError ? (
+          <div className="chat-stream-error" role="alert">
+            <span className="chat-stream-error-icon" aria-hidden="true">
+              <svg
+                className="peer-icon"
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+            </span>
+            <span className="chat-stream-error-text">
+              {formatStreamErrorLabel(streamError, isZh)}
+            </span>
+            <div className="chat-stream-error-actions">
+              {showStreamResume ? (
+                <button
+                  type="button"
+                  className="chat-stream-error-resume"
+                  onClick={handleResumeStream}
+                  disabled={!hasProvider}
+                >
+                  {isZh ? '继续' : 'Resume'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="chat-stream-error-dismiss"
+                onClick={handleDismissStreamError}
+                aria-label={isZh ? '关闭错误提示' : 'Dismiss error'}
+              >
+                <PeerIcon name="close" size={14} />
+              </button>
+            </div>
+          </div>
+        ) : null}
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
         <>
+        {/* 没有 Git 时（workspaceIsGit === false）整排不渲染，不要露出禁用的隔离开关。 */}
+        {workspaceIsGit === true ? (
+        <div className="composer-context-row">
+            {gitChrome.workspaceHead ? (
+              <span
+                className="composer-workspace-head"
+                title={gitChrome.workspaceHead.title}
+                aria-label={gitChrome.workspaceHead.title}
+              >
+                <GitBranchGlyph />
+                <span className="composer-bound-branch-text">{gitChrome.workspaceHead.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.taskLine?.selectable ? (
+              <Dropdown
+                className="composer-dropdown composer-bound-branch"
+                value={gitChrome.taskLine.value}
+                options={boundBranchOptions}
+                onChange={handleSelectBoundBranch}
+                ariaLabel={gitChrome.taskLine.title}
+                title={gitChrome.taskLine.title}
+                prefix={<GitBranchGlyph />}
+                menuPlacement="down"
+                searchable
+                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
+                footerAction={{
+                  label: isZh ? '创建分支' : 'Create branch',
+                  onSelect: (_query, highlightedValue) => {
+                    handleOpenCreateBranchDialog(highlightedValue);
+                  },
+                }}
+              />
+            ) : gitChrome.taskLine ? (
+              <span
+                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                data-kind={gitChrome.taskLine.kind}
+                title={gitChrome.taskLine.title}
+                aria-label={gitChrome.taskLine.title}
+              >
+                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
+              </span>
+            ) : null}
+            {gitChrome.writeMismatch ? (
+              <span
+                className="composer-write-mismatch"
+                title={gitChrome.writeMismatch.title}
+                aria-label={gitChrome.writeMismatch.title}
+              >
+                {gitChrome.writeMismatch.label}
+              </span>
+            ) : null}
+            <label
+              className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
+              title={
+                isStreaming
+                  ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
+                  : (isZh
+                    ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
+                    : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
+              }
+            >
+              <input
+                type="checkbox"
+                checked={preferredWorktree}
+                disabled={isStreaming}
+                onChange={(event) => changePreferredWorktree(event.target.checked)}
+                aria-label={isZh ? '隔离执行' : 'Worktree'}
+              />
+              <span>{isZh ? '隔离执行' : 'Worktree'}</span>
+            </label>
+        </div>
+        ) : null}
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
@@ -2706,28 +3083,6 @@ export function ChatSurface({
                 menuPlacement="up"
               />
             ) : null}
-            {boundBranch && (workspaceGit == null || workspaceGit.ok || Boolean(deliveryLine)) ? (
-              <Dropdown
-                className="composer-dropdown composer-bound-branch"
-                value={boundBranch.value}
-                options={boundBranchOptions}
-                onChange={handleSelectBoundBranch}
-                disabled={!canSelectBoundBranch}
-                ariaLabel={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
-                title={canSelectBoundBranch
-                  ? (isZh ? `选择新任务源头，当前 ${boundBranch.title}` : `Choose the source branch. ${boundBranch.title}`)
-                  : boundBranch.title}
-                prefix={(
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                )}
-                menuPlacement="up"
-              />
-            ) : null}
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
               value={modePickerValue(mode)}
@@ -2746,33 +3101,105 @@ export function ChatSurface({
               title={accessLevelTitle(localAccessLevel, isZh)}
               menuPlacement="up"
             />
-            {isDraftConversation && workspacePath ? (
-              <label
-                className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
-                title={
-                  workspaceIsGit === false
-                    ? (isZh ? '当前工作区不是 Git 仓库，无法隔离执行' : 'This workspace is not a Git repository')
-                    : (isZh
-                      ? '在独立 Git worktree 里改代码，主工作区保持当前分支。默认关闭，之后仍可在任务里再开。'
-                      : 'Run in a Git worktree so the main workspace stays on its current branch. Off by default; you can still isolate later.')
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={preferredWorktree}
-                  disabled={workspaceIsGit === false}
-                  onChange={(event) => changePreferredWorktree(event.target.checked)}
-                  aria-label={isZh ? '隔离执行' : 'Worktree'}
-                />
-                <span>{isZh ? '隔离执行' : 'Worktree'}</span>
-              </label>
-            ) : null}
           </div>
           {homeComposerContextControls}
         </div>
         </>
         ) : null}
       </div>
+      {createBranchDialog ? (
+        <Overlay
+          onClose={() => setCreateBranchDialog(null)}
+          ariaLabel={isZh ? '创建分支' : 'Create Branch'}
+          panelClassName="pa-confirm-dialog"
+        >
+          {({ requestClose }) => {
+            const nameOk = isSafeComposerBranchName(createBranchDialog.name);
+            const upstream = createBranchDialog.push
+              ? parseComposerUpstreamSpec(createBranchDialog.upstream, createBranchDialog.name)
+              : null;
+            const canConfirm = nameOk && (!createBranchDialog.push || upstream != null);
+            const patchDialog = (next: Partial<{ name: string; push: boolean; upstream: string }>) => {
+              setCreateBranchDialog({
+                source: createBranchDialog.source,
+                name: createBranchDialog.name,
+                push: createBranchDialog.push,
+                upstream: createBranchDialog.upstream,
+                ...next,
+              });
+            };
+            const confirmCreate = () => {
+              if (!canConfirm) return;
+              handleCreateBoundBranch(
+                createBranchDialog.name,
+                createBranchDialog.source,
+                createBranchDialog.push,
+                createBranchDialog.upstream,
+              );
+              requestClose();
+            };
+            return (
+              <div className="pa-confirm-body">
+                <h2 className="pa-confirm-title">{isZh ? '创建分支' : 'Create Branch'}</h2>
+                <p className="pa-confirm-message">
+                  {isZh
+                    ? `从 ${createBranchDialog.source} 创建分支`
+                    : `Create a branch from ${createBranchDialog.source}`}
+                </p>
+                <input
+                  className="pa-confirm-input"
+                  value={createBranchDialog.name}
+                  onChange={(event) => patchDialog({ name: event.target.value })}
+                  placeholder={isZh ? '分支名' : 'Branch name'}
+                  autoFocus
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    confirmCreate();
+                  }}
+                />
+                <label className="pa-confirm-check">
+                  <input
+                    type="checkbox"
+                    checked={createBranchDialog.push}
+                    onChange={(event) => patchDialog({ push: event.target.checked })}
+                  />
+                  <span>{isZh ? '创建后推送到远端（git push -u）' : 'Push to remote after creating (git push -u)'}</span>
+                </label>
+                {createBranchDialog.push ? (
+                  <label className="pa-confirm-field">
+                    <span className="pa-confirm-field-label">{isZh ? '跟踪到' : 'Track'}</span>
+                    <input
+                      className="pa-confirm-input"
+                      value={createBranchDialog.upstream}
+                      onChange={(event) => patchDialog({ upstream: event.target.value })}
+                      placeholder={defaultComposerUpstreamSpec(createBranchDialog.name) || 'origin/branch'}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        confirmCreate();
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <div className="pa-confirm-actions is-spread">
+                  <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
+                    {isZh ? '取消 Esc' : 'Cancel Esc'}
+                  </button>
+                  <button
+                    type="button"
+                    className="pa-confirm-btn primary"
+                    disabled={!canConfirm}
+                    onClick={confirmCreate}
+                  >
+                    {isZh ? '确认' : 'Confirm'}
+                  </button>
+                </div>
+              </div>
+            );
+          }}
+        </Overlay>
+      ) : null}
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
       ) : null}

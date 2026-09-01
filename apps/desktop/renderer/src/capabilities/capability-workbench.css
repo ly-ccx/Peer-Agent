@@ -1187,12 +1187,13 @@
   .skill-detail-when p { @apply text-[13px] leading-6; color: var(--za-text-muted); }
 
   .skill-view-tabs {
-    @apply mb-0 inline-flex w-fit rounded-xl p-1;
+    @apply mb-0 inline-flex w-fit p-1;
+    border-radius: var(--za-radius);
     background: color-mix(in srgb, var(--za-text) 6%, transparent);
     border: 1px solid var(--za-line);
   }
   .skill-view-tabs button {
-    @apply rounded-lg border-0 bg-transparent px-4 py-2 text-[13px] font-medium;
+    @apply rounded-[var(--ui-radius-control)] border-0 bg-transparent px-4 py-2 text-[13px] font-medium;
     color: var(--za-text-muted);
   }
   .skill-view-tabs button.active { color: var(--za-text); background: var(--za-surface); box-shadow: var(--za-shadow-xs); }
@@ -1204,6 +1205,7 @@
   .skill-marketplace-toolbar input {
     @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
     color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
   }
   .skill-marketplace {
     @apply pt-0;
@@ -1378,7 +1380,7 @@
   }
   .skill-marketplace-category-select .pa-dropdown-trigger {
     @apply px-3 py-2 text-[12px];
-    border-radius: var(--ui-radius-control);
+    border-radius: var(--za-radius);
     min-height: 34px;
     color: var(--za-text);
     background: var(--za-surface);
@@ -1445,6 +1447,58 @@
   }
   .skill-marketplace-pagination button:disabled { @apply cursor-not-allowed opacity-40; }
 
+  /* 页码控件（Qoder 市场）：‹ 1 2 3 4 … 312 › */
+  .skill-marketplace-pagination--pages { @apply gap-1.5; width: 100%; justify-content: center; }
+  .skill-marketplace-pagination--pages .pagination-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    width: 32px;
+    border-radius: 10px;
+    font-size: 15px;
+    border: 1px solid var(--za-line);
+    background: var(--za-surface);
+    color: var(--za-text);
+  }
+  .skill-marketplace-pagination--pages .pagination-arrow:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--za-text) 25%, var(--za-line));
+  }
+  .skill-marketplace-pagination--pages .pagination-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    min-width: 32px;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--za-text-muted);
+  }
+  .skill-marketplace-pagination--pages .pagination-page:hover {
+    background: var(--za-surface-hover, var(--za-surface));
+    color: var(--za-text);
+  }
+  .skill-marketplace-pagination--pages .pagination-page.is-active {
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
+    border-color: transparent;
+  }
+  .skill-marketplace-pagination--pages .pagination-ellipsis {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 4px;
+    font-size: 12.5px;
+    color: var(--za-text-muted);
+    user-select: none;
+  }
+
   @media (max-width: 720px) {
     .skill-marketplace-toolbar {
       @apply static mb-3 items-stretch;
@@ -1460,9 +1514,9 @@
 }
 
 /* 未分层覆盖：全局 .pa-dropdown-trigger 的 --radius-md(8px) 不在 @layer 内，
-   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步共用控件圆角，不是胶囊。 */
+   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步与分段外框共用 --za-radius。 */
 .skill-marketplace-toolbar input,
 .skill-marketplace-category-select .pa-dropdown-trigger,
 .skill-marketplace-toolbar .skill-marketplace-install {
-  border-radius: var(--ui-radius-control);
+  border-radius: var(--za-radius);
 }

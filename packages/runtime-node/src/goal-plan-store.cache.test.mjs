@@ -25,7 +25,10 @@ test('listPlans 缓存命中：index 未变化时复用结果（不重复 normal
     const t1 = process.hrtime.bigint();
     assert.equal(second.length, 1);
     assert.equal(second[0].planId, first[0].planId);
-    // 缓存命中路径只做 stat + 浅拷贝 + normalize×1（单条），应在个位数 ms 内。
+    // 真正复用归一化结果对象；数组本身是浅拷贝，避免调用方 sort 污染缓存。
+    assert.equal(second[0], first[0]);
+    assert.notEqual(second, first);
+    // 缓存命中路径只做 stat + 浅拷贝，应在个位数 ms 内。
     assert.ok(Number(t1 - t0) < 50_000_000, `second listPlans took ${Number(t1 - t0) / 1e6}ms`);
   } finally {
     rmSync(dir, { recursive: true, force: true });

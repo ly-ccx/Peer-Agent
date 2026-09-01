@@ -32,6 +32,11 @@ export interface AcceptanceClosePlanLike {
   readonly runTrace?: {
     readonly events?: readonly { readonly evidenceRefs?: readonly string[] | null }[] | null;
   } | null;
+  readonly resultAcceptance?: {
+    readonly acceptedAt?: string | null;
+    readonly acceptedBy?: string | null;
+    readonly userOverride?: boolean | null;
+  } | null;
 }
 
 export class AcceptanceCloseGateError extends Error {
@@ -90,13 +95,15 @@ function latestManualApproval(plan: AcceptanceClosePlanLike, criterionId: string
 function gapMessage(gaps: readonly AcceptanceCloseGap[], locale: 'zh' | 'en'): string {
   if (gaps.length === 0) return '';
   if (locale === 'en') {
-    return gaps.length === 1
+    const head = gaps.length === 1
       ? `Cannot accept yet: ${gaps[0].description} still lacks resolvable evidence.`
       : `Cannot accept yet: ${gaps.length} success criteria still lack resolvable evidence.`;
+    return `${head} Use Follow up to reopen the task and supply the missing evidence.`;
   }
-  return gaps.length === 1
+  const head = gaps.length === 1
     ? `还不能验收：${gaps[0].description} 还缺可解析的对照证据。`
     : `还不能验收：还有 ${gaps.length} 条成功标准缺少可解析的对照证据。`;
+  return `${head} 点「继续追问」重开任务去补证据。`;
 }
 
 export function evaluateAcceptanceCloseGate(
@@ -162,14 +169,17 @@ export function assertAcceptanceCloseGate(
   } = {},
 ): void {
   const verdict = evaluateAcceptanceCloseGate(plan, options);
-  if (!verdict.ok) {
+  if (!verdict.ok && plan?.resultAcceptance?.userOverride !== true) {
     throw new AcceptanceCloseGateError(verdict.message, verdict.gaps);
   }
 }
 
 export function isAcceptanceClosePatch(
   previous: { readonly acceptedAt?: string | null } | null | undefined,
-  next: { readonly acceptedAt?: string | null } | null | undefined,
+  next: {
+    readonly acceptedAt?: string | null;
+    readonly userOverride?: boolean | null;
+  } | null | undefined,
 ): boolean {
   const prevAt = typeof previous?.acceptedAt === 'string' ? previous.acceptedAt.trim() : '';
   const nextAt = typeof next?.acceptedAt === 'string' ? next.acceptedAt.trim() : '';

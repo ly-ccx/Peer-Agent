@@ -49,26 +49,34 @@ function createHarness() {
   return { calls, handlers, owners };
 }
 
-test('goal owners register the exact 21 invoke channels', () => {
+test('goal owners register the exact invoke channels', () => {
   const { handlers, owners } = createHarness();
   assert.deepEqual(owners, ['goalPlans-ipc', 'goalRunner-ipc']);
   assert.deepEqual([...handlers.keys()].sort(), [
     'goalPlans:approve',
     'goalPlans:awaiting-counts',
+    'goalPlans:cleanup-handoff-preview',
+    'goalPlans:commit-source-checkout',
     'goalPlans:create',
+    'goalPlans:decline-source-handoffs',
     'goalPlans:delete',
     'goalPlans:discard-line',
     'goalPlans:export-evidence',
     'goalPlans:get',
+    'goalPlans:inspect-source-checkout',
     'goalPlans:isolate',
     'goalPlans:list',
     'goalPlans:mark-requested-user-input',
     'goalPlans:open-site',
+    'goalPlans:preview-handoff-merge',
     'goalPlans:record-manual-confirmation',
     'goalPlans:record-task-evidence',
+    'goalPlans:resolve-handoff-conflicts',
     'goalPlans:retry-handoff',
+    'goalPlans:retry-source-handoffs',
     'goalPlans:revise',
     'goalPlans:set-status',
+    'goalPlans:stash-source-checkout',
     'goalRunner:clear',
     'goalRunner:get-state',
     'goalRunner:pause',

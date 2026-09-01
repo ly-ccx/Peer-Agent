@@ -2105,8 +2105,8 @@ test('onChange: setRunnerState 进度字段广播 conversationId + changeKind=ru
   assert.equal(events[0].runner.roundCount, 2, '合并后应是最新 roundCount');
   assert.equal(events[0].runner.toolCallCount, 3);
 
-  // 节流写盘：等待 flush 后应落盘
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  // 节流写盘：1s 窗口后应落盘
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   const disk = JSON.parse(
     readFileSync(path.join(storeDir, `${plan.planId}.json`), 'utf8'),
   );

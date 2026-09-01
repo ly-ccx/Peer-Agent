@@ -186,6 +186,25 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('A').messages[0].content, 'fresh');
   });
 
+  it('keeps streamError on the interrupted conversation when another conversation loads', () => {
+    const store = new ConversationStore();
+    store.setState('A', { streamError: 'net::ERR_NETWORK_CHANGED' });
+    store.setState('B', { streamError: null });
+    store.beginLoad('B');
+    assert.equal(store.getSnapshot('A').streamError, 'net::ERR_NETWORK_CHANGED');
+    assert.equal(store.getSnapshot('B').streamError, null);
+
+    const interrupted = { ...msg('a1', 'partial'), role: 'assistant' as const, interrupted: true };
+    store.beginLoad('A');
+    assert.equal(store.getSnapshot('A').streamError, null);
+    store.commitLoad('A', {
+      messages: [interrupted],
+      streamError: 'net::ERR_NETWORK_CHANGED',
+    });
+    assert.equal(store.getSnapshot('A').streamError, 'net::ERR_NETWORK_CHANGED');
+    assert.equal(store.getSnapshot('B').streamError, null);
+  });
+
   it('keeps draft and queued user messages isolated per conversation', () => {
     const store = new ConversationStore();
     store.setDraft('A', 'draft A');
@@ -328,6 +347,31 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('B').isStreaming, true);
     assert.equal(store.getSnapshot('B').streamId, 'stream-active');
     assert.equal(store.resolveConversation('stream-active'), 'B');
+  });
+
+  it('settleInactiveStreams also clears the provider recovery notice on inactive streams', () => {
+    const store = new ConversationStore();
+    store.routeStream('stream-stale', 'A');
+    store.routeStream('stream-active', 'B');
+    store.setState('A', {
+      isStreaming: true,
+      streamId: 'stream-stale',
+      providerRecoveryNotice: {
+        kind: 'connection',
+        status: 'retrying',
+        attempt: 1,
+        maxRetries: 3,
+        delayMs: 500,
+        reason: 'connect timeout',
+      },
+    });
+    store.setState('B', { isStreaming: true, streamId: 'stream-active' });
+
+    store.settleInactiveStreams(['stream-active']);
+
+    // 回归锁：终态收敛必须清掉重试横幅（用户停止 / 流结束后横幅不得残留）。
+    assert.equal(store.getSnapshot('A').providerRecoveryNotice, null);
+    assert.equal(store.getSnapshot('A').isStreaming, false);
   });
 
   it('routes an explicitly identified compaction event to A while a new B stays idle', () => {

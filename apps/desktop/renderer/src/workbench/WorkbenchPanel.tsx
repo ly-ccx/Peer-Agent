@@ -7,11 +7,13 @@ import { BackgroundThreadsView } from './views/BackgroundThreadsView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
-  WORKBENCH_MAX_VW_RATIO,
   WORKBENCH_DEFAULT_WIDTH,
-  MAIN_MIN_WIDTH,
-  MAIN_RESTORE_WIDTH,
 } from './WorkbenchContext';
+import {
+  WORKBENCH_MAXIMIZE_RATIO,
+  clampWorkbenchWidth,
+  resolveWorkbenchResizeStage,
+} from './workbenchResizeStages';
 
 interface TabDef {
   readonly id: WorkbenchTabId;
@@ -129,7 +131,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     sidebarAutoCollapsed,
     setSidebarAutoCollapsed,
     sidebarOpen,
-    sidebarWidth,
     conversationId,
     browserSession,
     setBrowserSession,
@@ -147,7 +148,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     return () => registerGoalSlot(null);
   }, [registerGoalSlot]);
 
-  // 拖拽分隔线
+  // 拖拽分隔线。
+  // Electron <webview> 会在 guest 层吃掉 pointerup：分隔条停在 data-active，
+  // 跟手宽度也写不回去。拖拽会话必须 pointer capture + cancel 清理，
+  // 并关掉 width/grid 过渡、暂时禁用 webview 的 pointer-events。
   const draggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(width);
@@ -155,70 +159,119 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
   const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
     const resizer = ev.currentTarget;
+    const pointerId = ev.pointerId;
     resizer.dataset.active = 'true';
     draggingRef.current = true;
     startXRef.current = ev.clientX;
-    startWidthRef.current = width;
+    startWidthRef.current = maximized ? window.innerWidth : width;
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
+    if (layoutHost === 'root') {
+      document.documentElement.dataset.workbenchResizing = 'true';
+    }
+    try {
+      resizer.setPointerCapture(pointerId);
+    } catch {
+      // pointer 可能已离开；后续仍靠 window 监听与 webview pointer-events 兜底。
+    }
 
-    const computeUpper = () => {
-      const vwLimit = Math.min(WORKBENCH_MAX_WIDTH, Math.floor(window.innerWidth * WORKBENCH_MAX_VW_RATIO));
-      return Math.max(WORKBENCH_MIN_WIDTH, vwLimit);
+    // 上限跟全屏比例链走：至少能拖过 WORKBENCH_MAXIMIZE_RATIO（0.8）进全屏，实际允许拖满窗口。
+    const computeUpper = () =>
+      Math.max(WORKBENCH_MIN_WIDTH, Math.floor(window.innerWidth * Math.max(1, WORKBENCH_MAXIMIZE_RATIO)));
+
+    // 拖拽期间本地跟踪渐进阶段，避免每帧 setState；仅在阈值穿越时落 React 状态。
+    let autoCollapsed = sidebarAutoCollapsed;
+    let liveMaximized = maximized;
+    let rafId = 0;
+    let pendingWidth: number | null = null;
+
+    const applyWidth = (next: number) => {
+      if (layoutHost === 'root') {
+        document.documentElement.style.setProperty('--za-workbench-width', `${next}px`);
+      }
+      // 面板宽度走 inline style（抽屉/local host 不投影到 :root CSS 变量）。
+      const panel = resizer.parentElement;
+      if (panel) panel.style.width = `${next}px`;
+
+      const stage = resolveWorkbenchResizeStage({
+        viewportWidth: window.innerWidth,
+        workbenchWidth: next,
+        sidebarOpen,
+        sidebarAutoCollapsed: autoCollapsed,
+        maximized: liveMaximized,
+      });
+      // 仅当用户未「主动收起」左栏时，右侧拖拽才有权自动收/展左栏。
+      // 阶段切换会触发 React 重绘，必须同步 width，否则 inline 跟手宽度会被旧 state 冲掉。
+      if (sidebarOpen && stage.sidebarAutoCollapsed !== autoCollapsed) {
+        autoCollapsed = stage.sidebarAutoCollapsed;
+        setWidth(next);
+        setSidebarAutoCollapsed(autoCollapsed);
+      }
+      if (stage.maximized !== liveMaximized) {
+        liveMaximized = stage.maximized;
+        setWidth(next);
+        setMaximized(liveMaximized);
+      }
     };
 
-    // 左栏当前占用的宽度（用户主动收起则为 0，否则用实时拖拽宽度）。
-    const liveSidebarWidth = () => (sidebarOpen ? sidebarWidth : 0);
-    // 拖拽期间本地跟踪「右侧挤压自动收起」态，避免每帧 setState；仅在阈值穿越时落 React 状态。
-    let autoCollapsed = sidebarAutoCollapsed;
+    const flush = () => {
+      rafId = 0;
+      if (pendingWidth == null) return;
+      const next = pendingWidth;
+      pendingWidth = null;
+      applyWidth(next);
+    };
 
     const onMove = (e: PointerEvent) => {
       if (!draggingRef.current) return;
       const dx = startXRef.current - e.clientX;
-      let next = startWidthRef.current + dx;
-      const upper = computeUpper();
-      if (next < WORKBENCH_MIN_WIDTH) next = WORKBENCH_MIN_WIDTH;
-      if (next > upper) next = upper;
-      // 直接改 CSS 变量，避免 re-render
-      document.documentElement.style.setProperty('--za-workbench-width', `${next}px`);
-
-      // 临界吸附：仅当用户未「主动收起」左栏时，右侧挤压才有权自动收/展左栏。
-      // 用户主动收起（sidebarOpen=false）时这里完全不插手，避免和 toggle/拖窄打架。
-      if (!sidebarOpen) return;
-      const sbWidth = liveSidebarWidth();
-      if (!autoCollapsed) {
-        // 当前左栏可见：主区被挤到 MAIN_MIN_WIDTH 以下则自动收起。
-        const mainAvailable = window.innerWidth - sbWidth - next;
-        if (mainAvailable < MAIN_MIN_WIDTH) {
-          autoCollapsed = true;
-          setSidebarAutoCollapsed(true);
-        }
-      } else {
-        // 当前左栏已自动收起：主区恢复到 MAIN_RESTORE_WIDTH（含左栏宽度）以上才展开（滞回防横跳）。
-        const mainIfRestored = window.innerWidth - sidebarWidth - next;
-        if (mainIfRestored >= MAIN_RESTORE_WIDTH) {
-          autoCollapsed = false;
-          setSidebarAutoCollapsed(false);
-        }
-      }
+      pendingWidth = clampWorkbenchWidth(
+        startWidthRef.current + dx,
+        computeUpper(),
+        WORKBENCH_MIN_WIDTH,
+      );
+      if (!rafId) rafId = requestAnimationFrame(flush);
     };
 
     const onUp = () => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      flush();
       delete resizer.dataset.active;
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
-      const finalWidthStr = document.documentElement.style.getPropertyValue('--za-workbench-width');
-      const finalWidth = parseInt(finalWidthStr, 10);
+      delete document.documentElement.dataset.workbenchResizing;
+      try {
+        if (resizer.hasPointerCapture(pointerId)) {
+          resizer.releasePointerCapture(pointerId);
+        }
+      } catch {
+        // already released
+      }
+      const panel = resizer.parentElement;
+      const fromPanel = panel ? parseInt(panel.style.width, 10) : NaN;
+      const fromVar = parseInt(
+        document.documentElement.style.getPropertyValue('--za-workbench-width'),
+        10,
+      );
+      const finalWidth = Number.isFinite(fromPanel) ? fromPanel : fromVar;
       if (Number.isFinite(finalWidth)) setWidth(finalWidth);
-      // sidebarAutoCollapsed 已在 onMove 的阈值穿越处实时落定，这里无需再读 DOM。
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onUp);
+      resizer.removeEventListener('lostpointercapture', onUp);
     };
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onUp);
+    resizer.addEventListener('lostpointercapture', onUp);
   };
 
   const onDoubleClick = () => {
@@ -249,7 +302,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
       aria-hidden={!open}
       style={{ width: open ? (maximized ? '100%' : `${width}px`) : 0 }}
     >
-      {open && !maximized ? (
+      {open ? (
         <div
           className="workbench-resizer"
           role="separator"

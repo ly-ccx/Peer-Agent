@@ -19,8 +19,19 @@ test('conversation switch remeasures mounted turns without detaching their obser
   const pendingRestoreEffect = surface.match(
     /useLayoutEffect\(\(\) => \{\s*const pending = pendingThreadScrollRestoreRef\.current;[\s\S]*?\n\s*\}, \[[\s\S]*?\n\s*\]\);/,
   )?.[0] ?? '';
+  assert.match(surface, /planThreadScrollOnConversationOpen\(/);
   assert.ok(pendingRestoreEffect, 'pending scroll restore effect should exist');
   assert.doesNotMatch(pendingRestoreEffect, /resetVirtualMeasurements/);
+  assert.match(
+    pendingRestoreEffect,
+    /shouldShowConversationLoadingPlaceholder/,
+    'opening a conversation must wait for the loading placeholder before sticking to bottom',
+  );
+  assert.match(
+    pendingRestoreEffect,
+    /scrollThreadToBottom/,
+    'opening a conversation should stick to the latest messages after the list mounts',
+  );
 
   assert.match(
     virtualHook,

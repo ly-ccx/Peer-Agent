@@ -13,6 +13,7 @@ export interface PeerExecOptions {
   readonly model: string | undefined;
   readonly effort: string | undefined;
   readonly mode: ExecMode;
+  readonly fast: boolean;
   readonly workspace: string | undefined;
   readonly maxTurns: number | undefined;
   readonly promptParts: readonly string[];
@@ -66,6 +67,7 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
   let model: string | undefined;
   let effort: string | undefined;
   let mode: ExecMode = 'chat';
+  let fast = false;
   let workspace: string | undefined;
   let maxTurns: number | undefined;
   const promptParts: string[] = [];
@@ -143,6 +145,17 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
       effort = value.value;
       continue;
     }
+    if (flag.name === '--fast') {
+      if (flag.inline !== undefined) {
+        return {
+          kind: 'error',
+          message: 'peer exec: --fast does not take a value',
+          exitCode: CLI_EXIT.usage,
+        };
+      }
+      fast = true;
+      continue;
+    }
     if (flag.name === '--mode') {
       const value = readValue('--mode', flag.inline, rest);
       if (!value.ok) return { kind: 'error', message: value.message, exitCode: CLI_EXIT.usage };
@@ -193,6 +206,7 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
       model,
       effort,
       mode,
+      fast,
       workspace,
       maxTurns,
       promptParts,
@@ -233,6 +247,7 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '  --model <id>                This-run model id, or provider::model',
       '  --effort <level>            This-run effort override',
       '  --mode chat|plan|goal       Runtime mode (default: chat)',
+      '  --fast                      ChatGPT/Grok OAuth Fast (service_tier=priority)',
       '  --workspace <path>          Workspace root (must exist)',
       '  --max-turns <n>             Optional agent-loop cap (default: none)',
       '  -h, --help                  Show this help',

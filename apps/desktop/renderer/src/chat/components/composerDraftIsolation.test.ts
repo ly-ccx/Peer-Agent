@@ -42,14 +42,19 @@ test('draft input stays in the composer leaf and never becomes context token aut
 });
 
 test('composer auto-sizing stays in CSS and does not force layout on every draft character', async () => {
-  const [controls, styles] = await Promise.all([
+  const [controls, liveStyles, legacyStyles] = await Promise.all([
     readSource('./ComposerDraftControls.tsx'),
+    readSource('../styles/chat-surface.css'),
     readSource('../styles/chat-composer.css'),
   ]);
 
   assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
-  assert.match(styles, /field-sizing:\s*content/);
-  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*200px/);
+  // Live composer is `.chat-composer`; autosize must land on that selector, not only the unused cloud class.
+  assert.match(
+    liveStyles,
+    /\.chat-composer textarea \{[\s\S]*?field-sizing:\s*content;[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+  assert.match(legacyStyles, /field-sizing:\s*content/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
@@ -125,6 +130,14 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   assert.doesNotMatch(settings, /fastMode|Fast mode|快速模式/);
 });
 
+test('sending a new task clears shared draft text while keeping isolation preference', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /persistDraftComposer\(\{ draft: '', queue: \[\] \}\)/);
+  assert.match(surface, /persistDraftComposer\(\{ draft: text, queue: \[\] \}\)/);
+  assert.match(surface, /draft: patch\.draft \?\? draftComposer\.draft/);
+  assert.match(surface, /queue: \[\.\.\.\(patch\.queue \?\? draftComposer\.messageQueue\)\]/);
+});
+
 test('new tasks can opt into worktree isolation from the draft composer', async () => {
   const [surface, main, service, panel] = await Promise.all([
     readSource('./ChatSurface.tsx'),
@@ -133,24 +146,58 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('./GoalPlanPanel.tsx'),
   ]);
 
+  assert.match(surface, /workspaceIsGit === false/);
+  assert.match(surface, /workspaceIsGit === true \? \([\s\S]*composer-context-row[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
+  assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
+  assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
   assert.match(surface, /composer-worktree-toggle/);
   assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
+  assert.ok(surface.includes('disabled={isStreaming}'));
+  assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);
+  assert.match(surface, /当前任务正在执行，无法更改隔离环境/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
-  assert.match(surface, /isDraftConversation && workspacePath/);
+  assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
+  assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
   assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
   assert.match(main, /preparePlanExecutionWorkspace/);
   assert.match(service, /preparePlanExecutionWorkspace/);
   assert.match(panel, /goalPlansIsolate/);
+  assert.match(surface, /planComposerGitChrome/);
+  assert.match(surface, /composer-workspace-head/);
+  assert.match(surface, /composer-task-line/);
+  assert.match(surface, /GitWorktreeGlyph/);
+  assert.match(surface, /composer-write-mismatch/);
   assert.match(surface, /composer-bound-branch/);
-  assert.match(surface, /formatComposerBoundBranch/);
   assert.match(surface, /canSelectComposerSourceBranch/);
   assert.match(surface, /buildComposerBranchOptions/);
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
+  assert.match(surface, /searchable/);
+  assert.match(surface, /gitCreateBranch/);
+  assert.match(surface, /handleOpenCreateBranchDialog/);
+  assert.match(surface, /resolveComposerCreateSourceBranch/);
+  assert.match(surface, /Create a branch from \$\{createBranchDialog\.source\}/);
+  assert.match(surface, /panelClassName="pa-confirm-dialog"/);
+  assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
+  assert.match(surface, /本地分支/);
+  assert.match(surface, /远程分支/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
-  assert.match(surface, /disabled=\{!canSelectBoundBranch\}/);
-  assert.match(surface, /workspaceGit == null \|\| workspaceGit\.ok \|\| Boolean\(deliveryLine\)/);
+  // Create-branch dialog pushes to the remote by default (opt-out checkbox).
+  assert.match(surface, /pa-confirm-check/);
+  assert.match(surface, /创建后推送到远端（git push -u）/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true, upstream: '' \}\)/);
+  assert.match(surface, /push: shouldPush,/);
+  assert.match(surface, /upstreamRemote: upstream\?\.remote/);
+  assert.match(surface, /upstreamBranch: upstream\?\.branch/);
+  assert.match(surface, /跟踪到/);
+  assert.match(surface, /parseComposerUpstreamSpec/);
+  assert.match(surface, /defaultComposerUpstreamSpec/);
+  assert.match(surface, /pushed === false/);
+  assert.match(surface, /branchPushNotice/);
+  assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
   assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);

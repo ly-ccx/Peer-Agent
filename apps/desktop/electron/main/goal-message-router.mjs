@@ -169,16 +169,24 @@ export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, so
   }
 
   // A user message starts a fresh chat stream directly; it does not pass through
-  // goalRunner.resume. Atomically restore failed continuations and take over only
-  // the narrow allow-list of recoverable infrastructure blockers.
+  // goalRunner.resume. Restore failed continuations, take over recoverable
+  // infrastructure blockers, and also take over stale product blockers so the
+  // home card does not keep asking for a decision while the foreground turn runs.
+  // requested_user_input stays owned by consumeRequestedUserInput above.
   const continuesCurrentGoal = CONTINUATION_INTENTS.has(route.intent);
   const foregroundTakesOverSystemBlocker = continuesCurrentGoal
     && activeGoalPlan?.status === 'executing'
     && activeGoalPlan?.runner?.status === 'blocked'
     && isRecoverableSystemGoalBlocker(activeGoalPlan.runner.blockedReason);
+  const foregroundTakesOverStaleBlocker = continuesCurrentGoal
+    && activeGoalPlan?.status === 'executing'
+    && ['blocked', 'budget_exhausted'].includes(activeGoalPlan?.runner?.status)
+    && activeGoalPlan?.runner?.blockedReason !== 'requested_user_input';
   if (
     continuesCurrentGoal
-    && (activeGoalPlan?.status === 'failed' || foregroundTakesOverSystemBlocker)
+    && (activeGoalPlan?.status === 'failed'
+      || foregroundTakesOverSystemBlocker
+      || foregroundTakesOverStaleBlocker)
   ) {
     goalPlanStore?.resumeRunner?.(route.goalPlanId, {
       intent: 'execute',

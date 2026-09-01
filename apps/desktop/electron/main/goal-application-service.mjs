@@ -17,6 +17,14 @@ export function createGoalApplicationService({
   recordTaskEvidence,
   deletePlan,
   retryHandoff,
+  retrySourceHandoffs,
+  declineSourceHandoffs,
+  inspectSourceCheckout,
+  commitSourceCheckout,
+  stashSourceCheckout,
+  resolveHandoffConflicts,
+  previewHandoffMerge,
+  cleanupHandoffPreview,
   isolate,
   openSite,
   discardLine,
@@ -53,6 +61,14 @@ export function createGoalApplicationService({
     recordTaskEvidence: assertFunction(recordTaskEvidence, 'recordTaskEvidence'),
     deletePlan: assertFunction(deletePlan, 'deletePlan'),
     retryHandoff: assertFunction(retryHandoff, 'retryHandoff'),
+    retrySourceHandoffs,
+    declineSourceHandoffs,
+    inspectSourceCheckout,
+    commitSourceCheckout,
+    stashSourceCheckout,
+    resolveHandoffConflicts,
+    previewHandoffMerge,
+    cleanupHandoffPreview,
     isolate: assertFunction(isolate, 'isolate'),
     openSite: assertFunction(openSite, 'openSite'),
     discardLine: assertFunction(discardLine, 'discardLine'),
@@ -105,6 +121,46 @@ export function createGoalApplicationService({
       ports.recordTaskEvidence(planId, taskId, change),
     remove,
     retryHandoff: ({ planId } = {}) => ports.retryHandoff(planId),
+    inspectSourceCheckout: ({ planId, workspacePath } = {}) =>
+      typeof ports.inspectSourceCheckout === 'function'
+        ? ports.inspectSourceCheckout(planId, { workspacePath })
+        : { ok: false, reason: 'unavailable' },
+    commitSourceCheckout: ({ planId, message, permissionConfirmed, workspacePath } = {}) =>
+      typeof ports.commitSourceCheckout === 'function'
+        ? ports.commitSourceCheckout(planId, {
+          message,
+          permissionConfirmed: Boolean(permissionConfirmed),
+          workspacePath,
+        })
+        : { ok: false, reason: 'unavailable' },
+    stashSourceCheckout: ({ planId, permissionConfirmed, workspacePath } = {}) =>
+      typeof ports.stashSourceCheckout === 'function'
+        ? ports.stashSourceCheckout(planId, {
+          permissionConfirmed: Boolean(permissionConfirmed),
+          workspacePath,
+        })
+        : { ok: false, reason: 'unavailable' },
+    retrySourceHandoffs: ({ planIds } = {}) =>
+      typeof ports.retrySourceHandoffs === 'function'
+        ? ports.retrySourceHandoffs(planIds)
+        : { ok: false, reason: 'unavailable' },
+    declineSourceHandoffs: ({ planIds } = {}) =>
+      typeof ports.declineSourceHandoffs === 'function'
+        ? ports.declineSourceHandoffs(planIds)
+        : { ok: false, reason: 'unavailable' },
+    // ADR 69 P2：收口决断与真机预览（可选端口，未接线的环境返回 ok:false）。
+    resolveHandoffConflicts: ({ planId, resolutions, permissionConfirmed } = {}) =>
+      typeof ports.resolveHandoffConflicts === 'function'
+        ? ports.resolveHandoffConflicts(planId, resolutions, { permissionConfirmed: Boolean(permissionConfirmed) })
+        : { ok: false, reason: 'unavailable' },
+    previewHandoffMerge: ({ planId, resolutions } = {}) =>
+      typeof ports.previewHandoffMerge === 'function'
+        ? ports.previewHandoffMerge(planId, resolutions)
+        : { ok: false, reason: 'unavailable' },
+    cleanupHandoffPreview: ({ planId, previewPath } = {}) =>
+      typeof ports.cleanupHandoffPreview === 'function'
+        ? ports.cleanupHandoffPreview(planId, previewPath)
+        : { ok: false, reason: 'unavailable' },
     isolate: ({ planId } = {}) => ports.isolate(planId),
     openSite: ({ planId, mode } = {}) => ports.openSite(planId, { mode }),
     discardLine: ({ planId, deleteBranch } = {}) =>

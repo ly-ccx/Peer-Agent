@@ -4,15 +4,13 @@ import test from 'node:test';
 /**
  * 总工作台（GlobalWorkbenchPage）Goal Thread 分组回归测试。
  *
- * 背景（2026-08-16）：区级 TaskOverviewPage 已有「一格一线」分组，但总工作台
- * 待验收列表仍把同线多卡平铺成 N 张独立卡。本次把分组提取为共享模块
- * goalThreadGrouping 并接入总工作台渲染路径。
+ * 背景：Goal 完成即终态后，总工作台主列不再挂待验收分组。
+ * 共享模块 goalThreadGrouping 仍保留纯逻辑；页面只渲染「需要你」。
  *
  * 保证：
- * 1. 渲染路径引用共享分组模块（groupResultCardsByGoalThread）；
- * 2. thread 组卡内渲染 ThreadList，打开依据页时带上同线待签项；
- * 3. single 组（无 rootPlanId 旧数据）走原 InboxRow 平铺路径，不套树；
- * 4. 待验收计数 = 分组后的组数（N 张同线卡算 1 项）。
+ * 1. 主列不再引用 groupResultCardsByGoalThread / resultGroups；
+ * 2. InboxRow 只走 kind="need"；
+ * 3. 共享分组语义仍由下方镜像测试锁住。
  */
 
 const readPage = async () => {
@@ -20,36 +18,31 @@ const readPage = async () => {
   return readFile(new URL('./GlobalWorkbenchPage.tsx', import.meta.url), 'utf8');
 };
 
-test('总工作台：待验收列表引用共享 Goal Thread 分组模块', async () => {
+test('总工作台：主列不再渲染待验收 Goal Thread 分组', async () => {
   const source = await readPage();
-  // 渲染数据源：分组派生必须存在，且 contextItems 传全量 items（树上下文）。
-  assert.match(source, /groupResultCardsByGoalThread\(displayedResults, items\)/);
-  // 计数跟随分组：同线 N 卡合并为 1 项。
-  assert.match(source, /gwb-side-count">\{resultGroups\.length\} 项<\/span>/);
-  assert.doesNotMatch(source, /gwb-side-count">\{displayedResults\.length\} 项/);
+  assert.doesNotMatch(source, /groupResultCardsByGoalThread/);
+  assert.doesNotMatch(source, /resultGroups/);
+  assert.doesNotMatch(source, /displayedResults/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
 });
 
-test('总工作台：thread 组卡内渲染同级 Goal 列表并带上同线待签', async () => {
+test('总工作台：主列 InboxRow 只走需要你，不带同线待签', async () => {
   const source = await readPage();
-  assert.match(source, /threadNodes=\{group\.nodes\}/);
-  assert.match(source, /threadPendingCount=\{group\.pendingCount\}/);
-  assert.match(source, /<ThreadList nodes=\{threadNodes\}/);
-  // 打开依据页带上 acceptTogether，归档时一次签完同线待签项。
-  assert.match(source, /collectPendingAcceptanceItems\(/);
-  assert.match(source, /acceptTogether: collectPendingAcceptanceItems\(/);
-  assert.doesNotMatch(source, /for \(const pending of collectPendingAcceptanceItems\(/);
+  assert.match(source, /kind="need"/);
+  assert.doesNotMatch(source, /kind="accept"/);
+  assert.doesNotMatch(source, /threadNodes=\{group\.nodes\}/);
+  assert.doesNotMatch(source, /collectPendingAcceptanceItems\(/);
+  assert.doesNotMatch(source, /acceptTogether:/);
 });
 
-test('总工作台：single 组保持原 InboxRow 平铺路径（旧数据兼容）', async () => {
+test('总工作台：需要你列表保持 InboxRow 平铺路径', async () => {
   const source = await readPage();
-  // single 分支：无 threadNodes / ThreadList，走与改造前一致的平铺渲染。
   assert.match(
     source,
-    /<InboxRow\s+key=\{group\.item\.taskId\}\s+item=\{group\.item\}\s+kind="accept"\s+phase=\{group\.phase\}/,
+    /<InboxRow\s+key=\{item\.taskId\}\s+item=\{item\}\s+kind="need"/,
   );
-  // single 分支不得挂树。
-  const singleBranch = source.split('key={group.item.taskId}')[1]?.split('/>')[0] ?? '';
-  assert.ok(!singleBranch.includes('threadNodes'), 'single 分支不应传 threadNodes');
+  const needBranch = source.split('kind="need"')[1]?.split('/>')[0] ?? '';
+  assert.ok(!needBranch.includes('threadNodes'), '需要你行不应传 threadNodes');
 });
 
 // ---- 与共享实现保持同一语义的纯逻辑镜像（防止模块被误删/改动后断言失真）----

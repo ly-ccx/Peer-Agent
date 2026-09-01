@@ -38,6 +38,7 @@ describe('parsePeerArgv', () => {
         model: undefined,
         effort: undefined,
         mode: 'chat',
+        fast: false,
         workspace: undefined,
         maxTurns: undefined,
         promptParts: ['list files'],
@@ -76,6 +77,7 @@ describe('parsePeerArgv', () => {
         model: 'gpt-5.4',
         effort: 'max',
         mode: 'plan',
+        fast: false,
         workspace: '/tmp/ws',
         maxTurns: 80,
         promptParts: ['fix', 'tests'],
@@ -95,6 +97,17 @@ describe('parsePeerArgv', () => {
     expect(parsePeerArgv(['exec', '--max-turns', '0'])).toMatchObject({
       kind: 'error',
       message: 'peer exec: --max-turns must be a positive integer',
+    });
+  });
+
+  test('parses exec --fast as a boolean flag', () => {
+    expect(parsePeerArgv(['exec', '--fast', 'hello'])).toMatchObject({
+      kind: 'exec',
+      options: { fast: true, promptParts: ['hello'] },
+    });
+    expect(parsePeerArgv(['exec', '--fast=true'])).toMatchObject({
+      kind: 'error',
+      message: 'peer exec: --fast does not take a value',
     });
   });
 });
@@ -117,6 +130,7 @@ describe('formatPeerHelp', () => {
     expect(help).toContain('Do not join with /');
     expect(help).toContain('--max-turns <n>');
     expect(help).toContain('default: none');
+    expect(help).toContain('--fast');
   });
 });
 

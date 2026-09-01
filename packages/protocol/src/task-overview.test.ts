@@ -166,6 +166,48 @@ test('rule 5: runner blocked → needs_you / decision', () => {
   assert.equal(item.statusLabel, '执行受阻');
 });
 
+test('live conversation stream outranks stale blocked as peer_advancing', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'blocked',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, 'Peer 正在推进');
+});
+
+test('live conversation stream outranks recoverable system blocker', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'blocked',
+      systemBlocked: true,
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, 'Peer 正在推进');
+});
+
+test('waiting_user is not swallowed by a live conversation stream', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'waiting_user',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'user_input');
+  assert.equal(item.nextAction, 'answer_question');
+  assert.equal(item.statusLabel, '等待你的选择');
+});
+
 test('recoverable system blocker does not become a user decision', () => {
   const item = projectGoalPlan(
     goalSnapshot({
@@ -178,6 +220,19 @@ test('recoverable system blocker does not become a user decision', () => {
   assert.equal(item.needsYouReason, undefined);
   assert.equal(item.nextAction, 'inspect');
   assert.equal(item.statusLabel, '系统执行中断');
+});
+
+test('live conversation stream outranks budget_exhausted as peer_advancing', () => {
+  const item = projectGoalPlan(
+    goalSnapshot({
+      status: 'executing',
+      runnerStatus: 'budget_exhausted',
+      conversationLive: true,
+    }),
+  );
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.needsYouReason, undefined);
+  assert.equal(item.statusLabel, 'Peer 正在推进');
 });
 
 test('rule 5b: runner budget_exhausted → needs_you / decision', () => {
@@ -220,38 +275,38 @@ test('未消费的 stream 中断优先于 completed 待验收并提供继续入�
   assert.equal(item.issueDetail, '连接意外断开');
 });
 
-test('rule 6: completed 未验收 → result_ready', () => {
+test('rule 6: completed → terminal，不再因未验收进入 result_ready', () => {
   const item = projectGoalPlan(goalSnapshot({ status: 'completed', accepted: false }));
-  assert.equal(item.actionRight, 'result_ready');
-  assert.equal(item.nextAction, 'review_result');
-  assert.equal(item.statusLabel, '待用户验收');
-  assert.equal(item.actionLabel, '查看进度');
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.nextAction, 'none');
+  assert.equal(item.statusLabel, '已完成');
+  assert.equal(item.actionLabel, '查看 →');
 });
 
-test('completed 但质量自检未过线时仍算正在处理，不进待验收', () => {
+test('completed 即使质量自检未过线也进终态，不再卡首页', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: false,
     requiresQualityReview: true,
     qualityReviewStatus: 'reviewing',
   }));
-  assert.equal(item.actionRight, 'peer_advancing');
-  assert.equal(item.statusLabel, 'Peer 正在自检');
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '已完成');
   assert.notEqual(item.actionRight, 'result_ready');
 });
 
-test('completed 且需要自检但尚未写入过线结果时，不得进入待验收', () => {
+test('completed 且需要自检但尚未写入过线结果时，仍进入终态', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: false,
     requiresQualityReview: true,
   }));
-  assert.equal(item.actionRight, 'peer_advancing');
-  assert.equal(item.statusLabel, 'Peer 正在自检');
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '已完成');
   assert.notEqual(item.actionRight, 'result_ready');
 });
 
-test('completed 且质量自检过线后才进入待验收', () => {
+test('completed 且质量自检过线后进入终态', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: false,
@@ -259,12 +314,13 @@ test('completed 且质量自检过线后才进入待验收', () => {
     qualityReviewStatus: 'passed',
     qualityChecks: [{ id: 'intent', label: '对照你的目标', status: 'passed' }],
   }));
-  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '已完成');
   assert.equal(item.qualityReviewStatus, 'passed');
   assert.equal(item.qualityChecks?.[0]?.label, '对照你的目标');
 });
 
-test('completed 且质量自检过线后，即使 runner 仍残留 running 也进入待验收', () => {
+test('completed 且质量自检过线后，即使 runner 仍残留 running 也进入终态', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: false,
@@ -272,15 +328,15 @@ test('completed 且质量自检过线后，即使 runner 仍残留 running 也�
     requiresQualityReview: true,
     qualityReviewStatus: 'passed',
   }));
-  assert.equal(item.actionRight, 'result_ready');
-  assert.equal(item.statusLabel, '待用户验收');
+  assert.equal(item.actionRight, 'terminal');
+  assert.equal(item.statusLabel, '已完成');
   assert.notEqual(item.statusLabel, 'Peer 正在自检');
 });
 
-test('rule 16a: completed 已验收 → terminal', () => {
+test('rule 16a: completed → terminal', () => {
   const item = projectGoalPlan(goalSnapshot({ status: 'completed', accepted: true }));
   assert.equal(item.actionRight, 'terminal');
-  assert.equal(item.statusLabel, '已验收');
+  assert.equal(item.statusLabel, '已完成');
 });
 
 test('accepted with only deliveryRoute is terminal, not delivering', () => {
@@ -290,30 +346,46 @@ test('accepted with only deliveryRoute is terminal, not delivering', () => {
     deliveryRoute: '来源 peer-knowledge · 交付 peer_agent · PeerAgent/0.0.5',
   }));
   assert.equal(item.actionRight, 'terminal');
-  assert.equal(item.statusLabel, '已验收');
+  assert.equal(item.statusLabel, '已完成');
 });
 
-test('accepted but still delivering stays visible as result_ready', () => {
+test('completed but still delivering stays visible as peer_advancing', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: true,
     deliveryHandoffStatus: 'delivering',
-    deliveryHandoffLabel: '正在交回目标分支',
+    deliveryHandoffLabel: '正在合进源头',
   }));
-  assert.equal(item.actionRight, 'result_ready');
-  assert.equal(item.statusLabel, '正在交回目标分支');
+  assert.equal(item.actionRight, 'peer_advancing');
+  assert.equal(item.statusLabel, '正在合进源头');
   assert.equal(item.deliveryHandoffStatus, 'delivering');
 });
 
-test('accepted handoff stopped stays visible as result_ready', () => {
+test('completed handoff stopped stays visible as needs_you', () => {
   const item = projectGoalPlan(goalSnapshot({
     status: 'completed',
     accepted: true,
     deliveryHandoffStatus: 'stopped',
     deliveryHandoffLabel: '目标分支有冲突',
   }));
-  assert.equal(item.actionRight, 'result_ready');
-  assert.equal(item.statusLabel, '交回未完成');
+  assert.equal(item.actionRight, 'needs_you');
+  assert.equal(item.needsYouReason, 'decision');
+  assert.equal(item.statusLabel, '合不进源头');
+});
+
+test('stopped empty-shell / stale verdicts leave the workbench as completed', () => {
+  for (const verdict of ['AUTO_CLEAN', 'STALE'] as const) {
+    const item = projectGoalPlan(goalSnapshot({
+      status: 'completed',
+      accepted: true,
+      deliveryHandoffStatus: 'stopped',
+      deliveryHandoffVerdict: verdict,
+      deliveryHandoffLabel: '合不进 0.0.9',
+    }));
+    assert.equal(item.actionRight, 'terminal');
+    assert.equal(item.statusLabel, '已完成');
+    assert.notEqual(item.needsYouReason, 'decision');
+  }
 });
 
 test('rule 16b: cancelled / failed → terminal', () => {
@@ -598,7 +670,7 @@ test('projectGoalPlan 透传 timing.completedAt 为 completedAt', () => {
       },
     }),
   );
-  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.actionRight, 'terminal');
   assert.equal(item.completedAt, '2026-08-10T00:03:00.000Z');
   assert.equal(item.lastActiveAt, '2026-08-10T00:05:00.000Z');
 });
@@ -611,7 +683,7 @@ test('projectGoalPlan 终态缺 timing.completedAt 时回落 updatedAt', () => {
       updatedAt: '2026-08-10T00:05:00.000Z',
     }),
   );
-  assert.equal(item.actionRight, 'result_ready');
+  assert.equal(item.actionRight, 'terminal');
   assert.equal(item.completedAt, '2026-08-10T00:05:00.000Z');
 });
 
@@ -661,11 +733,11 @@ test('projectGoalPlan 透传交付路由，不把缺分支补成 main', () => {
   assert.notEqual(item.deliveryRoute, 'main');
 });
 
-test('projectGoalPlan 透传交回状态，没隔离或没验收时不显示', () => {
+test('projectGoalPlan 透传合回状态', () => {
   const shown = projectGoalPlan(goalSnapshot({
-    deliveryHandoffLabel: '已交回 peer_agent / PeerAgent/0.0.4',
+    deliveryHandoffLabel: '已合进 peer_agent / PeerAgent/0.0.4',
   }));
-  assert.equal(shown.deliveryHandoffLabel, '已交回 peer_agent / PeerAgent/0.0.4');
+  assert.equal(shown.deliveryHandoffLabel, '已合进 peer_agent / PeerAgent/0.0.4');
   const hidden = projectGoalPlan(goalSnapshot({}));
   assert.equal(hidden.deliveryHandoffLabel, undefined);
 });

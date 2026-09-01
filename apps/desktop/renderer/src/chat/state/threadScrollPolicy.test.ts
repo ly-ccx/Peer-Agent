@@ -3,9 +3,26 @@ import { describe, it } from 'node:test';
 import {
   isMessageStructureRewritten,
   planThreadScrollAfterMessagesChange,
+  planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
   shouldStickMessageRailToLatest,
 } from './threadScrollPolicy.ts';
+
+describe('thread scroll on conversation open', () => {
+  it('defaults to the latest messages at the bottom', () => {
+    assert.deepEqual(
+      planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: false }),
+      { stickToBottom: true },
+    );
+  });
+
+  it('does not steal scroll when an explicit message target is present', () => {
+    assert.deepEqual(
+      planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: true }),
+      { stickToBottom: false },
+    );
+  });
+});
 
 describe('thread scroll policy after compaction', () => {
   it('detects structure rewrite when message count drops', () => {

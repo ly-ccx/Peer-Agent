@@ -1,11 +1,19 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface DropdownOption {
   readonly value: string;
   readonly label: string;
   readonly tone?: 'danger';
+  readonly group?: string;
+  readonly hint?: string;
+}
+
+export interface DropdownFooterAction {
+  readonly label: string | ((query: string) => string);
+  readonly onSelect: (query: string, highlightedValue?: string) => void;
+  readonly disabled?: boolean | ((query: string) => boolean);
 }
 
 interface MenuCoords {
@@ -13,6 +21,14 @@ interface MenuCoords {
   readonly top: number;
   readonly width: number;
   readonly placement: 'down' | 'up';
+}
+
+function optionMatchesQuery(option: DropdownOption, query: string): boolean {
+  if (!query) return true;
+  const haystack = [option.label, option.value, option.hint ?? '', option.group ?? '']
+    .join('\n')
+    .toLowerCase();
+  return haystack.includes(query);
 }
 
 // 暗色自定义下拉，替代原生 <select>(原生在 macOS 会套系统皮，与暗色设计语言割裂)。
@@ -33,6 +49,10 @@ export function Dropdown({
   title,
   prefix,
   menuPlacement = 'down',
+  searchable = false,
+  searchPlaceholder,
+  emptyLabel,
+  footerAction,
 }: {
   readonly value: string;
   readonly options: readonly DropdownOption[];
@@ -44,17 +64,34 @@ export function Dropdown({
   readonly title?: string;
   readonly prefix?: ReactNode;
   readonly menuPlacement?: 'down' | 'up';
+  readonly searchable?: boolean;
+  readonly searchPlaceholder?: string;
+  readonly emptyLabel?: string;
+  readonly footerAction?: DropdownFooterAction;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const [coords, setCoords] = useState<MenuCoords | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
 
   const selected = options.find((o) => o.value === value);
   const triggerLabel = selected?.label ?? placeholder ?? value;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleOptions = useMemo(
+    () => options.filter((option) => optionMatchesQuery(option, normalizedQuery)),
+    [normalizedQuery, options],
+  );
+  const footerDisabled = typeof footerAction?.disabled === 'function'
+    ? footerAction.disabled(query)
+    : footerAction?.disabled === true;
+  const footerLabel = typeof footerAction?.label === 'function'
+    ? footerAction.label(query)
+    : footerAction?.label;
 
   // 依据触发器在视口中的位置计算 fixed 菜单坐标，并按可用空间自适应上下方向。
   const updatePosition = useCallback(() => {
@@ -91,12 +128,17 @@ export function Dropdown({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [open]);
 
-  // 打开时把高亮对齐到当前选中项(无选中则首项)。
   useEffect(() => {
-    if (!open) return;
-    const idx = options.findIndex((o) => o.value === value);
-    setActiveIndex(idx >= 0 ? idx : 0);
-  }, [open, options, value]);
+    if (!open) {
+      setQuery('');
+      return;
+    }
+    const idx = visibleOptions.findIndex((o) => o.value === value);
+    setActiveIndex(idx >= 0 ? idx : (visibleOptions.length > 0 ? 0 : -1));
+    if (searchable) {
+      searchRef.current?.focus();
+    }
+  }, [open, searchable, value, visibleOptions]);
 
   // 打开后在 paint 前测量菜单高度并定位，避免首帧闪烁；关闭时清空坐标。
   useLayoutEffect(() => {
@@ -105,7 +147,7 @@ export function Dropdown({
       return;
     }
     updatePosition();
-  }, [open, updatePosition]);
+  }, [open, updatePosition, visibleOptions.length, query]);
 
   // 打开期间，祖先滚动或窗口尺寸变化时跟随重定位(scroll 用 capture 以捕获内部滚动容器)。
   useEffect(() => {
@@ -121,12 +163,52 @@ export function Dropdown({
 
   const commit = useCallback(
     (index: number) => {
-      const opt = options[index];
+      const opt = visibleOptions[index];
       if (opt) onChange(opt.value);
       setOpen(false);
     },
-    [options, onChange],
+    [visibleOptions, onChange],
   );
+
+  const runFooter = useCallback(() => {
+    if (!footerAction || footerDisabled) return false;
+    footerAction.onSelect(query, visibleOptions[activeIndex]?.value);
+    setOpen(false);
+    return true;
+  }, [activeIndex, footerAction, footerDisabled, query, visibleOptions]);
+
+  const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+        break;
+      case 'ArrowDown':
+        event.preventDefault();
+        setActiveIndex((i) => Math.min(Math.max(i, -1) + 1, visibleOptions.length - 1));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        setActiveIndex((i) => Math.max(i - 1, 0));
+        break;
+      case 'Enter':
+        event.preventDefault();
+        if (activeIndex >= 0 && visibleOptions[activeIndex]) {
+          commit(activeIndex);
+        } else {
+          runFooter();
+        }
+        break;
+      case ' ':
+        if (event.currentTarget instanceof HTMLInputElement) break;
+        event.preventDefault();
+        commit(activeIndex);
+        break;
+      default:
+        break;
+    }
+  };
 
   const onTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
@@ -137,27 +219,7 @@ export function Dropdown({
       }
       return;
     }
-    switch (event.key) {
-      case 'Escape':
-        event.preventDefault();
-        setOpen(false);
-        break;
-      case 'ArrowDown':
-        event.preventDefault();
-        setActiveIndex((i) => Math.min(i + 1, options.length - 1));
-        break;
-      case 'ArrowUp':
-        event.preventDefault();
-        setActiveIndex((i) => Math.max(i - 1, 0));
-        break;
-      case 'Enter':
-      case ' ':
-        event.preventDefault();
-        commit(activeIndex);
-        break;
-      default:
-        break;
-    }
+    onListKeyDown(event);
   };
 
   const rootClassName = [
@@ -180,37 +242,78 @@ export function Dropdown({
       } as CSSProperties)
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
+  let lastGroup: string | undefined;
+  const optionNodes = visibleOptions.map((opt, index) => {
+    const showGroup = Boolean(opt.group) && opt.group !== lastGroup;
+    lastGroup = opt.group;
+    return (
+      <div key={`${opt.group ?? ''}::${opt.value}`}>
+        {showGroup ? <div className="pa-dropdown-group">{opt.group}</div> : null}
+        <button
+          type="button"
+          role="option"
+          aria-selected={opt.value === value}
+          className={`pa-dropdown-item ${index === activeIndex ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''}`}
+          onMouseEnter={() => setActiveIndex(index)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            commit(index);
+          }}
+        >
+          <span className="pa-dropdown-check" aria-hidden>
+            {opt.value === value ? '✓' : ''}
+          </span>
+          <span className="pa-dropdown-item-label">{opt.label}</span>
+          {opt.hint ? <span className="pa-dropdown-item-hint">{opt.hint}</span> : null}
+        </button>
+      </div>
+    );
+  });
+
   // 菜单已被 portal 移出 root，需把消费方 className 透传到菜单上，
   // 使原先依赖祖先关系的样式(如 .composer-dropdown .pa-dropdown-menu)改写为复合选择器后仍生效。
   const menu = open
     ? createPortal(
         <div
           ref={menuRef}
-          className={`pa-dropdown-menu ${className ?? ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`.trim()}
+          className={`pa-dropdown-menu ${className ?? ''} ${searchable ? 'is-searchable' : ''} ${coords?.placement === 'up' ? 'is-up' : 'is-down'}`.trim()}
           role="listbox"
           id={listId}
           aria-label={ariaLabel}
           style={menuStyle}
         >
-          {options.map((opt, index) => (
+          {searchable ? (
+            <div className="pa-dropdown-search">
+              <input
+                ref={searchRef}
+                type="text"
+                value={query}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder || ariaLabel}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={onListKeyDown}
+              />
+            </div>
+          ) : null}
+          <div className="pa-dropdown-list">
+            {optionNodes}
+            {visibleOptions.length === 0 ? (
+              <div className="pa-dropdown-empty">{emptyLabel || 'No matches'}</div>
+            ) : null}
+          </div>
+          {footerAction ? (
             <button
-              key={opt.value}
               type="button"
-              role="option"
-              aria-selected={opt.value === value}
-              className={`pa-dropdown-item ${index === activeIndex ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''}`}
-              onMouseEnter={() => setActiveIndex(index)}
+              className="pa-dropdown-footer"
+              disabled={footerDisabled}
               onMouseDown={(event) => {
                 event.preventDefault();
-                commit(index);
+                runFooter();
               }}
             >
-              <span className="pa-dropdown-check" aria-hidden>
-                {opt.value === value ? '✓' : ''}
-              </span>
-              <span className="pa-dropdown-item-label">{opt.label}</span>
+              {footerLabel}
             </button>
-          ))}
+          ) : null}
         </div>,
         document.body,
       )

@@ -446,12 +446,15 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (isStaleStreamTerminal(prev.streamId, streamId)) return {};
         const msgs = prev.messages as ChatMsg[];
         const last = msgs[msgs.length - 1];
+        // 终态收敛对齐 done/error：用户点停止后清掉重试横幅，
+        // 否则「正在重试连接」会残留到下一次流事件才消失。
         const settled = {
           isStreaming: false,
           compactionState: IDLE_COMPACTION_STATE,
           activeUsage: null,
           pendingPermissionCalls: [],
           toolProgress: null,
+          providerRecoveryNotice: null,
           turnStartedAt: null,
           streamId: null,
         };

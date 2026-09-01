@@ -10,6 +10,7 @@ const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
 const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
 const newSession = TUI_COMMANDS.find((command) => command.id === 'new')!;
 const version = TUI_COMMANDS.find((command) => command.id === 'version')!;
+const fast = TUI_COMMANDS.find((command) => command.id === 'fast')!;
 
 function harness() {
   let state = createTuiExperienceState('chat');
@@ -37,6 +38,7 @@ function harness() {
       return `History: ${direction}`;
     },
     controlGoal: () => 'unused',
+    toggleFastMode: () => 'Fast on',
     quit: () => { quitCount += 1; },
     showVersion: () => 'peer 0.0.2-test',
     setNotice: (notice: string | null) => { notices.push(notice); },
@@ -115,6 +117,15 @@ describe('TUI command execution', () => {
     executeTuiCommand(version, subject.handlers);
 
     expect(subject.notices.at(-1)).toBe('peer 0.0.2-test');
+    expect(subject.state.surface).toEqual({ type: 'composer' });
+  });
+
+  test('executes /fast through the shared dispatcher and stays on the composer', () => {
+    const subject = harness();
+
+    executeTuiCommand(fast, subject.handlers);
+
+    expect(subject.notices.at(-1)).toBe('Fast on');
     expect(subject.state.surface).toEqual({ type: 'composer' });
   });
 });

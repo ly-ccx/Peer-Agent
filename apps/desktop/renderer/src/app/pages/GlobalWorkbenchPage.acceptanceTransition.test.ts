@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const readPage = () => readFile(new URL('./GlobalWorkbenchPage.tsx', import.meta.url), 'utf8');
+const readPanel = () =>
+  readFile(new URL('../components/SourceCheckoutPanel.tsx', import.meta.url), 'utf8');
 const readStyles = () =>
   readFile(new URL('../../styles/global-workbench.css', import.meta.url), 'utf8');
 
@@ -10,10 +12,8 @@ test('advancing count has one overview entry and no duplicate hero summary', asy
   const source = await readPage();
   const styles = await readStyles();
 
-  assert.match(
-    source,
-    /<span className="gwb-side-label">PEER 推进<\/span>\s*<span className="gwb-side-count">\{advancing\.length\} 个任务<\/span>/,
-  );
+  assert.match(source, /<span className="gwb-side-label">进行中<\/span>/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
   assert.doesNotMatch(source, /个任务在推进|gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
   assert.doesNotMatch(styles, /\.gwb-calm-card|\.gwb-calm-title|\.gwb-calm-dot/);
 });
@@ -30,38 +30,64 @@ test('global workbench renders action arrows as decorative svg icons', async () 
   assert.match(styles, /\.gwb-btn-arrow/);
 });
 
-test('global workbench acceptance waits for success before celebrating and freezes order snapshot', async () => {
+test('global workbench main column no longer hosts leftover acceptance snapshots', async () => {
   const source = await readPage();
-  assert.match(source, /mergeAcceptanceTransitionItems/);
-  assert.match(source, /ACCEPTANCE_CELEBRATION_MS/);
-  assert.match(source, /ACCEPTANCE_EXIT_MS/);
-  assert.match(source, /await onAcceptResult\(item\);[\s\S]*phase: 'celebrating'/);
-  assert.match(source, /setAcceptanceOrderSnapshot\(resultReady\.map\(\(candidate\) => candidate\.taskId\)\)/);
-  assert.match(source, /orderSnapshot: acceptanceOrderSnapshot/);
-  assert.match(source, /ParticleShatterOverlay/);
-  assert.match(source, /acceptHandlerRef\.current = handleAccept/);
-  assert.match(source, /is-shattering/);
-  assert.match(source, /is-exiting/);
+  assert.doesNotMatch(source, /mergeAcceptanceTransitionItems/);
+  assert.doesNotMatch(source, /ACCEPTANCE_CELEBRATION_MS/);
+  assert.doesNotMatch(source, /setAcceptanceOrderSnapshot/);
+  assert.doesNotMatch(source, /resultReady/);
+  assert.doesNotMatch(source, /handleAccept/);
+  assert.doesNotMatch(source, /kind="accept"/);
+  assert.match(source, /kind="need"/);
   assert.match(source, /className="gwb-type"/);
   assert.match(source, /className="gwb-body"/);
   assert.match(source, /className="gwb-chips"/);
   assert.match(source, /className="gwb-chip gwb-chip-ws"/);
   assert.doesNotMatch(source, /gwb-tag-col|gwb-item-main|gwb-meta/);
-  assert.match(source, /正在交回…/);
-  assert.match(source, /已归档 ✓/);
-  assert.match(source, /查看进度/);
   assert.doesNotMatch(source, /先看依据/);
   assert.doesNotMatch(source, /确认验收/);
-  assert.doesNotMatch(
-    source,
-    /onAccept=\{\s*onAcceptResult\s*\?\s*\(\)\s*=>\s*\{\s*void onAcceptResult\(item\);/,
-  );
 });
 
-test('global workbench acceptance failure returns the card to a retryable idle state', async () => {
+test('source env-block cards keep checkout actions but open the related conversation', async () => {
   const source = await readPage();
-  assert.match(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
-  assert.match(source, /disabled=\{kind === 'accept' && acceptBusy\}/);
+  const panel = await readPanel();
+  const styles = await readStyles();
+  assert.match(source, /deliveryHandoffStoppedReason/);
+  assert.match(source, /isWorkbenchHandoffCard/);
+  assert.match(source, /SourceCheckoutPanel/);
+  assert.match(source, /sourceBlock\s*\n\s*\? '去对话'/);
+  assert.doesNotMatch(source, /sourceOpen \? '收起' : '处理'/);
+  assert.doesNotMatch(source, /处理源头/);
+  assert.doesNotMatch(source, /收起源头/);
+  assert.doesNotMatch(source, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
+  assert.match(panel, /不合进/);
+  assert.match(panel, /goalPlansDeclineSourceHandoffs/);
+  assert.match(panel, /提交并合进/);
+  assert.match(panel, /合进 \$\{dest\}/);
+  assert.doesNotMatch(panel, /提交这些改动/);
+  assert.doesNotMatch(panel, /先放下再合/);
+  assert.doesNotMatch(panel, /再试一次/);
+  assert.match(source, /sourceBlock \? <SourceCheckoutPanel item=\{item\} \/>/);
+  assert.match(panel, /workspacePath/);
+  assert.match(panel, /committed\.detail/);
+  assert.match(panel, /disabled=\{busy \|\| !canRetry\}/);
+  assert.match(panel, /blockedPlanTitles/);
+  assert.match(panel, /useConfirm/);
+  assert.doesNotMatch(panel, /点名字只是认人/);
+  assert.doesNotMatch(panel, /window\.confirm/);
+  assert.doesNotMatch(panel, /onClick=\{\(\) => onOpenItem/);
+  assert.match(panel, /这台桌面还没接上源头检查/);
+  assert.doesNotMatch(panel, /setError\(['"]unavailable['"]\)/);
+  assert.match(styles, /\.source-checkout-panel\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/);
+  assert.doesNotMatch(styles, /\.source-checkout-panel\s*\{[\s\S]*#9a7340/);
+});
+
+test('global workbench pulse and empty radar do not revive an accept bucket', async () => {
+  const source = await readPage();
+  assert.doesNotMatch(source, /catch \{[\s\S]*delete next\[item\.taskId\]/);
+  assert.doesNotMatch(source, /actionRight === 'result_ready'\) row\.accept/);
+  assert.match(source, /gwb-layout--empty/);
+  assert.match(source, /kind="need"/);
 });
 
 test('global workbench removes the final divider through the shatter host wrapper', async () => {
@@ -108,4 +134,47 @@ test('global workbench acceptance uses particle shatter overlay styles', async (
   const styles = await readStyles();
   assert.match(styles, /\.gwb-item--submitting/);
   assert.match(styles, /\.gwb-accept-spinner/);
+});
+
+test('empty radar stretches the main column and keeps the side ambient', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(source, /className=\{`gwb-layout\$\{showEmpty \? ' gwb-layout--empty' : ''\}`\}/);
+  assert.match(source, /现在没有进行中的工作/);
+  assert.match(source, /Pin 会话和进行中的任务会显示在这里/);
+  assert.doesNotMatch(source, /现在没有需要你处理的事/);
+  assert.doesNotMatch(source, /Peer 正在推进 \{advancing\.length\} 个任务，你可以离开。/);
+  assert.doesNotMatch(source, /个任务由 Peer 推进中/);
+
+  assert.match(styles, /\.gwb-layout--empty\s*\{[\s\S]*items-stretch/);
+  assert.match(styles, /\.gwb-empty\s*\{[\s\S]*flex-1[\s\S]*min-height:\s*310px/);
+  assert.doesNotMatch(source, /gwb-calm-card|gwb-calm-title|gwb-calm-dot/);
+});
+
+test('home workbench merges in-progress work and shows pinned conversations', async () => {
+  const source = await readPage();
+  assert.match(source, /<span className="gwb-side-label">进行中<\/span>/);
+  assert.match(source, /\{needsYou\.length\} 需你 · \{advancing\.length\} 推进/);
+  assert.match(source, /inProgressCount > 0/);
+  assert.match(source, /pinnedConversations\.length > 0/);
+  assert.match(source, /listPinnedConversations/);
+  assert.match(source, /onOpenPinnedConversation\?\.\(conv\.id, conv\.workspacePath\)/);
+  assert.doesNotMatch(source, /gwb-side-label">PEER 推进/);
+  assert.doesNotMatch(source, /gwb-side-label">需要你/);
+});
+
+test('workspace pulse aggregates need and run only, not leftover acceptance', async () => {
+  const source = await readPage();
+  const styles = await readStyles();
+
+  assert.match(source, /new Map<string, \{ need: number; run: number \}>/);
+  assert.match(source, /total: counts\.need \+ counts\.run/);
+  assert.match(source, /\{row\.need\} 需你/);
+  assert.match(source, /\{row\.run\} 推进/);
+  assert.doesNotMatch(source, /row\.accept|\{row\.accept\} 验收/);
+  assert.doesNotMatch(source, /actionRight === 'result_ready'\) row\.accept/);
+  assert.doesNotMatch(styles, /\.gwb-num-ok/);
+  assert.match(styles, /grid-template-columns:\s*1\.4fr repeat\(2, 0\.8fr\)/);
+  assert.doesNotMatch(styles, /repeat\(3,/);
 });

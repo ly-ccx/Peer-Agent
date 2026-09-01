@@ -45,18 +45,12 @@ function parseArgs(call) {
 }
 
 /**
- * 计划标题兜底：title 在 schema 中已标为 required 且 prompt 明确要求，模型正常都会给；
- * 本函数仅为极端情况下模型仍漏传 title 的兜底，避免落空串让面板显示“未命名计划”。
- * 兜底时用 goal 首句（截断）凑一个可读标题。纯本地推导，不引入云端事实，符合“本地负责能力”。
+ * 计划标题兜底：title 在 schema 中已标为 required 且 prompt 明确要求，模型正常都会给。
+ * 漏传时不再用 goal 截断冒充标题（那会把用户原话显示到浮动条）；交由 store sanitize
+ * 落成「未命名任务」，再在分析意图后用短标题刷新。
  */
-function deriveTitle(rawTitle, goal) {
-  const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-  if (title) return title;
-  const source = typeof goal === 'string' ? goal.trim() : '';
-  if (!source) return '';
-  const firstLine = source.split(/\r?\n/)[0].trim();
-  const firstSentence = firstLine.split(/(?<=[。．.!？?])/)[0].trim() || firstLine;
-  return firstSentence.length > 40 ? `${firstSentence.slice(0, 40)}…` : firstSentence;
+function deriveTitle(rawTitle, _goal) {
+  return typeof rawTitle === 'string' ? rawTitle.trim() : '';
 }
 
 function nonEmptyString(value) {

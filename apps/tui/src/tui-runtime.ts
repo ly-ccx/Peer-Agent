@@ -2,6 +2,7 @@ import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/pr
 import {
   createChatGptResponsesProvider,
   createOpenAICompatibleProvider,
+  effectiveFastMode,
   refreshChatGptOAuthTokens,
   type ModelProviderRequest,
 } from '@peer-agent/runtime-node';
@@ -41,6 +42,7 @@ export interface CreateTuiRuntimeOptions {
   readonly persistAccessLevel?: (accessLevel: LocalAccessLevel) => void;
   readonly toolAllowlist?: readonly string[];
   readonly denyInteractiveTools?: boolean;
+  readonly initialFastMode?: boolean;
 }
 
 export interface TuiRuntime {
@@ -50,6 +52,8 @@ export interface TuiRuntime {
   readonly modelConfig: TuiModelConfig;
   readonly languageStore: TuiLanguageStore;
   readonly themeStore: TuiThemeStore;
+  getSessionFastMode(): boolean;
+  setSessionFastMode(fastMode: boolean): void;
   dispose(): Promise<void>;
 }
 
@@ -72,6 +76,15 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
   }
   const modelConfig = resolveTuiModelConfig(process.env, { userDataPath });
   const sharedMetadata = modelConfig.sharedMetadata;
+  let sessionFastMode = options.initialFastMode === true;
+
+  function authMethodFor(credentialId: string | undefined): string | null {
+    if (!credentialId) return modelConfig.sharedMetadata?.authMethod ?? null;
+    return modelConfig.sharedProviders?.find((item) => item.credentialId === credentialId)?.authMethod
+      ?? (modelConfig.sharedMetadata?.credentialId === credentialId
+        ? modelConfig.sharedMetadata.authMethod
+        : null);
+  }
   function sharedProvider(credentialId: string) {
     const metadata = modelConfig.sharedProviders?.find((item) => item.credentialId === credentialId);
     if (!metadata) throw new Error(`Provider credential not found: ${credentialId}`);
@@ -303,6 +316,10 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           return contextAccountingModelKey(selection.providerId, selection.modelId);
         },
         getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
+        getFastMode: () => effectiveFastMode(
+          authMethodFor(modelSelection.getSelection().providerId),
+          sessionFastMode,
+        ),
         getContextWindow: () => {
           const selection = modelSelection.getSelection();
           return modelSelection.catalog.find((entry) => (
@@ -321,6 +338,10 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     modelConfig,
     languageStore,
     themeStore,
+    getSessionFastMode: () => sessionFastMode,
+    setSessionFastMode(fastMode) {
+      sessionFastMode = fastMode === true;
+    },
     dispose: () => host.dispose(),
   };
 }

@@ -3,22 +3,21 @@ import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { ThinkingOrb } from 'thinking-orbs';
 import { prefersReducedMotion } from '../hooks/useMotionPresence';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
-import { collectPendingAcceptanceItems } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { useTaskOverview } from '../hooks/useTaskOverview';
-import { groupResultCardsByGoalThread, ThreadList, type ThreadListNode } from './goalThreadGrouping';
+import { ThreadList, type ThreadListNode } from './goalThreadGrouping';
 import {
-  ACCEPTANCE_CELEBRATION_MS,
-  ACCEPTANCE_EXIT_MS,
-  mergeAcceptanceTransitionItems,
   type AcceptancePhase,
 } from '../state/acceptanceTransition';
 import { ParticleShatterOverlay } from '../fx/ParticleShatterOverlay';
 import { useShatterExitCollapse } from '../fx/useShatterExitCollapse';
-import { PeerIcon } from '../../ui/icons';
+import { isWorkbenchHandoffCard, SourceCheckoutPanel } from '../components/SourceCheckoutPanel';
 import { ActionLabel } from './actionLabelDisplay';
+import { listPinnedConversations } from '../../chat/state/listPinnedConversations';
+import type { PinnedConversationMeta } from '../../chat/state/pinnedConversationList';
+import { workspaceLabelFromPath } from '../../chat/components/workspacePathDisplay';
 
 function workspaceBasename(workspacePath: string): string {
   const normalized = workspacePath.replace(/[/\\]+$/, '');
@@ -38,14 +37,15 @@ type AcceptanceTransition = {
 };
 
 export function GlobalWorkbenchPage({
-  onOpenTasks,
-  onOpenHistory,
+  onOpenTasks: _onOpenTasks,
+  onOpenHistory: _onOpenHistory,
   onNewTask,
   onOpenItem,
   onAcceptResult,
   acceptHandlerRef,
   onCancelItem,
   onOpenWorkspace,
+  onOpenPinnedConversation,
   enabled = true,
 }: {
   readonly onOpenTasks?: () => void;
@@ -57,6 +57,7 @@ export function GlobalWorkbenchPage({
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   /** 点击「工作区脉搏」行：切到对应区级工作台。 */
   readonly onOpenWorkspace?: (workspacePath: string) => void;
+  readonly onOpenPinnedConversation?: (id: string, workspacePath?: string | null) => void;
   readonly enabled?: boolean;
 }) {
   const workbench = useWorkbenchOptional();
@@ -100,146 +101,6 @@ export function GlobalWorkbenchPage({
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you'),
     [items],
   );
-  const resultReady = useMemo(
-    () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready'),
-    [items],
-  );
-
-  // 与区级 TaskOverviewPage 共用三段式验收编排：
-  // submitting -> celebrating -> exiting，避免 IPC 刷新后卡片瞬间消失。
-  const [acceptanceTransitions, setAcceptanceTransitions] = useState<
-    Record<string, AcceptanceTransition>
-  >({});
-  const [acceptanceOrderSnapshot, setAcceptanceOrderSnapshot] = useState<readonly string[]>([]);
-  const transitionTimers = useRef<Set<number>>(new Set());
-
-  useEffect(
-    () => () => {
-      for (const timer of transitionTimers.current) window.clearTimeout(timer);
-      transitionTimers.current.clear();
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (Object.keys(acceptanceTransitions).length === 0 && acceptanceOrderSnapshot.length > 0) {
-      setAcceptanceOrderSnapshot([]);
-    }
-  }, [acceptanceOrderSnapshot.length, acceptanceTransitions]);
-
-  const scheduleTransition = useCallback((callback: () => void, delayMs: number) => {
-    const timer = window.setTimeout(() => {
-      transitionTimers.current.delete(timer);
-      callback();
-    }, delayMs);
-    transitionTimers.current.add(timer);
-  }, []);
-
-  const handleAccept = useCallback(
-    async (item: TaskOverviewItem) => {
-      if (!onAcceptResult || item.source !== 'goal_plan' || !item.taskId) return;
-      if (acceptanceTransitions[item.taskId]) return;
-
-      // Freeze visual order before awaited IPC refresh removes the accepted item.
-      if (Object.keys(acceptanceTransitions).length === 0) {
-        setAcceptanceOrderSnapshot(resultReady.map((candidate) => candidate.taskId));
-      }
-      setAcceptanceTransitions((prev) => ({
-        ...prev,
-        [item.taskId]: { item, phase: 'submitting' },
-      }));
-
-      try {
-        await onAcceptResult(item);
-        // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
-      } catch {
-        setAcceptanceTransitions((prev) => {
-          if (!(item.taskId in prev)) return prev;
-          const next = { ...prev };
-          delete next[item.taskId];
-          return next;
-        });
-      }
-    },
-    [acceptanceTransitions, onAcceptResult, resultReady],
-  );
-
-  useEffect(() => {
-    const submittingIds = Object.entries(acceptanceTransitions)
-      .filter(([, transition]) => transition.phase === 'submitting')
-      .map(([taskId]) => taskId);
-    if (submittingIds.length === 0) return;
-
-    for (const taskId of submittingIds) {
-      const live = resultReady.find((item) => item.taskId === taskId);
-      if (live?.deliveryHandoffStatus === 'stopped') {
-        setAcceptanceTransitions((prev) => {
-          if (!(taskId in prev)) return prev;
-          const next = { ...prev };
-          delete next[taskId];
-          return next;
-        });
-        continue;
-      }
-      const delivered = live?.deliveryHandoffStatus === 'delivered' || !live;
-      if (!delivered) continue;
-      setAcceptanceTransitions((prev) => {
-        const current = prev[taskId];
-        if (!current || current.phase !== 'submitting') return prev;
-        return {
-          ...prev,
-          [taskId]: { ...current, phase: 'celebrating' },
-        };
-      });
-      scheduleTransition(() => {
-        setAcceptanceTransitions((prev) => {
-          const current = prev[taskId];
-          if (!current) return prev;
-          return {
-            ...prev,
-            [taskId]: { ...current, phase: 'exiting' },
-          };
-        });
-        scheduleTransition(() => {
-          setAcceptanceTransitions((prev) => {
-            if (!(taskId in prev)) return prev;
-            const next = { ...prev };
-            delete next[taskId];
-            return next;
-          });
-        }, ACCEPTANCE_EXIT_MS);
-      }, ACCEPTANCE_CELEBRATION_MS);
-    }
-  }, [acceptanceTransitions, resultReady, scheduleTransition]);
-
-  useEffect(() => {
-    if (!acceptHandlerRef) return;
-    acceptHandlerRef.current = handleAccept;
-    return () => {
-      if (acceptHandlerRef.current === handleAccept) {
-        acceptHandlerRef.current = null;
-      }
-    };
-  }, [acceptHandlerRef, handleAccept]);
-
-  const displayedResults = useMemo(
-    () =>
-      mergeAcceptanceTransitionItems({
-        currentItems: resultReady,
-        transitions: Object.values(acceptanceTransitions),
-        orderSnapshot: acceptanceOrderSnapshot,
-      }),
-    [acceptanceOrderSnapshot, acceptanceTransitions, resultReady],
-  );
-
-  // 一格一线：与区级 TaskOverviewPage 共用 Goal Thread 分组 —— 同 rootPlanId
-  // 的待验收卡合并为一张（卡内压缩树），无 rootPlanId 的旧数据保持单卡平铺。
-  // contextItems 传全量 items，让已完结的同线计划也能作为树上下文出现。
-  const resultGroups = useMemo(
-    () => groupResultCardsByGoalThread(displayedResults, items),
-    [displayedResults, items],
-  );
-
   const advancing = useMemo(
     () => items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing'),
     [items],
@@ -253,27 +114,49 @@ export function GlobalWorkbenchPage({
     [items],
   );
 
-  const actionCount = needsYou.length + resultReady.length;
-  // 主列只承载「待你处理」；无待办时即使 Peer 推进中/有讨论，也应展示 calm 空态，
-  // 避免中间整片留白（推进与讨论在右侧栏）。
-  const showEmpty = actionCount === 0;
+  const [pinnedConversations, setPinnedConversations] = useState<readonly PinnedConversationMeta[]>([]);
 
-  // 工作区脉搏：按 workspaceLabel 聚合
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const loadPinned = async () => {
+      try {
+        const next = await listPinnedConversations();
+        if (!cancelled) setPinnedConversations(next);
+      } catch {
+        if (!cancelled) setPinnedConversations([]);
+      }
+    };
+    void loadPinned();
+    const unsubscribe = clientApi.onConversationsChanged(() => {
+      void loadPinned();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [enabled]);
+
+  const inProgressCount = needsYou.length + advancing.length;
+  // 主列承载当前激活内容：进行中（需要你 + Peer 推进）和 pin。
+  // 只有进行中和 Pin 都空时才显示空态，避免独立空栏挡住推进中的任务。
+  const showEmpty = inProgressCount === 0 && pinnedConversations.length === 0;
+
+  // 工作区脉搏：按 workspaceLabel 聚合需你 / 推进。Goal 完成即终态，不再计验收。
   const pulse = useMemo(() => {
-    const map = new Map<string, { need: number; run: number; accept: number }>();
+    const map = new Map<string, { need: number; run: number }>();
     for (const item of items) {
       if (item.source === 'conversation') continue;
       const key = item.workspaceLabel?.trim() || '未标注工作区';
-      const row = map.get(key) ?? { need: 0, run: 0, accept: 0 };
+      const row = map.get(key) ?? { need: 0, run: 0 };
       if (item.actionRight === 'needs_you') row.need += 1;
       else if (item.actionRight === 'peer_advancing') row.run += 1;
-      else if (item.actionRight === 'result_ready') row.accept += 1;
       map.set(key, row);
     }
     return [...map.entries()]
-      .map(([name, counts]) => ({ name, ...counts, total: counts.need + counts.run + counts.accept }))
+      .map(([name, counts]) => ({ name, ...counts, total: counts.need + counts.run }))
       .filter((r) => r.total > 0)
-      .sort((a, b) => b.need - a.need || b.accept - a.accept || b.run - a.run)
+      .sort((a, b) => b.need - a.need || b.run - a.run)
       .slice(0, 6);
   }, [items]);
 
@@ -284,18 +167,16 @@ export function GlobalWorkbenchPage({
           <div className="gwb-hero-copy">
             <div className="gwb-eyebrow">全部工作区</div>
             <h1>工作台</h1>
-            <p>汇总待你处理的决策、权限与验收。其余由 Peer 推进。</p>
+            <p>汇总待你处理的选项、决策与权限。其余由 Peer 推进。</p>
           </div>
         </header>
 
-        <div className="gwb-layout">
+        <div className={`gwb-layout${showEmpty ? ' gwb-layout--empty' : ''}`}>
           <div className="gwb-main">
             {showEmpty ? (
               <div className="gwb-empty">
-                <p>现在没有需要你处理的事</p>
-                {advancing.length > 0 ? (
-                  <p className="gwb-empty-hint">{advancing.length} 个任务由 Peer 推进中</p>
-                ) : null}
+                <p>现在没有进行中的工作</p>
+                <p className="gwb-empty-hint">雷达是安静的。Pin 会话和进行中的任务会显示在这里。</p>
                 {onNewTask ? (
                   <button type="button" className="gwb-btn gwb-btn-primary" onClick={onNewTask}>
                     发起新任务
@@ -304,136 +185,107 @@ export function GlobalWorkbenchPage({
               </div>
             ) : null}
 
-            {needsYou.length > 0 ? (
+            {inProgressCount > 0 ? (
               <section className="gwb-panel">
                 <div className="gwb-panel-head gwb-side-head">
                   <div className="gwb-side-head-left">
-                    <span className="gwb-side-label">需要你</span>
-                    <span className="gwb-side-count">{needsYou.length} 项 · 决策 / 权限</span>
+                    <span className="gwb-side-label">进行中</span>
+                    <span className="gwb-side-count">
+                      {needsYou.length} 需你 · {advancing.length} 推进
+                    </span>
                   </div>
                 </div>
-                <div className="gwb-list">
-                  {needsYou.map((item) => (
-                    <InboxRow
-                      key={item.taskId}
-                      item={item}
-                      kind="need"
-                      onOpen={() => handleOpenItem(item)}
-                    />
-                  ))}
+                {needsYou.length > 0 ? (
+                  <div className="gwb-list">
+                    {needsYou.map((item) => (
+                      <InboxRow
+                        key={item.taskId}
+                        item={item}
+                        kind="need"
+                        onOpen={() => handleOpenItem(item)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {advancing.length > 0 ? (
+                  <div className="gwb-run-list">
+                    {advancing.map((item) => (
+                      <button
+                        key={item.taskId}
+                        type="button"
+                        className="gwb-run-row"
+                        onClick={() => handleOpenItem(item)}
+                      >
+                        <span className="gwb-run-dot" aria-hidden="true">
+                          <ThinkingOrb
+                            state="weaving"
+                            size={20}
+                            aria-label="Peer 正在推进"
+                            paused={prefersReducedMotion()}
+                          />
+                        </span>
+                        <span className="gwb-run-copy">
+                          <span className="gwb-run-title">{item.title}</span>
+                          <span className="gwb-run-sub">
+                            {[item.workspaceLabel, item.statusLabel].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        {item.planProgress ? (
+                          <span className="gwb-run-pct" aria-live="polite" aria-atomic="true">
+                            <span
+                              key={`${item.planProgress.completed}/${item.planProgress.total}`}
+                              className="gwb-run-pct-value"
+                            >
+                              {item.planProgress.completed}/{item.planProgress.total}
+                            </span>
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {pinnedConversations.length > 0 ? (
+              <section className="gwb-panel">
+                <div className="gwb-panel-head gwb-side-head">
+                  <div className="gwb-side-head-left">
+                    <span className="gwb-side-label">Pin</span>
+                    <span className="gwb-side-count">{pinnedConversations.length} 个会话</span>
+                  </div>
+                </div>
+                <div className="gwb-run-list">
+                  {pinnedConversations.map((conv) => {
+                    const workspaceLabel = workspaceLabelFromPath(conv.workspacePath);
+                    return (
+                      <button
+                        key={conv.id}
+                        type="button"
+                        className="gwb-run-row"
+                        onClick={() => onOpenPinnedConversation?.(conv.id, conv.workspacePath)}
+                      >
+                        <span className="gwb-pin-mark" aria-hidden="true">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                          </svg>
+                        </span>
+                        <span className="gwb-run-copy">
+                          <span className="gwb-run-title">{conv.title || '未命名会话'}</span>
+                          {workspaceLabel ? (
+                            <span className="gwb-run-sub">{workspaceLabel}</span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}
 
-            {displayedResults.length > 0 ? (
-              <section className="gwb-panel">
-                <div className="gwb-panel-head gwb-side-head">
-                  <div className="gwb-side-head-left">
-                    <span className="gwb-side-label">待验收</span>
-                    <span className="gwb-side-count">{resultGroups.length} 项</span>
-                  </div>
-                  {onOpenHistory ? (
-                    <button type="button" className="gwb-link" onClick={onOpenHistory}>
-                      查看历史
-                      <PeerIcon name="chevronRight" size={14} className="gwb-link-arrow" />
-                    </button>
-                  ) : null}
-                </div>
-                <div className="gwb-list">
-                  {resultGroups.map((group) =>
-                    group.kind === 'thread' ? (
-                      <div className="gwb-thread-card" key={`thread-${group.rootPlanId}`}>
-                        <InboxRow
-                          item={group.latest.item}
-                          kind="accept"
-                          phase={group.latest.phase}
-                          threadNodes={group.nodes}
-                          threadPendingCount={group.pendingCount}
-                          onOpenThreadNode={(node) => handleOpenItem(node)}
-                          onOpen={() =>
-                            handleOpenItem(
-                              group.latest.item,
-                              collectPendingAcceptanceItems(group.items.map((entry) => entry.item)).length
-                                ? {
-                                    acceptTogether: collectPendingAcceptanceItems(
-                                      group.items.map((entry) => entry.item),
-                                    ),
-                                  }
-                                : undefined,
-                            )
-                          }
-                        />
-                      </div>
-                    ) : (
-                      <InboxRow
-                        key={group.item.taskId}
-                        item={group.item}
-                        kind="accept"
-                        phase={group.phase}
-                        onOpen={() => handleOpenItem(group.item)}
-                      />
-                    ),
-                  )}
-                </div>
-              </section>
-            ) : null}
           </div>
 
           <aside className="gwb-side">
-            <section className="gwb-panel">
-              <div className="gwb-panel-head gwb-side-head">
-                <div className="gwb-side-head-left">
-                  <span className="gwb-side-label">PEER 推进</span>
-                  <span className="gwb-side-count">{advancing.length} 个任务</span>
-                </div>
-                {onOpenTasks ? (
-                  <button type="button" className="gwb-link" onClick={onOpenTasks}>
-                    查看全部
-                    <PeerIcon name="chevronRight" size={14} className="gwb-link-arrow" />
-                  </button>
-                ) : null}
-              </div>
-              {advancing.length === 0 ? (
-                <div className="gwb-side-empty">当前没有推进中的任务</div>
-              ) : (
-                <div className="gwb-run-list">
-                  {advancing.slice(0, 6).map((item) => (
-                    <button
-                      key={item.taskId}
-                      type="button"
-                      className="gwb-run-row"
-                      onClick={() => handleOpenItem(item)}
-                    >
-                      <span className="gwb-run-dot" aria-hidden="true">
-                        <ThinkingOrb
-                          state="weaving"
-                          size={20}
-                          aria-label="Peer 正在推进"
-                          paused={prefersReducedMotion()}
-                        />
-                      </span>
-                      <span className="gwb-run-copy">
-                        <span className="gwb-run-title">{item.title}</span>
-                        <span className="gwb-run-sub">
-                          {[item.workspaceLabel, item.statusLabel].filter(Boolean).join(' · ')}
-                        </span>
-                      </span>
-                      {item.planProgress ? (
-                        <span className="gwb-run-pct" aria-live="polite" aria-atomic="true">
-                          <span
-                            key={`${item.planProgress.completed}/${item.planProgress.total}`}
-                            className="gwb-run-pct-value"
-                          >
-                            {item.planProgress.completed}/{item.planProgress.total}
-                          </span>
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-
             {pulse.length > 0 ? (
               <section className="gwb-panel gwb-pulse">
                 <div className="gwb-panel-head gwb-side-head">
@@ -458,9 +310,6 @@ export function GlobalWorkbenchPage({
                         {row.need} 需你
                       </span>
                       <span className="gwb-num">{row.run} 推进</span>
-                      <span className={row.accept > 0 ? 'gwb-num gwb-num-ok' : 'gwb-num'}>
-                        {row.accept} 验收
-                      </span>
                     </button>
                   ))}
                 </div>
@@ -523,6 +372,9 @@ function InboxRow({
   readonly threadPendingCount?: number;
   readonly onOpenThreadNode?: (item: TaskOverviewItem) => void;
 }) {
+  const sourceBlock = kind === 'need'
+    && Boolean(item.deliveryHandoffStoppedReason)
+    && isWorkbenchHandoffCard(item);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   useShatterExitCollapse(kind === 'accept' ? phase : null, hostRef);
@@ -551,16 +403,20 @@ function InboxRow({
           : threadPendingCount && threadPendingCount > 1
             ? `${item.statusLabel || '等待验收'} · ${threadPendingCount} 项待签`
             : item.statusLabel || '等待验收'
-      : item.statusLabel;
+      : sourceBlock
+        ? `${item.blockedPlanIds?.length || 1} 件事`
+        : item.statusLabel;
 
   const cta =
     kind === 'accept'
       ? submitting
-        ? '正在交回…'
+        ? '正在合进源头…'
         : celebrating
           ? '已归档 ✓'
           : '查看进度'
-      : item.actionLabel || '去处理';
+      : sourceBlock
+        ? '去对话'
+        : item.actionLabel || '去处理';
 
   const durationLabel =
     typeof item.durationMs === 'number' &&
@@ -591,19 +447,25 @@ function InboxRow({
         </div>
         <div className="gwb-body">
           <div className="gwb-title">{item.title}</div>
-          {item.currentGoalTitle ? (
+          {sourceBlock ? (
+            <div className="gwb-desc">
+              {item.currentGoalTitle || '挡住它们的是这条线上的未提交改动'}
+            </div>
+          ) : item.currentGoalTitle ? (
             <div className="gwb-desc">当前 · {item.currentGoalTitle}</div>
           ) : null}
           <div className="gwb-chips">
             {item.workspaceLabel ? (
               <span className="gwb-chip gwb-chip-ws">{item.workspaceLabel}</span>
             ) : null}
-            {item.planProgress ? (
+            {sourceBlock ? (
+              <span className="gwb-chip">{item.blockedPlanIds?.length || 1} 件事</span>
+            ) : item.planProgress ? (
               <span className="gwb-chip">
                 {item.planProgress.completed} / {item.planProgress.total}
               </span>
             ) : null}
-            {durationLabel ? (
+            {!sourceBlock && durationLabel ? (
               <span className="gwb-chip gwb-chip-duration">耗时 {durationLabel}</span>
             ) : null}
             <span className="gwb-chip">{timeLabel}</span>
@@ -616,7 +478,7 @@ function InboxRow({
           <button
             type="button"
             className="gwb-btn gwb-btn-primary"
-            onClick={onOpen}
+            onClick={() => { void onOpen(); }}
             disabled={kind === 'accept' && acceptBusy}
           >
             {kind === 'accept' && submitting ? <span className="gwb-accept-spinner" aria-hidden="true" /> : null}
@@ -624,6 +486,7 @@ function InboxRow({
             {kind !== 'accept' && item.nextAction === 'decide_blocked' && !cta.includes('→') ? <ActionArrowIcon /> : null}
           </button>
         </div>
+        {sourceBlock ? <SourceCheckoutPanel item={item} /> : null}
       </div>
       {kind === 'accept' ? (
         <ParticleShatterOverlay active={shattering} targetRef={cardRef} />

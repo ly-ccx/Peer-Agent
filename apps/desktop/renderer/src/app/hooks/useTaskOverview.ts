@@ -150,9 +150,10 @@ export function useTaskOverview(
   useEffect(() => {
     if (!enabled) return undefined;
     if (document.hidden) return () => {};
+    // 兜底轮询拉长：变更以 taskOverview:changed 广播为主，避免多挂载点每 4s 打主进程。
     const timer = window.setInterval(() => {
       void reload();
-    }, 4000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, [enabled, reload]);
 

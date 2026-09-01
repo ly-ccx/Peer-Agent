@@ -673,7 +673,7 @@ describe('TUI app layout', () => {
 
   test('renders the help picker opened by /help', () => {
     expect(appSource).toContain("experience.surface.picker === 'help'");
-    expect(appSource).toContain('buildTuiHelpSections({ goalStatus }, locale)');
+    expect(appSource).toContain('buildTuiHelpSections(commandContext, locale)');
     expect(appSource).toContain('<strong>Help</strong>');
     expect(appSource).toContain('helpSections.map((section)');
   });
@@ -711,6 +711,15 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('onOpenHistory={openGoalHistory}');
     expect(appSource).toContain("goalLayout.mode === 'compact-summary'");
     expect(appSource).toContain('<GoalCompactSummary');
+    expect(goalStatusViewSource).toContain('goalCompactSummaryView(');
+    expect(goalStatusViewSource).toContain('{compact.glyph}');
+    expect(goalStatusViewSource).toContain('{compact.title}');
+    expect(goalStatusViewSource).toContain('{compact.progressTrack}');
+    expect(goalStatusViewSource).toContain('{compact.progressCount}');
+    expect(goalStatusViewSource).toContain('{compact.missionLabel}');
+    expect(goalStatusViewSource).not.toContain('Goal {missionPosition}/{totalPlans} · tasks');
+    expect(goalStatusViewSource).not.toContain('{view.percent}% · {view.status}');
+    expect(goalStatusViewSource).not.toContain('fg={statusColor(view.status)} wrapMode="none"');
     expect(appSource).toContain('missionPosition={missionPosition}');
     expect(goalStatusViewSource).toContain('backgroundColor={COLOR.background}');
     expect(goalStatusViewSource).not.toContain('backgroundColor={COLOR.panel}');

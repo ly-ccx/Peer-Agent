@@ -305,15 +305,11 @@ export function thinkingStatusLabel(frame: number, _hasThinkingContent = false):
   return `Thinking${dots}`;
 }
 
-const RUNNING_ACTIVITY_GLYPHS = '0123456789abcdefABCDEF~!@#$%^&*+=_';
+export const RUNNING_ACTIVITY_LABEL = 'working...';
 
-/** A deterministic, continuously changing Crush-style character field. */
-export function runningActivityField(frame: number, width = 80): string {
-  const length = width >= 48 ? 12 : width >= 30 ? 8 : 4;
-  return Array.from({ length }, (_, index) => {
-    const offset = Math.abs(frame * 11 + index * 17 + index * index * 3);
-    return RUNNING_ACTIVITY_GLYPHS[offset % RUNNING_ACTIVITY_GLYPHS.length] ?? '0';
-  }).join('');
+/** Stable busy label. Motion is a highlight sweep in the view, not glyph scramble. */
+export function runningActivityField(_frame = 0, _width = 80): string {
+  return RUNNING_ACTIVITY_LABEL;
 }
 
 export function formatRunningElapsed(elapsedMs: number): string {
@@ -334,7 +330,7 @@ export function formatRunningElapsed(elapsedMs: number): string {
   return parts.join('');
 }
 
-/** Character field + stable real status + elapsed time, with narrow-width fallback. */
+/** Busy label + stable real status + elapsed time, with narrow-width fallback. */
 export function composerRunningStatusLine(options: {
   readonly frame: number;
   readonly statusLabel: string;
@@ -345,7 +341,7 @@ export function composerRunningStatusLine(options: {
   const activity = runningActivityField(options.frame, width);
   const elapsed = formatRunningElapsed(options.elapsedMs ?? 0);
   const label = options.statusLabel.trim();
-  // Empty label (generic running) keeps the Crush-style activity field + timer.
+  // Empty label (generic running) keeps the busy label + timer.
   if (width < 30 || !label) return `${activity} · ${elapsed}`;
   return `${activity}  ${label} · ${elapsed}`;
 }

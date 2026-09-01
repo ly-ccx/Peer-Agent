@@ -16,6 +16,7 @@ import {
   resolveResultDrawerAcceptanceTargets,
   type OpenResultOptions,
 } from './app/state/resultDrawerAcceptance';
+import { resolveWorkbenchConversationId } from './app/state/openWorkbenchConversation';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -35,7 +36,7 @@ import { useConversationStreamRouter } from './chat/hooks/useConversationStreamR
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
-import { normalizeConversationListPage, shouldContinueConversationList } from './chat/state/conversationListPagination';
+import { normalizeConversationListPage } from './chat/state/conversationListPagination';
 import {
   clearCompletedUnreadId,
   nextCompletedUnreadIds,
@@ -141,6 +142,8 @@ function MainApp() {
   const [resultDrawerAcceptTogether, setResultDrawerAcceptTogether] = useState<readonly TaskOverviewItem[]>([]);
   const [resultAcceptancePending, setResultAcceptancePending] = useState<TaskOverviewItem | null>(null);
   const [resultCloseGate, setResultCloseGate] = useState<AcceptanceCloseVerdict | null>(null);
+  /** 证据不全时用户二次确认强制归档，供关闭动画后的 revise 写入 userOverride。 */
+  const resultAcceptanceUserOverrideRef = useRef(false);
   /** 抽屉验收关完后走工作台 handleAccept，只播那条记录的卡片粉碎。 */
   const workbenchAcceptRef = useRef<((item: TaskOverviewItem) => void | Promise<void>) | null>(null);
 
@@ -164,8 +167,12 @@ function MainApp() {
     setResultDrawerAcceptTogether([]);
   }, []);
 
-  const acceptResultFromWorkbench = useCallback(async (item: TaskOverviewItem) => {
+  const acceptResultFromWorkbench = useCallback(async (
+    item: TaskOverviewItem,
+    options?: { readonly userOverride?: boolean },
+  ) => {
     if (item.source !== 'goal_plan' || !item.taskId) return;
+    const userOverride = options?.userOverride === true || resultAcceptanceUserOverrideRef.current;
     try {
       await clientApi.goalPlansRevise({
         planId: item.taskId,
@@ -173,9 +180,10 @@ function MainApp() {
           resultAcceptance: {
             acceptedAt: new Date().toISOString(),
             acceptedBy: 'user',
+            ...(userOverride ? { userOverride: true } : {}),
           },
         },
-        reason: 'workbench_one_click_accept',
+        reason: userOverride ? 'workbench_force_accept' : 'workbench_one_click_accept',
         changedBy: 'user',
       });
       setResultDrawerItem((current) => (current?.taskId === item.taskId ? null : current));
@@ -186,6 +194,8 @@ function MainApp() {
     } catch (error) {
       console.error('[workbench] accept result failed', error);
       throw error;
+    } finally {
+      if (userOverride) resultAcceptanceUserOverrideRef.current = false;
     }
   }, []);
 
@@ -258,13 +268,6 @@ function MainApp() {
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
-  const [conversationNextCursor, setConversationNextCursor] = useState<string | null>(
-    () => startupSnapshot?.conversationNextCursor ?? null,
-  );
-  const [conversationHasMore, setConversationHasMore] = useState<boolean>(
-    () => Boolean(startupSnapshot?.conversationHasMore),
-  );
-  const [conversationsLoadingMore, setConversationsLoadingMore] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notificationMessageTarget, setNotificationMessageTarget] = useState<{
     conversationId: string;
@@ -365,8 +368,6 @@ function MainApp() {
       }
       return merged;
     });
-    setConversationNextCursor(normalized.nextCursor);
-    setConversationHasMore(normalized.hasMore);
   }, []);
 
   const refreshConversations = useCallback(async (_wsPath?: string | null, view?: ConversationView) => {
@@ -377,6 +378,7 @@ function MainApp() {
         status,
         limit: CONVERSATION_LIST_PAGE_SIZE,
         paginated: true,
+        includeMessageCount: false,
       });
       // 丢弃过期响应：只有最新一次请求的结果才允许写回，避免慢请求晚返回覆盖新视图。
       if (seq !== refreshSeqRef.current) return;
@@ -390,53 +392,6 @@ function MainApp() {
       void refreshConversations();
     },
   });
-
-  const loadMoreConversations = useCallback(async () => {
-    if (!conversationHasMore || conversationsLoadingMore || !conversationNextCursor) return;
-    const status = conversationView;
-    const seq = refreshSeqRef.current;
-    setConversationsLoadingMore(true);
-    try {
-      const page = await clientApi.conversationsList({
-        status,
-        limit: CONVERSATION_LIST_PAGE_SIZE,
-        cursor: conversationNextCursor,
-        paginated: true,
-      });
-      if (seq !== refreshSeqRef.current) return;
-      applyConversationListPage(page as any, { append: true });
-    } catch {
-    } finally {
-      setConversationsLoadingMore(false);
-    }
-  }, [
-    applyConversationListPage,
-    conversationHasMore,
-    conversationNextCursor,
-    conversationView,
-    conversationsLoadingMore,
-  ]);
-
-  // 侧栏按工作区挂任务树，不再露出「加载更多」。余页在后台续拉，计数才完整。
-  useEffect(() => {
-    if (
-      conversationsLoadingMore
-      || !shouldContinueConversationList({
-        conversationCount: conversations.length,
-        hasMore: conversationHasMore,
-        nextCursor: conversationNextCursor,
-      })
-    ) {
-      return;
-    }
-    void loadMoreConversations();
-  }, [
-    conversationHasMore,
-    conversationNextCursor,
-    conversations.length,
-    conversationsLoadingMore,
-    loadMoreConversations,
-  ]);
 
   const scheduleConversationRefresh = useCallback((wsPath?: string | null, view?: ConversationView) => {
     if (conversationRefreshTimerRef.current) clearTimeout(conversationRefreshTimerRef.current);
@@ -531,6 +486,7 @@ function MainApp() {
           status: 'active',
           limit: CONVERSATION_LIST_PAGE_SIZE,
           paginated: true,
+        includeMessageCount: false,
         });
         applyConversationListPage(page as Parameters<typeof applyConversationListPage>[0]);
       } catch {
@@ -789,8 +745,9 @@ function MainApp() {
     setActivePage('chat');
   }, [activeWorkspace, conversationView, refreshConversations]);
 
-  const handleNewChat = useCallback(async () => {
-    const ws = registeredWorkspacePath(activeWorkspace, workspaces);
+  const handleNewChat = useCallback(async (workspacePath?: string) => {
+    const target = typeof workspacePath === 'string' ? workspacePath : activeWorkspace;
+    const ws = registeredWorkspacePath(target, workspaces);
     setDraftWorkspacePath(ws);
     // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
     // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。
@@ -848,11 +805,12 @@ function MainApp() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleNewChat, newTaskShortcut]);
 
-  const handleSelectConversation = useCallback((id: string) => {
+  const handleSelectConversation = useCallback((id: string, workspacePath?: string | null) => {
     const target = conversations.find((conversation) => conversation.id === id);
-    if (target?.workspacePath && target.workspacePath !== activeWorkspace) {
-      setActiveWorkspace(target.workspacePath);
-      void clientApi.workspaceSetActive({ path: target.workspacePath }).catch(() => {});
+    const nextWorkspacePath = workspacePath ?? target?.workspacePath;
+    if (nextWorkspacePath && nextWorkspacePath !== activeWorkspace) {
+      setActiveWorkspace(nextWorkspacePath);
+      void clientApi.workspaceSetActive({ path: nextWorkspacePath }).catch(() => {});
     }
     setActiveConversationId(id);
     setConversationDrawerOpen(false);
@@ -1044,13 +1002,14 @@ function MainApp() {
                           openResultDrawer(item, options);
                           return;
                         }
-                        const conversationId = item.conversationId;
-                        if (conversationId) {
-                          handleSelectConversation(String(conversationId));
-                          focusTaskRelatedMessage(item);
-                          return;
-                        }
-                        openCollectionDrawer('tasks');
+                        void resolveWorkbenchConversationId(item).then((conversationId) => {
+                          if (conversationId) {
+                            handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
+                            focusTaskRelatedMessage({ ...item, conversationId });
+                            return;
+                          }
+                          openCollectionDrawer('tasks');
+                        });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}
@@ -1061,6 +1020,9 @@ function MainApp() {
                         setActiveWorkspace(workspacePath);
                         setHomeScope('workspace');
                         setActivePage('home');
+                      }}
+                      onOpenPinnedConversation={(id, workspacePath) => {
+                        handleSelectConversation(id, workspacePath);
                       }}
                     />
                   ) : (
@@ -1077,13 +1039,14 @@ function MainApp() {
                           openResultDrawer(item, options);
                           return;
                         }
-                        const conversationId = item.conversationId;
-                        if (conversationId) {
-                          handleSelectConversation(String(conversationId));
-                          focusTaskRelatedMessage(item);
-                          return;
-                        }
-                        openCollectionDrawer('tasks');
+                        void resolveWorkbenchConversationId(item).then((conversationId) => {
+                          if (conversationId) {
+                            handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
+                            focusTaskRelatedMessage({ ...item, conversationId });
+                            return;
+                          }
+                          openCollectionDrawer('tasks');
+                        });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
                       acceptHandlerRef={workbenchAcceptRef}
@@ -1155,6 +1118,14 @@ function MainApp() {
                   onTaskStarted={(conversationId) => {
                     setConversationView('active');
                     setActiveConversationId(conversationId);
+                    // 任务绑定的工作区(草稿落点)可能与 activeWorkspace 不一致:
+                    // 草稿态切换工作区只写 draftWorkspacePath。会话激活后输入面板
+                    // workspacePath 来源切到 activeWorkspace,须同步为任务绑定区,
+                    // 否则"在 xxx"显示旧文件夹(与 handleSelectConversation 语义对齐)。
+                    if (draftWorkspacePath && draftWorkspacePath !== activeWorkspace) {
+                      setActiveWorkspace(draftWorkspacePath);
+                      void clientApi.workspaceSetActive({ path: draftWorkspacePath }).catch(() => {});
+                    }
                     setCollectionDrawer(null);
                     setActivePage('chat');
                     void refreshConversations(draftWorkspacePath, 'active');
@@ -1334,45 +1305,30 @@ function MainApp() {
                           {(() => {
                             const item = resultDrawerItem;
                             if (!item) return null;
-                            const canAccept =
-                              item.source === 'goal_plan' && Boolean(item.taskId);
-                            if (!canAccept) return null;
-                            const closeBlocked = Boolean(resultCloseGate && !resultCloseGate.ok);
                             return (
                               <footer className="conversation-result-drawer__footer">
-                                {closeBlocked && resultCloseGate?.message ? (
-                                  <p className="conversation-result-drawer__gate">{resultCloseGate.message}</p>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="task-overview-btn"
-                                  disabled={Boolean(resultAcceptancePending)}
-                                  onClick={() => {
-                                    requestClose();
-                                    if (item.conversationId) {
-                                      handleSelectConversation(String(item.conversationId));
-                                    }
-                                  }}
-                                >
-                                  {isZh ? '继续追问' : 'Follow up'}
-                                </button>
                                 <button
                                   type="button"
                                   className="task-overview-btn task-overview-btn--primary"
-                                  disabled={Boolean(resultAcceptancePending) || closeBlocked}
                                   onClick={() => {
-                                    if (resultAcceptancePending || closeBlocked) return;
-                                    setResultAcceptancePending(item);
-                                    requestClose();
+                                    void (async () => {
+                                      if (item.source === 'goal_plan' && item.taskId) {
+                                        try {
+                                          await clientApi.goalPlansMarkRequestedUserInput({
+                                            planId: item.taskId,
+                                          });
+                                        } catch {
+                                          // 重开失败也不挡回会话：用户至少还能继续说。
+                                        }
+                                      }
+                                      requestClose();
+                                      if (item.conversationId) {
+                                        handleSelectConversation(String(item.conversationId));
+                                      }
+                                    })();
                                   }}
                                 >
-                                  {resultAcceptancePending
-                                    ? isZh
-                                      ? '正在归档…'
-                                      : 'Archiving…'
-                                    : isZh
-                                      ? '确认归档'
-                                      : 'Archive'}
+                                  {isZh ? '继续追问' : 'Follow up'}
                                 </button>
                               </footer>
                             );

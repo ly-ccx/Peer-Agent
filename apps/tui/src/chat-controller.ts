@@ -54,6 +54,9 @@ import {
 } from './tool-result-summary.ts';
 import { recordTuiPerf, tuiPerfNow } from './tui-perf.ts';
 
+/** Desktop agent-loop default: no turn cap unless send() / `peer exec --max-turns` sets one. */
+const DEFAULT_CHAT_MAX_TURNS = Number.POSITIVE_INFINITY;
+
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling' | 'compacting';
 export type ChatUsage = ModelUsage | RuntimeTurnUsage;
@@ -838,6 +841,7 @@ export function createChatController(options: {
     string
   >({
     model: options.model,
+    defaultMaxTurns: DEFAULT_CHAT_MAX_TURNS,
     lifecycle: {
       toolResultsApplied(state, executions) {
         const addedContentChars = executions.reduce((total, execution) => {

@@ -28,6 +28,10 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
     skillHubSync: assertFunction(skills?.skillHubSync, 'skills.skillHubSync'),
     skillHubInstall: assertFunction(skills?.skillHubInstall, 'skills.skillHubInstall'),
     skillHubListCategories: assertFunction(skills?.skillHubListCategories, 'skills.skillHubListCategories'),
+    qoderQuery: assertFunction(skills?.qoderQuery, 'skills.qoderQuery'),
+    qoderGetDetail: assertFunction(skills?.qoderGetDetail, 'skills.qoderGetDetail'),
+    qoderInstall: assertFunction(skills?.qoderInstall, 'skills.qoderInstall'),
+    qoderListTaxonomies: assertFunction(skills?.qoderListTaxonomies, 'skills.qoderListTaxonomies'),
   };
 
   return Object.freeze([
@@ -51,6 +55,10 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
       ipc.handle('skills:skillhub:sync', (_event, options = {}) => ports.skillHubSync(options));
       ipc.handle('skills:skillhub:install', (_event, identity = {}) => ports.skillHubInstall(identity));
       ipc.handle('skills:skillhub:list-categories', () => ports.skillHubListCategories());
+      ipc.handle('skills:qoder:query', (_event, query = {}) => ports.qoderQuery(query));
+      ipc.handle('skills:qoder:get-detail', (_event, identity = {}) => ports.qoderGetDetail(identity));
+      ipc.handle('skills:qoder:install', (_event, identity = {}) => ports.qoderInstall(identity));
+      ipc.handle('skills:qoder:list-taxonomies', () => ports.qoderListTaxonomies());
     }),
   ]);
 }

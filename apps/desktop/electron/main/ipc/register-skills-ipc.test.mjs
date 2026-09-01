@@ -29,6 +29,10 @@ function createHarness() {
       skillHubSync: port('skillhub-sync'),
       skillHubInstall: port('skillhub-install'),
       skillHubListCategories: port('skillhub-list-categories'),
+      qoderQuery: port('qoder-query'),
+      qoderGetDetail: port('qoder-get-detail'),
+      qoderInstall: port('qoder-install'),
+      qoderListTaxonomies: port('qoder-list-taxonomies'),
     },
   });
   const handlers = new Map();
@@ -56,6 +60,10 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
     'skills:marketplace:get-detail',
     'skills:marketplace:install',
     'skills:marketplace:list',
+    'skills:qoder:get-detail',
+    'skills:qoder:install',
+    'skills:qoder:list-taxonomies',
+    'skills:qoder:query',
     'skills:refresh',
     'skills:skillhub:get-detail',
     'skills:skillhub:get-status',
@@ -92,6 +100,10 @@ test('skills IPC preserves payload and result projection', async () => {
   assert.equal(await handlers.get('skills:skillhub:sync')(null, { reset: true }), 'skillhub-sync');
   assert.equal(await handlers.get('skills:skillhub:install')(null, { namespace: 'owner', slug: 'demo', version: '1' }), 'skillhub-install');
   assert.equal(await handlers.get('skills:skillhub:list-categories')(), 'skillhub-list-categories');
+  assert.equal(await handlers.get('skills:qoder:query')(null, { page: 1, keyword: 'pdf' }), 'qoder-query');
+  assert.equal(await handlers.get('skills:qoder:get-detail')(null, { skillId: 'official03866510' }), 'qoder-get-detail');
+  assert.equal(await handlers.get('skills:qoder:install')(null, { skillId: 'official03866510' }), 'qoder-install');
+  assert.equal(await handlers.get('skills:qoder:list-taxonomies')(), 'qoder-list-taxonomies');
 
   assert.deepEqual(calls, [
     ['list'],
@@ -114,6 +126,10 @@ test('skills IPC preserves payload and result projection', async () => {
     ['skillhub-sync', { reset: true }],
     ['skillhub-install', { namespace: 'owner', slug: 'demo', version: '1' }],
     ['skillhub-list-categories'],
+    ['qoder-query', { page: 1, keyword: 'pdf' }],
+    ['qoder-get-detail', { skillId: 'official03866510' }],
+    ['qoder-install', { skillId: 'official03866510' }],
+    ['qoder-list-taxonomies'],
   ]);
 });
 

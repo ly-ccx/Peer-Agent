@@ -14,7 +14,8 @@ import type {
 } from './chat-controller.ts';
 import type { TuiHost } from './tui-host.ts';
 
-const DEFAULT_MAX_TURNS = 8;
+/** Desktop explorer/verifier streams use the unbounded agent loop. */
+const DEFAULT_MAX_TURNS = Number.POSITIVE_INFINITY;
 
 export interface TuiGoalWorkerAdapter {
   runExplorer(input: {

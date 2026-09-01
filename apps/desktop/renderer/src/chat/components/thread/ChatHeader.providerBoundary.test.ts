@@ -12,6 +12,8 @@ test('ChatHeader only renders Workbench controls when a provider is available', 
   assert.match(source, /\{workbench \? <WorkbenchToggle isZh=\{isZh\} \/> : null\}/);
   assert.match(source, /chat-header-branch/);
   assert.match(source, /chat-header-branch-text/);
+  assert.match(source, /GitWorktreeGlyph/);
+  assert.match(source, /GitBranchGlyph/);
   assert.doesNotMatch(source, /^\s*<SidebarToggle isZh=\{isZh\} \/>$/m);
   assert.doesNotMatch(source, /^\s*<WorkbenchToggle isZh=\{isZh\} \/>$/m);
 });
@@ -24,5 +26,8 @@ test('bound branch chrome lives in chat-surface styles as truncated metadata', a
   assert.match(css, /\.composer-bound-branch-text\b/);
   assert.match(css, /\.chat-header-branch \{[\s\S]*?flex:\s*0 1 auto;/);
   assert.match(css, /\.composer-bound-branch \{[\s\S]*?flex:\s*0 1 auto;/);
+  assert.match(css, /\.composer-workspace-head\b/);
+  assert.match(css, /\.composer-task-line\b/);
+  assert.match(css, /\.composer-write-mismatch\b/);
   assert.doesNotMatch(css, /\.chat-header-branch \{[\s\S]*?flex:\s*0 1 11rem;/);
 });

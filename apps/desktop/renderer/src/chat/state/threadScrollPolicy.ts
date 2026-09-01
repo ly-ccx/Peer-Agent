@@ -5,6 +5,18 @@
  * 此时若仍用错误 totalSize 贴底，浏览器可能把 scrollTop 钳到 0，随后高度回升却停在顶部。
  */
 
+/**
+ * 打开会话的默认落点：最新消息（底部）。
+ * 查找 / 任务相关消息等显式锚点优先，不抢贴底。
+ */
+export function planThreadScrollOnConversationOpen(input: {
+  readonly hasExplicitMessageTarget: boolean;
+}): {
+  readonly stickToBottom: boolean;
+} {
+  return { stickToBottom: !input.hasExplicitMessageTarget };
+}
+
 /** 消息条数下降视为结构重写（压缩/reload 的典型信号）。 */
 export function isMessageStructureRewritten(
   previousCount: number,

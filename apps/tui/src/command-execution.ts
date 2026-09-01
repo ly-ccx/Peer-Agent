@@ -6,6 +6,7 @@ export interface TuiCommandExecutionHandlers {
   readonly compactContext: () => string | Promise<string>;
   readonly navigateHistory: (direction: 'earlier' | 'later' | 'latest') => string;
   readonly controlGoal: (control: 'pause' | 'resume' | 'cancel') => string;
+  readonly toggleFastMode?: () => string;
   readonly showVersion: () => string;
   readonly quit: () => void;
   readonly setNotice: (notice: string | null) => void;
@@ -36,6 +37,8 @@ export function executeTuiCommand(
     handlers.setNotice(handlers.navigateHistory(action.direction));
   } else if (action.type === 'goal-control') {
     handlers.setNotice(handlers.controlGoal(action.control));
+  } else if (action.type === 'toggle-fast-mode') {
+    handlers.setNotice(handlers.toggleFastMode?.() ?? 'Fast mode is unavailable for this model');
   } else if (action.type === 'show-version') {
     handlers.setNotice(handlers.showVersion());
   } else if (action.type === 'quit') {

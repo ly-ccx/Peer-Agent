@@ -7,6 +7,7 @@ import { useLocalAccessPreference } from '../../chat/hooks/useLocalAccessPrefere
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
+import { HandoffConflictPanel } from '../components/HandoffConflictPanel';
 import { ActionLabel } from './actionLabelDisplay';
 import {
   ACCEPTANCE_CELEBRATION_MS,
@@ -34,14 +35,13 @@ import { groupInboxByConversation } from './inboxConversationGrouping';
 /**
  * TaskOverview 页面 —— Action Inbox。
  *
- * 工作台首页只回答「现在轮到我做什么」：需要你处理、执行异常恢复、结果待验收。
- * Peer 推进中和讨论沉到常驻底栏；讨论入口打开现有任务/会话抽屉。
+ * 工作台首页只回答三件事：需要你（遇选项）、正在推进、未读。
+ * Goal 完成即终态，不再设「结果待验收」。
  *
  * 任务/历史页：统一列表（也可由 Drawer 承载）。
  * 行动权分桶只消费 TaskOverviewItem.actionRight，前端不解析状态机。
  *
- * 结果待验收：首页按真实队列全部渲染，徽标与列表条数一致。
- * 主按钮「查看进度」。确认归档只出现在看过依据之后。
+ * 未读：只展示会话里尚未看过的沟通，不等于验收。
  *
  * 侧栏语义：工作台固定全局（workspacePath=null）；
  * 任务/历史抽屉可按 workspacePath 收窄。下方工作区点击只激活落点，不改工作台数据边界。
@@ -63,7 +63,7 @@ interface TaskOverviewPageProps {
   readonly onNewTask?: () => void;
   /** 打开对应会话（决策 / 查看进度）。归组卡可带上同线待签项。 */
   readonly onOpenItem?: OpenTaskOverviewItem;
-  /** 工作台一键确认验收（仅 goal_plan）。 */
+  /** 遗留：验收入口已取消，保留 prop 以免调用方断裂。 */
   readonly onAcceptResult?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly acceptHandlerRef?: MutableRefObject<((item: TaskOverviewItem) => void | Promise<void>) | null>;
   /** 取消正在推进的 GoalPlan（仅 goal_plan）。 */
@@ -83,7 +83,7 @@ function scopeDisplayLabel(workspacePath: string | null | undefined): string {
   return `Workspace · ${workspaceLabelFromPath(workspacePath)}`;
 }
 
-/** 相对时间；completed 模式用于结果待验收卡片「何时完成」。 */
+/** 相对时间；completed 模式用于历史完成卡片「何时完成」。 */
 function formatRelativeTime(iso?: string, options?: { readonly completed?: boolean }): string {
   const completed = options?.completed === true;
   if (!iso) return completed ? '刚刚完成' : '刚刚更新';
@@ -470,15 +470,15 @@ function HeroLayout({
   readonly onCancelItem?: (item: TaskOverviewItem) => void | Promise<void>;
   readonly onOpenTools?: () => void;
 }) {
-  const discussions = items.filter((i) => i.source === 'conversation');
-  const visibleDiscussions = discussions.slice(0, DISCUSSION_PREVIEW_LIMIT);
-  const hiddenDiscussionCount = Math.max(0, discussions.length - visibleDiscussions.length);
+  const unread = items.filter((i) => i.source === 'conversation' && i.isUnread === true);
+  const visibleUnread = unread.slice(0, DISCUSSION_PREVIEW_LIMIT);
+  const hiddenUnreadCount = Math.max(0, unread.length - visibleUnread.length);
   const needsYou = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'needs_you');
   const paused = items.filter(
     (i) => i.source !== 'conversation' && i.actionRight === 'paused',
   );
   const advancing = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'peer_advancing');
-  const resultReady = items.filter((i) => i.source !== 'conversation' && i.actionRight === 'result_ready');
+  const resultReady: TaskOverviewItem[] = [];
   const [acceptanceTransitions, setAcceptanceTransitions] = useState<
     Record<string, AcceptanceTransition>
   >({});
@@ -544,7 +544,7 @@ function HeroLayout({
 
     try {
       await onAcceptResult(item);
-      // 交回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
+      // 合回在后台进行。卡片先停在 submitting，等 delivered 再庆祝退场。
     } catch {
       setAcceptanceTransitions((prev) => {
         if (!(item.taskId in prev)) return prev;
@@ -613,15 +613,9 @@ function HeroLayout({
     };
   }, [acceptHandlerRef, handleAccept]);
 
-  const displayedResults = mergeAcceptanceTransitionItems({
-    currentItems: resultReady,
-    transitions: Object.values(acceptanceTransitions),
-    orderSnapshot: acceptanceOrderSnapshot,
-  });
   const needsYouCards = groupInboxByConversation(needsYou);
   const pausedCards = groupInboxByConversation(paused);
-  const resultCards = groupInboxByConversation(displayedResults.map((entry) => entry.item));
-  const hasInbox = needsYouCards.length + pausedCards.length + resultCards.length > 0;
+  const hasInbox = needsYouCards.length + pausedCards.length > 0;
 
   return (
     <div className="task-overview-page task-overview-page--home">
@@ -640,9 +634,9 @@ function HeroLayout({
             </span>
           </div>
           <div className="task-overview-compact-stats" aria-label="工作台状态">
-            <span><b>{needsYouCards.length}</b> 轮到你</span>
-            <span><b>{advancing.length}</b> Peer 推进</span>
-            <span><b>{resultCards.length}</b> 结果待验收</span>
+            <span><b>{needsYouCards.length}</b> 需要你</span>
+            <span><b>{advancing.length}</b> 正在推进</span>
+            <span><b>{unread.length}</b> 未读</span>
           </div>
         </header>
       </div>
@@ -658,26 +652,26 @@ function HeroLayout({
         <div className="task-overview-hero-copy">
           <h1>现在轮到你做什么</h1>
           <p>
-            {subtitle ?? '一张卡是一件事。点进去继续这件事。'}
+            {subtitle ?? '需要你时才来找你。其余 Peer 自己推进。'}
           </p>
         </div>
         <div className="task-overview-hero-stats">
           <div className="task-overview-stat">
             <b>{needsYouCards.length}</b>
-            <span>轮到你</span>
+            <span>需要你</span>
           </div>
           <div className="task-overview-stat">
             <b>{advancing.length}</b>
-            <span>Peer 推进</span>
+            <span>正在推进</span>
           </div>
           <div className="task-overview-stat">
-            <b>{resultCards.length}</b>
-            <span>结果待验收</span>
+            <b>{unread.length}</b>
+            <span>未读</span>
           </div>
         </div>
       </header>
 
-      {!hasInbox && discussions.length === 0 ? (
+      {!hasInbox && unread.length === 0 && advancing.length === 0 ? (
         <div className="task-overview-empty">
           <p>{emptyLabel}</p>
           {onNewTask ? (
@@ -696,10 +690,10 @@ function HeroLayout({
             <section className="task-overview-section">
               <div className="task-overview-section-head">
                 <div className="task-overview-section-title">
-                  <h2>需要你处理</h2>
+                  <h2>需要你</h2>
                   <small>{needsYouCards.length}</small>
                 </div>
-                <span className="task-overview-section-meta">决策与权限</span>
+                <span className="task-overview-section-meta">遇到选项、决策或权限</span>
               </div>
               <div
                 className={`task-overview-handoff-list${needsYouCards.length === 1 ? ' task-overview-handoff-list--single' : ''}`}
@@ -746,81 +740,48 @@ function HeroLayout({
             </section>
           ) : null}
 
-          {resultCards.length > 0 ? (
-            <section className="task-overview-section result-section">
+          {advancing.length > 0 ? (
+            <section className="task-overview-section">
               <div className="task-overview-section-head">
                 <div className="task-overview-section-title">
-                  <h2>结果待验收</h2>
-                  <small>{resultCards.length}</small>
+                  <h2>正在推进</h2>
+                  <small>{advancing.length}</small>
                 </div>
-                {onOpenHistory ? (
-                  <SectionLink label="查看历史" onClick={onOpenHistory} />
-                ) : (
-                  <span className="task-overview-section-meta">Peer 已完成并带回 Evidence</span>
-                )}
+                <span className="task-overview-section-hint">Peer 正在做，你不用插手</span>
               </div>
-              <div className="task-overview-work-stream goal-thread-stream">
-                {resultCards.map((card) => {
-                  const entries = displayedResults.filter((entry) =>
-                    card.items.some((item) => item.taskId === entry.item.taskId),
-                  );
-                  const groups = groupResultCardsByGoalThread(entries, allItems ?? items);
-                  const thread = groups.find((group) => group.kind === 'thread');
-                  const threadNodes =
-                    thread?.kind === 'thread'
-                      ? thread.nodes
-                      : card.items.length > 1
-                        ? buildThreadListNodes(
-                            card.latestItem.rootPlanId ?? card.latestItem.taskId,
-                            card.items.map((item) => ({
-                              item,
-                              phase:
-                                displayedResults.find((entry) => entry.item.taskId === item.taskId)
-                                  ?.phase ?? null,
-                            })),
-                            allItems ?? items,
-                          )
-                        : undefined;
-                  const pendingItems = card.items.filter((item) => item.actionRight === 'result_ready');
-                  const phase =
-                    displayedResults.find((entry) => entry.item.taskId === card.latestItem.taskId)
-                      ?.phase ?? null;
-                  return (
-                    <ResultCard
-                      key={card.key}
-                      item={card.latestItem}
-                      phase={phase}
-                      onOpenItem={onOpenItem}
-                      threadNodes={threadNodes}
-                      pendingCount={pendingItems.length}
-                      acceptTogether={pendingItems}
-                    />
-                  );
-                })}
+              <div className="task-overview-work-stream">
+                {advancing.map((item) => (
+                  <WorkItem
+                    key={item.taskId}
+                    item={item}
+                    onOpenItem={onOpenItem}
+                    onCancelItem={onCancelItem}
+                  />
+                ))}
               </div>
             </section>
           ) : null}
 
-          {discussions.length > 0 ? (
+          {unread.length > 0 ? (
             <section className="task-overview-section task-overview-section--discuss">
               <div className="task-overview-section-head">
                 <div className="task-overview-section-title">
-                  <h2>正在讨论</h2>
-                  <small>{discussions.length}</small>
+                  <h2>未读</h2>
+                  <small>{unread.length}</small>
                 </div>
                 {onOpenTasks ? (
                   <SectionLink
                     label="查看全部"
-                    count={hiddenDiscussionCount}
-                    countHint={`还有 ${hiddenDiscussionCount} 条`}
+                    count={hiddenUnreadCount}
+                    countHint={`还有 ${hiddenUnreadCount} 条`}
                     onClick={onOpenTasks}
                   />
                 ) : (
-                  <span className="task-overview-section-meta">未读沟通</span>
+                  <span className="task-overview-section-meta">打开看一眼即可</span>
                 )}
               </div>
               <div className="task-overview-discussion-grid">
-                {visibleDiscussions.map((item) => (
+                {visibleUnread.map((item) => (
                   <DiscussionCard key={item.taskId} item={item} onOpenItem={onOpenItem} />
                 ))}
               </div>
@@ -841,7 +802,7 @@ function HeroLayout({
                 <span className="task-overview-background-bar__pulse" aria-hidden="true" />
                 <span className="task-overview-background-bar__copy">
                   <b>{advancing.length}</b>
-                  Peer 推进中
+                  正在推进
                 </span>
                 {advancing[0]?.planProgress && advancing[0].planProgress.total > 0 ? (
                   <span className="task-overview-background-bar__meter" aria-hidden="true">
@@ -1303,9 +1264,9 @@ function ResultCard({
           {celebrating
             ? '验收完成，任务已圆满结束'
             : phase === 'submitting' || item.deliveryHandoffStatus === 'delivering'
-              ? '正在交回目标分支'
+              ? (item.deliveryHandoffLabel || '正在合进源头')
               : item.deliveryHandoffStatus === 'stopped'
-                ? (item.deliveryHandoffLabel || '交回未完成')
+                ? (item.deliveryHandoffLabel || '合不进源头')
                 : '等待验收'}
         </span>
         {threadNodes && threadNodes.length > 0 ? (
@@ -1328,13 +1289,19 @@ function ResultCard({
         <ThreadList nodes={threadNodes} currentId={item.taskId} onOpenItem={onOpenItem} />
       ) : null}
       <ArtifactList item={item} />
+      {item.deliveryHandoffVerdict === 'CONFLICT' && item.deliveryHandoffConflicts?.length ? (
+        <HandoffConflictPanel
+          planId={item.taskId}
+          conflicts={item.deliveryHandoffConflicts}
+        />
+      ) : null}
       <div className="result-card-actions work-item-actions">
         <WorkItemMeta item={item} group="runtime" fallbackWhenEmpty="READY" />
         <div className="work-item-actions__buttons">
         {phase === 'submitting' ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>
             <span className="result-card-spinner" aria-hidden="true" />
-            正在交回…
+            正在合进源头…
           </button>
         ) : celebrating ? (
           <button type="button" className="task-overview-btn task-overview-btn--primary result-card-accept" disabled>

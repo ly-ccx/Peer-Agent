@@ -9,10 +9,23 @@ export const PEER_ATTACHMENT_DND_TYPE = 'application/x-peer-attachment-id';
 /** 按附件 id 缓存已降采样的缩略图，避免每字输入反复解码 2MB 原图 dataUrl。 */
 const attachmentThumbCache = new Map<string, string>();
 
-/** 显示 38px，缓存 76px@2x 足够；超过此边长的原图才降采样。 */
-const THUMB_EDGE_PX = 76;
+/** 输入区与已发送消息都是 88px 小图；缓存 360px 边长覆盖 2x 屏。 */
+const THUMB_EDGE_PX = 360;
 /** 小于约 64KB 的 dataUrl 直接用原图，跳过 canvas。 */
 const THUMB_SKIP_BYTES = 64 * 1024;
+
+function fileExtensionLabel(name: string): string {
+  const base = name.trim().split(/[/\\]/).pop() ?? name;
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0 || dot === base.length - 1) return 'FILE';
+  const ext = base.slice(dot + 1).replace(/[^A-Za-z0-9]/g, '');
+  if (!ext) return 'FILE';
+  return ext.slice(0, 5).toUpperCase();
+}
+
+function attachmentChipSurface(attachment: ChatAttachment): 'attachment-chip--media' | 'attachment-chip--doc' {
+  return attachment.kind === 'image' ? 'attachment-chip--media' : 'attachment-chip--doc';
+}
 
 function estimateDataUrlBytes(dataUrl: string): number {
   const comma = dataUrl.indexOf(',');
@@ -96,7 +109,7 @@ export const AttachmentStrip = memo(function AttachmentStrip({
         return (
           <div
             key={attachment.id}
-            className={`attachment-chip ${attachment.kind}${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
+            className={`attachment-chip ${attachmentChipSurface(attachment)} ${attachment.kind}${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
             draggable={canReorder}
             onDragStart={(event) => {
               if (!canReorder) return;
@@ -131,7 +144,7 @@ export const AttachmentStrip = memo(function AttachmentStrip({
             }}
           >
             {attachment.kind === 'image' ? (
-              // Codex-style: image chips are thumb-only; no filename/size chrome.
+              // 图片是可点的媒体块，不带文件名/大小条。
               // dataUrl 优先；缺失时按 filePath 按需加载（ADR 59 不落盘整图到会话）。
               <ResolvedImageChip
                 attachment={attachment}
@@ -143,7 +156,7 @@ export const AttachmentStrip = memo(function AttachmentStrip({
               // Appshot 缺缩略图（artifact 未接线或文件丢失）：损坏/占位态，
               // 不伪装成正常图片成功卡片（产品 §12.1「不出现空白成功卡片」）。
               <span
-                className="attachment-file-icon attachment-appshot-broken"
+                className="attachment-kind-badge attachment-appshot-broken"
                 title={isZh ? '截图不可用' : 'Screenshot unavailable'}
                 aria-label={isZh ? '截图不可用' : 'Screenshot unavailable'}
               >
@@ -155,11 +168,8 @@ export const AttachmentStrip = memo(function AttachmentStrip({
                 </svg>
               </span>
             ) : (
-              <span className="attachment-file-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
+              <span className="attachment-kind-badge" aria-hidden="true">
+                {fileExtensionLabel(attachment.name)}
               </span>
             )}
             {attachment.kind === 'image' && attachment.dataUrl ? null : (
@@ -268,7 +278,7 @@ const ResolvedImageChip = memo(function ResolvedImageChip({
   if (attachment.appshot || loadFailed) {
     return (
       <span
-        className="attachment-file-icon attachment-appshot-missing"
+        className="attachment-kind-badge attachment-appshot-missing"
         title={
           isZh
             ? `截图不可用：${attachment.name}${attachment.artifactRef ? `（${attachment.artifactRef}）` : ''}`

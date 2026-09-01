@@ -37,6 +37,22 @@ test('draft workspace selection does not navigate the global workspace', async (
   );
 });
 
+test('starting a task syncs the active workspace to the task binding', async () => {
+  const app = await readAppSource();
+  const handler = app.match(
+    /onTaskStarted=\{\(conversationId\) => \{([\s\S]*?)\n                  \}\}/,
+  )?.[1] ?? '';
+
+  // 草稿态切换工作区只写 draftWorkspacePath；任务发起后 activeConversationId 置位，
+  // 输入面板 workspacePath 来源切到 activeWorkspace。必须同步二者，否则"在 xxx"显示旧文件夹。
+  assert.ok(handler, 'expected an onTaskStarted handler in App');
+  assert.match(
+    handler,
+    /if \(draftWorkspacePath && draftWorkspacePath !== activeWorkspace\) \{[\s\S]*?setActiveWorkspace\(draftWorkspacePath\);[\s\S]*?workspaceSetActive\(\{ path: draftWorkspacePath \}\)/,
+  );
+  assert.match(handler, /setActiveConversationId\(conversationId\)/);
+});
+
 test('draft submission receives the selected workspace path', async () => {
   const app = await readAppSource();
   const draftWorkspaceBindings = app.match(
@@ -46,5 +62,9 @@ test('draft submission receives the selected workspace path', async () => {
   assert.equal(draftWorkspaceBindings.length, 2);
   assert.match(app, /const \[draftWorkspacePath, setDraftWorkspacePath\] = useState/);
   assert.match(app, /setDraftWorkspacePath\(ws\);[\s\S]*?setActiveConversationId\(null\)/);
+  assert.match(
+    app,
+    /const handleNewChat = useCallback\(async \(workspacePath\?: string\) => \{[\s\S]*?const target = typeof workspacePath === 'string' \? workspacePath : activeWorkspace;[\s\S]*?registeredWorkspacePath\(target, workspaces\)/,
+  );
   assert.doesNotMatch(app, /workspacePreviewDefault/);
 });

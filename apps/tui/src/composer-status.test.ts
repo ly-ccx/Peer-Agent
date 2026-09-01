@@ -80,6 +80,35 @@ describe('composer status', () => {
       usage: { inputTokens: 200, cacheReadTokens: 800 },
       lastRequestUsage: { inputTokens: 500, cacheReadTokens: 0 },
     })).toEqual({ inputTokens: 1_200, cacheReadTokens: 4_800 });
+    // Idle CLI only reads lifetime. A last-request cache hit cannot light the
+    // badge once lifetime exists — persist must fold cacheRead into lifetime.
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'grok-4.6',
+      lifetimeUsage: { inputTokens: 1_000, cacheReadTokens: 4_000 },
+    })).toMatchObject({ cache: 'cache 80%', cachePercent: 80 });
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'grok-4.6',
+      lifetimeUsage: { inputTokens: 1_000, cacheReadTokens: 0 },
+      lastRequestUsage: { inputTokens: 500, cacheReadTokens: 400 },
+    })).not.toHaveProperty('cache');
+  });
+
+  test('surfaces Fast only when the admitted session flag is on', () => {
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'gpt-5.5',
+    })).not.toHaveProperty('fast');
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'gpt-5.5',
+      fastMode: true,
+    })).toMatchObject({ fast: true });
   });
 
   test('uses the repository model-catalog window for supported GPT models', () => {

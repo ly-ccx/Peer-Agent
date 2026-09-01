@@ -4,12 +4,125 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-## 0.0.7 - 2026-08-23
+## [0.0.9] - 2026-08-27
 
 ### Notes
 
-- Open the `0.0.7` development line from the published `0.0.6` / `origin/main`.
-- Stamp the in-repo development version to `0.0.7`. This commit is not a published GitHub Release.
+- Stable release that turns isolated-task merge-back into workbench triage: clean work merges itself, stale branches can be rebuilt, and only real conflicts wait for you.
+- Desktop Skills query Tencent SkillHub remotely and add a Qoder marketplace beside it. Installs still land in the local store and the grant chain.
+- Source merge cards stay on the workbench. Handle auto-routes them. Blocks from the same source collapse into one.
+- Creating a branch from the source picker opens a confirm dialog instead of writing immediately.
+- Docs changelog is generated from `release-notes/v0.0.9.md`.
+
+### Added
+
+- Merge-conflict triage on the workbench (auto-clean / auto-merge / stale / conflict / blocked-env) instead of per-line red cards (ADR 69).
+- Tencent SkillHub remote catalog in the Skills panel (category, keyword, pagination).
+- Qoder skill marketplace next to SkillHub, with matching detail-dialog styling.
+- Declineable demo merge-conflict cards on the workbench.
+- Create-branch confirm dialog in the source-branch picker.
+
+### Changed
+
+- Workbench Handle auto-routes merge cards into the right bucket.
+- Same-source merge blocks collapse on the workbench card.
+- Removing a workspace keeps its conversations.
+- Sidebar “add workspace” is a compact icon; session-title descenders are no longer cropped.
+- Dock cat icon is inset to match neighboring apps.
+
+### Fixed
+
+- Source merge-back uses the product confirm dialog, not a native browser prompt.
+- Demo merge conflicts can be declined instead of sticking on the workbench.
+- SkillHub and Qoder detail dialogs share spacing and radius.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
+
+## 0.0.8 - 2026-08-25
+
+### Notes
+
+- Stable release that turns the workbench into a cross-task radar: home shows Needs you / Peer advancing / Unread. A finished Goal is terminal — no extra result-ready acceptance bucket.
+- Empty inbox fills the main column. Isolated tasks merge the worktree back on completion; unisolated work skips the handoff gate.
+- Start a new task from a workspace row. The source-branch picker can search, group, and create branches.
+- CLI agent loops are unbounded like Desktop. Docs changelog is generated from `release-notes/v0.0.8.md`.
+
+### Added
+
+- Empty workbench radar surface that stretches the main column when nothing needs you.
+- Isolated complete-and-merge: isolated worktrees merge to the target branch on Goal completion.
+- New-task action on a workspace row (context menu / hover plus).
+- Source-branch search, grouping, and local-branch create in the composer picker.
+- Isolation glyph on isolated task lines.
+
+### Changed
+
+- Home workbench drops leftover result-ready / acceptance buckets; pulse keeps need/run only.
+- Plan titles follow intent, not the first utterance.
+- Sidebar Workbench badge shows the needs-you count only.
+- Mode and access sit before branch chrome.
+- Composer returns to the source capsule after handoff; Worktree toggle is the next-run preference.
+- Isolation cannot be toggled while a task is running.
+- Attachments render as media tiles and document cards.
+
+### Fixed
+
+- Resume the current turn after a stream or network failure.
+- Interactive CLI and Goal workers no longer inherit a 64-turn cap.
+- Other workspace groups stay open when switching sessions.
+- macOS traffic lights are centered in the 40px titlebar; the app icon fills the squircle.
+- Sidebar selection fill follows the conversation, not the whole workspace group.
+- Nested workspace shadows no longer clip; context-usage popover shadow restored.
+- Overview-list jank and tray/CLI main-thread stalls.
+- Shared new-task drafts clear after send; incomplete evidence can be force-archived.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
+
+## 0.0.7 - 2026-08-25
+
+### Notes
+
+- Stable release that splits workspace HEAD from the conversation task line, lets new tasks pick a source branch, and shows prior Goals on the result view.
+- Sidebar conversations are flat list rows; workspace names take the first line and the path moves under them.
+- CLI adds Fast mode; narrow TUI Goal summaries become a Now Playing row.
+- Docs changelog is generated from `release-notes/v0.0.7.md`.
+
+### Added
+
+- Draft composer source-branch picker that saves the workspace source without checking out git.
+- Composer / header chrome that shows workspace HEAD separately from the task line or isolation mark.
+- Prior Goals on the task result view (status, completed work, files already touched).
+- CLI Fast mode for ChatGPT / Grok OAuth (`service_tier=priority` when admission and the flag are on).
+- TUI compact Goal row restyled as Now Playing.
+
+### Changed
+
+- Sidebar conversation rows are a flat fill with the pin in the trailing actions, not a lifted capsule.
+- Workspace name uses the full first line; path stacks on the second line.
+- Sidebar titles use `--ui-font-control` so they follow appearance font-scale at chrome size.
+- Opening a conversation lands on the latest messages.
+- Startup loads a short workspace task preview instead of fetching every conversation for counts.
+- Large diffs virtualize file-index hover; TUI streaming drops the 32ms delta buffer.
+- TUI activity uses a stable `working...` highlight sweep.
+
+### Fixed
+
+- Missing `evidenceRefs` on historical Goals no longer crash the renderer.
+- Same-workspace Goal bindings no longer leave isolation or the composer chip on a stale HEAD.
+- Stale Goal handoff is not treated as an empty model reply.
+- CLI prompt-cache hits survive split Responses usage details.
+- Unused workspace avatar badges are removed.
+
+### Release
+
+- Desktop: install the platform asset from the `v0.0.7` GitHub Release.
+- CLI / TUI: `npm i -g @peer-agent/cli@latest` or `npm i -g @peer-agent/cli@0.0.7`.
 
 ## 0.0.6 - 2026-08-23
 

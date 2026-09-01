@@ -46,7 +46,7 @@ import { createLocalShellProvider } from './runtime-gateway/local-shell-provider
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
-import { createSkillHubMarketplaceStore } from './skillhub-marketplace-store.mjs';
+import { createQoderApiClient, createQoderMarketplaceService } from './qoder-marketplace-service.mjs';
 import { createSkillHubVerifiedInstaller } from './skillhub-verified-installer.mjs';
 import { createSkillHubMarketplaceService } from './skillhub-marketplace-service.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
@@ -314,6 +314,7 @@ let skillStore = disableLocalSkill
     });
 let skillMarketplaceService;
 let skillHubMarketplaceService;
+let qoderMarketplaceService;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
@@ -453,15 +454,29 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => {
     broadcastToAllWindows('goalPlans:changed', payload);
-    taskOverviewBroadcast.request({
-      reason: 'goalPlans:changed',
-      planId: payload?.planId ?? null,
-    });
+    // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
+    if (payload?.changeKind !== 'runner-progress') {
+      taskOverviewBroadcast.request({
+        reason: 'goalPlans:changed',
+        planId: payload?.planId ?? null,
+      });
+    }
     try {
       taskNotificationBroker?.handleGoalPlanChanged(payload);
     } catch (err) {
       console.warn('[task-notification] handleGoalPlanChanged failed:', err);
     }
+    if (payload?.changeKind === 'runner-progress') {
+      return;
+    }
+    // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
+    queueMicrotask(() => {
+      try {
+        maybeSyncConversationTitleFromPlan(payload);
+      } catch (error) {
+        console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
+      }
+    });
     // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
     // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
     queueMicrotask(() => {
@@ -479,7 +494,8 @@ const goalPlanStore = createGoalPlanStore({
           const plan = goalPlanStore.getPlan(planId);
           if (!plan) return;
           if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
-          if (plan.resultAcceptance?.acceptedAt && plan.deliveryHandoff?.status !== 'delivered') return;
+          // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
+          if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
           void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
             console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
           });
@@ -503,6 +519,8 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
+  // llmChatService 在本聚合器之后才创建；list 时惰性读取，避免启动环依赖。
+  listActiveStreams: () => llmChatService?.listActiveStreams?.() ?? [],
   artifactRoots: {
     shell: path.join(dataHome, 'shell-artifacts'),
     browser: path.join(dataHome, 'browser-artifacts'),
@@ -1841,6 +1859,8 @@ const conversationApplicationService = createConversationApplicationService({
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
+  updatePreferredExecutionIsolation: (id, preferredExecutionIsolation) =>
+    conversationStore.updatePreferredExecutionIsolation(id, preferredExecutionIsolation),
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
@@ -2014,8 +2034,6 @@ const openPathApplicationService = createOpenPathApplicationService({
 const workspaceApplicationService = createWorkspaceApplicationService({
   getSettings: () => settingsStore.getAll(),
   mergeSettings: (patch) => settingsStore.merge(patch),
-  deleteConversationsByWorkspace: (workspacePath) =>
-    conversationStore.deleteConversationsByWorkspace(workspacePath),
   pathExists: (candidate) => existsSync(candidate),
   basename: (candidate) => path.basename(candidate),
   getDefaultWorkspacePath: () => path.join(app.getPath('home'), 'PeerAgent'),
@@ -2073,9 +2091,83 @@ const goalApplicationService = createGoalApplicationService({
   recordTaskEvidence: (planId, taskId, change) =>
     goalPlanStore.recordTaskEvidence(planId, taskId, change),
   deletePlan: (planId) => goalPlanStore.deletePlan(planId),
-  retryHandoff: (planId) => {
-    scheduleGoalDeliveryHandoff(planId, { retry: true });
-    return goalPlanStore.getPlan(planId) ?? null;
+  retryHandoff: async (planId) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return null;
+    if (typeof goalDeliveryHandoff?.retryHandoff === 'function') {
+      return await goalDeliveryHandoff.retryHandoff(plan);
+    }
+    return plan;
+  },
+  inspectSourceCheckout: async (planId, { workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.inspectSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.inspectSource(plan, { repositoryRoot: workspacePath });
+  },
+  commitSourceCheckout: async (planId, { message, permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.commitSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.commitSource(plan, { message, permissionConfirmed, repositoryRoot: workspacePath });
+  },
+  stashSourceCheckout: async (planId, { permissionConfirmed = false, workspacePath } = {}) => {
+    const plan = typeof planId === 'string' && planId ? goalPlanStore.getPlan(planId) : null;
+    if (typeof goalDeliveryHandoff?.stashSource !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.stashSource(plan, { permissionConfirmed, repositoryRoot: workspacePath });
+  },
+  retrySourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    if (typeof goalDeliveryHandoff?.retryHandoffs !== 'function') return { ok: false, reason: 'unavailable' };
+    const plans = ids.map((planId) => goalPlanStore.getPlan(planId)).filter(Boolean);
+    return goalDeliveryHandoff.retryHandoffs(plans);
+  },
+  declineSourceHandoffs: async (planIds) => {
+    const ids = Array.isArray(planIds) ? planIds.filter((id) => typeof id === 'string' && id.trim()) : [];
+    const results = [];
+    for (const planId of ids) {
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan) {
+        results.push({ planId, ok: false, reason: 'not_found' });
+        continue;
+      }
+      try {
+        if (typeof goalWorktreeAdapter?.discardLine === 'function') {
+          await goalWorktreeAdapter.discardLine(plan, { deleteBranch: true });
+        }
+        const cancelled = goalPlanStore.setPlanStatus(planId, 'cancelled') || goalPlanStore.getPlan(planId) || plan;
+        results.push({
+          planId,
+          ok: cancelled?.status === 'cancelled',
+          status: cancelled?.status,
+        });
+      } catch (error) {
+        results.push({
+          planId,
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error || 'decline_failed'),
+        });
+      }
+    }
+    return { ok: results.every((result) => result.ok), results };
+  },
+  // ADR 69 P2：收口决断执行。keep_taskline 动 git 目标线，需渲染层先弹确认并回传 permissionConfirmed。
+  resolveHandoffConflicts: async (planId, resolutions, { permissionConfirmed = false } = {}) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.resolveConflicts !== 'function') return { ok: false, reason: 'unavailable' };
+    const result = await goalDeliveryHandoff.resolveConflicts(plan, resolutions, { permissionConfirmed });
+    return { ...result, plan: goalPlanStore.getPlan(planId) ?? plan };
+  },
+  previewHandoffMerge: async (planId, resolutions) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.previewMerge !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.previewMerge(plan, resolutions);
+  },
+  cleanupHandoffPreview: async (planId, previewPath) => {
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return { ok: false, reason: 'not_found' };
+    if (typeof goalDeliveryHandoff?.cleanupPreview !== 'function') return { ok: false, reason: 'unavailable' };
+    return goalDeliveryHandoff.cleanupPreview(plan, previewPath);
   },
   isolate: async (planId) => {
     const plan = goalPlanStore.getPlan(planId);
@@ -2398,6 +2490,22 @@ function registerDesktopIpcHost() {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
           return skillHubMarketplaceService.listCategories();
         },
+        qoderQuery: (query) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.query(query);
+        },
+        qoderGetDetail: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.getSkillDetailWithReadme(identity);
+        },
+        qoderInstall: (identity) => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.install(identity);
+        },
+        qoderListTaxonomies: () => {
+          if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
+          return qoderMarketplaceService.listTaxonomies();
+        },
       },
     }),
     ...createPendingTaskIpcRegistrations({
@@ -2451,9 +2559,10 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
-          // 相对 hiddenInset 默认原点下移，使三点在约 40px 标题栏内垂直居中
-          //（对照 Codex 观感；仅 macOS 生效）。
-          trafficLightPosition: { x: 16, y: 18 },
+          // trafficLightPosition 是按钮簇左上角，不是圆心。
+          // 12pt 灯在 40px hiddenInset 标题栏内垂直居中：(40 - 12) / 2 = 14。
+          // y: 18 会把视觉中心压到 24px，三点会明显偏低。仅 macOS 生效。
+          trafficLightPosition: { x: 16, y: 14 },
         }
       : {}),
     titleBarStyle: 'hiddenInset',
@@ -2816,6 +2925,24 @@ function scheduleGoalDeliveryHandoff(planId, { retry = false } = {}) {
   });
 }
 
+function maybeSyncConversationTitleFromPlan(payload = {}) {
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  if (!planId || typeof goalPlanStore.getPlan !== 'function') return;
+  const plan = goalPlanStore.getPlan(planId);
+  if (!plan) return;
+  const conversationId = typeof plan.conversationId === 'string' ? plan.conversationId.trim() : '';
+  const title = typeof plan.title === 'string' ? plan.title.trim() : '';
+  if (!conversationId || !title || title === '未命名任务') return;
+  const conversation = conversationStore.getConversation?.(conversationId);
+  if (!conversation) return;
+  const titleSource = typeof conversation.titleSource === 'string' ? conversation.titleSource : '';
+  // 用户手改过的侧栏标题不覆盖；仅替换草稿/占位来源。
+  if (titleSource === 'manual') return;
+  if (titleSource && !['user_snippet', 'fallback', 'plan', ''].includes(titleSource)) return;
+  if (conversation.title === title && titleSource === 'plan') return;
+  conversationStore.updateTitle(conversationId, title, { source: 'plan' });
+}
+
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;
   if (!planId) return;
@@ -2979,6 +3106,8 @@ function handleChatSend({
   modelProviderId,
   workspacePath,
   assistantMessageId,
+  // 续写中断回复：本轮不是新的用户输入，goal 路由/intake 不应把它当成新回合处理。
+  resumeInterruptedReply = false,
   contextAttachments,
   runtimeReminders,
   attachmentContext,
@@ -3002,7 +3131,15 @@ function handleChatSend({
     : continuityContext;
   let answeredRequestedUserInputPlanId = null;
   // Agent 默认（chat）与 legacy goal 共享 intake / 路由契约。
-  if ((mode === 'goal' || mode === 'chat') && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
+  // 续写中断回复不是新的用户输入：末条 assistant 的部分内容只是「继续」指令的
+  // 载体，不能触发 goal 事件路由 / intake 判别 / plan 状态迁移，否则会把
+  // 「继续」误判为用户新决策，甚至 kick stalled runner 产生第二路并发流。
+  if (
+    !resumeInterruptedReply
+    && (mode === 'goal' || mode === 'chat')
+    && conversationId
+    && typeof goalPlanStore.upsertGoalContract === 'function'
+  ) {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
       try {
@@ -3059,7 +3196,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               createdBy: 'user',
             });
@@ -3074,7 +3212,8 @@ function handleChatSend({
                   targetWorkspacePath: conversationWorkspacePath,
                 }
                 : {}),
-              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              // 不把用户首句原话当标题；创建后再由短意图标题刷新。
+              title: '',
               goal,
               status: 'accepted',
               workflowKind: 'goal_self_driven',
@@ -3097,6 +3236,17 @@ function handleChatSend({
   const resolvedModelProviderId =
     modelProviderId
     ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
+  // 续写中断回复的运行时提醒：末条 assistant 是被网络中断截断的半截回复，
+  // 模型必须把它当作自己「未写完的话」从断点继续，而不是当作新输入重新作答。
+  const effectiveRuntimeReminders = resumeInterruptedReply
+    ? [
+        ...(Array.isArray(runtimeReminders) ? runtimeReminders : []),
+        {
+          id: 'resume-interrupted-reply',
+          content: 'The last assistant message in this conversation was truncated by a network interruption mid-generation. It is your own unfinished reply, not user input. Continue exactly where it left off to complete the same reply. Do not repeat, rewrite, summarize, or re-answer what was already generated; do not treat this as a new question or a new turn.',
+        },
+      ]
+    : runtimeReminders;
   const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: sender,
@@ -3110,16 +3260,17 @@ function handleChatSend({
     // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
     workspacePath,
     assistantMessageId,
+    resumeInterruptedReply,
     contextAttachments,
-    runtimeReminders,
+    runtimeReminders: effectiveRuntimeReminders,
     attachmentContext,
     continuityContext: resolvedContinuityContext,
     configInstructions,
     contextExtensions,
   });
-  // goal 模式首答回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
+  // goal 模式首笔回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
   // 仅在回合 resolve 后按 outcome 决定是否静默移除残留的 intake 契约。
-  if ((mode === 'goal' || mode === 'chat') && conversationId) {
+  if (!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId) {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
@@ -3658,28 +3809,20 @@ function startLocalRuntime() {
     installSkillFromZip: (zipBuffer) => skillStore.installSkillFromZip(zipBuffer),
   });
   const skillHubApiClient = createSkillHubApiClient();
-  const skillHubStore = createSkillHubMarketplaceStore({
-    filePath: path.join(userDataPath, 'marketplace', 'skillhub-index.json'),
-    apiClient: skillHubApiClient,
-  });
   const skillHubInstaller = createSkillHubVerifiedInstaller({
     apiClient: skillHubApiClient,
     installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
   });
+  // SkillHub 与 Qoder 一样走远程列表查询：搜索、分类、分页、排序都打官方接口。
   skillHubMarketplaceService = createSkillHubMarketplaceService({
-    store: skillHubStore,
     installer: skillHubInstaller,
     apiClient: skillHubApiClient,
   });
-  // 全量元数据同步属于主进程本地能力：启动后在后台从 checkpoint 续传，
-  // 不阻塞首帧，也不把同步生命周期交给 Renderer 页面是否被打开。
-  const skillHubSyncStatus = skillHubMarketplaceService.getStatus();
-  const skillHubIndexStale = !skillHubSyncStatus.updatedAt || Date.now() - skillHubSyncStatus.updatedAt > 24 * 60 * 60 * 1_000;
-  if (skillHubSyncStatus.status === 'error' || skillHubSyncStatus.nextPage > 1 || skillHubIndexStale) {
-    void skillHubMarketplaceService.sync().catch((error) => {
-      console.warn('[skillhub] Background marketplace sync paused:', error instanceof Error ? error.message : error);
-    });
-  }
+  // Qoder 市场：qoder.com apphub 支持服务端搜索 + 分页，无需本地索引同步。
+  qoderMarketplaceService = createQoderMarketplaceService({
+    apiClient: createQoderApiClient(),
+    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+  });
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,

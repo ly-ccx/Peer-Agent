@@ -10,7 +10,7 @@ function item(
   return { actionRight, source } as TaskOverviewItem;
 }
 
-test('counts needs_you and result_ready, ignoring discussions and other rights', () => {
+test('counts needs_you only, ignoring discussions, result_ready, and other rights', () => {
   const counts = countWorkbenchInbox([
     item('needs_you'),
     item('needs_you'),
@@ -19,5 +19,5 @@ test('counts needs_you and result_ready, ignoring discussions and other rights',
     item('needs_you', 'conversation'),
     item('result_ready', 'conversation'),
   ]);
-  assert.deepEqual(counts, { needsYou: 2, resultReady: 1 });
+  assert.deepEqual(counts, { needsYou: 2 });
 });

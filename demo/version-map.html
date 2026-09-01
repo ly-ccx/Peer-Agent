@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Peer · 合并进 0.0.9</title>
+<!--
+  PROTOTYPE — throwaway.
+  同屏三栏。货要合进发版线 0.0.9，不说「交回」。
+-->
+<style>
+  :root {
+    --chrome-canvas: #FAFBFC;
+    --chrome-raised: #F3F5F8;
+    --chrome-sunken: #EBEEF3;
+    --chrome-hover: #F0F2F6;
+    --chrome-active: #E8ECF2;
+    --chrome-hairline: rgba(15, 23, 42, 0.08);
+    --paper-sheet: #FFFFFF;
+    --graphite: #1F2430;
+    --graphite-soft: #5B6472;
+    --graphite-fade: #8B93A1;
+    --graphite-mute: #A8B0BC;
+    --azure: #3D6B99;
+    --azure-soft: #E8F0F8;
+    --warn: #9A6B24;
+    --warn-soft: #F8F0E0;
+    --success: #2F6B4F;
+    --success-soft: #E6F3EC;
+    --control-fill: #EEF1F5;
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-fast: 120ms;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+    color: var(--graphite); background: #DDE3EA;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .app {
+    height: 100%; display: flex; flex-direction: column;
+    background: var(--chrome-canvas);
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+  }
+  .osbar {
+    display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px;
+    background: var(--chrome-raised); border-bottom: 1px solid var(--chrome-hairline); flex: none;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; background: #D8DEE6; display: block; }
+  .title { font-weight: 620; letter-spacing: -0.02em; }
+  .hint { margin-left: auto; color: var(--graphite-fade); font-size: 12px; }
+  .toggle {
+    height: 26px; padding: 0 10px; border-radius: 999px;
+    background: var(--control-fill); color: var(--graphite-soft);
+  }
+  .toggle.is-on { background: var(--graphite); color: #F7F9FC; }
+  .stage {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: minmax(300px, 1.1fr) minmax(240px, 0.8fr) minmax(320px, 1.2fr);
+  }
+  .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .pane + .pane { border-left: 1px solid var(--chrome-hairline); }
+  .pane-label {
+    flex: none; padding: 8px 14px 6px;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--graphite-mute); background: var(--chrome-raised);
+    border-bottom: 1px solid var(--chrome-hairline);
+  }
+  .pane-body { flex: 1; min-height: 0; overflow: auto; }
+
+  .pane-home { background: var(--chrome-canvas); }
+  .thread { padding: 16px 16px 8px; }
+  .bubble {
+    margin: 0 0 12px; padding: 8px 10px; border-radius: 10px;
+    background: var(--chrome-sunken); color: var(--graphite-soft); font-size: 12px;
+  }
+  .goal-card {
+    background: var(--paper-sheet); border: 1px solid var(--chrome-hairline);
+    border-radius: 14px; padding: 16px;
+    box-shadow: 0 1px 0 rgba(15,23,42,0.03);
+  }
+  .goal-card header { display: flex; align-items: flex-start; gap: 8px; }
+  .goal-card h2 { margin: 0; font-size: 16px; letter-spacing: -0.02em; }
+  .badge {
+    display: inline-flex; align-items: center; height: 20px; margin-left: auto;
+    padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    background: var(--control-fill); color: var(--graphite-soft); white-space: nowrap;
+  }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.ok { background: var(--success-soft); color: var(--success); }
+  .goal-meta { margin-top: 4px; color: var(--graphite-fade); font-size: 12px; }
+
+  .route {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+    align-items: center;
+    margin: 14px 0 12px; padding: 10px; border-radius: 12px;
+    background: var(--chrome-sunken);
+  }
+  .route[data-state="is-blocked"] { background: var(--warn-soft); }
+  .route[data-state="is-ok"] { background: var(--success-soft); }
+  .route[data-state="is-busy"] { background: var(--azure-soft); }
+  .node {
+    min-width: 0; padding: 8px 10px; border-radius: 10px;
+    background: var(--paper-sheet); border: 1px solid var(--chrome-hairline);
+  }
+  .node .k { display: block; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--graphite-mute); margin-bottom: 2px; }
+  .node .v { font-weight: 620; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arrow { color: var(--graphite-fade); font-size: 18px; font-weight: 500; }
+  .route[data-state="is-blocked"] .arrow { color: var(--warn); }
+  .route[data-state="is-ok"] .arrow { color: var(--success); }
+
+  .why { margin: 0 0 10px; color: var(--graphite); }
+  .why b { font-weight: 650; }
+  .btn {
+    height: 32px; padding: 0 12px; border-radius: 8px; font-weight: 600;
+    background: var(--control-fill);
+    transition: transform var(--motion-fast) var(--ease-out);
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary { background: var(--graphite); color: #F7F9FC; }
+  .composer {
+    margin: 8px 12px 12px; padding: 8px 10px;
+    border: 1px solid var(--chrome-hairline); border-radius: 12px;
+    background: var(--paper-sheet); color: var(--graphite-soft); font-size: 12px;
+  }
+  .composer b { color: var(--azure); }
+
+  .pane-radar { background: var(--chrome-raised); }
+  .radar { padding: 12px 14px 20px; }
+  .radar .lead { margin: 0 0 12px; color: var(--graphite-soft); font-size: 12px; }
+  .group-kicker { font-size: 12px; color: var(--graphite-fade); margin: 4px 0 8px; }
+  .radar-card {
+    width: 100%; text-align: left; margin-bottom: 8px;
+    background: var(--paper-sheet); border: 1px solid var(--chrome-hairline);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .radar-card:hover { background: var(--chrome-hover); }
+  .radar-card.is-on { outline: 1px solid var(--azure); }
+  .radar-card .kind { font-size: 11px; font-weight: 650; color: var(--warn); }
+  .radar-card h3 { margin: 2px 0 4px; font-size: 13px; }
+  .chip { background: var(--control-fill); border-radius: 999px; padding: 1px 7px; font-size: 11px; color: var(--graphite-fade); }
+
+  .pane-map { background: var(--chrome-canvas); }
+  .map { padding: 12px 16px 20px; }
+  .kicker { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--graphite-mute); margin-bottom: 6px; }
+  .vers { display: flex; gap: 6px; margin-bottom: 10px; }
+  .ver { padding: 5px 10px; border-radius: 999px; color: var(--graphite-soft); background: var(--control-fill); }
+  .ver.is-on { background: var(--graphite); color: #F7F9FC; }
+  .gate { padding: 10px 12px; border-radius: 12px; margin-bottom: 12px; }
+  .gate.is-ok { background: var(--success-soft); color: var(--success); }
+  .gate.is-block { background: var(--warn-soft); color: var(--warn); }
+  .gate h3 { margin: 0 0 6px; font-size: 13px; }
+  .gate ul { margin: 0; padding-left: 16px; }
+  .hub {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-radius: 12px; background: var(--azure-soft); margin-bottom: 8px;
+  }
+  .hub h2 { margin: 0; font-size: 18px; }
+  .mark { font-size: 10px; color: var(--azure); letter-spacing: 0.06em; text-transform: uppercase; }
+  .spine { height: 10px; width: 2px; background: var(--chrome-active); margin: 0 18px; }
+  .lane-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; color: var(--graphite-fade); font-size: 12px; }
+  .cards { display: flex; flex-wrap: wrap; gap: 6px; }
+  .card {
+    text-align: left; min-width: 140px; padding: 8px 10px; border-radius: 10px;
+    background: var(--paper-sheet); border: 1px solid var(--chrome-hairline);
+  }
+  .card .name { font-weight: 560; margin-bottom: 3px; }
+  .card.is-on { outline: 1px solid var(--azure); }
+  .card.is-quiet { opacity: 0.5; }
+  .ghost { color: var(--graphite-mute); font-size: 12px; padding: 4px 2px; }
+  .st { display: inline-flex; gap: 4px; font-size: 11px; font-weight: 600; }
+  .st-online { color: var(--azure); } .st-forked { color: var(--graphite-soft); }
+  .st-pending, .st-stopped { color: var(--warn); } .st-merged { color: var(--success); }
+  .st-unclaimed { color: var(--graphite-fade); } .st-dropped { color: var(--graphite-mute); }
+
+  .sheet {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.28);
+    display: none; align-items: center; justify-content: center; z-index: 5;
+  }
+  .sheet.is-on { display: flex; }
+  .messy-col {
+    width: min(420px, 92vw); max-height: 80vh; overflow: auto;
+    background: var(--paper-sheet); border-radius: 16px; padding: 18px;
+    box-shadow: 0 24px 80px rgba(15,23,42,0.2);
+  }
+  .messy-col h2 { margin: 4px 0 8px; }
+  .picker { margin-top: 12px; border: 1px solid var(--chrome-hairline); border-radius: 12px; overflow: hidden; }
+  .picker-search, .picker-foot { padding: 10px 12px; color: var(--graphite-mute); }
+  .picker-row { width: 100%; display: flex; justify-content: space-between; padding: 8px 12px; }
+  .picker-row span { color: var(--graphite-mute); }
+  .picker-row.is-on { background: var(--chrome-active); }
+  .callout { margin-top: 12px; padding: 10px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(8px);
+    background: var(--graphite); color: #F7F9FC; padding: 8px 14px; border-radius: 999px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+  }
+  .toast.is-on { opacity: 1; transform: translateX(-50%); }
+  @media (max-width: 980px) {
+    .stage { grid-template-columns: 1fr; }
+    .pane { min-height: 42vh; }
+    .pane + .pane { border-left: 0; border-top: 1px solid var(--chrome-hairline); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="osbar">
+    <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="title">Peer · 合并进 0.0.9</div>
+    <div class="hint">任务线 → 发版线 · 同屏三栏</div>
+    <button class="toggle" id="messyToggle" type="button">对照下拉</button>
+  </header>
+  <div class="stage" id="stage"></div>
+</div>
+<div class="sheet" id="sheet"><div class="messy-col" id="messy"></div></div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+const LABEL = {
+  online: "写在发版线上",
+  forked: "还在任务线",
+  pending: "待合并",
+  stopped: "合不进去",
+  merged: "已进这版",
+  dropped: "不纳入本版",
+  unclaimed: "无主分叉",
+};
+const ICON = {
+  online: "✎", forked: "⎇", pending: "→", stopped: "!", merged: "✓", dropped: "–", unclaimed: "?",
+};
+
+const seed = {
+  "0.0.9": {
+    shipped: false,
+    hub: "peer_agent / 0.0.9",
+    tasks: [
+      {
+        id: "merge009",
+        title: "合并到 0.0.9",
+        status: "stopped",
+        progress: "4 / 4 已做完",
+        git: "PeerAgent/合并到-0-0-9",
+        short: "合并到-0-0-9",
+        where: "还在任务线上",
+        stoppedReason: "你正在 0.0.9 上改别的东西，还没提交。没法把这条任务合进去。",
+        rounds: [
+          { t: "暂存无关改动", s: "完成" },
+          { t: "合并弹窗分支", s: "完成" },
+          { t: "恢复暂存", s: "完成" },
+          { t: "推到 origin/0.0.9", s: "完成" },
+        ],
+      },
+      {
+        id: "blue",
+        title: "工作区蓝点悬停让位",
+        status: "online",
+        progress: "进行中",
+        git: "PeerAgent/工作区蓝点悬停让位",
+        short: "蓝点让位",
+        where: "提交会直接写进 0.0.9",
+      },
+      {
+        id: "source",
+        title: "会话来源条跟手",
+        status: "forked",
+        progress: "1 / 2",
+        git: "PeerAgent/会话来源条跟手",
+        short: "来源条跟手",
+        where: "从 0.0.9 分出，做完再合回去",
+      },
+      {
+        id: "ascii",
+        title: "分支名强制 ASCII",
+        status: "pending",
+        progress: "已做完",
+        git: "PeerAgent/keep-git-branches-ascii",
+        short: "ASCII 分支名",
+        where: "独有提交还没进 0.0.9",
+      },
+      {
+        id: "popup",
+        title: "改成分支创建弹窗",
+        status: "merged",
+        progress: "已进这版",
+        git: "PeerAgent/改成分支创建弹窗",
+        short: "创建弹窗",
+        where: "已经在 0.0.9 上",
+      },
+      {
+        id: "hover",
+        title: "选中贴近 hover 白",
+        status: "unclaimed",
+        progress: "",
+        git: "PeerAgent/选中贴近-hover-白",
+        short: "hover 白",
+        where: "仓库里有独有补丁，没有任务认领",
+      },
+      {
+        id: "capsule",
+        title: "侧栏胶囊间距",
+        status: "dropped",
+        progress: "",
+        git: "PeerAgent/sidebar-capsule-spacing",
+        short: "胶囊间距",
+        where: "来自更老的线，不进 0.0.9",
+      },
+    ],
+  },
+  "0.0.8": {
+    shipped: true,
+    hub: "peer_agent / 0.0.8",
+    tasks: [
+      { id: "input", title: "提高输入框高度", status: "merged", progress: "已进这版", git: "PeerAgent/提高输入框高度", short: "输入框高度", where: "已随 0.0.8 发出" },
+    ],
+  },
+};
+
+const messyRows = [
+  "恢复图标原来的圆角", "打开-0-0-9-开发线", "提交中断提醒到-0-0-9",
+  "提交来源条改动", "提高输入框高度", "改成分支创建弹窗",
+  "清理已合入本地分支", "工作区蓝点悬停让位", "keep-git-branches-ascii", "选中贴近-hover-白",
+];
+
+const state = { version: "0.0.9", selected: "merge009", showMerged: false, showDropped: false, showMessy: false };
+let data = JSON.parse(JSON.stringify(seed));
+
+function tasks(ver = state.version) { return data[ver].tasks; }
+function taskById(id) {
+  for (const ver of Object.keys(data)) {
+    const hit = data[ver].tasks.find((t) => t.id === id);
+    if (hit) return { task: hit, version: ver };
+  }
+  return null;
+}
+function byStatus(s, ver = state.version) { return tasks(ver).filter((t) => t.status === s); }
+function openLeaves(ver = state.version) {
+  return tasks(ver).filter((t) => t.status === "pending" || t.status === "stopped" || t.status === "unclaimed");
+}
+function gateOf(ver) {
+  const list = data[ver].tasks;
+  const forked = list.filter((t) => t.status === "forked");
+  const pending = list.filter((t) => t.status === "pending" || t.status === "stopped");
+  const unclaimed = list.filter((t) => t.status === "unclaimed");
+  return { forked, pending, unclaimed, ok: forked.length + pending.length + unclaimed.length === 0 };
+}
+function icon(status) {
+  return `<span class="st st-${status}">${ICON[status] || "·"} ${LABEL[status] || status}</span>`;
+}
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("is-on");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("is-on"), 1600);
+}
+
+function routeBlock(t, ver) {
+  const blocked = t.status === "stopped" || t.status === "pending";
+  const ok = t.status === "merged" || t.status === "online";
+  const busy = t.status === "forked";
+  const arrow = blocked ? "↛" : "→";
+  const cls = blocked ? "is-blocked" : ok ? "is-ok" : busy ? "is-busy" : "";
+  const from = t.short || t.git.replace("PeerAgent/", "");
+  return `<div class="route" data-state="${cls}">
+    <div class="node"><span class="k">任务线</span><span class="v">${from}</span></div>
+    <div class="arrow" aria-hidden="true">${arrow}</div>
+    <div class="node"><span class="k">发版线</span><span class="v">${ver}</span></div>
+  </div>`;
+}
+
+function actionBlock(t, ver) {
+  if (t.status === "stopped") {
+    return `<p class="why">${t.stoppedReason}</p>
+      <button class="btn primary" data-act="retry" data-id="${t.id}">再试一次，合并进 0.0.9</button>`;
+  }
+  if (t.status === "pending") {
+    return `<p class="why">活已经做完，还停在任务线上，没有合进 <b>${ver}</b>。</p>
+      <button class="btn primary" data-act="merge" data-id="${t.id}">合并进 ${ver}</button>`;
+  }
+  if (t.status === "merged") {
+    return `<p class="why">已经合并进 <b>${data[ver].hub}</b>。发版看的是这条线。</p>`;
+  }
+  if (t.status === "forked") {
+    return `<p class="why">还在任务线上改。做完才会出现「合并进 ${ver}」。</p>`;
+  }
+  if (t.status === "online") {
+    return `<p class="why">没开任务线，改动会直接写进 <b>${ver}</b>。</p>`;
+  }
+  return `<p class="why">${t.where || ""}</p>`;
+}
+
+function renderHome() {
+  const hit = taskById(state.selected) || { task: tasks()[0], version: state.version };
+  const t = hit.task;
+  const ver = hit.version;
+  return `<div class="thread">
+    <div class="bubble">把弹窗那条合进 0.0.9，并推到 origin。</div>
+    <article class="goal-card">
+      <header>
+        <div>
+          <h2>${t.title}</h2>
+          <div class="goal-meta">${t.progress || ""}</div>
+        </div>
+        <span class="badge${t.status === "stopped" || t.status === "pending" ? " warn" : t.status === "merged" ? " ok" : ""}">${LABEL[t.status]}</span>
+      </header>
+      ${routeBlock(t, ver)}
+      ${actionBlock(t, ver)}
+    </article>
+  </div>
+  <div class="composer">工作区在 <b>${ver}</b>　·　${t.status === "online" ? "写在发版线上" : t.status === "merged" ? "已合并进发版线" : "任务线 " + (t.short || "")}</div>`;
+}
+
+function renderRadar() {
+  const groups = Object.keys(data).map((ver) => {
+    const leaves = openLeaves(ver);
+    if (!leaves.length) return "";
+    return `<div class="group-kicker">${data[ver].hub} · ${leaves.length} 条还没进这版</div>
+      ${leaves.map((t) => `
+        <button class="radar-card${t.id === state.selected ? " is-on" : ""}" data-act="select" data-id="${t.id}">
+          <span class="kind">${t.status === "unclaimed" ? "体检" : "要你处理"}</span>
+          <h3>${t.title}</h3>
+          <span class="chip">${t.status === "stopped" ? "合不进 " + ver : "还没进 " + ver}</span>
+        </button>`).join("")}`;
+  }).join("");
+  return `<div class="radar">
+    <p class="lead">按发版线归组。点叶子，左边卡跟着变，右边门闩也跟着变。</p>
+    ${groups || `<p class="ghost">没有还没进这版的叶子。</p>`}
+  </div>`;
+}
+
+function lane(title, items, empty, folded, foldAct) {
+  const extra = folded != null
+    ? `<button data-act="${foldAct}" style="margin-left:auto;color:var(--graphite-fade)">${folded ? "展开" : "折起"}</button>`
+    : "";
+  return `<div class="lane-title"><b>${title}</b><span>${items.length}</span>${extra}</div>
+    <div class="cards">${items.length ? items.map((t) => card(t, folded)).join("") : `<div class="ghost">${empty}</div>`}</div>`;
+}
+function card(t, quiet) {
+  return `<button class="card${t.id === state.selected ? " is-on" : ""}${quiet ? " is-quiet" : ""}" data-act="select" data-id="${t.id}">
+    <div class="name">${t.title}</div>${icon(t.status)}
+  </button>`;
+}
+
+function renderMap() {
+  const v = state.version;
+  const g = gateOf(v);
+  const active = [...byStatus("online"), ...byStatus("forked")];
+  const pending = [...byStatus("pending"), ...byStatus("stopped")];
+  const merged = byStatus("merged");
+  const other = [...byStatus("unclaimed"), ...byStatus("dropped")];
+  const mergedShow = state.showMerged ? merged : merged.slice(0, 1);
+  const otherShow = state.showDropped ? other : other.filter((t) => t.status === "unclaimed");
+  return `<div class="map">
+    <div class="kicker">发版线</div>
+    <div class="vers">${Object.keys(data).map((id) => {
+      const gg = gateOf(id);
+      const tag = data[id].shipped ? "已发" : (gg.ok ? "可发" : "未合完");
+      return `<button class="ver${id === v ? " is-on" : ""}" data-act="ver" data-id="${id}">${id} · ${tag}</button>`;
+    }).join("")}</div>
+    <section class="gate ${g.ok ? "is-ok" : "is-block"}">
+      <h3>${g.ok ? "可以发" : "还不能发"} · ${v}</h3>
+      ${g.ok
+        ? `<ul><li>声明过的子题都已进 ${v}</li><li>没有无主分叉</li></ul>`
+        : `<ul>
+            ${g.forked.map((t) => `<li>还在任务线 · ${t.title}</li>`).join("")}
+            ${g.pending.map((t) => `<li>${t.status === "stopped" ? "合不进 " + v : "还没进 " + v} · ${t.title}</li>`).join("")}
+            ${g.unclaimed.map((t) => `<li>无主 · ${t.title}</li>`).join("")}
+          </ul>`}
+    </section>
+    <div class="hub">
+      <div><div class="mark">发版线</div><h2>${v}</h2></div>
+      <div>${g.ok ? "子题已进这版" : `${g.forked.length + g.pending.length + g.unclaimed.length} 项还没进 ${v}`}</div>
+    </div>
+    <div class="spine"></div>
+    ${lane("进行中", active, "这版暂时没有活任务")}
+    ${lane("还没进 " + v, pending, "没有待合并的子题")}
+    ${lane("已进这版", mergedShow, "还没有合进来的", merged.length > 1, "fold-merged")}
+    ${!state.showMerged && merged.length > 1 ? `<div class="ghost">还有 ${merged.length - 1} 条已折起</div>` : ""}
+    ${lane("无主 / 不纳入", otherShow, "没有噪音", other.some((t) => t.status === "dropped"), "fold-dropped")}
+  </div>`;
+}
+
+function renderMessy() {
+  return `<div class="kicker">现在的产品</div>
+    <h2>同一条选择器，四件不是一类的事</h2>
+    <p>源头、任务枝、已经合进去的便利贴、更老版本的遗留，全部平铺成「本地」。</p>
+    <div class="picker">
+      <div class="picker-search">搜索分支…</div>
+      ${messyRows.map((n, i) => `<button class="picker-row${i === 5 ? " is-on" : ""}">${n}<span>本地</span></button>`).join("")}
+      <div class="picker-foot">创建分支</div>
+    </div>
+    <div class="callout">Git 不会告诉你谁是孩子。这张名单也没有「还没进 0.0.9」。</div>`;
+}
+
+function render() {
+  document.getElementById("stage").innerHTML = `
+    <section class="pane pane-home">
+      <div class="pane-label">家 · 这条任务要合进哪</div>
+      <div class="pane-body">${renderHome()}</div>
+    </section>
+    <section class="pane pane-radar">
+      <div class="pane-label">雷达 · 还没进发版线</div>
+      <div class="pane-body">${renderRadar()}</div>
+    </section>
+    <section class="pane pane-map">
+      <div class="pane-label">地图 · ${state.version} 还能不能发</div>
+      <div class="pane-body">${renderMap()}</div>
+    </section>`;
+  document.getElementById("messy").innerHTML = renderMessy();
+  document.getElementById("sheet").classList.toggle("is-on", state.showMessy);
+  document.getElementById("messyToggle").classList.toggle("is-on", state.showMessy);
+}
+
+function applyAct(act, id) {
+  const found = id ? taskById(id) : null;
+  const t = found && found.task;
+  if (act === "select" && id) state.selected = id;
+  if (act === "ver") { state.version = id; state.selected = data[id].tasks[0].id; }
+  if (act === "fold-merged") state.showMerged = !state.showMerged;
+  if (act === "fold-dropped") state.showDropped = !state.showDropped;
+  if ((act === "retry" || act === "merge") && t) {
+    t.status = "merged";
+    t.where = `已经在 ${found.version} 上`;
+    t.progress = "已进这版";
+    t.stoppedReason = "";
+    toast("已合并进 " + found.version + " · 三栏一起变了");
+  }
+}
+
+document.getElementById("stage").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  applyAct(btn.dataset.act, btn.dataset.id);
+  render();
+});
+document.getElementById("messyToggle").addEventListener("click", () => {
+  state.showMessy = !state.showMessy;
+  render();
+});
+document.getElementById("sheet").addEventListener("click", (e) => {
+  if (e.target.id === "sheet") { state.showMessy = false; render(); }
+});
+render();
+</script>
+</body>
+</html>

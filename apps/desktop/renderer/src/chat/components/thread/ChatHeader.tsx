@@ -5,6 +5,7 @@ import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
+import { GitBranchGlyph, GitWorktreeGlyph } from '../gitGlyphs';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -39,7 +40,7 @@ export function ChatHeader({
   onOpenTools,
   onOpenAutomationRun,
   onClose,
-  boundBranch = null,
+  taskLine = null,
 }: {
   readonly title: string;
   readonly automationOrigin?: {
@@ -65,7 +66,7 @@ export function ChatHeader({
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   /** When set (e.g. conversation Drawer), render a close control in the main header row. */
   readonly onClose?: () => void;
-  readonly boundBranch?: { readonly label: string; readonly title: string } | null;
+  readonly taskLine?: { readonly label: string; readonly title: string; readonly kind?: string } | null;
 }) {
   const workbench = useWorkbenchOptional();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -192,19 +193,14 @@ export function ChatHeader({
             >
               {displayTitle}
             </span>
-            {boundBranch ? (
+            {taskLine ? (
               <span
-                className="chat-header-branch"
-                title={boundBranch.title}
-                aria-label={isZh ? `绑定分支 ${boundBranch.label}` : `Bound branch ${boundBranch.label}`}
+                className={`chat-header-branch${taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                title={taskLine.title}
+                aria-label={taskLine.title}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="6" y1="3" x2="6" y2="15" />
-                  <circle cx="18" cy="6" r="3" />
-                  <circle cx="6" cy="18" r="3" />
-                  <path d="M18 9a9 9 0 0 1-9 9" />
-                </svg>
-                <span className="chat-header-branch-text">{boundBranch.label}</span>
+                {taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+                <span className="chat-header-branch-text">{taskLine.label}</span>
               </span>
             ) : null}
           </>

@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
 import { contextAccountingModelKey, type LlmSubscriptionQuota, type LocalAccessLevel } from '@peer-agent/protocol';
-import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
+import { effectiveFastMode, supportsFastMode, type RuntimeModelSelection } from '@peer-agent/runtime-node';
 import type { CliUpdateController, CliUpdateStatus } from './cli-update.ts';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { ThemedText, ThemedTextarea } from './themed-primitives.tsx';
 import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
-import { buildTuiHelpSections, resolveTuiCommandInput } from './command-registry.ts';
+import { buildTuiHelpSections, resolveTuiCommandInput, type TuiCommandContext } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
 import { formatPeerVersionLine, resolvePeerCliVersion } from './cli-version.ts';
 import { resolveLeaderKey } from './leader-key.ts';
@@ -229,8 +229,8 @@ function ComposerRunningStatusLabel({
   const startedAtRef = useRef(Date.now());
   const activity = runningActivityField(frame, width);
   const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
-  // Scheme D: generic running is activity + elapsed only. Real exceptional
-  // states keep a label; compacting also shows live percent + progress bar.
+  // Generic running is the stable `working...` label + elapsed only. Real
+  // exceptional states keep a label; compacting also shows live percent + bar.
   const statusLabel = runStatus === 'running'
     ? `· ${elapsed}`
     : runStatus === 'compacting'
@@ -1187,7 +1187,7 @@ function findPendingUserInput(messages: readonly ChatMessage[]): TuiUserInputReq
 }
 
 
-export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, getSessionFastMode, setSessionFastMode, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
@@ -1195,6 +1195,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   readonly languageStore?: TuiLanguageStore;
   readonly themeStore?: TuiThemeStore;
   readonly cliUpdate?: CliUpdateController;
+  readonly getSessionFastMode?: () => boolean;
+  readonly setSessionFastMode?: (fastMode: boolean) => void;
   readonly onQuit: () => void;
 }) {
   const terminal = useTerminalDimensions();
@@ -1223,6 +1225,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const persistence = useMemo(() => createTuiConversationPersistence({
     workspacePath: host.workspaceRoot,
     initialMode: 'chat',
+    initialFastMode: getSessionFastMode?.() === true,
     initialModel: modelSelection?.getSelection() ?? {
       providerId: 'unknown',
       modelId: modelLabel,
@@ -1371,6 +1374,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     readonly providerId: string;
     readonly modelId: string;
   } | null>(null);
+  const [fastMode, setFastMode] = useState(() => getSessionFastMode?.() === true);
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');
@@ -1463,7 +1467,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     ? experience.surface
     : null;
   const activeGoalRunnerStatus = activeSharedGoalPlan?.runner?.status;
-  const goalStatus = activeGoalRunnerStatus === 'paused'
+  const goalStatus: TuiCommandContext['goalStatus'] = activeGoalRunnerStatus === 'paused'
     ? 'paused'
     : activeSharedGoalPlan && (
       activeGoalRunnerStatus === 'running'
@@ -1471,11 +1475,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     )
       ? 'running'
       : 'none';
+  const selectedAuthMethod = selectedModel?.providerId
+    ? resolveSharedAuthMethod({ credentialId: selectedModel.providerId })
+    : null;
+  const fastAvailable = supportsFastMode(selectedAuthMethod);
+  const effectiveSessionFast = effectiveFastMode(selectedAuthMethod, fastMode);
+  const commandContext = useMemo((): TuiCommandContext => (
+    { goalStatus, fastAvailable }
+  ), [fastAvailable, goalStatus]);
   const commandItems = commandSurface
-    ? filterTuiCommands(commandSurface.query, { goalStatus }, locale)
+    ? filterTuiCommands(commandSurface.query, commandContext, locale)
     : [];
   const slashItems = slashSurface
-    ? filterTuiCommands(slashSurface.query, { goalStatus }, locale)
+    ? filterTuiCommands(slashSurface.query, commandContext, locale)
     : [];
   const skillItems = skillSurface
     ? skills.filter((skill) => `${skill.name ?? ''} ${skill.skillId} ${skill.description ?? ''}`.toLowerCase().includes(skillSurface.query.toLowerCase()))
@@ -1499,8 +1511,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     ? experience.surface
     : null;
   const helpSections = useMemo(
-    () => (helpSurface ? buildTuiHelpSections({ goalStatus }, locale) : []),
-    [goalStatus, helpSurface, locale],
+    () => (helpSurface ? buildTuiHelpSections(commandContext, locale) : []),
+    [commandContext, helpSurface, locale],
   );
   useEffect(() => {
     if (!modelSurface) {
@@ -1623,6 +1635,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     locale,
     modelLabel: selectedModelLabel,
     reasoningEffort: selectedModel?.reasoningEffort,
+    fastMode: effectiveSessionFast,
     lifetimeUsage: persistence.getLifetimeUsage(),
     usage: activeUsage,
     lastRequestUsage: snapshot.lastRequestUsage,
@@ -1821,6 +1834,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         setSelectedModel(conversation.modelSelection);
       }
     }
+    const restoredFast = conversation.fastMode === true;
+    setFastMode(restoredFast);
+    setSessionFastMode?.(restoredFast);
     setExperience((current) => escapeFooter({
       ...current,
       mode: conversation.mode,
@@ -1840,7 +1856,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     clearChat: () => {
       const cleared = controller.clear();
       if (cleared) {
-        persistence.startNewConversation(controller.getSnapshot().mode);
+        persistence.startNewConversation(controller.getSnapshot().mode, fastMode);
         setRenderWindowState(createConversationRenderWindowState());
       }
       return cleared;
@@ -1848,7 +1864,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     startNewSession: () => {
       const started = controller.clear();
       if (started) {
-        persistence.startNewConversation(controller.getSnapshot().mode);
+        persistence.startNewConversation(controller.getSnapshot().mode, fastMode);
         setRenderWindowState(createConversationRenderWindowState());
         setComposerDraft('');
         composerRef.current?.clear();
@@ -1897,6 +1913,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       }
       return `Goal is ${runnerStatus}; ${control} is unavailable`;
     },
+    toggleFastMode: () => {
+      if (!fastAvailable) {
+        return locale === 'zh-CN'
+          ? '当前模型不支持 Fast（仅 ChatGPT/Grok OAuth）'
+          : 'Fast is only available for ChatGPT/Grok OAuth';
+      }
+      const next = !fastMode;
+      setFastMode(next);
+      setSessionFastMode?.(next);
+      persistence.syncFastMode(next);
+      if (locale === 'zh-CN') return next ? '已开启 Fast' : '已关闭 Fast';
+      return next ? 'Fast on' : 'Fast off';
+    },
     quit: onQuit,
     showVersion: () => formatPeerVersionLine(resolvePeerCliVersion()),
     setNotice: setCommandNotice,
@@ -1904,7 +1933,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   });
 
   const runSlashCommandInput = (input: string): boolean => {
-    const command = resolveTuiCommandInput(input, { goalStatus }, locale);
+    const command = resolveTuiCommandInput(input, commandContext, locale);
     if (!command) {
       setCommandNotice(`Unknown command: ${input}`);
       return true;
@@ -2018,7 +2047,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         return;
       }
       if (leader.type === 'command') {
-        const command = resolveTuiCommandInput(`/${leader.commandId}`, { goalStatus }, locale);
+        const command = resolveTuiCommandInput(`/${leader.commandId}`, commandContext, locale);
         if (command) {
           runCommand(command);
         } else {

@@ -2,6 +2,34 @@
  * 右侧可展开/收起 + 可拖拽宽度的工作台。一级承载 Plan/Browser/Files/Documents。
  */
 
+/* 根 Workbench 最大化必须在 @layer 外：sidebar.css 的三栏网格是未分层规则，
+   层内 grid-template-columns 压不过侧栏收起/展开，只会把左栏和聊天藏掉、右栏仍停在原宽度。 */
+:root[data-workbench-maximized='true'] .app-layout {
+  grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
+}
+
+:root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.workbench-panel--maximized {
+  width: 100% !important;
+  max-width: none;
+}
+
+/* 全屏拖回仍握着分隔条：视觉保持 100%，内部宽度继续跟手；低于滞回后再退出全屏。 */
+
+/* 拖拽进行中：关掉 width/grid 过渡，并让 Electron <webview> 不再截走 pointerup。
+   必须在 @layer 外，才能压过 sidebar.css 未分层的 grid-template-columns 过渡。 */
+:root[data-workbench-resizing='true'] .app-layout,
+:root[data-workbench-resizing='true'] .workbench-panel {
+  transition: none;
+}
+:root[data-workbench-resizing='true'] .browser-webview {
+  pointer-events: none !important;
+}
+
 @layer components {
   .workbench-panel {
     position: relative;
@@ -20,25 +48,13 @@
     transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
     -webkit-app-region: no-drag;
   }
+  :root[data-workbench-resizing='true'] .workbench-panel {
+    transition: none;
+  }
 
   .workbench-panel:not(.workbench-panel--open) {
     width: 0 !important;
     border-left: none;
-  }
-
-  /* 根 Workbench 最大化：三栏网格只保留 Workbench，左栏与聊天栏让位但保持挂载。 */
-  :root[data-workbench-maximized='true'] .app-layout {
-    grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
-  }
-
-  :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
-    visibility: hidden;
-    pointer-events: none;
-  }
-
-  .workbench-panel--maximized {
-    width: 100% !important;
-    max-width: none;
   }
 
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
@@ -1675,6 +1691,9 @@
   .browser-webview[data-active='true'] {
     visibility: visible;
     pointer-events: auto;
+  }
+  :root[data-workbench-resizing='true'] .browser-webview[data-active='true'] {
+    pointer-events: none;
   }
 
   /* 错误兜底页 */

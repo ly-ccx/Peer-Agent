@@ -117,6 +117,7 @@ export async function runPeerExec(
     accessLevel: ACCESS_TO_LEVEL[options.access],
     toolAllowlist,
     denyInteractiveTools: true,
+    initialFastMode: options.fast,
   });
 
   try {
@@ -174,6 +175,7 @@ export async function runPeerExec(
   const persistence = createTuiConversationPersistence({
     workspacePath: workspaceRoot,
     initialMode: options.mode,
+    initialFastMode: options.fast,
     initialModel: runtime.modelSelection.getSelection(),
     getContextWindow: (selection) => runtime.modelSelection.catalog.find((entry) => (
       entry.providerId === selection.providerId && entry.modelId === selection.modelId
@@ -212,7 +214,7 @@ export async function runPeerExec(
 
   try {
     const sendResult = await controller.send(prompt, {
-      // RuntimePipeline defaults to 64 when maxTurns is omitted.
+      // Match Desktop / interactive TUI: unbounded unless `--max-turns` is set.
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
     });
 

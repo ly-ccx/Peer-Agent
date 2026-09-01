@@ -12,14 +12,11 @@ test('TaskOverview hook sends the current conversation scope to main', async () 
   assert.match(source, /conversationId:\s*conversationId \?\? undefined/);
 });
 
-test('ChatSurface queries only its current conversation and follows page visibility', async () => {
+test('ChatSurface no longer mounts TaskOverview; workbench/sidebar own the projection', async () => {
   const source = await readChatSurface();
-  const hookCall = source.match(/const taskOverviewItems = useTaskOverview\(\{([\s\S]*?)\}\);/)?.[1];
-
-  assert.ok(hookCall, 'ChatSurface should keep TaskOverview as the main-owned projection source');
-  assert.match(hookCall, /enabled:\s*Boolean\(conversationId\)\s*&&\s*isPageActive/);
-  assert.match(hookCall, /conversationId/);
-  assert.doesNotMatch(hookCall, /activeWithinMs:\s*0/);
+  const sidebar = await readFile(new URL('../../chat/components/SidebarWorkbenchCounts.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /useTaskOverview\(/);
+  assert.match(sidebar, /useTaskOverview\(\{ workspacePath: null, includeTerminal: false \}\)/);
 });
 
 test('TaskOverview hook preserves the previous array when projection contents are unchanged', async () => {
@@ -59,4 +56,11 @@ test('visibilitychange resumes with one immediate sync', async () => {
     source,
     /if \(!document\.hidden && pendingVisibleReloadRef\.current\) \{\s*\n\s*pendingVisibleReloadRef\.current = false;\s*\n\s*void reload\(\);/,
   );
+});
+
+
+test('TaskOverview fallback poll is slower than broadcast cadence', async () => {
+  const source = await readHook();
+  assert.match(source, /setInterval\([\s\S]*?15_000\)/);
+  assert.doesNotMatch(source, /setInterval\([\s\S]*?,\s*4000\)/);
 });
