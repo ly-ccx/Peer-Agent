@@ -581,6 +581,31 @@ describe('service templates', () => {
     // glm-5.2 不在常开思考模型名单内，保持 wire 级默认（无按模型 effortMap）。
     assert.equal(resolvedGlm.reasoningEffortMap, undefined);
 
+    // Wire 隔离：默认模型 gpt-5.6-luna（openai-responses）不受 GLM 档位契约影响。
+    const resolvedLuna = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'gpt-5.6-luna',
+    });
+    assert.equal(resolvedLuna.wire, 'openai-responses');
+    assert.equal(resolvedLuna.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+    assert.equal(resolvedLuna.reasoningEffortMap, undefined);
+    assert.equal(resolvedLuna.reasoningDefaultEffort, 'default');
+
+    // Anthropic wire（claude 系）同样不受 GLM profile 影响。
+    assert.equal(resolvedClaude.reasoningEffortMap, undefined);
+
+    // 用户手工配置的 reasoningEffortMap 优先于按模型 profile。
+    const resolvedGlmCustom = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.3-flash',
+      reasoningEffortMap: { default: 'max' },
+    });
+    assert.deepEqual(resolvedGlmCustom.reasoningEffortMap, { default: 'max' });
+
     for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
       const resolved = resolveChannel({
         channelId: CHANNEL_IDS.OPENCODE_GO,
