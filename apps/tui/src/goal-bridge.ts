@@ -59,6 +59,8 @@ const GOAL_ALWAYS_ALLOWED = new Set<string>([
   'browser_type',
   'browser_screenshot',
   'browser_read_dom',
+  'browser_hover',
+  'browser_scroll',
   'request_user_input',
   'local.interaction.request_user_input',
   'request_explorer',

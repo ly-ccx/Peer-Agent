@@ -37,8 +37,10 @@ const CLICK = 'local.web.control.click';
 const TYPE = 'local.web.control.type';
 const SCREENSHOT = 'local.web.control.screenshot';
 const READ_DOM = 'local.web.control.readDom';
+const HOVER = 'local.web.control.hover';
+const SCROLL = 'local.web.control.scroll';
 
-const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM]);
+const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM, HOVER, SCROLL]);
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
@@ -153,6 +155,14 @@ export function buildElementJs(selector, body = 'return el;') {
   return `(() => { ${down} const el = doc.querySelector(${safeCss}); if (!el) return null; ${body} })()`;
 }
 
+const SCROLL_ALIGNMENTS = new Set(['start', 'center', 'end', 'nearest']);
+
+export function normalizeScrollAlignment(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return SCROLL_ALIGNMENTS.has(trimmed) ? trimmed : '';
+}
+
 function buildImagePreview(image) {
   if (!image || typeof image.getSize !== 'function' || typeof image.toDataURL !== 'function') return null;
   const sourceSize = image.getSize();
@@ -238,6 +248,10 @@ function permissionReason(capabilityId, { host, locale }) {
       return zh ? `请求对内嵌浏览器（${host}）截图` : `Requesting to screenshot the in-app browser (${host})`;
     case READ_DOM:
       return zh ? `请求读取内嵌浏览器（${host}）的页面内容` : `Requesting to read the in-app browser DOM (${host})`;
+    case HOVER:
+      return zh ? `请求在内嵌浏览器（${host}）中悬停元素` : `Requesting to hover in the in-app browser (${host})`;
+    case SCROLL:
+      return zh ? `请求滚动内嵌浏览器（${host}）` : `Requesting to scroll the in-app browser (${host})`;
     default:
       return zh ? '请求操控内嵌浏览器' : 'Requesting to control the in-app browser';
   }
@@ -574,6 +588,83 @@ export function createLocalBrowserControlProvider({
         evidenceSummary = zh
           ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : `坐标 (${point.x}, ${point.y})`}。`
           : `Clicked ${selector ? `element "${selector}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+      } else if (capabilityId === HOVER) {
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        let point = { x: Number(args.x), y: Number(args.y) };
+        let locatedBy = 'point';
+        let viewportMeta = {};
+        if (selector) {
+          const located = await wc.executeJavaScript(
+            buildElementJs(selector, `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `),
+            true,
+          );
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
+          locatedBy = 'selector';
+          viewportMeta = normalized;
+          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+        }
+        wc.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+        outputPreview = { status: 'success', action: 'hover', locatedBy, selector: selector || undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        output = { action: 'hover', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器悬停${selector ? `元素「${selector}」` : `坐标 (${point.x}, ${point.y})`}。`
+          : `Hovered ${selector ? `element "${selector}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+      } else if (capabilityId === SCROLL) {
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        const deltaX = Number.isFinite(Number(args.deltaX)) ? Number(args.deltaX) : 0;
+        const deltaY = Number.isFinite(Number(args.deltaY)) ? Number(args.deltaY) : 0;
+        const block = normalizeScrollAlignment(args.block);
+        const inline = normalizeScrollAlignment(args.inline);
+        const useIntoView = Boolean(block || inline);
+        if (!selector && !useIntoView && deltaX === 0 && deltaY === 0) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 selector、deltaX/deltaY 或 block/inline 之一。' : 'Provide a selector, deltaX/deltaY, or block/inline.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        if (selector) await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+        const scrollBody = useIntoView
+          ? `el.scrollIntoView({block:${JSON.stringify(block || 'nearest')},inline:${JSON.stringify(inline || 'nearest')}});`
+          : `const target = el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth ? el : (el.closest && el.closest('*') ? (() => { let n = el; while (n && n !== doc && n !== doc.documentElement) { const s = n.ownerDocument.defaultView.getComputedStyle(n); const oy = s.overflowY; const ox = s.overflowX; if ((oy === 'auto' || oy === 'scroll' || ox === 'auto' || ox === 'scroll') && (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth)) return n; n = n.parentElement; } return doc.scrollingElement || doc.documentElement; })() : el); target.scrollBy(${deltaX}, ${deltaY});`;
+        const viewportBody = useIntoView
+          ? `const el = doc.scrollingElement || doc.documentElement; el.scrollIntoView({block:${JSON.stringify(block || 'nearest')},inline:${JSON.stringify(inline || 'nearest')}});`
+          : `const el = doc.scrollingElement || doc.documentElement; el.scrollBy(${deltaX}, ${deltaY});`;
+        const js = selector
+          ? buildElementJs(selector, `
+              const pickScroller = () => {
+                if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) return el;
+                let n = el.parentElement;
+                while (n && n !== doc && n !== doc.documentElement) {
+                  if (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth) return n;
+                  n = n.parentElement;
+                }
+                return doc.scrollingElement || doc.documentElement;
+              };
+              const scroller = pickScroller();
+              const before = { x: scroller.scrollLeft, y: scroller.scrollTop };
+              ${scrollBody}
+              return { before, after: { x: scroller.scrollLeft, y: scroller.scrollTop }, mode: ${JSON.stringify(useIntoView ? 'intoView' : 'delta')} };
+            `)
+          : `(() => { let doc = document; const el = doc.scrollingElement || doc.documentElement; const before = { x: el.scrollLeft, y: el.scrollTop }; ${viewportBody} const afterEl = doc.scrollingElement || doc.documentElement; return { before, after: { x: afterEl.scrollLeft, y: afterEl.scrollTop }, mode: ${JSON.stringify(useIntoView ? 'intoView' : 'delta')} }; })()`;
+        const scrolled = await wc.executeJavaScript(js, true);
+        if (selector && !scrolled) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const after = scrolled?.after ?? { x: 0, y: 0 };
+        outputPreview = { status: 'success', action: 'scroll', selector: selector || undefined, deltaX, deltaY, block: block || undefined, inline: inline || undefined, mode: scrolled?.mode, after, ...targetIdentity };
+        output = { action: 'scroll', selector: selector || undefined, deltaX, deltaY, mode: scrolled?.mode, after, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已滚动内嵌浏览器${selector ? `元素「${selector}」` : '视口'}${useIntoView ? '（scrollIntoView）' : `（Δx=${deltaX}, Δy=${deltaY}）`}。`
+          : `Scrolled ${selector ? `element "${selector}"` : 'the viewport'} in the in-app browser${useIntoView ? ' via scrollIntoView' : ` by Δx=${deltaX}, Δy=${deltaY}`}.`;
       } else if (capabilityId === TYPE) {
         const text = String(args.text);
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';

@@ -37,3 +37,21 @@ test('browser_open_panel is registered and projected through the local Browser c
     redactSensitive: false,
   });
 });
+
+test('browser_hover and browser_scroll are registered as Desktop-only browser tools', () => {
+  assert.equal(BROWSER_TOOL_NAMES.hover, 'browser_hover');
+  assert.equal(BROWSER_TOOL_NAMES.scroll, 'browser_scroll');
+  assert.equal(BROWSER_CAPABILITY_TO_TOOL['local.web.control.hover'], 'browser_hover');
+  assert.equal(BROWSER_CAPABILITY_TO_TOOL['local.web.control.scroll'], 'browser_scroll');
+
+  const registry = createRuntimeToolRegistry();
+  const hover = registry.getTool('browser_hover');
+  const scroll = registry.getTool('browser_scroll');
+  assert.ok(hover);
+  assert.ok(scroll);
+  assert.equal(hover.capabilityId, 'local.web.control.hover');
+  assert.equal(scroll.capabilityId, 'local.web.control.scroll');
+  assert.ok(hover.inputSchema.properties.selector);
+  assert.ok(scroll.inputSchema.properties.deltaY);
+  assert.ok(scroll.inputSchema.properties.block);
+});

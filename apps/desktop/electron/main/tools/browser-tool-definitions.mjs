@@ -8,7 +8,7 @@ import { DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
  *     → Tool Call(browser_*) → PermissionGrant → Evidence
  *
  * 用途：让 Agent 操控当前会话 Workbench 浏览器的活跃网页标签（<webview>）：
- * 导航、点击、输入、截图、读取 DOM。renderer 在 webview dom-ready 后把
+ * 导航、点击、输入、悬停、滚动、截图、读取 DOM。renderer 在 webview dom-ready 后把
  * getWebContentsId() 上报给 main（见 browser-control-registry.mjs），provider 用
  * webContents.fromId(id) 直接操控同一个 WebContents，操作对用户实时可见。
  *
@@ -24,6 +24,8 @@ export const BROWSER_TOOL_NAMES = Object.freeze({
   type: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.toolName,
   screenshot: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.toolName,
   readDom: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.toolName,
+  hover: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.toolName,
+  scroll: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.toolName,
 });
 
 /**
@@ -37,6 +39,8 @@ export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.capabilityId]: BROWSER_TOOL_NAMES.type,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.capabilityId]: BROWSER_TOOL_NAMES.screenshot,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.capabilityId]: BROWSER_TOOL_NAMES.readDom,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.capabilityId]: BROWSER_TOOL_NAMES.hover,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.capabilityId]: BROWSER_TOOL_NAMES.scroll,
 });
 
 const BROWSER_CONTROL_MODE_SCOPES = Object.freeze(['chat', 'goal']);
@@ -77,6 +81,20 @@ const READ_DOM_PROMPT = [
   '"selector" to scope extraction (defaults to document.body). The extracted content is',
   'stored as a local artifact; only a truncated summary plus an artifact reference is',
   'returned. Use this to understand page structure before clicking or typing.',
+].join(' ');
+
+const HOVER_PROMPT = [
+  'Hover an element in the visible in-app browser. Provide a CSS "selector" to hover the first',
+  'matching element (supports optional frame:N prefix), or "x"/"y" viewport coordinates to hover',
+  'a point. Use this to reveal tooltips or submenus. The hover is dispatched on the same webview',
+  'the user is looking at.',
+].join(' ');
+
+const SCROLL_PROMPT = [
+  'Scroll the visible in-app browser. Provide an optional CSS "selector" to target an element or',
+  'its nearest scrollable ancestor (supports frame:N prefix). Use "deltaX"/"deltaY" for incremental',
+  'scroll, or "block"/"inline" (start|center|end|nearest) to scrollIntoView. Without a selector,',
+  'the document viewport scrolls. Prefer element scroll over whole-page jumps.',
 ].join(' ');
 
 const BROWSER_CONTROL_RUNTIME = Object.freeze({
@@ -236,6 +254,68 @@ function readDomTool() {
   };
 }
 
+function hoverTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.hover,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover),
+    prompt: () => HOVER_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector of the element to hover (first match). Supports optional frame:N prefix.',
+        },
+        x: {
+          type: 'number',
+          description: 'Viewport X coordinate to hover (used when selector is omitted).',
+        },
+        y: {
+          type: 'number',
+          description: 'Viewport Y coordinate to hover (used when selector is omitted).',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
+function scrollTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.scroll,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll),
+    prompt: () => SCROLL_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector of the element or nearest scrollable ancestor. Supports optional frame:N prefix.',
+        },
+        deltaX: {
+          type: 'number',
+          description: 'Horizontal scroll delta in CSS pixels.',
+        },
+        deltaY: {
+          type: 'number',
+          description: 'Vertical scroll delta in CSS pixels.',
+        },
+        block: {
+          type: 'string',
+          description: 'scrollIntoView block alignment: start | center | end | nearest.',
+        },
+        inline: {
+          type: 'string',
+          description: 'scrollIntoView inline alignment: start | center | end | nearest.',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
 export const BROWSER_TOOL_DEFINITIONS = [
   openPanelTool(),
   navigateTool(),
@@ -243,4 +323,6 @@ export const BROWSER_TOOL_DEFINITIONS = [
   typeTool(),
   screenshotTool(),
   readDomTool(),
+  hoverTool(),
+  scrollTool(),
 ];

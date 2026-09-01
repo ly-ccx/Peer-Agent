@@ -1,0 +1,46 @@
+{
+  "capabilityId": "local.web.control.hover",
+  "name": "Browser hover",
+  "description": "Hovers an element (by CSS selector) or a point (by x/y coordinates) in the visible in-app browser the user is watching.",
+  "localizedName": {
+    "zh-CN": "浏览器悬停",
+    "en-US": "Browser hover"
+  },
+  "localizedDescription": {
+    "zh-CN": "在用户眼前可见的内嵌浏览器中，按 CSS 选择器悬停元素，或按 x/y 视口坐标悬停某点，用于触发 tooltip / 子菜单，操作对用户实时可见。",
+    "en-US": "Hovers an element (by CSS selector) or a point (by x/y coordinates) in the visible in-app browser the user is watching, typically to reveal tooltips or submenus."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "CSS selector of the element to hover (first match). Supports optional frame:N prefix."
+      },
+      "x": {
+        "type": "number",
+        "description": "Viewport X coordinate to hover (used when selector is omitted)."
+      },
+      "y": {
+        "type": "number",
+        "description": "Viewport Y coordinate to hover (used when selector is omitted)."
+      }
+    }
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}
