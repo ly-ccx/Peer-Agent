@@ -157,6 +157,144 @@ export function buildElementJs(selector, body = 'return el;') {
   return `(() => { ${down} const el = doc.querySelector(${safeCss}); if (!el) return null; ${body} })()`;
 }
 
+const ROLE_SNAPSHOT_MAX_NODES = 80;
+const ROLE_SNAPSHOT_NAME_MAX = 80;
+const IMPLICIT_ROLES = Object.freeze({
+  A: 'link',
+  BUTTON: 'button',
+  INPUT: null,
+  TEXTAREA: 'textbox',
+  SELECT: 'combobox',
+  SUMMARY: 'button',
+  H1: 'heading',
+  H2: 'heading',
+  H3: 'heading',
+  H4: 'heading',
+  H5: 'heading',
+  H6: 'heading',
+  IMG: 'img',
+  NAV: 'navigation',
+  MAIN: 'main',
+  HEADER: 'banner',
+  FOOTER: 'contentinfo',
+  ASIDE: 'complementary',
+  FORM: 'form',
+  TABLE: 'table',
+  LI: 'listitem',
+  UL: 'list',
+  OL: 'list',
+  OPTION: 'option',
+  LABEL: null,
+});
+const INPUT_ROLES = Object.freeze({
+  button: 'button',
+  submit: 'button',
+  reset: 'button',
+  checkbox: 'checkbox',
+  radio: 'radio',
+  range: 'slider',
+  search: 'searchbox',
+  email: 'textbox',
+  password: 'textbox',
+  tel: 'textbox',
+  url: 'textbox',
+  text: 'textbox',
+  number: 'spinbutton',
+});
+
+const ROLE_SNAPSHOT_COLLECTOR = `function compactCss(el) {
+  if (!el || el.nodeType !== 1) return '';
+  if (el.id && typeof el.id === 'string' && /^[A-Za-z][\\w:-]*$/.test(el.id)) return '#' + el.id;
+  const tag = String(el.tagName || '').toLowerCase();
+  const cls = typeof el.className === 'string'
+    ? el.className.trim().split(/\\s+/).filter((c) => /^[A-Za-z][\\w:-]*$/.test(c)).slice(0, 2)
+    : [];
+  const classPart = cls.length ? '.' + cls.join('.') : '';
+  const type = el.getAttribute && el.getAttribute('type');
+  const typePart = type && /^[A-Za-z0-9_-]+$/.test(type) ? '[type="' + type + '"]' : '';
+  const name = el.getAttribute && el.getAttribute('name');
+  const namePart = name && /^[A-Za-z][\\w:-]*$/.test(name) ? '[name="' + name + '"]' : '';
+  return tag + classPart + typePart + namePart;
+}
+function accessibleName(el, doc, nameMax) {
+  const labelled = el.getAttribute && el.getAttribute('aria-labelledby');
+  if (labelled) {
+    const parts = labelled.split(/\\s+/).map((id) => doc.getElementById(id)?.textContent?.trim()).filter(Boolean);
+    if (parts.length) return parts.join(' ').slice(0, nameMax);
+  }
+  const label = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder'))) || '';
+  if (label) return String(label).trim().slice(0, nameMax);
+  if (el.labels && el.labels[0] && el.labels[0].textContent) return String(el.labels[0].textContent).trim().slice(0, nameMax);
+  const text = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+  return text.slice(0, nameMax);
+}
+function roleOf(el, implicit, inputRoles) {
+  const explicit = el.getAttribute && el.getAttribute('role');
+  if (explicit) return explicit.trim();
+  const tag = el.tagName;
+  if (tag === 'INPUT') {
+    const type = ((el.getAttribute && el.getAttribute('type')) || 'text').toLowerCase();
+    return inputRoles[type] || 'textbox';
+  }
+  if (Object.prototype.hasOwnProperty.call(implicit, tag)) return implicit[tag];
+  return '';
+}
+function collectRoles(root, doc, implicit, inputRoles, nameMax, maxNodes) {
+  const nodes = [];
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  let current = root.nodeType === 1 ? root : walker.nextNode();
+  while (current && nodes.length < maxNodes) {
+    const role = roleOf(current, implicit, inputRoles);
+    if (role) {
+      const r = current.getBoundingClientRect();
+      const href = current.getAttribute && current.getAttribute('href');
+      nodes.push({
+        role,
+        name: accessibleName(current, doc, nameMax),
+        tag: String(current.tagName || '').toLowerCase(),
+        selector: compactCss(current),
+        disabled: Boolean(current.disabled || (current.getAttribute && current.getAttribute('aria-disabled') === 'true')),
+        href: href || undefined,
+        headingLevel: /^H[1-6]$/.test(current.tagName) ? Number(current.tagName.slice(1)) : undefined,
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      });
+    }
+    current = walker.nextNode();
+  }
+  return { count: nodes.length, truncated: Boolean(current), nodes };
+}`;
+
+export function buildRolesSnapshotJs(selector = '', { maxNodes = ROLE_SNAPSHOT_MAX_NODES } = {}) {
+  const limit = Math.max(1, Math.min(200, Math.round(Number(maxNodes) || ROLE_SNAPSHOT_MAX_NODES)));
+  const { framePath, css } = parseFrameSelector(selector || '');
+  const safeCss = JSON.stringify(css);
+  const implicit = JSON.stringify(IMPLICIT_ROLES);
+  const inputRoles = JSON.stringify(INPUT_ROLES);
+  const down = [
+    'let doc = document;',
+    ...framePath.map((i) => {
+      const idx = Number.isInteger(i) ? i : parseInt(i, 10);
+      return `doc = doc.defaultView?.frames[${idx}]?.document || null; if (!doc) return null;`;
+    }),
+  ].join('\n');
+  const scopeLine = css
+    ? `const root = doc.querySelector(${safeCss}); if (!root) return null;`
+    : 'const root = doc.body || doc.documentElement; if (!root) return null;';
+  return `(() => {
+    ${down}
+    ${scopeLine}
+    const IMPLICIT = ${implicit};
+    const INPUT_ROLES = ${inputRoles};
+    const NAME_MAX = ${ROLE_SNAPSHOT_NAME_MAX};
+    const MAX = ${limit};
+    ${ROLE_SNAPSHOT_COLLECTOR}
+    return collectRoles(root, doc, IMPLICIT, INPUT_ROLES, NAME_MAX, MAX);
+  })()`;
+}
+
 const SCROLL_ALIGNMENTS = new Set(['start', 'center', 'end', 'nearest']);
 
 export function normalizeScrollAlignment(value) {
@@ -307,7 +445,7 @@ function createBrowserArtifactStore({ userDataPath }) {
     const raw = String(content ?? '');
     const truncated = raw.length > MAX_ARTIFACT_CHARS;
     const capped = truncated ? `${raw.slice(0, MAX_ARTIFACT_CHARS)}\n...[artifact truncated]` : raw;
-    const ext = format === 'html' ? 'html' : 'txt';
+    const ext = format === 'html' ? 'html' : format === 'roles' ? 'json' : 'txt';
     await writeFile(path.join(dir, `content.${ext}`), capped, 'utf8');
     await writeFile(
       path.join(dir, 'metadata.json'),
@@ -941,34 +1079,55 @@ export function createLocalBrowserControlProvider({
           : `Captured the in-app browser (${size.width}×${size.height}); image stored at ${artifact.artifactRef}.`;
       } else if (capabilityId === READ_DOM) {
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
-        const format = args.format === 'html' ? 'html' : 'text';
-        const prop = format === 'html' ? 'outerHTML' : 'innerText';
-        const expr = selector
-          ? buildElementJs(selector, `return el.${prop};`)
-          : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
-        const dom = await wc.executeJavaScript(expr, true);
-        if (selector && dom == null) {
-          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
-        }
+        const format = args.format === 'html' ? 'html' : args.format === 'roles' ? 'roles' : 'text';
         const actionId = randomUUID();
         const finalUrl = typeof wc.getURL === 'function' ? wc.getURL() : (activeEntry?.url ?? '');
         const title = typeof wc.getTitle === 'function' ? wc.getTitle() : (activeEntry?.title ?? '');
-        const fullText = String(dom ?? '');
+        let fullText = '';
+        let roleCount = 0;
+        let roleTruncated = false;
+        if (format === 'roles') {
+          const snapshot = await wc.executeJavaScript(buildRolesSnapshotJs(selector), true);
+          if (selector && snapshot == null) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+          roleCount = Number.isFinite(snapshot?.count) ? snapshot.count : nodes.length;
+          roleTruncated = Boolean(snapshot?.truncated);
+          fullText = JSON.stringify({ count: roleCount, truncated: roleTruncated, nodes }, null, 2);
+        } else {
+          const prop = format === 'html' ? 'outerHTML' : 'innerText';
+          const expr = selector
+            ? buildElementJs(selector, `return el.${prop};`)
+            : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
+          const dom = await wc.executeJavaScript(expr, true);
+          if (selector && dom == null) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          fullText = String(dom ?? '');
+        }
         const artifact = await store.writeTextArtifact({
           actionId,
           toolCallId: call.toolCallId,
           format,
           content: fullText,
-          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, ...targetIdentity, startedAt, completedAt: nowIso() },
+          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
-        const summary = summarize(fullText);
         const maxChars = Number.isFinite(Number(args.maxChars)) ? Number(args.maxChars) : SUMMARY_MAX_CHARS;
-        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary: summarize(fullText, maxChars), artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated, ...targetIdentity };
-        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, ...targetIdentity };
+        const summarySource = format === 'roles'
+          ? (JSON.parse(fullText).nodes || []).map((n) => `${n.role}${n.name ? ` "${n.name}"` : ''}${n.selector ? ` ${n.selector}` : ''}`).join('\n') || '(no roles)'
+          : fullText;
+        const summary = summarize(summarySource, maxChars);
+        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated || roleTruncated, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity };
+        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity };
         evidenceSummary = zh
-          ? `已读取内嵌浏览器页面（${format}，${fullText.length} 字符），内容已落盘（${artifact.artifactRef}）。`
-          : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`;
+          ? (format === 'roles'
+            ? `已读取内嵌浏览器角色快照（${roleCount} 个节点），内容已落盘（${artifact.artifactRef}）。`
+            : `已读取内嵌浏览器页面（${format}，${fullText.length} 字符），内容已落盘（${artifact.artifactRef}）。`)
+          : (format === 'roles'
+            ? `Read the in-app browser role snapshot (${roleCount} nodes); content stored at ${artifact.artifactRef}.`
+            : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`);
       }
 
       const completedAt = nowIso();

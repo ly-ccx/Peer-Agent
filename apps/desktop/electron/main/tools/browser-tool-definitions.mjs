@@ -81,10 +81,12 @@ const SCREENSHOT_PROMPT = [
 ].join(' ');
 
 const READ_DOM_PROMPT = [
-  'Read text/HTML content from the visible in-app browser DOM. Provide an optional CSS',
-  '"selector" to scope extraction (defaults to document.body). The extracted content is',
-  'stored as a local artifact; only a truncated summary plus an artifact reference is',
-  'returned. Use this to understand page structure before clicking or typing.',
+  'Read content from the visible in-app browser DOM. Provide an optional CSS "selector"',
+  'to scope extraction (defaults to document.body; supports frame:N). Set "format" to',
+  '"text", "html", or "roles". Use format=roles to get a role/name/selector snapshot so',
+  'you can pick elements by accessibility role and name instead of guessing CSS. The',
+  'extracted content is stored as a local artifact; only a truncated summary plus an',
+  'artifact reference is returned.',
 ].join(' ');
 
 const HOVER_PROMPT = [
@@ -260,7 +262,12 @@ function readDomTool() {
       properties: {
         selector: {
           type: 'string',
-          description: 'Optional CSS selector to scope extraction (defaults to document.body).',
+          description: 'Optional CSS selector to scope extraction (defaults to document.body). Supports frame:N prefix.',
+        },
+        format: {
+          type: 'string',
+          enum: ['text', 'html', 'roles'],
+          description: 'text, html, or roles (accessibility snapshot of role/name/selector). Defaults to text.',
         },
         maxChars: {
           type: 'number',

@@ -99,3 +99,11 @@ test('browser_external_* tools are registered as Desktop-only L2 contracts', () 
   assert.equal(registry.getTool('playwright_click'), null);
   assert.equal(open.capabilityId.startsWith('local.web.control.'), false);
 });
+
+test('browser_read_dom declares format=roles for accessibility snapshots', () => {
+  const registry = createRuntimeToolRegistry();
+  const readDom = registry.getTool('browser_read_dom');
+  assert.ok(readDom);
+  assert.deepEqual(readDom.inputSchema.properties.format.enum, ['text', 'html', 'roles']);
+  assert.match(readDom.prompt(), /format=roles|role\/name/i);
+});

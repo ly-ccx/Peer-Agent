@@ -25,6 +25,16 @@ function createActionWebContents() {
     },
     executeJavaScript: async (expr) => {
       scripts.push(expr);
+      if (expr.includes('collectRoles')) {
+        return {
+          count: 2,
+          truncated: false,
+          nodes: [
+            { role: 'button', name: 'Submit', tag: 'button', selector: '#go', disabled: false, x: 10, y: 20, w: 80, h: 24 },
+            { role: 'link', name: 'Home', tag: 'a', selector: 'a.home', disabled: false, href: '/', x: 0, y: 0, w: 40, h: 16 },
+          ],
+        };
+      }
       if (expr.includes('getBoundingClientRect')) {
         return {
           x: 40,
@@ -64,10 +74,25 @@ function actionCall(capabilityId, toolName, args) {
   };
 }
 
-function createProvider(browser) {
+function createArtifactStore() {
+  const texts = [];
+  return {
+    texts,
+    writeTextArtifact: async (entry) => {
+      texts.push(entry);
+      return {
+        artifactRef: `local-browser-artifact://${entry.actionId}`,
+        artifactRefs: [`local-browser-artifact://${entry.actionId}/content`],
+        truncated: false,
+      };
+    },
+  };
+}
+
+function createProvider(browser, artifactStore = {}) {
   return createLocalBrowserControlProvider({
     userDataPath: '/tmp/peer-agent-browser-actions-test',
-    artifactStore: {},
+    artifactStore,
     resolveWebContents: () => browser,
     ensureBrowserReady: async () => {},
   });
@@ -361,4 +386,55 @@ test('drag from selector to selector uses locator chain', async () => {
   assert.equal(execution.result.outputPreview.to.locatedBy, 'selector');
   assert.ok(browser.scripts.some((expr) => expr.includes('querySelector("#src")')));
   assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('querySelector("#dst")')));
+});
+
+test('read_dom format=roles 落角色快照并返回 role/name 摘要', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 51,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-roles',
+    active: true,
+    url: browser.getURL(),
+  });
+  const store = createArtifactStore();
+  const provider = createProvider(browser, store);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.readDom', 'browser_read_dom', { format: 'roles' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.format, 'roles');
+  assert.equal(execution.result.outputPreview.roleCount, 2);
+  assert.match(execution.result.outputPreview.summary, /button "Submit"/);
+  assert.ok(browser.scripts.some((expr) => expr.includes('collectRoles')));
+  assert.equal(store.texts[0].format, 'roles');
+  assert.match(store.texts[0].content, /"role": "button"/);
+});
+
+test('read_dom format=roles 支持 frame:N 前缀', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 52,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-roles-frame',
+    active: true,
+    url: browser.getURL(),
+  });
+  const store = createArtifactStore();
+  const provider = createProvider(browser, store);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.readDom', 'browser_read_dom', { format: 'roles', selector: 'frame:0 #panel' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('querySelector("#panel")')));
 });

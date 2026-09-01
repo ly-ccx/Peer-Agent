@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseFrameSelector, buildElementJs } from './local-browser-control-provider.mjs';
+import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs } from './local-browser-control-provider.mjs';
 
 test('parseFrameSelector 无前缀时返回空 framePath 与原始 css', () => {
   const r = parseFrameSelector('#submit');
@@ -57,4 +57,18 @@ test('buildElementJs 对 selector 做 JSON 转义防注入', () => {
   assert.ok(js.includes(JSON.stringify(`#x"}; return 1; //`)));
   // 不应出现裸的未转义引号拼接成可执行语句
   assert.ok(!js.includes(`querySelector(#x"`) );
+});
+
+test('buildRolesSnapshotJs 无 selector 时扫 document.body', () => {
+  const js = buildRolesSnapshotJs();
+  assert.ok(js.includes('const root = doc.body || doc.documentElement'));
+  assert.ok(js.includes('collectRoles(root, doc, IMPLICIT, INPUT_ROLES, NAME_MAX, MAX)'));
+  assert.ok(js.includes('"BUTTON":"button"') || js.includes('"BUTTON": "button"'));
+});
+
+test('buildRolesSnapshotJs 支持 frame:N 前缀与 selector 转义', () => {
+  const js = buildRolesSnapshotJs('frame:0 #panel"};alert(1)');
+  assert.ok(js.includes('frames[0]'));
+  assert.ok(js.includes('querySelector(' + JSON.stringify('#panel"};alert(1)')));
+  assert.ok(!js.includes('querySelector(#panel"}'));
 });
