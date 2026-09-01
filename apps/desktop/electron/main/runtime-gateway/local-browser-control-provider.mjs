@@ -92,7 +92,7 @@ export function computeViewportPoint(cssPoint, viewport = {}) {
 async function waitForElementStable(wc, selector, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 1500;
   const pollMs = opts.pollMs ?? 120;
-  const js = (el) => `(() => { const e = document.querySelector(${JSON.stringify(el)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })()`;
+  const js = (el) => buildElementJs(el, `const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };`);
   const deadline = Date.now() + timeoutMs;
   let prev = null;
   while (Date.now() < deadline) {
@@ -108,6 +108,49 @@ async function waitForElementStable(wc, selector, opts = {}) {
     await sleep(pollMs);
   }
   return false;
+}
+
+/**
+ * 解析「frame:index 前缀 + CSS selector」。
+ *
+ * 支持形如 `frame:0 #submit`、`frame:1 .btn`。无前缀时 framePath 为空，表示主文档。
+ * 纯函数，产出 { framePath: number[], css: string }，供 buildElementJs 使用。
+ *
+ * @param {string} selector
+ * @returns {{ framePath: number[], css: string }}
+ */
+export function parseFrameSelector(selector) {
+  const framePath = [];
+  let rest = selector ?? '';
+  const match = rest.match(/^frame:(\d+)(?:\s*)(.*)$/);
+  if (match) {
+    framePath.push(Number(match[1]));
+    rest = match[2];
+  }
+  return { framePath, css: rest.trim() };
+}
+
+/**
+ * 生成「在目标文档（可跨 iframe）里 querySelector」的自执行表达式字符串。
+ *
+ * click/type/readDom/waitForElementStable 各处统一用它来定位元素，
+ * 消除裸 document.querySelector 只在主 frame 生效的局限。selector 以 JSON.stringify 转义，
+ * frame index 经 parseInt 校验，防止注入。
+ *
+ * @param {string} selector
+ * @returns {string} 一段可交给 executeJavaScript 的 IIFE 字符串，命中元素或 null
+ */
+export function buildElementJs(selector, body = 'return el;') {
+  const { framePath, css } = parseFrameSelector(selector);
+  const safeCss = JSON.stringify(css);
+  const down = [
+    'let doc = document;',
+    ...framePath.map((i) => {
+      const idx = Number.isInteger(i) ? i : parseInt(i, 10);
+      return `doc = doc.defaultView?.frames[${idx}]?.document || null; if (!doc) return null;`;
+    }),
+  ].join('\n');
+  return `(() => { ${down} const el = doc.querySelector(${safeCss}); if (!el) return null; ${body} })()`;
 }
 
 function buildImagePreview(image) {
@@ -504,7 +547,12 @@ export function createLocalBrowserControlProvider({
         let viewportMeta = {};
         if (selector) {
           const located = await wc.executeJavaScript(
-            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({block:'center',inline:'center'}); const r = el.getBoundingClientRect(); const vv = window.visualViewport; return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 }; })()`,
+            buildElementJs(selector, `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `),
             true,
           );
           if (!located) {
@@ -534,7 +582,7 @@ export function createLocalBrowserControlProvider({
         if (selector) {
           await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
           const focused = await wc.executeJavaScript(
-            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true; })()`,
+            buildElementJs(selector, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true;`),
             true,
           );
           if (!focused) {
@@ -611,7 +659,7 @@ export function createLocalBrowserControlProvider({
         const format = args.format === 'html' ? 'html' : 'text';
         const prop = format === 'html' ? 'outerHTML' : 'innerText';
         const expr = selector
-          ? `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.${prop} : null; })()`
+          ? buildElementJs(selector, `return el.${prop};`)
           : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
         const dom = await wc.executeJavaScript(expr, true);
         if (selector && dom == null) {
