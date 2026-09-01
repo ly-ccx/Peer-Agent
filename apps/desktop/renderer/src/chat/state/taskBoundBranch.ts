@@ -236,6 +236,35 @@ export function isSafeComposerBranchName(value: string): boolean {
   return /^[A-Za-z0-9._/@~^+-]+$/.test(trimmed);
 }
 
+export const DEFAULT_COMPOSER_UPSTREAM_REMOTE = 'origin';
+
+export function defaultComposerUpstreamSpec(localName: string): string {
+  const name = localName.trim();
+  return name ? `${DEFAULT_COMPOSER_UPSTREAM_REMOTE}/${name}` : `${DEFAULT_COMPOSER_UPSTREAM_REMOTE}/`;
+}
+
+export interface ComposerUpstreamSpec {
+  readonly remote: string;
+  readonly branch: string;
+}
+
+/** Parse "origin/feat" or "origin" into the remote + remote branch this local branch will track. */
+export function parseComposerUpstreamSpec(
+  raw: string | null | undefined,
+  localName: string,
+): ComposerUpstreamSpec | null {
+  const local = trimBranch(localName);
+  const trimmed = (raw ?? '').trim();
+  const spec = trimmed || (local ? defaultComposerUpstreamSpec(local) : '');
+  if (!spec) return null;
+  const slash = spec.indexOf('/');
+  const remote = slash === -1 ? spec : spec.slice(0, slash);
+  const branch = (slash === -1 ? '' : spec.slice(slash + 1)) || local || '';
+  if (!isSafeComposerBranchName(remote) || remote.includes('/')) return null;
+  if (!isSafeComposerBranchName(branch)) return null;
+  return { remote, branch };
+}
+
 /** Create-from source: highlighted list row, else current selection, else workspace HEAD. */
 export function resolveComposerCreateSourceBranch(input: {
   readonly highlighted?: string | null;

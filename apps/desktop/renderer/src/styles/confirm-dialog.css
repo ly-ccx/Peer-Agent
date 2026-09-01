@@ -74,6 +74,21 @@
     margin: 0;
   }
 
+  .pa-confirm-field {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .pa-confirm-field-label {
+    display: block;
+    font-size: 12.5px;
+    color: var(--pa-text-secondary);
+  }
+
+  .pa-confirm-field .pa-confirm-input {
+    margin-top: 4px;
+  }
+
   .pa-confirm-actions {
     margin-top: 8px;
     display: flex;
