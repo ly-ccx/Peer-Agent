@@ -66,6 +66,10 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /hasUnarchivedHint/);
   assert.doesNotMatch(source, /GoalStripPlanRow/);
   assert.doesNotMatch(source, /goal-panel-toggle-plans/);
+  assert.doesNotMatch(source, /goal-panel-toggle-label/);
+  assert.doesNotMatch(source, /goal-panel-toggle-summary/);
+  assert.doesNotMatch(source, /个目标计划/);
+  assert.doesNotMatch(source, /Goal plans/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,120}onNextAction\(plan, 'adjust'\)/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,80}mergeIntoSource\(\)/);
   assert.doesNotMatch(source, /重试交回/);

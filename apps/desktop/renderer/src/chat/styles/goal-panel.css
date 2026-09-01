@@ -8,13 +8,13 @@
   margin: 0 0 16px;
 }
 
-/* Docked variant: sits directly above the composer as a collapsible bar.
-   Width/centering must match .chat-composer so the bar lines up with the input. */
+/* Docked variant: sits in the composer chrome row as a compact capsule.
+   Width hugs the current-task copy in both collapsed and hosted/expanded states. */
 .goal-panel--docked {
   gap: 0;
-  width: 100%;
-  max-width: var(--chat-content-max);
-  margin: 0 auto 8px;
+  width: auto;
+  max-width: min(100%, var(--chat-content-max));
+  margin: 0;
   border: 1px solid var(--chrome-hairline, var(--ui-border-subtle, var(--za-line)));
   border-radius: var(--ui-radius-panel, var(--za-radius));
   /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃。
@@ -134,8 +134,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
+  width: auto;
+  max-width: 100%;
+  padding: 6px 10px;
   border: none;
   background: transparent;
   color: var(--za-text-soft);
@@ -148,29 +149,8 @@
   background: var(--ui-surface-hover, var(--za-hover));
 }
 
-.goal-panel-toggle-label {
-  font-weight: 600;
-  color: var(--za-text);
-}
-
-.goal-panel-toggle-summary {
-  color: var(--za-text-muted);
-  font-size: var(--ui-font-meta, 12px);
-}
-
-.goal-panel-toggle-badge {
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: var(--ui-radius-round, 999px);
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
-  font-size: var(--ui-font-caption, 11px);
-  line-height: 18px;
-  text-align: center;
-}
-
 .goal-panel-toggle-caret {
-  margin-left: auto;
+  margin-left: 0;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -189,9 +169,6 @@
 /* caret 固定指向右(›)，作为「点击进入/查看」指示符，不随展开态旋转。
    展开/收起状态由右侧 Workbench 分栏是否出现来表达，无需箭头方向反馈。 */
 
-/* 当折叠态存在活跃计划块时，由 .goal-panel-toggle-active 的 margin-left:auto 负责把
-   「活跃标题 + caret」整组推到最右；此时 caret 不能再各自吸收一份剩余空间（否则两段
-   auto 会把活跃标题夹在中间），改用紧贴 active 的小间距。 */
 .goal-panel-toggle-active + .goal-panel-toggle-caret {
   margin-left: 8px;
 }
@@ -207,7 +184,6 @@
 
 /* A：折叠态在 header 直接显示活跃计划标题 + X/Y 迷你进度。 */
 .goal-panel-toggle-active {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;

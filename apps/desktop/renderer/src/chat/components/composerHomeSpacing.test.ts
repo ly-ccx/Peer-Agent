@@ -12,25 +12,49 @@ test('home control strip keeps a compact left-group gap', () => {
   );
 });
 
-test('source and isolation sit above the composer card', () => {
+test('composer chrome keeps branch left, capsule center, isolation right', () => {
   assert.match(
     styles,
-    /\.composer-context-row \{[\s\S]*?margin:\s*0 auto 4px;/,
+    /\.composer-chrome-row \{[\s\S]*?grid-template-columns:\s*1fr auto 1fr;[\s\S]*?margin:\s*0 auto 8px;/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.composer-chrome-row \{[^}]*justify-content:\s*center;/,
   );
   assert.match(
     styles,
-    /\.chat-composer-wrap--empty-home \.composer-context-row \{[\s\S]*?margin:\s*0 auto 6px;/,
+    /\.composer-chrome-left \{[\s\S]*?justify-self:\s*start;/,
+  );
+  assert.match(
+    styles,
+    /\.composer-chrome-center \{[\s\S]*?justify-self:\s*center;/,
+  );
+  assert.match(
+    styles,
+    /\.composer-chrome-right \{[\s\S]*?justify-self:\s*end;/,
+  );
+  assert.match(
+    styles,
+    /\.composer-chrome-center > \.goal-panel--docked \{[\s\S]*?width:\s*auto;/,
+  );
+  assert.match(
+    styles,
+    /\.chat-composer-wrap--empty-home \.composer-chrome-row \{[\s\S]*?margin:\s*0 auto 8px;/,
   );
 });
 
-test('isolation toggle pins to the right of the context row', () => {
+test('isolation toggle pins to the right chrome column', () => {
   assert.match(
     styles,
-    /\.composer-context-row \.composer-worktree-toggle \{[\s\S]*?margin-left:\s*auto;/,
+    /\.composer-chrome-right \{[\s\S]*?justify-self:\s*end;[\s\S]*?gap:\s*var\(--space-2\);/,
   );
   assert.match(
     styles,
-    /\.chat-composer-wrap--empty-home \.composer-context-row \.composer-worktree-toggle \{[\s\S]*?margin-left:\s*auto;/,
+    /\.composer-chrome-right \.composer-worktree-toggle \{\n  flex-shrink:\s*0;\n\}/,
+  );
+  assert.match(
+    styles,
+    /\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-worktree-toggle \{\n  flex-shrink:\s*0;\n\}/,
   );
 });
 

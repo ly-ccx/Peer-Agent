@@ -147,8 +147,11 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   ]);
 
   assert.match(surface, /workspaceIsGit === false/);
-  assert.match(surface, /workspaceIsGit === true \? \([\s\S]*composer-context-row[\s\S]*<ComposerDraftControls/);
-  assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-chrome-row[\s\S]*composer-chrome-left[\s\S]*composer-chrome-center[\s\S]*composer-chrome-right[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-chrome-left[\s\S]*composer-context-row[\s\S]*composer-chrome-center[\s\S]*GoalPlanPanel/);
+  assert.match(surface, /composer-chrome-right[\s\S]*composer-task-line[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /workspaceIsGit === true && \(gitChrome\.taskLine\?\.kind === 'isolated' \|\| gitChrome\.taskLine\?\.kind === 'source'\)/);
+  assert.match(surface, /gitChrome\.taskLine\.kind !== 'isolated' && gitChrome\.taskLine\.kind !== 'source'/);
   assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
   assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
   assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);

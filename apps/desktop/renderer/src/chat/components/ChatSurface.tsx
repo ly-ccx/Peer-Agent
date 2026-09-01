@@ -2869,7 +2869,6 @@ export function ChatSurface({
       ) : null}
 
       <div className={`chat-composer-wrap${showEmptyHome ? ' chat-composer-wrap--empty-home' : ''}`}>
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -2946,8 +2945,10 @@ export function ChatSurface({
         {/* Empty-home Composer is gated by hasProvider && showEmptyHome. */}
         {!(showEmptyHome && !hasProvider) ? (
         <>
-        {/* 没有 Git 时（workspaceIsGit === false）整排不渲染，不要露出禁用的隔离开关。 */}
-        {workspaceIsGit === true ? (
+        <div className="composer-chrome-row">
+        <div className="composer-chrome-left">
+        {/* 没有 Git 时不渲染分支和隔离开关，不要露出禁用的隔离开关。 */}
+        {workspaceIsGit === true && (gitChrome.workspaceHead || gitChrome.taskLine?.selectable || (gitChrome.taskLine && gitChrome.taskLine.kind !== 'isolated' && gitChrome.taskLine.kind !== 'source') || gitChrome.writeMismatch) ? (
         <div className="composer-context-row">
             {gitChrome.workspaceHead ? (
               <span
@@ -2980,14 +2981,14 @@ export function ChatSurface({
                   },
                 }}
               />
-            ) : gitChrome.taskLine ? (
+            ) : gitChrome.taskLine && gitChrome.taskLine.kind !== 'isolated' && gitChrome.taskLine.kind !== 'source' ? (
               <span
-                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                className="composer-task-line"
                 data-kind={gitChrome.taskLine.kind}
                 title={gitChrome.taskLine.title}
                 aria-label={gitChrome.taskLine.title}
               >
-                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+                <GitBranchGlyph />
                 <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
               </span>
             ) : null}
@@ -3000,6 +3001,25 @@ export function ChatSurface({
                 {gitChrome.writeMismatch.label}
               </span>
             ) : null}
+        </div>
+        ) : null}
+        </div>
+        <div className="composer-chrome-center">
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
+        </div>
+        <div className="composer-chrome-right">
+        {workspaceIsGit === true && (gitChrome.taskLine?.kind === 'isolated' || gitChrome.taskLine?.kind === 'source') ? (
+              <span
+                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
+                data-kind={gitChrome.taskLine.kind}
+                title={gitChrome.taskLine.title}
+                aria-label={gitChrome.taskLine.title}
+              >
+                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
+              </span>
+        ) : null}
+        {workspaceIsGit === true ? (
             <label
               className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
               title={
@@ -3019,8 +3039,9 @@ export function ChatSurface({
               />
               <span>{isZh ? '隔离执行' : 'Worktree'}</span>
             </label>
-        </div>
         ) : null}
+        </div>
+        </div>
         <ComposerDraftControls
           conversationId={conversationId}
           variant={showEmptyHome ? 'home' : 'conversation'}
