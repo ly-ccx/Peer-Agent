@@ -7,6 +7,7 @@ import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mj
 import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
+import { EXTERNAL_BROWSER_TOOL_DEFINITIONS } from './external-browser-tool-definitions.mjs';
 import {
   buildAnthropicToolsFromModelProjection,
   buildAnthropicToolsFromRegistry,
@@ -57,6 +58,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
       ...AUTOMATION_TOOL_DEFINITIONS,
       ...WEB_TOOL_DEFINITIONS,
       ...BROWSER_TOOL_DEFINITIONS,
+      ...EXTERNAL_BROWSER_TOOL_DEFINITIONS,
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
       ...createSkillToolDefinitionsFromStore(skillStore),
     ],

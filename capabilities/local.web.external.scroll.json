@@ -1,0 +1,51 @@
+{
+  "capabilityId": "local.web.external.scroll",
+  "name": "External browser scroll",
+  "description": "Scrolls the temporary Peer-managed Chromium viewport or a target element.",
+  "localizedName": {
+    "zh-CN": "外部浏览器滚动",
+    "en-US": "External browser scroll"
+  },
+  "localizedDescription": {
+    "zh-CN": "滚动临时 Peer 托管 Chromium 的视口或目标元素。",
+    "en-US": "Scrolls the temporary Peer-managed Chromium viewport or a target element."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "Optional CSS selector of the element or nearest scrollable ancestor. Supports frame:N prefix."
+      },
+      "deltaX": {
+        "type": "number",
+        "description": "Horizontal scroll delta in CSS pixels."
+      },
+      "deltaY": {
+        "type": "number",
+        "description": "Vertical scroll delta in CSS pixels."
+      },
+      "block": {
+        "type": "string",
+        "description": "scrollIntoView block alignment: start | center | end | nearest."
+      }
+    },
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

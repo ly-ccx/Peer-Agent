@@ -1,0 +1,40 @@
+{
+  "capabilityId": "local.web.external.click",
+  "name": "External browser click",
+  "description": "Clicks an element by CSS selector in the temporary Peer-managed Chromium session.",
+  "localizedName": {
+    "zh-CN": "外部浏览器点击",
+    "en-US": "External browser click"
+  },
+  "localizedDescription": {
+    "zh-CN": "在临时 Peer 托管 Chromium 中按 CSS 选择器点击元素。",
+    "en-US": "Clicks an element by CSS selector in the temporary Peer-managed Chromium session."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "CSS selector of the element to click (first match). Supports optional frame:N prefix."
+      }
+    },
+    "required": ["selector"],
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

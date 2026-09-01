@@ -1,0 +1,34 @@
+{
+  "capabilityId": "local.web.external.close",
+  "name": "Close external browser",
+  "description": "Stops and destroys the current conversation's temporary Peer-managed Chromium session.",
+  "localizedName": {
+    "zh-CN": "关闭外部浏览器",
+    "en-US": "Close external browser"
+  },
+  "localizedDescription": {
+    "zh-CN": "停止并销毁当前会话的临时 Peer 托管 Chromium 会话。",
+    "en-US": "Stops and destroys the current conversation's temporary Peer-managed Chromium session."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D1_internal",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "summary",
+    "maxChars": 2000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

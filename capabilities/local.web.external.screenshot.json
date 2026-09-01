@@ -1,0 +1,34 @@
+{
+  "capabilityId": "local.web.external.screenshot",
+  "name": "External browser screenshot",
+  "description": "Captures a screenshot of the temporary Peer-managed Chromium page. The PNG is stored as a local artifact.",
+  "localizedName": {
+    "zh-CN": "外部浏览器截图",
+    "en-US": "External browser screenshot"
+  },
+  "localizedDescription": {
+    "zh-CN": "截取临时 Peer 托管 Chromium 当前页面，PNG 落本地 artifact。",
+    "en-US": "Captures a screenshot of the temporary Peer-managed Chromium page. The PNG is stored as a local artifact."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

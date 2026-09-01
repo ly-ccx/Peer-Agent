@@ -5,6 +5,10 @@ import {
   BROWSER_CAPABILITY_TO_TOOL,
   BROWSER_TOOL_NAMES,
 } from './browser-tool-definitions.mjs';
+import {
+  EXTERNAL_BROWSER_CAPABILITY_TO_TOOL,
+  EXTERNAL_BROWSER_TOOL_NAMES,
+} from './external-browser-tool-definitions.mjs';
 import { createRuntimeProjectionFromToolRegistry } from './runtime-projection-tool-materializer.mjs';
 
 test('browser_open_panel is registered and projected through the local Browser capability', () => {
@@ -72,4 +76,26 @@ test('browser_key and browser_drag are registered as Desktop-only browser tools'
   assert.ok(key.inputSchema.properties.keys);
   assert.ok(drag.inputSchema.properties.fromSelector);
   assert.ok(drag.inputSchema.properties.toX);
+});
+
+test('browser_external_* tools are registered as Desktop-only L2 contracts', () => {
+  assert.equal(EXTERNAL_BROWSER_TOOL_NAMES.open, 'browser_external_open');
+  assert.equal(EXTERNAL_BROWSER_CAPABILITY_TO_TOOL['local.web.external.open'], 'browser_external_open');
+  assert.equal(EXTERNAL_BROWSER_CAPABILITY_TO_TOOL['local.web.external.readDom'], 'browser_external_read_dom');
+
+  const registry = createRuntimeToolRegistry();
+  const open = registry.getTool('browser_external_open');
+  const click = registry.getTool('browser_external_click');
+  const screenshot = registry.getTool('browser_external_screenshot');
+  assert.ok(open);
+  assert.ok(click);
+  assert.ok(screenshot);
+  assert.equal(open.capabilityId, 'local.web.external.open');
+  assert.equal(click.capabilityId, 'local.web.external.click');
+  assert.equal(open.runtime.adapter, 'runtime-gateway.local-external-browser-provider');
+  assert.ok(click.inputSchema.properties.selector);
+  assert.equal(registry.getTool('browser_external_download'), null);
+  assert.equal(registry.getTool('browser_external_dialog'), null);
+  assert.equal(registry.getTool('playwright_click'), null);
+  assert.equal(open.capabilityId.startsWith('local.web.control.'), false);
 });
