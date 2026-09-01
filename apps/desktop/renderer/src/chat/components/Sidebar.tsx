@@ -22,10 +22,12 @@ import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import { countWorkbenchInbox } from '../state/workbenchInboxCounts';
 import { groupTasksByWorkspace } from '../state/groupTasksByWorkspace';
 import {
+  emptyWorkspaceTreeToggles,
   isWorkspaceTaskTreeOpen,
   nextWorkspaceTreeToggles,
   openWorkspaceTreeToggles,
   UNASSIGNED_WORKSPACE_KEY,
+  type WorkspaceTreeToggles,
 } from '../state/workspaceTaskTree';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
@@ -262,7 +264,7 @@ export function Sidebar({
   );
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   const [, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
-  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<ReadonlySet<string>>(() => new Set());
+  const [workspaceTreeToggles, setWorkspaceTreeToggles] = useState<WorkspaceTreeToggles>(() => emptyWorkspaceTreeToggles());
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
@@ -315,8 +317,8 @@ export function Sidebar({
     await ensureWorkspaceActive(wsPath);
   }, [ensureWorkspaceActive, onOpenWorkspaceHome]);
 
-  const toggleWorkspaceTree = useCallback((wsPath: string) => {
-    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath));
+  const toggleWorkspaceTree = useCallback((wsPath: string, currentlyOpen: boolean) => {
+    setWorkspaceTreeToggles((current) => nextWorkspaceTreeToggles(current, wsPath, currentlyOpen));
   }, []);
 
   const handleAddWorkspace = useCallback(async () => {
@@ -694,7 +696,7 @@ export function Sidebar({
 
   const isUnassignedOpen = isWorkspaceTaskTreeOpen({
     path: UNASSIGNED_WORKSPACE_KEY,
-    toggled: workspaceTreeToggles,
+    toggles: workspaceTreeToggles,
     activeWorkspace,
     focusedWorkspace,
   });
@@ -814,7 +816,7 @@ export function Sidebar({
             const workspaceTasks = sortWorkspaceTasks(groupedTasks.byPath.get(ws.path) ?? [], isArchivedView);
             const isTreeOpen = isWorkspaceTaskTreeOpen({
               path: ws.path,
-              toggled: workspaceTreeToggles,
+              toggles: workspaceTreeToggles,
               activeWorkspace,
               focusedWorkspace,
             });
@@ -857,7 +859,7 @@ export function Sidebar({
                         : (isZh ? `展开 ${ws.name}` : `Expand ${ws.name}`)}
                       onClick={(event) => {
                         event.stopPropagation();
-                        toggleWorkspaceTree(ws.path);
+                        toggleWorkspaceTree(ws.path, isTreeOpen);
                       }}
                     >
                       <svg
@@ -957,7 +959,7 @@ export function Sidebar({
                     : (isZh ? '展开未归属' : 'Expand unassigned')}
                   onClick={(event) => {
                     event.stopPropagation();
-                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY);
+                    toggleWorkspaceTree(UNASSIGNED_WORKSPACE_KEY, isUnassignedOpen);
                   }}
                 >
                   <svg
