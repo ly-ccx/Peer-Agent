@@ -116,6 +116,24 @@ const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.i
 // 向后兼容别名:历史调用/测试以 FALLBACK_MODELS 引用同一份清单。
 const FALLBACK_MODELS = SUBSCRIPTION_CATALOG;
 
+// DeepSeek 官方静态目录兜底。
+// 事实: DeepSeek 的 Anthropic 兼容平面没有 /v1/models,模型目录只挂在
+// OpenAI 兼容平面;目录远程失败(404/断网等)时用它兜底,官方仅此两款公开模型。
+const DEEPSEEK_FALLBACK_CATALOG = Object.freeze([
+  Object.freeze({
+    id: 'deepseek-chat',
+    label: 'DeepSeek Chat',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+  }),
+  Object.freeze({
+    id: 'deepseek-reasoner',
+    label: 'DeepSeek Reasoner',
+    contextWindow: 128_000,
+    maxOutputTokens: 64_000,
+  }),
+]);
+
 // 订阅 codex 端点真正可用的模型前缀。仅 gpt-5 家族。
 function isSubscriptionUsableModel(id) {
   if (typeof id !== 'string') return false;
@@ -261,7 +279,9 @@ function normalizeApiModelList(data, wire) {
  * 仅剔除只对 POST 有意义的 Content-Type。拉取成功返回 source='remote'。
  *
  * @param {{ baseUrl?: string, headers?: Record<string,string>, wire?: string,
- *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch }} params
+ *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch,
+ *           modelCatalog?: { wire?: string, baseUrl?: string,
+ *                            headers?: Record<string,string>, fallbackCatalog?: Array<{id:string,label:string}> } }} params
  * @returns {Promise<{ models: Array<{id:string,label:string}>, source: 'remote' }>}
  */
 export async function listOpenAICompatibleModels({
@@ -272,7 +292,19 @@ export async function listOpenAICompatibleModels({
   timeoutMs = 15000,
   fetchImpl,
   registryFetchImpl,
+  modelCatalog,
 } = {}) {
+  if (modelCatalog) {
+    return listModelCatalogForChannel({
+      baseUrl,
+      wire,
+      apiKey,
+      timeoutMs,
+      fetchImpl,
+      registryFetchImpl,
+      modelCatalog,
+    });
+  }
   const doFetch = fetchImpl || fetchWithConnectionRecovery;
   const root = String(baseUrl || '').replace(/\/+$/, '');
   if (!root) throw new Error('base_url_not_configured');
@@ -312,6 +344,50 @@ export async function listOpenAICompatibleModels({
     : await fetchModelsDevRegistry({ fetchImpl: registryFetchImpl });
   const models = enrichModelsWithRegistry(providerModels, registry);
   return { models, source: 'remote' };
+}
+
+/**
+ * 渠道感知的模型目录统一入口。
+ *
+ * - requestConfig.modelCatalog 存在(渠道声明了目录平面覆盖,如 DeepSeek):
+ *   用覆盖的 wire/baseUrl/headers 拉远程目录,失败时回退该渠道的静态目录
+ *   (返回 source='fallback' 且保留 error 供诊断)。
+ * - modelCatalog 不存在:与历史一致直接走 listOpenAICompatibleModels,
+ *   失败原样抛错,不引入兜底。
+ *
+ * @param {{ baseUrl?: string, wire?: string, apiKey?: string, timeoutMs?: number,
+ *           fetchImpl?: typeof fetch, registryFetchImpl?: typeof fetch,
+ *           modelCatalog?: { channelId?: string, wire?: string, baseUrl?: string,
+ *                            headers?: Record<string,string>,
+ *                            fallbackCatalog?: Array<{id:string,label:string}> } }} requestConfig
+ * @returns {Promise<{ models: Array<{id:string,label:string}>,
+ *                     source: 'remote'|'fallback', error?: string }>}
+ */
+export async function listModelCatalogForChannel(requestConfig = {}) {
+  const override = requestConfig.modelCatalog;
+  if (!override) {
+    return listOpenAICompatibleModels(requestConfig);
+  }
+  try {
+    return await listOpenAICompatibleModels({
+      ...requestConfig,
+      wire: override.wire ?? requestConfig.wire,
+      baseUrl: override.baseUrl ?? requestConfig.baseUrl,
+      headers: override.headers ?? requestConfig.headers,
+      modelCatalog: undefined,
+    });
+  } catch (error) {
+    const fallbackCatalog = override.fallbackCatalog
+      ?? (override.channelId === 'deepseek' ? DEEPSEEK_FALLBACK_CATALOG : undefined);
+    if (!Array.isArray(fallbackCatalog) || fallbackCatalog.length === 0) {
+      throw error;
+    }
+    return {
+      models: fallbackCatalog.map((model) => ({ ...model })),
+      source: 'fallback',
+      error: error?.message || 'models_list_failed',
+    };
+  }
 }
 
 export {

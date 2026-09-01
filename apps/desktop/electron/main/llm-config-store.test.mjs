@@ -1730,3 +1730,41 @@ test('updateProvider rejects model id that already exists in the same group', ()
   assert.equal(same.model, 'model-a');
   assert.equal(same.modelLabel, 'A');
 }));
+
+test('getApiKeyRequestConfig keeps the chat plane and appends the DeepSeek catalog plane override', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const deepseek = store.addProvider({
+    provider: 'anthropic',
+    channelId: 'deepseek',
+    authMethod: 'api_key',
+    apiKey: 'deepseek-test-key',
+  });
+  const config = store.getApiKeyRequestConfig(deepseek.id);
+  // 对话平面不变：Anthropic 兼容端点 + x-api-key。
+  assert.equal(config.wire, 'anthropic-messages');
+  assert.equal(config.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.equal(config.headers['x-api-key'], 'deepseek-test-key');
+  // 目录平面覆盖：OpenAI 兼容端点 + Bearer。
+  assert.deepEqual(config.modelCatalog, {
+    channelId: 'deepseek',
+    wire: 'openai-chat',
+    baseUrl: 'https://api.deepseek.com',
+    headers: { Authorization: 'Bearer deepseek-test-key' },
+  });
+}));
+
+test('getApiKeyRequestConfig leaves catalog config untouched for channels without an override', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const gateway = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'gateway-test-key',
+    baseUrl: 'https://gateway.example/v1',
+    model: 'model-a',
+  });
+  const config = store.getApiKeyRequestConfig(gateway.id);
+  assert.equal(config.wire, 'openai-chat');
+  assert.equal(config.baseUrl, 'https://gateway.example/v1');
+  assert.equal(config.headers.Authorization, 'Bearer gateway-test-key');
+  assert.equal(config.modelCatalog, undefined);
+}));

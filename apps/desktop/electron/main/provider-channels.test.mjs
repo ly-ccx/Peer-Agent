@@ -5,6 +5,7 @@ import {
   CHANNEL_IDS,
   listChannelDescriptors,
   resolveChannel,
+  resolveModelCatalogRequestConfig,
   validateCustomHeaders,
   listServiceTemplates,
   resolveServiceTemplateId,
@@ -656,5 +657,48 @@ describe('service templates', () => {
     });
     assert.equal(forced.wire, 'openai-responses');
     assert.equal(forced.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+  });
+
+  it('keeps DeepSeek model catalog on the OpenAI plane while chat stays on the Anthropic plane', () => {
+    const chat = resolveChannel({
+      channelId: CHANNEL_IDS.DEEPSEEK,
+      authMethod: 'api_key',
+      apiKey: 'deepseek-test-key',
+    });
+    assert.equal(chat.wire, 'anthropic-messages');
+    assert.equal(chat.baseUrl, 'https://api.deepseek.com/anthropic');
+    assert.equal(chat.headers['x-api-key'], 'deepseek-test-key');
+
+    const catalog = resolveModelCatalogRequestConfig({
+      channelId: CHANNEL_IDS.DEEPSEEK,
+      authMethod: 'api_key',
+      apiKey: 'deepseek-test-key',
+    });
+    assert.equal(catalog.wire, 'openai-chat');
+    assert.equal(catalog.baseUrl, 'https://api.deepseek.com');
+    assert.deepEqual(catalog.headers, { Authorization: 'Bearer deepseek-test-key' });
+    assert.equal(catalog.modelCatalogOverride, true);
+    assert.equal(catalog.channelId, CHANNEL_IDS.DEEPSEEK);
+    // catalog 覆盖只影响模型目录；对话请求配置保持 Anthropic 平面。
+    assert.notEqual(catalog.baseUrl, chat.baseUrl);
+  });
+
+  it('keeps non-overridden channel catalog config aligned with the chat plane', () => {
+    const chat = resolveChannel({
+      channelId: CHANNEL_IDS.OPENAI,
+      authMethod: 'api_key',
+      apiKey: 'openai-test-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    const catalog = resolveModelCatalogRequestConfig({
+      channelId: CHANNEL_IDS.OPENAI,
+      authMethod: 'api_key',
+      apiKey: 'openai-test-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    assert.equal(catalog.wire, chat.wire);
+    assert.equal(catalog.baseUrl, chat.baseUrl);
+    assert.deepEqual(catalog.headers, chat.headers);
+    assert.equal(catalog.modelCatalogOverride, false);
   });
 });

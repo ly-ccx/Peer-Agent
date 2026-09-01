@@ -42,6 +42,13 @@ export const CHANNEL_IDS = {
 export const DEEPSEEK_ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic';
 export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-chat';
 
+/**
+ * DeepSeek OpenAI 兼容平面(模型目录唯一入口)。
+ * 文档: https://api-docs.deepseek.com/zh-cn/api/list-models
+ * Anthropic 兼容平面只实现对话端点,没有 /v1/models,列模型必须走该平面。
+ */
+export const DEEPSEEK_OPENAI_BASE_URL = 'https://api.deepseek.com';
+
 /** GLM Coding Plan Anthropic-compatible endpoints (region-specific; keys are not interchangeable). */
 export const GLM_CODING_PLAN_CN_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
 export const GLM_CODING_PLAN_GLOBAL_BASE_URL = 'https://api.z.ai/api/anthropic';
@@ -161,6 +168,9 @@ const CHANNEL_DESCRIPTORS = {
     allowedWires: ['anthropic-messages'],
     authMethods: { api_key: { wire: 'anthropic-messages' } },
     defaults: { baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL, model: DEEPSEEK_DEFAULT_MODEL },
+    // 模型目录与对话分离：目录走 OpenAI 兼容平面(GET /models + Bearer)，
+    // 对话仍走 Anthropic 兼容平面(/anthropic/v1/messages)。
+    modelCatalog: { wire: 'openai-chat', baseUrl: DEEPSEEK_OPENAI_BASE_URL },
     capabilities: {
       reasoning: {
         supported: true,
@@ -1550,5 +1560,53 @@ export function resolveChannel(config = {}) {
     reasoningDefaultEffort: capabilities.reasoning?.defaultEffort || undefined,
     supportsReasoning: Boolean(capabilities.reasoning?.supported),
     supportsPromptCaching: capabilities.promptCache !== false,
+  };
+}
+
+// 目录平面各自的「最小 GET 鉴权头」。目录请求是只读 GET，
+// 不要携带对话平面的 Content-Type / anthropic-version 等 POST 专用头。
+const MODEL_CATALOG_WIRE_HEADERS = Object.freeze({
+  'openai-chat': (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
+  'anthropic-messages': (apiKey) => ({
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+  }),
+  gemini: () => ({}),
+});
+
+/**
+ * 渠道的「模型目录」请求配置。
+ * 默认复用对话平面(wire/baseUrl + requiredHeadersFor 结果)，行为与历史一致；
+ * descriptor.modelCatalog 声明的渠道(如 DeepSeek)切到目录平面，用该平面的最小鉴权头发 GET。
+ * 仅用于模型目录；对话请求必须继续使用 resolveChannel() 的结果。
+ *
+ * @returns {{ channelId: string, wire: string, baseUrl: string,
+ *             headers: Record<string,string>, fallbackCatalog?: Array<{id:string,label:string}>,
+ *             modelCatalogOverride: boolean }}
+ */
+export function resolveModelCatalogRequestConfig(config = {}) {
+  const resolved = resolveChannel(config);
+  const override = resolved.descriptor?.modelCatalog;
+  if (!override) {
+    return {
+      channelId: resolved.channelId,
+      wire: resolved.wire,
+      baseUrl: resolved.baseUrl,
+      headers: resolved.headers,
+      modelCatalogOverride: false,
+    };
+  }
+  const wire = override.wire || resolved.wire;
+  const buildHeaders = MODEL_CATALOG_WIRE_HEADERS[wire];
+  if (typeof buildHeaders !== 'function') {
+    throw new Error(`unsupported_model_catalog_wire:${resolved.channelId}:${wire}`);
+  }
+  return {
+    channelId: resolved.channelId,
+    wire,
+    baseUrl: override.baseUrl || resolved.baseUrl,
+    headers: buildHeaders(config.apiKey ?? ''),
+    fallbackCatalog: override.fallbackCatalog,
+    modelCatalogOverride: true,
   };
 }

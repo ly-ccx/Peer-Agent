@@ -39,6 +39,7 @@ import {
   inferChannelId,
   legacyProviderForWire,
   resolveChannel,
+  resolveModelCatalogRequestConfig,
   resolveServiceTemplateId,
   validateCustomHeaders,
 } from './provider-channels.mjs';
@@ -1498,11 +1499,22 @@ export function createLlmConfigStore({
     const apiKey = readApiKey(item);
     if (!apiKey) return null;
     const resolved = resolveChannel({ ...item, apiKey });
+    const catalogResolved = resolveModelCatalogRequestConfig({ ...item, apiKey });
     return {
       wire: resolved.wire,
       baseUrl: resolved.baseUrl,
       headers: resolved.headers,
       apiKey,
+      // 渠道声明的目录平面覆盖(如 DeepSeek 走 OpenAI 兼容平面拉目录)；
+      // 无覆盖的渠道为 undefined，目录行为保持历史不变。
+      modelCatalog: catalogResolved.modelCatalogOverride
+        ? {
+            channelId: catalogResolved.channelId,
+            wire: catalogResolved.wire,
+            baseUrl: catalogResolved.baseUrl,
+            headers: catalogResolved.headers,
+          }
+        : undefined,
     };
   }
 

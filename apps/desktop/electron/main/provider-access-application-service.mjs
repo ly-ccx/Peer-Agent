@@ -1,7 +1,7 @@
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
-import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
+import { listSubscriptionModels, listModelCatalogForChannel } from './provider-adapters/openai-model-catalog.mjs';
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
 import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
@@ -21,7 +21,7 @@ const DEFAULT_OPERATIONS = Object.freeze({
   ensureFreshGoogleTokens,
   ensureFreshGrokTokens,
   listSubscriptionModels,
-  listOpenAICompatibleModels,
+  listModelCatalogForChannel,
   listGrokBuildModels,
   listGeminiModels,
   preferGeminiModel,
@@ -214,8 +214,10 @@ export function createProviderAccessApplicationService({
       const requestConfig = ports.getApiKeyRequestConfig(id);
       if (!requestConfig) return { success: false, models: [], error: 'api_key_not_configured' };
       try {
-        const { models, source } = await ops.listOpenAICompatibleModels(requestConfig);
-        return { success: true, models, source };
+        // 渠道声明目录平面覆盖(如 DeepSeek)时由统一入口切平面并按需兜底；
+        // 其余渠道与历史行为一致，失败原样报错。
+        const { models, source, error } = await ops.listModelCatalogForChannel(requestConfig);
+        return { success: true, models, source, ...(error ? { error } : {}) };
       } catch (error) {
         return { success: false, models: [], error: error?.message || 'models_list_failed' };
       }
@@ -256,13 +258,15 @@ export function createProviderAccessApplicationService({
         apiKey: config.apiKey,
         customHeaders: config.customHeaders,
       });
-      const { models, source } = await ops.listOpenAICompatibleModels({
+      const { models, source, error } = await ops.listModelCatalogForChannel({
         baseUrl: resolved.baseUrl,
         headers: resolved.headers,
         wire: resolved.wire,
         apiKey: config.apiKey,
+        // 表单模式没有已落盘渠道上下文，走历史纯远程行为(失败即报错)。
+        modelCatalog: undefined,
       });
-      return { success: true, models, source };
+      return { success: true, models, source, ...(error ? { error } : {}) };
     } catch (error) {
       return { success: false, models: [], error: error?.message || 'models_fetch_failed' };
     }
