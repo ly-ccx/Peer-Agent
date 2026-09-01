@@ -557,6 +557,30 @@ describe('service templates', () => {
     assert.equal(resolvedGlm.headers.Authorization, 'Bearer go-key');
     assert.equal(resolvedGlm.capabilities.reasoning.paramStyle, 'openai-effort');
 
+    // GLM-5.3 系是常开思考模型（上游 400 [1210]：仅接受 low/high/max）：
+    // 按模型档位契约覆盖 wire 级默认，off/default 收敛为 low，xhigh 收敛为 max。
+    const resolvedGlmFlash = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.3-flash',
+    });
+    assert.equal(resolvedGlmFlash.wire, 'openai-chat');
+    assert.deepEqual(resolvedGlmFlash.reasoningEffortMap, {
+      off: 'low',
+      low: 'low',
+      default: 'low',
+      medium: 'high',
+      high: 'high',
+      max: 'max',
+      xhigh: 'max',
+    });
+    assert.deepEqual(resolvedGlmFlash.reasoningEffortLevels, ['off', 'low', 'default', 'high', 'xhigh']);
+    assert.equal(resolvedGlmFlash.reasoningDefaultEffort, 'low');
+
+    // glm-5.2 不在常开思考模型名单内，保持 wire 级默认（无按模型 effortMap）。
+    assert.equal(resolvedGlm.reasoningEffortMap, undefined);
+
     for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
       const resolved = resolveChannel({
         channelId: CHANNEL_IDS.OPENCODE_GO,

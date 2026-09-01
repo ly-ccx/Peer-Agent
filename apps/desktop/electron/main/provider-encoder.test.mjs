@@ -160,6 +160,39 @@ describe('Provider message encoders', () => {
     assert.equal(plainOff.reasoning_effort, undefined);
   });
 
+  it('maps GLM-5.3 always-on thinking efforts to upstream low/high/max contract', () => {
+    // OpenCode Go glm-5.3-flash：思考不可关闭（400 [1210]），仅接受 low/high/max。
+    const glmMap = {
+      off: 'low',
+      low: 'low',
+      default: 'low',
+      medium: 'high',
+      high: 'high',
+      max: 'max',
+      xhigh: 'max',
+    };
+    const make = (effort) => encodeOpenAIChatRequest({
+      model: 'glm-5.3-flash',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort,
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+      reasoningEffortMap: glmMap,
+    });
+
+    // off/default 收敛为 low（最省思考），不出现“省略字段→上游默认”的行为。
+    assert.equal(make('off').reasoning_effort, 'low');
+    assert.equal(make('low').reasoning_effort, 'low');
+    assert.equal(make('default').reasoning_effort, 'low');
+    assert.equal(make('high').reasoning_effort, 'high');
+    // xhigh 收敛为上游顶档 max，杜绝非法档位直发。
+    assert.equal(make('xhigh').reasoning_effort, 'max');
+    // 全档位发出的值只能是上游契约 {low, high, max}。
+    const emitted = new Set(['off', 'low', 'default', 'high', 'xhigh'].map((e) => make(e).reasoning_effort));
+    assert.deepEqual([...emitted].sort(), ['high', 'low', 'max']);
+  });
+
   it('maps max output tokens to the OpenAI Responses request field', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'gpt-test',
