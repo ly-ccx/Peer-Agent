@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
+  defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
   isInternalIsolationBranch,
+  parseComposerUpstreamSpec,
   planComposerGitChrome,
   resolveComposerCreateSourceBranch,
   sameComposerBranchRef,
@@ -272,4 +274,19 @@ test('create-from source prefers the highlighted list row over current selection
     }),
     '0.0.7',
   );
+});
+
+test('create-branch upstream defaults to origin plus the local name', () => {
+  assert.equal(defaultComposerUpstreamSpec('0.0.11'), 'origin/0.0.11');
+  assert.deepEqual(parseComposerUpstreamSpec('', '0.0.11'), { remote: 'origin', branch: '0.0.11' });
+  assert.deepEqual(parseComposerUpstreamSpec('origin/0.0.12', '0.0.11'), {
+    remote: 'origin',
+    branch: '0.0.12',
+  });
+  assert.deepEqual(parseComposerUpstreamSpec('upstream', 'release'), {
+    remote: 'upstream',
+    branch: 'release',
+  });
+  assert.equal(parseComposerUpstreamSpec('origin/--bad', '0.0.11'), null);
+  assert.equal(parseComposerUpstreamSpec('origin/has space', '0.0.11'), null);
 });

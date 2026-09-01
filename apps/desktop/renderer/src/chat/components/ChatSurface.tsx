@@ -52,8 +52,10 @@ import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '
 import {
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
+  defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
   isSafeComposerBranchName,
+  parseComposerUpstreamSpec,
   planComposerGitChrome,
   resolveComposerCreateSourceBranch,
   type TaskDeliveryLine,
@@ -566,6 +568,7 @@ export function ChatSurface({
     readonly source: string;
     readonly name: string;
     readonly push: boolean;
+    readonly upstream: string;
   } | null>(null);
   const [branchPushNotice, setBranchPushNotice] = useState<{
     readonly branchName: string;
@@ -2490,10 +2493,18 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
-  const handleCreateBoundBranch = useCallback((rawName: string, sourceBranch?: string | null, push?: boolean) => {
+  const handleCreateBoundBranch = useCallback((
+    rawName: string,
+    sourceBranch?: string | null,
+    push?: boolean,
+    rawUpstream?: string | null,
+  ) => {
     const name = rawName.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
     if (!isSafeComposerBranchName(name)) return;
+    const shouldPush = push !== false;
+    const upstream = shouldPush ? parseComposerUpstreamSpec(rawUpstream, name) : null;
+    if (shouldPush && !upstream) return;
     const startPoint = resolveComposerCreateSourceBranch({
       highlighted: sourceBranch,
       selected: gitChrome.taskLine?.value,
@@ -2503,7 +2514,9 @@ export function ChatSurface({
       workspaceRoot: workspacePath,
       name,
       startPoint,
-      push: push !== false,
+      push: shouldPush,
+      upstreamRemote: upstream?.remote,
+      upstreamBranch: upstream?.branch,
     }).then((created) => {
       if (created?.ok !== true) return;
       if (push !== false && created.pushed === false) {
@@ -2533,7 +2546,7 @@ export function ChatSurface({
       currentHead: workspaceGit?.current,
     });
     if (!source) return;
-    setCreateBranchDialog({ source, name: '', push: true });
+    setCreateBranchDialog({ source, name: '', push: true, upstream: '' });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
@@ -3101,7 +3114,30 @@ export function ChatSurface({
           panelClassName="pa-confirm-dialog"
         >
           {({ requestClose }) => {
-            const canConfirm = isSafeComposerBranchName(createBranchDialog.name);
+            const nameOk = isSafeComposerBranchName(createBranchDialog.name);
+            const upstream = createBranchDialog.push
+              ? parseComposerUpstreamSpec(createBranchDialog.upstream, createBranchDialog.name)
+              : null;
+            const canConfirm = nameOk && (!createBranchDialog.push || upstream != null);
+            const patchDialog = (next: Partial<{ name: string; push: boolean; upstream: string }>) => {
+              setCreateBranchDialog({
+                source: createBranchDialog.source,
+                name: createBranchDialog.name,
+                push: createBranchDialog.push,
+                upstream: createBranchDialog.upstream,
+                ...next,
+              });
+            };
+            const confirmCreate = () => {
+              if (!canConfirm) return;
+              handleCreateBoundBranch(
+                createBranchDialog.name,
+                createBranchDialog.source,
+                createBranchDialog.push,
+                createBranchDialog.upstream,
+              );
+              requestClose();
+            };
             return (
               <div className="pa-confirm-body">
                 <h2 className="pa-confirm-title">{isZh ? '创建分支' : 'Create Branch'}</h2>
@@ -3113,32 +3149,39 @@ export function ChatSurface({
                 <input
                   className="pa-confirm-input"
                   value={createBranchDialog.name}
-                  onChange={(event) => setCreateBranchDialog({
-                    source: createBranchDialog.source,
-                    name: event.target.value,
-                    push: createBranchDialog.push,
-                  })}
+                  onChange={(event) => patchDialog({ name: event.target.value })}
                   placeholder={isZh ? '分支名' : 'Branch name'}
                   autoFocus
                   onKeyDown={(event) => {
-                    if (event.key !== 'Enter' || !canConfirm) return;
+                    if (event.key !== 'Enter') return;
                     event.preventDefault();
-                    handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
-                    requestClose();
+                    confirmCreate();
                   }}
                 />
                 <label className="pa-confirm-check">
                   <input
                     type="checkbox"
                     checked={createBranchDialog.push}
-                    onChange={(event) => setCreateBranchDialog({
-                      source: createBranchDialog.source,
-                      name: createBranchDialog.name,
-                      push: event.target.checked,
-                    })}
+                    onChange={(event) => patchDialog({ push: event.target.checked })}
                   />
                   <span>{isZh ? '创建后推送到远端（git push -u）' : 'Push to remote after creating (git push -u)'}</span>
                 </label>
+                {createBranchDialog.push ? (
+                  <label className="pa-confirm-field">
+                    <span className="pa-confirm-field-label">{isZh ? '跟踪到' : 'Track'}</span>
+                    <input
+                      className="pa-confirm-input"
+                      value={createBranchDialog.upstream}
+                      onChange={(event) => patchDialog({ upstream: event.target.value })}
+                      placeholder={defaultComposerUpstreamSpec(createBranchDialog.name) || 'origin/branch'}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        confirmCreate();
+                      }}
+                    />
+                  </label>
+                ) : null}
                 <div className="pa-confirm-actions is-spread">
                   <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
                     {isZh ? '取消 Esc' : 'Cancel Esc'}
@@ -3147,10 +3190,7 @@ export function ChatSurface({
                     type="button"
                     className="pa-confirm-btn primary"
                     disabled={!canConfirm}
-                    onClick={() => {
-                      handleCreateBoundBranch(createBranchDialog.name, createBranchDialog.source, createBranchDialog.push);
-                      requestClose();
-                    }}
+                    onClick={confirmCreate}
                   >
                     {isZh ? '确认' : 'Confirm'}
                   </button>

@@ -188,8 +188,13 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   // Create-branch dialog pushes to the remote by default (opt-out checkbox).
   assert.match(surface, /pa-confirm-check/);
   assert.match(surface, /创建后推送到远端（git push -u）/);
-  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true \}\)/);
-  assert.match(surface, /push: push !== false,/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true, upstream: '' \}\)/);
+  assert.match(surface, /push: shouldPush,/);
+  assert.match(surface, /upstreamRemote: upstream\?\.remote/);
+  assert.match(surface, /upstreamBranch: upstream\?\.branch/);
+  assert.match(surface, /跟踪到/);
+  assert.match(surface, /parseComposerUpstreamSpec/);
+  assert.match(surface, /defaultComposerUpstreamSpec/);
   assert.match(surface, /pushed === false/);
   assert.match(surface, /branchPushNotice/);
   assert.match(surface, /branch-push-notice/);

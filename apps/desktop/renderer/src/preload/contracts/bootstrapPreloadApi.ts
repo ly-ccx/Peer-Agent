@@ -480,6 +480,10 @@ export interface BootstrapPreloadApi {
     readonly startPoint?: string;
     /** After creating the local branch, push it with upstream tracking (git push -u). */
     readonly push?: boolean;
+    /** Remote name to push to (defaults to the first configured remote). */
+    readonly upstreamRemote?: string;
+    /** Remote branch name to track (defaults to the local branch name). */
+    readonly upstreamBranch?: string;
   }) => Promise<{
     readonly ok: boolean;
     readonly status: 'created' | 'already_exists' | 'invalid_name' | 'invalid_ref' | 'not_git_repo' | 'error';
