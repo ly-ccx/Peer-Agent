@@ -1339,6 +1339,24 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     delayMs?: number;
     reason?: string;
   }) => void) => () => void;
+  readonly onChatStreamStatus: (listener: (payload: {
+    streamId?: string;
+    conversationId?: string;
+    status?: 'queued' | 'retrying';
+    provider?: string;
+    code?: string;
+    queueType?: string | null;
+    queueCount?: number | null;
+    serviceAvailable?: boolean | null;
+    waitMs?: number;
+    upstreamWaitTimeMs?: number | null;
+    waitedMs?: number;
+    budgetMs?: number;
+    attempt?: number;
+    maxAttempts?: number;
+    reason?: string | null;
+    message?: string;
+  }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: {
     conversationId: string;
     streamId: string;

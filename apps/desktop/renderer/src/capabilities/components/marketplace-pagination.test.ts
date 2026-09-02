@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildPageItems } from './marketplace-pagination.ts';
 
-function pagesOf(items: readonly ReturnType<typeof buildPageItems>) {
-  return items.map((item) => (item.type === 'page' ? item.page : '…'));
+function pagesOf(items: ReturnType<typeof buildPageItems> | undefined) {
+  return (items ?? []).map((item) => (item.type === 'page' ? item.page : '…'));
 }
 
 test('keeps every page when the range is short', () => {

@@ -383,6 +383,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('chat:stream:connection-recovery', handler);
     return () => ipcRenderer.removeListener('chat:stream:connection-recovery', handler);
   },
+  onChatStreamStatus: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:stream:status', handler);
+    return () => ipcRenderer.removeListener('chat:stream:status', handler);
+  },
   onChatCompaction: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:compaction', handler);

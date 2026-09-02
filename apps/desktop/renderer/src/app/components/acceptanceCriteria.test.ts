@@ -17,7 +17,7 @@ test('pairs success criteria with criterion results by id', () => {
     criterionResults: [
       { criterionId: 'c1', passed: true, evidenceRef: 'ev-1', detail: '已核对' },
     ],
-  } as GoalPlan);
+  } as unknown as GoalPlan);
 
   assert.equal(rows.length, 2);
   assert.equal(rows[0]?.result?.passed, true);

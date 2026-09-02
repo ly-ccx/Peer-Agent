@@ -9,12 +9,27 @@ import { prepareQoderInferRequest, resolveQoderInferenceEndpoint } from './qoder
 
 
 /** Qoder slow-queue (10605) and transient stream failures. */
-export const QODER_QUEUE_MAX_RETRIES = 3;
-export const QODER_QUEUE_MAX_WAIT_MS = 120_000;
+/**
+ * Queue waiting is time-budgeted, not attempt-counted: upstream tells us the
+ * poll interval (retryAfterSeconds) and a queue of hundreds of people needs
+ * far more than a handful of polls. QODER_QUEUE_MAX_RETRIES stays only as a
+ * poll-count safety valve; the real limit is QODER_QUEUE_TOTAL_BUDGET_MS.
+ */
+export const QODER_QUEUE_MAX_RETRIES = 40;
+/** Cap for a single queue wait so one poll never blocks the run for minutes. */
+export const QODER_QUEUE_MAX_WAIT_MS = 60_000;
 export const QODER_QUEUE_DEFAULT_WAIT_MS = 15_000;
+/** Total client-side time budget spent waiting in the Qoder slow queue. */
+export const QODER_QUEUE_TOTAL_BUDGET_MS = 10 * 60_000;
 /** When upstream waitTime is huge, still keep each client wait bounded. */
 export const QODER_QUEUE_LONG_WAIT_HINT_MS = 5 * 60_000;
-/** 103 Duplicate + rate-limit style stream failures: short bounded backoff. */
+/**
+ * 103 Duplicate request: upstream dedups at conversation/session level, so
+ * retrying with fresh request ids rarely helps. One bounded retry, then a
+ * terminal, actionable error instead of burning three blind attempts.
+ */
+export const QODER_DUPLICATE_RETRY_DELAYS_MS = [2_000];
+/** Rate-limit / transport style transient stream failures: short bounded backoff. */
 export const QODER_TRANSIENT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 export const QODER_CONNECTION_RETRY_DELAYS_MS = [1_000, 3_000];
 
@@ -85,26 +100,72 @@ function extractJsonObjectsFromText(text) {
   return objects;
 }
 
+function parseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    // The resilience loop re-wraps the failure as { message: errorText }, and
+    // errorText carries a "provider_stream_error: " prefix, so the embedded
+    // envelope is not pure JSON. Fall back to extracting the first object.
+    return extractJsonObjectsFromText(value)[0] ?? null;
+  }
+}
+
+/**
+ * Unwrap nested `message` envelopes down to the innermost queue payload.
+ * The gateway ships the queue detail two ways: as an object in `message`
+ * (mock/test shape) and as a JSON *string* in `message` (real shape:
+ * {"code":"10605","message":"{\"isQueued\":true,...}"}). Without unwrapping
+ * the string form, retryAfterSeconds/queueCount never reach the wait policy
+ * and every queue poll degrades to the default 15s escalation.
+ */
+function unwrapQueueSource(payload) {
+  let current = payload;
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    const candidate = parseJsonObject(current.message);
+    if (!candidate) break;
+    current = candidate;
+  }
+  return current || payload;
+}
+
 function normalizeQueuePayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
-  const nestedMessage = payload.message && typeof payload.message === 'object' ? payload.message : null;
-  const source = nestedMessage || payload;
-  const code = String(payload.code ?? nestedMessage?.code ?? payload.type ?? '');
+  const source = unwrapQueueSource(payload);
+  const code = String(payload.code ?? payload.type ?? source.code ?? '');
   const isQueued = source.isQueued === true
     || source.queued === true
     || code === '10605'
     || /isQueued["']?\s*:\s*true/i.test(JSON.stringify(payload));
   if (!isQueued && code !== '10605') return null;
-  const waitTimeRaw = source.waitTime ?? source.wait_time ?? source.estimatedWaitMs ?? nestedMessage?.waitTime;
-  const waitTimeMs = Number(waitTimeRaw);
+  // Upstream waitTime/wait_time are SECONDS (observed: waitTime=189 with
+  // retryAfterSeconds=30 for a ~900-deep queue), while estimatedWaitMs is ms.
+  const waitTimeSecondsRaw = source.waitTime ?? source.wait_time;
+  const waitTimeMsRaw = source.estimatedWaitMs;
+  const waitTimeSeconds = Number(waitTimeSecondsRaw);
+  const waitTimeMsDirect = Number(waitTimeMsRaw);
+  const waitTimeMs = Number.isFinite(waitTimeSeconds) && waitTimeSeconds > 0
+    ? waitTimeSeconds * 1000
+    : (Number.isFinite(waitTimeMsDirect) && waitTimeMsDirect > 0 ? waitTimeMsDirect : null);
+  // retryAfterSeconds is the upstream poll interval: how long to wait before
+  // asking again. It is the authoritative cadence hint for the queue loop.
+  const retryAfterSeconds = Number(
+    source.retryAfterSeconds ?? source.retry_after_seconds,
+  );
   const serviceAvailableRaw = source.serviceAvailable ?? source.service_available
-    ?? nestedMessage?.serviceAvailable ?? payload.serviceAvailable;
+    ?? payload.serviceAvailable;
   const serviceAvailable = typeof serviceAvailableRaw === 'boolean' ? serviceAvailableRaw : null;
   return {
     kind: 'queued',
     code: code || '10605',
     queueType: source.queueType || source.queue_type || null,
-    waitTimeMs: Number.isFinite(waitTimeMs) && waitTimeMs > 0 ? waitTimeMs : QODER_QUEUE_DEFAULT_WAIT_MS,
+    waitTimeMs: waitTimeMs && waitTimeMs > 0 ? waitTimeMs : QODER_QUEUE_DEFAULT_WAIT_MS,
+    retryAfterMs: Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? retryAfterSeconds * 1000
+      : null,
     queueCount: Number(source.queueCount ?? source.queue_count) || null,
     serviceAvailable,
     reason: 'queue',
@@ -161,10 +222,13 @@ export function classifyQoderStreamFailure(errorText, streamError = null) {
   }
   if (/10605|isQueued|queueType["']?\s*:\s*["']?slow/i.test(text)) {
     const waitMatch = text.match(/waitTime["']?\s*:\s*(\d+)/i);
+    const retryMatch = text.match(/retryAfterSeconds["']?\s*:\s*(\d+)/i);
     return {
       kind: 'queued',
       code: '10605',
-      waitTimeMs: waitMatch ? Number(waitMatch[1]) : QODER_QUEUE_DEFAULT_WAIT_MS,
+      // waitTime in the raw envelope is seconds (see normalizeQueuePayload).
+      waitTimeMs: waitMatch ? Number(waitMatch[1]) * 1000 : QODER_QUEUE_DEFAULT_WAIT_MS,
+      retryAfterMs: retryMatch ? Number(retryMatch[1]) * 1000 : null,
       queueType: /queueType["']?\s*:\s*["']?(\w+)/i.exec(text)?.[1] || null,
       queueCount: null,
       serviceAvailable: null,
@@ -186,8 +250,17 @@ export function classifyQoderStreamFailure(errorText, streamError = null) {
 }
 
 export function computeQoderQueueWaitMs(queueInfo, { attempt = 0 } = {}) {
+  // Upstream poll cadence (retryAfterSeconds) wins: it is the interval the
+  // queue asks us to wait before asking again. The total estimated waitTime
+  // is a display hint, not a single sleep — cap it to the default poll so a
+  // 3-minute estimate does not block one wait for minutes.
+  const cadence = Number(queueInfo?.retryAfterMs);
   const hinted = Number(queueInfo?.waitTimeMs);
-  const base = Number.isFinite(hinted) && hinted > 0 ? hinted : QODER_QUEUE_DEFAULT_WAIT_MS;
+  const base = Number.isFinite(cadence) && cadence > 0
+    ? cadence
+    : (Number.isFinite(hinted) && hinted > 0
+      ? Math.min(hinted, QODER_QUEUE_DEFAULT_WAIT_MS)
+      : QODER_QUEUE_DEFAULT_WAIT_MS);
   // Cap each wait; add mild backoff so long queues do not spin too aggressively.
   const withBackoff = base + Math.min(attempt, 3) * 2_000;
   // Keep a small floor to avoid tight spin, but honor short waitTime hints (tests/local).
@@ -221,6 +294,7 @@ export function formatQoderQueueStatusMessage(classification, {
 
 export function formatQoderQueueError(errorText, {
   attempts,
+  waitedMs,
   waitTimeMs,
   queueType,
   queueCount,
@@ -231,6 +305,9 @@ export function formatQoderQueueError(errorText, {
   const countLabel = Number.isFinite(Number(queueCount)) ? `, last position ~${Number(queueCount)}` : '';
   const clientWait = formatQueueWaitLabel(waitTimeMs);
   const upstreamWait = formatQueueWaitLabel(upstreamWaitTimeMs ?? waitTimeMs);
+  const waitedLabel = Number.isFinite(Number(waitedMs)) && Number(waitedMs) > 0
+    ? `, waited ${formatQueueWaitLabel(Number(waitedMs))} in queue`
+    : '';
   const waitLabel = clientWait ? `, last client wait ${clientWait}` : '';
   const upstreamLabel = upstreamWait ? `, upstream wait ~${upstreamWait}` : '';
   const unavailable = serviceAvailable === false
@@ -240,7 +317,7 @@ export function formatQoderQueueError(errorText, {
     ? '. Queue is very long — try another model or retry later'
     : '';
   return `qoder_queue_timeout: still in Qoder ${typeLabel} after ${attempts} wait(s)`
-    + `${countLabel}${waitLabel}${upstreamLabel}${unavailable}${longQueue}`
+    + `${countLabel}${waitedLabel}${waitLabel}${upstreamLabel}${unavailable}${longQueue}`
     + `. Upstream: ${String(errorText || '').slice(0, 240)}`;
 }
 
@@ -249,7 +326,8 @@ export function formatQoderDuplicateError(errorText, { attempts } = {}) {
     ? ` after ${Number(attempts)} retry attempt(s)`
     : '';
   return `qoder_duplicate_request: Qoder rejected the request as Duplicate (103)${attemptLabel}. `
-    + 'Each retry already used a fresh request id; wait a moment or stop overlapping runs on the same account. '
+    + 'Upstream dedups at conversation/session level, so further retries will not help. '
+    + 'Wait a moment, stop overlapping runs on the same account, or start a new conversation. '
     + `Upstream: ${String(errorText || '').slice(0, 240)}`;
 }
 
@@ -258,11 +336,15 @@ async function sendQoderStreamWithResilience(sendOnce, {
   webContents = null,
   streamId = null,
   maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
+  queueBudgetMs = QODER_QUEUE_TOTAL_BUDGET_MS,
   transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  duplicateRetryDelaysMs = QODER_DUPLICATE_RETRY_DELAYS_MS,
   waitImpl = sleepMs,
 } = {}) {
   let queueAttempts = 0;
+  let queueWaitedMs = 0;
   let transientAttempts = 0;
+  let duplicateAttempts = 0;
   let lastResult = null;
   while (true) {
     lastResult = await sendOnce();
@@ -275,8 +357,12 @@ async function sendQoderStreamWithResilience(sendOnce, {
       code: lastResult?.streamErrorType,
     });
 
-    if (classification.kind === 'queued' && queueAttempts < maxQueueRetries) {
-      const waitMs = computeQoderQueueWaitMs(classification, { attempt: queueAttempts });
+    if (classification.kind === 'queued'
+      && queueAttempts < maxQueueRetries
+      && queueWaitedMs < queueBudgetMs) {
+      const rawWaitMs = computeQoderQueueWaitMs(classification, { attempt: queueAttempts });
+      // Never sleep past the remaining queue budget.
+      const waitMs = Math.max(50, Math.min(rawWaitMs, queueBudgetMs - queueWaitedMs));
       const message = formatQoderQueueStatusMessage(classification, {
         attempt: queueAttempts + 1,
         maxAttempts: maxQueueRetries,
@@ -292,6 +378,9 @@ async function sendQoderStreamWithResilience(sendOnce, {
           queueCount: classification.queueCount,
           serviceAvailable: classification.serviceAvailable,
           waitMs,
+          upstreamWaitTimeMs: classification.waitTimeMs ?? null,
+          waitedMs: queueWaitedMs,
+          budgetMs: queueBudgetMs,
           attempt: queueAttempts + 1,
           maxAttempts: maxQueueRetries,
           message,
@@ -300,12 +389,17 @@ async function sendQoderStreamWithResilience(sendOnce, {
         /* renderer may not listen */
       }
       await waitImpl(waitMs, signal);
+      queueWaitedMs += waitMs;
       queueAttempts += 1;
       continue;
     }
 
-    if (classification.kind === 'transient' && transientAttempts < transientRetryDelaysMs.length) {
-      const waitMs = transientRetryDelaysMs[transientAttempts];
+    const isDuplicate = classification.reason === 'duplicate' || classification.code === '103';
+    const retryDelays = isDuplicate ? duplicateRetryDelaysMs : transientRetryDelaysMs;
+    const retryAttempts = isDuplicate ? duplicateAttempts : transientAttempts;
+
+    if (classification.kind === 'transient' && retryAttempts < retryDelays.length) {
+      const waitMs = retryDelays[retryAttempts];
       try {
         webContents?.send?.('chat:stream:status', {
           streamId,
@@ -314,17 +408,18 @@ async function sendQoderStreamWithResilience(sendOnce, {
           code: classification.code || 'transient',
           reason: classification.reason || null,
           waitMs,
-          attempt: transientAttempts + 1,
-          maxAttempts: transientRetryDelaysMs.length,
-          message: classification.reason === 'duplicate'
-            ? `Qoder Duplicate request (103); retrying with a fresh request id in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${transientAttempts + 1}/${transientRetryDelaysMs.length})`
-            : `Qoder transient error; retrying in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${transientAttempts + 1}/${transientRetryDelaysMs.length})`,
+          attempt: retryAttempts + 1,
+          maxAttempts: retryDelays.length,
+          message: isDuplicate
+            ? `Qoder Duplicate request (103); retrying once with a fresh request id in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${retryAttempts + 1}/${retryDelays.length})`
+            : `Qoder transient error; retrying in ${formatQueueWaitLabel(waitMs) || 'a moment'} (retry ${retryAttempts + 1}/${retryDelays.length})`,
         });
       } catch {
         /* renderer may not listen */
       }
       await waitImpl(waitMs, signal);
-      transientAttempts += 1;
+      if (isDuplicate) duplicateAttempts += 1;
+      else transientAttempts += 1;
       continue;
     }
 
@@ -333,6 +428,7 @@ async function sendQoderStreamWithResilience(sendOnce, {
         ...lastResult,
         errorText: formatQoderQueueError(lastResult?.errorText, {
           attempts: queueAttempts,
+          waitedMs: queueWaitedMs,
           waitTimeMs: Math.min(
             Number(classification.waitTimeMs) || QODER_QUEUE_DEFAULT_WAIT_MS,
             QODER_QUEUE_MAX_WAIT_MS,
@@ -346,11 +442,11 @@ async function sendQoderStreamWithResilience(sendOnce, {
       };
     }
 
-    if (classification.reason === 'duplicate' || classification.code === '103') {
+    if (isDuplicate) {
       return {
         ...lastResult,
         errorText: formatQoderDuplicateError(lastResult?.errorText, {
-          attempts: transientAttempts,
+          attempts: duplicateAttempts,
         }),
         duplicateExhausted: true,
       };
@@ -1139,7 +1235,9 @@ export async function sendQoderPrivateStream({
   modelOptionValues = {},
   effort = null,
   maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
+  queueBudgetMs = QODER_QUEUE_TOTAL_BUDGET_MS,
   transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  duplicateRetryDelaysMs = QODER_DUPLICATE_RETRY_DELAYS_MS,
   waitImpl = sleepMs,
   fetchWithRecovery,
   consumeStream = consumeOpenAIStream,
@@ -1322,7 +1420,9 @@ export async function sendQoderPrivateStream({
     webContents,
     streamId,
     maxQueueRetries,
+    queueBudgetMs,
     transientRetryDelaysMs,
+    duplicateRetryDelaysMs,
     waitImpl,
   });
 }

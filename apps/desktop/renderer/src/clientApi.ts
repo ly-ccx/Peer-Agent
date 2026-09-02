@@ -222,6 +222,7 @@ const unavailableApi: ClientApi = {
   onChatStreamNotice: unavailableMethod('onChatStreamNotice'),
   onChatStreamProviderRecovery: unavailableMethod('onChatStreamProviderRecovery'),
   onChatStreamConnectionRecovery: unavailableMethod('onChatStreamConnectionRecovery'),
+  onChatStreamStatus: unavailableMethod('onChatStreamStatus'),
   onChatCompaction: unavailableMethod('onChatCompaction'),
   onChatActiveStreamsChanged: unavailableMethod('onChatActiveStreamsChanged'),
   onWindowFullscreenChanged: unavailableMethod('onWindowFullscreenChanged'),
