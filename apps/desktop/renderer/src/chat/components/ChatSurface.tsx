@@ -115,6 +115,7 @@ import type {
   CompactionMeta,
   CompactionState,
   ChatMsg,
+  ProviderRecoveryNotice,
   QueuedMessage,
   TextGroup,
   ThinkingGroup,
@@ -217,6 +218,35 @@ function formatRetryCountdownLabel(remainingSeconds: number): string {
 function formatRetryCountdownLabelEn(remainingSeconds: number): string {
   if (remainingSeconds <= 0) return 'reconnecting…';
   return `in about ${remainingSeconds}s`;
+}
+
+// 排队等待时长文案：秒级显示 s，分钟级显示 m，避免长等待显示成一大串秒。
+function formatQueueDurationLabel(ms: number): string {
+  const value = Number(ms) || 0;
+  if (value <= 0) return '';
+  if (value < 60_000) return `${Math.max(1, Math.round(value / 1000))}s`;
+  return `${Math.max(1, Math.round(value / 60_000))}m`;
+}
+
+function formatQueueNoticeText(notice: ProviderRecoveryNotice, isZh: boolean): string {
+  const count = typeof notice.queueCount === 'number' && notice.queueCount > 0
+    ? (isZh ? `，前方约 ${notice.queueCount} 人` : `, ~${notice.queueCount} ahead`)
+    : '';
+  const upstream = formatQueueDurationLabel(notice.upstreamWaitTimeMs ?? 0);
+  const upstreamLabel = upstream
+    ? (isZh ? `，上游预计等待 ~${upstream}` : `, upstream est. ~${upstream}`)
+    : '';
+  const waited = formatQueueDurationLabel(notice.waitedMs ?? 0);
+  const waitedLabel = waited
+    ? (isZh ? `，已等待 ${waited}` : `, waited ${waited}`)
+    : '';
+  const poll = formatQueueDurationLabel(notice.waitMs ?? 0);
+  const pollLabel = poll
+    ? (isZh ? `；每 ${poll} 查询一次队列` : `; polling every ${poll}`)
+    : '';
+  return isZh
+    ? `Qoder 上游排队中${count}${upstreamLabel}${waitedLabel}${pollLabel}，正在按队列节奏等待…`
+    : `Queued upstream at Qoder${count}${upstreamLabel}${waitedLabel}${pollLabel}; waiting on the queue cadence…`;
 }
 
 function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
@@ -2793,9 +2823,11 @@ export function ChatSurface({
           />
         ) : null}
         {providerRecoveryNotice ? (
-          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
+          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}${providerRecoveryNotice.kind === 'queue' ? ' provider-recovery-notice--queue' : ''}`}>
             <div className="provider-recovery-body">
-              {providerRecoveryNotice.kind === 'connection'
+              {providerRecoveryNotice.kind === 'queue'
+                ? formatQueueNoticeText(providerRecoveryNotice, isZh)
+                : providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
                     ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，${formatRetryCountdownLabel(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))}）`
