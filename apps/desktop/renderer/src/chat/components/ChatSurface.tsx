@@ -2471,7 +2471,7 @@ export function ChatSurface({
     const isolationOptions: DropdownOption[] = [
       {
         value: COMPOSER_ENV_ISOLATION_ON,
-        label: isZh ? '独立目录' : 'Isolated directory',
+        label: isZh ? 'Worktree' : 'Worktree',
         group: isolationGroup,
         hint: isZh ? '下次' : 'next',
       },

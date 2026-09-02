@@ -232,7 +232,8 @@ export const COMPOSER_ENV_ISOLATION_OFF = '__composer_env_isolation_off__';
 
 /**
  * Collapsed chrome copy for “where this send writes”.
- * Next-task isolation preference only rewrites a selectable draft source line.
+ * Next-task Worktree preference rewrites source lines (draft or bound),
+ * but does not override a live task-line or write-mismatch.
  */
 export function formatComposerEnvCapsule(
   chrome: ComposerGitChrome,
@@ -250,7 +251,7 @@ export function formatComposerEnvCapsule(
     return {
       kind: 'isolated',
       isolated: true,
-      label: isZh ? `隔离 · ${name}` : `isolated · ${name}`,
+      label: `Worktree · ${name}`,
       title: taskLine.title,
     };
   }
@@ -281,14 +282,14 @@ export function formatComposerEnvCapsule(
 
   if (taskLine?.kind === 'source') {
     const name = visibleBranchName(taskLine.value, taskLine.value);
-    if (preferredIsolation && taskLine.selectable) {
+    if (preferredIsolation) {
       return {
         kind: 'source',
         isolated: true,
-        label: isZh ? `隔离 · 从 ${name}` : `isolated · from ${name}`,
+        label: isZh ? `Worktree · 从 ${name}` : `Worktree · from ${name}`,
         title: isZh
-          ? `下次任务将从 ${taskLine.value} 开独立目录。合回后这次隔离会结束，这个选择只表示下一次。`
-          : `The next task will fork ${taskLine.value} into an isolated directory. This preference applies to the next task only.`,
+          ? `下次任务将从 ${taskLine.value} 开 Worktree。合回后这次隔离会结束，这个选择只表示下一次。`
+          : `The next task will fork ${taskLine.value} into a Worktree. This preference applies to the next task only.`,
       };
     }
     if (taskLine.selectable) {
@@ -321,10 +322,10 @@ export function formatComposerEnvCapsule(
     return {
       kind: 'source',
       isolated: true,
-      label: isZh ? '隔离' : 'isolated',
+      label: 'Worktree',
       title: isZh
-        ? '下次任务将在独立目录里执行。合回后这次隔离会结束，这个选择只表示下一次。'
-        : 'The next task will run in an isolated directory. This preference applies to the next task only.',
+        ? '下次任务将在 Worktree 里执行。合回后这次隔离会结束，这个选择只表示下一次。'
+        : 'The next task will run in a Worktree. This preference applies to the next task only.',
     };
   }
 

@@ -157,7 +157,11 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /composer-env-capsule/);
   assert.match(surface, /formatComposerEnvCapsule/);
   assert.match(surface, /COMPOSER_ENV_ISOLATION_ON/);
-  assert.match(surface, /isZh \? '独立目录' : 'Isolated directory'/);
+  assert.match(surface, /isZh \? 'Worktree' : 'Worktree'/);
+  assert.match(surface, /isZh \? '当前工作区' : 'Current workspace'/);
+  assert.doesNotMatch(surface, /独立目录/);
+  assert.doesNotMatch(surface, /Isolated directory/);
+  assert.doesNotMatch(surface, /当前分支/);
   assert.match(surface, /isZh \? '下次任务' : 'Next task'/);
   assert.match(surface, /if \(!isStreaming\) changePreferredWorktree/);
   assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);

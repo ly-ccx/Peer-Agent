@@ -193,7 +193,7 @@ test('an existing session waits for delivery facts before showing a source chip'
   assert.equal(chrome.taskLine, null);
 });
 
-test('env capsule says where this send writes and never mixes next-task isolation into bound lines', () => {
+test('env capsule shows Worktree when that is selected, and current workspace is not current branch', () => {
   const draft = planComposerGitChrome({
     isDraft: true,
     deliveryKnown: true,
@@ -206,7 +206,7 @@ test('env capsule says where this send writes and never mixes next-task isolatio
   );
   assert.equal(
     formatComposerEnvCapsule(draft, { locale: 'zh', preferredIsolation: true })?.label,
-    '隔离 · 从 sept-1-changes',
+    'Worktree · 从 sept-1-changes',
   );
 
   const isolated = planComposerGitChrome({
@@ -221,7 +221,7 @@ test('env capsule says where this send writes and never mixes next-task isolatio
   }, { locale: 'zh' });
   assert.equal(
     formatComposerEnvCapsule(isolated, { locale: 'zh', preferredIsolation: false })?.label,
-    '隔离 · cli-drop-stream-buf',
+    'Worktree · cli-drop-stream-buf',
   );
 
   const delivered = planComposerGitChrome({
@@ -236,8 +236,20 @@ test('env capsule says where this send writes and never mixes next-task isolatio
     },
   }, { locale: 'zh' });
   assert.equal(
-    formatComposerEnvCapsule(delivered, { locale: 'zh', preferredIsolation: true })?.label,
+    formatComposerEnvCapsule(delivered, { locale: 'zh' })?.label,
     '源头 0.0.7',
+  );
+  assert.doesNotMatch(
+    formatComposerEnvCapsule(delivered, { locale: 'zh' })?.label ?? '',
+    /当前分支/,
+  );
+  assert.equal(
+    formatComposerEnvCapsule(delivered, { locale: 'zh', preferredIsolation: true })?.label,
+    'Worktree · 从 0.0.7',
+  );
+  assert.equal(
+    formatComposerEnvCapsule(delivered, { locale: 'zh', preferredIsolation: true })?.isolated,
+    true,
   );
 
   const mismatch = planComposerGitChrome({
