@@ -1737,7 +1737,7 @@ test('start: 并发 kick 在 prepareIsolation 让出时只开一次泵', async (
   assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
 });
 
-test('verbal stop: 部分完成且本轮没有推进剩余任务时，泵不得再开下一轮', async () => {
+test('verbal stop: 连续两轮纯文本且无推进才暂停（首轮宽限）', async () => {
   const plan = createApprovedPlan();
   registerEvidenceRefs(plan.planId, ['artifact://verbal-1']);
   store.recordTaskEvidence(plan.planId, 't1', {
@@ -1757,10 +1757,51 @@ test('verbal stop: 部分完成且本轮没有推进剩余任务时，泵不得�
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(got.status, 'paused');
   assert.equal(got.runner.status, 'paused');
   assert.equal(got.runner.blockedReason, 'verbal_stop_no_remaining_progress');
   assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
+  // 首轮应记录宽限事件而不是直接暂停。
+  const graceEvents = got.runTrace.events.filter(
+    (event) => event.type === 'self_correction' && event.payload?.summaryCode === 'verbal_stop_grace',
+  );
+  assert.equal(graceEvents.length, 1);
+  assert.equal(graceEvents[0]?.payload?.turnNumber, 1);
+});
+
+test('verbal stop: 纯文本过渡回合先宽限继续，下一轮推进则不暂停', async () => {
+  const plan = createApprovedPlan();
+  registerEvidenceRefs(plan.planId, ['artifact://verbal-grace-1']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://verbal-grace-1'],
+  });
+  store.setPlanStatus(plan.planId, 'executing');
+
+  const calls = [];
+  const runtime = {
+    async runGoalTurn() {
+      calls.push(1);
+      if (calls.length === 1) {
+        // 过渡回合：模型只说了要继续，本轮没有任何工具调用。
+        return { continue: false, terminalStatus: 'done', toolCallCount: 0 };
+      }
+      // 第二回合模型真正调用了工具并以请求澄清收尾（确定性退出泵）。
+      return { requestedUserInput: true, blockedReason: 'grace_then_ask', toolCallCount: 1 };
+    },
+  };
+  const runner = createRunner({ runtime });
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(calls.length, 2);
+  assert.equal(got.runner.blockedReason, 'grace_then_ask');
+  assert.equal(got.runner.status, 'waiting_user');
+  const graceEvent = got.runTrace.events.find(
+    (event) => event.type === 'self_correction' && event.payload?.summaryCode === 'verbal_stop_grace',
+  );
+  assert.ok(graceEvent, '首轮纯文本回合应记录宽限事件');
+  assert.equal(graceEvent?.payload?.turnNumber, 1);
 });
 
