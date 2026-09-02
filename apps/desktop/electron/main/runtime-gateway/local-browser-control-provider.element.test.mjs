@@ -83,5 +83,13 @@ test('buildRoleResolveJs requires a unique role/name match and reuses snapshot h
   assert.ok(js.includes('nameMatches'));
   assert.ok(js.includes('"button"'));
   assert.ok(js.includes('"Submit"'));
+  assert.ok(js.includes('const wantNth = null;'));
   assert.ok(js.includes('if (matches.length !== 1) return { ok: false, count: matches.length }'));
+});
+
+test('buildRoleResolveJs selects the nth match when provided', () => {
+  const js = buildRoleResolveJs('button', 'OK', 'return { ok: true, count: 1 };', { nth: 0 });
+  assert.ok(js.includes('const wantNth = 0;'));
+  assert.ok(js.includes('wantNth >= matches.length'));
+  assert.ok(js.includes('matches[wantNth]'));
 });

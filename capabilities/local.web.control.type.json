@@ -27,11 +27,15 @@
       },
       "role": {
         "type": "string",
-        "description": "Accessibility role from a format=roles snapshot (used when selector is omitted). Must match exactly one element."
+        "description": "Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set."
       },
       "name": {
         "type": "string",
-        "description": "Accessible name from a format=roles snapshot. Optional with role; unique match still required."
+        "description": "Accessible name from a format=roles snapshot. Optional with role."
+      },
+      "nth": {
+        "type": "integer",
+        "description": "0-based index among role/name matches. Use when several same-named roles match."
       },
       "clear": {
         "type": "boolean",

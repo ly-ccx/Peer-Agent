@@ -64,16 +64,16 @@ const NAVIGATE_PROMPT = [
 
 const CLICK_PROMPT = [
   'Click an element in the visible in-app browser. Provide a CSS "selector", or "role"/"name"',
-  'from a browser_read_dom format=roles snapshot (unique match required), or "x"/"y" viewport',
-  'coordinates to click a point. The click is dispatched on the same webview the user is looking',
-  'at. Returns a short result summary.',
+  'from a browser_read_dom format=roles snapshot (unique match required unless "nth" is set),',
+  'or "x"/"y" viewport coordinates to click a point. Use 0-based "nth" when several same-named',
+  'roles match. The click is dispatched on the same webview the user is looking at.',
 ].join(' ');
 
 const TYPE_PROMPT = [
   'Type text into the visible in-app browser. If "selector" or "role"/"name" (from a roles',
-  'snapshot; unique match required) is given, the element is focused (and optionally cleared)',
-  'first; otherwise text goes to the currently focused element. Set "submit" to press Enter',
-  'afterwards. Acts on the same visible webview. Returns a summary.',
+  'snapshot; unique match required unless "nth" is set) is given, the element is focused',
+  '(and optionally cleared) first; otherwise text goes to the currently focused element.',
+  'Use 0-based "nth" for same-named roles. Set "submit" to press Enter afterwards.',
 ].join(' ');
 
 const SCREENSHOT_PROMPT = [
@@ -92,10 +92,9 @@ const READ_DOM_PROMPT = [
 ].join(' ');
 
 const HOVER_PROMPT = [
-  'Hover an element in the visible in-app browser. Provide a CSS "selector" to hover the first',
-  'matching element (supports optional frame:N prefix), or "x"/"y" viewport coordinates to hover',
-  'a point. Use this to reveal tooltips or submenus. The hover is dispatched on the same webview',
-  'the user is looking at.',
+  'Hover an element in the visible in-app browser. Provide a CSS "selector" (optional frame:N),',
+  'or "role"/"name" from a format=roles snapshot (unique match required unless 0-based "nth"',
+  'is set), or "x"/"y" viewport coordinates. Use this to reveal tooltips or submenus.',
 ].join(' ');
 
 const SCROLL_PROMPT = [
@@ -190,11 +189,15 @@ function clickTool() {
         },
         role: {
           type: 'string',
-          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Must match exactly one element.',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
         },
         name: {
           type: 'string',
-          description: 'Accessible name from a format=roles snapshot. Optional with role; unique match still required.',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among role/name matches. Use when several same-named roles match.',
         },
         x: {
           type: 'number',
@@ -229,11 +232,15 @@ function typeTool() {
         },
         role: {
           type: 'string',
-          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Must match exactly one element.',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
         },
         name: {
           type: 'string',
-          description: 'Accessible name from a format=roles snapshot. Optional with role; unique match still required.',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among role/name matches. Use when several same-named roles match.',
         },
         clear: {
           type: 'boolean',
@@ -309,6 +316,18 @@ function hoverTool() {
         selector: {
           type: 'string',
           description: 'CSS selector of the element to hover (first match). Supports optional frame:N prefix.',
+        },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among role/name matches. Use when several same-named roles match.',
         },
         x: {
           type: 'number',

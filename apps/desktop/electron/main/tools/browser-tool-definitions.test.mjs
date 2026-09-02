@@ -48,10 +48,12 @@ test('browser_click and browser_type accept role/name from a roles snapshot', ()
   const type = registry.getTool('browser_type');
   assert.ok(click.inputSchema.properties.role);
   assert.ok(click.inputSchema.properties.name);
+  assert.ok(click.inputSchema.properties.nth);
   assert.ok(type.inputSchema.properties.role);
   assert.ok(type.inputSchema.properties.name);
+  assert.ok(type.inputSchema.properties.nth);
   assert.match(click.prompt(), /role/);
-  assert.match(type.prompt(), /role/);
+  assert.match(type.prompt(), /nth/);
 });
 
 test('browser_hover and browser_scroll are registered as Desktop-only browser tools', () => {
@@ -68,6 +70,9 @@ test('browser_hover and browser_scroll are registered as Desktop-only browser to
   assert.equal(hover.capabilityId, 'local.web.control.hover');
   assert.equal(scroll.capabilityId, 'local.web.control.scroll');
   assert.ok(hover.inputSchema.properties.selector);
+  assert.ok(hover.inputSchema.properties.role);
+  assert.ok(hover.inputSchema.properties.nth);
+  assert.match(hover.prompt(), /nth/);
   assert.ok(scroll.inputSchema.properties.deltaY);
   assert.ok(scroll.inputSchema.properties.block);
 });

@@ -28,7 +28,13 @@ function createActionWebContents() {
       scripts.push(expr);
       if (expr.includes('findRoleMatches')) {
         const count = Number.isInteger(browser.roleMatchCount) ? browser.roleMatchCount : 1;
-        if (count !== 1) return { ok: false, count };
+        const nthMatch = expr.match(/const wantNth = (null|\d+);/);
+        const wantNth = nthMatch && nthMatch[1] !== 'null' ? Number(nthMatch[1]) : null;
+        if (wantNth == null) {
+          if (count !== 1) return { ok: false, count };
+        } else if (wantNth < 0 || wantNth >= count) {
+          return { ok: false, count, nth: wantNth };
+        }
         if (expr.includes('scrollIntoView') || expr.includes('x0: Math.round')) {
           return {
             ok: true,
@@ -285,6 +291,59 @@ test('click by role fails when multiple elements match', async () => {
   assert.equal(browser.inputEvents.length, 0);
 });
 
+test('click by role nth=0 picks the first of several same-named roles', async () => {
+  const browser = createActionWebContents();
+  browser.roleMatchCount = 3;
+  registerBrowserWebContents({
+    webContentsId: 68,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-role-nth',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { role: 'button', name: 'OK', nth: 0 }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'role');
+  assert.equal(execution.result.outputPreview.nth, 0);
+  assert.ok(browser.scripts.some((expr) => expr.includes('const wantNth = 0;')));
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
+    { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
+  ]);
+});
+
+test('click by role nth out of range fails recoverably', async () => {
+  const browser = createActionWebContents();
+  browser.roleMatchCount = 2;
+  registerBrowserWebContents({
+    webContentsId: 69,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-role-nth-oob',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { role: 'button', name: 'OK', nth: 5 }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /nth=5 is out of range/);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
 test('type by unique role/name focuses then inserts text', async () => {
   const browser = createActionWebContents();
   registerBrowserWebContents({
@@ -307,6 +366,32 @@ test('type by unique role/name focuses then inserts text', async () => {
   assert.equal(execution.result.outputPreview.locatedBy, 'role');
   assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('el.focus()')));
   assert.ok(browser.inputEvents.some((event) => event.type === 'char' && event.keyCode === 'h'));
+});
+
+test('hover by unique role/name locates then hovers the element', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 70,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-hover-role',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.hover', 'browser_hover', { role: 'button', name: 'Menu' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'role');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('"button"') && expr.includes('"Menu"')));
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
+  ]);
 });
 
 test('hover by selector uses mouseMove and records viewport metadata', async () => {
