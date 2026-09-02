@@ -186,6 +186,15 @@ function IconGo() {
   return <svg {...ICON_PROPS}><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>;
 }
 
+function IconOpenExternal() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M7 17 17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
+}
+
 function IconGlobe() {
   return (
     <svg {...ICON_PROPS} width={14} height={14}>
@@ -384,6 +393,7 @@ export function BrowserView({
       reload: isZh ? '刷新' : 'Reload',
       stop: isZh ? '停止' : 'Stop',
       go: isZh ? '前往' : 'Go',
+      openInDefaultBrowser: isZh ? '用默认浏览器打开' : 'Open in default browser',
       newTab: isZh ? '新建网页标签' : 'New browser tab',
       closeTab: isZh ? '关闭网页标签' : 'Close browser tab',
       untitled: isZh ? '新标签页' : 'New tab',
@@ -458,6 +468,27 @@ export function BrowserView({
     () => handlesRef.current.get(session.activeTabId) ?? null,
     [session.activeTabId],
   );
+
+  const externalUrl = useMemo(() => {
+    const raw = (activeRuntime.currentUrl || address || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      return parsed.toString();
+    } catch {
+      return '';
+    }
+  }, [activeRuntime.currentUrl, address]);
+  const canOpenExternal = Boolean(externalUrl);
+
+  const handleOpenExternal = useCallback(async () => {
+    if (!externalUrl) return;
+    const res = await clientApi.openBrowserExternal(externalUrl);
+    if (!res?.ok) {
+      setMenuNotice(isZh ? '无法用默认浏览器打开' : 'Could not open in default browser');
+    }
+  }, [externalUrl, isZh]);
 
   const handleMenuAction = useCallback(
     async (id: BrowserMenuActionId) => {
@@ -650,6 +681,16 @@ export function BrowserView({
             <IconGo />
           </button>
         </div>
+        <button
+          type="button"
+          className="browser-nav-btn"
+          title={t.openInDefaultBrowser}
+          aria-label={t.openInDefaultBrowser}
+          disabled={!canOpenExternal}
+          onClick={() => void handleOpenExternal()}
+        >
+          <IconOpenExternal />
+        </button>
         <div className="browser-menu-wrap" ref={menuWrapRef}>
           <button
             type="button"

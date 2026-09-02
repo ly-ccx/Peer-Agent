@@ -713,6 +713,12 @@ export interface BootstrapPreloadApi {
     readonly bytes?: number;
     readonly error?: string;
   }>;
+  /** 用系统默认浏览器打开当前 http(s) 页面。 */
+  readonly openBrowserExternal: (url: string) => Promise<{
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly error?: string;
+  }>;
   /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
   readonly listBrowserSessionSources: () => Promise<{
     readonly ok: boolean;

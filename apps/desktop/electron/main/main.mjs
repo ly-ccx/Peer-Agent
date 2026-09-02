@@ -1897,6 +1897,7 @@ const browserCoreApplicationService = createBrowserCoreApplicationService({
   joinPath: (...parts) => path.join(...parts),
   now: () => new Date(),
   writeFile: (targetPath, content) => writeFile(targetPath, content),
+  openExternal: (url) => shell.openExternal(url),
 });
 
 const browserSessionImportApplicationService = createBrowserSessionImportApplicationService({

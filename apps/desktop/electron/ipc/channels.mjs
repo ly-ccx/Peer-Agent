@@ -76,6 +76,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'browser:import-site-session',
   'browser:list-session-sites',
   'browser:list-session-sources',
+  'browser:open-external',
   'browser:open-full-disk-access-settings',
   'browser:panel-reveal-ack',
   'browser:register-webcontents',

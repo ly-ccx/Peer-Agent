@@ -53,6 +53,7 @@ const unavailableApi: ClientApi = {
   unregisterBrowserWebContents: unavailableMethod('unregisterBrowserWebContents'),
   clearBrowserSiteData: unavailableMethod('clearBrowserSiteData'),
   captureBrowserPage: unavailableMethod('captureBrowserPage'),
+  openBrowserExternal: unavailableMethod('openBrowserExternal'),
   listBrowserSessionSources: unavailableMethod('listBrowserSessionSources'),
   getStartupOsPermissions: unavailableMethod('getStartupOsPermissions'),
   getBrowserSessionImportPreflight: unavailableMethod('getBrowserSessionImportPreflight'),

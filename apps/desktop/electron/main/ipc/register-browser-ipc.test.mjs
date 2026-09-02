@@ -13,6 +13,7 @@ function createServices(calls) {
       unregisterWebContents: port('unregister'),
       clearSiteData: port('clear-site-data'),
       capturePage: port('capture-page'),
+      openExternal: port('open-external'),
     },
     sessionImport: {
       listSessionSources: port('list-session-sources'),
@@ -59,6 +60,7 @@ test('browser owner registers Browser, Session Import, and FDA channels once', (
     'browser:unregister-webcontents',
     'browser:clear-site-data',
     'browser:capture-page',
+    'browser:open-external',
     'browser:list-session-sources',
     'browser:session-import-preflight',
     'browser:list-session-sites',
@@ -99,6 +101,10 @@ test('browser owner projects Browser and Session Import payloads', () => {
     'capture-page-result',
   );
   assert.equal(
+    handlers.get('browser:open-external')({ sender }, { url: 'https://example.com' }),
+    'open-external-result',
+  );
+  assert.equal(
     handlers.get('browser:list-session-sources')({ sender }),
     'list-session-sources-result',
   );
@@ -123,6 +129,7 @@ test('browser owner projects Browser and Session Import payloads', () => {
     ['unregister', { webContentsId: 2 }],
     ['clear-site-data', { url: 'https://example.com' }],
     ['capture-page', { webContentsId: 3, savePath: '/tmp/page.png', sender }],
+    ['open-external', { url: 'https://example.com' }],
     ['list-session-sources'],
     ['session-import-preflight'],
     ['list-session-sites', { profileId: 'profile-1' }],
