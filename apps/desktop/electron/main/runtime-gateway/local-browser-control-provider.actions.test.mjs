@@ -18,6 +18,7 @@ function createActionWebContents() {
     inputEvents,
     scripts,
     roleMatchCount: 1,
+    textMatchCount: 1,
     isDestroyed: () => false,
     getURL: () => 'https://example.com/page',
     getTitle: () => 'Example',
@@ -26,6 +27,33 @@ function createActionWebContents() {
     },
     executeJavaScript: async (expr) => {
       scripts.push(expr);
+      if (expr.includes('findTextTestIdMatches')) {
+        const count = Number.isInteger(browser.textMatchCount) ? browser.textMatchCount : 1;
+        const nthMatch = expr.match(/const wantNth = (null|\d+);/);
+        const wantNth = nthMatch && nthMatch[1] !== 'null' ? Number(nthMatch[1]) : null;
+        if (wantNth == null) {
+          if (count !== 1) return { ok: false, count };
+        } else if (wantNth < 0 || wantNth >= count) {
+          return { ok: false, count, nth: wantNth };
+        }
+        if (expr.includes('scrollIntoView') || expr.includes('x0: Math.round')) {
+          return {
+            ok: true,
+            count: 1,
+            x: 40,
+            y: 80,
+            dpr: 1,
+            vvScale: 1,
+            scrollX: 0,
+            scrollY: 0,
+            x0: 20,
+            y0: 60,
+            w: 40,
+            h: 40,
+          };
+        }
+        return { ok: true, count: 1 };
+      }
       if (expr.includes('findRoleMatches')) {
         const count = Number.isInteger(browser.roleMatchCount) ? browser.roleMatchCount : 1;
         const nthMatch = expr.match(/const wantNth = (null|\d+);/);
@@ -344,6 +372,104 @@ test('click by role nth out of range fails recoverably', async () => {
   assert.equal(browser.inputEvents.length, 0);
 });
 
+test('click by unique visible text locates then clicks the element', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 71,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-text',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { hasText: 'Submit' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'hasText');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findTextTestIdMatches') && expr.includes('"hasText"') && expr.includes('"Submit"')));
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
+    { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
+  ]);
+});
+
+test('click by unique testid locates then clicks the element', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 72,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-testid',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { testid: 'login-btn' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'testid');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findTextTestIdMatches') && expr.includes('"testid"') && expr.includes('"login-btn"')));
+});
+
+test('click by hasText fails when no unique match exists', async () => {
+  const browser = createActionWebContents();
+  browser.textMatchCount = 0;
+  registerBrowserWebContents({
+    webContentsId: 73,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-text-missing',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { hasText: 'Missing' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /No unique element matched text/);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('click by hasText nth=0 picks the first of several same texts', async () => {
+  const browser = createActionWebContents();
+  browser.textMatchCount = 3;
+  registerBrowserWebContents({
+    webContentsId: 74,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-text-nth',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { hasText: 'OK', nth: 0 }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'hasText');
+  assert.equal(execution.result.outputPreview.nth, 0);
+});
+
 test('type by unique role/name focuses then inserts text', async () => {
   const browser = createActionWebContents();
   registerBrowserWebContents({
@@ -368,6 +494,30 @@ test('type by unique role/name focuses then inserts text', async () => {
   assert.ok(browser.inputEvents.some((event) => event.type === 'char' && event.keyCode === 'h'));
 });
 
+test('type by unique testid focuses then inserts text', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 75,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-type-testid',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.type', 'browser_type', { testid: 'email', text: 'hi' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'testid');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findTextTestIdMatches') && expr.includes('el.focus()')));
+  assert.ok(browser.inputEvents.some((event) => event.type === 'char' && event.keyCode === 'h'));
+});
+
 test('hover by unique role/name locates then hovers the element', async () => {
   const browser = createActionWebContents();
   registerBrowserWebContents({
@@ -389,6 +539,32 @@ test('hover by unique role/name locates then hovers the element', async () => {
   assert.equal(execution.result.status, 'success');
   assert.equal(execution.result.outputPreview.locatedBy, 'role');
   assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('"button"') && expr.includes('"Menu"')));
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
+  ]);
+});
+
+test('hover by unique visible text locates then hovers the element', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 76,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-hover-text',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.hover', 'browser_hover', { hasText: 'Menu' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'hasText');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findTextTestIdMatches') && expr.includes('"Menu"')));
   assert.deepEqual(browser.inputEvents, [
     { type: 'mouseMove', x: 40, y: 80 },
   ]);

@@ -49,11 +49,15 @@ test('browser_click and browser_type accept role/name from a roles snapshot', ()
   assert.ok(click.inputSchema.properties.role);
   assert.ok(click.inputSchema.properties.name);
   assert.ok(click.inputSchema.properties.nth);
+  assert.ok(click.inputSchema.properties.hasText);
+  assert.ok(click.inputSchema.properties.testid);
   assert.ok(type.inputSchema.properties.role);
   assert.ok(type.inputSchema.properties.name);
   assert.ok(type.inputSchema.properties.nth);
-  assert.match(click.prompt(), /role/);
-  assert.match(type.prompt(), /nth/);
+  assert.ok(type.inputSchema.properties.hasText);
+  assert.ok(type.inputSchema.properties.testid);
+  assert.match(click.prompt(), /testid/);
+  assert.match(type.prompt(), /hasText/);
 });
 
 test('browser_hover and browser_scroll are registered as Desktop-only browser tools', () => {
@@ -72,7 +76,9 @@ test('browser_hover and browser_scroll are registered as Desktop-only browser to
   assert.ok(hover.inputSchema.properties.selector);
   assert.ok(hover.inputSchema.properties.role);
   assert.ok(hover.inputSchema.properties.nth);
-  assert.match(hover.prompt(), /nth/);
+  assert.ok(hover.inputSchema.properties.hasText);
+  assert.ok(hover.inputSchema.properties.testid);
+  assert.match(hover.prompt(), /testid/);
   assert.ok(scroll.inputSchema.properties.deltaY);
   assert.ok(scroll.inputSchema.properties.block);
 });

@@ -121,14 +121,11 @@ function parseRoleNth(value) {
   return { ok: true, nth: n };
 }
 
-async function waitForRoleElementStable(wc, role, name, opts = {}) {
+async function waitForLocatorElementStable(wc, buildJs, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 1500;
   const pollMs = opts.pollMs ?? 120;
-  const sampleJs = buildRoleResolveJs(
-    role,
-    name,
+  const sampleJs = buildJs(
     'const r = el.getBoundingClientRect(); return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };',
-    { nth: opts.nth },
   );
   const deadline = Date.now() + timeoutMs;
   let prev = null;
@@ -145,6 +142,22 @@ async function waitForRoleElementStable(wc, role, name, opts = {}) {
     await sleep(pollMs);
   }
   return false;
+}
+
+async function waitForRoleElementStable(wc, role, name, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildRoleResolveJs(role, name, body, { nth: opts.nth }),
+    opts,
+  );
+}
+
+async function waitForTextTestIdElementStable(wc, kind, value, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildTextTestIdResolveJs(kind, value, body, { nth: opts.nth }),
+    opts,
+  );
 }
 
 /**
@@ -360,6 +373,38 @@ function findRoleMatches(root, doc, implicit, inputRoles, nameMax, wantRole, wan
   return matches;
 }`;
 
+const TEXT_TESTID_FIND_HELPER = `function visibleTextOf(el) {
+  const raw = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+  return raw;
+}
+function findTextTestIdMatches(root, kind, want) {
+  const matches = [];
+  const stack = [];
+  const target = String(want || '').trim();
+  if (!target) return matches;
+  const mode = String(kind || '').trim();
+  if (root && root.nodeType === 1) stack.push(root);
+  else if (root && root.firstElementChild) stack.push(root.firstElementChild);
+  while (stack.length) {
+    const current = stack.shift();
+    let hit = false;
+    if (mode === 'testid') {
+      const attr = current.getAttribute && (current.getAttribute('data-testid') || current.getAttribute('data-test-id') || current.getAttribute('data-test'));
+      hit = String(attr || '').trim() === target;
+    } else if (mode === 'hasText') {
+      hit = visibleTextOf(current) === target;
+    }
+    if (hit) matches.push(current);
+    const kids = [];
+    if (current.shadowRoot) {
+      for (const child of current.shadowRoot.children || []) kids.push(child);
+    }
+    for (const child of current.children || []) kids.push(child);
+    stack.unshift(...kids);
+  }
+  return matches;
+}`;
+
 export function buildRolesSnapshotJs(selector = '', { maxNodes = ROLE_SNAPSHOT_MAX_NODES } = {}) {
   const limit = Math.max(1, Math.min(200, Math.round(Number(maxNodes) || ROLE_SNAPSHOT_MAX_NODES)));
   const { framePath, css } = parseFrameSelector(selector || '');
@@ -442,6 +487,90 @@ async function resolveRoleTarget(wc, role, name, { zh, nth } = {}) {
     return { ok: false, count, reason, label };
   }
   return { ok: true, label };
+}
+
+export function buildTextTestIdResolveJs(kind, value, body = 'return el;', { nth } = {}) {
+  const mode = kind === 'testid' ? 'testid' : 'hasText';
+  const want = JSON.stringify(String(value || '').trim());
+  const wantNth = Number.isInteger(nth) && nth >= 0 ? nth : null;
+  return `(() => {
+    let doc = document;
+    const root = doc;
+    const kind = ${JSON.stringify(mode)};
+    const want = ${want};
+    const wantNth = ${wantNth == null ? 'null' : String(wantNth)};
+    ${TEXT_TESTID_FIND_HELPER}
+    const matches = findTextTestIdMatches(root, kind, want);
+    if (wantNth == null) {
+      if (matches.length !== 1) return { ok: false, count: matches.length };
+    } else if (wantNth < 0 || wantNth >= matches.length) {
+      return { ok: false, count: matches.length, nth: wantNth };
+    }
+    const el = wantNth == null ? matches[0] : matches[wantNth];
+    ${body}
+  })()`;
+}
+
+async function resolveTextTestIdTarget(wc, kind, value, { zh, nth } = {}) {
+  const mode = kind === 'testid' ? 'testid' : 'hasText';
+  const wanted = String(value || '').trim();
+  const kindLabel = mode === 'testid' ? 'testid' : 'text';
+  const baseLabel = `${kindLabel} "${wanted}"`;
+  const label = nth == null ? baseLabel : `${baseLabel} nth=${nth}`;
+  const resolved = await wc.executeJavaScript(
+    buildTextTestIdResolveJs(mode, wanted, 'return { ok: true, count: 1 };', { nth }),
+    true,
+  );
+  if (!resolved?.ok) {
+    const count = Number(resolved?.count) || 0;
+    const reason = nth != null
+      ? (zh
+        ? `「${baseLabel}」匹配到 ${count} 个元素，nth=${nth} 越界。`
+        : `${baseLabel} matched ${count} elements; nth=${nth} is out of range.`)
+      : count > 1
+        ? (zh
+          ? `「${baseLabel}」匹配到 ${count} 个元素，请改用 nth 或更具体的定位。`
+          : `${baseLabel} matched ${count} elements; use nth or a more specific locator.`)
+        : (zh
+          ? `未找到「${baseLabel}」。`
+          : `No unique element matched ${baseLabel}.`);
+    return { ok: false, count, reason, label, locatedBy: mode };
+  }
+  return { ok: true, label, locatedBy: mode };
+}
+
+const POINT_LOCATE_BODY = `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `;
+
+async function locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh }) {
+  if (role) {
+    const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
+    if (!resolved.ok) return resolved;
+    const located = await wc.executeJavaScript(
+      buildRoleResolveJs(role, name, POINT_LOCATE_BODY, { nth }),
+      true,
+    );
+    if (!located?.ok) {
+      return { ok: false, reason: zh ? `未找到角色「${resolved.label}」。` : `No unique element matched role "${resolved.label}".`, label: resolved.label };
+    }
+    return { ok: true, located, locatedBy: 'role', label: resolved.label };
+  }
+  const kind = testid ? 'testid' : 'hasText';
+  const value = testid || hasText;
+  const resolved = await resolveTextTestIdTarget(wc, kind, value, { zh, nth });
+  if (!resolved.ok) return resolved;
+  const located = await wc.executeJavaScript(
+    buildTextTestIdResolveJs(kind, value, POINT_LOCATE_BODY, { nth }),
+    true,
+  );
+  if (!located?.ok) {
+    return { ok: false, reason: zh ? `未找到「${resolved.label}」。` : `No unique element matched ${resolved.label}.`, label: resolved.label };
+  }
+  return { ok: true, located, locatedBy: resolved.locatedBy, label: resolved.label };
 }
 
 const SCROLL_ALIGNMENTS = new Set(['start', 'center', 'end', 'nearest']);
@@ -868,12 +997,14 @@ export function createLocalBrowserControlProvider({
     if (capabilityId === CLICK || capabilityId === HOVER) {
       const hasSelector = typeof args?.selector === 'string' && args.selector.trim().length > 0;
       const hasRole = typeof args?.role === 'string' && args.role.trim().length > 0;
+      const hasVisibleText = typeof args?.hasText === 'string' && args.hasText.trim().length > 0;
+      const hasTestId = typeof args?.testid === 'string' && args.testid.trim().length > 0;
       const hasPoint = Number.isFinite(Number(args?.x)) && Number.isFinite(Number(args?.y));
-      if (!hasSelector && !hasRole && !hasPoint) {
+      if (!hasSelector && !hasRole && !hasVisibleText && !hasTestId && !hasPoint) {
         return failed({
           call,
           locale,
-          reason: zh ? '需要提供 selector、role/name 或 x/y 坐标之一。' : 'Provide a selector, role/name, or x/y coordinates.',
+          reason: zh ? '需要提供 selector、role/name、hasText、testid 或 x/y 坐标之一。' : 'Provide a selector, role/name, hasText, testid, or x/y coordinates.',
         });
       }
     }
@@ -964,6 +1095,8 @@ export function createLocalBrowserControlProvider({
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const role = typeof args.role === 'string' ? args.role.trim() : '';
         const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
         const parsedNth = parseRoleNth(args.nth);
         if (!parsedNth.ok) {
           return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
@@ -994,44 +1127,39 @@ export function createLocalBrowserControlProvider({
           locatedBy = 'selector';
           viewportMeta = normalized;
           await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
-        } else if (role) {
-          const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
-          if (!resolved.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+        } else if (role || hasText || testid) {
+          const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
+          if (!locatedTarget.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: locatedTarget.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-          roleLabel = resolved.label;
-          const located = await wc.executeJavaScript(
-            buildRoleResolveJs(role, name, `
-              el.scrollIntoView({block:'center',inline:'center'});
-              const r = el.getBoundingClientRect();
-              const vv = window.visualViewport;
-              return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
-            `, { nth }),
-            true,
-          );
-          if (!located?.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到角色「${roleLabel}」。` : `No unique element matched role "${roleLabel}".`, dataLevel: 'D2_sensitive', status: 'failed' }) };
-          }
+          roleLabel = locatedTarget.label;
+          const located = locatedTarget.located;
           const normalized = computeViewportPoint(
             { x: located.x, y: located.y },
             { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
           );
           point = { x: normalized.x, y: normalized.y };
-          locatedBy = 'role';
+          locatedBy = locatedTarget.locatedBy;
           viewportMeta = normalized;
-          await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+          if (role) {
+            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+          } else {
+            await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+          }
         }
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         wc.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         output = { action: 'click', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         evidenceSummary = zh
-          ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : role ? `角色「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
-          : `Clicked ${selector ? `element "${selector}"` : role ? `role "${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+          ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : roleLabel ? `「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
+          : `Clicked ${selector ? `element "${selector}"` : roleLabel ? `"${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
       } else if (capabilityId === HOVER) {
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const role = typeof args.role === 'string' ? args.role.trim() : '';
         const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
         const parsedNth = parseRoleNth(args.nth);
         if (!parsedNth.ok) {
           return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
@@ -1062,39 +1190,32 @@ export function createLocalBrowserControlProvider({
           locatedBy = 'selector';
           viewportMeta = normalized;
           await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
-        } else if (role) {
-          const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
-          if (!resolved.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+        } else if (role || hasText || testid) {
+          const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
+          if (!locatedTarget.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: locatedTarget.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-          roleLabel = resolved.label;
-          const located = await wc.executeJavaScript(
-            buildRoleResolveJs(role, name, `
-              el.scrollIntoView({block:'center',inline:'center'});
-              const r = el.getBoundingClientRect();
-              const vv = window.visualViewport;
-              return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
-            `, { nth }),
-            true,
-          );
-          if (!located?.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到角色「${roleLabel}」。` : `No unique element matched role "${roleLabel}".`, dataLevel: 'D2_sensitive', status: 'failed' }) };
-          }
+          roleLabel = locatedTarget.label;
+          const located = locatedTarget.located;
           const normalized = computeViewportPoint(
             { x: located.x, y: located.y },
             { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
           );
           point = { x: normalized.x, y: normalized.y };
-          locatedBy = 'role';
+          locatedBy = locatedTarget.locatedBy;
           viewportMeta = normalized;
-          await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+          if (role) {
+            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+          } else {
+            await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+          }
         }
         wc.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
-        outputPreview = { status: 'success', action: 'hover', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'hover', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         output = { action: 'hover', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         evidenceSummary = zh
-          ? `已在内嵌浏览器悬停${selector ? `元素「${selector}」` : role ? `角色「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
-          : `Hovered ${selector ? `element "${selector}"` : role ? `role "${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+          ? `已在内嵌浏览器悬停${selector ? `元素「${selector}」` : roleLabel ? `「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
+          : `Hovered ${selector ? `element "${selector}"` : roleLabel ? `"${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
       } else if (capabilityId === SCROLL) {
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const deltaX = Number.isFinite(Number(args.deltaX)) ? Number(args.deltaX) : 0;
@@ -1220,6 +1341,8 @@ export function createLocalBrowserControlProvider({
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const role = typeof args.role === 'string' ? args.role.trim() : '';
         const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
         const parsedNth = parseRoleNth(args.nth);
         if (!parsedNth.ok) {
           return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
@@ -1238,20 +1361,39 @@ export function createLocalBrowserControlProvider({
           if (!focused) {
             return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的输入元素：${selector}` : `No input element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-        } else if (role) {
-          const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
-          if (!resolved.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
-          }
-          roleLabel = resolved.label;
-          locatedBy = 'role';
-          await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
-          const focused = await wc.executeJavaScript(
-            buildRoleResolveJs(role, name, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
-            true,
-          );
-          if (!focused?.ok) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到角色「${roleLabel}」的输入元素。` : `No unique input matched role "${roleLabel}".`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+        } else if (role || hasText || testid) {
+          if (role) {
+            const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
+            if (!resolved.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            roleLabel = resolved.label;
+            locatedBy = 'role';
+            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const focused = await wc.executeJavaScript(
+              buildRoleResolveJs(role, name, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
+              true,
+            );
+            if (!focused?.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到角色「${roleLabel}」的输入元素。` : `No unique input matched role "${roleLabel}".`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+          } else {
+            const kind = testid ? 'testid' : 'hasText';
+            const value = testid || hasText;
+            const resolved = await resolveTextTestIdTarget(wc, kind, value, { zh, nth });
+            if (!resolved.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            roleLabel = resolved.label;
+            locatedBy = resolved.locatedBy;
+            await waitForTextTestIdElementStable(wc, kind, value, { timeoutMs: 1500, pollMs: 120, nth });
+            const focused = await wc.executeJavaScript(
+              buildTextTestIdResolveJs(kind, value, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
+              true,
+            );
+            if (!focused?.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到「${roleLabel}」的输入元素。` : `No unique input matched ${roleLabel}.`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
           }
         }
         if (typeof wc.insertText === 'function') {
@@ -1266,7 +1408,7 @@ export function createLocalBrowserControlProvider({
           wc.sendInputEvent({ type: 'char', keyCode: '\r' });
           wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
         }
-        outputPreview = { status: 'success', action: 'type', locatedBy: locatedBy || undefined, selector: selector || undefined, role: role || undefined, name: name || undefined, nth: nth ?? undefined, chars: text.length, cleared: clear, submitted: submit, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'type', locatedBy: locatedBy || undefined, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, chars: text.length, cleared: clear, submitted: submit, ...targetIdentity };
         output = { action: 'type', locatedBy: locatedBy || undefined, chars: text.length, submitted: submit, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器输入 ${text.length} 个字符${submit ? '并回车提交' : ''}。`

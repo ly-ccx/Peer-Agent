@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs, buildRoleResolveJs } from './local-browser-control-provider.mjs';
+import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs, buildRoleResolveJs, buildTextTestIdResolveJs } from './local-browser-control-provider.mjs';
 
 test('parseFrameSelector 无前缀时返回空 framePath 与原始 css', () => {
   const r = parseFrameSelector('#submit');
@@ -92,4 +92,18 @@ test('buildRoleResolveJs selects the nth match when provided', () => {
   assert.ok(js.includes('const wantNth = 0;'));
   assert.ok(js.includes('wantNth >= matches.length'));
   assert.ok(js.includes('matches[wantNth]'));
+});
+
+test('buildTextTestIdResolveJs matches visible text or data-testid and supports nth', () => {
+  const textJs = buildTextTestIdResolveJs('hasText', 'Submit', 'return { ok: true, count: 1 };');
+  assert.ok(textJs.includes('findTextTestIdMatches'));
+  assert.ok(textJs.includes('visibleTextOf'));
+  assert.ok(textJs.includes('"hasText"'));
+  assert.ok(textJs.includes('"Submit"'));
+  assert.ok(textJs.includes('const wantNth = null;'));
+  const testIdJs = buildTextTestIdResolveJs('testid', 'login-btn', 'return { ok: true, count: 1 };', { nth: 1 });
+  assert.ok(testIdJs.includes('"testid"'));
+  assert.ok(testIdJs.includes('"login-btn"'));
+  assert.ok(testIdJs.includes('data-testid'));
+  assert.ok(testIdJs.includes('const wantNth = 1;'));
 });

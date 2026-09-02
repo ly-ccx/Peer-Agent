@@ -35,7 +35,15 @@
       },
       "nth": {
         "type": "integer",
-        "description": "0-based index among role/name matches. Use when several same-named roles match."
+        "description": "0-based index among matches. Use when several same-named roles, texts, or testids match."
+      },
+      "hasText": {
+        "type": "string",
+        "description": "Exact visible text of the element to focus (used when selector is omitted). Unique match required unless nth is set. Not the typed content."
+      },
+      "testid": {
+        "type": "string",
+        "description": "data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set."
       },
       "clear": {
         "type": "boolean",

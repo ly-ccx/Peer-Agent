@@ -63,17 +63,17 @@ const NAVIGATE_PROMPT = [
 ].join(' ');
 
 const CLICK_PROMPT = [
-  'Click an element in the visible in-app browser. Provide a CSS "selector", or "role"/"name"',
-  'from a browser_read_dom format=roles snapshot (unique match required unless "nth" is set),',
-  'or "x"/"y" viewport coordinates to click a point. Use 0-based "nth" when several same-named',
-  'roles match. The click is dispatched on the same webview the user is looking at.',
+  'Click an element in the visible in-app browser. Provide a CSS "selector", "role"/"name"',
+  'from a format=roles snapshot, visible "hasText", "testid" (data-testid), or "x"/"y"',
+  'coordinates. Unique match required unless 0-based "nth" is set. Prefer hasText/testid/role',
+  'over guessing CSS. The click is dispatched on the same webview the user is looking at.',
 ].join(' ');
 
 const TYPE_PROMPT = [
-  'Type text into the visible in-app browser. If "selector" or "role"/"name" (from a roles',
-  'snapshot; unique match required unless "nth" is set) is given, the element is focused',
-  '(and optionally cleared) first; otherwise text goes to the currently focused element.',
-  'Use 0-based "nth" for same-named roles. Set "submit" to press Enter afterwards.',
+  'Type text into the visible in-app browser. If "selector", "role"/"name", visible "hasText",',
+  'or "testid" is given, the element is focused (and optionally cleared) first; otherwise text',
+  'goes to the currently focused element. "text" is the typed content, not the locator. Use',
+  '0-based "nth" when several matches exist. Set "submit" to press Enter afterwards.',
 ].join(' ');
 
 const SCREENSHOT_PROMPT = [
@@ -93,8 +93,8 @@ const READ_DOM_PROMPT = [
 
 const HOVER_PROMPT = [
   'Hover an element in the visible in-app browser. Provide a CSS "selector" (optional frame:N),',
-  'or "role"/"name" from a format=roles snapshot (unique match required unless 0-based "nth"',
-  'is set), or "x"/"y" viewport coordinates. Use this to reveal tooltips or submenus.',
+  '"role"/"name", visible "hasText", "testid", or "x"/"y" coordinates. Unique match required',
+  'unless 0-based "nth" is set. Use this to reveal tooltips or submenus.',
 ].join(' ');
 
 const SCROLL_PROMPT = [
@@ -197,7 +197,15 @@ function clickTool() {
         },
         nth: {
           type: 'integer',
-          description: '0-based index among role/name matches. Use when several same-named roles match.',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
         },
         x: {
           type: 'number',
@@ -240,7 +248,15 @@ function typeTool() {
         },
         nth: {
           type: 'integer',
-          description: '0-based index among role/name matches. Use when several same-named roles match.',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element to focus (used when selector is omitted). Unique match required unless nth is set. Not the typed content.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
         },
         clear: {
           type: 'boolean',
@@ -327,7 +343,15 @@ function hoverTool() {
         },
         nth: {
           type: 'integer',
-          description: '0-based index among role/name matches. Use when several same-named roles match.',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
         },
         x: {
           type: 'number',
