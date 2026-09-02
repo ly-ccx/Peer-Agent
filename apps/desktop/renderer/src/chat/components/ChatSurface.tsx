@@ -8,6 +8,7 @@ import type {
   ContextAccountingSnapshot,
   ContextAttachmentItem,
   ContinuityContextItem,
+  GoalRunnerStatus,
   LlmProviderConfigView,
 } from '@peer-agent/protocol';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -503,6 +504,7 @@ export function ChatSurface({
   const messages = convState.messages as ChatMsg[];
   const automationProposal = selectAutomationChatProposal(convState.automationCreateContext);
   const loadStatus = convState.loadStatus;
+  const streamStatus = convState.streamStatus;
   const isStreaming = convState.isStreaming;
   const turnGroupCacheRef = useRef<{
     conversationId: string | null;
@@ -579,6 +581,7 @@ export function ChatSurface({
   } | null>(null);
   const [deliveryLine, setDeliveryLine] = useState<TaskDeliveryLine | null>(null);
   const [deliveryLineKnown, setDeliveryLineKnown] = useState(false);
+  const [goalRunnerStatus, setGoalRunnerStatus] = useState<GoalRunnerStatus | null>(null);
   const persistDraftComposer = useCallback((patch: {
     draft?: string;
     queue?: ConversationRuntimeState['messageQueue'];
@@ -1235,6 +1238,7 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
+    setGoalRunnerStatus(null);
     // streamError 按会话桶隔离：不要在切到目标会话时把它清掉。
     // 上一会话的横幅不会串过来；本会话若仍是中断态，加载后从 interrupted 还原。
     // 切换会话时恢复「该会话」输入框状态(草稿文本 + 待发送队列):
@@ -1268,7 +1272,8 @@ export function ChatSurface({
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
     // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
-    setIsStreaming(false);
+    // 自动出队看 streamStatus，不在这里单独 setIsStreaming(false)：已 ready 会话会走
+    // beginStreamReattach，把流状态标成 unknown，避免假空闲窗口把队列发出去。
     streamIdRef.current = null;
     setToolProgress(null);
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
@@ -1303,6 +1308,8 @@ export function ChatSurface({
     if (hardBegin) {
       convActions.beginLoad();
       setTokenUsage(null);
+    } else {
+      convActions.beginStreamReattach();
     }
     let cancelled = false;
     void (async () => {
@@ -2186,18 +2193,20 @@ export function ChatSurface({
     }
   }, [promoteQueuedMessageToFront]);
 
-  // 队列自动出队：loadStatus 只有在 reattach 收敛后才会 ready，避免切回运行中会话时
-  // 把暂时的 isStreaming=false 当成真正空闲。每个会话同一时间只投递一条；发送路径明确
-  // 接受后才移除队首，IPC 失败或前置条件变化时消息仍留在队列中。
+  // 队列自动出队：streamStatus 只有在 reattach 收敛后才会 confirmed，避免切回运行中会话时
+  // 把暂时的 isStreaming=false 当成真正空闲。Goal Runner 占用会话时同样让路。
+  // 每个会话同一时间只投递一条；发送路径明确接受后才移除队首。
   useEffect(() => {
     if (!canAutoDispatchQueuedMessage({
       loadStatus,
+      streamStatus,
       isStreaming,
       isCompactionActive,
       hasProvider,
       hasConversation: Boolean(conversationId),
       hasResumeTask: Boolean(resumeTask),
       queueLength: messageQueue.length,
+      goalRunnerStatus: goalRunnerStatus ?? null,
     })) return;
     if (!conversationId || queuedDispatchInFlightRef.current.has(conversationId)) return;
     const head = messageQueue[0];
@@ -2216,12 +2225,14 @@ export function ChatSurface({
       });
   }, [
     loadStatus,
+    streamStatus,
     isStreaming,
     isCompactionActive,
     hasProvider,
     conversationId,
     resumeTask,
     messageQueue,
+    goalRunnerStatus,
     removeQueuedMessage,
     submitMessage,
     setStreamError,
@@ -2437,6 +2448,9 @@ export function ChatSurface({
   const handleActiveDeliveryChange = useCallback((line: TaskDeliveryLine | null) => {
     setDeliveryLine(line);
     setDeliveryLineKnown(true);
+  }, []);
+  const handleActiveGoalRunnerStatusChange = useCallback((status: GoalRunnerStatus | null) => {
+    setGoalRunnerStatus(status);
   }, []);
   const workspaceBaseBranch = useMemo(() => {
     const pending = pendingBaseBranch?.trim();
@@ -2982,7 +2996,7 @@ export function ChatSurface({
         <>
         <div className="composer-chrome-row">
         <div className="composer-chrome-left">
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} onActiveGoalRunnerStatusChange={handleActiveGoalRunnerStatusChange} />
         </div>
         {workspaceIsGit === true ? (
         <div className="composer-chrome-right">

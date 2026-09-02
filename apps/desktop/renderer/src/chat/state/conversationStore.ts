@@ -44,6 +44,11 @@ import type {
 export interface ConversationRuntimeState {
   /** 会话内容加载阶段：判别式状态，把「旧内容配新 id」中间态显式化为 loading。 */
   readonly loadStatus: 'idle' | 'loading' | 'ready';
+  /**
+   * 切会话时 renderer 会先把 isStreaming 归零，再异步 reattach。
+   * unknown = 流状态尚未确认，自动出队必须让路；confirmed = reattach 已收敛。
+   */
+  readonly streamStatus: 'unknown' | 'confirmed';
   readonly messages: readonly ChatMsg[];
   /** 当前会话输入草稿。随会话桶存放，避免切会话时复用上一会话输入态。 */
   readonly draft: string;
@@ -78,6 +83,7 @@ export interface ConversationRuntimeState {
 /** 未知会话返回的稳定空切片单例（冻结，引用恒定，避免订阅死循环）。 */
 export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze({
   loadStatus: 'idle',
+  streamStatus: 'confirmed',
   messages: Object.freeze([]) as readonly ChatMsg[],
   draft: '',
   messageQueue: Object.freeze([]) as readonly QueuedMessage[],
@@ -315,10 +321,28 @@ export class ConversationStore {
   beginLoad(conversationId: string | null): void {
     this.setState(conversationId, {
       loadStatus: 'loading',
+      streamStatus: 'unknown',
       messages: Object.freeze([]) as readonly ChatMsg[],
       isStreaming: false,
       compactionState: IDLE_COMPACTION_STATE,
       streamError: null,
+      toolProgress: null,
+      pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],
+      providerRecoveryNotice: null,
+      turnStartedAt: null,
+      streamId: null,
+    });
+  }
+
+  /**
+   * 静默刷新入口：保留可见消息和 composer 态，只把流状态标成尚未确认。
+   * 切回已 ready 会话时不能 beginLoad 清空，但自动出队仍必须等 reattach 收敛。
+   */
+  beginStreamReattach(conversationId: string | null): void {
+    this.setState(conversationId, {
+      streamStatus: 'unknown',
+      isStreaming: false,
+      compactionState: IDLE_COMPACTION_STATE,
       toolProgress: null,
       pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],
       providerRecoveryNotice: null,
@@ -332,7 +356,7 @@ export class ConversationStore {
     conversationId: string | null,
     patch: Partial<ConversationRuntimeState>,
   ): void {
-    this.setState(conversationId, { ...patch, loadStatus: 'ready' });
+    this.setState(conversationId, { streamStatus: 'confirmed', ...patch, loadStatus: 'ready' });
   }
 
   /** 丢弃某会话桶（会话删除时清理内存）。 */

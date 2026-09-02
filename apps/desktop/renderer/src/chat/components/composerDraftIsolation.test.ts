@@ -211,7 +211,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /branchPushNotice/);
   assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
+  assert.match(surface, /onActiveGoalRunnerStatusChange=\{handleActiveGoalRunnerStatusChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
+  assert.match(panel, /onActiveGoalRunnerStatusChange/);
   assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
 });
 
@@ -226,6 +228,13 @@ test('external conversation reload replaces or clears the shared accounting snap
     surface,
     /convActions\.commitLoad\(\{[\s\S]*contextAccounting: storedContextAccountingSnapshot/,
   );
+});
+
+test('switching a ready conversation holds the queue until stream reattach confirms idle', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /convActions\.beginStreamReattach\(\)/);
+  assert.match(surface, /streamStatus/);
+  assert.match(surface, /goalRunnerStatus: goalRunnerStatus \?\? null/);
 });
 
 test('unknown restored context renders as unknown, never zero percent', async () => {

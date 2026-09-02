@@ -171,6 +171,11 @@ interface GoalPlanPanelProps {
    * 表达层只读，隔离真值仍以 deliveryBinding 为准。
    */
   readonly onActiveDeliveryChange?: (line: TaskDeliveryLine | null) => void;
+  /**
+   * 当前活动计划的 Goal Runner 状态。自动出队用它挡住 tick 交接窗口，
+   * 不依赖 isStreaming（handoff 会先把流状态打成 false）。
+   */
+  readonly onActiveGoalRunnerStatusChange?: (status: GoalRunnerStatus | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -1933,7 +1938,7 @@ const PlanCard = memo(function PlanCard({
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange, onActiveGoalRunnerStatusChange }: GoalPlanPanelProps): ReactElement | null {
   const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2309,6 +2314,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   useEffect(() => {
     onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
   }, [onActiveDeliveryChange, planViewModel.activePlan]);
+
+  useEffect(() => {
+    onActiveGoalRunnerStatusChange?.(planViewModel.activePlan?.runner?.status ?? null);
+  }, [onActiveGoalRunnerStatusChange, planViewModel.activePlan?.runner?.status]);
 
   // 面板位于输入框上方：没有计划时不占位，直接隐藏。
   if (plans.length === 0) {
