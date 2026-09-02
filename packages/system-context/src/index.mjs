@@ -47,3 +47,4 @@ export { createRuntimeReminderPromptSource } from './sources/runtime-reminder-so
 export { createCorePromptSource, renderSystemCorePrompt } from './sources/core-source.mjs';
 export { createRuntimePromptSource, renderRuntimeContext } from './sources/runtime-source.mjs';
 export { createVerifierPromptSource } from './sources/verifier-source.mjs';
+export { createWebEntryPromptSource, renderWebEntryPrompt } from './sources/web-entry-source.mjs';

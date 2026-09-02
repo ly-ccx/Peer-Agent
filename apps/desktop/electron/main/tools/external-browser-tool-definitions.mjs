@@ -64,7 +64,7 @@ export const EXTERNAL_BROWSER_TOOL_DEFINITIONS = [
   tool(
     EXTERNAL_BROWSER_TOOL_NAMES.open,
     DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserExternalOpen,
-    'Open a temporary Peer-managed Chromium session for this conversation. Isolated from the in-app Browser workspace and from the user daily profile. Do not use this to control the visible Workbench webview. Optional url navigates after launch. Download and dialog are rejected until a later slice.',
+    'Open a temporary Peer-managed Chromium session for this conversation. Isolated from the in-app Browser workspace and from the user daily profile. This is not the default webpage entry; use in-app browser_* tools unless the task needs a separate profile or multi-page environment. Do not use this to control the visible Workbench webview. Optional url navigates after launch. Download and dialog are rejected until a later slice.',
     {
       type: 'object',
       additionalProperties: false,

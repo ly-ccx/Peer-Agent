@@ -153,6 +153,8 @@ export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;
 export function createTaskAcceptancePromptSource(): PromptSource;
+export function createWebEntryPromptSource(): PromptSource;
+export function renderWebEntryPrompt(): string;
 export function createVerifierPromptSource(): PromptSource;
 export function renderConstructionFalsificationPrompt(): string;
 export function extractAcceptancePins(brief: string): string[];

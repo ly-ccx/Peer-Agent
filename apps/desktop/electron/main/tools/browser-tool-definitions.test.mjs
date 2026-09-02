@@ -98,6 +98,8 @@ test('browser_external_* tools are registered as Desktop-only L2 contracts', () 
   assert.equal(registry.getTool('browser_external_dialog'), null);
   assert.equal(registry.getTool('playwright_click'), null);
   assert.equal(open.capabilityId.startsWith('local.web.control.'), false);
+  assert.match(open.prompt(), /not the default webpage entry/i);
+  assert.match(open.prompt(), /browser_\*/);
 });
 
 test('browser_read_dom declares format=roles for accessibility snapshots', () => {

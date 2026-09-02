@@ -22,6 +22,7 @@ const DEFAULT_SOURCE_IDS = [
   'project.instructions',
   'runtime.contextExtensions',
   'runtime.reminders',
+  'runtime.web-entry',
   'automation.intent-policy',
   'runtime.goal-plan',
   'runtime.goal-runner',
@@ -37,6 +38,16 @@ test('Desktop adapter exposes the canonical default Source registry', () => {
   assert.deepEqual(createDefaultPromptSourceRegistry().listSourceIds(), DEFAULT_SOURCE_IDS);
   assert.deepEqual(createDesktopRegistry().listSourceIds(), DEFAULT_SOURCE_IDS);
   assert.equal(assembleDesktopSystemContext, assembleSystemContext);
+});
+
+test('web task default entry is assembled as an L5 tool rule', () => {
+  const assembled = assembleSystemContext({ mode: 'chat' });
+  const section = assembled.sections.find((item) => item.id === 'runtime.web-entry');
+  assert.ok(section);
+  assert.equal(section.layer, 'L5_TOOL_RULES');
+  assert.match(section.content, /browser_\*/);
+  assert.match(section.content, /browser_external_\*/);
+  assert.match(section.content, /Do not open Playwright/);
 });
 
 test('automation intent policy classifies ordinary chat without leaking into non-chat modes', () => {
