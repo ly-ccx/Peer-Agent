@@ -2494,6 +2494,7 @@ export function ChatSurface({
       value: option.value,
       label: formatComposerBranchOptionLabel(option.value),
       group: option.kind === 'remote' ? remoteGroup : localGroup,
+      tab: option.kind,
       hint: option.kind === 'remote'
         ? (isZh ? '远程' : 'remote')
         : (isZh ? '本地' : 'local'),
@@ -3009,6 +3010,11 @@ export function ChatSurface({
                 menuPlacement="down"
                 searchable={canSelectBoundBranch}
                 searchPlaceholder={isZh ? '搜索源头…' : 'Search source…'}
+                tabs={canSelectBoundBranch ? [
+                  { id: 'local', label: isZh ? '本地' : 'Local' },
+                  { id: 'remote', label: isZh ? '远程' : 'Remote' },
+                ] : undefined}
+                tabsAriaLabel={isZh ? '源头范围' : 'Source scope'}
                 emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
                 footerAction={canSelectBoundBranch ? {
                   label: isZh ? '创建分支' : 'Create branch',

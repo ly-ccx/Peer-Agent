@@ -1,14 +1,15 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  filterDropdownOptions,
+  resolveDropdownActiveTab,
+  type DropdownOption,
+  type DropdownTab,
+} from './dropdownMenu';
 
-export interface DropdownOption {
-  readonly value: string;
-  readonly label: string;
-  readonly tone?: 'danger';
-  readonly group?: string;
-  readonly hint?: string;
-}
+export type { DropdownOption, DropdownTab } from './dropdownMenu';
+export { filterDropdownOptions, resolveDropdownActiveTab } from './dropdownMenu';
 
 export interface DropdownFooterAction {
   readonly label: string | ((query: string) => string);
@@ -21,14 +22,6 @@ interface MenuCoords {
   readonly top: number;
   readonly width: number;
   readonly placement: 'down' | 'up';
-}
-
-function optionMatchesQuery(option: DropdownOption, query: string): boolean {
-  if (!query) return true;
-  const haystack = [option.label, option.value, option.hint ?? '', option.group ?? '']
-    .join('\n')
-    .toLowerCase();
-  return haystack.includes(query);
 }
 
 // 暗色自定义下拉，替代原生 <select>(原生在 macOS 会套系统皮，与暗色设计语言割裂)。
@@ -54,6 +47,8 @@ export function Dropdown({
   searchPlaceholder,
   emptyLabel,
   footerAction,
+  tabs,
+  tabsAriaLabel,
 }: {
   readonly value: string;
   readonly options: readonly DropdownOption[];
@@ -71,9 +66,12 @@ export function Dropdown({
   readonly searchPlaceholder?: string;
   readonly emptyLabel?: string;
   readonly footerAction?: DropdownFooterAction;
+  readonly tabs?: readonly DropdownTab[];
+  readonly tabsAriaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const [coords, setCoords] = useState<MenuCoords | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -84,10 +82,13 @@ export function Dropdown({
 
   const selected = options.find((o) => o.value === value);
   const triggerLabel = triggerLabelOverride ?? selected?.label ?? placeholder ?? value;
-  const normalizedQuery = query.trim().toLowerCase();
+  const tabList = tabs && tabs.length > 0 ? tabs : undefined;
+  const menuTab = tabList
+    ? (activeTab || resolveDropdownActiveTab({ tabs: tabList, options, value }))
+    : undefined;
   const visibleOptions = useMemo(
-    () => options.filter((option) => optionMatchesQuery(option, normalizedQuery)),
-    [normalizedQuery, options],
+    () => filterDropdownOptions(options, query, menuTab),
+    [menuTab, options, query],
   );
   const footerDisabled = typeof footerAction?.disabled === 'function'
     ? footerAction.disabled(query)
@@ -134,14 +135,24 @@ export function Dropdown({
   useEffect(() => {
     if (!open) {
       setQuery('');
+      setActiveTab('');
       return;
     }
     const idx = visibleOptions.findIndex((o) => o.value === value);
     setActiveIndex(idx >= 0 ? idx : (visibleOptions.length > 0 ? 0 : -1));
+  }, [open, value, visibleOptions]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (tabList) {
+      setActiveTab(resolveDropdownActiveTab({ tabs: tabList, options, value }));
+    }
     if (searchable) {
       searchRef.current?.focus();
     }
-  }, [open, searchable, value, visibleOptions]);
+    // Snap the tab only when the menu opens, not when the user switches tabs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open is the intended trigger
+  }, [open]);
 
   // 打开后在 paint 前测量菜单高度并定位，避免首帧闪烁；关闭时清空坐标。
   useLayoutEffect(() => {
@@ -296,6 +307,27 @@ export function Dropdown({
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={onListKeyDown}
               />
+            </div>
+          ) : null}
+          {tabList ? (
+            <div className="pa-dropdown-tabs" role="tablist" aria-label={tabsAriaLabel}>
+              {tabList.map((tab) => {
+                const selectedTab = tab.id === menuTab;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    className={`pa-dropdown-tab${selectedTab ? ' is-active' : ''}`}
+                    aria-selected={selectedTab}
+                    tabIndex={selectedTab ? 0 : -1}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
           <div className="pa-dropdown-list">

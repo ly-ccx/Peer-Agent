@@ -183,6 +183,10 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /formatComposerBranchOptionLabel\(option\.value\)/);
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
   assert.match(surface, /searchable/);
+  assert.match(surface, /tab: option.kind/);
+  assert.match(surface, /id: 'local'/);
+  assert.match(surface, /id: 'remote'/);
+  assert.match(surface, /tabs=\{canSelectBoundBranch \? \[/);
   assert.match(surface, /gitCreateBranch/);
   assert.match(surface, /handleOpenCreateBranchDialog/);
   assert.match(surface, /resolveComposerCreateSourceBranch/);
