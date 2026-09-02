@@ -26,9 +26,19 @@ describe('workbench view visibility', () => {
     );
   });
 
+  it('reuses one BrowserView instance per conversation instead of remounting the foreground key', () => {
+    assert.match(panelSource, /mountedBrowserConversations\(conversationId, preparedBrowserConversations\)/);
+    assert.match(panelSource, /key=\{`mounted-browser-\$\{id\}`\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
+    assert.match(
+      panelSource,
+      /workbench-view--prepared-browser[\s\S]*claimForeground=\{id === conversationId\}/,
+    );
+  });
+
   it('keeps a prepared background Browser guest mounted off-screen instead of display:none', () => {
     assert.match(panelSource, /workbench-view--prepared-browser/);
-    assert.match(panelSource, /claimForeground=\{false\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
     assert.match(
       workbenchStyles,
       /\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,

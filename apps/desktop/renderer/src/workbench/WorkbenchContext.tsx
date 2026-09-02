@@ -32,6 +32,7 @@ import {
 import { defaultModeForKind, detectFileKind } from './file-preview/fileTypes';
 import { workbenchIsLayoutVisible } from './workbenchLayoutProjection';
 import {
+  rememberLeavingBrowserConversation,
   rememberPreparedBrowser,
   resolveBrowserPanelReveal,
 } from './browserPanelReveal';
@@ -228,6 +229,26 @@ export function WorkbenchProvider({
   const filesNonceRef = useRef(0);
   const [focusThreadTaskId, setFocusThreadTaskId] = useState<string | null>(null);
   const [preparedBrowserConversations, setPreparedBrowserConversations] = useState<string[]>([]);
+  const previousConversationIdRef = useRef<string | null>(conversationId);
+  let livePreparedBrowserConversations = preparedBrowserConversations;
+  if (previousConversationIdRef.current !== conversationId) {
+    const leavingId = previousConversationIdRef.current;
+    previousConversationIdRef.current = conversationId;
+    if (leavingId) {
+      const leavingKey = workbenchSessionKey(leavingId);
+      const leavingSession = browserSessionMap[leavingKey]
+        ?? defaultBrowserSessionsRef.current[leavingKey]
+        ?? null;
+      livePreparedBrowserConversations = rememberLeavingBrowserConversation(
+        preparedBrowserConversations,
+        leavingId,
+        isBlankBrowserSession(leavingSession),
+      );
+      if (livePreparedBrowserConversations.join('\0') !== preparedBrowserConversations.join('\0')) {
+        setPreparedBrowserConversations(livePreparedBrowserConversations);
+      }
+    }
+  }
 
   const currentSessionKey = workbenchSessionKey(conversationId);
   const open = resolveWorkbenchOpen(openByConversation, conversationId, legacyOpenDefault);
@@ -616,7 +637,7 @@ export function WorkbenchProvider({
     documentSession,
     focusThreadTaskId,
     layoutHost,
-    preparedBrowserConversations,
+    preparedBrowserConversations: livePreparedBrowserConversations,
     conversationId,
     setOpen,
     toggleOpen,
@@ -639,7 +660,7 @@ export function WorkbenchProvider({
     setDocumentSession,
   }), [
     open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, focusThreadTaskId, layoutHost, preparedBrowserConversations, conversationId,
+    filesTarget, browserSession, documentSession, focusThreadTaskId, layoutHost, livePreparedBrowserConversations, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, openBackgroundThread,
     setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,
