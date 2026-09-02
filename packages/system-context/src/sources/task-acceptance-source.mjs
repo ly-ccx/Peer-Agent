@@ -83,6 +83,17 @@ export function firstUserMessageText(messages) {
   return '';
 }
 
+export function lastUserMessageText(messages) {
+  if (!Array.isArray(messages)) return '';
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== 'user') continue;
+    const text = extractUserMessageText(message);
+    if (text) return text;
+  }
+  return '';
+}
+
 export function extractAcceptancePins(brief) {
   const text = neutralizeToolCallSyntax(asString(brief));
   if (!text) return [];
@@ -134,7 +145,23 @@ export function normalizeTaskAcceptance(value) {
 }
 
 export function taskAcceptanceFromMessages(messages) {
-  return normalizeTaskAcceptance(firstUserMessageText(messages));
+  const original = firstUserMessageText(messages);
+  const latest = lastUserMessageText(messages);
+  if (!original && !latest) return null;
+  if (!latest || latest === original) return normalizeTaskAcceptance(original);
+  return normalizeTaskAcceptance({
+    brief: [
+      original,
+      '',
+      'Later user direction (overrides withdrawn scope):',
+      latest,
+    ].join('\n'),
+    pins: [
+      ...extractAcceptancePins(latest),
+      ...extractAcceptancePins(original),
+    ],
+    source: 'messages',
+  });
 }
 
 function formatTaskAcceptance(acceptance) {
@@ -147,6 +174,9 @@ function formatTaskAcceptance(acceptance) {
     'Construction-falsification (L1) decides how to cross-check these pins.',
     acceptance.brief
       ? ['## Original brief', acceptance.brief].join('\n')
+      : '',
+    acceptance.source === 'messages'
+      ? 'Later user direction overrides withdrawn scope from the original brief.'
       : '',
     pinLines.join('\n'),
   ]);

@@ -1325,6 +1325,7 @@ goalRunner = createGoalRunner({
         terminalStatus: outcome?.terminalStatus ?? null,
         toolCallCount: outcome?.toolCallCount ?? 0,
         usage: outcome?.usage,
+        continue: (outcome?.toolCallCount ?? 0) > 0,
       };
     },
   },
@@ -3160,6 +3161,7 @@ function handleChatSend({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
+            pauseRunner: (planId) => goalRunner?.pause(planId),
           });
           if (route.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({

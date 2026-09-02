@@ -28,6 +28,7 @@ export {
   extractAcceptancePins,
   extractUserMessageText,
   firstUserMessageText,
+  lastUserMessageText,
   normalizeTaskAcceptance,
   taskAcceptanceFromMessages,
 } from './sources/task-acceptance-source.mjs';

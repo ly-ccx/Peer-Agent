@@ -1737,3 +1737,30 @@ test('start: 并发 kick 在 prepareIsolation 让出时只开一次泵', async (
   assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
 });
 
+test('verbal stop: 部分完成且本轮没有推进剩余任务时，泵不得再开下一轮', async () => {
+  const plan = createApprovedPlan();
+  registerEvidenceRefs(plan.planId, ['artifact://verbal-1']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://verbal-1'],
+  });
+  store.setPlanStatus(plan.planId, 'executing');
+
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      return { continue: false, terminalStatus: 'done', toolCallCount: 0 };
+    },
+  };
+  const runner = createRunner({ runtime });
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(calls, 1);
+  assert.equal(got.status, 'paused');
+  assert.equal(got.runner.status, 'paused');
+  assert.equal(got.runner.blockedReason, 'verbal_stop_no_remaining_progress');
+  assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
+});
+

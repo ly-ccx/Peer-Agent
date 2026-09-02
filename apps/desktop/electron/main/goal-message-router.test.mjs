@@ -265,6 +265,57 @@ test('classifyGoalMessage treats correction wording as user_correction', () => {
   assert.equal(classification.eventType, 'user_correction');
 });
 
+test('applyGoalMessageRoute: 用户改向会收尾未完成任务并停泵', () => {
+  const route = routeGoalMessage({
+    messageText: '先别发线上，剩下的不用继续',
+    activeGoalPlan,
+  });
+  assert.equal(route.intent, 'correction');
+
+  const calls = [];
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan,
+    goalPlanStore: {
+      appendRunEvent(planId, event) {
+        calls.push(['event', planId, event.type]);
+        return { planId, status: 'executing' };
+      },
+      cancelOpenTasks(planId, change) {
+        calls.push(['cancel', planId, change.reason]);
+        return { planId, status: 'completed' };
+      },
+    },
+    pauseRunner(planId) {
+      calls.push(['pause', planId]);
+    },
+  });
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['event', 'cancel', 'pause']);
+});
+
+test('applyGoalMessageRoute: 暂停只停泵，不收尾未完成任务', () => {
+  const route = routeGoalMessage({ messageText: '暂停', activeGoalPlan });
+  const calls = [];
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan,
+    goalPlanStore: {
+      appendRunEvent() {
+        calls.push('event');
+        return { planId: activeGoalPlan.planId };
+      },
+      cancelOpenTasks() {
+        calls.push('cancel');
+      },
+    },
+    pauseRunner() {
+      calls.push('pause');
+    },
+  });
+  assert.deepEqual(calls, ['event', 'pause']);
+});
+
 
 test('applyGoalMessageRoute restores a failed Goal on follow_up (not only resume keyword)', () => {
   const failedPlan = {

@@ -183,6 +183,15 @@ test('shouldAutoStartAcceptedGoalRunner: intake / 非自驱 / 终态 不启动',
     false,
   );
   assert.equal(shouldAutoStartAcceptedGoalRunner(null), false);
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunner({
+      workflowKind: 'goal_self_driven',
+      activation: { kind: 'accepted_goal' },
+      status: 'executing',
+      runner: { status: 'paused' },
+    }),
+    false,
+  );
 });
 
 test('plan change auto-start: 只接受 goal-accepted，拒绝 Runner 自身 persist 回流', () => {

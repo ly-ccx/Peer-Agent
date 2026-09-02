@@ -328,6 +328,23 @@ function hasCompletedProgress(plan) {
   return progress && progress.total > 0 && progress.completed === progress.total;
 }
 
+function countOpenLeaves(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  let open = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    if (!['completed', 'failed', 'cancelled'].includes(task.status)) open += 1;
+  }
+  return open;
+}
+
 function planNeedsQualityReview(plan) {
   return planRequiresQualityReview(plan) && plan?.qualityReview?.status !== 'passed';
 }
@@ -1839,6 +1856,7 @@ export function createGoalRunner({
       });
       emit('goalRunner:tickStarted', { planId, turnNumber, reanchor });
 
+      const openLeavesBeforeTurn = countOpenLeaves(plan);
       let result;
       try {
         result = await chatRuntime.runGoalTurn({
@@ -1983,9 +2001,42 @@ export function createGoalRunner({
       }
 
       if (latest.status === 'completed' || hasCompletedProgress(latest)) continue;
-      if (latest.status === 'failed') continue;
+      if (latest.status === 'failed' || latest.status === 'cancelled') continue;
 
       const exploreRequests = normalizeExploreRequests(result);
+
+      // 口头停但计划未终态：本轮没有推进剩余任务，就不要再开下一轮。
+      // intake / explorer 轮不算口头停；continue:true 表示模型还要接着干。
+      const openLeavesAfterTurn = countOpenLeaves(latest);
+      const turnDidNotAdvanceOpenWork = !isIntakeContract(latest)
+        && exploreRequests.length === 0
+        && openLeavesAfterTurn > 0
+        && openLeavesAfterTurn === openLeavesBeforeTurn
+        && result?.intent !== 'verify'
+        && (result?.continue === false || result?.terminalStatus === 'done')
+        && (result?.toolCallCount ?? 0) === 0
+        && !result?.requestedUserInput
+        && !result?.blocked
+        && !result?.failed
+        && result?.terminalStatus !== 'error'
+        && result?.terminalStatus !== 'aborted';
+      if (turnDidNotAdvanceOpenWork) {
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'paused',
+          intent: 'block',
+          phase: 'waiting_user',
+          blockedReason: 'verbal_stop_no_remaining_progress',
+          updatedAt: now(),
+        });
+        if (!TERMINAL_PLAN_STATUSES.has(latest.status)) {
+          goalPlanStore.setPlanStatus(planId, 'paused');
+        }
+        emit('goalRunner:tickCompleted', { planId, turnNumber, continue: false });
+        emit('goalRunner:paused', { planId, reason: 'verbal_stop_no_remaining_progress' });
+        return getState(planId);
+      }
+
       if (exploreRequests.length > 0) {
         const exploreResult = await runExplorerBatch({
           planId,

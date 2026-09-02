@@ -213,7 +213,9 @@ function readJson(filePath) {
 /** ExecutionStatus（execution.ts）——本 store 仅依赖这些字面量做聚合判定。 */
 const TERMINAL_OK = 'completed';
 const TERMINAL_FAIL = 'failed';
+const TERMINAL_CANCEL = 'cancelled';
 const BLOCKED = 'waiting_user';
+const LEAF_TERMINAL_STATUSES = new Set([TERMINAL_OK, TERMINAL_FAIL, TERMINAL_CANCEL]);
 
 /** Plan 终态：关闭 active segment 并落盘 duration。 */
 const PLAN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -463,8 +465,8 @@ export function aggregateProgress(tasks) {
  *    Runner 未启动」的僵死态。批准闸门只能由显式 recordApproval 打开。
  *
  * 2. 自动收尾：当计划已 'executing'（或可恢复的 'failed'）且存在叶子、且所有叶子均为
- *    终态（completed / failed）时，把顶层推进到终态——含任一 failed → 'failed'，
- *    否则全 completed → 'completed'。waiting_user 不算终态；空计划不收尾。
+ *    终态（completed / failed / cancelled）时，把顶层推进到终态——含任一 failed → 'failed'，
+ *    否则 completed + cancelled → 'completed'。waiting_user 不算终态；空计划不收尾。
  *
  * 3. 失败恢复：stream/runtime 中断可能把 plan 显式标成 'failed'，但子任务仍可能继续
  *    成功完成。若全部叶子已成功终态，则收尾为 'completed'（解除 failed 粘住）。
@@ -491,7 +493,7 @@ export function derivePlanStatus(currentStatus, tasks) {
         }
         leafTotal += 1;
         if (t.status === TERMINAL_FAIL) hasFailed = true;
-        else if (t.status !== TERMINAL_OK) allTerminal = false;
+        else if (!LEAF_TERMINAL_STATUSES.has(t.status)) allTerminal = false;
       }
     };
     walkLeaves(list);
@@ -526,6 +528,7 @@ export function derivePlanStatus(currentStatus, tasks) {
         t.status === 'running' ||
         t.status === TERMINAL_OK ||
         t.status === TERMINAL_FAIL ||
+        t.status === TERMINAL_CANCEL ||
         t.status === BLOCKED
       ) {
         started = true;
@@ -3426,6 +3429,7 @@ export function createGoalPlanStore({
       'running',
       TERMINAL_OK,
       TERMINAL_FAIL,
+      TERMINAL_CANCEL,
       'waiting_user',
     ]);
     if (
@@ -3471,7 +3475,9 @@ export function createGoalPlanStore({
       if (change.failureReason !== undefined) updated.failureReason = change.failureReason;
       if (change.blockedReason !== undefined) updated.blockedReason = change.blockedReason;
       if (status === 'running' && !t.startedAt) updated.startedAt = now;
-      if (status === TERMINAL_OK || status === TERMINAL_FAIL) updated.completedAt = now;
+      if (status === TERMINAL_OK || status === TERMINAL_FAIL || status === TERMINAL_CANCEL) {
+        updated.completedAt = now;
+      }
       return updated;
     });
     if (!found) throw new Error(`[goal-plan-store] task ${taskId} not found in plan ${planId}`);
@@ -3486,7 +3492,9 @@ export function createGoalPlanStore({
       };
       collectChildLeaves(updatedPlan.tasks);
       const childFailed = childTasks.some((task) => task.status === TERMINAL_FAIL || task.status === BLOCKED);
-      const childComplete = childTasks.length > 0 && childTasks.every((task) => task.status === TERMINAL_OK);
+      const childComplete = childTasks.length > 0
+        && childTasks.every((task) => LEAF_TERMINAL_STATUSES.has(task.status))
+        && !childFailed;
       const childStarted = childTasks.some((task) => task.status !== 'pending');
       const delegatedStatus = childFailed
         ? BLOCKED
@@ -3540,6 +3548,35 @@ export function createGoalPlanStore({
       }
     }
     return getPlan(updatedPlan.planId);
+  }
+
+  /**
+   * 用户改向/撤回剩余工作时，把未终态叶子标成 cancelled。
+   * persist 会按叶子事实把计划收尾为 completed（含 cancelled 叶子），泵即可停。
+   */
+  function cancelOpenTasks(planId, { reason } = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const note = typeof reason === 'string' && reason.trim()
+      ? reason.trim()
+      : '用户撤回剩余工作';
+    let cancelledCount = 0;
+    const walk = (list) => (list || []).map((task) => {
+      const children = Array.isArray(task.subtasks) ? task.subtasks : [];
+      if (children.length > 0) return { ...task, subtasks: walk(children) };
+      if (LEAF_TERMINAL_STATUSES.has(task.status)) return task;
+      cancelledCount += 1;
+      return {
+        ...task,
+        status: TERMINAL_CANCEL,
+        blockedReason: note,
+        completedAt: now,
+      };
+    });
+    const tasks = walk(plan.tasks);
+    if (cancelledCount === 0) return plan;
+    return persist({ ...plan, tasks, updatedAt: now });
   }
 
   /**
@@ -4171,6 +4208,7 @@ export function createGoalPlanStore({
     listEvidenceIndex: readEvidenceIndex,
     findEvidenceIndexRecords,
     recordTaskEvidence,
+    cancelOpenTasks,
     recordCriterionResults,
     recordQualityReview,
     recordDeliveryHandoff,

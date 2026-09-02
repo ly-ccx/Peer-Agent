@@ -5,7 +5,9 @@ import {
   createTaskAcceptancePromptSource,
   extractAcceptancePins,
   firstUserMessageText,
+  lastUserMessageText,
   normalizeTaskAcceptance,
+  taskAcceptanceFromMessages,
   TASK_ACCEPTANCE_BRIEF_LIMIT,
   TASK_ACCEPTANCE_PIN_LIMIT,
 } from './task-acceptance-source.mjs';
@@ -86,4 +88,27 @@ test('task-acceptance source stays dark without input and renders L7 facts when 
   assert.match(sections[0].content, /serialize_by_alias/);
   assert.equal(sections[0].source.kind, 'task-acceptance');
   assert.ok(sections[0].source.pinCount >= 4);
+});
+
+test('taskAcceptanceFromMessages overlays later user direction on the original brief', () => {
+  assert.equal(lastUserMessageText([
+    { role: 'user', content: '先发布到线上' },
+    { role: 'assistant', content: '好' },
+    { role: 'user', content: '先别发线上，剩下的不用继续' },
+  ]), '先别发线上，剩下的不用继续');
+
+  const acceptance = taskAcceptanceFromMessages([
+    { role: 'user', content: '先发布到线上并验证网关注册' },
+    { role: 'assistant', content: '开始做' },
+    { role: 'user', content: '先别发线上，剩下的不用继续' },
+  ]);
+  assert.match(acceptance.brief, /先发布到线上/);
+  assert.match(acceptance.brief, /Later user direction \(overrides withdrawn scope\)/);
+  assert.match(acceptance.brief, /先别发线上，剩下的不用继续/);
+
+  const source = createTaskAcceptancePromptSource();
+  const sections = source.render(source.observe({ taskAcceptance: acceptance }));
+  assert.match(sections[0].content, /## Original brief/);
+  assert.match(sections[0].content, /overrides withdrawn scope/);
+  assert.match(sections[0].content, /先别发线上/);
 });

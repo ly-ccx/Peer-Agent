@@ -160,6 +160,7 @@ export function renderConstructionFalsificationPrompt(): string;
 export function extractAcceptancePins(brief: string): string[];
 export function extractUserMessageText(message: unknown): string;
 export function firstUserMessageText(messages: readonly unknown[] | null | undefined): string;
+export function lastUserMessageText(messages: readonly unknown[] | null | undefined): string;
 export function normalizeTaskAcceptance(value: unknown): TaskAcceptanceContext & {
   readonly brief: string;
   readonly pins: readonly string[];

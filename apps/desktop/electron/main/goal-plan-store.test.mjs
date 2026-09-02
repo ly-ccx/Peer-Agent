@@ -298,6 +298,32 @@ test('derivePlanStatus: executing + 全叶子 completed → completed（自动�
   assert.equal(derivePlanStatus('executing', tasks), 'completed');
 });
 
+test('derivePlanStatus: executing + completed 与 cancelled 叶子 → completed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'cancelled' },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'completed');
+});
+
+test('cancelOpenTasks: 用户改向后未完成叶子收尾，计划不再保持 executing', () => {
+  const plan = approvedPlanWithTasks();
+  store.setPlanStatus(plan.planId, 'executing');
+  registerEvidenceRefs(plan.planId, ['artifact://steer-1']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://steer-1'],
+  });
+  assert.equal(store.getPlan(plan.planId).status, 'executing');
+
+  const updated = store.cancelOpenTasks(plan.planId, { reason: '用户撤回剩余工作' });
+  const nested = updated.tasks.find((task) => task.taskId === 't2')?.subtasks || [];
+  assert.equal(updated.status, 'completed');
+  assert.equal(updated.tasks.find((task) => task.taskId === 't1')?.status, 'completed');
+  assert.equal(nested.find((task) => task.taskId === 't2a')?.status, 'cancelled');
+  assert.equal(nested.find((task) => task.taskId === 't2b')?.status, 'cancelled');
+});
+
 test('derivePlanStatus: executing + 含 failed（其余 completed）→ failed', () => {
   const tasks = [
     { taskId: 't1', status: 'completed' },
