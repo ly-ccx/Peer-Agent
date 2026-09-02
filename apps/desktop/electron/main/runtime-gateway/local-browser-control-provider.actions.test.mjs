@@ -27,6 +27,19 @@ function createActionWebContents() {
     },
     executeJavaScript: async (expr) => {
       scripts.push(expr);
+      if (expr.includes('elementFromPoint') || expr.includes("reason: 'actionable'")) {
+        const reason = browser.actionableReason || 'actionable';
+        return {
+          ok: reason === 'actionable',
+          reason,
+          x: 40,
+          y: 80,
+          x0: 20,
+          y0: 60,
+          w: 40,
+          h: 40,
+        };
+      }
       if (expr.includes('findTextTestIdMatches')) {
         const count = Number.isInteger(browser.textMatchCount) ? browser.textMatchCount : 1;
         const nthMatch = expr.match(/const wantNth = (null|\d+);/);
@@ -568,6 +581,78 @@ test('hover by unique visible text locates then hovers the element', async () =>
   assert.deepEqual(browser.inputEvents, [
     { type: 'mouseMove', x: 40, y: 80 },
   ]);
+});
+
+test('click fails when the target stays disabled', async () => {
+  const browser = createActionWebContents();
+  browser.actionableReason = 'disabled';
+  registerBrowserWebContents({
+    webContentsId: 81,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-disabled',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { selector: '#go' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /disabled/i);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('hover fails when the target stays covered', async () => {
+  const browser = createActionWebContents();
+  browser.actionableReason = 'occluded';
+  registerBrowserWebContents({
+    webContentsId: 82,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-hover-occluded',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.hover', 'browser_hover', { selector: '#menu' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /covered/i);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('type fails when the target node is detached', async () => {
+  const browser = createActionWebContents();
+  browser.actionableReason = 'stale';
+  registerBrowserWebContents({
+    webContentsId: 83,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-type-stale',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.type', 'browser_type', { selector: '#q', text: 'hello' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /detached/i);
+  assert.equal(browser.inputEvents.length, 0);
 });
 
 test('hover by selector uses mouseMove and records viewport metadata', async () => {

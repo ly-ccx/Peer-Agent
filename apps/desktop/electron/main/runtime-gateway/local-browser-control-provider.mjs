@@ -93,25 +93,69 @@ export function computeViewportPoint(cssPoint, viewport = {}) {
   };
 }
 
-async function waitForElementStable(wc, selector, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 1500;
-  const pollMs = opts.pollMs ?? 120;
-  const js = (el) => buildElementJs(el, `const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };`);
-  const deadline = Date.now() + timeoutMs;
-  let prev = null;
-  while (Date.now() < deadline) {
-    const sample = await wc.executeJavaScript(js(selector), true);
-    if (!sample) return false;
-    if (prev) {
-      const stable = prev.x === sample.x && prev.y === sample.y &&
-        prev.x0 === sample.x0 && prev.y0 === sample.y0 &&
-        prev.w === sample.w && prev.h === sample.h;
-      if (stable) return true;
-    }
-    prev = sample;
-    await sleep(pollMs);
+export const ELEMENT_ACTIONABLE_SAMPLE_BODY = `
+    if (!el || !el.isConnected) return { ok: false, reason: 'stale', x: 0, y: 0, x0: 0, y0: 0, w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2);
+    const y = Math.round(r.top + r.height / 2);
+    const x0 = Math.round(r.left);
+    const y0 = Math.round(r.top);
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (w <= 0 || h <= 0) return { ok: false, reason: 'not_visible', x, y, x0, y0, w, h };
+    const disabled = Boolean(
+      el.disabled === true
+      || el.getAttribute('aria-disabled') === 'true'
+      || el.closest('[disabled], [aria-disabled="true"]')
+    );
+    if (disabled) return { ok: false, reason: 'disabled', x, y, x0, y0, w, h };
+    const hit = (el.ownerDocument || document).elementFromPoint(x, y);
+    const occluded = !(hit && (hit === el || el.contains(hit) || hit.contains(el)));
+    if (occluded) return { ok: false, reason: 'occluded', x, y, x0, y0, w, h };
+    return { ok: true, reason: 'actionable', x, y, x0, y0, w, h };
+`;
+
+export function describeActionableWaitFailure(reason, zh, action = 'click') {
+  const verb = action === 'type'
+    ? (zh ? '未输入' : 'did not type')
+    : action === 'hover'
+      ? (zh ? '未悬停' : 'did not hover')
+      : (zh ? '未点击' : 'did not click');
+  switch (reason) {
+    case 'disabled':
+      return zh ? `目标仍被禁用，${verb}。` : `Target stayed disabled; ${verb}.`;
+    case 'occluded':
+      return zh ? `目标仍被挡住，${verb}。` : `Target stayed covered; ${verb}.`;
+    case 'stale':
+      return zh ? `目标节点已不在页面上，${verb}。` : `Target node was detached; ${verb}.`;
+    case 'not_visible':
+      return zh ? `目标仍不可见，${verb}。` : `Target stayed not visible; ${verb}.`;
+    default:
+      return zh ? `目标仍不可点，${verb}。` : `Target stayed not actionable; ${verb}.`;
   }
-  return false;
+}
+
+function failUnlessActionable(waited, { call, permissionGrant, locale, zh, action }) {
+  if (waited?.ok) return null;
+  return {
+    call,
+    permissionGrant,
+    result: createFailedClientToolResult({
+      call,
+      locale,
+      reason: describeActionableWaitFailure(waited?.reason, zh, action),
+      dataLevel: 'D2_sensitive',
+      status: 'failed',
+    }),
+  };
+}
+
+async function waitForElementStable(wc, selector, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildElementJs(selector, body),
+    opts,
+  );
 }
 
 function parseRoleNth(value) {
@@ -124,24 +168,29 @@ function parseRoleNth(value) {
 async function waitForLocatorElementStable(wc, buildJs, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 1500;
   const pollMs = opts.pollMs ?? 120;
-  const sampleJs = buildJs(
-    'const r = el.getBoundingClientRect(); return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), x0: Math.round(r.left), y0: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };',
-  );
+  const sampleJs = buildJs(ELEMENT_ACTIONABLE_SAMPLE_BODY);
   const deadline = Date.now() + timeoutMs;
   let prev = null;
+  let lastReason = 'not_actionable';
   while (Date.now() < deadline) {
     const sample = await wc.executeJavaScript(sampleJs, true);
-    if (!sample?.ok) return false;
+    if (!sample || sample.ok !== true) {
+      lastReason = sample?.reason || 'stale';
+      prev = null;
+      await sleep(pollMs);
+      continue;
+    }
+    lastReason = sample.reason || 'actionable';
     if (prev) {
       const stable = prev.x === sample.x && prev.y === sample.y &&
         prev.x0 === sample.x0 && prev.y0 === sample.y0 &&
         prev.w === sample.w && prev.h === sample.h;
-      if (stable) return true;
+      if (stable) return { ok: true, reason: 'actionable', sample };
     }
     prev = sample;
     await sleep(pollMs);
   }
-  return false;
+  return { ok: false, reason: lastReason };
 }
 
 async function waitForRoleElementStable(wc, role, name, opts = {}) {
@@ -1126,7 +1175,9 @@ export function createLocalBrowserControlProvider({
           point = { x: normalized.x, y: normalized.y };
           locatedBy = 'selector';
           viewportMeta = normalized;
-          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+          if (blocked) return blocked;
         } else if (role || hasText || testid) {
           const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
           if (!locatedTarget.ok) {
@@ -1142,9 +1193,13 @@ export function createLocalBrowserControlProvider({
           locatedBy = locatedTarget.locatedBy;
           viewportMeta = normalized;
           if (role) {
-            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+            if (blocked) return blocked;
           } else {
-            await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+            if (blocked) return blocked;
           }
         }
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
@@ -1189,7 +1244,9 @@ export function createLocalBrowserControlProvider({
           point = { x: normalized.x, y: normalized.y };
           locatedBy = 'selector';
           viewportMeta = normalized;
-          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+          if (blocked) return blocked;
         } else if (role || hasText || testid) {
           const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
           if (!locatedTarget.ok) {
@@ -1205,9 +1262,13 @@ export function createLocalBrowserControlProvider({
           locatedBy = locatedTarget.locatedBy;
           viewportMeta = normalized;
           if (role) {
-            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+            if (blocked) return blocked;
           } else {
-            await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+            if (blocked) return blocked;
           }
         }
         wc.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
@@ -1353,7 +1414,9 @@ export function createLocalBrowserControlProvider({
         let locatedBy = selector ? 'selector' : '';
         let roleLabel = '';
         if (selector) {
-          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+          if (blocked) return blocked;
           const focused = await wc.executeJavaScript(
             buildElementJs(selector, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true;`),
             true,
@@ -1369,7 +1432,9 @@ export function createLocalBrowserControlProvider({
             }
             roleLabel = resolved.label;
             locatedBy = 'role';
-            await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+            if (blocked) return blocked;
             const focused = await wc.executeJavaScript(
               buildRoleResolveJs(role, name, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
               true,
@@ -1386,7 +1451,9 @@ export function createLocalBrowserControlProvider({
             }
             roleLabel = resolved.label;
             locatedBy = resolved.locatedBy;
-            await waitForTextTestIdElementStable(wc, kind, value, { timeoutMs: 1500, pollMs: 120, nth });
+            const waited = await waitForTextTestIdElementStable(wc, kind, value, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+            if (blocked) return blocked;
             const focused = await wc.executeJavaScript(
               buildTextTestIdResolveJs(kind, value, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
               true,

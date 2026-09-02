@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs, buildRoleResolveJs, buildTextTestIdResolveJs } from './local-browser-control-provider.mjs';
+import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs, buildRoleResolveJs, buildTextTestIdResolveJs, ELEMENT_ACTIONABLE_SAMPLE_BODY, describeActionableWaitFailure } from './local-browser-control-provider.mjs';
 
 test('parseFrameSelector 无前缀时返回空 framePath 与原始 css', () => {
   const r = parseFrameSelector('#submit');
@@ -106,4 +106,15 @@ test('buildTextTestIdResolveJs matches visible text or data-testid and supports 
   assert.ok(testIdJs.includes('"login-btn"'));
   assert.ok(testIdJs.includes('data-testid'));
   assert.ok(testIdJs.includes('const wantNth = 1;'));
+});
+
+test('actionable wait sample checks enabled, occlusion, and stale nodes', () => {
+  assert.ok(ELEMENT_ACTIONABLE_SAMPLE_BODY.includes('elementFromPoint'));
+  assert.ok(ELEMENT_ACTIONABLE_SAMPLE_BODY.includes('isConnected'));
+  assert.ok(ELEMENT_ACTIONABLE_SAMPLE_BODY.includes("reason: 'disabled'"));
+  assert.ok(ELEMENT_ACTIONABLE_SAMPLE_BODY.includes("reason: 'occluded'"));
+  assert.ok(ELEMENT_ACTIONABLE_SAMPLE_BODY.includes("reason: 'stale'"));
+  assert.equal(describeActionableWaitFailure('disabled', false, 'click'), 'Target stayed disabled; did not click.');
+  assert.equal(describeActionableWaitFailure('occluded', false, 'hover'), 'Target stayed covered; did not hover.');
+  assert.equal(describeActionableWaitFailure('stale', false, 'type'), 'Target node was detached; did not type.');
 });
