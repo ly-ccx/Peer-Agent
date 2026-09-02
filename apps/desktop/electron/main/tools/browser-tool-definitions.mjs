@@ -63,15 +63,17 @@ const NAVIGATE_PROMPT = [
 ].join(' ');
 
 const CLICK_PROMPT = [
-  'Click an element in the visible in-app browser. Provide a CSS "selector" to click the',
-  'first matching element, or "x"/"y" viewport coordinates to click a point. The click is',
-  'dispatched on the same webview the user is looking at. Returns a short result summary.',
+  'Click an element in the visible in-app browser. Provide a CSS "selector", or "role"/"name"',
+  'from a browser_read_dom format=roles snapshot (unique match required), or "x"/"y" viewport',
+  'coordinates to click a point. The click is dispatched on the same webview the user is looking',
+  'at. Returns a short result summary.',
 ].join(' ');
 
 const TYPE_PROMPT = [
-  'Type text into the visible in-app browser. If "selector" is given, the element is focused',
-  '(and optionally cleared) first; otherwise text goes to the currently focused element. Set',
-  '"submit" to press Enter afterwards. Acts on the same visible webview. Returns a summary.',
+  'Type text into the visible in-app browser. If "selector" or "role"/"name" (from a roles',
+  'snapshot; unique match required) is given, the element is focused (and optionally cleared)',
+  'first; otherwise text goes to the currently focused element. Set "submit" to press Enter',
+  'afterwards. Acts on the same visible webview. Returns a summary.',
 ].join(' ');
 
 const SCREENSHOT_PROMPT = [
@@ -186,6 +188,14 @@ function clickTool() {
           type: 'string',
           description: 'CSS selector of the element to click (first match).',
         },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Must match exactly one element.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role; unique match still required.',
+        },
         x: {
           type: 'number',
           description: 'Viewport X coordinate to click (used when selector is omitted).',
@@ -216,6 +226,14 @@ function typeTool() {
         selector: {
           type: 'string',
           description: 'Optional CSS selector to focus before typing.',
+        },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Must match exactly one element.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role; unique match still required.',
         },
         clear: {
           type: 'boolean',

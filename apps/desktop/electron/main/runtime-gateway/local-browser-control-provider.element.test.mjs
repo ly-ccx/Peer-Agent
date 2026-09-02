@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs } from './local-browser-control-provider.mjs';
+import { parseFrameSelector, buildElementJs, buildRolesSnapshotJs, buildRoleResolveJs } from './local-browser-control-provider.mjs';
 
 test('parseFrameSelector 无前缀时返回空 framePath 与原始 css', () => {
   const r = parseFrameSelector('#submit');
@@ -74,4 +74,14 @@ test('buildRolesSnapshotJs 支持 frame:N 前缀与 selector 转义', () => {
   assert.ok(js.includes('queryDeep(doc, ' + JSON.stringify('#panel"};alert(1)') + ')'));
   assert.ok(js.includes('current.shadowRoot'));
   assert.ok(!js.includes('querySelector(#panel"}'));
+});
+
+test('buildRoleResolveJs requires a unique role/name match and reuses snapshot helpers', () => {
+  const js = buildRoleResolveJs('button', 'Submit', 'return { ok: true, count: 1 };');
+  assert.ok(js.includes('findRoleMatches'));
+  assert.ok(js.includes('accessibleName'));
+  assert.ok(js.includes('nameMatches'));
+  assert.ok(js.includes('"button"'));
+  assert.ok(js.includes('"Submit"'));
+  assert.ok(js.includes('if (matches.length !== 1) return { ok: false, count: matches.length }'));
 });

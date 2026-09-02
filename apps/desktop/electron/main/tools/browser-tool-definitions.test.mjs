@@ -42,6 +42,18 @@ test('browser_open_panel is registered and projected through the local Browser c
   });
 });
 
+test('browser_click and browser_type accept role/name from a roles snapshot', () => {
+  const registry = createRuntimeToolRegistry();
+  const click = registry.getTool('browser_click');
+  const type = registry.getTool('browser_type');
+  assert.ok(click.inputSchema.properties.role);
+  assert.ok(click.inputSchema.properties.name);
+  assert.ok(type.inputSchema.properties.role);
+  assert.ok(type.inputSchema.properties.name);
+  assert.match(click.prompt(), /role/);
+  assert.match(type.prompt(), /role/);
+});
+
 test('browser_hover and browser_scroll are registered as Desktop-only browser tools', () => {
   assert.equal(BROWSER_TOOL_NAMES.hover, 'browser_hover');
   assert.equal(BROWSER_TOOL_NAMES.scroll, 'browser_scroll');

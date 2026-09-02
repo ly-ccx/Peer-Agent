@@ -14,9 +14,10 @@ import {
 function createActionWebContents() {
   const inputEvents = [];
   const scripts = [];
-  return {
+  const browser = {
     inputEvents,
     scripts,
+    roleMatchCount: 1,
     isDestroyed: () => false,
     getURL: () => 'https://example.com/page',
     getTitle: () => 'Example',
@@ -25,6 +26,27 @@ function createActionWebContents() {
     },
     executeJavaScript: async (expr) => {
       scripts.push(expr);
+      if (expr.includes('findRoleMatches')) {
+        const count = Number.isInteger(browser.roleMatchCount) ? browser.roleMatchCount : 1;
+        if (count !== 1) return { ok: false, count };
+        if (expr.includes('scrollIntoView') || expr.includes('x0: Math.round')) {
+          return {
+            ok: true,
+            count: 1,
+            x: 40,
+            y: 80,
+            dpr: 1,
+            vvScale: 1,
+            scrollX: 0,
+            scrollY: 0,
+            x0: 20,
+            y0: 60,
+            w: 40,
+            h: 40,
+          };
+        }
+        return { ok: true, count: 1 };
+      }
       if (expr.includes('collectRoles')) {
         return {
           count: 2,
@@ -59,6 +81,7 @@ function createActionWebContents() {
       return true;
     },
   };
+  return browser;
 }
 
 function actionCall(capabilityId, toolName, args) {
@@ -185,6 +208,105 @@ test('click supports frame:N selector prefix', async () => {
   assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#submit")')));
   assert.equal(browser.inputEvents[0].type, 'mouseDown');
   assert.equal(browser.inputEvents[1].type, 'mouseUp');
+});
+
+test('click by unique role/name locates then clicks the element', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 64,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-role',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { role: 'button', name: 'Submit' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'role');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('"button"') && expr.includes('"Submit"')));
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
+    { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
+  ]);
+});
+
+test('click by role fails when no unique match exists', async () => {
+  const browser = createActionWebContents();
+  browser.roleMatchCount = 0;
+  registerBrowserWebContents({
+    webContentsId: 65,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-role-missing',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { role: 'button', name: 'Missing' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /No unique element matched role/);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('click by role fails when multiple elements match', async () => {
+  const browser = createActionWebContents();
+  browser.roleMatchCount = 3;
+  registerBrowserWebContents({
+    webContentsId: 66,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-role-many',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { role: 'button' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'failed');
+  assert.match(String(execution.result.outputPreview?.reason ?? ''), /matched 3 elements/);
+  assert.equal(browser.inputEvents.length, 0);
+});
+
+test('type by unique role/name focuses then inserts text', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 67,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-type-role',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.type', 'browser_type', { role: 'textbox', name: 'Email', text: 'hi' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'role');
+  assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('el.focus()')));
+  assert.ok(browser.inputEvents.some((event) => event.type === 'char' && event.keyCode === 'h'));
 });
 
 test('hover by selector uses mouseMove and records viewport metadata', async () => {
