@@ -107,6 +107,86 @@ test('normalizeScrollAlignment 只接受 start/center/end/nearest', () => {
   assert.equal(normalizeScrollAlignment(1), '');
 });
 
+test('click by selector uses mouseDown/Up and records viewport metadata', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 61,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { selector: '#go' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'selector');
+  assert.equal(execution.result.outputPreview.x, 40);
+  assert.equal(execution.result.outputPreview.y, 80);
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
+    { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
+  ]);
+  assert.ok(browser.scripts.some((expr) => expr.includes('queryDeep(doc, "#go")')));
+});
+
+test('click by coordinates skips element lookup', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 62,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-point',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { x: 12, y: 24 }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.outputPreview.locatedBy, 'point');
+  assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseDown', x: 12, y: 24, button: 'left', clickCount: 1 },
+    { type: 'mouseUp', x: 12, y: 24, button: 'left', clickCount: 1 },
+  ]);
+  assert.equal(browser.scripts.length, 0);
+});
+
+test('click supports frame:N selector prefix', async () => {
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 63,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-frame',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { selector: 'frame:0 #submit' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#submit")')));
+  assert.equal(browser.inputEvents[0].type, 'mouseDown');
+  assert.equal(browser.inputEvents[1].type, 'mouseUp');
+});
+
 test('hover by selector uses mouseMove and records viewport metadata', async () => {
   const browser = createActionWebContents();
   registerBrowserWebContents({
@@ -131,7 +211,7 @@ test('hover by selector uses mouseMove and records viewport metadata', async () 
   assert.equal(execution.result.outputPreview.x, 40);
   assert.equal(execution.result.outputPreview.y, 80);
   assert.deepEqual(browser.inputEvents, [{ type: 'mouseMove', x: 40, y: 80 }]);
-  assert.ok(browser.scripts.some((expr) => expr.includes('querySelector("#menu")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('queryDeep(doc, "#menu")')));
 });
 
 test('hover by coordinates skips element lookup', async () => {
@@ -177,7 +257,7 @@ test('hover supports frame:N selector prefix', async () => {
     },
   );
   assert.equal(execution.result.status, 'success');
-  assert.ok(browser.scripts.some((expr) => expr.includes('frames[1]') && expr.includes('querySelector(".item")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[1]') && expr.includes('queryDeep(doc, ".item")')));
 });
 
 test('scroll by selector delta uses executeJavaScript and records after offset', async () => {
@@ -384,8 +464,8 @@ test('drag from selector to selector uses locator chain', async () => {
   assert.equal(execution.result.status, 'success');
   assert.equal(execution.result.outputPreview.from.locatedBy, 'selector');
   assert.equal(execution.result.outputPreview.to.locatedBy, 'selector');
-  assert.ok(browser.scripts.some((expr) => expr.includes('querySelector("#src")')));
-  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('querySelector("#dst")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('queryDeep(doc, "#src")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#dst")')));
 });
 
 test('read_dom format=roles 落角色快照并返回 role/name 摘要', async () => {
@@ -436,5 +516,5 @@ test('read_dom format=roles 支持 frame:N 前缀', async () => {
     },
   );
   assert.equal(execution.result.status, 'success');
-  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('querySelector("#panel")')));
+  assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#panel")')));
 });

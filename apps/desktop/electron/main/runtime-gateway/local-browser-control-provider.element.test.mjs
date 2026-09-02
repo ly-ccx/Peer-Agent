@@ -30,14 +30,16 @@ test('parseFrameSelector 空/undefined 安全回落', () => {
 test('buildElementJs 无前缀生成主 document 查询表达式', () => {
   const js = buildElementJs('#submit');
   assert.ok(js.includes('let doc = document;'));
-  assert.ok(js.includes('doc.querySelector("#submit")'));
+  assert.ok(js.includes('function queryDeep(root, css)'));
+  assert.ok(js.includes('queryDeep(doc, "#submit")'));
+  assert.ok(js.includes('node.shadowRoot'));
   assert.ok(js.includes('if (!el) return null;'));
 });
 
 test('buildElementJs 带 frame:1 下钻到对应 iframe document', () => {
   const js = buildElementJs('frame:1 .btn');
   assert.ok(js.includes('doc.defaultView?.frames[1]?.document || null'));
-  assert.ok(js.includes('doc.querySelector(".btn")'));
+  assert.ok(js.includes('queryDeep(doc, ".btn")'));
 });
 
 test('buildElementJs 未命中/下钻失败返回 null', () => {
@@ -49,7 +51,7 @@ test('buildElementJs 未命中/下钻失败返回 null', () => {
 test('buildElementJs 注入 body 并在定位后执行', () => {
   const js = buildElementJs('#box', 'return el.offsetWidth;');
   assert.ok(js.includes('return el.offsetWidth;'));
-  assert.ok(js.includes('const el = doc.querySelector("#box");'));
+  assert.ok(js.includes('const el = queryDeep(doc, "#box");'));
 });
 
 test('buildElementJs 对 selector 做 JSON 转义防注入', () => {
@@ -69,6 +71,7 @@ test('buildRolesSnapshotJs 无 selector 时扫 document.body', () => {
 test('buildRolesSnapshotJs 支持 frame:N 前缀与 selector 转义', () => {
   const js = buildRolesSnapshotJs('frame:0 #panel"};alert(1)');
   assert.ok(js.includes('frames[0]'));
-  assert.ok(js.includes('querySelector(' + JSON.stringify('#panel"};alert(1)')));
+  assert.ok(js.includes('queryDeep(doc, ' + JSON.stringify('#panel"};alert(1)') + ')'));
+  assert.ok(js.includes('current.shadowRoot'));
   assert.ok(!js.includes('querySelector(#panel"}'));
 });

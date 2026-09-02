@@ -135,11 +135,33 @@ export function parseFrameSelector(selector) {
 }
 
 /**
- * 生成「在目标文档（可跨 iframe）里 querySelector」的自执行表达式字符串。
+ * 在文档（含 open shadowRoot）里按 CSS 查找第一个元素。
+ * 注入到 executeJavaScript 字符串里；closed shadow 进不去。
+ */
+const DEEP_QUERY_HELPER = `function queryDeep(root, css) {
+  if (!root || !css) return null;
+  try {
+    const hit = root.querySelector(css);
+    if (hit) return hit;
+  } catch {
+    return null;
+  }
+  const walk = root.querySelectorAll ? root.querySelectorAll('*') : [];
+  for (const node of walk) {
+    if (node.shadowRoot) {
+      const nested = queryDeep(node.shadowRoot, css);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}`;
+
+/**
+ * 生成「在目标文档（可跨 iframe / open shadowRoot）里 querySelector」的自执行表达式。
  *
  * click/type/readDom/waitForElementStable 各处统一用它来定位元素，
- * 消除裸 document.querySelector 只在主 frame 生效的局限。selector 以 JSON.stringify 转义，
- * frame index 经 parseInt 校验，防止注入。
+ * 消除裸 document.querySelector 只在主 frame、光 DOM 生效的局限。
+ * selector 以 JSON.stringify 转义，frame index 经 parseInt 校验，防止注入。
  *
  * @param {string} selector
  * @returns {string} 一段可交给 executeJavaScript 的 IIFE 字符串，命中元素或 null
@@ -154,7 +176,7 @@ export function buildElementJs(selector, body = 'return el;') {
       return `doc = doc.defaultView?.frames[${idx}]?.document || null; if (!doc) return null;`;
     }),
   ].join('\n');
-  return `(() => { ${down} const el = doc.querySelector(${safeCss}); if (!el) return null; ${body} })()`;
+  return `(() => { ${DEEP_QUERY_HELPER} ${down} const el = queryDeep(doc, ${safeCss}); if (!el) return null; ${body} })()`;
 }
 
 const ROLE_SNAPSHOT_MAX_NODES = 80;
@@ -241,9 +263,11 @@ function roleOf(el, implicit, inputRoles) {
 }
 function collectRoles(root, doc, implicit, inputRoles, nameMax, maxNodes) {
   const nodes = [];
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-  let current = root.nodeType === 1 ? root : walker.nextNode();
-  while (current && nodes.length < maxNodes) {
+  const stack = [];
+  if (root && root.nodeType === 1) stack.push(root);
+  else if (root && root.firstElementChild) stack.push(root.firstElementChild);
+  while (stack.length && nodes.length < maxNodes) {
+    const current = stack.shift();
     const role = roleOf(current, implicit, inputRoles);
     if (role) {
       const r = current.getBoundingClientRect();
@@ -262,9 +286,14 @@ function collectRoles(root, doc, implicit, inputRoles, nameMax, maxNodes) {
         h: Math.round(r.height),
       });
     }
-    current = walker.nextNode();
+    const kids = [];
+    if (current.shadowRoot) {
+      for (const child of current.shadowRoot.children || []) kids.push(child);
+    }
+    for (const child of current.children || []) kids.push(child);
+    stack.unshift(...kids);
   }
-  return { count: nodes.length, truncated: Boolean(current), nodes };
+  return { count: nodes.length, truncated: stack.length > 0, nodes };
 }`;
 
 export function buildRolesSnapshotJs(selector = '', { maxNodes = ROLE_SNAPSHOT_MAX_NODES } = {}) {
@@ -281,9 +310,10 @@ export function buildRolesSnapshotJs(selector = '', { maxNodes = ROLE_SNAPSHOT_M
     }),
   ].join('\n');
   const scopeLine = css
-    ? `const root = doc.querySelector(${safeCss}); if (!root) return null;`
+    ? `const root = queryDeep(doc, ${safeCss}); if (!root) return null;`
     : 'const root = doc.body || doc.documentElement; if (!root) return null;';
   return `(() => {
+    ${DEEP_QUERY_HELPER}
     ${down}
     ${scopeLine}
     const IMPLICIT = ${implicit};
