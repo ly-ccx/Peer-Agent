@@ -208,7 +208,7 @@ function defaultGoalPlanStore() {
  */
 export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalPlanStore()) {
   if (!conversationId || typeof goalPlanStore?.listPlansByConversation !== 'function') {
-    return { hasPlan: false, hasApprovedPlan: false, intakeActive: false };
+    return { hasPlan: false, hasApprovedPlan: false, intakeActive: false, interruptedIntakeActive: false };
   }
   let plans = [];
   try {
@@ -229,7 +229,17 @@ export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalP
   const intakeActive = plans.some(
     (plan) => plan?.activation?.kind === 'intake' && !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status),
   );
-  return { hasPlan, hasApprovedPlan, intakeActive };
+  // 曾中断的 intake 契约（runner.interruption 标记）：目标曾明确（首答在推进/被执行），
+  // 仅因流式中断而暂停。用户此时发「继续/新消息」= 接管续跑，不应再适用 intake 禁写闸门，
+  // 否则模型会被迫停下来「先恢复状态」（审计：mark_interrupted keep 后仍被 gate 拦截）。
+  const interruptedIntakeActive = plans.some(
+    (plan) =>
+      plan?.activation?.kind === 'intake'
+      && !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status)
+      && typeof plan?.runner?.interruption === 'object'
+      && plan.runner.interruption !== null,
+  );
+  return { hasPlan, hasApprovedPlan, intakeActive, interruptedIntakeActive };
 }
 
 /**
@@ -335,7 +345,9 @@ export function evaluateGoalModeGate({
     // intake 判别阶段（方案乙 write-gate）：目标尚未确认，Runner 只做只读/问答/澄清。
     // 上方已放行规划/回写/提问与只读能力；到这里的都是有副作用能力（写文件、shell、
     // MCP 副作用等），在 intake 阶段一律结构化拒绝，直到 intake 收敛为 accepted_goal。
-    if (planGate?.intakeActive) {
+    // 例外：契约带 runner.interruption（曾中断，目标已明确）且用户发「继续/新消息」接管时，
+    // 跳过 intake 禁写闸门，允许继续执行（否则模型会停下来「先恢复状态」造成中断观感）。
+    if (planGate?.intakeActive && !planGate?.interruptedIntakeActive) {
       return { allowed: false, reason: 'goal_intake_write_blocked', detail: toolName ?? undefined };
     }
     // ① pre-act 写盘范围守卫（write_file / edit_file）。

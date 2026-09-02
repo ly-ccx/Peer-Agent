@@ -2997,7 +2997,11 @@ export function createGoalPlanStore({
       blockerAudit: null,
       blockedReason: undefined,
       lastError: undefined,
-      interruption: undefined,
+      // 中断标记是「待用户确认的中断事实」，resume（继续执行）不应把它清掉，
+      // 否则中断→继续链路会被 decideIntakeConvergence 误判为 pure_qa 并静默删除
+      // （审计：mark_interrupted keep 后同一契约仍被 pure_qa→remove）。
+      // 只有当调用方显式传入 consumedInterruption:true（用户明确放弃/接管）时才清除。
+      ...(patch.consumedInterruption === true ? { interruption: undefined } : {}),
       updatedAt: patch.updatedAt || now,
     }, planId);
     return persist(

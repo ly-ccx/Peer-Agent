@@ -1690,7 +1690,14 @@ test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，
   assert.equal(interrupted.status, 'failed');
   assert.equal(interrupted.runner.interruption.source, 'stream_error');
 
-  const resumed = store.resumeRunner(created.planId, { phase: 'act' });
+  // 普通 resume（intake 中断→继续路径）：中断标记保留，避免 decideIntakeConvergence
+  // 把它误判为 pure_qa 而静默删除；未消费标记时计划保持 failed（等待显式恢复）。
+  const kept = store.resumeRunner(created.planId, { phase: 'act' });
+  assert.equal(kept.status, 'failed');
+  assert.equal(kept.runner.interruption.source, 'stream_error');
+
+  // 用户显式恢复失败计划（consumedInterruption:true）：消费并清除中断标记，恢复执行。
+  const resumed = store.resumeRunner(created.planId, { phase: 'act', consumedInterruption: true });
   assert.equal(resumed.status, 'executing');
   assert.equal(resumed.runner.status, 'running');
   assert.equal(resumed.runner.interruption, undefined);
