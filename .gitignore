@@ -29,3 +29,12 @@ docs/architecture/*
 
 # 误生成的证书文件
 -
+
+# 本地调试/原型目录（不进仓库）
+scratch/
+demo/
+
+# QA 工件（截图/验收记录，仅在本地产生）
+.peer-agent-qa/
+.peer-agent-real-file-artifact.md
+.peer-agent-artifact-acceptance.md
