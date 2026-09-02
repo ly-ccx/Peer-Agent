@@ -460,6 +460,99 @@ test('DeepSeek models migrate off/default effort levels to Anthropic low/high/ma
   assert.equal(persisted.reasoningParamStyle, 'anthropic-enabled-output-effort');
 }));
 
+test('supportsPromptCaching falls back to channel capability when the model record omits it', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [
+      {
+        id: 'ds-group',
+        groupId: 'ds-group',
+        provider: 'openai',
+        channelId: 'deepseek',
+        authMethod: 'api_key',
+        name: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com',
+        apiKeyConfigured: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        // Qoder 渠道明确声明 promptCache: false，模型条目缺失缓存字段时应保持 false。
+        id: 'q-group',
+        groupId: 'q-group',
+        provider: 'openai',
+        channelId: 'qoder',
+        authMethod: 'qoder_local_auth',
+        name: 'Qoder CLI',
+        baseUrl: 'https://api2-v2.qoder.sh/model/v1',
+        apiKeyConfigured: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    models: [
+      // DeepSeek：渠道支持缓存，模型条目未声明 → 回填为 true。
+      {
+        id: 'ds-model',
+        groupId: 'ds-group',
+        model: 'deepseek-v4-flash',
+        enabled: true,
+        isDefault: true,
+        metadataSource: 'models.dev',
+        supportsPromptCaching: null,
+      },
+      // Qoder：渠道不支持缓存，模型条目未声明 → 保持 false。
+      {
+        id: 'q-model',
+        groupId: 'q-group',
+        model: 'qoder/deepseek-chat',
+        enabled: true,
+        metadataSource: 'remote',
+        supportsPromptCaching: null,
+      },
+    ],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const views = store.listProviders();
+  const ds = views.find((p) => p.model === 'deepseek-v4-flash');
+  const q = views.find((p) => p.model === 'qoder/deepseek-chat');
+
+  // 渠道支持缓存 → 模型条目缺失时回填为 true，使渲染层门控 (=== true) 命中。
+  assert.equal(ds.supportsPromptCaching, true);
+
+  // 渠道明确不支持缓存 → 模型条目缺失时保持 undefined（不误判为「禁用缓存」，
+  // 也不回填 false，保持与无缓存渠道原有语义一致）。
+  assert.equal(q.supportsPromptCaching, undefined);
+}));
+
+test('supportsPromptCaching stays undefined when the channel cannot be resolved', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({
+    version: 2,
+    channels: [{
+      id: 'opaque-group',
+      groupId: 'opaque-group',
+      provider: 'openai',
+      // 自定义 baseUrl 且非已知渠道 → resolveChannel 掷错，视图应安全回退为 undefined。
+      baseUrl: 'https://custom.example.test/v1',
+      authMethod: 'api_key',
+      apiKeyConfigured: true,
+      name: 'Opaque',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }],
+    models: [{
+      id: 'opaque-model',
+      groupId: 'opaque-group',
+      model: 'custom-model',
+      enabled: true,
+      metadataSource: 'remote',
+      supportsPromptCaching: null,
+    }],
+  }, null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.supportsPromptCaching, undefined);
+}));
+
 test('manual provider creation and updates persist max output tokens', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({
@@ -927,6 +1020,7 @@ test('addModel inherits connection fields without copying model metadata', () =>
   assert.equal(second.inputPrice, undefined);
   assert.equal(second.supportsVision, undefined);
   assert.equal(second.supportsReasoning, undefined);
+  // 未显式声明时仅在渠道能力为 true 时回填；openai/example.test 渠道为 false → 保持 undefined。
   assert.equal(second.supportsPromptCaching, undefined);
   assert.equal(second.metadataSource, 'models.dev');
   assert.equal(second.pricingSource, 'models.dev-reference');
@@ -975,6 +1069,7 @@ test('addModel inherits connection fields without copying model metadata', () =>
   assert.equal(resetToUnknown.cacheReadPrice, undefined);
   assert.equal(resetToUnknown.supportsVision, undefined);
   assert.equal(resetToUnknown.supportsReasoning, undefined);
+  // 回退仅在渠道能力为 true 时生效；openai/example.test 渠道为 false → 保持 undefined。
   assert.equal(resetToUnknown.supportsPromptCaching, undefined);
   assert.equal(resetToUnknown.reasoningParamStyle, undefined);
   assert.equal(resetToUnknown.reasoningEffortMap, undefined);

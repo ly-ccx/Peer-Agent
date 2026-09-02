@@ -875,8 +875,15 @@ export function createLlmConfigStore({
     const oauthStatus = oauthStatusOf(item);
     const resolved = (() => {
       try {
+        // 模型目录/元数据源(如 models.dev/remote)常把 supportsPromptCaching 落成 null。
+        // 若直接透传给 resolveChannel，其 `!== undefined` 分支会把 null 当「禁用缓存」
+        // (Boolean(null)=false)，覆盖渠道 descriptor 的 promptCache: true。
+        // 这里把 null/undefined 视为「未声明」，仅在显式 true/false 时透传，
+        // 让渠道能力(如 DeepSeek promptCache: true)正确倒档。
+        const resolveInput = { ...item };
+        if (resolveInput.supportsPromptCaching == null) delete resolveInput.supportsPromptCaching;
         return resolveChannel({
-          ...item,
+          ...resolveInput,
           apiKey: item.apiKeyConfigured || item.oauthConfigured ? 'configured' : '',
           accountId: oauthStatus?.accountId,
         });
@@ -917,7 +924,13 @@ export function createLlmConfigStore({
       longContextOutputPrice: item.longContextOutputPrice ?? undefined,
       supportsVision: item.supportsVision ?? undefined,
       supportsReasoning: item.supportsReasoning ?? undefined,
-      supportsPromptCaching: item.supportsPromptCaching ?? undefined,
+      // 缓存能力回填：模型条目未显式声明时，仅在渠道能力为 true 时回填为 true。
+      // 模型目录(如 models.dev/remote)通常不带 supportsPromptCaching 字段，
+      // 若直接透传 null/undefined，渲染层门控(supportsPromptCaching === true)会失守。
+      // 渠道声明(如 DeepSeek promptCache: true)在此作为权威回退；
+      // 但渠道明确不支持缓存(如 Qoder promptCache: false)或不可解析时保持 undefined，
+      // 避免把「无缓存语义」误判成「禁用缓存」。
+      supportsPromptCaching: item.supportsPromptCaching ?? (resolved?.supportsPromptCaching === true ? true : undefined),
       // DeepSeek / Kimi / Grok：渠道级思考契约优先于模型历史缓存。
       // 避免旧档位（DeepSeek off/default、Grok 三档）盖住渠道新声明。
       // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
