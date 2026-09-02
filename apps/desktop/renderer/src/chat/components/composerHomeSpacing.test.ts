@@ -12,10 +12,18 @@ test('home control strip keeps a compact left-group gap', () => {
   );
 });
 
-test('composer chrome keeps branch left, capsule center, isolation right', () => {
+test('composer chrome keeps Goal left and environment right, or Goal centered without Git', () => {
   assert.match(
     styles,
-    /\.composer-chrome-row \{[\s\S]*?grid-template-columns:\s*1fr auto 1fr;[\s\S]*?margin:\s*0 auto 8px;/,
+    /\.composer-chrome-row:has\(\.composer-chrome-right:not\(:empty\)\) \{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(0,\s*auto\);/,
+  );
+  assert.match(
+    styles,
+    /\.composer-chrome-row:not\(:has\(\.composer-chrome-right:not\(:empty\)\)\) \{[\s\S]*?grid-template-columns:\s*1fr auto 1fr;/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.composer-chrome-row \{[^}]*grid-template-columns:\s*1fr auto 1fr;/,
   );
   assert.doesNotMatch(
     styles,
@@ -27,7 +35,7 @@ test('composer chrome keeps branch left, capsule center, isolation right', () =>
   );
   assert.match(
     styles,
-    /\.composer-chrome-center \{[\s\S]*?justify-self:\s*center;/,
+    /\.composer-chrome-row:not\(:has\(\.composer-chrome-right:not\(:empty\)\)\) \.composer-chrome-left \{[\s\S]*?justify-self:\s*center;/,
   );
   assert.match(
     styles,
@@ -35,7 +43,7 @@ test('composer chrome keeps branch left, capsule center, isolation right', () =>
   );
   assert.match(
     styles,
-    /\.composer-chrome-center > \.goal-panel--docked \{[\s\S]*?width:\s*auto;/,
+    /\.composer-chrome-left > \.goal-panel--docked \{[\s\S]*?width:\s*auto;/,
   );
   assert.match(
     styles,
@@ -43,18 +51,18 @@ test('composer chrome keeps branch left, capsule center, isolation right', () =>
   );
 });
 
-test('isolation toggle pins to the right chrome column', () => {
+test('env capsule pins to the right chrome column', () => {
   assert.match(
     styles,
     /\.composer-chrome-right \{[\s\S]*?justify-self:\s*end;[\s\S]*?gap:\s*var\(--space-2\);/,
   );
   assert.match(
     styles,
-    /\.composer-chrome-right \.composer-worktree-toggle \{\n  flex-shrink:\s*0;\n\}/,
+    /\.composer-chrome-right \.composer-env-capsule \{\n  flex-shrink:\s*1;\n\}/,
   );
   assert.match(
     styles,
-    /\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-worktree-toggle \{\n  flex-shrink:\s*0;\n\}/,
+    /\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-env-capsule \{\n  flex-shrink:\s*1;\n\}/,
   );
 });
 

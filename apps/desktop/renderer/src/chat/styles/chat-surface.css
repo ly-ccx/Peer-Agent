@@ -1017,7 +1017,6 @@
 
 .composer-chrome-row {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   column-gap: 8px;
   width: 100%;
@@ -1026,12 +1025,21 @@
   padding: 0 var(--space-1);
 }
 
-.composer-chrome-row:not(:has(.goal-panel--docked)):not(:has(.composer-context-row)):not(:has(.composer-worktree-toggle)) {
+/* Git 环境在右侧时：Goal 吃剩余宽度靠左，环境贴右，避免中间胶囊把左右挤叠。 */
+.composer-chrome-row:has(.composer-chrome-right:not(:empty)) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+}
+
+/* 没有 Git 环境时：只剩 Goal，继续光学居中。 */
+.composer-chrome-row:not(:has(.composer-chrome-right:not(:empty))) {
+  grid-template-columns: 1fr auto 1fr;
+}
+
+.composer-chrome-row:not(:has(.goal-panel--docked)):not(:has(.composer-env-capsule)) {
   display: none;
 }
 
 .composer-chrome-left,
-.composer-chrome-center,
 .composer-chrome-right {
   display: flex;
   align-items: center;
@@ -1043,12 +1051,13 @@
   justify-content: flex-start;
 }
 
-.composer-chrome-center {
+.composer-chrome-row:not(:has(.composer-chrome-right:not(:empty))) .composer-chrome-left {
+  grid-column: 2;
   justify-self: center;
   justify-content: center;
 }
 
-.composer-chrome-center > .goal-panel--docked {
+.composer-chrome-left > .goal-panel--docked {
   flex: 0 1 auto;
   width: auto;
   min-width: 0;
@@ -1189,70 +1198,50 @@
   color: var(--graphite-soft);
 }
 
-.composer-worktree-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--composer-addon-height);
-  min-height: var(--composer-addon-height);
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--composer-addon-color);
-  font-size: var(--composer-addon-font-size);
-  font-weight: 500;
-  line-height: 1.2;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.composer-chrome-right .composer-worktree-toggle {
-  flex-shrink: 0;
-}
-
-.composer-worktree-toggle input {
-  margin: 0;
-  accent-color: var(--graphite-ink, currentColor);
-}
-
-.composer-worktree-toggle:hover:not(:has(input:disabled)) {
-  background: var(--composer-addon-hover-bg);
-  border-color: var(--chrome-hairline);
-  color: var(--graphite-soft);
-}
-
-.composer-worktree-toggle.is-active {
-  color: var(--graphite-soft);
-}
-
-.composer-worktree-toggle:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.composer-bound-branch {
+.composer-env-capsule {
   flex: 0 1 auto;
-  width: max-content;
   min-width: 0;
-  max-width: 11rem;
+  max-width: 16rem;
 }
 
+.composer-chrome-right .composer-env-capsule {
+  flex-shrink: 1;
+}
+
+.composer-env-capsule-dropdown {
+  width: max-content;
+  max-width: 16rem;
+  min-width: 0;
+}
+
+.composer-env-capsule-dropdown.is-isolated .pa-dropdown-trigger {
+  color: var(--graphite-soft);
+}
+
+.composer-env-capsule-dropdown.is-mismatch .pa-dropdown-trigger {
+  color: var(--graphite-mute);
+}
+
+.composer-env-capsule-dropdown .pa-dropdown-trigger,
 .composer-bound-branch .pa-dropdown-trigger {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   padding: 0 6px;
 }
 
+.composer-env-capsule-dropdown .pa-dropdown-prefix,
 .composer-bound-branch .pa-dropdown-prefix {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
 }
 
+.composer-env-capsule-dropdown .pa-dropdown-prefix svg,
 .composer-bound-branch .pa-dropdown-prefix svg {
   opacity: 0.78;
 }
 
+.composer-env-capsule-dropdown .pa-dropdown-value,
 .composer-bound-branch .pa-dropdown-value,
 .composer-bound-branch-text {
   min-width: 0;
@@ -1262,10 +1251,12 @@
 }
 
 .composer-workspace-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret,
+.composer-env-capsule-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret,
 .composer-bound-branch .pa-dropdown-trigger:disabled .pa-dropdown-caret {
   display: none;
 }
 
+.composer-env-capsule-dropdown .pa-dropdown-trigger:disabled,
 .composer-bound-branch .pa-dropdown-trigger:disabled {
   opacity: 1;
   cursor: default;
@@ -5101,8 +5092,8 @@ button.chat-header-cap-item:focus-visible {
   padding: 0;
 }
 
-.chat-composer-wrap--empty-home .composer-chrome-right .composer-worktree-toggle {
-  flex-shrink: 0;
+.chat-composer-wrap--empty-home .composer-chrome-right .composer-env-capsule {
+  flex-shrink: 1;
 }
 
 .chat-composer-wrap--empty-home .chat-composer-toolbar {
@@ -5129,7 +5120,7 @@ button.chat-header-cap-item:focus-visible {
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger,
 .chat-composer-wrap--empty-home .composer-workspace-add,
-.chat-composer-wrap--empty-home .composer-worktree-toggle,
+.chat-composer-wrap--empty-home .composer-env-capsule .pa-dropdown-trigger,
 .chat-composer-wrap--empty-home .composer-workspace-head,
 .chat-composer-wrap--empty-home .composer-task-line,
 .chat-composer-wrap--empty-home .composer-write-mismatch {
@@ -5145,8 +5136,7 @@ button.chat-header-cap-item:focus-visible {
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open,
-.chat-composer-wrap--empty-home .composer-workspace-add:hover,
-.chat-composer-wrap--empty-home .composer-worktree-toggle:hover:not(:has(input:disabled)) {
+.chat-composer-wrap--empty-home .composer-workspace-add:hover {
   background: color-mix(in srgb, var(--ink-base) 6%, transparent);
 }
 

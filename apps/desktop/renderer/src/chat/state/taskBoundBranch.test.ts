@@ -6,6 +6,7 @@ import {
   canSelectComposerSourceBranch,
   defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
+  formatComposerEnvCapsule,
   isInternalIsolationBranch,
   parseComposerUpstreamSpec,
   planComposerGitChrome,
@@ -190,6 +191,84 @@ test('an existing session waits for delivery facts before showing a source chip'
   }, { locale: 'zh' });
   assert.equal(chrome.workspaceHead?.label, '在 0.0.7');
   assert.equal(chrome.taskLine, null);
+});
+
+test('env capsule says where this send writes and never mixes next-task isolation into bound lines', () => {
+  const draft = planComposerGitChrome({
+    isDraft: true,
+    deliveryKnown: true,
+    currentHead: 'sept-1-changes',
+    workspaceBaseBranch: 'sept-1-changes',
+  }, { locale: 'zh' });
+  assert.equal(
+    formatComposerEnvCapsule(draft, { locale: 'zh' })?.label,
+    '在 sept-1-changes',
+  );
+  assert.equal(
+    formatComposerEnvCapsule(draft, { locale: 'zh', preferredIsolation: true })?.label,
+    '隔离 · 从 sept-1-changes',
+  );
+
+  const isolated = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: true,
+    currentHead: '0.0.7',
+    delivery: {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: true,
+    },
+  }, { locale: 'zh' });
+  assert.equal(
+    formatComposerEnvCapsule(isolated, { locale: 'zh', preferredIsolation: false })?.label,
+    '隔离 · cli-drop-stream-buf',
+  );
+
+  const delivered = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: true,
+    currentHead: '0.0.7',
+    delivery: {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: false,
+      delivered: true,
+    },
+  }, { locale: 'zh' });
+  assert.equal(
+    formatComposerEnvCapsule(delivered, { locale: 'zh', preferredIsolation: true })?.label,
+    '源头 0.0.7',
+  );
+
+  const mismatch = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: true,
+    currentHead: 'main',
+    delivery: {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: false,
+    },
+  }, { locale: 'zh' });
+  assert.equal(
+    formatComposerEnvCapsule(mismatch, { locale: 'zh' })?.label,
+    '在 main · 写在当前工作区',
+  );
+
+  const unisolated = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: true,
+    currentHead: 'PeerAgent/cli-drop-stream-buf',
+    delivery: {
+      targetBranch: '0.0.7',
+      taskBranch: 'PeerAgent/cli-drop-stream-buf',
+      isolated: false,
+    },
+  }, { locale: 'zh' });
+  assert.equal(
+    formatComposerEnvCapsule(unisolated, { locale: 'zh', preferredIsolation: true })?.label,
+    '在 cli-drop-stream-buf',
+  );
 });
 
 test('draft composer can pick a source branch until a session or task line is bound', () => {

@@ -50,10 +50,13 @@ import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
 import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
+  COMPOSER_ENV_ISOLATION_OFF,
+  COMPOSER_ENV_ISOLATION_ON,
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
   defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
+  formatComposerEnvCapsule,
   isSafeComposerBranchName,
   parseComposerUpstreamSpec,
   planComposerGitChrome,
@@ -2456,11 +2459,33 @@ export function ChatSurface({
     isDraft: isDraftConversation,
     delivery: deliveryLine,
   }) && gitChrome.taskLine?.selectable === true;
+  const envCapsule = useMemo(
+    () => formatComposerEnvCapsule(gitChrome, {
+      locale: isZh ? 'zh' : 'en',
+      preferredIsolation: preferredWorktree,
+    }),
+    [gitChrome, isZh, preferredWorktree],
+  );
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
-    if (!gitChrome.taskLine?.selectable) return [];
-    const localGroup = isZh ? '本地分支' : 'Local';
-    const remoteGroup = isZh ? '远程分支' : 'Remote';
-    return buildComposerBranchOptions({
+    const isolationGroup = isZh ? '下次任务' : 'Next task';
+    const isolationOptions: DropdownOption[] = [
+      {
+        value: COMPOSER_ENV_ISOLATION_ON,
+        label: isZh ? '独立目录' : 'Isolated directory',
+        group: isolationGroup,
+        hint: isZh ? '下次' : 'next',
+      },
+      {
+        value: COMPOSER_ENV_ISOLATION_OFF,
+        label: isZh ? '当前工作区' : 'Current workspace',
+        group: isolationGroup,
+        hint: isZh ? '下次' : 'next',
+      },
+    ];
+    if (!gitChrome.taskLine?.selectable) return isolationOptions;
+    const localGroup = isZh ? '源头' : 'Source';
+    const remoteGroup = isZh ? '远程源头' : 'Remote source';
+    const branchOptions = buildComposerBranchOptions({
       branches: workspaceGit?.ok ? workspaceGit.branches : [],
       localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
       remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
@@ -2473,9 +2498,18 @@ export function ChatSurface({
         ? (isZh ? '远程' : 'remote')
         : (isZh ? '本地' : 'local'),
     }));
+    return [...isolationOptions, ...branchOptions];
   }, [gitChrome.taskLine, isZh, workspaceGit]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
+    if (next === COMPOSER_ENV_ISOLATION_ON) {
+      if (!isStreaming) changePreferredWorktree(true);
+      return;
+    }
+    if (next === COMPOSER_ENV_ISOLATION_OFF) {
+      if (!isStreaming) changePreferredWorktree(false);
+      return;
+    }
     if (!next || !workspacePath || !canSelectBoundBranch) return;
     if (next === gitChrome.taskLine?.value) return;
     const previous = gitChrome.taskLine?.value ?? null;
@@ -2492,7 +2526,7 @@ export function ChatSurface({
       .catch(() => {
         setPendingBaseBranch(previous);
       });
-  }, [canSelectBoundBranch, gitChrome.taskLine?.value, onWorkspaceUpdated, workspacePath]);
+  }, [canSelectBoundBranch, changePreferredWorktree, gitChrome.taskLine?.value, isStreaming, onWorkspaceUpdated, workspacePath]);
   const handleCreateBoundBranch = useCallback((
     rawName: string,
     sourceBranch?: string | null,
@@ -2947,100 +2981,45 @@ export function ChatSurface({
         <>
         <div className="composer-chrome-row">
         <div className="composer-chrome-left">
-        {/* 没有 Git 时不渲染分支和隔离开关，不要露出禁用的隔离开关。 */}
-        {workspaceIsGit === true && (gitChrome.workspaceHead || gitChrome.taskLine?.selectable || (gitChrome.taskLine && gitChrome.taskLine.kind !== 'isolated' && gitChrome.taskLine.kind !== 'source') || gitChrome.writeMismatch) ? (
-        <div className="composer-context-row">
-            {gitChrome.workspaceHead ? (
-              <span
-                className="composer-workspace-head"
-                title={gitChrome.workspaceHead.title}
-                aria-label={gitChrome.workspaceHead.title}
-              >
-                <GitBranchGlyph />
-                <span className="composer-bound-branch-text">{gitChrome.workspaceHead.label}</span>
-              </span>
-            ) : null}
-            {gitChrome.taskLine?.selectable ? (
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
+        </div>
+        {workspaceIsGit === true ? (
+        <div className="composer-chrome-right">
+        {/* 没有 Git 时不渲染执行环境；收起态只说这次写在哪。 */}
+        <div className="composer-env-capsule">
               <Dropdown
-                className="composer-dropdown composer-bound-branch"
-                value={gitChrome.taskLine.value}
+                className={`composer-dropdown composer-env-capsule-dropdown${envCapsule.isolated ? ' is-isolated' : ''}${envCapsule.kind === 'mismatch' ? ' is-mismatch' : ''}`}
+                value={
+                  canSelectBoundBranch && gitChrome.taskLine?.value
+                    ? gitChrome.taskLine.value
+                    : (preferredWorktree ? COMPOSER_ENV_ISOLATION_ON : COMPOSER_ENV_ISOLATION_OFF)
+                }
                 options={boundBranchOptions}
                 onChange={handleSelectBoundBranch}
-                triggerLabel={gitChrome.taskLine.label}
-                ariaLabel={gitChrome.taskLine.title}
-                title={gitChrome.taskLine.title}
-                prefix={<GitBranchGlyph />}
+                triggerLabel={envCapsule.label}
+                ariaLabel={envCapsule.title}
+                title={
+                  isStreaming
+                    ? (isZh
+                      ? `${envCapsule.title} 当前任务正在执行，无法更改隔离环境`
+                      : `${envCapsule.title} Cannot change isolation while the current task is running`)
+                    : envCapsule.title
+                }
+                prefix={envCapsule.isolated ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
                 menuPlacement="down"
-                searchable
-                searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
-                emptyLabel={isZh ? '没有匹配的分支' : 'No matching branches'}
-                footerAction={{
+                searchable={canSelectBoundBranch}
+                searchPlaceholder={isZh ? '搜索源头…' : 'Search source…'}
+                emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
+                footerAction={canSelectBoundBranch ? {
                   label: isZh ? '创建分支' : 'Create branch',
                   onSelect: (_query, highlightedValue) => {
                     handleOpenCreateBranchDialog(highlightedValue);
                   },
-                }}
+                } : undefined}
               />
-            ) : gitChrome.taskLine && gitChrome.taskLine.kind !== 'isolated' && gitChrome.taskLine.kind !== 'source' ? (
-              <span
-                className="composer-task-line"
-                data-kind={gitChrome.taskLine.kind}
-                title={gitChrome.taskLine.title}
-                aria-label={gitChrome.taskLine.title}
-              >
-                <GitBranchGlyph />
-                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
-              </span>
-            ) : null}
-            {gitChrome.writeMismatch ? (
-              <span
-                className="composer-write-mismatch"
-                title={gitChrome.writeMismatch.title}
-                aria-label={gitChrome.writeMismatch.title}
-              >
-                {gitChrome.writeMismatch.label}
-              </span>
-            ) : null}
+        </div>
         </div>
         ) : null}
-        </div>
-        <div className="composer-chrome-center">
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} onActiveDeliveryChange={handleActiveDeliveryChange} />
-        </div>
-        <div className="composer-chrome-right">
-        {workspaceIsGit === true && (gitChrome.taskLine?.kind === 'isolated' || gitChrome.taskLine?.kind === 'source') ? (
-              <span
-                className={`composer-task-line${gitChrome.taskLine.kind === 'isolated' ? ' is-isolated' : ''}`}
-                data-kind={gitChrome.taskLine.kind}
-                title={gitChrome.taskLine.title}
-                aria-label={gitChrome.taskLine.title}
-              >
-                {gitChrome.taskLine.kind === 'isolated' ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
-                <span className="composer-bound-branch-text">{gitChrome.taskLine.label}</span>
-              </span>
-        ) : null}
-        {workspaceIsGit === true ? (
-            <label
-              className={`composer-worktree-toggle${preferredWorktree ? ' is-active' : ''}`}
-              title={
-                isStreaming
-                  ? (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')
-                  : (isZh
-                    ? '下次任务是否在独立 Worktree 里执行。合回目标分支后这次隔离会结束，这个开关只表示下一次。'
-                    : 'Whether the next task runs in a Worktree. After it merges back to the target branch, this isolation ends; the toggle only means the next run.')
-              }
-            >
-              <input
-                type="checkbox"
-                checked={preferredWorktree}
-                disabled={isStreaming}
-                onChange={(event) => changePreferredWorktree(event.target.checked)}
-                aria-label={isZh ? '隔离执行' : 'Worktree'}
-              />
-              <span>{isZh ? '隔离执行' : 'Worktree'}</span>
-            </label>
-        ) : null}
-        </div>
         </div>
         <ComposerDraftControls
           conversationId={conversationId}

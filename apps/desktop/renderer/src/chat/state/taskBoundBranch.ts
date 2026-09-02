@@ -33,6 +33,15 @@ export interface ComposerGitChrome {
   readonly writeMismatch: ComposerWriteMismatch | null;
 }
 
+export type ComposerEnvCapsuleKind = 'workspace' | 'source' | 'isolated' | 'task-line' | 'mismatch';
+
+export interface ComposerEnvCapsule {
+  readonly kind: ComposerEnvCapsuleKind;
+  readonly label: string;
+  readonly title: string;
+  readonly isolated: boolean;
+}
+
 function trimBranch(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const next = value.trim();
@@ -216,6 +225,115 @@ export function planComposerGitChrome(
     : null;
 
   return { workspaceHead, taskLine, writeMismatch };
+}
+
+export const COMPOSER_ENV_ISOLATION_ON = '__composer_env_isolation_on__';
+export const COMPOSER_ENV_ISOLATION_OFF = '__composer_env_isolation_off__';
+
+/**
+ * Collapsed chrome copy for “where this send writes”.
+ * Next-task isolation preference only rewrites a selectable draft source line.
+ */
+export function formatComposerEnvCapsule(
+  chrome: ComposerGitChrome,
+  options?: {
+    readonly locale?: 'zh' | 'en';
+    readonly preferredIsolation?: boolean;
+  },
+): ComposerEnvCapsule {
+  const isZh = options?.locale !== 'en';
+  const preferredIsolation = options?.preferredIsolation === true;
+  const { workspaceHead, taskLine, writeMismatch } = chrome;
+
+  if (taskLine?.kind === 'isolated') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    return {
+      kind: 'isolated',
+      isolated: true,
+      label: isZh ? `隔离 · ${name}` : `isolated · ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (writeMismatch) {
+    const head = workspaceHead
+      ? visibleBranchName(workspaceHead.value, workspaceHead.value)
+      : null;
+    return {
+      kind: 'mismatch',
+      isolated: false,
+      label: head
+        ? (isZh ? `在 ${head} · 写在当前工作区` : `on ${head} · writes here`)
+        : (isZh ? '写在当前工作区' : 'writes on current workspace'),
+      title: writeMismatch.title,
+    };
+  }
+
+  if (taskLine?.kind === 'task-line') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    return {
+      kind: 'task-line',
+      isolated: false,
+      label: isZh ? `在 ${name}` : `on ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (taskLine?.kind === 'source') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    if (preferredIsolation && taskLine.selectable) {
+      return {
+        kind: 'source',
+        isolated: true,
+        label: isZh ? `隔离 · 从 ${name}` : `isolated · from ${name}`,
+        title: isZh
+          ? `下次任务将从 ${taskLine.value} 开独立目录。合回后这次隔离会结束，这个选择只表示下一次。`
+          : `The next task will fork ${taskLine.value} into an isolated directory. This preference applies to the next task only.`,
+      };
+    }
+    if (taskLine.selectable) {
+      return {
+        kind: 'source',
+        isolated: false,
+        label: isZh ? `在 ${name}` : `on ${name}`,
+        title: taskLine.title,
+      };
+    }
+    return {
+      kind: 'source',
+      isolated: false,
+      label: isZh ? `源头 ${name}` : `from ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (workspaceHead) {
+    const name = visibleBranchName(workspaceHead.value, workspaceHead.value);
+    return {
+      kind: 'workspace',
+      isolated: false,
+      label: isZh ? `在 ${name}` : `on ${name}`,
+      title: workspaceHead.title,
+    };
+  }
+
+  if (preferredIsolation) {
+    return {
+      kind: 'source',
+      isolated: true,
+      label: isZh ? '隔离' : 'isolated',
+      title: isZh
+        ? '下次任务将在独立目录里执行。合回后这次隔离会结束，这个选择只表示下一次。'
+        : 'The next task will run in an isolated directory. This preference applies to the next task only.',
+    };
+  }
+
+  return {
+    kind: 'workspace',
+    isolated: false,
+    label: isZh ? '当前工作区' : 'current workspace',
+    title: isZh ? '继续会写在当前工作区' : 'Continuing writes on the current workspace.',
+  };
 }
 
 /** Draft composer can pick a workspace source; bound sessions/task lines stay locked. */
