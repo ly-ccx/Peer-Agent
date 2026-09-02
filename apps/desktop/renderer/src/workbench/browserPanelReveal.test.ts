@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  MAX_PREPARED_BROWSER_CONVERSATIONS,
+  mountedBrowserConversations,
+  rememberLeavingBrowserConversation,
   rememberPreparedBrowser,
   resolveBrowserPanelReveal,
 } from './browserPanelReveal.ts';
-
 test('foreground focus still opens the current conversation Browser panel', () => {
   const decision = resolveBrowserPanelReveal({
     requestConversationId: 'conversation-a',
@@ -80,4 +82,28 @@ test('rememberPreparedBrowser keeps the newest conversations within the cap', ()
   );
   assert.deepEqual(ids, ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
   assert.deepEqual(rememberPreparedBrowser(ids, 'c'), ['b', 'd', 'e', 'f', 'g', 'h', 'i', 'c']);
+});
+
+test('rememberLeavingBrowserConversation keeps a used page and skips blank about:blank', () => {
+  assert.deepEqual(
+    rememberLeavingBrowserConversation(['kept'], 'leaving', false),
+    ['kept', 'leaving'],
+  );
+  assert.deepEqual(
+    rememberLeavingBrowserConversation(['kept'], 'blank-session', true),
+    ['kept'],
+  );
+});
+
+test('mountedBrowserConversations keeps the current session in the same live list', () => {
+  assert.deepEqual(
+    mountedBrowserConversations('current', ['old-a', 'old-b']),
+    ['old-a', 'old-b', 'current'],
+  );
+  const overCap = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  assert.equal(MAX_PREPARED_BROWSER_CONVERSATIONS, 8);
+  assert.deepEqual(
+    mountedBrowserConversations('i', overCap),
+    ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'],
+  );
 });

@@ -7,7 +7,7 @@
     "en-US": "Browser type"
   },
   "localizedDescription": {
-    "zh-CN": "向用户眼前可见的内嵌浏览器输入文本：可先按 CSS 选择器聚焦/清空目标元素，输入后可选回车提交，操作对用户实时可见。",
+    "zh-CN": "向用户眼前可见的内嵌浏览器输入文本：可先按 CSS 选择器或角色快照的 role/name 聚焦/清空目标元素，输入后可选回车提交，操作对用户实时可见。",
     "en-US": "Types text into the visible in-app browser, optionally focusing/clearing a target element first and pressing Enter afterwards."
   },
   "source": "web",
@@ -24,6 +24,26 @@
       "selector": {
         "type": "string",
         "description": "Optional CSS selector to focus before typing."
+      },
+      "role": {
+        "type": "string",
+        "description": "Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set."
+      },
+      "name": {
+        "type": "string",
+        "description": "Accessible name from a format=roles snapshot. Optional with role."
+      },
+      "nth": {
+        "type": "integer",
+        "description": "0-based index among matches. Use when several same-named roles, texts, or testids match."
+      },
+      "hasText": {
+        "type": "string",
+        "description": "Exact visible text of the element to focus (used when selector is omitted). Unique match required unless nth is set. Not the typed content."
+      },
+      "testid": {
+        "type": "string",
+        "description": "data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set."
       },
       "clear": {
         "type": "boolean",

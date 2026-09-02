@@ -650,6 +650,32 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       },
     );
 
+    const offStreamStatus = clientApi.onChatStreamStatus(
+      ({ streamId, conversationId, status, provider, code, queueType, queueCount, serviceAvailable, waitMs, upstreamWaitTimeMs, waitedMs, budgetMs, attempt, maxAttempts, reason, message }) => {
+        if (!streamId) return;
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId ?? null);
+        if (!cid) return;
+        conversationStore.setState(cid, {
+          providerRecoveryNotice: {
+            kind: status === 'queued' ? 'queue' : 'connection',
+            provider,
+            status: status === 'queued' ? 'queued' : 'retrying',
+            reason: reason ?? code,
+            queueType,
+            queueCount,
+            serviceAvailable,
+            waitMs,
+            upstreamWaitTimeMs,
+            waitedMs,
+            budgetMs,
+            attempt,
+            maxRetries: maxAttempts,
+            message,
+          },
+        });
+      },
+    );
+
     const offCompaction = clientApi.onChatCompaction(
       ({ conversationId, streamId, stage, percent, progressStage, attempt, maxAttempts, inputTokenBudget, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, errorCode, message }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
@@ -815,6 +841,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       offError();
       offProviderRecovery();
       offConnectionRecovery();
+      offStreamStatus();
       offCompaction();
     };
     // 处理闭包只读 ref，无外部依赖：整份订阅「挂载一次」即可，切会话不重绑。

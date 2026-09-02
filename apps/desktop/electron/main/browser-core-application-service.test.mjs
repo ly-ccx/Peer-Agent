@@ -53,6 +53,9 @@ function createHarness(overrides = {}) {
     writeFile: async (targetPath, content) => {
       calls.push(['write-file', targetPath, content]);
     },
+    openExternal: async (url) => {
+      calls.push(['open-external', url]);
+    },
     ...overrides,
   };
 
@@ -238,4 +241,36 @@ test('capturePage maps host failures to the legacy error result', async () => {
     ok: false,
     error: 'capture exploded',
   });
+});
+
+test('openExternal only opens http(s) URLs in the system browser', async () => {
+  const { calls, service } = createHarness();
+
+  assert.deepEqual(await service.openExternal(), { ok: false, error: 'invalid_url' });
+  assert.deepEqual(await service.openExternal({ url: 'not a url' }), {
+    ok: false,
+    error: 'invalid_url',
+  });
+  assert.deepEqual(await service.openExternal({ url: 'file:///tmp/secret' }), {
+    ok: false,
+    error: 'unsupported_protocol',
+  });
+  assert.deepEqual(await service.openExternal({ url: 'javascript:alert(1)' }), {
+    ok: false,
+    error: 'unsupported_protocol',
+  });
+  assert.equal(calls.some((entry) => entry[0] === 'open-external'), false);
+
+  assert.deepEqual(await service.openExternal({ url: 'https://github.com/ly-ccx/Peer-Agent' }), {
+    ok: true,
+    url: 'https://github.com/ly-ccx/Peer-Agent',
+  });
+  assert.deepEqual(await service.openExternal({ url: 'http://localhost:5173/app' }), {
+    ok: true,
+    url: 'http://localhost:5173/app',
+  });
+  assert.deepEqual(calls.filter((entry) => entry[0] === 'open-external'), [
+    ['open-external', 'https://github.com/ly-ccx/Peer-Agent'],
+    ['open-external', 'http://localhost:5173/app'],
+  ]);
 });

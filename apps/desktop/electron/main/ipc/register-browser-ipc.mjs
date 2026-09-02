@@ -19,6 +19,7 @@ export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag,
     ),
     clearSiteData: assertFunction(browser?.clearSiteData, 'browser.clearSiteData'),
     capturePage: assertFunction(browser?.capturePage, 'browser.capturePage'),
+    openExternal: assertFunction(browser?.openExternal, 'browser.openExternal'),
     listSessionSources: assertFunction(
       sessionImport?.listSessionSources,
       'sessionImport.listSessionSources',
@@ -66,6 +67,8 @@ export function createBrowserIpcRegistrations({ browser, sessionImport, fdaDrag,
         ports.clearSiteData(payload));
       ipc.handle('browser:capture-page', (event, payload = {}) =>
         ports.capturePage({ ...payload, sender: event.sender }));
+      ipc.handle('browser:open-external', (_event, payload = {}) =>
+        ports.openExternal(payload));
       ipc.handle('browser:list-session-sources', () => ports.listSessionSources());
       ipc.handle('browser:session-import-preflight', () =>
         ports.getSessionImportPreflight());

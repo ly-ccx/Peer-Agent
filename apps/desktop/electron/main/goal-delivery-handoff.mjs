@@ -803,6 +803,45 @@ export function createGoalDeliveryHandoff({
     return handoffPlan(plan, { retry: true });
   }
 
+  /**
+   * ADR 68 对账补充：交付在 Goal 完成瞬间因质检未回填而 stopped(quality_review_pending)、
+   * 之后工作树又被清理的计划，重试链路永远撞 missing_worktree，卡片永久停在"合不进"。
+   * 若 git 事实上任务线已完全并入目标分支（含工作树已清理导致的空壳任务线），
+   * 则按 direct 交付补记 delivered 事实，不重放合并动作。
+   * 幂等：alreadyDelivered 的记录不会被覆盖（recordDirectDelivery 仅在 status 可写时写入）。
+   */
+  async function reconcileStoppedHandoff(plan) {
+    if (!plan || typeof plan !== 'object') return { ok: false, reason: 'invalid_plan' };
+    if (!alreadyStopped(plan)) return { ok: false, reason: 'not_stopped' };
+    if (!isCompleted(plan) || !isQualityReady(plan)) return { ok: false, reason: 'not_ready' };
+    const binding = plan.deliveryBinding || {};
+    const worktreePath = trim(binding.worktreePath);
+    // 仅对账"工作树已清理"的场景；工作树还在的 stopped 走正常 retryHandoff 链路。
+    if (worktreePath && existsSync(worktreePath)) return { ok: false, reason: 'worktree_present' };
+    const next = await recordDirectDelivery(plan);
+    const delivered = next?.deliveryHandoff?.status === 'delivered';
+    return { ok: delivered, reason: delivered ? undefined : 'not_landed', plan: next };
+  }
+
+  async function reconcileStoppedHandoffs(plans) {
+    const candidates = Array.isArray(plans) ? plans : [];
+    const results = [];
+    for (const plan of candidates) {
+      try {
+        const next = await reconcileStoppedHandoff(plan);
+        results.push({
+          planId: plan?.planId,
+          ok: next.ok === true,
+          reason: next.reason,
+          delivered: next.plan?.deliveryHandoff?.status === 'delivered',
+        });
+      } catch (error) {
+        results.push({ planId: plan?.planId, ok: false, reason: String(error?.message || error).slice(0, 200) });
+      }
+    }
+    return results;
+  }
+
   async function inspectSource(plan, { repositoryRoot } = {}) {
     const binding = plan?.deliveryBinding || {};
     const root = trim(repositoryRoot)
@@ -902,6 +941,8 @@ export function createGoalDeliveryHandoff({
     handoffPlan,
     retryHandoff,
     retryHandoffs,
+    reconcileStoppedHandoff,
+    reconcileStoppedHandoffs,
     inspectSource,
     commitSource,
     stashSource,

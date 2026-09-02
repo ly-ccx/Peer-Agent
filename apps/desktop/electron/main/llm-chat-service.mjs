@@ -9,7 +9,7 @@ import {
   renderSystemContext,
   renderStableSystemContext,
 } from './llm-prompts.mjs';
-import { firstUserMessageText } from '@peer-agent/system-context';
+import { taskAcceptanceFromMessages } from '@peer-agent/system-context';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
 import {
@@ -1263,8 +1263,8 @@ export function createLlmChatService({
         const storedConversation = conversationId
           ? conversationStore?.getConversation?.(conversationId)
           : null;
-        const taskAcceptance = firstUserMessageText(messages)
-          || firstUserMessageText(storedConversation?.messages);
+        const taskAcceptance = taskAcceptanceFromMessages(messages)
+          || taskAcceptanceFromMessages(storedConversation?.messages);
         const accountingIdentity = {
           conversationId: conversationId || streamId,
           contentRevision:

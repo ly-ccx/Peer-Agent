@@ -1,14 +1,14 @@
 {
   "capabilityId": "local.web.control.click",
   "name": "Browser click",
-  "description": "Clicks an element (by CSS selector) or a point (by x/y coordinates) in the visible in-app browser the user is watching.",
+  "description": "Clicks an element (by CSS selector or accessibility role/name) or a point (by x/y coordinates) in the visible in-app browser the user is watching.",
   "localizedName": {
     "zh-CN": "浏览器点击",
     "en-US": "Browser click"
   },
   "localizedDescription": {
-    "zh-CN": "在用户眼前可见的内嵌浏览器中，按 CSS 选择器点击元素，或按 x/y 视口坐标点击某点，操作对用户实时可见。",
-    "en-US": "Clicks an element (by CSS selector) or a point (by x/y coordinates) in the visible in-app browser the user is watching."
+    "zh-CN": "在用户眼前可见的内嵌浏览器中，按 CSS 选择器或角色快照的 role/name 点击元素，或按 x/y 视口坐标点击某点，操作对用户实时可见。",
+    "en-US": "Clicks an element (by CSS selector or accessibility role/name) or a point (by x/y coordinates) in the visible in-app browser the user is watching."
   },
   "source": "web",
   "riskLevel": "L3_external_write",
@@ -20,6 +20,26 @@
       "selector": {
         "type": "string",
         "description": "CSS selector of the element to click (first match)."
+      },
+      "role": {
+        "type": "string",
+        "description": "Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set."
+      },
+      "name": {
+        "type": "string",
+        "description": "Accessible name from a format=roles snapshot. Optional with role."
+      },
+      "nth": {
+        "type": "integer",
+        "description": "0-based index among matches. Use when several same-named roles, texts, or testids match."
+      },
+      "hasText": {
+        "type": "string",
+        "description": "Exact visible text of the element (used when selector is omitted). Unique match required unless nth is set."
+      },
+      "testid": {
+        "type": "string",
+        "description": "data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set."
       },
       "x": {
         "type": "number",

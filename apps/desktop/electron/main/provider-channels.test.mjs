@@ -5,6 +5,7 @@ import {
   CHANNEL_IDS,
   listChannelDescriptors,
   resolveChannel,
+  resolveModelCatalogRequestConfig,
   validateCustomHeaders,
   listServiceTemplates,
   resolveServiceTemplateId,
@@ -557,6 +558,55 @@ describe('service templates', () => {
     assert.equal(resolvedGlm.headers.Authorization, 'Bearer go-key');
     assert.equal(resolvedGlm.capabilities.reasoning.paramStyle, 'openai-effort');
 
+    // GLM-5.3 系是常开思考模型（上游 400 [1210]：仅接受 low/high/max）：
+    // 按模型档位契约覆盖 wire 级默认，off/default 收敛为 low，xhigh 收敛为 max。
+    const resolvedGlmFlash = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.3-flash',
+    });
+    assert.equal(resolvedGlmFlash.wire, 'openai-chat');
+    assert.deepEqual(resolvedGlmFlash.reasoningEffortMap, {
+      off: 'low',
+      low: 'low',
+      default: 'low',
+      medium: 'high',
+      high: 'high',
+      max: 'max',
+      xhigh: 'max',
+    });
+    assert.deepEqual(resolvedGlmFlash.reasoningEffortLevels, ['off', 'low', 'default', 'high', 'xhigh']);
+    assert.equal(resolvedGlmFlash.reasoningDefaultEffort, 'low');
+
+    // glm-5.2 不在常开思考模型名单内，保持 wire 级默认（无按模型 effortMap）。
+    assert.equal(resolvedGlm.reasoningEffortMap, undefined);
+
+    // Wire 隔离：默认模型 gpt-5.6-luna（openai-responses）不受 GLM 档位契约影响。
+    const resolvedLuna = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'gpt-5.6-luna',
+    });
+    assert.equal(resolvedLuna.wire, 'openai-responses');
+    assert.equal(resolvedLuna.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+    assert.equal(resolvedLuna.reasoningEffortMap, undefined);
+    assert.equal(resolvedLuna.reasoningDefaultEffort, 'default');
+
+    // Anthropic wire（claude 系）同样不受 GLM profile 影响。
+    assert.equal(resolvedClaude.reasoningEffortMap, undefined);
+
+    // 用户手工配置的 reasoningEffortMap 优先于按模型 profile。
+    const resolvedGlmCustom = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.3-flash',
+      reasoningEffortMap: { default: 'max' },
+    });
+    assert.deepEqual(resolvedGlmCustom.reasoningEffortMap, { default: 'max' });
+
     for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
       const resolved = resolveChannel({
         channelId: CHANNEL_IDS.OPENCODE_GO,
@@ -607,5 +657,48 @@ describe('service templates', () => {
     });
     assert.equal(forced.wire, 'openai-responses');
     assert.equal(forced.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+  });
+
+  it('keeps DeepSeek model catalog on the OpenAI plane while chat stays on the Anthropic plane', () => {
+    const chat = resolveChannel({
+      channelId: CHANNEL_IDS.DEEPSEEK,
+      authMethod: 'api_key',
+      apiKey: 'deepseek-test-key',
+    });
+    assert.equal(chat.wire, 'anthropic-messages');
+    assert.equal(chat.baseUrl, 'https://api.deepseek.com/anthropic');
+    assert.equal(chat.headers['x-api-key'], 'deepseek-test-key');
+
+    const catalog = resolveModelCatalogRequestConfig({
+      channelId: CHANNEL_IDS.DEEPSEEK,
+      authMethod: 'api_key',
+      apiKey: 'deepseek-test-key',
+    });
+    assert.equal(catalog.wire, 'openai-chat');
+    assert.equal(catalog.baseUrl, 'https://api.deepseek.com');
+    assert.deepEqual(catalog.headers, { Authorization: 'Bearer deepseek-test-key' });
+    assert.equal(catalog.modelCatalogOverride, true);
+    assert.equal(catalog.channelId, CHANNEL_IDS.DEEPSEEK);
+    // catalog 覆盖只影响模型目录；对话请求配置保持 Anthropic 平面。
+    assert.notEqual(catalog.baseUrl, chat.baseUrl);
+  });
+
+  it('keeps non-overridden channel catalog config aligned with the chat plane', () => {
+    const chat = resolveChannel({
+      channelId: CHANNEL_IDS.OPENAI,
+      authMethod: 'api_key',
+      apiKey: 'openai-test-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    const catalog = resolveModelCatalogRequestConfig({
+      channelId: CHANNEL_IDS.OPENAI,
+      authMethod: 'api_key',
+      apiKey: 'openai-test-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    assert.equal(catalog.wire, chat.wire);
+    assert.equal(catalog.baseUrl, chat.baseUrl);
+    assert.deepEqual(catalog.headers, chat.headers);
+    assert.equal(catalog.modelCatalogOverride, false);
   });
 });

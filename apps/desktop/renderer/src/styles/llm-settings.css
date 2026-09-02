@@ -975,6 +975,36 @@
 .pa-dropdown-search input:focus {
   border-color: var(--azure-seal, var(--graphite-base));
 }
+.pa-dropdown-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  margin: 0 2px 6px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--chrome-sunken, var(--pa-surface-muted));
+  border: 1px solid var(--chrome-hairline, var(--pa-border-subtle));
+}
+.pa-dropdown-tab {
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--graphite-mute, var(--pa-text-secondary));
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.pa-dropdown-tab:hover {
+  color: var(--graphite-base, var(--pa-text-primary));
+}
+.pa-dropdown-tab.is-active {
+  background: var(--surface-raised, var(--pa-surface-card));
+  color: var(--graphite-base, var(--pa-text-primary));
+  font-weight: 600;
+}
 .pa-dropdown-list {
   display: flex;
   flex-direction: column;

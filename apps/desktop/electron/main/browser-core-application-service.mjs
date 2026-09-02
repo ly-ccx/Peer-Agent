@@ -26,6 +26,7 @@ export function createBrowserCoreApplicationService({
   joinPath,
   now,
   writeFile,
+  openExternal,
 } = {}) {
   const ports = {
     getActiveWebContentsId: assertFunction(getActiveWebContentsId, 'getActiveWebContentsId'),
@@ -40,6 +41,7 @@ export function createBrowserCoreApplicationService({
     joinPath: assertFunction(joinPath, 'joinPath'),
     now: assertFunction(now, 'now'),
     writeFile: assertFunction(writeFile, 'writeFile'),
+    openExternal: assertFunction(openExternal, 'openExternal'),
   };
 
   function runRegistryCommand(command, registration) {
@@ -121,6 +123,26 @@ export function createBrowserCoreApplicationService({
     }
   }
 
+  async function openExternalUrl({ url } = {}) {
+    try {
+      if (!url || typeof url !== 'string') return { ok: false, error: 'invalid_url' };
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return { ok: false, error: 'invalid_url' };
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, error: 'unsupported_protocol' };
+      }
+      const href = parsed.toString();
+      await ports.openExternal(href);
+      return { ok: true, url: href };
+    } catch (error) {
+      return { ok: false, error: error?.message || 'open_external_failed' };
+    }
+  }
+
   return Object.freeze({
     registerWebContents: (registration = {}) =>
       runRegistryCommand(ports.registerWebContents, registration),
@@ -128,5 +150,6 @@ export function createBrowserCoreApplicationService({
       runRegistryCommand(ports.unregisterWebContents, registration),
     clearSiteData,
     capturePage,
+    openExternal: openExternalUrl,
   });
 }

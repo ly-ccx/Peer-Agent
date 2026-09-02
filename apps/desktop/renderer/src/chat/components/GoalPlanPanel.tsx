@@ -171,6 +171,11 @@ interface GoalPlanPanelProps {
    * 表达层只读，隔离真值仍以 deliveryBinding 为准。
    */
   readonly onActiveDeliveryChange?: (line: TaskDeliveryLine | null) => void;
+  /**
+   * 当前活动计划的 Goal Runner 状态。自动出队用它挡住 tick 交接窗口，
+   * 不依赖 isStreaming（handoff 会先把流状态打成 false）。
+   */
+  readonly onActiveGoalRunnerStatusChange?: (status: GoalRunnerStatus | null) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -1933,7 +1938,7 @@ const PlanCard = memo(function PlanCard({
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus, onActiveDeliveryChange, onActiveGoalRunnerStatusChange }: GoalPlanPanelProps): ReactElement | null {
   const confirm = useConfirm();
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2249,9 +2254,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const effectiveBusyPlanId = approvalBusyPlanId ?? busyPlanId;
   const effectiveError = approvalError ?? error;
 
-  // 采用同一判定口径：Goal 模式中已接受但尚未启动的计划，同样正在等待
-  // 用户选择「开始执行 / 调整计划 / 取消计划」，必须在列表摘要中显式标记为待审批。
-  const pendingCount = plans.filter((plan) => hasPendingGoalApproval([plan])).length;
   // 推到右侧 Workbench Goal slot 后，折叠/展开由 Workbench tab 接管，
   // 面板内容始终视为展开（无 docked toggle 形态）。
   const dockedToWorkbench = !!sidePanelContainer;
@@ -2313,12 +2315,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     onActiveDeliveryChange?.(snapshotDeliveryLine(planViewModel.activePlan));
   }, [onActiveDeliveryChange, planViewModel.activePlan]);
 
+  useEffect(() => {
+    onActiveGoalRunnerStatusChange?.(planViewModel.activePlan?.runner?.status ?? null);
+  }, [onActiveGoalRunnerStatusChange, planViewModel.activePlan?.runner?.status]);
+
   // 面板位于输入框上方：没有计划时不占位，直接隐藏。
   if (plans.length === 0) {
     return null;
   }
-  // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
-  const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   const { activePlan, mainPlan, listPlans, orderedListPlans } = planViewModel;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
   const hasUnarchivedHint = Boolean(
@@ -2338,9 +2342,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const hasCompletedFormalGoal = plans.some(shouldShowGoalCompletionFeedback);
   const dockedCompleted =
     hasCompletedFormalGoal && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
-  const summary = isZh
-    ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
-    : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
 
   return (
     <div
@@ -2390,10 +2391,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               setManualCollapsed(expanded);
             }}
           >
-            <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
-            <span className="goal-panel-toggle-summary">{summary}</span>
-            {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
-            {(dockedToWorkbench || !expanded) && activePlan ? (
+            {activePlan ? (
               <span className="goal-panel-toggle-active">
                 {activePlan.status === 'executing' ? (
                   <span className="goal-panel-toggle-active-dot" aria-hidden="true" />

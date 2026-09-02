@@ -298,6 +298,32 @@ test('derivePlanStatus: executing + 全叶子 completed → completed（自动�
   assert.equal(derivePlanStatus('executing', tasks), 'completed');
 });
 
+test('derivePlanStatus: executing + completed 与 cancelled 叶子 → completed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'cancelled' },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'completed');
+});
+
+test('cancelOpenTasks: 用户改向后未完成叶子收尾，计划不再保持 executing', () => {
+  const plan = approvedPlanWithTasks();
+  store.setPlanStatus(plan.planId, 'executing');
+  registerEvidenceRefs(plan.planId, ['artifact://steer-1']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://steer-1'],
+  });
+  assert.equal(store.getPlan(plan.planId).status, 'executing');
+
+  const updated = store.cancelOpenTasks(plan.planId, { reason: '用户撤回剩余工作' });
+  const nested = updated.tasks.find((task) => task.taskId === 't2')?.subtasks || [];
+  assert.equal(updated.status, 'completed');
+  assert.equal(updated.tasks.find((task) => task.taskId === 't1')?.status, 'completed');
+  assert.equal(nested.find((task) => task.taskId === 't2a')?.status, 'cancelled');
+  assert.equal(nested.find((task) => task.taskId === 't2b')?.status, 'cancelled');
+});
+
 test('derivePlanStatus: executing + 含 failed（其余 completed）→ failed', () => {
   const tasks = [
     { taskId: 't1', status: 'completed' },
@@ -1664,7 +1690,14 @@ test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，
   assert.equal(interrupted.status, 'failed');
   assert.equal(interrupted.runner.interruption.source, 'stream_error');
 
-  const resumed = store.resumeRunner(created.planId, { phase: 'act' });
+  // 普通 resume（intake 中断→继续路径）：中断标记保留，避免 decideIntakeConvergence
+  // 把它误判为 pure_qa 而静默删除；未消费标记时计划保持 failed（等待显式恢复）。
+  const kept = store.resumeRunner(created.planId, { phase: 'act' });
+  assert.equal(kept.status, 'failed');
+  assert.equal(kept.runner.interruption.source, 'stream_error');
+
+  // 用户显式恢复失败计划（consumedInterruption:true）：消费并清除中断标记，恢复执行。
+  const resumed = store.resumeRunner(created.planId, { phase: 'act', consumedInterruption: true });
   assert.equal(resumed.status, 'executing');
   assert.equal(resumed.runner.status, 'running');
   assert.equal(resumed.runner.interruption, undefined);

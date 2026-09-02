@@ -90,6 +90,22 @@ export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS = Object.freeze({
     'local.web.control.screenshot',
   ),
   browserReadDom: defineToolContract('browser_read_dom', 'local.web.control.readDom'),
+  browserHover: defineToolContract('browser_hover', 'local.web.control.hover'),
+  browserScroll: defineToolContract('browser_scroll', 'local.web.control.scroll'),
+  browserKey: defineToolContract('browser_key', 'local.web.control.key'),
+  browserDrag: defineToolContract('browser_drag', 'local.web.control.drag'),
+  browserExternalOpen: defineToolContract('browser_external_open', 'local.web.external.open'),
+  browserExternalClose: defineToolContract('browser_external_close', 'local.web.external.close'),
+  browserExternalNavigate: defineToolContract('browser_external_navigate', 'local.web.external.navigate'),
+  browserExternalClick: defineToolContract('browser_external_click', 'local.web.external.click'),
+  browserExternalType: defineToolContract('browser_external_type', 'local.web.external.type'),
+  browserExternalHover: defineToolContract('browser_external_hover', 'local.web.external.hover'),
+  browserExternalScroll: defineToolContract('browser_external_scroll', 'local.web.external.scroll'),
+  browserExternalScreenshot: defineToolContract(
+    'browser_external_screenshot',
+    'local.web.external.screenshot',
+  ),
+  browserExternalReadDom: defineToolContract('browser_external_read_dom', 'local.web.external.readDom'),
 });
 
 export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACT_LIST = Object.freeze(

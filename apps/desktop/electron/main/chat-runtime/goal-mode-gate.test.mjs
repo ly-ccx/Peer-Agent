@@ -120,6 +120,7 @@ describe('resolveGoalPlanGate', () => {
       hasPlan: false,
       hasApprovedPlan: false,
       intakeActive: false,
+      interruptedIntakeActive: false,
     });
   });
 
@@ -134,11 +135,13 @@ describe('resolveGoalPlanGate', () => {
       hasPlan: true,
       hasApprovedPlan: true,
       intakeActive: false,
+      interruptedIntakeActive: false,
     });
     assert.deepEqual(resolveGoalPlanGate('c2', fakeStore), {
       hasPlan: false,
       hasApprovedPlan: false,
       intakeActive: false,
+      interruptedIntakeActive: false,
     });
   });
 
@@ -150,6 +153,7 @@ describe('resolveGoalPlanGate', () => {
       hasPlan: true,
       hasApprovedPlan: false,
       intakeActive: false,
+      interruptedIntakeActive: false,
     });
   });
 
@@ -165,6 +169,7 @@ describe('resolveGoalPlanGate', () => {
       hasPlan: false,
       hasApprovedPlan: false,
       intakeActive: false,
+      interruptedIntakeActive: false,
     });
   });
 
@@ -186,6 +191,39 @@ describe('resolveGoalPlanGate', () => {
     };
     const gate = resolveGoalPlanGate('c1', fakeStore);
     assert.equal(gate.intakeActive, false);
+  });
+
+  it('flags interruptedIntakeActive when an intake contract carries runner.interruption', () => {
+    const fakeStore = {
+      listPlansByConversation: () => [
+        {
+          status: 'executing',
+          activation: { kind: 'intake' },
+          runner: { interruption: { source: 'stream_interrupted', reason: 'aborted', interruptedAt: '2026-09-02T12:34:31Z' } },
+        },
+      ],
+    };
+    const gate = resolveGoalPlanGate('c1', fakeStore);
+    assert.equal(gate.intakeActive, true);
+    assert.equal(gate.interruptedIntakeActive, true);
+  });
+
+  it('does not flag interruptedIntakeActive for an intake contract without interruption or terminal', () => {
+    const noMarker = resolveGoalPlanGate('c1', {
+      listPlansByConversation: () => [
+        { status: 'executing', activation: { kind: 'intake' } },
+      ],
+    });
+    assert.equal(noMarker.intakeActive, true);
+    assert.equal(noMarker.interruptedIntakeActive, false);
+
+    const terminal = resolveGoalPlanGate('c1', {
+      listPlansByConversation: () => [
+        { status: 'cancelled', activation: { kind: 'intake' }, runner: { interruption: {} } },
+      ],
+    });
+    assert.equal(terminal.intakeActive, false);
+    assert.equal(terminal.interruptedIntakeActive, false);
   });
 });
 
@@ -224,6 +262,21 @@ describe('evaluateGoalModeGate · intake write-gate', () => {
       });
       assert.equal(r.allowed, true, `${toolName} should be allowed during intake`);
     }
+  });
+
+  it('allows side-effecting tools for an interrupted intake contract (continue path)', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'write_file',
+      riskLevel: 'L2_local_write',
+      planGate: {
+        hasPlan: true,
+        hasApprovedPlan: false,
+        intakeActive: true,
+        interruptedIntakeActive: true,
+      },
+    });
+    assert.equal(r.allowed, true, 'interrupted intake contract should bypass intake write gate');
   });
 });
 

@@ -176,6 +176,7 @@ describe('conversationStore', () => {
     });
     store.beginLoad('A');
     assert.equal(store.getSnapshot('A').loadStatus, 'loading');
+    assert.equal(store.getSnapshot('A').streamStatus, 'unknown');
     assert.equal(store.getSnapshot('A').messages.length, 0);
     assert.equal(store.getSnapshot('A').isStreaming, false);
     assert.equal(store.getSnapshot('A').draft, 'draft A');
@@ -183,7 +184,30 @@ describe('conversationStore', () => {
 
     store.commitLoad('A', { messages: [msg('new', 'fresh')] });
     assert.equal(store.getSnapshot('A').loadStatus, 'ready');
+    assert.equal(store.getSnapshot('A').streamStatus, 'confirmed');
     assert.equal(store.getSnapshot('A').messages[0].content, 'fresh');
+  });
+
+  it('beginStreamReattach keeps transcript and queue while stream status is unknown', () => {
+    const store = new ConversationStore();
+    store.setState('A', {
+      loadStatus: 'ready',
+      streamStatus: 'confirmed',
+      messages: [msg('keep', 'visible')],
+      isStreaming: true,
+      draft: 'draft A',
+      messageQueue: [queued('q-a', 'queued A')],
+    });
+    store.beginStreamReattach('A');
+    assert.equal(store.getSnapshot('A').loadStatus, 'ready');
+    assert.equal(store.getSnapshot('A').streamStatus, 'unknown');
+    assert.equal(store.getSnapshot('A').messages[0].content, 'visible');
+    assert.equal(store.getSnapshot('A').isStreaming, false);
+    assert.equal(store.getSnapshot('A').messageQueue[0]?.text, 'queued A');
+
+    store.commitLoad('A', {});
+    assert.equal(store.getSnapshot('A').streamStatus, 'confirmed');
+    assert.equal(store.getSnapshot('A').messages[0].content, 'visible');
   });
 
   it('keeps streamError on the interrupted conversation when another conversation loads', () => {

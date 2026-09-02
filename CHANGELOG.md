@@ -4,6 +4,41 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+## [0.0.11] - 2026-09-02
+
+### Notes
+
+- Stable release that makes the in-app browser easier to drive: click, type, and hover can target unique roles, visible text, or test ids, and they wait until the target is actually actionable.
+- Switching chats and coming back no longer reloads recent pages from scratch.
+- The address-bar arrow can send the current page to the system browser.
+- The source picker splits local and remote branches; the env capsule shows the current Worktree.
+- Qoder queue follows upstream cadence and surfaces queue status in the UI.
+
+### Features
+
+- Locate click/type/hover by unique `role`/`name`, visible `hasText`, or `testid`, with 0-based `nth` for same-named matches.
+- Wait until the target is enabled, unoccluded, and still connected before clicking, typing, or hovering.
+- Keep up to 8 recent non-blank session pages alive across conversation switches.
+- Open the current http(s) page in the system browser from the address bar.
+- Split the source picker into local and remote tabs; show the current Worktree on the env capsule.
+
+### Improved
+
+- Qoder queue honors upstream cadence and shows queue status in the UI.
+- Sidebar pinned chats are more stable; stream-state races are fixed.
+- Goal interrupts are no longer silently deleted; continue is not blocked by the gate.
+
+### Fixed
+
+- DeepSeek and form-mode model catalogs go through the declared plane instead of the Anthropic path.
+- Merge-back that stopped because the worktree was already cleaned can reconcile instead of staying stuck.
+- A mistaken `node_modules` symlink is removed so checkouts no longer destroy the dependency directory.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
+
 ## [0.0.10] - 2026-08-31
 
 ### Notes

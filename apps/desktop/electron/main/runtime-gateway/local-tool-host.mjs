@@ -10,6 +10,7 @@ import { createLocalSearchAggregateProvider } from './local-search-aggregate-pro
 import { createLocalShellProvider } from './local-shell-provider.mjs';
 import { createLocalWebProvider } from './local-web-provider.mjs';
 import { createLocalBrowserControlProvider } from './local-browser-control-provider.mjs';
+import { createLocalExternalBrowserProvider } from './local-external-browser-provider.mjs';
 import { createConfiguredHookRunner } from './hook-config.mjs';
 import { appendHookEvidence } from './hook-evidence.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
@@ -27,6 +28,7 @@ export function createLocalToolHost({
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
   browserControlProvider = createLocalBrowserControlProvider({ userDataPath, ensureBrowserReady }),
+  externalBrowserProvider = createLocalExternalBrowserProvider({ userDataPath }),
   searchAggregateProvider = createLocalSearchAggregateProvider({ workspaceRoot }),
   automationProposalService = null,
   automationProposalProvider = createLocalAutomationProposalProvider({
@@ -53,6 +55,7 @@ export function createLocalToolHost({
       automationProposalProvider,
       webProvider,
       browserControlProvider,
+      externalBrowserProvider,
       searchAggregateProvider,
       ...(mcpProvider ? [mcpProvider] : []),
       ...extraProviders,

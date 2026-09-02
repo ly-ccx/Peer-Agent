@@ -37,8 +37,12 @@ const CLICK = 'local.web.control.click';
 const TYPE = 'local.web.control.type';
 const SCREENSHOT = 'local.web.control.screenshot';
 const READ_DOM = 'local.web.control.readDom';
+const HOVER = 'local.web.control.hover';
+const SCROLL = 'local.web.control.scroll';
+const KEY = 'local.web.control.key';
+const DRAG = 'local.web.control.drag';
 
-const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM]);
+const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM, HOVER, SCROLL, KEY, DRAG]);
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
@@ -61,6 +65,681 @@ function hostOf(url) {
   } catch {
     return 'unknown';
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function computeViewportPoint(cssPoint, viewport = {}) {
+  const dpr = Number.isFinite(viewport.devicePixelRatio) && viewport.devicePixelRatio > 0
+    ? viewport.devicePixelRatio
+    : 1;
+  const scale = Number.isFinite(viewport.visualViewportScale) && viewport.visualViewportScale > 0
+    ? viewport.visualViewportScale
+    : 1;
+  const scrollX = Number.isFinite(viewport.scrollX) ? viewport.scrollX : 0;
+  const scrollY = Number.isFinite(viewport.scrollY) ? viewport.scrollY : 0;
+  // 契约：坐标统一用逻辑坐标，不乘 dpr/scale 放大；底层负责物理像素换算。
+  const x = Math.round(cssPoint.x ?? 0);
+  const y = Math.round(cssPoint.y ?? 0);
+  return {
+    x,
+    y,
+    css: { x: Math.round(cssPoint.x ?? 0), y: Math.round(cssPoint.y ?? 0) },
+    dpr,
+    visualViewportScale: scale,
+    scroll: { x: scrollX, y: scrollY },
+  };
+}
+
+export const ELEMENT_ACTIONABLE_SAMPLE_BODY = `
+    if (!el || !el.isConnected) return { ok: false, reason: 'stale', x: 0, y: 0, x0: 0, y0: 0, w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2);
+    const y = Math.round(r.top + r.height / 2);
+    const x0 = Math.round(r.left);
+    const y0 = Math.round(r.top);
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (w <= 0 || h <= 0) return { ok: false, reason: 'not_visible', x, y, x0, y0, w, h };
+    const disabled = Boolean(
+      el.disabled === true
+      || el.getAttribute('aria-disabled') === 'true'
+      || el.closest('[disabled], [aria-disabled="true"]')
+    );
+    if (disabled) return { ok: false, reason: 'disabled', x, y, x0, y0, w, h };
+    const hit = (el.ownerDocument || document).elementFromPoint(x, y);
+    const occluded = !(hit && (hit === el || el.contains(hit) || hit.contains(el)));
+    if (occluded) return { ok: false, reason: 'occluded', x, y, x0, y0, w, h };
+    return { ok: true, reason: 'actionable', x, y, x0, y0, w, h };
+`;
+
+export function describeActionableWaitFailure(reason, zh, action = 'click') {
+  const verb = action === 'type'
+    ? (zh ? '未输入' : 'did not type')
+    : action === 'hover'
+      ? (zh ? '未悬停' : 'did not hover')
+      : (zh ? '未点击' : 'did not click');
+  switch (reason) {
+    case 'disabled':
+      return zh ? `目标仍被禁用，${verb}。` : `Target stayed disabled; ${verb}.`;
+    case 'occluded':
+      return zh ? `目标仍被挡住，${verb}。` : `Target stayed covered; ${verb}.`;
+    case 'stale':
+      return zh ? `目标节点已不在页面上，${verb}。` : `Target node was detached; ${verb}.`;
+    case 'not_visible':
+      return zh ? `目标仍不可见，${verb}。` : `Target stayed not visible; ${verb}.`;
+    default:
+      return zh ? `目标仍不可点，${verb}。` : `Target stayed not actionable; ${verb}.`;
+  }
+}
+
+function failUnlessActionable(waited, { call, permissionGrant, locale, zh, action }) {
+  if (waited?.ok) return null;
+  return {
+    call,
+    permissionGrant,
+    result: createFailedClientToolResult({
+      call,
+      locale,
+      reason: describeActionableWaitFailure(waited?.reason, zh, action),
+      dataLevel: 'D2_sensitive',
+      status: 'failed',
+    }),
+  };
+}
+
+async function waitForElementStable(wc, selector, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildElementJs(selector, body),
+    opts,
+  );
+}
+
+function parseRoleNth(value) {
+  if (value == null || value === '') return { ok: true, nth: null };
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(n) || n < 0) return { ok: false, nth: null };
+  return { ok: true, nth: n };
+}
+
+async function waitForLocatorElementStable(wc, buildJs, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 1500;
+  const pollMs = opts.pollMs ?? 120;
+  const sampleJs = buildJs(ELEMENT_ACTIONABLE_SAMPLE_BODY);
+  const deadline = Date.now() + timeoutMs;
+  let prev = null;
+  let lastReason = 'not_actionable';
+  while (Date.now() < deadline) {
+    const sample = await wc.executeJavaScript(sampleJs, true);
+    if (!sample || sample.ok !== true) {
+      lastReason = sample?.reason || 'stale';
+      prev = null;
+      await sleep(pollMs);
+      continue;
+    }
+    lastReason = sample.reason || 'actionable';
+    if (prev) {
+      const stable = prev.x === sample.x && prev.y === sample.y &&
+        prev.x0 === sample.x0 && prev.y0 === sample.y0 &&
+        prev.w === sample.w && prev.h === sample.h;
+      if (stable) return { ok: true, reason: 'actionable', sample };
+    }
+    prev = sample;
+    await sleep(pollMs);
+  }
+  return { ok: false, reason: lastReason };
+}
+
+async function waitForRoleElementStable(wc, role, name, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildRoleResolveJs(role, name, body, { nth: opts.nth }),
+    opts,
+  );
+}
+
+async function waitForTextTestIdElementStable(wc, kind, value, opts = {}) {
+  return waitForLocatorElementStable(
+    wc,
+    (body) => buildTextTestIdResolveJs(kind, value, body, { nth: opts.nth }),
+    opts,
+  );
+}
+
+/**
+ * 解析「frame:index 前缀 + CSS selector」。
+ *
+ * 支持形如 `frame:0 #submit`、`frame:1 .btn`。无前缀时 framePath 为空，表示主文档。
+ * 纯函数，产出 { framePath: number[], css: string }，供 buildElementJs 使用。
+ *
+ * @param {string} selector
+ * @returns {{ framePath: number[], css: string }}
+ */
+export function parseFrameSelector(selector) {
+  const framePath = [];
+  let rest = selector ?? '';
+  const match = rest.match(/^frame:(\d+)(?:\s*)(.*)$/);
+  if (match) {
+    framePath.push(Number(match[1]));
+    rest = match[2];
+  }
+  return { framePath, css: rest.trim() };
+}
+
+/**
+ * 在文档（含 open shadowRoot）里按 CSS 查找第一个元素。
+ * 注入到 executeJavaScript 字符串里；closed shadow 进不去。
+ */
+const DEEP_QUERY_HELPER = `function queryDeep(root, css) {
+  if (!root || !css) return null;
+  try {
+    const hit = root.querySelector(css);
+    if (hit) return hit;
+  } catch {
+    return null;
+  }
+  const walk = root.querySelectorAll ? root.querySelectorAll('*') : [];
+  for (const node of walk) {
+    if (node.shadowRoot) {
+      const nested = queryDeep(node.shadowRoot, css);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}`;
+
+/**
+ * 生成「在目标文档（可跨 iframe / open shadowRoot）里 querySelector」的自执行表达式。
+ *
+ * click/type/readDom/waitForElementStable 各处统一用它来定位元素，
+ * 消除裸 document.querySelector 只在主 frame、光 DOM 生效的局限。
+ * selector 以 JSON.stringify 转义，frame index 经 parseInt 校验，防止注入。
+ *
+ * @param {string} selector
+ * @returns {string} 一段可交给 executeJavaScript 的 IIFE 字符串，命中元素或 null
+ */
+export function buildElementJs(selector, body = 'return el;') {
+  const { framePath, css } = parseFrameSelector(selector);
+  const safeCss = JSON.stringify(css);
+  const down = [
+    'let doc = document;',
+    ...framePath.map((i) => {
+      const idx = Number.isInteger(i) ? i : parseInt(i, 10);
+      return `doc = doc.defaultView?.frames[${idx}]?.document || null; if (!doc) return null;`;
+    }),
+  ].join('\n');
+  return `(() => { ${DEEP_QUERY_HELPER} ${down} const el = queryDeep(doc, ${safeCss}); if (!el) return null; ${body} })()`;
+}
+
+const ROLE_SNAPSHOT_MAX_NODES = 80;
+const ROLE_SNAPSHOT_NAME_MAX = 80;
+const IMPLICIT_ROLES = Object.freeze({
+  A: 'link',
+  BUTTON: 'button',
+  INPUT: null,
+  TEXTAREA: 'textbox',
+  SELECT: 'combobox',
+  SUMMARY: 'button',
+  H1: 'heading',
+  H2: 'heading',
+  H3: 'heading',
+  H4: 'heading',
+  H5: 'heading',
+  H6: 'heading',
+  IMG: 'img',
+  NAV: 'navigation',
+  MAIN: 'main',
+  HEADER: 'banner',
+  FOOTER: 'contentinfo',
+  ASIDE: 'complementary',
+  FORM: 'form',
+  TABLE: 'table',
+  LI: 'listitem',
+  UL: 'list',
+  OL: 'list',
+  OPTION: 'option',
+  LABEL: null,
+});
+const INPUT_ROLES = Object.freeze({
+  button: 'button',
+  submit: 'button',
+  reset: 'button',
+  checkbox: 'checkbox',
+  radio: 'radio',
+  range: 'slider',
+  search: 'searchbox',
+  email: 'textbox',
+  password: 'textbox',
+  tel: 'textbox',
+  url: 'textbox',
+  text: 'textbox',
+  number: 'spinbutton',
+});
+
+const ROLE_SNAPSHOT_COLLECTOR = `function compactCss(el) {
+  if (!el || el.nodeType !== 1) return '';
+  if (el.id && typeof el.id === 'string' && /^[A-Za-z][\\w:-]*$/.test(el.id)) return '#' + el.id;
+  const tag = String(el.tagName || '').toLowerCase();
+  const cls = typeof el.className === 'string'
+    ? el.className.trim().split(/\\s+/).filter((c) => /^[A-Za-z][\\w:-]*$/.test(c)).slice(0, 2)
+    : [];
+  const classPart = cls.length ? '.' + cls.join('.') : '';
+  const type = el.getAttribute && el.getAttribute('type');
+  const typePart = type && /^[A-Za-z0-9_-]+$/.test(type) ? '[type="' + type + '"]' : '';
+  const name = el.getAttribute && el.getAttribute('name');
+  const namePart = name && /^[A-Za-z][\\w:-]*$/.test(name) ? '[name="' + name + '"]' : '';
+  return tag + classPart + typePart + namePart;
+}
+function accessibleName(el, doc, nameMax) {
+  const labelled = el.getAttribute && el.getAttribute('aria-labelledby');
+  if (labelled) {
+    const parts = labelled.split(/\\s+/).map((id) => doc.getElementById(id)?.textContent?.trim()).filter(Boolean);
+    if (parts.length) return parts.join(' ').slice(0, nameMax);
+  }
+  const label = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder'))) || '';
+  if (label) return String(label).trim().slice(0, nameMax);
+  if (el.labels && el.labels[0] && el.labels[0].textContent) return String(el.labels[0].textContent).trim().slice(0, nameMax);
+  const text = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+  return text.slice(0, nameMax);
+}
+function roleOf(el, implicit, inputRoles) {
+  const explicit = el.getAttribute && el.getAttribute('role');
+  if (explicit) return explicit.trim();
+  const tag = el.tagName;
+  if (tag === 'INPUT') {
+    const type = ((el.getAttribute && el.getAttribute('type')) || 'text').toLowerCase();
+    return inputRoles[type] || 'textbox';
+  }
+  if (Object.prototype.hasOwnProperty.call(implicit, tag)) return implicit[tag];
+  return '';
+}
+function collectRoles(root, doc, implicit, inputRoles, nameMax, maxNodes) {
+  const nodes = [];
+  const stack = [];
+  if (root && root.nodeType === 1) stack.push(root);
+  else if (root && root.firstElementChild) stack.push(root.firstElementChild);
+  while (stack.length && nodes.length < maxNodes) {
+    const current = stack.shift();
+    const role = roleOf(current, implicit, inputRoles);
+    if (role) {
+      const r = current.getBoundingClientRect();
+      const href = current.getAttribute && current.getAttribute('href');
+      nodes.push({
+        role,
+        name: accessibleName(current, doc, nameMax),
+        tag: String(current.tagName || '').toLowerCase(),
+        selector: compactCss(current),
+        disabled: Boolean(current.disabled || (current.getAttribute && current.getAttribute('aria-disabled') === 'true')),
+        href: href || undefined,
+        headingLevel: /^H[1-6]$/.test(current.tagName) ? Number(current.tagName.slice(1)) : undefined,
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      });
+    }
+    const kids = [];
+    if (current.shadowRoot) {
+      for (const child of current.shadowRoot.children || []) kids.push(child);
+    }
+    for (const child of current.children || []) kids.push(child);
+    stack.unshift(...kids);
+  }
+  return { count: nodes.length, truncated: stack.length > 0, nodes };
+}`;
+
+const ROLE_FIND_HELPER = `function nameMatches(have, want, nameMax) {
+  const actual = String(have || '').trim();
+  const expected = String(want || '').trim();
+  if (!expected) return true;
+  if (actual === expected) return true;
+  if (expected.length === nameMax && actual.slice(0, nameMax) === expected) return true;
+  return false;
+}
+function findRoleMatches(root, doc, implicit, inputRoles, nameMax, wantRole, wantName) {
+  const matches = [];
+  const stack = [];
+  const targetRole = String(wantRole || '').trim().toLowerCase();
+  if (!targetRole) return matches;
+  if (root && root.nodeType === 1) stack.push(root);
+  else if (root && root.firstElementChild) stack.push(root.firstElementChild);
+  while (stack.length) {
+    const current = stack.shift();
+    const role = roleOf(current, implicit, inputRoles);
+    if (role && String(role).trim().toLowerCase() === targetRole && nameMatches(accessibleName(current, doc, nameMax), wantName, nameMax)) {
+      matches.push(current);
+    }
+    const kids = [];
+    if (current.shadowRoot) {
+      for (const child of current.shadowRoot.children || []) kids.push(child);
+    }
+    for (const child of current.children || []) kids.push(child);
+    stack.unshift(...kids);
+  }
+  return matches;
+}`;
+
+const TEXT_TESTID_FIND_HELPER = `function visibleTextOf(el) {
+  const raw = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+  return raw;
+}
+function findTextTestIdMatches(root, kind, want) {
+  const matches = [];
+  const stack = [];
+  const target = String(want || '').trim();
+  if (!target) return matches;
+  const mode = String(kind || '').trim();
+  if (root && root.nodeType === 1) stack.push(root);
+  else if (root && root.firstElementChild) stack.push(root.firstElementChild);
+  while (stack.length) {
+    const current = stack.shift();
+    let hit = false;
+    if (mode === 'testid') {
+      const attr = current.getAttribute && (current.getAttribute('data-testid') || current.getAttribute('data-test-id') || current.getAttribute('data-test'));
+      hit = String(attr || '').trim() === target;
+    } else if (mode === 'hasText') {
+      hit = visibleTextOf(current) === target;
+    }
+    if (hit) matches.push(current);
+    const kids = [];
+    if (current.shadowRoot) {
+      for (const child of current.shadowRoot.children || []) kids.push(child);
+    }
+    for (const child of current.children || []) kids.push(child);
+    stack.unshift(...kids);
+  }
+  return matches;
+}`;
+
+export function buildRolesSnapshotJs(selector = '', { maxNodes = ROLE_SNAPSHOT_MAX_NODES } = {}) {
+  const limit = Math.max(1, Math.min(200, Math.round(Number(maxNodes) || ROLE_SNAPSHOT_MAX_NODES)));
+  const { framePath, css } = parseFrameSelector(selector || '');
+  const safeCss = JSON.stringify(css);
+  const implicit = JSON.stringify(IMPLICIT_ROLES);
+  const inputRoles = JSON.stringify(INPUT_ROLES);
+  const down = [
+    'let doc = document;',
+    ...framePath.map((i) => {
+      const idx = Number.isInteger(i) ? i : parseInt(i, 10);
+      return `doc = doc.defaultView?.frames[${idx}]?.document || null; if (!doc) return null;`;
+    }),
+  ].join('\n');
+  const scopeLine = css
+    ? `const root = queryDeep(doc, ${safeCss}); if (!root) return null;`
+    : 'const root = doc.body || doc.documentElement; if (!root) return null;';
+  return `(() => {
+    ${DEEP_QUERY_HELPER}
+    ${down}
+    ${scopeLine}
+    const IMPLICIT = ${implicit};
+    const INPUT_ROLES = ${inputRoles};
+    const NAME_MAX = ${ROLE_SNAPSHOT_NAME_MAX};
+    const MAX = ${limit};
+    ${ROLE_SNAPSHOT_COLLECTOR}
+    return collectRoles(root, doc, IMPLICIT, INPUT_ROLES, NAME_MAX, MAX);
+  })()`;
+}
+
+export function buildRoleResolveJs(role, name = '', body = 'return el;', { nth } = {}) {
+  const wantRole = JSON.stringify(String(role || '').trim());
+  const wantName = JSON.stringify(String(name || '').trim());
+  const implicit = JSON.stringify(IMPLICIT_ROLES);
+  const inputRoles = JSON.stringify(INPUT_ROLES);
+  const wantNth = Number.isInteger(nth) && nth >= 0 ? nth : null;
+  return `(() => {
+    let doc = document;
+    const root = doc;
+    const IMPLICIT = ${implicit};
+    const INPUT_ROLES = ${inputRoles};
+    const NAME_MAX = ${ROLE_SNAPSHOT_NAME_MAX};
+    const wantRole = ${wantRole};
+    const wantName = ${wantName};
+    const wantNth = ${wantNth == null ? 'null' : String(wantNth)};
+    ${ROLE_SNAPSHOT_COLLECTOR}
+    ${ROLE_FIND_HELPER}
+    const matches = findRoleMatches(root, doc, IMPLICIT, INPUT_ROLES, NAME_MAX, wantRole, wantName);
+    if (wantNth == null) {
+      if (matches.length !== 1) return { ok: false, count: matches.length };
+    } else if (wantNth < 0 || wantNth >= matches.length) {
+      return { ok: false, count: matches.length, nth: wantNth };
+    }
+    const el = wantNth == null ? matches[0] : matches[wantNth];
+    ${body}
+  })()`;
+}
+
+async function resolveRoleTarget(wc, role, name, { zh, nth } = {}) {
+  const wantedRole = String(role || '').trim();
+  const wantedName = String(name || '').trim();
+  const baseLabel = wantedName ? `${wantedRole} "${wantedName}"` : wantedRole;
+  const label = nth == null ? baseLabel : `${baseLabel} nth=${nth}`;
+  const resolved = await wc.executeJavaScript(
+    buildRoleResolveJs(wantedRole, wantedName, 'return { ok: true, count: 1 };', { nth }),
+    true,
+  );
+  if (!resolved?.ok) {
+    const count = Number(resolved?.count) || 0;
+    const reason = nth != null
+      ? (zh
+        ? `角色「${baseLabel}」匹配到 ${count} 个元素，nth=${nth} 越界。`
+        : `Role "${baseLabel}" matched ${count} elements; nth=${nth} is out of range.`)
+      : count > 1
+        ? (zh
+          ? `角色「${baseLabel}」匹配到 ${count} 个元素，请改用 nth、更具体的 name 或 CSS selector。`
+          : `Role "${baseLabel}" matched ${count} elements; use nth, a more specific name, or a CSS selector.`)
+        : (zh
+          ? `未找到角色「${baseLabel}」。先用 browser_read_dom format=roles 查看可用 role/name。`
+          : `No unique element matched role "${baseLabel}". Read format=roles first.`);
+    return { ok: false, count, reason, label };
+  }
+  return { ok: true, label };
+}
+
+export function buildTextTestIdResolveJs(kind, value, body = 'return el;', { nth } = {}) {
+  const mode = kind === 'testid' ? 'testid' : 'hasText';
+  const want = JSON.stringify(String(value || '').trim());
+  const wantNth = Number.isInteger(nth) && nth >= 0 ? nth : null;
+  return `(() => {
+    let doc = document;
+    const root = doc;
+    const kind = ${JSON.stringify(mode)};
+    const want = ${want};
+    const wantNth = ${wantNth == null ? 'null' : String(wantNth)};
+    ${TEXT_TESTID_FIND_HELPER}
+    const matches = findTextTestIdMatches(root, kind, want);
+    if (wantNth == null) {
+      if (matches.length !== 1) return { ok: false, count: matches.length };
+    } else if (wantNth < 0 || wantNth >= matches.length) {
+      return { ok: false, count: matches.length, nth: wantNth };
+    }
+    const el = wantNth == null ? matches[0] : matches[wantNth];
+    ${body}
+  })()`;
+}
+
+async function resolveTextTestIdTarget(wc, kind, value, { zh, nth } = {}) {
+  const mode = kind === 'testid' ? 'testid' : 'hasText';
+  const wanted = String(value || '').trim();
+  const kindLabel = mode === 'testid' ? 'testid' : 'text';
+  const baseLabel = `${kindLabel} "${wanted}"`;
+  const label = nth == null ? baseLabel : `${baseLabel} nth=${nth}`;
+  const resolved = await wc.executeJavaScript(
+    buildTextTestIdResolveJs(mode, wanted, 'return { ok: true, count: 1 };', { nth }),
+    true,
+  );
+  if (!resolved?.ok) {
+    const count = Number(resolved?.count) || 0;
+    const reason = nth != null
+      ? (zh
+        ? `「${baseLabel}」匹配到 ${count} 个元素，nth=${nth} 越界。`
+        : `${baseLabel} matched ${count} elements; nth=${nth} is out of range.`)
+      : count > 1
+        ? (zh
+          ? `「${baseLabel}」匹配到 ${count} 个元素，请改用 nth 或更具体的定位。`
+          : `${baseLabel} matched ${count} elements; use nth or a more specific locator.`)
+        : (zh
+          ? `未找到「${baseLabel}」。`
+          : `No unique element matched ${baseLabel}.`);
+    return { ok: false, count, reason, label, locatedBy: mode };
+  }
+  return { ok: true, label, locatedBy: mode };
+}
+
+const POINT_LOCATE_BODY = `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { ok: true, count: 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `;
+
+async function locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh }) {
+  if (role) {
+    const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
+    if (!resolved.ok) return resolved;
+    const located = await wc.executeJavaScript(
+      buildRoleResolveJs(role, name, POINT_LOCATE_BODY, { nth }),
+      true,
+    );
+    if (!located?.ok) {
+      return { ok: false, reason: zh ? `未找到角色「${resolved.label}」。` : `No unique element matched role "${resolved.label}".`, label: resolved.label };
+    }
+    return { ok: true, located, locatedBy: 'role', label: resolved.label };
+  }
+  const kind = testid ? 'testid' : 'hasText';
+  const value = testid || hasText;
+  const resolved = await resolveTextTestIdTarget(wc, kind, value, { zh, nth });
+  if (!resolved.ok) return resolved;
+  const located = await wc.executeJavaScript(
+    buildTextTestIdResolveJs(kind, value, POINT_LOCATE_BODY, { nth }),
+    true,
+  );
+  if (!located?.ok) {
+    return { ok: false, reason: zh ? `未找到「${resolved.label}」。` : `No unique element matched ${resolved.label}.`, label: resolved.label };
+  }
+  return { ok: true, located, locatedBy: resolved.locatedBy, label: resolved.label };
+}
+
+const SCROLL_ALIGNMENTS = new Set(['start', 'center', 'end', 'nearest']);
+
+export function normalizeScrollAlignment(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return SCROLL_ALIGNMENTS.has(trimmed) ? trimmed : '';
+}
+
+const NAMED_KEYS = Object.freeze({
+  tab: 'Tab',
+  enter: 'Return',
+  return: 'Return',
+  escape: 'Escape',
+  esc: 'Escape',
+  backspace: 'Backspace',
+  delete: 'Delete',
+  arrowup: 'Up',
+  arrowdown: 'Down',
+  arrowleft: 'Left',
+  arrowright: 'Right',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+  home: 'Home',
+  end: 'End',
+  pageup: 'PageUp',
+  pagedown: 'PageDown',
+  space: 'Space',
+});
+
+const MODIFIER_ALIASES = Object.freeze({
+  meta: 'meta',
+  cmd: 'meta',
+  command: 'meta',
+  control: 'control',
+  ctrl: 'control',
+  alt: 'alt',
+  option: 'alt',
+  shift: 'shift',
+});
+
+export function parseBrowserKeySpec(raw) {
+  if (typeof raw !== 'string') return { ok: false, reason: 'empty' };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, reason: 'empty' };
+  const parts = trimmed.split('+').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return { ok: false, reason: 'empty' };
+  const modifiers = { alt: false, control: false, meta: false, shift: false };
+  let keyName = '';
+  for (let i = 0; i < parts.length; i += 1) {
+    const token = parts[i];
+    const lower = token.toLowerCase();
+    const modifier = MODIFIER_ALIASES[lower];
+    if (modifier) {
+      if (i === parts.length - 1) return { ok: false, reason: 'modifier_only' };
+      modifiers[modifier] = true;
+      continue;
+    }
+    if (i !== parts.length - 1) return { ok: false, reason: 'unknown', token };
+    if (NAMED_KEYS[lower]) {
+      keyName = NAMED_KEYS[lower];
+    } else if (/^[a-z0-9]$/i.test(token)) {
+      keyName = token.toUpperCase();
+    } else {
+      return { ok: false, reason: 'unknown', token };
+    }
+  }
+  if (!keyName) return { ok: false, reason: 'empty' };
+  return { ok: true, keyName, modifiers, label: trimmed };
+}
+
+export function interpolateDragPath(from, to, steps = 6) {
+  const count = Math.max(3, Math.min(8, Math.round(Number(steps) || 6)));
+  const path = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = i / (count - 1);
+    path.push({
+      x: Math.round(from.x + (to.x - from.x) * t),
+      y: Math.round(from.y + (to.y - from.y) * t),
+    });
+  }
+  return path;
+}
+
+async function locatePointFromSelector(wc, selector) {
+  const located = await wc.executeJavaScript(
+    buildElementJs(selector, `
+      el.scrollIntoView({block:'center',inline:'center'});
+      const r = el.getBoundingClientRect();
+      const vv = window.visualViewport;
+      return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+    `),
+    true,
+  );
+  if (!located) return null;
+  const normalized = computeViewportPoint(
+    { x: located.x, y: located.y },
+    { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+  );
+  await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+  return { point: { x: normalized.x, y: normalized.y }, viewport: normalized };
+}
+
+function dispatchBrowserKey(wc, spec) {
+  const { keyName, modifiers } = spec;
+  const payload = {
+    type: 'keyDown',
+    keyCode: keyName,
+    modifiers: Object.entries(modifiers).filter(([, on]) => on).map(([name]) => name),
+  };
+  wc.sendInputEvent(payload);
+  if (keyName === 'Return') {
+    wc.sendInputEvent({ type: 'char', keyCode: '\r', modifiers: payload.modifiers });
+  } else if (keyName === 'Space') {
+    wc.sendInputEvent({ type: 'char', keyCode: ' ', modifiers: payload.modifiers });
+  }
+  wc.sendInputEvent({ ...payload, type: 'keyUp' });
 }
 
 function buildImagePreview(image) {
@@ -93,7 +772,7 @@ function createBrowserArtifactStore({ userDataPath }) {
     const raw = String(content ?? '');
     const truncated = raw.length > MAX_ARTIFACT_CHARS;
     const capped = truncated ? `${raw.slice(0, MAX_ARTIFACT_CHARS)}\n...[artifact truncated]` : raw;
-    const ext = format === 'html' ? 'html' : 'txt';
+    const ext = format === 'html' ? 'html' : format === 'roles' ? 'json' : 'txt';
     await writeFile(path.join(dir, `content.${ext}`), capped, 'utf8');
     await writeFile(
       path.join(dir, 'metadata.json'),
@@ -148,6 +827,14 @@ function permissionReason(capabilityId, { host, locale }) {
       return zh ? `请求对内嵌浏览器（${host}）截图` : `Requesting to screenshot the in-app browser (${host})`;
     case READ_DOM:
       return zh ? `请求读取内嵌浏览器（${host}）的页面内容` : `Requesting to read the in-app browser DOM (${host})`;
+    case HOVER:
+      return zh ? `请求在内嵌浏览器（${host}）中悬停元素` : `Requesting to hover in the in-app browser (${host})`;
+    case SCROLL:
+      return zh ? `请求滚动内嵌浏览器（${host}）` : `Requesting to scroll the in-app browser (${host})`;
+    case KEY:
+      return zh ? `请求在内嵌浏览器（${host}）中发送按键` : `Requesting to send keys in the in-app browser (${host})`;
+    case DRAG:
+      return zh ? `请求在内嵌浏览器（${host}）中拖拽` : `Requesting to drag in the in-app browser (${host})`;
     default:
       return zh ? '请求操控内嵌浏览器' : 'Requesting to control the in-app browser';
   }
@@ -356,14 +1043,17 @@ export function createLocalBrowserControlProvider({
         return failed({ call, locale, reason: zh ? '缺少必填参数 text。' : 'Missing required argument: text.' });
       }
     }
-    if (capabilityId === CLICK) {
+    if (capabilityId === CLICK || capabilityId === HOVER) {
       const hasSelector = typeof args?.selector === 'string' && args.selector.trim().length > 0;
+      const hasRole = typeof args?.role === 'string' && args.role.trim().length > 0;
+      const hasVisibleText = typeof args?.hasText === 'string' && args.hasText.trim().length > 0;
+      const hasTestId = typeof args?.testid === 'string' && args.testid.trim().length > 0;
       const hasPoint = Number.isFinite(Number(args?.x)) && Number.isFinite(Number(args?.y));
-      if (!hasSelector && !hasPoint) {
+      if (!hasSelector && !hasRole && !hasVisibleText && !hasTestId && !hasPoint) {
         return failed({
           call,
           locale,
-          reason: zh ? '需要提供 selector 或 x/y 坐标之一。' : 'Provide either a selector or x/y coordinates.',
+          reason: zh ? '需要提供 selector、role/name、hasText、testid 或 x/y 坐标之一。' : 'Provide a selector, role/name, hasText, testid, or x/y coordinates.',
         });
       }
     }
@@ -452,38 +1142,325 @@ export function createLocalBrowserControlProvider({
           : `Navigated the in-app browser to "${title || finalUrl}".`;
       } else if (capabilityId === CLICK) {
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        const role = typeof args.role === 'string' ? args.role.trim() : '';
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
+        const parsedNth = parseRoleNth(args.nth);
+        if (!parsedNth.ok) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const nth = parsedNth.nth;
         let point = { x: Number(args.x), y: Number(args.y) };
         let locatedBy = 'point';
+        let viewportMeta = {};
+        let roleLabel = '';
         if (selector) {
           const located = await wc.executeJavaScript(
-            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({block:'center',inline:'center'}); const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) }; })()`,
+            buildElementJs(selector, `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `),
             true,
           );
           if (!located) {
             return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-          point = located;
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
           locatedBy = 'selector';
+          viewportMeta = normalized;
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+          if (blocked) return blocked;
+        } else if (role || hasText || testid) {
+          const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
+          if (!locatedTarget.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: locatedTarget.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          roleLabel = locatedTarget.label;
+          const located = locatedTarget.located;
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
+          locatedBy = locatedTarget.locatedBy;
+          viewportMeta = normalized;
+          if (role) {
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+            if (blocked) return blocked;
+          } else {
+            const waited = await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'click' });
+            if (blocked) return blocked;
+          }
         }
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         wc.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, x: point.x, y: point.y, ...targetIdentity };
-        output = { action: 'click', locatedBy, x: point.x, y: point.y, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        output = { action: 'click', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
         evidenceSummary = zh
-          ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : `坐标 (${point.x}, ${point.y})`}。`
-          : `Clicked ${selector ? `element "${selector}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+          ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : roleLabel ? `「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
+          : `Clicked ${selector ? `element "${selector}"` : roleLabel ? `"${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+      } else if (capabilityId === HOVER) {
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        const role = typeof args.role === 'string' ? args.role.trim() : '';
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
+        const parsedNth = parseRoleNth(args.nth);
+        if (!parsedNth.ok) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const nth = parsedNth.nth;
+        let point = { x: Number(args.x), y: Number(args.y) };
+        let locatedBy = 'point';
+        let viewportMeta = {};
+        let roleLabel = '';
+        if (selector) {
+          const located = await wc.executeJavaScript(
+            buildElementJs(selector, `
+              el.scrollIntoView({block:'center',inline:'center'});
+              const r = el.getBoundingClientRect();
+              const vv = window.visualViewport;
+              return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2), dpr: window.devicePixelRatio || 1, vvScale: vv ? (vv.scale || 1) : 1, scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 };
+            `),
+            true,
+          );
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
+          locatedBy = 'selector';
+          viewportMeta = normalized;
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+          if (blocked) return blocked;
+        } else if (role || hasText || testid) {
+          const locatedTarget = await locatePointByRoleOrText(wc, { role, name, hasText, testid, nth, zh });
+          if (!locatedTarget.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: locatedTarget.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          roleLabel = locatedTarget.label;
+          const located = locatedTarget.located;
+          const normalized = computeViewportPoint(
+            { x: located.x, y: located.y },
+            { devicePixelRatio: located.dpr, visualViewportScale: located.vvScale, scrollX: located.scrollX, scrollY: located.scrollY },
+          );
+          point = { x: normalized.x, y: normalized.y };
+          locatedBy = locatedTarget.locatedBy;
+          viewportMeta = normalized;
+          if (role) {
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+            if (blocked) return blocked;
+          } else {
+            const waited = await waitForTextTestIdElementStable(wc, testid ? 'testid' : 'hasText', testid || hasText, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'hover' });
+            if (blocked) return blocked;
+          }
+        }
+        wc.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+        outputPreview = { status: 'success', action: 'hover', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        output = { action: 'hover', locatedBy, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器悬停${selector ? `元素「${selector}」` : roleLabel ? `「${roleLabel}」` : `坐标 (${point.x}, ${point.y})`}。`
+          : `Hovered ${selector ? `element "${selector}"` : roleLabel ? `"${roleLabel}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
+      } else if (capabilityId === SCROLL) {
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        const deltaX = Number.isFinite(Number(args.deltaX)) ? Number(args.deltaX) : 0;
+        const deltaY = Number.isFinite(Number(args.deltaY)) ? Number(args.deltaY) : 0;
+        const block = normalizeScrollAlignment(args.block);
+        const inline = normalizeScrollAlignment(args.inline);
+        const useIntoView = Boolean(block || inline);
+        if (!selector && !useIntoView && deltaX === 0 && deltaY === 0) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 selector、deltaX/deltaY 或 block/inline 之一。' : 'Provide a selector, deltaX/deltaY, or block/inline.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        if (selector) await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+        const scrollBody = useIntoView
+          ? `el.scrollIntoView({block:${JSON.stringify(block || 'nearest')},inline:${JSON.stringify(inline || 'nearest')}});`
+          : `const target = el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth ? el : (el.closest && el.closest('*') ? (() => { let n = el; while (n && n !== doc && n !== doc.documentElement) { const s = n.ownerDocument.defaultView.getComputedStyle(n); const oy = s.overflowY; const ox = s.overflowX; if ((oy === 'auto' || oy === 'scroll' || ox === 'auto' || ox === 'scroll') && (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth)) return n; n = n.parentElement; } return doc.scrollingElement || doc.documentElement; })() : el); target.scrollBy(${deltaX}, ${deltaY});`;
+        const viewportBody = useIntoView
+          ? `const el = doc.scrollingElement || doc.documentElement; el.scrollIntoView({block:${JSON.stringify(block || 'nearest')},inline:${JSON.stringify(inline || 'nearest')}});`
+          : `const el = doc.scrollingElement || doc.documentElement; el.scrollBy(${deltaX}, ${deltaY});`;
+        const js = selector
+          ? buildElementJs(selector, `
+              const pickScroller = () => {
+                if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) return el;
+                let n = el.parentElement;
+                while (n && n !== doc && n !== doc.documentElement) {
+                  if (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth) return n;
+                  n = n.parentElement;
+                }
+                return doc.scrollingElement || doc.documentElement;
+              };
+              const scroller = pickScroller();
+              const before = { x: scroller.scrollLeft, y: scroller.scrollTop };
+              ${scrollBody}
+              return { before, after: { x: scroller.scrollLeft, y: scroller.scrollTop }, mode: ${JSON.stringify(useIntoView ? 'intoView' : 'delta')} };
+            `)
+          : `(() => { let doc = document; const el = doc.scrollingElement || doc.documentElement; const before = { x: el.scrollLeft, y: el.scrollTop }; ${viewportBody} const afterEl = doc.scrollingElement || doc.documentElement; return { before, after: { x: afterEl.scrollLeft, y: afterEl.scrollTop }, mode: ${JSON.stringify(useIntoView ? 'intoView' : 'delta')} }; })()`;
+        const scrolled = await wc.executeJavaScript(js, true);
+        if (selector && !scrolled) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const after = scrolled?.after ?? { x: 0, y: 0 };
+        outputPreview = { status: 'success', action: 'scroll', selector: selector || undefined, deltaX, deltaY, block: block || undefined, inline: inline || undefined, mode: scrolled?.mode, after, ...targetIdentity };
+        output = { action: 'scroll', selector: selector || undefined, deltaX, deltaY, mode: scrolled?.mode, after, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已滚动内嵌浏览器${selector ? `元素「${selector}」` : '视口'}${useIntoView ? '（scrollIntoView）' : `（Δx=${deltaX}, Δy=${deltaY}）`}。`
+          : `Scrolled ${selector ? `element "${selector}"` : 'the viewport'} in the in-app browser${useIntoView ? ' via scrollIntoView' : ` by Δx=${deltaX}, Δy=${deltaY}`}.`;
+      } else if (capabilityId === KEY) {
+        const rawKeys = Array.isArray(args.keys) ? args.keys : [];
+        if (rawKeys.length === 0) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 keys 数组。' : 'Provide a keys array.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const parsed = [];
+        for (const raw of rawKeys) {
+          const spec = parseBrowserKeySpec(raw);
+          if (!spec.ok) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `不支持的按键：${String(raw)}` : `Unsupported key: ${String(raw)}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          parsed.push(spec);
+        }
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        if (selector) {
+          await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const focused = await wc.executeJavaScript(
+            buildElementJs(selector, 'el.focus(); return true;'),
+            true,
+          );
+          if (!focused) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+        }
+        for (const spec of parsed) dispatchBrowserKey(wc, spec);
+        const labels = parsed.map((spec) => spec.label);
+        outputPreview = { status: 'success', action: 'key', keys: labels, selector: selector || undefined, ...targetIdentity };
+        output = { action: 'key', keys: labels, selector: selector || undefined, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器发送按键 ${labels.join(', ')}${selector ? `（先聚焦「${selector}」）` : ''}。`
+          : `Sent keys ${labels.join(', ')} in the in-app browser${selector ? ` after focusing "${selector}"` : ''}.`;
+      } else if (capabilityId === DRAG) {
+        const fromSelector = typeof args.fromSelector === 'string' ? args.fromSelector.trim() : '';
+        const toSelector = typeof args.toSelector === 'string' ? args.toSelector.trim() : '';
+        let fromPoint = { x: Number(args.fromX), y: Number(args.fromY) };
+        let toPoint = { x: Number(args.toX), y: Number(args.toY) };
+        let fromLocatedBy = 'point';
+        let toLocatedBy = 'point';
+        if (fromSelector) {
+          const located = await locatePointFromSelector(wc, fromSelector);
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到拖拽起点：${fromSelector}` : `No drag source matched selector: ${fromSelector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          fromPoint = located.point;
+          fromLocatedBy = 'selector';
+        } else if (!Number.isFinite(fromPoint.x) || !Number.isFinite(fromPoint.y)) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 fromSelector 或 fromX/fromY。' : 'Provide fromSelector or fromX/fromY.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        if (toSelector) {
+          const located = await locatePointFromSelector(wc, toSelector);
+          if (!located) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到拖拽终点：${toSelector}` : `No drag target matched selector: ${toSelector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          toPoint = located.point;
+          toLocatedBy = 'selector';
+        } else if (!Number.isFinite(toPoint.x) || !Number.isFinite(toPoint.y)) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '需要提供 toSelector 或 toX/toY。' : 'Provide toSelector or toX/toY.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const path = interpolateDragPath(fromPoint, toPoint);
+        wc.sendInputEvent({ type: 'mouseDown', x: fromPoint.x, y: fromPoint.y, button: 'left', clickCount: 1 });
+        for (const step of path.slice(1)) {
+          wc.sendInputEvent({ type: 'mouseMove', x: step.x, y: step.y });
+        }
+        wc.sendInputEvent({ type: 'mouseUp', x: toPoint.x, y: toPoint.y, button: 'left', clickCount: 1 });
+        outputPreview = {
+          status: 'success',
+          action: 'drag',
+          from: { ...fromPoint, locatedBy: fromLocatedBy, selector: fromSelector || undefined },
+          to: { ...toPoint, locatedBy: toLocatedBy, selector: toSelector || undefined },
+          steps: path.length,
+          ...targetIdentity,
+        };
+        output = { action: 'drag', from: fromPoint, to: toPoint, steps: path.length, ...targetIdentity };
+        evidenceSummary = zh
+          ? `已在内嵌浏览器从 (${fromPoint.x}, ${fromPoint.y}) 拖到 (${toPoint.x}, ${toPoint.y})。`
+          : `Dragged from (${fromPoint.x}, ${fromPoint.y}) to (${toPoint.x}, ${toPoint.y}) in the in-app browser.`;
       } else if (capabilityId === TYPE) {
         const text = String(args.text);
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+        const role = typeof args.role === 'string' ? args.role.trim() : '';
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const hasText = typeof args.hasText === 'string' ? args.hasText.trim() : '';
+        const testid = typeof args.testid === 'string' ? args.testid.trim() : '';
+        const parsedNth = parseRoleNth(args.nth);
+        if (!parsedNth.ok) {
+          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? 'nth 必须是从 0 起的整数。' : 'nth must be an integer starting at 0.', dataLevel: 'D2_sensitive', status: 'failed' }) };
+        }
+        const nth = parsedNth.nth;
         const clear = args.clear === true;
         const submit = args.submit === true;
+        let locatedBy = selector ? 'selector' : '';
+        let roleLabel = '';
         if (selector) {
+          const waited = await waitForElementStable(wc, selector, { timeoutMs: 1500, pollMs: 120 });
+          const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+          if (blocked) return blocked;
           const focused = await wc.executeJavaScript(
-            `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true; })()`,
+            buildElementJs(selector, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return true;`),
             true,
           );
           if (!focused) {
             return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的输入元素：${selector}` : `No input element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+        } else if (role || hasText || testid) {
+          if (role) {
+            const resolved = await resolveRoleTarget(wc, role, name, { zh, nth });
+            if (!resolved.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            roleLabel = resolved.label;
+            locatedBy = 'role';
+            const waited = await waitForRoleElementStable(wc, role, name, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+            if (blocked) return blocked;
+            const focused = await wc.executeJavaScript(
+              buildRoleResolveJs(role, name, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
+              true,
+            );
+            if (!focused?.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到角色「${roleLabel}」的输入元素。` : `No unique input matched role "${roleLabel}".`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+          } else {
+            const kind = testid ? 'testid' : 'hasText';
+            const value = testid || hasText;
+            const resolved = await resolveTextTestIdTarget(wc, kind, value, { zh, nth });
+            if (!resolved.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: resolved.reason, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            roleLabel = resolved.label;
+            locatedBy = resolved.locatedBy;
+            const waited = await waitForTextTestIdElementStable(wc, kind, value, { timeoutMs: 1500, pollMs: 120, nth });
+            const blocked = failUnlessActionable(waited, { call, permissionGrant, locale, zh, action: 'type' });
+            if (blocked) return blocked;
+            const focused = await wc.executeJavaScript(
+              buildTextTestIdResolveJs(kind, value, `el.focus(); if (${clear ? 'true' : 'false'} && 'value' in el) { el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } return { ok: true, count: 1 };`, { nth }),
+              true,
+            );
+            if (!focused?.ok) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到「${roleLabel}」的输入元素。` : `No unique input matched ${roleLabel}.`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
           }
         }
         if (typeof wc.insertText === 'function') {
@@ -498,8 +1475,8 @@ export function createLocalBrowserControlProvider({
           wc.sendInputEvent({ type: 'char', keyCode: '\r' });
           wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
         }
-        outputPreview = { status: 'success', action: 'type', selector: selector || undefined, chars: text.length, cleared: clear, submitted: submit, ...targetIdentity };
-        output = { action: 'type', chars: text.length, submitted: submit, ...targetIdentity };
+        outputPreview = { status: 'success', action: 'type', locatedBy: locatedBy || undefined, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, chars: text.length, cleared: clear, submitted: submit, ...targetIdentity };
+        output = { action: 'type', locatedBy: locatedBy || undefined, chars: text.length, submitted: submit, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器输入 ${text.length} 个字符${submit ? '并回车提交' : ''}。`
           : `Typed ${text.length} characters into the in-app browser${submit ? ' and submitted' : ''}.`;
@@ -553,34 +1530,55 @@ export function createLocalBrowserControlProvider({
           : `Captured the in-app browser (${size.width}×${size.height}); image stored at ${artifact.artifactRef}.`;
       } else if (capabilityId === READ_DOM) {
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
-        const format = args.format === 'html' ? 'html' : 'text';
-        const prop = format === 'html' ? 'outerHTML' : 'innerText';
-        const expr = selector
-          ? `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.${prop} : null; })()`
-          : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
-        const dom = await wc.executeJavaScript(expr, true);
-        if (selector && dom == null) {
-          return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
-        }
+        const format = args.format === 'html' ? 'html' : args.format === 'roles' ? 'roles' : 'text';
         const actionId = randomUUID();
         const finalUrl = typeof wc.getURL === 'function' ? wc.getURL() : (activeEntry?.url ?? '');
         const title = typeof wc.getTitle === 'function' ? wc.getTitle() : (activeEntry?.title ?? '');
-        const fullText = String(dom ?? '');
+        let fullText = '';
+        let roleCount = 0;
+        let roleTruncated = false;
+        if (format === 'roles') {
+          const snapshot = await wc.executeJavaScript(buildRolesSnapshotJs(selector), true);
+          if (selector && snapshot == null) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+          roleCount = Number.isFinite(snapshot?.count) ? snapshot.count : nodes.length;
+          roleTruncated = Boolean(snapshot?.truncated);
+          fullText = JSON.stringify({ count: roleCount, truncated: roleTruncated, nodes }, null, 2);
+        } else {
+          const prop = format === 'html' ? 'outerHTML' : 'innerText';
+          const expr = selector
+            ? buildElementJs(selector, `return el.${prop};`)
+            : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
+          const dom = await wc.executeJavaScript(expr, true);
+          if (selector && dom == null) {
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          fullText = String(dom ?? '');
+        }
         const artifact = await store.writeTextArtifact({
           actionId,
           toolCallId: call.toolCallId,
           format,
           content: fullText,
-          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, ...targetIdentity, startedAt, completedAt: nowIso() },
+          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
-        const summary = summarize(fullText);
         const maxChars = Number.isFinite(Number(args.maxChars)) ? Number(args.maxChars) : SUMMARY_MAX_CHARS;
-        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary: summarize(fullText, maxChars), artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated, ...targetIdentity };
-        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, ...targetIdentity };
+        const summarySource = format === 'roles'
+          ? (JSON.parse(fullText).nodes || []).map((n) => `${n.role}${n.name ? ` "${n.name}"` : ''}${n.selector ? ` ${n.selector}` : ''}`).join('\n') || '(no roles)'
+          : fullText;
+        const summary = summarize(summarySource, maxChars);
+        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated || roleTruncated, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity };
+        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, roleCount: format === 'roles' ? roleCount : undefined, ...targetIdentity };
         evidenceSummary = zh
-          ? `已读取内嵌浏览器页面（${format}，${fullText.length} 字符），内容已落盘（${artifact.artifactRef}）。`
-          : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`;
+          ? (format === 'roles'
+            ? `已读取内嵌浏览器角色快照（${roleCount} 个节点），内容已落盘（${artifact.artifactRef}）。`
+            : `已读取内嵌浏览器页面（${format}，${fullText.length} 字符），内容已落盘（${artifact.artifactRef}）。`)
+          : (format === 'roles'
+            ? `Read the in-app browser role snapshot (${roleCount} nodes); content stored at ${artifact.artifactRef}.`
+            : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`);
       }
 
       const completedAt = nowIso();

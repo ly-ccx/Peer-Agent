@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 const panelSource = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
+const browserViewSource = readFileSync(new URL('./views/BrowserView.tsx', import.meta.url), 'utf8');
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
 
 describe('workbench view visibility', () => {
@@ -25,12 +26,29 @@ describe('workbench view visibility', () => {
     );
   });
 
+  it('reuses one BrowserView instance per conversation instead of remounting the foreground key', () => {
+    assert.match(panelSource, /mountedBrowserConversations\(conversationId, preparedBrowserConversations\)/);
+    assert.match(panelSource, /key=\{`mounted-browser-\$\{id\}`\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
+    assert.match(
+      panelSource,
+      /workbench-view--prepared-browser[\s\S]*claimForeground=\{id === conversationId\}/,
+    );
+  });
+
   it('keeps a prepared background Browser guest mounted off-screen instead of display:none', () => {
     assert.match(panelSource, /workbench-view--prepared-browser/);
-    assert.match(panelSource, /claimForeground=\{false\}/);
+    assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
     assert.match(
       workbenchStyles,
       /\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,
     );
+  });
+
+  it('exposes an address-bar control to open the current http(s) page in the default browser', () => {
+    assert.match(browserViewSource, /openInDefaultBrowser/);
+    assert.match(browserViewSource, /IconOpenExternal/);
+    assert.match(browserViewSource, /openBrowserExternal/);
+    assert.match(browserViewSource, /parsed\.protocol !== 'http:' && parsed\.protocol !== 'https:'/);
   });
 });

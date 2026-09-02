@@ -153,11 +153,14 @@ export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;
 export function createTaskAcceptancePromptSource(): PromptSource;
+export function createWebEntryPromptSource(): PromptSource;
+export function renderWebEntryPrompt(): string;
 export function createVerifierPromptSource(): PromptSource;
 export function renderConstructionFalsificationPrompt(): string;
 export function extractAcceptancePins(brief: string): string[];
 export function extractUserMessageText(message: unknown): string;
 export function firstUserMessageText(messages: readonly unknown[] | null | undefined): string;
+export function lastUserMessageText(messages: readonly unknown[] | null | undefined): string;
 export function normalizeTaskAcceptance(value: unknown): TaskAcceptanceContext & {
   readonly brief: string;
   readonly pins: readonly string[];

@@ -30,7 +30,7 @@ import { SidebarConversationRow } from './SidebarConversationRow';
 import { SidebarWorkbenchCounts } from './SidebarWorkbenchCounts';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 import { listPinnedConversations } from '../state/listPinnedConversations';
-import { selectPinnedConversations } from '../state/pinnedConversationList';
+import { mergePinnedSectionConversations } from '../state/pinnedConversationList';
 
 type ConversationView = 'active' | 'archived';
 
@@ -255,8 +255,6 @@ export function Sidebar({
     if (!current) return null;
     return current.workspacePath || UNASSIGNED_WORKSPACE_KEY;
   }, [activeConversationId, mergedConversations]);
-  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
-  const [sidebarListTab, setSidebarListTab] = useState<'workspaces' | 'pinned'>('workspaces');
   const [allPinnedConversations, setAllPinnedConversations] = useState<readonly ConversationMeta[]>([]);
   const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
   const [projectPopoverPath, setProjectPopoverPath] = useState<string | null>(null);
@@ -432,11 +430,6 @@ export function Sidebar({
     await onRenameConversation(conv.id, nextTitle);
   }, [editingTitle, finishRenameConversation, onRenameConversation]);
 
-  const pinnedConversations = useMemo(
-    () => (isArchivedView ? [] : selectPinnedConversations(conversations)),
-    [conversations, isArchivedView],
-  );
-
   useEffect(() => {
     let cancelled = false;
     const loadPinned = async () => {
@@ -457,22 +450,51 @@ export function Sidebar({
     };
   }, []);
 
-  const pinTabConversations = useMemo(() => {
-    const byId = new Map<string, ConversationMeta>();
-    for (const conv of allPinnedConversations) byId.set(conv.id, conv);
-    for (const conv of pinnedConversations) byId.set(conv.id, conv);
-    return selectPinnedConversations([...byId.values()]);
-  }, [allPinnedConversations, pinnedConversations]);
-  const normalConversations = useMemo(
-    () => isArchivedView ? conversations : conversations.filter((conv) => !conv.pinnedAt),
-    [conversations, isArchivedView],
+  const [optimisticUnpinnedIds, setOptimisticUnpinnedIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  const pinConversation = useCallback((id: string) => {
+    setOptimisticUnpinnedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    return onPinConversation(id);
+  }, [onPinConversation]);
+
+  const unpinConversation = useCallback((id: string) => {
+    setAllPinnedConversations((prev) => prev.filter((conv) => conv.id !== id));
+    setOptimisticUnpinnedIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    return onUnpinConversation(id);
+  }, [onUnpinConversation]);
+
+  useEffect(() => {
+    setOptimisticUnpinnedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const conv of conversations) {
+        if (!conv.pinnedAt) next.delete(conv.id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [conversations]);
+
+  const pinnedSectionConversations = useMemo(() => {
+    if (isArchivedView) return [];
+    const merged = mergePinnedSectionConversations(allPinnedConversations, conversations);
+    if (optimisticUnpinnedIds.size === 0) return merged;
+    return merged.filter((conv) => !optimisticUnpinnedIds.has(conv.id));
+  }, [allPinnedConversations, conversations, isArchivedView, optimisticUnpinnedIds]);
+  const pinnedIds = useMemo(
+    () => pinnedSectionConversations.map((conv) => conv.id),
+    [pinnedSectionConversations],
   );
-  const pinnedIds = useMemo(() => pinnedConversations.map((conv) => conv.id), [pinnedConversations]);
-  const normalIds = useMemo(() => normalConversations.map((conv) => conv.id), [normalConversations]);
-  const listOrderKey = useMemo(
-    () => `${pinnedCollapsed ? 'pinned-collapsed' : pinnedIds.join(',')}|${normalIds.join(',')}`,
-    [normalIds, pinnedCollapsed, pinnedIds],
-  );
+  const listOrderKey = useMemo(() => pinnedIds.join(','), [pinnedIds]);
   const conversationListRef = useRef<HTMLDivElement>(null);
   useListFlip(conversationListRef, listOrderKey, {
     // 置顶拖拽进行中不播 FLIP，避免与原生 drag 抢 transform。
@@ -552,8 +574,8 @@ export function Sidebar({
       onArchiveConversation={archiveConversation}
       onRestoreConversation={restoreConversation}
       onDeleteConversation={deleteConversation}
-      onPinConversation={onPinConversation}
-      onUnpinConversation={onUnpinConversation}
+      onPinConversation={pinConversation}
+      onUnpinConversation={unpinConversation}
       movePinnedConversation={movePinnedConversation}
       setDraggingPinnedId={setDraggingPinnedId}
     />
@@ -703,60 +725,37 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-workspace-tree">
-        <div className="sidebar-workspace-tree-header">
-          <div className="sidebar-list-tabs" role="tablist" aria-label={isZh ? '会话列表' : 'Conversation lists'}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarListTab === 'workspaces'}
-              className={`sidebar-list-tab${sidebarListTab === 'workspaces' ? ' is-active' : ''}`}
-              onClick={() => setSidebarListTab('workspaces')}
-            >
-              {isZh ? '工作区' : 'Workspaces'}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarListTab === 'pinned'}
-              className={`sidebar-list-tab${sidebarListTab === 'pinned' ? ' is-active' : ''}`}
-              onClick={() => setSidebarListTab('pinned')}
-            >
-              {isZh ? 'Pin' : 'Pin'}
-              {pinTabConversations.length > 0 ? (
-                <span className="sidebar-workspace-tree-count">{pinTabConversations.length}</span>
-              ) : null}
-            </button>
-          </div>
-          {sidebarListTab === 'workspaces' ? (
-            <span className="sidebar-workspace-tree-meta">
-              <span className="sidebar-workspace-tree-count">{workspaces.length}</span>
-              <button
-                type="button"
-                className="sidebar-workspace-add"
-                title={isZh ? '添加工作区' : 'Add workspace'}
-                aria-label={isZh ? '添加工作区' : 'Add workspace'}
-                onClick={() => { void handleAddWorkspace(); }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-                  <path d="M12 10v6" />
-                  <path d="M9 13h6" />
-                </svg>
-              </button>
-            </span>
-          ) : null}
-        </div>
+        {!isArchivedView && pinnedSectionConversations.length > 0 ? (
+          <section className="sidebar-pinned-section" aria-label={isZh ? '置顶' : 'Pinned'}>
+            <div className="sidebar-workspace-tree-header">
+              <span className="sidebar-workspace-tree-label">{isZh ? '置顶' : 'Pinned'}</span>
+            </div>
+            <div className="sidebar-pinned-list channel-conversation-list" ref={conversationListRef}>
+              {pinnedSectionConversations.map((conv) => renderConversationRow(conv, { pinnedGroup: true, showWorkspace: true }))}
+            </div>
+          </section>
+        ) : null}
 
-        {sidebarListTab === 'pinned' ? (
-          <div className="sidebar-workspace-tree-list sidebar-pin-tab-list channel-conversation-list" ref={conversationListRef}>
-            {pinTabConversations.length === 0 ? (
-              <div className="sidebar-pin-empty">{isZh ? '还没有 Pin 会话' : 'No pinned chats yet'}</div>
-            ) : (
-              pinTabConversations.map((conv) => renderConversationRow(conv, { pinnedGroup: true, showWorkspace: true }))
-            )}
-          </div>
-        ) : (
-        <div className="sidebar-workspace-tree-list" ref={conversationListRef}>
+        <div className="sidebar-workspace-tree-header">
+          <span className="sidebar-workspace-tree-label">{isZh ? '工作区' : 'Workspaces'}</span>
+          <span className="sidebar-workspace-tree-meta">
+            <span className="sidebar-workspace-tree-count">{workspaces.length}</span>
+            <button
+              type="button"
+              className="sidebar-workspace-add"
+              title={isZh ? '添加工作区' : 'Add workspace'}
+              aria-label={isZh ? '添加工作区' : 'Add workspace'}
+              onClick={() => { void handleAddWorkspace(); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                <path d="M12 10v6" />
+                <path d="M9 13h6" />
+              </svg>
+            </button>
+          </span>
+        </div>
+        <div className="sidebar-workspace-tree-list">
           {workspaces.map((ws) => {
             // activeWorkspace 始终是新任务落点；点工作区只激活，不跳走。
             const isActiveWorkspace = activeWorkspace === ws.path;
@@ -957,7 +956,6 @@ export function Sidebar({
             </div>
           ) : null}
         </div>
-        )}
       </div>
 
 
@@ -1041,7 +1039,7 @@ export function Sidebar({
                   onClick={() => {
                     closeContextMenu();
                     if (!contextCanTogglePin) return;
-                    void (contextIsPinned ? onUnpinConversation(contextConv.id) : onPinConversation(contextConv.id));
+                    void (contextIsPinned ? unpinConversation(contextConv.id) : pinConversation(contextConv.id));
                   }}
                 >
                   <PinIcon filled={contextIsPinned} />

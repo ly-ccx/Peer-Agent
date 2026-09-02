@@ -31,6 +31,8 @@ export interface ConversationActions {
   ) => void;
   /** 进入加载阶段：归零内容并标记 loading。 */
   beginLoad: () => void;
+  /** 静默刷新：保留可见消息，只把流状态标成尚未确认。 */
+  beginStreamReattach: () => void;
   /** 加载完成：写入消息等并标记 ready。 */
   commitLoad: (patch: Partial<ConversationRuntimeState>) => void;
   /** 丢弃当前会话桶。 */
@@ -141,6 +143,7 @@ export function useConversationState(
     () => ({
       set: (patch) => conversationStore.setState(conversationId, patch),
       beginLoad: () => conversationStore.beginLoad(conversationId),
+      beginStreamReattach: () => conversationStore.beginStreamReattach(conversationId),
       commitLoad: (patch) => conversationStore.commitLoad(conversationId, patch),
       reset: () => conversationStore.reset(conversationId),
       setDraft: (draft) => conversationStore.setDraft(conversationId, draft),

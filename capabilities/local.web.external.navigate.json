@@ -1,0 +1,40 @@
+{
+  "capabilityId": "local.web.external.navigate",
+  "name": "External browser navigate",
+  "description": "Navigates the current conversation's temporary Peer-managed Chromium session to an absolute http(s) URL.",
+  "localizedName": {
+    "zh-CN": "外部浏览器导航",
+    "en-US": "External browser navigate"
+  },
+  "localizedDescription": {
+    "zh-CN": "将当前会话的临时 Peer 托管 Chromium 导航到绝对 http(s) URL。",
+    "en-US": "Navigates the current conversation's temporary Peer-managed Chromium session to an absolute http(s) URL."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Absolute http(s) URL to load."
+      }
+    },
+    "required": ["url"],
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

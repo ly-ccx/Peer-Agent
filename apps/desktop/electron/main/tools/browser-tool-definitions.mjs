@@ -8,7 +8,7 @@ import { DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
  *     → Tool Call(browser_*) → PermissionGrant → Evidence
  *
  * 用途：让 Agent 操控当前会话 Workbench 浏览器的活跃网页标签（<webview>）：
- * 导航、点击、输入、截图、读取 DOM。renderer 在 webview dom-ready 后把
+ * 导航、点击、输入、悬停、滚动、截图、读取 DOM。renderer 在 webview dom-ready 后把
  * getWebContentsId() 上报给 main（见 browser-control-registry.mjs），provider 用
  * webContents.fromId(id) 直接操控同一个 WebContents，操作对用户实时可见。
  *
@@ -24,6 +24,10 @@ export const BROWSER_TOOL_NAMES = Object.freeze({
   type: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.toolName,
   screenshot: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.toolName,
   readDom: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.toolName,
+  hover: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.toolName,
+  scroll: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.toolName,
+  key: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey.toolName,
+  drag: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag.toolName,
 });
 
 /**
@@ -37,6 +41,10 @@ export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.capabilityId]: BROWSER_TOOL_NAMES.type,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.capabilityId]: BROWSER_TOOL_NAMES.screenshot,
   [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.capabilityId]: BROWSER_TOOL_NAMES.readDom,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover.capabilityId]: BROWSER_TOOL_NAMES.hover,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll.capabilityId]: BROWSER_TOOL_NAMES.scroll,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey.capabilityId]: BROWSER_TOOL_NAMES.key,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag.capabilityId]: BROWSER_TOOL_NAMES.drag,
 });
 
 const BROWSER_CONTROL_MODE_SCOPES = Object.freeze(['chat', 'goal']);
@@ -55,15 +63,17 @@ const NAVIGATE_PROMPT = [
 ].join(' ');
 
 const CLICK_PROMPT = [
-  'Click an element in the visible in-app browser. Provide a CSS "selector" to click the',
-  'first matching element, or "x"/"y" viewport coordinates to click a point. The click is',
-  'dispatched on the same webview the user is looking at. Returns a short result summary.',
+  'Click an element in the visible in-app browser. Provide a CSS "selector", "role"/"name"',
+  'from a format=roles snapshot, visible "hasText", "testid" (data-testid), or "x"/"y"',
+  'coordinates. Unique match required unless 0-based "nth" is set. Prefer hasText/testid/role',
+  'over guessing CSS. The click is dispatched on the same webview the user is looking at.',
 ].join(' ');
 
 const TYPE_PROMPT = [
-  'Type text into the visible in-app browser. If "selector" is given, the element is focused',
-  '(and optionally cleared) first; otherwise text goes to the currently focused element. Set',
-  '"submit" to press Enter afterwards. Acts on the same visible webview. Returns a summary.',
+  'Type text into the visible in-app browser. If "selector", "role"/"name", visible "hasText",',
+  'or "testid" is given, the element is focused (and optionally cleared) first; otherwise text',
+  'goes to the currently focused element. "text" is the typed content, not the locator. Use',
+  '0-based "nth" when several matches exist. Set "submit" to press Enter afterwards.',
 ].join(' ');
 
 const SCREENSHOT_PROMPT = [
@@ -73,10 +83,39 @@ const SCREENSHOT_PROMPT = [
 ].join(' ');
 
 const READ_DOM_PROMPT = [
-  'Read text/HTML content from the visible in-app browser DOM. Provide an optional CSS',
-  '"selector" to scope extraction (defaults to document.body). The extracted content is',
-  'stored as a local artifact; only a truncated summary plus an artifact reference is',
-  'returned. Use this to understand page structure before clicking or typing.',
+  'Read content from the visible in-app browser DOM. Provide an optional CSS "selector"',
+  'to scope extraction (defaults to document.body; supports frame:N). Set "format" to',
+  '"text", "html", or "roles". Use format=roles to get a role/name/selector snapshot so',
+  'you can pick elements by accessibility role and name instead of guessing CSS. The',
+  'extracted content is stored as a local artifact; only a truncated summary plus an',
+  'artifact reference is returned.',
+].join(' ');
+
+const HOVER_PROMPT = [
+  'Hover an element in the visible in-app browser. Provide a CSS "selector" (optional frame:N),',
+  '"role"/"name", visible "hasText", "testid", or "x"/"y" coordinates. Unique match required',
+  'unless 0-based "nth" is set. Use this to reveal tooltips or submenus.',
+].join(' ');
+
+const SCROLL_PROMPT = [
+  'Scroll the visible in-app browser. Provide an optional CSS "selector" to target an element or',
+  'its nearest scrollable ancestor (supports frame:N prefix). Use "deltaX"/"deltaY" for incremental',
+  'scroll, or "block"/"inline" (start|center|end|nearest) to scrollIntoView. Without a selector,',
+  'the document viewport scrolls. Prefer element scroll over whole-page jumps.',
+].join(' ');
+
+const KEY_PROMPT = [
+  'Send keyboard keys or shortcuts in the visible in-app browser. Provide "keys" as an ordered',
+  'array of whitelist names: Tab, Enter, Escape, Backspace, Delete, ArrowUp/Down/Left/Right,',
+  'Home, End, PageUp, PageDown, Space, or Modifier+Key (Meta|Control|Alt|Shift). Optionally',
+  'focus a CSS "selector" first (supports frame:N). This is not for typing text; use browser_type',
+  'for character insertion. Enter may submit forms.',
+].join(' ');
+
+const DRAG_PROMPT = [
+  'Drag from a source to a target in the visible in-app browser. Provide fromSelector or',
+  'fromX/fromY, and toSelector or toX/toY. Uses mouseDown, interpolated mouseMove steps, then',
+  'mouseUp. Selectors support frame:N. For sliders, reorder, and canvas pan — not HTML5 file drop.',
 ].join(' ');
 
 const BROWSER_CONTROL_RUNTIME = Object.freeze({
@@ -148,6 +187,26 @@ function clickTool() {
           type: 'string',
           description: 'CSS selector of the element to click (first match).',
         },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
+        },
         x: {
           type: 'number',
           description: 'Viewport X coordinate to click (used when selector is omitted).',
@@ -178,6 +237,26 @@ function typeTool() {
         selector: {
           type: 'string',
           description: 'Optional CSS selector to focus before typing.',
+        },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element to focus (used when selector is omitted). Unique match required unless nth is set. Not the typed content.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
         },
         clear: {
           type: 'boolean',
@@ -224,11 +303,162 @@ function readDomTool() {
       properties: {
         selector: {
           type: 'string',
-          description: 'Optional CSS selector to scope extraction (defaults to document.body).',
+          description: 'Optional CSS selector to scope extraction (defaults to document.body). Supports frame:N prefix.',
+        },
+        format: {
+          type: 'string',
+          enum: ['text', 'html', 'roles'],
+          description: 'text, html, or roles (accessibility snapshot of role/name/selector). Defaults to text.',
         },
         maxChars: {
           type: 'number',
           description: 'Max characters to summarize back (full content goes to artifact).',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
+function hoverTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.hover,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserHover),
+    prompt: () => HOVER_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector of the element to hover (first match). Supports optional frame:N prefix.',
+        },
+        role: {
+          type: 'string',
+          description: 'Accessibility role from a format=roles snapshot (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name from a format=roles snapshot. Optional with role.',
+        },
+        nth: {
+          type: 'integer',
+          description: '0-based index among matches. Use when several same-named roles, texts, or testids match.',
+        },
+        hasText: {
+          type: 'string',
+          description: 'Exact visible text of the element (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        testid: {
+          type: 'string',
+          description: 'data-testid / data-test-id / data-test value (used when selector is omitted). Unique match required unless nth is set.',
+        },
+        x: {
+          type: 'number',
+          description: 'Viewport X coordinate to hover (used when selector is omitted).',
+        },
+        y: {
+          type: 'number',
+          description: 'Viewport Y coordinate to hover (used when selector is omitted).',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
+function scrollTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.scroll,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScroll),
+    prompt: () => SCROLL_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector of the element or nearest scrollable ancestor. Supports optional frame:N prefix.',
+        },
+        deltaX: {
+          type: 'number',
+          description: 'Horizontal scroll delta in CSS pixels.',
+        },
+        deltaY: {
+          type: 'number',
+          description: 'Vertical scroll delta in CSS pixels.',
+        },
+        block: {
+          type: 'string',
+          description: 'scrollIntoView block alignment: start | center | end | nearest.',
+        },
+        inline: {
+          type: 'string',
+          description: 'scrollIntoView inline alignment: start | center | end | nearest.',
+        },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
+function keyTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.key,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserKey),
+    prompt: () => KEY_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ordered whitelist key names, e.g. ["Tab"], ["Enter"], ["Meta+K"].',
+        },
+        selector: {
+          type: 'string',
+          description: 'Optional CSS selector to focus before sending keys. Supports frame:N prefix.',
+        },
+      },
+      required: ['keys'],
+      additionalProperties: false,
+    },
+  };
+}
+
+function dragTool() {
+  return {
+    name: BROWSER_TOOL_NAMES.drag,
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserDrag),
+    prompt: () => DRAG_PROMPT,
+    permissionPolicy: { kind: 'browser-control' },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromSelector: {
+          type: 'string',
+          description: 'CSS selector of the drag source. Supports optional frame:N prefix.',
+        },
+        fromX: {
+          type: 'number',
+          description: 'Viewport X of the drag source (used when fromSelector is omitted).',
+        },
+        fromY: {
+          type: 'number',
+          description: 'Viewport Y of the drag source (used when fromSelector is omitted).',
+        },
+        toSelector: {
+          type: 'string',
+          description: 'CSS selector of the drag target. Supports optional frame:N prefix.',
+        },
+        toX: {
+          type: 'number',
+          description: 'Viewport X of the drag target (used when toSelector is omitted).',
+        },
+        toY: {
+          type: 'number',
+          description: 'Viewport Y of the drag target (used when toSelector is omitted).',
         },
       },
       additionalProperties: false,
@@ -243,4 +473,8 @@ export const BROWSER_TOOL_DEFINITIONS = [
   typeTool(),
   screenshotTool(),
   readDomTool(),
+  hoverTool(),
+  scrollTool(),
+  keyTool(),
+  dragTool(),
 ];

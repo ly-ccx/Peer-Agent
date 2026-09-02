@@ -8,6 +8,7 @@ import {
 
 const idleReadyConversation = {
   loadStatus: 'ready' as const,
+  streamStatus: 'confirmed' as const,
   isStreaming: false,
   isCompactionActive: false,
   hasProvider: true,
@@ -28,11 +29,33 @@ describe('messageQueueDispatch', () => {
     }), false);
   });
 
+  it('keeps queued messages when a ready conversation has not confirmed stream state yet', () => {
+    assert.equal(canAutoDispatchQueuedMessage({
+      ...idleReadyConversation,
+      streamStatus: 'unknown',
+    }), false);
+  });
+
   it('keeps queued messages when reattach confirms the conversation is still running', () => {
     assert.equal(canAutoDispatchQueuedMessage({
       ...idleReadyConversation,
       isStreaming: true,
     }), false);
+  });
+
+  it('keeps queued messages while a goal runner still occupies the conversation', () => {
+    assert.equal(canAutoDispatchQueuedMessage({
+      ...idleReadyConversation,
+      goalRunnerStatus: 'running',
+    }), false);
+    assert.equal(canAutoDispatchQueuedMessage({
+      ...idleReadyConversation,
+      goalRunnerStatus: 'exploring',
+    }), false);
+    assert.equal(canAutoDispatchQueuedMessage({
+      ...idleReadyConversation,
+      goalRunnerStatus: 'idle',
+    }), true);
   });
 
   it('does not compete with compaction or a resume task', () => {

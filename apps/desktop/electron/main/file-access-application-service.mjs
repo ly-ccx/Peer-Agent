@@ -336,7 +336,14 @@ export function createFileAccessApplicationService(options = {}) {
     }
   }
 
-  async function createGitBranch({ workspaceRoot, name, startPoint, push } = {}) {
+  async function createGitBranch({
+    workspaceRoot,
+    name,
+    startPoint,
+    push,
+    upstreamRemote,
+    upstreamBranch,
+  } = {}) {
     const branchName = typeof name === 'string' ? name.trim() : '';
     if (!isSafeGitRef(branchName)) {
       return { ok: false, status: 'invalid_name', current: null, error: 'invalid_branch_name' };
@@ -344,6 +351,19 @@ export function createFileAccessApplicationService(options = {}) {
     const fromRef = typeof startPoint === 'string' ? startPoint.trim() : '';
     if (fromRef && !isSafeGitRef(fromRef)) {
       return { ok: false, status: 'invalid_ref', current: null, error: 'invalid_ref' };
+    }
+    let pushRemote = '';
+    let pushBranch = '';
+    if (push === true) {
+      pushRemote = typeof upstreamRemote === 'string' ? upstreamRemote.trim() : '';
+      pushBranch = typeof upstreamBranch === 'string' ? upstreamBranch.trim() : '';
+      if (!pushBranch) pushBranch = branchName;
+      if (pushRemote && !isSafeGitRef(pushRemote)) {
+        return { ok: false, status: 'invalid_name', current: null, error: 'invalid_upstream' };
+      }
+      if (!isSafeGitRef(pushBranch)) {
+        return { ok: false, status: 'invalid_name', current: null, error: 'invalid_upstream' };
+      }
     }
     const repoRoot = await resolveRepoRoot(workspaceRoot);
     if (!repoRoot) {
@@ -361,7 +381,7 @@ export function createFileAccessApplicationService(options = {}) {
         { maxBuffer: 1024 * 1024 },
       );
       if (push === true) {
-        pushResult = await pushGitBranch(repoRoot, branchName);
+        pushResult = await pushGitBranch(repoRoot, branchName, pushRemote, pushBranch);
       }
       return {
         ok: true,
@@ -384,24 +404,26 @@ export function createFileAccessApplicationService(options = {}) {
   }
 
   /**
-   * Push a freshly created branch to its default remote with upstream tracking
-   * (`git push -u`). Failure is non-blocking: the local branch already exists,
-   * so we report the reason instead of throwing.
+   * Push a freshly created branch with upstream tracking (`git push -u`).
+   * The refspec is local:remote so the user can track a differently named remote branch.
+   * Failure is non-blocking: the local branch already exists.
    */
-  async function pushGitBranch(repoRoot, branchName) {
+  async function pushGitBranch(repoRoot, localBranch, remoteName, remoteBranch) {
     try {
       const { stdout: remoteOut } = await executeGit(
         repoRoot,
         ['remote'],
         { maxBuffer: 1024 * 1024 },
       );
-      const remote = remoteOut.split('\n').map((line) => line.trim()).filter(Boolean)[0];
-      if (!remote) {
+      const remotes = remoteOut.split('\n').map((line) => line.trim()).filter(Boolean);
+      const remote = remoteName || remotes[0];
+      if (!remote || (remoteName && !remotes.includes(remote))) {
         return { pushed: false, pushError: 'no_remote' };
       }
+      const refspec = `${localBranch}:${remoteBranch || localBranch}`;
       await executeGit(
         repoRoot,
-        ['push', '-u', '--', remote, branchName],
+        ['push', '-u', '--', remote, refspec],
         { maxBuffer: 1024 * 1024, timeout: 60_000 },
       );
       return { pushed: true, pushError: null };

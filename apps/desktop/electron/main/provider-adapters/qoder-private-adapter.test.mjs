@@ -777,6 +777,7 @@ describe('qoder private adapter', () => {
         streamIdleTimeoutMs: 50,
         // Disable 103 auto-retry so this case only asserts envelope parsing latency.
         transientRetryDelaysMs: [],
+        duplicateRetryDelaysMs: [],
       });
 
       assert.equal(result.ok, false);
@@ -1132,11 +1133,24 @@ describe('qoder private adapter', () => {
     assert.equal(queued.kind, 'queued');
     assert.equal(queued.code, '10605');
     assert.equal(queued.queueType, 'slow');
-    assert.equal(queued.waitTimeMs, 15228);
+    // waitTime is seconds upstream: 15228s -> ms.
+    assert.equal(queued.waitTimeMs, 15_228_000);
     assert.equal(queued.queueCount, 12);
     assert.equal(queued.serviceAvailable, false);
-    assert.equal(computeQoderQueueWaitMs(queued), 15228);
-    assert.equal(computeQoderQueueWaitMs({ waitTimeMs: 999_999 }), 120_000);
+    // No retryAfterSeconds: poll cadence falls back to the capped default.
+    assert.equal(computeQoderQueueWaitMs(queued), 15_000);
+    assert.equal(computeQoderQueueWaitMs({ waitTimeMs: 999_999 }), 15_000);
+
+    // retryAfterSeconds is the authoritative poll cadence.
+    const withCadence = classifyQoderStreamFailure(
+      'provider_stream_error: {"code":"10605","message":{"isQueued":true,"queueType":"p4","queueCount":917,"retryAfterSeconds":30,"waitTime":189,"serviceAvailable":true}}',
+    );
+    assert.equal(withCadence.retryAfterMs, 30_000);
+    assert.equal(withCadence.waitTimeMs, 189_000);
+    assert.equal(withCadence.queueCount, 917);
+    assert.equal(computeQoderQueueWaitMs(withCadence), 30_000);
+    // Single wait is capped even when cadence is huge.
+    assert.equal(computeQoderQueueWaitMs({ retryAfterMs: 999_999 }), 60_000);
 
     const status = formatQoderQueueStatusMessage(queued, {
       attempt: 1,
@@ -1252,6 +1266,64 @@ describe('qoder private adapter', () => {
       assert.equal(result.queueExhausted, true);
       assert.match(result.errorText, /qoder_queue_timeout/);
       assert.equal(calls, 2); // initial + 1 retry
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('waits out the Qoder queue on the upstream cadence until the time budget runs out', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response([
+        'data: {"code":"10605","message":{"isQueued":true,"queueType":"p4","queueCount":917,"retryAfterSeconds":30,"waitTime":189,"serviceAvailable":true}}',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    const waits = [];
+    const events = [];
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+        streamId: 's-qoder-queue-budget',
+        // Budget 45s with a 30s cadence: first wait 30s, second clamped to the
+        // remaining 15s, then the budget is spent and the run terminates.
+        queueBudgetMs: 45_000,
+        maxQueueRetries: 40,
+        transientRetryDelaysMs: [],
+        duplicateRetryDelaysMs: [],
+        waitImpl: async (ms) => { waits.push(ms); },
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.queueExhausted, true);
+      // Polls at the upstream cadence (30s), then clamped by remaining budget.
+      assert.deepEqual(waits, [30_000, 15_000]);
+      assert.equal(calls, 3); // initial + 2 polls
+      // Queue status events carry the real queue depth + upstream estimate.
+      const queuedEvents = events.filter((event) => (
+        event.channel === 'chat:stream:status' && event.payload?.status === 'queued'
+      ));
+      assert.equal(queuedEvents.length, 2);
+      assert.equal(queuedEvents[0].payload.queueCount, 917);
+      assert.equal(queuedEvents[0].payload.upstreamWaitTimeMs, 189_000);
+      assert.equal(queuedEvents[0].payload.waitMs, 30_000);
+      assert.equal(queuedEvents[1].payload.waitedMs, 30_000);
+      assert.equal(queuedEvents[1].payload.waitMs, 15_000);
+      // Terminal error reports how long we actually waited in queue.
+      assert.match(result.errorText, /waited 45s in queue/);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
@@ -1391,7 +1463,7 @@ describe('qoder private adapter', () => {
         },
         streamId: 's-qoder-duplicate-retry',
         maxQueueRetries: 0,
-        transientRetryDelaysMs: [5],
+        duplicateRetryDelaysMs: [5],
         waitImpl: async () => {},
       });
 
@@ -1433,14 +1505,17 @@ describe('qoder private adapter', () => {
         webContents: { send: () => {} },
         streamId: 's-qoder-duplicate-exhausted',
         maxQueueRetries: 0,
-        transientRetryDelaysMs: [1, 1],
+        duplicateRetryDelaysMs: [1],
         waitImpl: async () => {},
       });
 
       assert.equal(result.ok, false);
       assert.equal(result.duplicateExhausted, true);
       assert.match(result.errorText, /qoder_duplicate_request/);
-      assert.equal(calls, 3); // initial + 2 retries
+      // Single bounded retry: initial + 1 retry, then a terminal error.
+      assert.equal(calls, 2);
+      assert.match(result.errorText, /after 1 retry attempt/);
+      assert.match(result.errorText, /further retries will not help/);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;

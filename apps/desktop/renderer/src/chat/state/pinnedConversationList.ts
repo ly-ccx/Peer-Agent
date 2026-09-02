@@ -32,6 +32,23 @@ export function selectPinnedConversations<T extends {
   return sortPinnedConversations(items.filter(isPinned));
 }
 
+export function mergePinnedSectionConversations<T extends {
+  id: string;
+  pinnedAt?: string | null;
+  pinnedOrder?: number | null;
+  updatedAt?: string;
+}>(cachedPinned: readonly T[], currentConversations: readonly T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const conv of cachedPinned) byId.set(conv.id, conv);
+  // Current list is newer: keep still-pinned chats, and drop chats that are now unpinned
+  // so a stale global pin cache cannot put them back into the pinned section.
+  for (const conv of currentConversations) {
+    if (isPinned(conv)) byId.set(conv.id, conv);
+    else byId.delete(conv.id);
+  }
+  return selectPinnedConversations([...byId.values()]);
+}
+
 export function toPinnedConversationMeta(item: {
   id: string;
   title: string;

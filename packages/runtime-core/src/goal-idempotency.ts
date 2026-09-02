@@ -61,6 +61,8 @@ const READ_ONLY_TOOLS = new Set([
   'web_fetch',
   'browser_read_dom',
   'browser_screenshot',
+  'browser_external_screenshot',
+  'browser_external_read_dom',
   'bash', // treated carefully below based on command shape when possible
 ]);
 
@@ -76,6 +78,17 @@ const NON_IDEMPOTENT_WRITE_TOOLS = new Set([
   'browser_click',
   'browser_type',
   'browser_navigate',
+  'browser_hover',
+  'browser_scroll',
+  'browser_key',
+  'browser_drag',
+  'browser_external_open',
+  'browser_external_close',
+  'browser_external_navigate',
+  'browser_external_click',
+  'browser_external_type',
+  'browser_external_hover',
+  'browser_external_scroll',
   'request_explorer',
   'request_user_input',
 ]);

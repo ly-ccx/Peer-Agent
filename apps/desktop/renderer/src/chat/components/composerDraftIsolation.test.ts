@@ -147,19 +147,27 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   ]);
 
   assert.match(surface, /workspaceIsGit === false/);
-  assert.match(surface, /workspaceIsGit === true \? \([\s\S]*composer-context-row[\s\S]*<ComposerDraftControls/);
-  assert.match(surface, /composer-context-row[\s\S]*composer-worktree-toggle[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-chrome-row[\s\S]*composer-chrome-left[\s\S]*GoalPlanPanel[\s\S]*composer-chrome-right[\s\S]*<ComposerDraftControls/);
+  assert.match(surface, /composer-chrome-left[\s\S]*GoalPlanPanel[\s\S]*workspaceIsGit === true \?[\s\S]*composer-chrome-right[\s\S]*composer-env-capsule/);
+  assert.match(surface, /composer-chrome-right[\s\S]*composer-env-capsule[\s\S]*<ComposerDraftControls/);
   assert.match(surface, /<ComposerDraftControls[\s\S]*chat-composer-toolbar[\s\S]*composer-workspace-dropdown/);
-  assert.doesNotMatch(surface, /composer-context-row[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
-  assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-worktree-toggle/);
-  assert.match(surface, /composer-worktree-toggle/);
-  assert.match(surface, /isZh \? '隔离执行' : 'Worktree'/);
-  assert.ok(surface.includes('disabled={isStreaming}'));
+  assert.doesNotMatch(surface, /composer-env-capsule[\s\S]*composer-workspace-dropdown[\s\S]*<ComposerDraftControls/);
+  assert.doesNotMatch(surface, /chat-composer-toolbar[\s\S]*composer-env-capsule/);
+  assert.doesNotMatch(surface, /composer-worktree-toggle/);
+  assert.match(surface, /composer-env-capsule/);
+  assert.match(surface, /formatComposerEnvCapsule/);
+  assert.match(surface, /COMPOSER_ENV_ISOLATION_ON/);
+  assert.match(surface, /isZh \? 'Worktree' : 'Worktree'/);
+  assert.match(surface, /isZh \? '当前工作区' : 'Current workspace'/);
+  assert.doesNotMatch(surface, /独立目录/);
+  assert.doesNotMatch(surface, /Isolated directory/);
+  assert.doesNotMatch(surface, /当前分支/);
+  assert.match(surface, /isZh \? '下次任务' : 'Next task'/);
+  assert.match(surface, /if \(!isStreaming\) changePreferredWorktree/);
   assert.doesNotMatch(surface, /当前工作区不是 Git 仓库，无法隔离执行/);
   assert.match(surface, /当前任务正在执行，无法更改隔离环境/);
   assert.match(surface, /preferredExecutionIsolation: preferredWorktree && workspaceIsGit !== false \? 'worktree' : 'none'/);
   assert.match(surface, /conversationsUpdatePreferredExecutionIsolation/);
-  assert.match(surface, /下次任务是否在独立 Worktree 里执行/);
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
   assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
@@ -167,34 +175,45 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(service, /preparePlanExecutionWorkspace/);
   assert.match(panel, /goalPlansIsolate/);
   assert.match(surface, /planComposerGitChrome/);
-  assert.match(surface, /composer-workspace-head/);
-  assert.match(surface, /composer-task-line/);
   assert.match(surface, /GitWorktreeGlyph/);
-  assert.match(surface, /composer-write-mismatch/);
-  assert.match(surface, /composer-bound-branch/);
+  assert.match(surface, /triggerLabel=\{envCapsule\.label\}/);
+  assert.match(surface, /envCapsule\.isolated/);
   assert.match(surface, /canSelectComposerSourceBranch/);
   assert.match(surface, /buildComposerBranchOptions/);
+  assert.match(surface, /formatComposerBranchOptionLabel\(option\.value\)/);
   assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
   assert.match(surface, /searchable/);
+  assert.match(surface, /tab: option.kind/);
+  assert.match(surface, /id: 'local'/);
+  assert.match(surface, /id: 'remote'/);
+  assert.match(surface, /tabs=\{canSelectBoundBranch \? \[/);
   assert.match(surface, /gitCreateBranch/);
   assert.match(surface, /handleOpenCreateBranchDialog/);
   assert.match(surface, /resolveComposerCreateSourceBranch/);
+  assert.match(surface, /handleSelectBoundBranch\(name\)/);
   assert.match(surface, /Create a branch from \$\{createBranchDialog\.source\}/);
   assert.match(surface, /panelClassName="pa-confirm-dialog"/);
   assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
-  assert.match(surface, /本地分支/);
-  assert.match(surface, /远程分支/);
+  assert.match(surface, /源头/);
+  assert.match(surface, /远程源头/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
   // Create-branch dialog pushes to the remote by default (opt-out checkbox).
   assert.match(surface, /pa-confirm-check/);
   assert.match(surface, /创建后推送到远端（git push -u）/);
-  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true \}\)/);
-  assert.match(surface, /push: push !== false,/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true, upstream: '' \}\)/);
+  assert.match(surface, /push: shouldPush,/);
+  assert.match(surface, /upstreamRemote: upstream\?\.remote/);
+  assert.match(surface, /upstreamBranch: upstream\?\.branch/);
+  assert.match(surface, /跟踪到/);
+  assert.match(surface, /parseComposerUpstreamSpec/);
+  assert.match(surface, /defaultComposerUpstreamSpec/);
   assert.match(surface, /pushed === false/);
   assert.match(surface, /branchPushNotice/);
   assert.match(surface, /branch-push-notice/);
   assert.match(surface, /onActiveDeliveryChange=\{handleActiveDeliveryChange\}/);
+  assert.match(surface, /onActiveGoalRunnerStatusChange=\{handleActiveGoalRunnerStatusChange\}/);
   assert.match(panel, /onActiveDeliveryChange/);
+  assert.match(panel, /onActiveGoalRunnerStatusChange/);
   assert.doesNotMatch(surface, /executionIsolation:\s*'worktree'/);
 });
 
@@ -209,6 +228,13 @@ test('external conversation reload replaces or clears the shared accounting snap
     surface,
     /convActions\.commitLoad\(\{[\s\S]*contextAccounting: storedContextAccountingSnapshot/,
   );
+});
+
+test('switching a ready conversation holds the queue until stream reattach confirms idle', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /convActions\.beginStreamReattach\(\)/);
+  assert.match(surface, /streamStatus/);
+  assert.match(surface, /goalRunnerStatus: goalRunnerStatus \?\? null/);
 });
 
 test('unknown restored context renders as unknown, never zero percent', async () => {

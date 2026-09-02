@@ -1,0 +1,58 @@
+{
+  "capabilityId": "local.web.control.drag",
+  "name": "Browser drag",
+  "description": "Drags from a source element or point to a target element or point in the visible in-app browser.",
+  "localizedName": {
+    "zh-CN": "浏览器拖拽",
+    "en-US": "Browser drag"
+  },
+  "localizedDescription": {
+    "zh-CN": "在用户眼前可见的内嵌浏览器中，从源元素/坐标拖到目标元素/坐标（滑块、排序、画布平移）。不做 HTML5 文件拖入。",
+    "en-US": "Drags from a source element or point to a target element or point in the visible in-app browser (sliders, reorder, canvas pan). Does not perform HTML5 file drop."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fromSelector": {
+        "type": "string",
+        "description": "CSS selector of the drag source. Supports optional frame:N prefix."
+      },
+      "fromX": {
+        "type": "number",
+        "description": "Viewport X of the drag source (used when fromSelector is omitted)."
+      },
+      "fromY": {
+        "type": "number",
+        "description": "Viewport Y of the drag source (used when fromSelector is omitted)."
+      },
+      "toSelector": {
+        "type": "string",
+        "description": "CSS selector of the drag target. Supports optional frame:N prefix."
+      },
+      "toX": {
+        "type": "number",
+        "description": "Viewport X of the drag target (used when toSelector is omitted)."
+      },
+      "toY": {
+        "type": "number",
+        "description": "Viewport Y of the drag target (used when toSelector is omitted)."
+      }
+    }
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

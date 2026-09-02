@@ -26,7 +26,7 @@ function createHarness(overrides = {}) {
     ensureFreshGoogleTokens: async (tokens) => ({ tokens, refreshed: false }),
     ensureFreshGrokTokens: async (tokens) => ({ tokens, refreshed: false }),
     listSubscriptionModels: async () => ({ models: [{ id: 'gpt-5' }], source: 'builtin' }),
-    listOpenAICompatibleModels: async () => ({ models: [{ id: 'remote' }], source: 'remote' }),
+    listModelCatalogForChannel: async () => ({ models: [{ id: 'remote' }], source: 'remote' }),
     listGrokBuildModels: async () => ({ models: [], source: 'remote' }),
     listGeminiModels: async () => ({ models: [], source: 'builtin' }),
     preferGeminiModel: () => null,
@@ -162,4 +162,145 @@ test('pending OAuth open and cancel are fail-safe', async () => {
     error: 'oauth_pending_url_unavailable',
   });
   assert.deepEqual(service.cancelOAuth(), { success: true });
+});
+
+test('api_key model discovery passes the fallback envelope through unchanged', async () => {
+  const { service } = createHarness({
+    ports: {
+      listProviders: () => [{ id: 'p1', authMethod: 'api_key', channelId: 'deepseek' }],
+      getApiKeyRequestConfig: (id) => ({
+        id,
+        wire: 'anthropic-messages',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        headers: { 'x-api-key': 'k' },
+        apiKey: 'k',
+        modelCatalog: {
+          channelId: 'deepseek',
+          wire: 'openai-chat',
+          baseUrl: 'https://api.deepseek.com',
+          headers: { Authorization: 'Bearer k' },
+        },
+      }),
+    },
+    operations: {
+      listModelCatalogForChannel: async (requestConfig) => {
+        if (requestConfig?.modelCatalog?.channelId !== 'deepseek') {
+          throw new Error('expected the persisted api_key request config to carry the catalog override');
+        }
+        return {
+          models: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }],
+          source: 'fallback',
+          error: 'models list failed: HTTP 404 not found',
+        };
+      },
+    },
+  });
+  const result = await service.listModels('p1');
+  assert.equal(result.success, true);
+  assert.equal(result.source, 'fallback');
+  assert.equal(result.error, 'models list failed: HTTP 404 not found');
+  assert.deepEqual(result.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+});
+
+test('api_key model discovery keeps plain failure for channels without a catalog override', async () => {
+  const { service } = createHarness({
+    ports: {
+      listProviders: () => [{ id: 'p1', authMethod: 'api_key', channelId: 'openai' }],
+      getApiKeyRequestConfig: (id) => ({
+        id,
+        wire: 'openai-chat',
+        baseUrl: 'https://gateway.example/v1',
+        headers: { Authorization: 'Bearer k' },
+        apiKey: 'k',
+      }),
+    },
+    operations: {
+      listModelCatalogForChannel: async () => {
+        throw new Error('models list failed: HTTP 500 boom');
+      },
+    },
+  });
+  const result = await service.listModels('p1');
+  assert.deepEqual(result, {
+    success: false,
+    models: [],
+    error: 'models list failed: HTTP 500 boom',
+  });
+});
+
+test('form fetchModels uses the channel-declared catalog plane for deepseek', async () => {
+  let seenRequestConfig = null;
+  const { service } = createHarness({
+    operations: {
+      resolveChannel: (config) => ({
+        ...config,
+        wire: 'anthropic-messages',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        headers: { 'x-api-key': 'form-key' },
+      }),
+      resolveModelCatalogRequestConfig: (config) => {
+        if (config?.channelId !== 'deepseek' || config?.apiKey !== 'form-key') {
+          throw new Error('expected form config to flow into the catalog plane resolution');
+        }
+        return {
+          channelId: 'deepseek',
+          wire: 'openai-chat',
+          baseUrl: 'https://api.deepseek.com',
+          headers: { Authorization: 'Bearer form-key' },
+          modelCatalogOverride: true,
+        };
+      },
+      listModelCatalogForChannel: async (requestConfig) => {
+        seenRequestConfig = requestConfig;
+        if (requestConfig?.modelCatalog?.channelId !== 'deepseek'
+          || requestConfig?.modelCatalog?.baseUrl !== 'https://api.deepseek.com') {
+          throw new Error('expected form fetchModels to carry the deepseek catalog plane override');
+        }
+        return {
+          models: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }],
+          source: 'remote',
+        };
+      },
+    },
+  });
+  const result = await service.fetchModels({
+    channelId: 'deepseek',
+    authMethod: 'api_key',
+    apiKey: 'form-key',
+    baseUrl: 'https://api.deepseek.com/anthropic',
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.source, 'remote');
+  assert.equal(seenRequestConfig.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.equal(seenRequestConfig.wire, 'anthropic-messages');
+  assert.deepEqual(seenRequestConfig.modelCatalog, {
+    channelId: 'deepseek',
+    wire: 'openai-chat',
+    baseUrl: 'https://api.deepseek.com',
+    headers: { Authorization: 'Bearer form-key' },
+  });
+});
+
+test('form fetchModels keeps plain remote behavior for gateways without a declared catalog plane', async () => {
+  const { service } = createHarness({
+    operations: {
+      listModelCatalogForChannel: async (requestConfig) => {
+        if (requestConfig?.modelCatalog !== undefined) {
+          throw new Error('expected no catalog override for gateways without a declared catalog plane');
+        }
+        throw new Error('models list failed: HTTP 500 boom');
+      },
+    },
+  });
+  const result = await service.fetchModels({
+    channelId: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'form-key',
+    baseUrl: 'https://gateway.example/v1',
+  });
+  assert.deepEqual(result, {
+    success: false,
+    models: [],
+    error: 'models list failed: HTTP 500 boom',
+  });
 });

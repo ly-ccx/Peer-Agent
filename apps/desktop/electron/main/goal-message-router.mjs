@@ -36,6 +36,15 @@ const CORRECTION_PATTERNS = [
   /错了/,
   /应该是/,
   /别这样/,
+  /先别/,
+  /不要再/,
+  /不用继续/,
+  /不再往下/,
+  /剩下的/,
+  /先到这/,
+  /别发/,
+  /停掉/,
+  /不要发布/,
 ];
 
 const REQUIREMENT_OVERRIDE_PATTERNS = [
@@ -144,7 +153,13 @@ export function resolveContinuableGoalPlan({
   return activeGoalPlan || null;
 }
 
-export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, source = 'chat:send' } = {}) {
+export function applyGoalMessageRoute({
+  route,
+  activeGoalPlan,
+  goalPlanStore,
+  pauseRunner,
+  source = 'chat:send',
+} = {}) {
   if (route?.type !== 'append_goal_event' || !route.goalPlanId) return null;
 
   const event = {
@@ -206,6 +221,23 @@ export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, so
     && (activeGoalPlan?.runner?.status === 'running' || activeGoalPlan?.runner?.status === 'exploring')
     && (!Number.isFinite(turnCount) || turnCount <= 0);
   const appended = goalPlanStore?.appendRunEvent?.(route.goalPlanId, event) ?? null;
+
+  // 用户改方向或撤回剩余工作：先把未完成叶子收尾，再停泵。
+  // 只记事件会让计划停在 executing（例如 2/4），停止按钮一直亮着。
+  // pause 只停泵，不收尾未完成任务。
+  if (route.intent === 'correction') {
+    if (typeof goalPlanStore?.cancelOpenTasks === 'function') {
+      goalPlanStore.cancelOpenTasks(route.goalPlanId, {
+        reason: route.summary || route.messageText || '用户撤回剩余工作',
+      });
+    }
+    if (typeof pauseRunner === 'function') {
+      pauseRunner(route.goalPlanId);
+    }
+  } else if (route.intent === 'pause' && typeof pauseRunner === 'function') {
+    pauseRunner(route.goalPlanId);
+  }
+
   if (stalledWithoutTurn) {
     return {
       type: 'kick_stalled_runner',

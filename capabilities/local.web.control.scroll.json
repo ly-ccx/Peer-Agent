@@ -1,0 +1,54 @@
+{
+  "capabilityId": "local.web.control.scroll",
+  "name": "Browser scroll",
+  "description": "Scrolls the visible in-app browser viewport or a target scroll container by CSS selector.",
+  "localizedName": {
+    "zh-CN": "浏览器滚动",
+    "en-US": "Browser scroll"
+  },
+  "localizedDescription": {
+    "zh-CN": "在用户眼前可见的内嵌浏览器中滚动视口或目标滚动容器：可按 CSS 选择器定位元素，用 delta 增量滚动或 scrollIntoView 滚入视口。",
+    "en-US": "Scrolls the visible in-app browser viewport or a target scroll container. Locate by CSS selector (optional frame:N prefix), then scroll by delta or scrollIntoView."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "CSS selector of the element or nearest scrollable ancestor. Supports optional frame:N prefix."
+      },
+      "deltaX": {
+        "type": "number",
+        "description": "Horizontal scroll delta in CSS pixels."
+      },
+      "deltaY": {
+        "type": "number",
+        "description": "Vertical scroll delta in CSS pixels."
+      },
+      "block": {
+        "type": "string",
+        "description": "scrollIntoView block alignment: start | center | end | nearest."
+      },
+      "inline": {
+        "type": "string",
+        "description": "scrollIntoView inline alignment: start | center | end | nearest."
+      }
+    }
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

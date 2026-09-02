@@ -1,5 +1,9 @@
 import { enrichModelsWithRegistry, fetchModelsDevRegistry } from './models-dev-registry.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import {
+  DEEPSEEK_ANTHROPIC_BASE_URL,
+  DEEPSEEK_OPENAI_BASE_URL,
+} from '../provider-channels.mjs';
 
 // OpenAI 订阅(ChatGPT OAuth)模型目录(ADR 28)。
 //
@@ -115,6 +119,63 @@ const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.i
 
 // 向后兼容别名:历史调用/测试以 FALLBACK_MODELS 引用同一份清单。
 const FALLBACK_MODELS = SUBSCRIPTION_CATALOG;
+
+// DeepSeek 官方静态目录兜底。
+// 事实: DeepSeek 的 Anthropic 兼容平面没有 /v1/models,模型目录只挂在
+// OpenAI 兼容平面;目录远程失败(404/断网等)时用它兜底,官方仅此两款公开模型。
+const DEEPSEEK_FALLBACK_CATALOG = Object.freeze([
+  Object.freeze({
+    id: 'deepseek-chat',
+    label: 'DeepSeek Chat',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+  }),
+  Object.freeze({
+    id: 'deepseek-reasoner',
+    label: 'DeepSeek Reasoner',
+    contextWindow: 128_000,
+    maxOutputTokens: 64_000,
+  }),
+]);
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const target = String(name).toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return undefined;
+}
+
+/**
+ * DeepSeek Anthropic 平面没有 /v1/models。目录必须改写到 OpenAI 平面
+ * (GET https://api.deepseek.com/models + Bearer)，即使调用方漏传 modelCatalog 覆盖。
+ * 官方 Anthropic 根地址不受影响。
+ */
+function rewriteDeepSeekCatalogRequest({ baseUrl, wire, headers = {}, apiKey } = {}) {
+  const root = String(baseUrl || '').replace(/\/+$/, '');
+  if (!root) return { root, wire, headers: { ...headers } };
+  const anthropicRoot = String(DEEPSEEK_ANTHROPIC_BASE_URL).replace(/\/+$/, '');
+  const openaiRoot = String(DEEPSEEK_OPENAI_BASE_URL).replace(/\/+$/, '');
+  const isDeepSeekAnthropic = root === anthropicRoot
+    || root.startsWith(`${anthropicRoot}/`)
+    || (/^https?:\/\/api\.deepseek\.com(?:\/|$)/i.test(root) && /\/anthropic(?:\/|$)/i.test(root));
+  if (!isDeepSeekAnthropic) {
+    return { root, wire, headers: { ...headers } };
+  }
+  const nextHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (lower === 'x-api-key' || lower === 'anthropic-version' || lower === 'content-type') continue;
+    nextHeaders[key] = value;
+  }
+  const existingAuth = headerValue(headers, 'authorization');
+  const bearer = String(apiKey || '').trim()
+    || String(existingAuth || '').replace(/^Bearer\s+/i, '').trim()
+    || String(headerValue(headers, 'x-api-key') || '').trim();
+  if (bearer) nextHeaders.Authorization = `Bearer ${bearer}`;
+  return { root: openaiRoot, wire: 'openai-chat', headers: nextHeaders };
+}
 
 // 订阅 codex 端点真正可用的模型前缀。仅 gpt-5 家族。
 function isSubscriptionUsableModel(id) {
@@ -261,7 +322,9 @@ function normalizeApiModelList(data, wire) {
  * 仅剔除只对 POST 有意义的 Content-Type。拉取成功返回 source='remote'。
  *
  * @param {{ baseUrl?: string, headers?: Record<string,string>, wire?: string,
- *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch }} params
+ *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch,
+ *           modelCatalog?: { wire?: string, baseUrl?: string,
+ *                            headers?: Record<string,string>, fallbackCatalog?: Array<{id:string,label:string}> } }} params
  * @returns {Promise<{ models: Array<{id:string,label:string}>, source: 'remote' }>}
  */
 export async function listOpenAICompatibleModels({
@@ -272,21 +335,35 @@ export async function listOpenAICompatibleModels({
   timeoutMs = 15000,
   fetchImpl,
   registryFetchImpl,
+  modelCatalog,
 } = {}) {
+  if (modelCatalog) {
+    return listModelCatalogForChannel({
+      baseUrl,
+      wire,
+      apiKey,
+      timeoutMs,
+      fetchImpl,
+      registryFetchImpl,
+      modelCatalog,
+    });
+  }
   const doFetch = fetchImpl || fetchWithConnectionRecovery;
-  const root = String(baseUrl || '').replace(/\/+$/, '');
+  const rewritten = rewriteDeepSeekCatalogRequest({ baseUrl, wire, headers, apiKey });
+  const root = rewritten.root;
+  const catalogWire = rewritten.wire;
   if (!root) throw new Error('base_url_not_configured');
 
-  const reqHeaders = { ...headers };
+  const reqHeaders = { ...rewritten.headers };
   // GET 列模型无请求体,去掉只对 POST 有意义的 Content-Type,避免部分网关校验报错。
   for (const key of Object.keys(reqHeaders)) {
     if (key.toLowerCase() === 'content-type') delete reqHeaders[key];
   }
 
   let url;
-  if (wire === 'gemini') {
+  if (catalogWire === 'gemini') {
     url = `${root}/models${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
-  } else if (wire === 'anthropic-messages') {
+  } else if (catalogWire === 'anthropic-messages') {
     url = `${root}/v1/models`;
   } else {
     url = `${root}/models`;
@@ -303,7 +380,7 @@ export async function listOpenAICompatibleModels({
   }
   const data = await res.json();
   const providerModels = sortNewestFirst(
-    normalizeApiModelList(data, wire).filter((m) => isLikelyChatModel(m.id)),
+    normalizeApiModelList(data, catalogWire).filter((m) => isLikelyChatModel(m.id)),
   );
   // A provider fetch mock should not accidentally become the registry transport too.
   // Production calls use global fetch; tests can opt in with registryFetchImpl.
@@ -312,6 +389,50 @@ export async function listOpenAICompatibleModels({
     : await fetchModelsDevRegistry({ fetchImpl: registryFetchImpl });
   const models = enrichModelsWithRegistry(providerModels, registry);
   return { models, source: 'remote' };
+}
+
+/**
+ * 渠道感知的模型目录统一入口。
+ *
+ * - requestConfig.modelCatalog 存在(渠道声明了目录平面覆盖,如 DeepSeek):
+ *   用覆盖的 wire/baseUrl/headers 拉远程目录,失败时回退该渠道的静态目录
+ *   (返回 source='fallback' 且保留 error 供诊断)。
+ * - modelCatalog 不存在:与历史一致直接走 listOpenAICompatibleModels,
+ *   失败原样抛错,不引入兜底。
+ *
+ * @param {{ baseUrl?: string, wire?: string, apiKey?: string, timeoutMs?: number,
+ *           fetchImpl?: typeof fetch, registryFetchImpl?: typeof fetch,
+ *           modelCatalog?: { channelId?: string, wire?: string, baseUrl?: string,
+ *                            headers?: Record<string,string>,
+ *                            fallbackCatalog?: Array<{id:string,label:string}> } }} requestConfig
+ * @returns {Promise<{ models: Array<{id:string,label:string}>,
+ *                     source: 'remote'|'fallback', error?: string }>}
+ */
+export async function listModelCatalogForChannel(requestConfig = {}) {
+  const override = requestConfig.modelCatalog;
+  if (!override) {
+    return listOpenAICompatibleModels(requestConfig);
+  }
+  try {
+    return await listOpenAICompatibleModels({
+      ...requestConfig,
+      wire: override.wire ?? requestConfig.wire,
+      baseUrl: override.baseUrl ?? requestConfig.baseUrl,
+      headers: override.headers ?? requestConfig.headers,
+      modelCatalog: undefined,
+    });
+  } catch (error) {
+    const fallbackCatalog = override.fallbackCatalog
+      ?? (override.channelId === 'deepseek' ? DEEPSEEK_FALLBACK_CATALOG : undefined);
+    if (!Array.isArray(fallbackCatalog) || fallbackCatalog.length === 0) {
+      throw error;
+    }
+    return {
+      models: fallbackCatalog.map((model) => ({ ...model })),
+      source: 'fallback',
+      error: error?.message || 'models_list_failed',
+    };
+  }
 }
 
 export {

@@ -43,13 +43,20 @@ test('sidebar previews workspace tasks and loads more on demand instead of count
   assert.doesNotMatch(app, /shouldContinueConversationList/);
 });
 
-test('sidebar pin tab lists all pinned conversations with workspace labels', async () => {
+test('sidebar stacks pinned section above the workspace tree', async () => {
   const source = await readSidebar();
   const row = await readFile(new URL('./SidebarConversationRow.tsx', import.meta.url), 'utf8');
-  assert.match(source, /sidebar-list-tab/);
-  assert.match(source, /setSidebarListTab\('pinned'\)/);
-  assert.match(source, /pinTabConversations/);
+  assert.match(source, /sidebar-pinned-section/);
+  assert.match(source, /pinnedSectionConversations/);
+  assert.match(source, /mergePinnedSectionConversations\(allPinnedConversations, conversations\)/);
+  assert.match(source, /optimisticUnpinnedIds/);
+  assert.match(source, /setAllPinnedConversations\(\(prev\) => prev\.filter\(\(conv\) => conv\.id !== id\)\)/);
+  assert.match(source, /isZh \? '置顶' : 'Pinned'/);
+  assert.match(source, /isZh \? '工作区' : 'Workspaces'/);
   assert.match(source, /showWorkspace: true/);
+  assert.doesNotMatch(source, /sidebar-list-tab/);
+  assert.doesNotMatch(source, /setSidebarListTab/);
+  assert.doesNotMatch(source, /role="tablist"/);
   assert.match(row, /showWorkspace && workspaceLabelFromPath\(conv\.workspacePath\)/);
   assert.match(row, /sidebar-conv-workspace/);
 });

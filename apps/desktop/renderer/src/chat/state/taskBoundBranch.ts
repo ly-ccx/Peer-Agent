@@ -33,6 +33,15 @@ export interface ComposerGitChrome {
   readonly writeMismatch: ComposerWriteMismatch | null;
 }
 
+export type ComposerEnvCapsuleKind = 'workspace' | 'source' | 'isolated' | 'task-line' | 'mismatch';
+
+export interface ComposerEnvCapsule {
+  readonly kind: ComposerEnvCapsuleKind;
+  readonly label: string;
+  readonly title: string;
+  readonly isolated: boolean;
+}
+
 function trimBranch(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const next = value.trim();
@@ -218,6 +227,116 @@ export function planComposerGitChrome(
   return { workspaceHead, taskLine, writeMismatch };
 }
 
+export const COMPOSER_ENV_ISOLATION_ON = '__composer_env_isolation_on__';
+export const COMPOSER_ENV_ISOLATION_OFF = '__composer_env_isolation_off__';
+
+/**
+ * Collapsed chrome copy for “where this send writes”.
+ * Next-task Worktree preference rewrites source lines (draft or bound),
+ * but does not override a live task-line or write-mismatch.
+ */
+export function formatComposerEnvCapsule(
+  chrome: ComposerGitChrome,
+  options?: {
+    readonly locale?: 'zh' | 'en';
+    readonly preferredIsolation?: boolean;
+  },
+): ComposerEnvCapsule {
+  const isZh = options?.locale !== 'en';
+  const preferredIsolation = options?.preferredIsolation === true;
+  const { workspaceHead, taskLine, writeMismatch } = chrome;
+
+  if (taskLine?.kind === 'isolated') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    return {
+      kind: 'isolated',
+      isolated: true,
+      label: `Worktree · ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (writeMismatch) {
+    const head = workspaceHead
+      ? visibleBranchName(workspaceHead.value, workspaceHead.value)
+      : null;
+    return {
+      kind: 'mismatch',
+      isolated: false,
+      label: head
+        ? (isZh ? `在 ${head} · 写在当前工作区` : `on ${head} · writes here`)
+        : (isZh ? '写在当前工作区' : 'writes on current workspace'),
+      title: writeMismatch.title,
+    };
+  }
+
+  if (taskLine?.kind === 'task-line') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    return {
+      kind: 'task-line',
+      isolated: false,
+      label: isZh ? `在 ${name}` : `on ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (taskLine?.kind === 'source') {
+    const name = visibleBranchName(taskLine.value, taskLine.value);
+    if (preferredIsolation) {
+      return {
+        kind: 'source',
+        isolated: true,
+        label: isZh ? `Worktree · 从 ${name}` : `Worktree · from ${name}`,
+        title: isZh
+          ? `下次任务将从 ${taskLine.value} 开 Worktree。合回后这次隔离会结束，这个选择只表示下一次。`
+          : `The next task will fork ${taskLine.value} into a Worktree. This preference applies to the next task only.`,
+      };
+    }
+    if (taskLine.selectable) {
+      return {
+        kind: 'source',
+        isolated: false,
+        label: isZh ? `在 ${name}` : `on ${name}`,
+        title: taskLine.title,
+      };
+    }
+    return {
+      kind: 'source',
+      isolated: false,
+      label: isZh ? `源头 ${name}` : `from ${name}`,
+      title: taskLine.title,
+    };
+  }
+
+  if (workspaceHead) {
+    const name = visibleBranchName(workspaceHead.value, workspaceHead.value);
+    return {
+      kind: 'workspace',
+      isolated: false,
+      label: isZh ? `在 ${name}` : `on ${name}`,
+      title: workspaceHead.title,
+    };
+  }
+
+  if (preferredIsolation) {
+    return {
+      kind: 'source',
+      isolated: true,
+      label: 'Worktree',
+      title: isZh
+        ? '下次任务将在 Worktree 里执行。合回后这次隔离会结束，这个选择只表示下一次。'
+        : 'The next task will run in a Worktree. This preference applies to the next task only.',
+    };
+  }
+
+  return {
+    kind: 'workspace',
+    isolated: false,
+    label: isZh ? '当前工作区' : 'current workspace',
+    title: isZh ? '继续会写在当前工作区' : 'Continuing writes on the current workspace.',
+  };
+}
+
 /** Draft composer can pick a workspace source; bound sessions/task lines stay locked. */
 export function canSelectComposerSourceBranch(input: {
   readonly isDraft: boolean;
@@ -234,6 +353,35 @@ export function isSafeComposerBranchName(value: string): boolean {
     return false;
   }
   return /^[A-Za-z0-9._/@~^+-]+$/.test(trimmed);
+}
+
+export const DEFAULT_COMPOSER_UPSTREAM_REMOTE = 'origin';
+
+export function defaultComposerUpstreamSpec(localName: string): string {
+  const name = localName.trim();
+  return name ? `${DEFAULT_COMPOSER_UPSTREAM_REMOTE}/${name}` : `${DEFAULT_COMPOSER_UPSTREAM_REMOTE}/`;
+}
+
+export interface ComposerUpstreamSpec {
+  readonly remote: string;
+  readonly branch: string;
+}
+
+/** Parse "origin/feat" or "origin" into the remote + remote branch this local branch will track. */
+export function parseComposerUpstreamSpec(
+  raw: string | null | undefined,
+  localName: string,
+): ComposerUpstreamSpec | null {
+  const local = trimBranch(localName);
+  const trimmed = (raw ?? '').trim();
+  const spec = trimmed || (local ? defaultComposerUpstreamSpec(local) : '');
+  if (!spec) return null;
+  const slash = spec.indexOf('/');
+  const remote = slash === -1 ? spec : spec.slice(0, slash);
+  const branch = (slash === -1 ? '' : spec.slice(slash + 1)) || local || '';
+  if (!isSafeComposerBranchName(remote) || remote.includes('/')) return null;
+  if (!isSafeComposerBranchName(branch)) return null;
+  return { remote, branch };
 }
 
 /** Create-from source: highlighted list row, else current selection, else workspace HEAD. */

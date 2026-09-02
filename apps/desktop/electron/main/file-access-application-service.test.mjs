@@ -341,7 +341,7 @@ test('createGitBranch with push creates the branch then pushes with upstream tra
       if (key === 'branch -- 0.0.11 origin/main') return { stdout: '' };
       if (key === 'branch --show-current') return { stdout: 'main\n' };
       if (key === 'remote') return { stdout: 'origin\nupstream\n' };
-      if (key === 'push -u -- origin 0.0.11') return { stdout: '' };
+      if (key === 'push -u -- origin 0.0.11:0.0.11') return { stdout: '' };
       throw new Error(`unexpected git call: ${key}`);
     },
   });
@@ -360,7 +360,99 @@ test('createGitBranch with push creates the branch then pushes with upstream tra
     pushed: true,
     pushError: null,
   });
-  assert.deepEqual(calls.slice(-2), ['remote', 'push -u -- origin 0.0.11']);
+  assert.deepEqual(calls.slice(-2), ['remote', 'push -u -- origin 0.0.11:0.0.11']);
+});
+
+test('createGitBranch with push can track a differently named remote branch', async () => {
+  const calls = [];
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      calls.push(key);
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- release 0.0.10') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'main\n' };
+      if (key === 'remote') return { stdout: 'origin\n' };
+      if (key === 'push -u -- origin release:0.0.11') return { stdout: '' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: 'release',
+    startPoint: '0.0.10',
+    push: true,
+    upstreamRemote: 'origin',
+    upstreamBranch: '0.0.11',
+  }), {
+    ok: true,
+    status: 'created',
+    name: 'release',
+    current: 'main',
+    repoRoot: '/repo',
+    pushed: true,
+    pushError: null,
+  });
+  assert.deepEqual(calls.slice(-2), ['remote', 'push -u -- origin release:0.0.11']);
+});
+
+test('createGitBranch without push does not contact the remote', async () => {
+  const calls = [];
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      const key = args.join(' ');
+      calls.push(key);
+      if (key === 'rev-parse --show-toplevel') return { stdout: '/repo\n' };
+      if (key === 'branch -- 0.0.11') return { stdout: '' };
+      if (key === 'branch --show-current') return { stdout: 'main\n' };
+      throw new Error(`unexpected git call: ${key}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '0.0.11',
+    push: false,
+    upstreamRemote: 'origin',
+    upstreamBranch: 'other',
+  }), {
+    ok: true,
+    status: 'created',
+    name: '0.0.11',
+    current: 'main',
+    repoRoot: '/repo',
+    pushed: false,
+    pushError: null,
+  });
+  assert.equal(calls.some((call) => call.startsWith('push ') || call === 'remote'), false);
+});
+
+test('createGitBranch rejects an unsafe upstream name without writing a ref', async () => {
+  const calls = [];
+  const harness = createHarness({
+    nodes: [['/repo', directory()]],
+    executeGit: async (_cwd, args) => {
+      calls.push(args.join(' '));
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+  });
+
+  assert.deepEqual(await harness.service.createGitBranch({
+    workspaceRoot: '/repo',
+    name: '0.0.11',
+    push: true,
+    upstreamRemote: 'origin',
+    upstreamBranch: '--output=/tmp/x',
+  }), {
+    ok: false,
+    status: 'invalid_name',
+    current: null,
+    error: 'invalid_upstream',
+  });
+  assert.deepEqual(calls, []);
 });
 
 test('createGitBranch push failure is non-blocking and reports the reason', async () => {
@@ -372,7 +464,7 @@ test('createGitBranch push failure is non-blocking and reports the reason', asyn
       if (key === 'branch -- 0.0.11') return { stdout: '' };
       if (key === 'branch --show-current') return { stdout: 'main\n' };
       if (key === 'remote') return { stdout: 'origin\n' };
-      if (key === 'push -u -- origin 0.0.11') {
+      if (key === 'push -u -- origin 0.0.11:0.0.11') {
         throw new Error('fatal: Authentication failed');
       }
       throw new Error(`unexpected git call: ${key}`);

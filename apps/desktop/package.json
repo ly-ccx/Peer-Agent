@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/desktop",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Peer Agent Desktop - local-first Task Flow Agent",
   "author": "Peer Agent Team <dev@peer-agent.local>",
   "private": true,
@@ -40,6 +40,7 @@
     "adm-zip": "^0.5.17",
     "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",
+    "playwright-core": "^1.55.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "thinking-orbs": "^0.3.1",

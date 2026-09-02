@@ -1,11 +1,11 @@
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
-import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
+import { listSubscriptionModels, listModelCatalogForChannel } from './provider-adapters/openai-model-catalog.mjs';
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
 import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
-import { resolveChannel } from './provider-channels.mjs';
+import { resolveChannel, resolveModelCatalogRequestConfig } from './provider-channels.mjs';
 import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 
 function assertFunction(value, label) {
@@ -21,12 +21,13 @@ const DEFAULT_OPERATIONS = Object.freeze({
   ensureFreshGoogleTokens,
   ensureFreshGrokTokens,
   listSubscriptionModels,
-  listOpenAICompatibleModels,
+  listModelCatalogForChannel,
   listGrokBuildModels,
   listGeminiModels,
   preferGeminiModel,
   listQoderModels,
   resolveChannel,
+  resolveModelCatalogRequestConfig,
   resolveGeminiCodeAssistProjectId,
 });
 
@@ -214,8 +215,10 @@ export function createProviderAccessApplicationService({
       const requestConfig = ports.getApiKeyRequestConfig(id);
       if (!requestConfig) return { success: false, models: [], error: 'api_key_not_configured' };
       try {
-        const { models, source } = await ops.listOpenAICompatibleModels(requestConfig);
-        return { success: true, models, source };
+        // 渠道声明目录平面覆盖(如 DeepSeek)时由统一入口切平面并按需兜底；
+        // 其余渠道与历史行为一致，失败原样报错。
+        const { models, source, error } = await ops.listModelCatalogForChannel(requestConfig);
+        return { success: true, models, source, ...(error ? { error } : {}) };
       } catch (error) {
         return { success: false, models: [], error: error?.message || 'models_list_failed' };
       }
@@ -256,13 +259,31 @@ export function createProviderAccessApplicationService({
         apiKey: config.apiKey,
         customHeaders: config.customHeaders,
       });
-      const { models, source } = await ops.listOpenAICompatibleModels({
+      // 与已落盘渠道(listModels 路径)共用目录平面判定：
+      // channelId 指向声明目录平面的渠道(如 DeepSeek)时同样切平面并按需兜底；
+      // 自定义网关(仅传 baseUrl)不带覆盖，保持纯远程行为。
+      const catalogConfig = ops.resolveModelCatalogRequestConfig({
+        channelId: config.channelId,
+        authMethod: 'api_key',
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        customHeaders: config.customHeaders,
+      });
+      const { models, source, error } = await ops.listModelCatalogForChannel({
         baseUrl: resolved.baseUrl,
         headers: resolved.headers,
         wire: resolved.wire,
         apiKey: config.apiKey,
+        modelCatalog: catalogConfig.modelCatalogOverride
+          ? {
+              channelId: catalogConfig.channelId,
+              wire: catalogConfig.wire,
+              baseUrl: catalogConfig.baseUrl,
+              headers: catalogConfig.headers,
+            }
+          : undefined,
       });
-      return { success: true, models, source };
+      return { success: true, models, source, ...(error ? { error } : {}) };
     } catch (error) {
       return { success: false, models: [], error: error?.message || 'models_fetch_failed' };
     }

@@ -1,0 +1,52 @@
+{
+  "capabilityId": "local.web.external.type",
+  "name": "External browser type",
+  "description": "Types text into the temporary Peer-managed Chromium session, optionally focusing a CSS selector first.",
+  "localizedName": {
+    "zh-CN": "外部浏览器输入",
+    "en-US": "External browser type"
+  },
+  "localizedDescription": {
+    "zh-CN": "向临时 Peer 托管 Chromium 输入文本，可先按 CSS 选择器聚焦目标。",
+    "en-US": "Types text into the temporary Peer-managed Chromium session, optionally focusing a CSS selector first."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text to type."
+      },
+      "selector": {
+        "type": "string",
+        "description": "Optional CSS selector to focus before typing. Supports frame:N prefix."
+      },
+      "clear": {
+        "type": "boolean",
+        "description": "Clear the target field before typing. Defaults to false."
+      },
+      "submit": {
+        "type": "boolean",
+        "description": "Press Enter after typing. Defaults to false."
+      }
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

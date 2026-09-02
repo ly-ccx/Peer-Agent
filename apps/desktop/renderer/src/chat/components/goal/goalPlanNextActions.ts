@@ -2,9 +2,12 @@ import type { GoalPlan } from '@peer-agent/protocol';
 
 export type GoalPlanNextAction = 'start' | 'adjust' | 'cancel' | 'continue-fix';
 
+/** Actions the approval banner renders; `continue-fix` is offered elsewhere. */
+export type GoalPlanApprovalAction = 'start' | 'adjust' | 'cancel';
+
 export interface GoalPlanNextStep {
   readonly kind: 'approval';
-  readonly actions: readonly GoalPlanNextAction[];
+  readonly actions: readonly GoalPlanApprovalAction[];
 }
 
 const NEXT_ACTIONS = ['start', 'adjust', 'cancel'] as const;

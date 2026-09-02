@@ -480,6 +480,10 @@ export interface BootstrapPreloadApi {
     readonly startPoint?: string;
     /** After creating the local branch, push it with upstream tracking (git push -u). */
     readonly push?: boolean;
+    /** Remote name to push to (defaults to the first configured remote). */
+    readonly upstreamRemote?: string;
+    /** Remote branch name to track (defaults to the local branch name). */
+    readonly upstreamBranch?: string;
   }) => Promise<{
     readonly ok: boolean;
     readonly status: 'created' | 'already_exists' | 'invalid_name' | 'invalid_ref' | 'not_git_repo' | 'error';
@@ -707,6 +711,12 @@ export interface BootstrapPreloadApi {
     readonly ok: boolean;
     readonly path?: string;
     readonly bytes?: number;
+    readonly error?: string;
+  }>;
+  /** 用系统默认浏览器打开当前 http(s) 页面。 */
+  readonly openBrowserExternal: (url: string) => Promise<{
+    readonly ok: boolean;
+    readonly url?: string;
     readonly error?: string;
   }>;
   /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
@@ -1328,6 +1338,24 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     maxRetries?: number;
     delayMs?: number;
     reason?: string;
+  }) => void) => () => void;
+  readonly onChatStreamStatus: (listener: (payload: {
+    streamId?: string;
+    conversationId?: string;
+    status?: 'queued' | 'retrying';
+    provider?: string;
+    code?: string;
+    queueType?: string | null;
+    queueCount?: number | null;
+    serviceAvailable?: boolean | null;
+    waitMs?: number;
+    upstreamWaitTimeMs?: number | null;
+    waitedMs?: number;
+    budgetMs?: number;
+    attempt?: number;
+    maxAttempts?: number;
+    reason?: string | null;
+    message?: string;
   }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: {
     conversationId: string;

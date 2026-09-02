@@ -22,6 +22,7 @@ import { createProviderPromptSource } from './sources/provider-source.mjs';
 import { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
 import { createRuntimePromptSource } from './sources/runtime-source.mjs';
 import { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
+import { createWebEntryPromptSource } from './sources/web-entry-source.mjs';
 
 const LAYER_ORDER = new Map([
   ['L0_CORE', 0],
@@ -89,6 +90,7 @@ export function createDefaultPromptSourceRegistry() {
       createProjectInstructionsPromptSource(),
       createContextExtensionPromptSource(),
       createRuntimeReminderPromptSource(),
+      createWebEntryPromptSource(),
       createAutomationIntentPromptSource(),
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),

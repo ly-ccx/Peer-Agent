@@ -62,7 +62,12 @@ export function shouldAutoStartAcceptedGoalRunner(plan) {
   if (!plan) return false;
   if (plan.workflowKind !== 'goal_self_driven') return false;
   if (plan.activation?.kind !== 'accepted_goal') return false;
-  return plan.status === 'accepted' || plan.status === 'executing';
+  if (plan.status !== 'accepted' && plan.status !== 'executing') return false;
+  const runnerStatus = plan.runner?.status;
+  if (['paused', 'blocked', 'waiting_user', 'budget_exhausted', 'completed', 'failed'].includes(runnerStatus)) {
+    return false;
+  }
+  return true;
 }
 
 /**

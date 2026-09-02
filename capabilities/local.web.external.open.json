@@ -1,0 +1,39 @@
+{
+  "capabilityId": "local.web.external.open",
+  "name": "Open external browser",
+  "description": "Starts a temporary Peer-managed Chromium session for the current conversation. Isolated from the in-app Browser workspace and from the user's daily browser profile.",
+  "localizedName": {
+    "zh-CN": "打开外部浏览器",
+    "en-US": "Open external browser"
+  },
+  "localizedDescription": {
+    "zh-CN": "为当前会话启动一个临时的 Peer 托管 Chromium 会话，与内嵌浏览器和工作日常 Profile 隔离。",
+    "en-US": "Starts a temporary Peer-managed Chromium session for the current conversation, isolated from the in-app Browser and the user's daily profile."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Optional absolute http(s) URL to open after the session starts."
+      }
+    },
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

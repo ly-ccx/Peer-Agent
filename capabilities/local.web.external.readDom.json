@@ -1,0 +1,43 @@
+{
+  "capabilityId": "local.web.external.readDom",
+  "name": "External browser read DOM",
+  "description": "Reads text or HTML from the temporary Peer-managed Chromium DOM. Full content is stored as a local artifact.",
+  "localizedName": {
+    "zh-CN": "外部浏览器读取 DOM",
+    "en-US": "External browser read DOM"
+  },
+  "localizedDescription": {
+    "zh-CN": "读取临时 Peer 托管 Chromium 的文本或 HTML；完整内容落本地 artifact。",
+    "en-US": "Reads text or HTML from the temporary Peer-managed Chromium DOM. Full content is stored as a local artifact."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "Optional CSS selector to scope extraction. Supports frame:N prefix."
+      },
+      "format": {
+        "type": "string",
+        "description": "text or html. Defaults to text."
+      }
+    },
+    "additionalProperties": false
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

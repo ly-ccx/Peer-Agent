@@ -86,3 +86,32 @@ export function rememberPreparedBrowser(
   const merged = [...without, nextId];
   return merged.length <= limit ? merged : merged.slice(merged.length - limit);
 }
+
+/**
+ * 切走会话时：非空白页立刻记进活页名单，空白 about:blank 不占名额。
+ * 必须在 render 当帧算出下一份名单，不能等 useEffect，否则第一帧会卸掉 webview。
+ */
+export function rememberLeavingBrowserConversation(
+  ids: readonly string[],
+  leavingId: string | null | undefined,
+  isBlank: boolean,
+  limit = MAX_PREPARED_BROWSER_CONVERSATIONS,
+): string[] {
+  const id = typeof leavingId === 'string' ? leavingId.trim() : '';
+  if (!id || isBlank) return [...ids];
+  return rememberPreparedBrowser(ids, id, limit);
+}
+
+/**
+ * 当前前台会话加上后台活页名单。前台必须在同一数组里，切回来才能复用同一个 BrowserView。
+ */
+export function mountedBrowserConversations(
+  conversationId: string | null,
+  preparedIds: readonly string[],
+  limit = MAX_PREPARED_BROWSER_CONVERSATIONS,
+): string[] {
+  const currentId = typeof conversationId === 'string' ? conversationId.trim() : '';
+  const prepared = preparedIds.filter((id) => id && id !== currentId);
+  if (!currentId) return prepared.slice(-limit);
+  return rememberPreparedBrowser(prepared, currentId, limit);
+}

@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   /** 截取指定 webContents 页面并保存 PNG；savePath 可选。 */
   captureBrowserPage: (webContentsId, savePath) =>
     ipcRenderer.invoke('browser:capture-page', { webContentsId, savePath }),
+  /** 用系统默认浏览器打开当前 http(s) 页面。 */
+  openBrowserExternal: (url) => ipcRenderer.invoke('browser:open-external', { url }),
   /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
   listBrowserSessionSources: () => ipcRenderer.invoke('browser:list-session-sources'),
   /** Agent 启动必需的 macOS 系统权限自检（不绑 Chrome 导入）。 */
@@ -380,6 +382,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:stream:connection-recovery', handler);
     return () => ipcRenderer.removeListener('chat:stream:connection-recovery', handler);
+  },
+  onChatStreamStatus: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:stream:status', handler);
+    return () => ipcRenderer.removeListener('chat:stream:status', handler);
   },
   onChatCompaction: (listener) => {
     const handler = (_event, payload) => listener(payload);

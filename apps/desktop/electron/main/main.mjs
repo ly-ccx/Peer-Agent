@@ -1325,6 +1325,7 @@ goalRunner = createGoalRunner({
         terminalStatus: outcome?.terminalStatus ?? null,
         toolCallCount: outcome?.toolCallCount ?? 0,
         usage: outcome?.usage,
+        continue: (outcome?.toolCallCount ?? 0) > 0,
       };
     },
   },
@@ -1897,6 +1898,7 @@ const browserCoreApplicationService = createBrowserCoreApplicationService({
   joinPath: (...parts) => path.join(...parts),
   now: () => new Date(),
   writeFile: (targetPath, content) => writeFile(targetPath, content),
+  openExternal: (url) => shell.openExternal(url),
 });
 
 const browserSessionImportApplicationService = createBrowserSessionImportApplicationService({
@@ -3159,6 +3161,7 @@ function handleChatSend({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
+            pauseRunner: (planId) => goalRunner?.pause(planId),
           });
           if (route.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({
@@ -3970,6 +3973,21 @@ function startBackgroundWork() {
   void createShellEnvSnapshot().catch((err) => {
     console.warn('[shell-env-snapshot] background create failed:', err?.message || err);
   });
+  // ADR 68 交付对账：Goal 完成瞬间质检未回填导致 handoff 停在 stopped(quality_review_pending)、
+  // 工作树随后又被清理的计划，启动时按 git 事实补记 delivered（逻辑在 handoff 模块内，失败只降级）。
+  if (typeof goalDeliveryHandoff?.reconcileStoppedHandoffs === 'function') {
+    void goalDeliveryHandoff
+      .reconcileStoppedHandoffs(goalPlanStore.listPlanDetails())
+      .then((results) => {
+        const delivered = results.filter((item) => item?.delivered);
+        if (delivered.length > 0) {
+          console.info('[goal-handoff] reconciled delivered on startup:', delivered.map((item) => item.planId).join(', '));
+        }
+      })
+      .catch((err) => {
+        console.warn('[goal-handoff] startup reconcile failed:', err?.message || err);
+      });
+  }
 }
 
 function startAutomationRuntime() {

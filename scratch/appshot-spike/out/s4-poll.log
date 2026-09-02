@@ -1,3 +1,0 @@
-[2026-07-30T09:56:49.991Z] poll start pid=49360 electron=41.7.1
-[2026-07-30T09:56:51.998Z] status change: null -> denied (check #1)
-[2026-07-30T09:59:50.089Z] timeout after 90 checks, last=denied
