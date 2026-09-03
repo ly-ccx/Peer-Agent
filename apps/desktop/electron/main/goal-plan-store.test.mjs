@@ -340,6 +340,14 @@ test('derivePlanStatus: failed + 全叶子 completed → completed（stream 失�
   assert.equal(derivePlanStatus('failed', tasks), 'completed');
 });
 
+test('derivePlanStatus: interrupted + 全叶子 completed → completed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'completed' },
+  ];
+  assert.equal(derivePlanStatus('interrupted', tasks), 'completed');
+});
+
 test('derivePlanStatus: failed + 仍有未完成叶子 → 保持 failed（需 resume 才能继续）', () => {
   const tasks = [
     { taskId: 't1', status: 'completed' },
@@ -1716,18 +1724,13 @@ test('verifier: passed 必须带 evidenceRefs，且目标必须引用真实 task
 test('未消费的 stream_error 中断经过 runner 落盘后保持 interrupted，resume 后才可恢复', () => {
   const created = approvedPlanWithTasks();
   store.setPlanStatus(created.planId, 'executing');
-  const completedLeaves = ['t1', 't2a', 't2b'];
-  const completedRefs = completedLeaves.map((taskId) => `artifact://stream-interrupted-${taskId}`);
-  registerEvidenceRefs(created.planId, completedRefs);
-  for (const taskId of completedLeaves) {
-    store.recordTaskEvidence(created.planId, taskId, {
-      status: 'completed',
-      evidenceRefs: [`artifact://stream-interrupted-${taskId}`],
-    });
-  }
-  assert.equal(store.getPlan(created.planId).status, 'completed');
+  registerEvidenceRefs(created.planId, ['artifact://stream-interrupted-t1']);
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://stream-interrupted-t1'],
+  });
+  assert.equal(store.getPlan(created.planId).status, 'executing');
 
-  store.setPlanStatus(created.planId, 'failed');
   store.setRunnerState(created.planId, {
     status: 'failed',
     phase: 'blocked',
@@ -1753,6 +1756,35 @@ test('未消费的 stream_error 中断经过 runner 落盘后保持 interrupted�
   assert.equal(resumed.status, 'executing');
   assert.equal(resumed.runner.status, 'running');
   assert.equal(resumed.runner.interruption, undefined);
+});
+
+test('叶子全部 completed 后，过期 interruption 不能把计划钉回 interrupted', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  const completedLeaves = ['t1', 't2a', 't2b'];
+  const completedRefs = completedLeaves.map((taskId) => `artifact://done-interrupted-${taskId}`);
+  registerEvidenceRefs(created.planId, completedRefs);
+  for (const taskId of completedLeaves) {
+    store.recordTaskEvidence(created.planId, taskId, {
+      status: 'completed',
+      evidenceRefs: [`artifact://done-interrupted-${taskId}`],
+    });
+  }
+  assert.equal(store.getPlan(created.planId).status, 'completed');
+
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected after work finished',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+
+  const recovered = store.getPlan(created.planId);
+  assert.equal(recovered.status, 'completed');
+  assert.equal(recovered.progress.percent, 100);
 });
 
 test('stream_error 后 setPlanStatus(failed)，任务全部 completed 时 plan 恢复为 completed', () => {

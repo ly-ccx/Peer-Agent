@@ -504,14 +504,21 @@ export function derivePlanStatus(currentStatus, tasks) {
 
   // 规则 2/3：executing 自动收尾；failed/interrupted 计划在叶子被显式重试为 running 时
   // 恢复执行，或在叶子事实已全部成功完成时恢复为 completed。未消费的 Runner interruption
-  // 会在 persist 中优先派生为 interrupted（ADR 73：可恢复挂起而非失败），只有 resumeRunner
-  // 能消费该中断事实；重试预算耗尽的失败仍落 failed 终态。
-  if (currentStatus === 'executing' || currentStatus === 'failed') {
+  // 只在叶子仍未全部成功时把计划钉在 interrupted（ADR 73：可恢复挂起而非失败）；
+  // 叶子已全部成功完成时，中断只是过期的 runner 事实，不能挡住 completed。
+  // 重试预算耗尽的失败仍落 failed 终态。
+  if (
+    currentStatus === 'executing'
+    || currentStatus === 'failed'
+    || currentStatus === 'interrupted'
+  ) {
     const { leafTotal, allTerminal, hasFailed, hasRunning } = inspectLeaves(tasks);
     if (leafTotal > 0 && allTerminal) {
       return hasFailed ? TERMINAL_FAIL : TERMINAL_OK;
     }
-    if (currentStatus === 'failed' && hasRunning) return 'executing';
+    if ((currentStatus === 'failed' || currentStatus === 'interrupted') && hasRunning) {
+      return 'executing';
+    }
     return currentStatus;
   }
 
@@ -2216,15 +2223,18 @@ export function createGoalPlanStore({
     // 原子消费该事实并恢复执行。可恢复中断在重试预算内仍由 running Runner 持有
     // 行动权，只记录失败尝试，不能因为 interruption Evidence 的存在就把整个计划
     // 降级为失败终态；真实叶子失败仍由 derivePlanStatus 派生为 failed。
+    const derivedStatus = options.preserveStatus
+      ? normalized.status
+      : derivePlanStatus(normalized.status, normalized.tasks);
     const hasUnconsumedInterruption = Boolean(
       normalized.runner?.interruption &&
       !(normalized.runner.interruption.recoverable === true && normalized.runner.status === 'running'),
     );
-    const nextStatus = hasUnconsumedInterruption
+    // 未消费中断只拦住「还没做完」的计划。叶子已全部成功时，不能再用过期
+    // interruption 把 completed 钉回 interrupted。
+    const nextStatus = hasUnconsumedInterruption && derivedStatus !== TERMINAL_OK
       ? 'interrupted'
-      : options.preserveStatus
-        ? normalized.status
-        : derivePlanStatus(normalized.status, normalized.tasks);
+      : derivedStatus;
     const nowIso = normalized.updatedAt || new Date().toISOString();
     const planTiming = applyGoalTimingTransition(
       prevTiming,
