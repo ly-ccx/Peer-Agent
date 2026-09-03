@@ -8,9 +8,12 @@ const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.m
 
 describe('workbench view visibility', () => {
   it('keeps BrowserView mounted so browser tabs and page sessions survive workbench tab switches', () => {
+    // root/local 分支现在都用模板字符串 class（workbench-view--browser + 可能 workbench-view--prepared-browser），
+    // 关键不变量是：浏览器视图常驻渲染（不通过 activeTab==='browser' && <BrowserView> 条件卸载），
+    // 且 data-active 用三元表达式绑定 activeTab，保证切会话/切 tab 时 guest 不重建。
     assert.match(
       panelSource,
-      /className="workbench-view workbench-view--browser"[\s\S]*data-active=\{activeTab === 'browser'\}[\s\S]*<BrowserView/,
+      /className=\{`workbench-view workbench-view--browser\$\{id === conversationId \? '' : ' workbench-view--prepared-browser'\}`\}[\s\S]*data-active=\{id === conversationId \? activeTab === 'browser' : false\}[\s\S]*<BrowserView/,
     );
     assert.doesNotMatch(panelSource, /activeTab === 'browser'\s*&&\s*<BrowserView/);
   });

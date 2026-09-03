@@ -382,21 +382,24 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               />
             </div>
           ))
-          : (
+          : mountedBrowserConversations(conversationId, preparedBrowserConversations).map((id) => (
             <div
-              className="workbench-view workbench-view--browser"
-              data-active={activeTab === 'browser'}
+              key={`mounted-browser-${id}`}
+              className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
+              data-active={id === conversationId ? activeTab === 'browser' : false}
+              aria-hidden={id === conversationId ? undefined : true}
             >
               <BrowserView
-                key={conversationId ?? '__none'}
                 isZh={isZh}
-                conversationId={conversationId}
-                session={browserSession}
-                onSessionChange={setBrowserSession}
-                claimForeground
+                conversationId={id}
+                session={id === conversationId ? browserSession : resolveBrowserSession(id)}
+                onSessionChange={id === conversationId
+                  ? setBrowserSession
+                  : (next) => setBrowserSessionFor(id, next)}
+                claimForeground={id === conversationId}
               />
             </div>
-          )}
+          ))}
         <div
           className="workbench-view workbench-view--files"
           data-active={activeTab === 'files'}

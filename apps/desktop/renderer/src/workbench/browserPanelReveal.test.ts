@@ -107,3 +107,24 @@ test('mountedBrowserConversations keeps the current session in the same live lis
     ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'],
   );
 });
+
+test('switch away and back keeps the visited session alive (local layout keep-alive)', () => {
+  // 模拟 local 布局：在会话 A 里打开页面后切到 B，再切回 A。
+  // 关键不变量：A 作为"被切走的非空白会话"必须始终留在 mounted 名单里，
+  // 这样 local 布局渲染多个常驻 BrowserView 时 A 的 key 稳定，guest 不重建、不重载。
+  let prepared: string[] = [];
+
+  // A 打开页面后切走：A 非空白(false) -> 记进活页名单。
+  prepared = rememberLeavingBrowserConversation(prepared, 'A', false);
+  assert.deepEqual(prepared, ['A']);
+
+  // 切到 B：A 仍在名单，B 成为当前会话。
+  const afterSwitchToB = mountedBrowserConversations('B', prepared);
+  assert.ok(afterSwitchToB.includes('A'), 'A 应保活在名单中，BrowserView 常驻');
+  assert.deepEqual(afterSwitchToB, ['A', 'B']);
+
+  // 切回 A：A 仍在名单首位。
+  const afterSwitchBackToA = mountedBrowserConversations('A', afterSwitchToB);
+  assert.ok(afterSwitchBackToA.includes('A'), '切回 A 时 A 仍常驻，不重建');
+  assert.deepEqual(afterSwitchBackToA, ['B', 'A']);
+});
