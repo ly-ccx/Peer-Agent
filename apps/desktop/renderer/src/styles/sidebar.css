@@ -48,6 +48,13 @@
   pointer-events: none;
 }
 
+/* 整栏收起：内容随列宽同步淡出（而非瞬时隐藏）。visibility 延迟到过渡结束
+   再翻转,避免动画一开始内容就"啪"地消失。展开反向走同一过渡。 */
+:root[data-sidebar-collapsed='true'] .app-sidebar {
+  opacity: 0;
+  visibility: hidden;
+}
+
 .app-sidebar {
   position: relative;
   display: flex;
@@ -63,7 +70,10 @@
   padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
-  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+  transition:
+    background var(--za-motion-fast, 120ms) var(--za-ease-out, ease),
+    opacity var(--za-motion-medium, 200ms) var(--za-ease-out, ease),
+    visibility 0s var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
 }
 
 /* 非 darwin（Windows/Linux）hiddenInset 窗口没有系统交通灯，
@@ -448,10 +458,29 @@
 }
 
 .sidebar-workspace-tasks {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--za-motion-medium) var(--za-ease-out);
+  min-height: 0;
+}
+
+.sidebar-workspace-tasks.is-open {
+  grid-template-rows: 1fr;
+}
+
+.sidebar-workspace-tasks-inner {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 2px 0 6px 6px;
+  padding: 2px 6px 6px 6px;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--za-motion-medium) var(--za-ease-out);
+}
+
+.sidebar-workspace-tasks.is-open .sidebar-workspace-tasks-inner {
+  opacity: 1;
 }
 
 /* Nested workspace sessions reuse channel-conversation-list, which otherwise
@@ -460,8 +489,8 @@
    this list shrinks to a single row. */
 .sidebar-workspace-tasks.channel-conversation-list {
   flex: none;
-  overflow: visible;
-  padding: 6px 4px 6px 6px;
+  overflow: hidden;
+  padding: 0;
   animation: none;
 }
 

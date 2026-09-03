@@ -849,12 +849,19 @@ export function Sidebar({
                     </svg>
                   </button>
                 </div>
-                {isTreeOpen ? (
-                  <div className="channel-conversation-list sidebar-workspace-tasks">
+                <div
+                  className={[
+                    'channel-conversation-list',
+                    'sidebar-workspace-tasks',
+                    isTreeOpen ? 'is-open' : 'is-collapsed',
+                  ].filter(Boolean).join(' ')}
+                  inert={isTreeOpen ? undefined : true}
+                >
+                  <div className="sidebar-workspace-tasks-inner">
                     {taskPreview.visible.map((conv) => renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView }))}
                     {renderWorkspaceTaskMore(ws.path, workspaceTasks.length, canShowMore)}
                   </div>
-                ) : null}
+                </div>
                 {projectPopoverPath === ws.path ? (
                   <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
                     <div className="sidebar-project-popover-title">{ws.name}</div>
@@ -935,8 +942,15 @@ export function Sidebar({
                   <span className="sidebar-workspace-name">{isZh ? '未归属' : 'Unassigned'}</span>
                 </span>
               </div>
-              {isUnassignedOpen ? (
-                <div className="channel-conversation-list sidebar-workspace-tasks">
+              <div
+                className={[
+                  'channel-conversation-list',
+                  'sidebar-workspace-tasks',
+                  isUnassignedOpen ? 'is-open' : 'is-collapsed',
+                ].filter(Boolean).join(' ')}
+                inert={isUnassignedOpen ? undefined : true}
+              >
+                <div className="sidebar-workspace-tasks-inner">
                   {previewWorkspaceTasks(
                     sortWorkspaceTasks(groupedTasks.unassigned, isArchivedView),
                     revealedCount(UNASSIGNED_WORKSPACE_KEY),
@@ -952,7 +966,7 @@ export function Sidebar({
                     ).canShowMore || pageHasMore(UNASSIGNED_WORKSPACE_KEY),
                   )}
                 </div>
-              ) : null}
+              </div>
             </div>
           ) : null}
         </div>
