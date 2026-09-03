@@ -484,6 +484,7 @@ export function derivePlanStatus(currentStatus, tasks) {
     let leafTotal = 0;
     let allTerminal = true;
     let hasFailed = false;
+    let hasRunning = false;
     const walkLeaves = (nodes) => {
       for (const t of nodes || []) {
         const children = Array.isArray(t.subtasks) ? t.subtasks : [];
@@ -494,20 +495,22 @@ export function derivePlanStatus(currentStatus, tasks) {
         leafTotal += 1;
         if (t.status === TERMINAL_FAIL) hasFailed = true;
         else if (!LEAF_TERMINAL_STATUSES.has(t.status)) allTerminal = false;
+        if (t.status === 'running') hasRunning = true;
       }
     };
     walkLeaves(list);
-    return { leafTotal, allTerminal, hasFailed };
+    return { leafTotal, allTerminal, hasFailed, hasRunning };
   };
 
-  // 规则 2/3：executing 自动收尾；failed 仅在「叶子事实已全部成功完成」时恢复为 completed，
-  // 避免 stream_error 把计划永久粘在 failed。未全部终态时保持 failed（需 resumeRunner
-  // 显式恢复为 executing，或等全部叶子成功后自动 completed）。
+  // 规则 2/3：executing 自动收尾；failed 计划在叶子被显式重试为 running 时恢复执行，
+  // 或在叶子事实已全部成功完成时恢复为 completed。未消费的 Runner interruption 会在
+  // persist 中优先保留 failed，只有 resumeRunner 能消费该独立失败事实。
   if (currentStatus === 'executing' || currentStatus === 'failed') {
-    const { leafTotal, allTerminal, hasFailed } = inspectLeaves(tasks);
+    const { leafTotal, allTerminal, hasFailed, hasRunning } = inspectLeaves(tasks);
     if (leafTotal > 0 && allTerminal) {
       return hasFailed ? TERMINAL_FAIL : TERMINAL_OK;
     }
+    if (currentStatus === 'failed' && hasRunning) return 'executing';
     return currentStatus;
   }
 

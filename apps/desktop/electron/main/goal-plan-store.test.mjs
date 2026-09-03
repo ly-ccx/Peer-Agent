@@ -476,6 +476,58 @@ test('recordTaskEvidence: accepted 的自驱 Goal 不走 Plan 批准闸门，可
   assert.deepEqual(after.tasks[0].evidenceRefs, ['local-test-artifact://goal-store']);
 });
 
+test('recordTaskEvidence: failed 任务显式重试为 running 时恢复计划并保留失败 Evidence', () => {
+  const created = store.createGoalContract({
+    conversationId: 'conv-goal-task-retry',
+    title: '重试失败任务',
+    goal: '失败后修复并继续执行',
+    tasks: [
+      { taskId: 'g1', order: 0, title: '执行修复', status: 'pending', evidenceRefs: [] },
+      { taskId: 'g2', order: 1, title: '验证修复', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+  const failureRef = 'local-test-artifact://goal-task-failure';
+  registerEvidenceRefs(created.planId, [failureRef]);
+
+  store.recordTaskEvidence(created.planId, 'g1', {
+    status: 'failed',
+    evidenceRefs: [failureRef],
+    failureReason: 'first attempt failed',
+  });
+  store.setPlanStatus(created.planId, 'failed', { changedBy: 'system:test' });
+  assert.equal(store.getPlan(created.planId).status, 'failed');
+
+  const retried = store.recordTaskEvidence(created.planId, 'g1', { status: 'running' });
+  assert.equal(retried.status, 'executing');
+  assert.equal(retried.tasks[0].status, 'running');
+  assert.deepEqual(retried.tasks[0].evidenceRefs, [failureRef]);
+  assert.equal(retried.tasks[0].failureReason, 'first attempt failed');
+});
+
+test('recordTaskEvidence: failed 计划无 running 叶子时保持失败', () => {
+  const created = store.createGoalContract({
+    conversationId: 'conv-goal-failed-sticky',
+    title: '保持失败事实',
+    goal: '等待显式重试',
+    tasks: [
+      { taskId: 'g1', order: 0, title: '失败步骤', status: 'pending', evidenceRefs: [] },
+      { taskId: 'g2', order: 1, title: '后续步骤', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+  const failureRef = 'local-test-artifact://goal-task-sticky-failure';
+  registerEvidenceRefs(created.planId, [failureRef]);
+
+  store.recordTaskEvidence(created.planId, 'g1', {
+    status: 'failed',
+    evidenceRefs: [failureRef],
+    failureReason: 'needs retry',
+  });
+  const failed = store.setPlanStatus(created.planId, 'failed', { changedBy: 'system:test' });
+
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.tasks[1].status, 'pending');
+});
+
 test('upsertGoalContract: 复用同会话自驱 Goal，且不把调用控制字段写入 artifact', () => {
   const first = store.upsertGoalContract('conv-upsert', {
     title: '初始目标',
