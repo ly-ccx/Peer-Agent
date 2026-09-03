@@ -598,7 +598,7 @@ test('projectGoalPlan 从 timing 投影 durationMs，并透传 modelLabel / prov
 });
 
 test('reuseUnchangedTaskOverviewItems keeps sibling cards when only one live durationMs changes', () => {
-  const liveTiming = (accumulatedMs) => ({
+  const liveTiming = (accumulatedMs: number) => ({
     startedAt: '2026-08-10T00:00:00.000Z',
     activeAccumulatedMs: accumulatedMs,
     activeSegmentStartedAt: '2026-08-10T00:00:10.000Z',

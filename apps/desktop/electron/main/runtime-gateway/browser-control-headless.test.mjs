@@ -55,6 +55,8 @@ test('ensureHeadlessBrowserEntry creates a hidden window+view and registers a hi
   assert.equal(electron.created.windows[0].opts.skipTaskbar, true);
   // 共享内嵌浏览器持久分区。
   assert.equal(electron.created.views[0].opts.webPreferences.partition, 'persist:peer-browser');
+  // offscreen 渲染：隐藏窗口也能被 capturePage 出帧（修复后台截图 0x0）。
+  assert.equal(electron.created.views[0].opts.webPreferences.offscreen, true);
 
   const entry = getActiveBrowserEntry('conversation-a');
   assert.ok(entry, 'headless entry 应注册为会话的 active entry');
