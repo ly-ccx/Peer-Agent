@@ -105,3 +105,12 @@ test('goal task list tooltip pins width and wraps titles instead of oscillating 
   assert.doesNotMatch(titleBlock, /text-overflow:\s*ellipsis/);
   assert.doesNotMatch(titleBlock, /white-space:\s*nowrap/);
 });
+
+test('GoalPlanPanel merge gate uses qualityReview instead of stale pending snapshot', async () => {
+  const source = await readSource();
+  assert.match(source, /isQualityReviewBlockingMerge\(plan\)/);
+  assert.doesNotMatch(
+    source,
+    /const qualityReviewPending = plan\.deliveryHandoff\?\.stoppedReason === 'quality_review_pending'/,
+  );
+});

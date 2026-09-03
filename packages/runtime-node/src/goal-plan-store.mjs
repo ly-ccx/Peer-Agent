@@ -3675,11 +3675,26 @@ export function createGoalPlanStore({
     if (!plan) return null;
     const qualityReview = normalizeQualityReview(review);
     if (!qualityReview) return plan;
-    return persist({
+    const now = new Date().toISOString();
+    const next = {
       ...plan,
       qualityReview,
-      updatedAt: new Date().toISOString(),
-    });
+      updatedAt: now,
+    };
+    // 质检已通过时，过期的 quality_review_pending 不再代表真实阻断。
+    if (
+      qualityReview.status === 'passed'
+      && plan.deliveryHandoff?.status === 'stopped'
+      && plan.deliveryHandoff?.stoppedReason === 'quality_review_pending'
+    ) {
+      const { stoppedReason: _stalePending, ...restHandoff } = plan.deliveryHandoff;
+      next.deliveryHandoff = {
+        ...restHandoff,
+        status: 'idle',
+        updatedAt: now,
+      };
+    }
+    return persist(next);
   }
 
   function recordDeliveryHandoff(planId, handoff = {}) {

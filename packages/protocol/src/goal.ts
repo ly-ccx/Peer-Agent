@@ -194,6 +194,7 @@ export function formatGoalDeliveryHandoff(
     /** 保留给调用方透传；合回展示不再看验收戳。 */
     readonly resultAcceptance?: { readonly acceptedAt?: string | null } | null;
     readonly deliveryBinding?: GoalDeliveryBinding | null;
+    readonly qualityReview?: GoalQualityReview | null;
   },
   options?: { readonly locale?: 'zh' | 'en' },
 ): string | undefined {
@@ -221,6 +222,12 @@ export function formatGoalDeliveryHandoff(
       : (locale === 'zh' ? '已合进源头' : 'merged into source');
   }
   if (handoff.status === 'stopped') {
+    if (
+      handoff.stoppedReason === 'quality_review_pending'
+      && !isQualityReviewBlockingMerge(input)
+    ) {
+      return undefined;
+    }
     return handoffStoppedReasonLabel(handoff.stoppedReason, locale, branch);
   }
   return undefined;
@@ -232,6 +239,7 @@ export function formatGoalDeliveryHandoffLamp(
     readonly deliveryHandoff?: GoalDeliveryHandoff | null;
     readonly deliveryBinding?: GoalDeliveryBinding | null;
     readonly status?: GoalPlanStatus | null;
+    readonly qualityReview?: GoalQualityReview | null;
   },
   options?: { readonly locale?: 'zh' | 'en' },
 ): string | undefined {
@@ -261,6 +269,15 @@ export function formatGoalDeliveryHandoffLamp(
     return locale === 'zh' ? `已归档到 ${dest}` : `archived to ${dest}`;
   }
   if (handoff.status === 'stopped') {
+    if (
+      handoff.stoppedReason === 'quality_review_pending'
+      && !isQualityReviewBlockingMerge(input)
+    ) {
+      if (input.status === 'completed') {
+        return locale === 'zh' ? `还没进 ${dest}` : `not on ${dest}`;
+      }
+      return undefined;
+    }
     return locale === 'zh' ? `合不进 ${dest}` : `blocked from ${dest}`;
   }
   return undefined;
@@ -623,6 +640,18 @@ export function isQualityReviewPassed(plan: {
   readonly qualityReview?: GoalQualityReview | null;
 } | null | undefined): boolean {
   return plan?.qualityReview?.status === 'passed';
+}
+
+/**
+ * 合回是否仍被「质量自检」拦住。
+ * 质检已通过时，过期的 quality_review_pending 快照不再阻断。
+ */
+export function isQualityReviewBlockingMerge(plan: {
+  readonly qualityReview?: GoalQualityReview | null;
+  readonly deliveryHandoff?: GoalDeliveryHandoff | null;
+} | null | undefined): boolean {
+  if (plan?.deliveryHandoff?.stoppedReason !== 'quality_review_pending') return false;
+  return !isQualityReviewPassed(plan);
 }
 
 export interface GoalBlockerAudit {

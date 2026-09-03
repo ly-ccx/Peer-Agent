@@ -5,6 +5,7 @@ import {
   formatGoalDeliveryHandoff,
   formatGoalDeliveryHandoffLamp,
   formatGoalDeliveryRoute,
+  isQualityReviewBlockingMerge,
   type GoalDeliveryBinding,
   type GoalPlan,
 } from './goal.ts';
@@ -354,5 +355,54 @@ test('ADR 68：direct 交付的灯条与标签用交付语义，不出现「还�
       },
     }),
     '已归档到 0.0.9',
+  );
+});
+
+test('isQualityReviewBlockingMerge ignores stale quality_review_pending after review passed', () => {
+  const binding: GoalDeliveryBinding = {
+    repoId: 'peer_agent',
+    targetWorkspacePath: '/repo/peer_agent',
+    targetBranch: 'PeerAgent/0.0.4',
+    targetBranchSource: 'workspace_head',
+    executionIsolation: 'worktree',
+    taskBranch: 'peer-goal/plan-delivery',
+    worktreePath: '/tmp/peer-goal-worktrees/plan-delivery',
+    boundAt: '2026-08-13T08:40:00.000Z',
+  };
+  const pendingHandoff = {
+    status: 'stopped' as const,
+    targetBranch: 'PeerAgent/0.0.4',
+    stoppedReason: 'quality_review_pending',
+    updatedAt: '2026-08-14T01:01:00.000Z',
+  };
+  assert.equal(
+    isQualityReviewBlockingMerge({
+      deliveryHandoff: pendingHandoff,
+    }),
+    true,
+  );
+  assert.equal(
+    isQualityReviewBlockingMerge({
+      qualityReview: { status: 'passed' },
+      deliveryHandoff: pendingHandoff,
+    }),
+    false,
+  );
+  assert.equal(
+    formatGoalDeliveryHandoff({
+      deliveryBinding: binding,
+      qualityReview: { status: 'passed' },
+      deliveryHandoff: pendingHandoff,
+    }),
+    undefined,
+  );
+  assert.equal(
+    formatGoalDeliveryHandoffLamp({
+      status: 'completed',
+      deliveryBinding: binding,
+      qualityReview: { status: 'passed' },
+      deliveryHandoff: pendingHandoff,
+    }),
+    '还没进 0.0.4',
   );
 });

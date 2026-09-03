@@ -18,6 +18,7 @@ import {
   formatGoalDeliveryHandoff,
   formatGoalDeliveryHandoffLamp,
   formatGoalDeliveryRoute,
+  isQualityReviewBlockingMerge,
   projectGoalTiming,
 } from '@peer-agent/protocol';
 import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
@@ -1643,7 +1644,7 @@ const PlanCard = memo(function PlanCard({
   // 画「任务线 → 发版线」会暗示一个不存在的合并。
   const showMergeRoute = isolated;
   const handoffStatus = plan.deliveryHandoff?.status;
-  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
+  const qualityReviewPending = isQualityReviewBlockingMerge(plan);
   const canMergeIntoSource = isolated
     && plan.status === 'completed'
     && handoffStatus !== 'delivered'
