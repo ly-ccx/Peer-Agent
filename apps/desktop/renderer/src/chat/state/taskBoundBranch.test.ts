@@ -340,14 +340,22 @@ test('composer branch options hide isolation UUID paths unless already selected'
   assert.equal(formatComposerBranchOptionLabel('PeerAgent/0.0.6'), '0.0.6');
 });
 
-test('create-from source prefers the highlighted list row over current selection', () => {
+test('create-from source prefers the current selection over the highlighted list row', () => {
   assert.equal(
     resolveComposerCreateSourceBranch({
       highlighted: 'PeerAgent/0.0.5',
       selected: 'main',
       currentHead: '0.0.7',
     }),
-    'PeerAgent/0.0.5',
+    'main',
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      highlighted: 'origin/main',
+      selected: null,
+      currentHead: '0.0.7',
+    }),
+    'origin/main',
   );
   assert.equal(
     resolveComposerCreateSourceBranch({

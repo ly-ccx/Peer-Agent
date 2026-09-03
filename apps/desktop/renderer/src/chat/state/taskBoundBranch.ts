@@ -384,14 +384,14 @@ export function parseComposerUpstreamSpec(
   return { remote, branch };
 }
 
-/** Create-from source: highlighted list row, else current selection, else workspace HEAD. */
+/** Create-from source: current selection first, then highlighted list row, then workspace HEAD. */
 export function resolveComposerCreateSourceBranch(input: {
   readonly highlighted?: string | null;
   readonly selected?: string | null;
   readonly currentHead?: string | null;
 }): string | null {
-  return trimBranch(input.highlighted)
-    ?? trimBranch(input.selected)
+  return trimBranch(input.selected)
+    ?? trimBranch(input.highlighted)
     ?? trimBranch(input.currentHead);
 }
 

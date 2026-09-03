@@ -2545,6 +2545,10 @@ export function ChatSurface({
     }));
     return [...isolationOptions, ...branchOptions];
   }, [gitChrome.taskLine, isZh, workspaceGit]);
+  const createBranchSourceOptions = useMemo<readonly DropdownOption[]>(
+    () => boundBranchOptions.filter((option) => option.tab === 'local' || option.tab === 'remote'),
+    [boundBranchOptions],
+  );
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (next === COMPOSER_ENV_ISOLATION_ON) {
@@ -2627,6 +2631,9 @@ export function ChatSurface({
     if (!source) return;
     setCreateBranchDialog({ source, name: '', push: true, upstream: '' });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
+  const handleCreateBranchSourceChange = useCallback((next: string) => {
+    setCreateBranchDialog((d) => (d ? { ...d, source: next, upstream: '' } : d));
+  }, []);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
@@ -3195,10 +3202,22 @@ export function ChatSurface({
               <div className="pa-confirm-body">
                 <h2 className="pa-confirm-title">{isZh ? '创建分支' : 'Create Branch'}</h2>
                 <p className="pa-confirm-message">
-                  {isZh
-                    ? `从 ${createBranchDialog.source} 创建分支`
-                    : `Create a branch from ${createBranchDialog.source}`}
+                  {isZh ? '从以下分支创建' : 'Create branch from'}
                 </p>
+                <Dropdown
+                  className="pa-confirm-dropdown"
+                  value={createBranchDialog.source}
+                  options={createBranchSourceOptions}
+                  onChange={handleCreateBranchSourceChange}
+                  searchable
+                  ariaLabel={isZh ? '创建分支来源' : 'Create branch source'}
+                  tabs={[
+                    { id: 'local', label: isZh ? '本地' : 'Local' },
+                    { id: 'remote', label: isZh ? '远程' : 'Remote' },
+                  ]}
+                  tabsAriaLabel={isZh ? '来源范围' : 'Source scope'}
+                  emptyLabel={isZh ? '没有匹配的分支' : 'No matching branch'}
+                />
                 <input
                   className="pa-confirm-input"
                   value={createBranchDialog.name}

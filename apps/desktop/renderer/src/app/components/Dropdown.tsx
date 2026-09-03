@@ -295,6 +295,12 @@ export function Dropdown({
           id={listId}
           aria-label={ariaLabel}
           style={menuStyle}
+          onMouseLeave={() =>
+            setActiveIndex((i) => {
+              const idx = visibleOptions.findIndex((o) => o.value === value);
+              return idx >= 0 ? idx : i;
+            })
+          }
         >
           {searchable ? (
             <div className="pa-dropdown-search">

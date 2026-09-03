@@ -191,7 +191,8 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /handleOpenCreateBranchDialog/);
   assert.match(surface, /resolveComposerCreateSourceBranch/);
   assert.match(surface, /handleSelectBoundBranch\(name\)/);
-  assert.match(surface, /Create a branch from \$\{createBranchDialog\.source\}/);
+  assert.match(surface, /value=\{createBranchDialog\.source\}/);
+  assert.match(surface, /onChange=\{handleCreateBranchSourceChange\}/);
   assert.match(surface, /panelClassName="pa-confirm-dialog"/);
   assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
   assert.match(surface, /源头/);
