@@ -80,7 +80,13 @@ test('applyGoalMessageRoute restores a failed Goal before recording the user res
 test('applyGoalMessageRoute atomically consumes a reply to requested_user_input', () => {
   const blockedPlan = {
     ...activeGoalPlan,
-    runner: { status: 'waiting_user', phase: 'waiting_user', blockedReason: 'requested_user_input' },
+    activation: { kind: 'accepted_goal' },
+    runner: {
+      status: 'waiting_user',
+      phase: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      turnCount: 2,
+    },
   };
   const route = routeGoalMessage({ messageText: '继续修复全部测试失败', activeGoalPlan: blockedPlan });
   const calls = [];
@@ -402,6 +408,44 @@ test('resolveContinuableGoalPlan keeps an already-active plan untouched', () => 
   });
   assert.equal(continued, activeGoalPlan);
   assert.deepEqual(calls, []);
+});
+
+test('applyGoalMessageRoute: accepted + 残留 waiting_user 的继续会消费并 kick', () => {
+  const leftoverPlan = {
+    planId: 'goal-leftover',
+    status: 'accepted',
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    runner: {
+      enabled: true,
+      status: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      turnCount: 0,
+    },
+  };
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan: leftoverPlan });
+  const calls = [];
+  const result = applyGoalMessageRoute({
+    route,
+    activeGoalPlan: leftoverPlan,
+    goalPlanStore: {
+      consumeRequestedUserInput(planId, event) {
+        calls.push(['consume', planId, event.type]);
+        return {
+          ...leftoverPlan,
+          runner: { enabled: true, status: 'running', turnCount: 0 },
+        };
+      },
+      appendRunEvent() {
+        calls.push(['event']);
+      },
+    },
+  });
+
+  assert.equal(consumesRequestedUserInput({ route, activeGoalPlan: leftoverPlan }), true);
+  assert.equal(result.type, 'kick_stalled_runner');
+  assert.equal(result.goalPlanId, 'goal-leftover');
+  assert.deepEqual(calls, [['consume', 'goal-leftover', 'goal_resumed']]);
 });
 
 test('applyGoalMessageRoute: running 但 0 回合的继续会改成 kick_stalled_runner', () => {

@@ -3166,13 +3166,13 @@ function handleChatSend({
             route,
             activeGoalPlan: activeGoal,
           });
-          applyGoalMessageRoute({
+          const appliedRoute = applyGoalMessageRoute({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
             pauseRunner: (planId) => goalRunner?.pause(planId),
           });
-          if (route.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
+          if (appliedRoute?.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({
               forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
                 conversationId,

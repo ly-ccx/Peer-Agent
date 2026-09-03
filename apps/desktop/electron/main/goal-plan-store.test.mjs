@@ -2105,6 +2105,39 @@ test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契
   assert.equal(plans.length, 1, '不应产生第二条悬空契约');
 });
 
+test('upsertGoalContract: intake 流错误残留的 waiting_user 在升级时清掉，才能 auto-start', () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-leftover-wait',
+    goal: '模糊目标占位',
+  });
+  store.setRunnerState(intake.planId, {
+    interruption: {
+      source: 'stream_interrupted',
+      reason: 'error',
+      interruptedAt: '2026-09-03T03:12:13.000Z',
+    },
+  });
+  store.markRequestedUserInput(intake.planId);
+  const leftover = store.getPlan(intake.planId);
+  assert.equal(leftover.runner.status, 'waiting_user');
+  assert.equal(leftover.runner.blockedReason, 'requested_user_input');
+
+  const upserted = store.upsertGoalContract('conv-intake-leftover-wait', {
+    goal: '修复质量自检合流判定缺陷',
+    title: '修复质量自检合流判定缺陷',
+    status: 'accepted',
+    activation: { kind: 'accepted_goal' },
+    tasks: [{ taskId: 't1', title: '定位合流判定', status: 'pending', evidenceRefs: [] }],
+  });
+
+  assert.equal(upserted.planId, intake.planId);
+  assert.equal(upserted.status, 'accepted');
+  assert.equal(upserted.activation?.kind, 'accepted_goal');
+  assert.equal(upserted.runner?.interruption ?? null, null);
+  assert.notEqual(upserted.runner?.status, 'waiting_user');
+  assert.equal(upserted.runner?.blockedReason ?? undefined, undefined);
+});
+
 test('upsertGoalContract: 只在 intake 升级时发出 goal-accepted，Runner 事件仍是普通 persist', () => {
   const events = [];
   const watched = createGoalPlanStore({ onChange: (event) => events.push(event) });
@@ -2481,6 +2514,41 @@ test('consumeRequestedUserInput atomically records the decision and clears only 
     summary: '不应消费',
   }), null);
   assert.equal(store.getPlan(plan.planId).runner.blockedReason, 'permission_required');
+});
+
+test('consumeRequestedUserInput accepts leftover accepted + waiting_user', () => {
+  const plan = store.createGoalContract({
+    conversationId: 'conv-accepted-leftover-wait',
+    title: '已确认目标',
+    goal: '已确认目标',
+    status: 'accepted',
+    tasks: [{ taskId: 't1', title: '推进', status: 'pending', evidenceRefs: [] }],
+  });
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'waiting_user',
+    intent: 'block',
+    phase: 'waiting_user',
+    blockedReason: 'requested_user_input',
+    turnCount: 0,
+  });
+  store.setPlanStatus(plan.planId, 'accepted');
+
+  const leftover = store.getPlan(plan.planId);
+  assert.equal(leftover.status, 'accepted');
+  assert.equal(leftover.runner.status, 'waiting_user');
+
+  const consumed = store.consumeRequestedUserInput(plan.planId, {
+    type: 'goal_resumed',
+    summary: '用户让当前目标继续：继续',
+    payload: { intent: 'resume', messageText: '继续' },
+  });
+
+  assert.ok(consumed);
+  assert.equal(consumed.status, 'accepted');
+  assert.equal(consumed.runner.status, 'running');
+  assert.equal(consumed.runner.blockedReason, undefined);
+  assert.equal(consumed.runTrace.events.at(-1).payload.messageText, '继续');
 });
 
 test('setRunnerState blocked pauses active segment while plan stays executing', async () => {

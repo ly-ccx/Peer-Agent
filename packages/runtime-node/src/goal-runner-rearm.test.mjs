@@ -89,6 +89,44 @@ test('goal-accepted change re-arms an interrupted plan with a stale interruption
   );
 });
 
+test('intake stream-error leftover waiting_user is cleared on goal-accepted so Runner can start', (t) => {
+  const { store, events, conversationId } = setUpStore(t, 'conv-rearm-leftover-wait');
+
+  const intake = store.createIntakeContract({ ...baseGoal, conversationId });
+  store.setRunnerState(intake.planId, {
+    interruption: {
+      source: 'stream_interrupted',
+      reason: 'error',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+  store.markRequestedUserInput(intake.planId);
+  const leftover = store.getPlan(intake.planId);
+  assert.equal(leftover.runner?.status, 'waiting_user');
+  assert.equal(leftover.runner?.blockedReason, 'requested_user_input');
+  assert.ok(leftover.runner?.interruption);
+  events.length = 0;
+
+  const upgraded = store.upsertGoalContract(conversationId, {
+    ...baseGoal,
+    activation: { kind: 'accepted_goal' },
+    status: 'accepted',
+    tasks: [{ taskId: 't1', title: 'Do the work', status: 'pending' }],
+  });
+
+  assert.equal(events.at(-1)?.changeKind, 'goal-accepted');
+  assert.equal(upgraded.activation?.kind, 'accepted_goal');
+  assert.equal(upgraded.status, 'accepted');
+  assert.equal(upgraded.runner?.interruption ?? null, null);
+  assert.notEqual(upgraded.runner?.status, 'waiting_user');
+  assert.equal(upgraded.runner?.blockedReason ?? undefined, undefined);
+  assert.equal(shouldRearmFailedGoalPlanFromChange(upgraded), false);
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange(events.at(-1), upgraded),
+    true,
+  );
+});
+
 test('cancelled and completed plans are not re-armed', (t) => {
   const { store, conversationId } = setUpStore(t, 'conv-rearm-terminal');
 

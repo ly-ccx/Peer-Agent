@@ -117,11 +117,30 @@ export function shouldResumeGoalRunnerAfterUserDecision(plan) {
 }
 
 /**
+ * intake 流错误 / 收敛把 waiting_user 盖上后，goal_create_plan 又把同一条
+ * 契约升成 accepted_goal。Runner 从未开过回合，这不是真的 request_user_input。
+ */
+function isLeftoverAcceptedGoalUserWait(plan) {
+  if (!plan) return false;
+  if (plan.workflowKind !== 'goal_self_driven') return false;
+  if (plan.activation?.kind !== 'accepted_goal') return false;
+  if (plan.status !== 'accepted' && plan.status !== 'executing') return false;
+  if (plan.runner?.status !== 'waiting_user') return false;
+  if (plan.runner?.blockedReason !== 'requested_user_input') return false;
+  const turnCount = Number(plan.runner?.turnCount);
+  return !Number.isFinite(turnCount) || turnCount <= 0;
+}
+
+/**
  * 磁盘上标成 running，但还没有真正开过回合。
  * start() 会先写 running，再 await prepareIsolation；若这段时间被二次 kick
  * 或泵没转起来，就会留下「面板在跑、turnCount=0、没有 action_started」。
+ *
+ * 也覆盖 accepted_goal 上残留的 waiting_user（turnCount=0）：auto-start 闸门
+ * 会把 waiting_user 当成真提问，必须靠这条 kick，不能再开一轮只口述的 chat。
  */
 export function isStalledAcceptedGoalRunner(plan) {
+  if (isLeftoverAcceptedGoalUserWait(plan)) return true;
   if (!shouldAutoStartAcceptedGoalRunner(plan)) return false;
   if (plan?.runner?.enabled !== true) return false;
   if (plan?.runner?.status !== 'running' && plan?.runner?.status !== 'exploring') return false;

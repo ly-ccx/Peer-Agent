@@ -323,3 +323,27 @@ test('isStalledAcceptedGoalRunner: running 但还没开过回合才算空转', (
     runner: { enabled: true, status: 'paused', turnCount: 0 },
   }), false);
 });
+
+test('isStalledAcceptedGoalRunner: accepted + 残留 waiting_user + 0 回合也要 kick', () => {
+  const leftover = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'accepted',
+    runner: {
+      enabled: true,
+      status: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      turnCount: 0,
+    },
+  };
+  assert.equal(isStalledAcceptedGoalRunner(leftover), true);
+  assert.equal(shouldAutoStartAcceptedGoalRunner(leftover), false);
+  assert.equal(isStalledAcceptedGoalRunner({
+    ...leftover,
+    runner: { ...leftover.runner, turnCount: 2 },
+  }), false);
+  assert.equal(isStalledAcceptedGoalRunner({
+    ...leftover,
+    activation: { kind: 'intake' },
+  }), false);
+});

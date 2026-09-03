@@ -1743,6 +1743,41 @@ function isInactivePlan(plan) {
   return plan?.status === 'cancelled';
 }
 
+/**
+ * 用户回复可以消费 request_user_input 的计划态。
+ * accepted + waiting_user 会出现在 intake 流错误残留、再被 goal_create_plan
+ * 升成 accepted_goal 之后；只认 executing 会让「继续」永远吃不到回复。
+ */
+export function canConsumeRequestedUserInput(plan) {
+  if (!plan) return false;
+  if (plan.status !== 'executing' && plan.status !== 'accepted') return false;
+  return ['waiting_user', 'blocked'].includes(plan.runner?.status)
+    && plan.runner?.blockedReason === 'requested_user_input';
+}
+
+/**
+ * intake → accepted_goal 升级时清掉流错误 / 收敛残留的「等用户」。
+ * 真执行中的 request_user_input 不会走这条升级缝，不能在这里清。
+ */
+function runnerPatchForAcceptedGoalUpgrade(runner) {
+  if (!runner || typeof runner !== 'object') return undefined;
+  const hasInterruption = runner.interruption != null;
+  const leftoverUserWait = runner.status === 'waiting_user'
+    && runner.blockedReason === 'requested_user_input';
+  if (!hasInterruption && !leftoverUserWait) return undefined;
+  const next = {
+    ...runner,
+    interruption: null,
+  };
+  if (leftoverUserWait) {
+    next.status = 'idle';
+    next.intent = 'execute';
+    next.phase = 'orient';
+    next.blockedReason = undefined;
+  }
+  return next;
+}
+
 export function createGoalPlanStore({
   storeDir = pathOf('goalPlans'),
   onChange,
@@ -2770,11 +2805,13 @@ export function createGoalPlanStore({
     const plan = getPlan(planId);
     if (!plan) return null;
     const acceptedAt = new Date().toISOString();
+    const upgradeRunner = runnerPatchForAcceptedGoalUpgrade(plan.runner);
     return revisePlan(planId, {
       ...patch,
       ...(!plan.targetWorkspacePath && plan.originWorkspacePath
         ? { targetWorkspacePath: plan.originWorkspacePath }
         : {}),
+      ...(upgradeRunner ? { runner: upgradeRunner } : {}),
       status: 'executing',
       workflowKind: 'goal_self_driven',
       activation: {
@@ -2821,26 +2858,19 @@ export function createGoalPlanStore({
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
     const shouldEmitGoalAccepted = upgradingFromIntake;
-    // 升级为 accepted_goal 时，未消费的 runner.interruption 标记必须一并消费：
-    // persist 的 hasUnconsumedInterruption 会把带中断标记的计划强制派生回 failed，
-    // 不消费则升级后计划立刻回到 failed，auto-start 永远放不进 Runner
-    // （缺陷现场：intake 首答中断标 failed，后续 goal_create_plan 升级仍卡死）。
-    const consumeInterruptionOnUpgrade = shouldEmitGoalAccepted
-      && activeGoal.runner?.interruption != null;
+    // 升级为 accepted_goal 时必须清掉 intake 残留：
+    // 1) 未消费 interruption，否则 persist 会把计划派生回 failed / interrupted；
+    // 2) 流错误收敛盖上的 waiting_user，否则 auto-start 闸门会当成真提问拦下 Runner。
+    const upgradeRunner = shouldEmitGoalAccepted
+      ? runnerPatchForAcceptedGoalUpgrade(activeGoal.runner)
+      : undefined;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
       status: safeStatus,
       workflowKind: 'goal_self_driven',
-      ...(consumeInterruptionOnUpgrade
-        ? {
-          runner: {
-            ...(activeGoal.runner || {}),
-            interruption: null,
-          },
-        }
-        : {}),
+      ...(upgradeRunner ? { runner: upgradeRunner } : {}),
       activation: {
         ...(activeGoal.activation || {}),
         ...(planPatch.activation || {}),
@@ -3165,14 +3195,7 @@ export function createGoalPlanStore({
    */
   function consumeRequestedUserInput(planId, event = {}) {
     const plan = getPlan(planId);
-    if (!plan) return null;
-    if (
-      plan.status !== 'executing'
-      || !['waiting_user', 'blocked'].includes(plan.runner?.status)
-      || plan.runner?.blockedReason !== 'requested_user_input'
-    ) {
-      return null;
-    }
+    if (!canConsumeRequestedUserInput(plan)) return null;
 
     const now = new Date().toISOString();
     const currentTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: planId });

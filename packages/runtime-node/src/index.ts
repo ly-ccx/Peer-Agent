@@ -209,6 +209,7 @@ export {
 export {
   aggregateProgress,
   applyGoalTimingTransition,
+  canConsumeRequestedUserInput,
   createGoalPlanStore,
   derivePlanStatus,
   goalPlanIsSelfDriven,

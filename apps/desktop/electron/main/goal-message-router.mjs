@@ -1,4 +1,6 @@
 import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
+import { isStalledAcceptedGoalRunner } from './goal-intake-convergence.mjs';
+import { canConsumeRequestedUserInput } from './goal-plan-store.mjs';
 
 const RESUME_PATTERNS = [
   /^继续$/,
@@ -138,9 +140,7 @@ const CONTINUATION_INTENTS = new Set([
 export function consumesRequestedUserInput({ route, activeGoalPlan } = {}) {
   return route?.type === 'append_goal_event'
     && CONTINUATION_INTENTS.has(route.intent)
-    && activeGoalPlan?.status === 'executing'
-    && ['waiting_user', 'blocked'].includes(activeGoalPlan?.runner?.status)
-    && activeGoalPlan?.runner?.blockedReason === 'requested_user_input';
+    && canConsumeRequestedUserInput(activeGoalPlan);
 }
 
 /**
@@ -180,7 +180,21 @@ export function applyGoalMessageRoute({
     consumesRequestedUserInput({ route, activeGoalPlan })
     && typeof goalPlanStore?.consumeRequestedUserInput === 'function'
   ) {
-    return goalPlanStore.consumeRequestedUserInput(route.goalPlanId, event);
+    const consumed = goalPlanStore.consumeRequestedUserInput(route.goalPlanId, event);
+    // 残留 waiting_user（turnCount=0）消费后仍要 kick Runner，不能只记回复再开一轮口述 chat。
+    if (isStalledAcceptedGoalRunner(activeGoalPlan)) {
+      return {
+        type: 'kick_stalled_runner',
+        goalPlanId: route.goalPlanId,
+        intent: route.intent,
+        eventType: route.eventType,
+        summaryCode: route.summaryCode,
+        summary: route.summary,
+        messageText: route.messageText,
+        appended: consumed,
+      };
+    }
+    return consumed;
   }
 
   // A user message starts a fresh chat stream directly; it does not pass through
