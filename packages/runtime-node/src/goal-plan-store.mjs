@@ -2816,12 +2816,26 @@ export function createGoalPlanStore({
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
     const shouldEmitGoalAccepted = upgradingFromIntake;
+    // 升级为 accepted_goal 时，未消费的 runner.interruption 标记必须一并消费：
+    // persist 的 hasUnconsumedInterruption 会把带中断标记的计划强制派生回 failed，
+    // 不消费则升级后计划立刻回到 failed，auto-start 永远放不进 Runner
+    // （缺陷现场：intake 首答中断标 failed，后续 goal_create_plan 升级仍卡死）。
+    const consumeInterruptionOnUpgrade = shouldEmitGoalAccepted
+      && activeGoal.runner?.interruption != null;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
       status: safeStatus,
       workflowKind: 'goal_self_driven',
+      ...(consumeInterruptionOnUpgrade
+        ? {
+          runner: {
+            ...(activeGoal.runner || {}),
+            interruption: null,
+          },
+        }
+        : {}),
       activation: {
         ...(activeGoal.activation || {}),
         ...(planPatch.activation || {}),

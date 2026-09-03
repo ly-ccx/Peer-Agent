@@ -96,6 +96,7 @@ import {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from '@peer-agent/runtime-node';
@@ -2953,13 +2954,21 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   if (!goalRunner) return;
   // 串行收口同会话 intake 流：等待原 sendMessage finally 释放 Runtime turn 后，
   // 再启动 Runner。仅发送 UI done 或同步 cancel 都不足以证明 session 已空闲。
+  // failed 计划的 re-arm 走 resume()：消费中断标记并把计划恢复为 executing；
+  // start() 对 failed 计划不会消费 interruption，会被 persist 重新派生回 failed。
+  const isFailedRearm = plan.status === 'failed';
   void serializeAcceptedGoalRunnerHandoff({
     forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
       plan.conversationId,
       { reason: 'goal_handoff' },
     ) ?? { released: Promise.resolve() },
-    isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId)),
-    startRunner: () => goalRunner.start(plan.planId),
+    isStillAccepted: () => (
+      shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
+      || shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
+    ),
+    startRunner: () => (isFailedRearm
+      ? goalRunner.resume(plan.planId, { reason: 'goal_accepted_rearm' })
+      : goalRunner.start(plan.planId)),
   }).catch((error) => {
     console.error('[main] plan-change auto-start goal runner failed:', error?.message || error);
   });
