@@ -2816,12 +2816,35 @@ export function createGoalPlanStore({
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
     const shouldEmitGoalAccepted = upgradingFromIntake;
+    // normalizeRunnerState 会保留合法的 interruption 事实；这里取规范化后的 runner
+    // 快照用于升级路径（若契约无 runner 则视为无陈旧中断可消费）。
+    const upgradingFromIntakeRunner = upgradingFromIntake
+      ? normalizeRunnerState(activeGoal.runner, activeGoal.planId)
+      : null;
+    // 升级 intake → accepted_goal 是一次全新的目标接受决策。intake 期间写入的
+    // stream 中断事实（recoverable:false）属于已被取代的前一回合，不得毒化这次
+    // 升级：persist() 的 hasUnconsumedInterruption 不变量会把契约压回 failed，
+    // auto-start 闸门随即拒绝启动 Runner（turnCount=0 永久停摆）。在此原子消费
+    // 该中断并重新武装 runner，使 goal-accepted 事件后的启动闸门按 accepted 放行。
+    const staleInterruption = upgradingFromIntakeRunner?.interruption ?? null;
+    const consumedInterruptionPatch = staleInterruption
+      ? {
+        runner: {
+          ...upgradingFromIntakeRunner,
+          enabled: true,
+          status: 'running',
+          interruption: undefined,
+          updatedAt: new Date().toISOString(),
+        },
+      }
+      : null;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
       status: safeStatus,
       workflowKind: 'goal_self_driven',
+      ...(consumedInterruptionPatch || {}),
       activation: {
         ...(activeGoal.activation || {}),
         ...(planPatch.activation || {}),

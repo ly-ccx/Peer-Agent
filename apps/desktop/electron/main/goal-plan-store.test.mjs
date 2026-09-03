@@ -2075,6 +2075,59 @@ test('upsertGoalContract: 只在 intake 升级时发出 goal-accepted，Runner �
   assert.equal(events.at(-1)?.changeKind, 'persist');
 });
 
+test('upsertGoalContract: 升级消费陈旧 stream 中断，goal-accepted 后 Runner 闸门放行（回归：turnCount=0 停摆）', () => {
+  // 复刻事故现场（plan 464f9554）：
+  // 1. goal 首答建立 intake 契约；2. 普通回合流错误写入 recoverable:false 中断，
+  //    persist 的 hasUnconsumedInterruption 不变量把契约派生为 failed；
+  // 3. 用户续聊后模型调用 goal_create_plan 升级 intake → accepted_goal。
+  // 修复前：升级写入被不变量压回 failed → auto-start 闸门拒绝 → Runner 永不启动。
+  // 修复后：升级是全新的目标接受决策，陈旧中断被原子消费，闸门按 accepted 放行。
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-stale-interruption',
+    goal: '修复权限判断并部署预发',
+  });
+  store.setRunnerState(intake.planId, {
+    enabled: true,
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_interrupted',
+      reason: 'error',
+      recoverable: false,
+      attempt: 1,
+      interruptedAt: '2026-09-03T02:19:52.080Z',
+    },
+  });
+  const poisoned = store.getPlan(intake.planId);
+  assert.equal(poisoned.status, 'failed', '中断写入后契约被毒化为 failed（事故现场）');
+  assert.equal(poisoned.runner.interruption.source, 'stream_interrupted');
+
+  const upgraded = store.upsertGoalContract('conv-stale-interruption', {
+    goal: '修复 nexus 权限判断并部署预发',
+    title: '修复 nexus 权限判断并部署预发',
+    status: 'accepted',
+    activation: { kind: 'accepted_goal' },
+    tasks: [
+      { taskId: 'read-deps', title: '读取依赖', status: 'pending', evidenceRefs: [] },
+      { taskId: 'fix-acl', title: '修复 ACL', status: 'pending', evidenceRefs: [] },
+      { taskId: 'deploy', title: '部署预发', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+
+  assert.equal(upgraded.planId, intake.planId, '必须原地升级，planId 不变');
+  assert.equal(upgraded.status, 'accepted', '升级后 status 必须是 accepted，不得被陈旧中断毒化为 failed');
+  assert.equal(upgraded.activation?.kind, 'accepted_goal');
+  assert.equal(upgraded.runner?.interruption, undefined, '陈旧中断必须被原子消费');
+  assert.equal(upgraded.runner?.enabled, true, 'runner 必须重新武装');
+  assert.equal(upgraded.runner?.status, 'running', 'runner 必须处于可被 auto-start 接管的形态');
+
+  // 后续普通 persist 不再被陈旧中断毒化（中断已消费）。
+  store.setPlanStatus(upgraded.planId, 'executing');
+  const afterPersist = store.getPlan(upgraded.planId);
+  assert.equal(afterPersist.status, 'executing', '中断消费后普通 persist 不得再派生 failed');
+  assert.equal(afterPersist.runner?.interruption, undefined);
+});
+
 test('派生子目标会反向关联父任务并联动执行状态', () => {
   const parent = store.createPlan({
     conversationId: 'conv-parent-link',
