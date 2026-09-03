@@ -253,6 +253,7 @@ export {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
