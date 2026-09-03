@@ -162,11 +162,24 @@ describe('resolveGoalPlanGate', () => {
       listPlansByConversation: () => [
         { status: 'completed' },
         { status: 'cancelled' },
-        { status: 'failed' },
       ],
     };
     assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
       hasPlan: false,
+      hasApprovedPlan: false,
+      intakeActive: false,
+      interruptedIntakeActive: false,
+    });
+  });
+
+  it('recognizes failed plans as active and recoverable without deadlocking side-effect writes', () => {
+    const fakeStore = {
+      listPlansByConversation: () => [
+        { status: 'failed', activation: { kind: 'accepted_goal' } },
+      ],
+    };
+    assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
+      hasPlan: true,
       hasApprovedPlan: false,
       intakeActive: false,
       interruptedIntakeActive: false,
