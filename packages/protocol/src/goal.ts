@@ -24,6 +24,8 @@ export type GoalPlanStatus =
   | 'accepted'
   | 'executing'
   | 'paused'
+  /** 未消费执行中断的可恢复挂起态（非终态，见 peer-knowledge ADR 73）。 */
+  | 'interrupted'
   | 'completed'
   | 'cancelled'
   | 'failed';

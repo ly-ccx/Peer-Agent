@@ -71,16 +71,21 @@ export function shouldAutoStartAcceptedGoalRunner(plan) {
 }
 
 /**
- * failed 计划的 re-arm 判定：goal-accepted 变更（用户/模型重新 goal_create_plan）
- * 可以把一个因中断而终态 failed 的 accepted_goal 重新拉起。runTrace 里必须有
- * turn 执行过才需要 re-arm；turnCount=0 说明 Runner 从未跑过一回合，属于启动窗口
- * 失败，同样允许拉起。cancelled / completed 是用户或流程的明确终态，不在此恢复。
+ * 中断挂起 / failed 计划的 re-arm 判定：goal-accepted 变更（用户/模型重新
+ * goal_create_plan）可以把一个因执行中断而挂起的 accepted_goal 重新拉起。
+ * - status === 'interrupted'（ADR 73）：未消费执行中断的可恢复挂起态，恢复执行由
+ *   resume() 消费中断标记完成。
+ * - status === 'failed'：兼容存量失败事实（含真实叶子失败），继续按既有 re-arm 路径
+ *   处理。
+ * runTrace 里必须有 turn 执行过才需要 re-arm；turnCount=0 说明 Runner 从未跑过一
+ * 回合，属于启动窗口失败，同样允许拉起。cancelled / completed 是用户或流程的明确
+ * 终态，不在此恢复。
  */
 export function shouldRearmFailedGoalPlanFromChange(plan) {
   if (!plan) return false;
   if (plan.workflowKind !== 'goal_self_driven') return false;
   if (plan.activation?.kind !== 'accepted_goal') return false;
-  if (plan.status !== 'failed') return false;
+  if (plan.status !== 'failed' && plan.status !== 'interrupted') return false;
   return true;
 }
 
@@ -93,9 +98,9 @@ export function shouldAutoStartAcceptedGoalRunnerFromChange(change, plan) {
   if (change?.changeKind !== 'goal-accepted') return false;
   // 正常路径：accepted/executing 计划由 start() 拉起。
   if (shouldAutoStartAcceptedGoalRunner(plan)) return true;
-  // re-arm 路径：中断终态 failed 的 accepted_goal 在收到新的 goal-accepted 变更
-  // （模型重新 goal_create_plan）时，用 resume() 消费中断标记并恢复执行，
-  // 避免 turn 1 注入失败后计划永久卡死。
+  // re-arm 路径：中断挂起（interrupted）或失败（failed）的 accepted_goal 在收到
+  // 新的 goal-accepted 变更（模型重新 goal_create_plan）时，用 resume() 消费中断
+  // 标记并恢复执行，避免 turn 1 注入失败后计划永久卡死。
   return shouldRearmFailedGoalPlanFromChange(plan);
 }
 

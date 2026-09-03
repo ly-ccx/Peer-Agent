@@ -25,6 +25,13 @@ function planWithDelivery(overrides: Partial<GoalPlan> = {}): GoalPlan {
   } as GoalPlan;
 }
 
+test('GoalPlanStatus 联合类型包含 interrupted 挂起态且不挤占 failed 语义', () => {
+  // ADR 73：未消费执行中断是独立可恢复挂起态，不是失败终态。
+  const interruptedPlan = planWithDelivery({ status: 'interrupted' });
+  assert.equal(interruptedPlan.status, 'interrupted');
+  assert.notEqual(interruptedPlan.status, 'failed');
+});
+
 test('GoalPlan 用 targetBranch 表达交付分支，不把 workspace 路径当唯一路由', () => {
   const plan = planWithDelivery({
     targetRepoId: 'peer_agent',

@@ -59,9 +59,9 @@ test('goal-accepted change re-arms a failed accepted_goal plan', (t) => {
   );
 });
 
-test('goal-accepted change still re-arms when the failed plan persists a stale interruption', (t) => {
-  // 兜底路径：磁盘上已存在 failed + 未消费 interruption 的 accepted_goal
-  // （升级前已落盘的旧数据），goal-accepted 变更必须能经 re-arm 闸门拉起。
+test('goal-accepted change re-arms an interrupted plan with a stale interruption', (t) => {
+  // 当前模型把未消费 interruption 归一化为 interrupted；goal-accepted 变更仍必须
+  // 能经 re-arm 闸门拉起。failed 作为升级前存量状态由上一条用例继续覆盖。
   const { store, events, conversationId } = setUpStore(t, 'conv-rearm-stale');
 
   const intake = store.createGoalContract({ ...baseGoal, conversationId });
@@ -74,17 +74,17 @@ test('goal-accepted change still re-arms when the failed plan persists a stale i
   });
   store.setPlanStatus(intake.planId, 'failed', { changedBy: 'system:test' });
 
-  const failedPlan = store.getPlan(intake.planId);
-  assert.equal(failedPlan.status, 'failed');
+  const interruptedPlan = store.getPlan(intake.planId);
+  assert.equal(interruptedPlan.status, 'interrupted');
   events.length = 0;
 
-  const change = { changeKind: 'goal-accepted', planId: failedPlan.planId };
-  assert.equal(shouldRearmFailedGoalPlanFromChange(failedPlan), true);
-  assert.equal(shouldAutoStartAcceptedGoalRunnerFromChange(change, failedPlan), true);
+  const change = { changeKind: 'goal-accepted', planId: interruptedPlan.planId };
+  assert.equal(shouldRearmFailedGoalPlanFromChange(interruptedPlan), true);
+  assert.equal(shouldAutoStartAcceptedGoalRunnerFromChange(change, interruptedPlan), true);
 
   // 非 goal-accepted 变更不能 re-arm（防止 Runner 自写 persist 触发自激循环）。
   assert.equal(
-    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'persist' }, failedPlan),
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'persist' }, interruptedPlan),
     false,
   );
 });

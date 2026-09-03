@@ -1392,7 +1392,7 @@ function normalizeRunTrace(trace, fallback = {}) {
   return normalized;
 }
 
-const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused', 'failed']);
+const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused', 'interrupted', 'failed']);
 
 function normalizeConversationId(value) {
   if (value === undefined || value === null) return null;
@@ -2172,16 +2172,17 @@ export function createGoalPlanStore({
         ? attachWorkspaceHeadBinding(plan, { readWorkspaceHead })
         : plan,
     );
-    // 已停止且尚未消费的执行中断是独立于叶子任务的失败事实，普通 persist 不能
-    // 把 failed 重新派生为 completed；仅 resumeRunner 能原子消费该事实并恢复执行。
-    // 可恢复中断在重试预算内仍由 running Runner 持有行动权，只记录失败尝试，不能
-    // 因为 interruption Evidence 的存在就把整个计划降级为 failed。
+    // 已停止且尚未消费的执行中断是独立于叶子任务的可恢复挂起事实（ADR 73），
+    // 普通 persist 不能把 interrupted 重新派生为 completed；仅 resumeRunner 能
+    // 原子消费该事实并恢复执行。可恢复中断在重试预算内仍由 running Runner 持有
+    // 行动权，只记录失败尝试，不能因为 interruption Evidence 的存在就把整个计划
+    // 降级为失败终态；真实叶子失败仍由 derivePlanStatus 派生为 failed。
     const hasUnconsumedInterruption = Boolean(
       normalized.runner?.interruption &&
       !(normalized.runner.interruption.recoverable === true && normalized.runner.status === 'running'),
     );
     const nextStatus = hasUnconsumedInterruption
-      ? 'failed'
+      ? 'interrupted'
       : options.preserveStatus
         ? normalized.status
         : derivePlanStatus(normalized.status, normalized.tasks);
