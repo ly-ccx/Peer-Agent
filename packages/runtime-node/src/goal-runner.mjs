@@ -25,8 +25,8 @@ const EXPLORER_CONCURRENCY_HARD_CAP = 8;
 const DEFAULT_NO_PROGRESS_LIMIT = 3;
 /** 同一可恢复 blocker 连续出现多少次才真正交还用户。 */
 const DEFAULT_BLOCKER_AUDIT_LIMIT = 3;
-/** 连续多少轮「纯文本且无推进」才判定真口头停；首轮视为宽限过渡回合。 */
-const VERBAL_STOP_GRACE_TURNS = 2;
+/** 连续多少轮「纯文本且无推进」才判定真口头停；前两轮视为纠偏宽限。 */
+const VERBAL_STOP_GRACE_TURNS = 3;
 const INSPECT_EXPLORER_MAX_TOOL_CALLS = 4;
 const INSPECT_EXPLORER_MAX_DURATION_MS = 120000;
 
@@ -1578,8 +1578,8 @@ export function createGoalRunner({
     let lastSignal = null;
     let noProgressStreak = 0;
     // 口头停宽限计数：连续多少轮「纯文本且无推进」后才暂停。
-    // 1 = 宽限过渡回合（工具调用可能被输出截断/下一轮才发起），
-    // 2 = 连续两轮仍无推进，判定真口头停。有推进即清零。
+    // 1–2 = 纠偏续跑（agent loop 应收束闸门拦住口述，这里是兜底），
+    // 3 = 仍无推进，判定真口头停。有推进即清零。
     let verbalStopStreak = 0;
     // 防偏航:范围基线在本次 pump 首轮建立,后续轮次相对它检测 drift（任务/文件膨胀）。
     let scopeBaseline = null;
@@ -2019,9 +2019,9 @@ export function createGoalRunner({
 
       const exploreRequests = normalizeExploreRequests(result);
 
-      // 口头停但计划未终态：纯文本且无推进的过渡回合先给一轮宽限
-      // （工具调用可能被输出截断、下一轮才真正发起）；连续两轮仍无推进
-      // 才判定真口头停并交还用户。intake / explorer 轮不算口头停；
+      // 口头停但计划未终态：纯文本且无推进先纠偏续跑（工具可能被截断、
+      // 或只口述了「我去读」）；连续 VERBAL_STOP_GRACE_TURNS 轮仍无推进
+      // 才 pause 交还用户。intake / explorer 轮不算口头停；
       // continue:true 表示模型还要接着干。
       const openLeavesAfterTurn = countOpenLeaves(latest);
       const turnDidNotAdvanceOpenWork = !isIntakeContract(latest)

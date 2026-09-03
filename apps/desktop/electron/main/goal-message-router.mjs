@@ -211,15 +211,23 @@ export function applyGoalMessageRoute({
     && activeGoalPlan?.status === 'executing'
     && ['blocked', 'budget_exhausted'].includes(activeGoalPlan?.runner?.status)
     && activeGoalPlan?.runner?.blockedReason !== 'requested_user_input';
+  const pausedNeedsResume = continuesCurrentGoal
+    && route.intent !== 'correction'
+    && (
+      activeGoalPlan?.status === 'paused'
+      || activeGoalPlan?.runner?.status === 'paused'
+    );
   if (
     continuesCurrentGoal
     && (activeGoalPlan?.status === 'failed'
       || foregroundTakesOverSystemBlocker
-      || foregroundTakesOverStaleBlocker)
+      || foregroundTakesOverStaleBlocker
+      || pausedNeedsResume)
   ) {
     goalPlanStore?.resumeRunner?.(route.goalPlanId, {
       intent: 'execute',
       phase: activeGoalPlan.runner?.phase === 'blocked'
+        || activeGoalPlan.runner?.phase === 'waiting_user'
         ? 'orient'
         : (activeGoalPlan.runner?.phase ?? 'orient'),
     });
@@ -252,7 +260,7 @@ export function applyGoalMessageRoute({
     pauseRunner(route.goalPlanId);
   }
 
-  if (stalledWithoutTurn) {
+  if (stalledWithoutTurn || pausedNeedsResume) {
     return {
       type: 'kick_stalled_runner',
       goalPlanId: route.goalPlanId,

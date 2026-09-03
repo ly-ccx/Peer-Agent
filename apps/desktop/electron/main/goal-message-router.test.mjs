@@ -448,6 +448,43 @@ test('applyGoalMessageRoute: accepted + 残留 waiting_user 的继续会消费�
   assert.deepEqual(calls, [['consume', 'goal-leftover', 'goal_resumed']]);
 });
 
+test('applyGoalMessageRoute: paused verbal-stop 的跟进会 resume 并 kick Runner', () => {
+  const pausedPlan = {
+    planId: 'goal-paused',
+    status: 'paused',
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    runner: {
+      enabled: true,
+      status: 'paused',
+      phase: 'waiting_user',
+      blockedReason: 'verbal_stop_no_remaining_progress',
+      turnCount: 2,
+    },
+  };
+  const route = routeGoalMessage({ messageText: '继续推进，不要停下来', activeGoalPlan: pausedPlan });
+  const calls = [];
+  const result = applyGoalMessageRoute({
+    route,
+    activeGoalPlan: pausedPlan,
+    goalPlanStore: {
+      resumeRunner(planId, patch) {
+        calls.push(['resume', planId, patch.intent]);
+        return { ...pausedPlan, status: 'executing', runner: { status: 'running' } };
+      },
+      appendRunEvent(planId, event) {
+        calls.push(['append', planId, event.type]);
+        return event;
+      },
+    },
+  });
+
+  assert.equal(route.intent, 'follow_up');
+  assert.equal(result.type, 'kick_stalled_runner');
+  assert.equal(result.goalPlanId, 'goal-paused');
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'append']);
+});
+
 test('applyGoalMessageRoute: running 但 0 回合的继续会改成 kick_stalled_runner', () => {
   const stalledPlan = {
     planId: 'goal-stalled',

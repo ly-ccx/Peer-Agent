@@ -873,7 +873,13 @@ function buildGoalRunnerReminder(plan, turnNumber) {
     kind: 'goal-runner',
     scope: 'turn',
     layer: 'L6_MODE_REMINDER',
-    content: 'Continue autonomously within the active goal, boundaries, and success criteria. Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path. If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+    content: [
+      'Continue autonomously within the active goal, boundaries, and success criteria.',
+      'Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path.',
+      'Open tasks are not finished by narrating the next read/search/edit. In this same turn emit a real tool call (read_file, bash, edit_file, or write_file).',
+      'Do not send a planning-only reply such as "现在读" / "先读取" / "Let me read" and then stop.',
+      'If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+    ].join(' '),
   };
 }
 

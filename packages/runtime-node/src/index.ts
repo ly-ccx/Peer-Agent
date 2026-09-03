@@ -360,6 +360,7 @@ export {
   emptyModelResponseCorrection,
   emptyModelResponseError,
   hasEmptyWriteNarration,
+  hasIncompleteActionNarration,
   hasLiteralToolCallSyntax,
   hasUnsupportedToolClaim,
   shouldRetryNoToolResponse,

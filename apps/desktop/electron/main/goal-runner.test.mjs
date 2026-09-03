@@ -1737,7 +1737,7 @@ test('start: 并发 kick 在 prepareIsolation 让出时只开一次泵', async (
   assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
 });
 
-test('verbal stop: 连续两轮纯文本且无推进才暂停（首轮宽限）', async () => {
+test('verbal stop: 连续三轮纯文本且无推进才暂停（前两轮纠偏）', async () => {
   const plan = createApprovedPlan();
   registerEvidenceRefs(plan.planId, ['artifact://verbal-1']);
   store.recordTaskEvidence(plan.planId, 't1', {
@@ -1757,17 +1757,17 @@ test('verbal stop: 连续两轮纯文本且无推进才暂停（首轮宽限）'
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(got.status, 'paused');
   assert.equal(got.runner.status, 'paused');
   assert.equal(got.runner.blockedReason, 'verbal_stop_no_remaining_progress');
   assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
-  // 首轮应记录宽限事件而不是直接暂停。
   const graceEvents = got.runTrace.events.filter(
     (event) => event.type === 'self_correction' && event.payload?.summaryCode === 'verbal_stop_grace',
   );
-  assert.equal(graceEvents.length, 1);
+  assert.equal(graceEvents.length, 2);
   assert.equal(graceEvents[0]?.payload?.turnNumber, 1);
+  assert.equal(graceEvents[1]?.payload?.turnNumber, 2);
 });
 
 test('verbal stop: 纯文本过渡回合先宽限继续，下一轮推进则不暂停', async () => {
