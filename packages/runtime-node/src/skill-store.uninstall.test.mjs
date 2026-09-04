@@ -65,11 +65,13 @@ test('uninstall unlinks a borrowed skill without deleting the source directory',
   assert.equal(lstatSync(sourceDir).isDirectory(), true);
 });
 
-test('uninstall refuses workspace skills and path-escape attempts', () => {
+test('uninstall refuses hand-authored workspace skills and path-escape attempts', () => {
   const { store, workspaceRoot } = createStoreFixture();
   makeSkillDir(path.join(workspaceRoot, 'skills'), 'workspace-skill');
   store.refresh();
-  assert.ok(store.listSkills().some((skill) => skill.skillId === 'workspace-skill' && skill.scope === 'workspace'));
+  const workspaceSkill = store.listSkills().find((skill) => skill.skillId === 'workspace-skill');
+  assert.equal(workspaceSkill?.scope, 'workspace');
+  assert.equal(workspaceSkill?.canUninstall, false);
 
   const workspaceResult = store.uninstallSkill('workspace-skill');
   assert.equal(workspaceResult.ok, false);
@@ -79,6 +81,25 @@ test('uninstall refuses workspace skills and path-escape attempts', () => {
   const escapeResult = store.uninstallSkill('../escape-skill');
   assert.equal(escapeResult.ok, false);
   assert.equal(escapeResult.error, 'invalid-skill-id');
+});
+
+test('uninstall refuses workspace symlinks even when their target has managed metadata', () => {
+  const { store, workspaceRoot, sourceRoot } = createStoreFixture();
+  const sourceDir = makeSkillDir(sourceRoot, 'linked-workspace-skill');
+  writeFileSync(path.join(sourceDir, '_meta.json'), JSON.stringify({ source: 'skillhub' }));
+  const linkPath = path.join(workspaceRoot, 'skills', 'linked-workspace-skill');
+  mkdirSync(path.dirname(linkPath), { recursive: true });
+  symlinkSync(sourceDir, linkPath);
+  store.refresh();
+
+  const skill = store.listSkills().find((item) => item.skillId === 'linked-workspace-skill');
+  assert.equal(skill?.scope, 'workspace');
+  assert.equal(skill?.canUninstall, false);
+  const result = store.uninstallSkill('linked-workspace-skill');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'workspace-skill-not-uninstallable');
+  assert.equal(lstatSync(linkPath).isSymbolicLink(), true);
+  assert.equal(existsSync(sourceDir), true);
 });
 
 function makeSkillZip(skillId = 'zip-skill') {
@@ -112,9 +133,14 @@ test('installSkillFromZip defaults to global userData/skills', () => {
 
 test('installSkillFromZip writes workspace/skills when scope=workspace', () => {
   const { store, userDataPath, workspaceRoot } = createStoreFixture();
-  const installed = store.installSkillFromZip(makeSkillZip('workspace-zip-skill'), { scope: 'workspace' });
+  const installed = store.installSkillFromZip(makeSkillZip('workspace-zip-skill'), {
+    scope: 'workspace',
+    source: 'skillhub',
+  });
   assert.equal(installed.skillId, 'workspace-zip-skill');
   assert.equal(installed.installScope, 'workspace');
+  assert.equal(installed.canUninstall, true);
+  assert.equal(store.getSkillDetail('workspace-zip-skill')?.canUninstall, true);
   assert.equal(
     existsSync(path.join(workspaceRoot, 'skills', 'workspace-zip-skill', 'SKILL.md')),
     true,
@@ -123,6 +149,36 @@ test('installSkillFromZip writes workspace/skills when scope=workspace', () => {
     existsSync(path.join(userDataPath, 'skills', 'workspace-zip-skill')),
     false,
   );
+});
+
+test('uninstall deletes a managed workspace install and keeps the workspace root', () => {
+  const { store, workspaceRoot } = createStoreFixture();
+  const target = path.join(workspaceRoot, 'skills', 'workspace-managed-skill');
+  store.installSkillFromZip(makeSkillZip('workspace-managed-skill'), {
+    scope: 'workspace',
+    source: 'qoder-marketplace',
+  });
+
+  const result = store.uninstallSkill('workspace-managed-skill');
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, 'deleted');
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(path.join(workspaceRoot, 'skills')), true);
+});
+
+test('workspace frontmatter source alone does not grant delete permission', () => {
+  const { store, workspaceRoot } = createStoreFixture();
+  const target = makeSkillDir(path.join(workspaceRoot, 'skills'), 'frontmatter-source-skill');
+  writeFileSync(path.join(target, 'SKILL.md'), `---\nname: frontmatter-source-skill\ndescription: demo\nsource: skillhub\n---\n`);
+  store.refresh();
+
+  const skill = store.listSkills().find((item) => item.skillId === 'frontmatter-source-skill');
+  assert.equal(skill?.source, 'skillhub');
+  assert.equal(skill?.canUninstall, false);
+  const result = store.uninstallSkill('frontmatter-source-skill');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'workspace-skill-not-uninstallable');
+  assert.equal(existsSync(target), true);
 });
 
 test('installSkillFromZip rejects workspace scope without an active workspace', () => {

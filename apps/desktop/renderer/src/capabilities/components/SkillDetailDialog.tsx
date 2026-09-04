@@ -51,7 +51,7 @@ export function SkillDetailDialog({
   }, [skill.skillId]);
 
   const current = detail ?? skill;
-  const canUninstall = current.scope !== 'workspace' && typeof onUninstall === 'function';
+  const canUninstall = current.canUninstall && typeof onUninstall === 'function';
 
   /** 卸载成功后走 Overlay requestClose，保留统一退场动画；不要直接 onClose 硬卸载。 */
   const handleUninstall = async (requestClose: () => void) => {
@@ -127,7 +127,11 @@ export function SkillDetailDialog({
             <footer className="skill-detail-footer">
               {confirmUninstall ? (
                 <div className="skill-uninstall-confirm" role="group" aria-label="确认卸载">
-                  <p>确认卸载「{current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。</p>
+                  <p>
+                    {current.scope === 'workspace'
+                      ? `确认卸载「${current.name}」？当前工作区中的安装目录会被永久删除，且无法撤销。`
+                      : `确认卸载「${current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。`}
+                  </p>
                   <div className="skill-uninstall-actions">
                     <button
                       type="button"

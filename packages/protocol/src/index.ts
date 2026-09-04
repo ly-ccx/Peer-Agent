@@ -96,6 +96,11 @@ export interface SkillSummary {
    * 例：skillhub、aone-open；本地手工 skill 可为空。
    */
   readonly source?: string | null;
+  /**
+   * 运行时根据安装来源、作用域与路径边界计算的卸载能力。
+   * 界面必须使用该字段，不可仅凭 scope 推断，以免误删工作区源码。
+   */
+  readonly canUninstall?: boolean;
 }
 
 export interface SkillDetail extends SkillSummary {
