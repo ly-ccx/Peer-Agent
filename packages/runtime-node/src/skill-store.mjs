@@ -413,8 +413,8 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     }
   }
 
-  function listSkills() {
-    return skills.map((skill) => ({
+  function summarizeSkill(skill, wsKey = activeWorkspaceKey) {
+    return {
       skillId: skill.skillId,
       name: skill.name,
       description: skill.description,
@@ -422,14 +422,41 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       whenToUse: skill.whenToUse || '',
       version: skill.version,
       dataLevel: skill.dataLevel,
-      // enabled = 对本工作区是否挂载（全局硬禁用优先）。
-      enabled: isSkillMounted(skill.skillId),
+      // enabled = 对目标工作区是否挂载（全局硬禁用优先）。
+      enabled: isSkillMounted(skill.skillId, wsKey),
       scope: skill.scope,
       workspacePath: skill.workspacePath,
       iconUrl: skill.iconUrl ?? null,
       source: skill.source ?? null,
       canUninstall: skill.scope === 'global' || isManagedWorkspaceSkill(skill),
-    }));
+    };
+  }
+
+  /**
+   * 默认返回运行时（当前激活工作区）投影。
+   * 传入 workspacePaths 时，为公共管理页返回所有目标工作区 Skill，并只附带一份全局 Skill。
+   */
+  function listSkills(workspacePaths) {
+    if (!Array.isArray(workspacePaths)) return skills.map((skill) => summarizeSkill(skill));
+
+    loadSettings();
+    const normalizedPaths = [...new Set(workspacePaths.map(normalizeWorkspaceKey).filter(Boolean))];
+    const workspaceSkills = normalizedPaths.flatMap((wsKey) => {
+      const root = workspaceSkillsRoot(wsKey);
+      return root
+        ? loadSkillsFromRoot(root).map((skill) => summarizeSkill({
+            ...skill,
+            scope: 'workspace',
+            workspacePath: wsKey,
+          }, wsKey))
+        : [];
+    });
+    const globalSkills = loadSkillsFromRoot(skillsRoot).map((skill) => summarizeSkill({
+      ...skill,
+      scope: 'global',
+      workspacePath: null,
+    }, null));
+    return [...workspaceSkills, ...globalSkills];
   }
 
   function ensureWorkspaceDisabledSet(wsKey = activeWorkspaceKey) {
@@ -441,11 +468,11 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return workspaceDisabledMap.get(wsKey);
   }
 
-  /** 对本工作区挂载 skill（打开开关）。 */
-  function enableSkill(skillId) {
+  /** 对目标工作区挂载 skill（打开开关）；未指定时沿用当前激活工作区。 */
+  function enableSkill(skillId, workspacePath) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
-    const wsKey = activeWorkspaceKey;
+    const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
     if (wsKey) {
       const set = ensureWorkspaceDisabledSet(wsKey);
       set?.delete(id);
@@ -455,17 +482,17 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       globalDisabledSet.delete(id);
     }
     saveSettings();
-    return listSkills();
+    return workspacePath === undefined ? listSkills() : listSkills(wsKey ? [wsKey] : []);
   }
 
   /**
-   * 对本工作区卸载 skill（关闭开关）。不删除全局安装包。
-   * 无工作区上下文时回退为全局禁用（兼容旧 CLI/测试路径）。
+   * 对目标工作区卸载 skill（关闭开关）。不删除全局安装包。
+   * 未指定工作区时沿用当前上下文；显式 null 回退为全局禁用。
    */
-  function disableSkill(skillId) {
+  function disableSkill(skillId, workspacePath) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
-    const wsKey = activeWorkspaceKey;
+    const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
     if (wsKey) {
       const set = ensureWorkspaceDisabledSet(wsKey);
       set?.add(id);
@@ -474,7 +501,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       globalDisabledSet.add(id);
     }
     saveSettings();
-    return listSkills();
+    return workspacePath === undefined ? listSkills() : listSkills(wsKey ? [wsKey] : []);
   }
 
   // 校验 skillId 合法且不含路径穿越，返回安全的目录名。非法返回 null。
@@ -608,11 +635,11 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * - workspace/skills 下由支持的市场来源安装的真实目录：递归删除
    * - workspace 手写 Skill、符号链接、路径逃逸：拒绝删除
    */
-  function uninstallSkill(skillId) {
+  function uninstallSkill(skillId, workspacePath) {
     const dirName = safeSkillDirName(skillId);
     if (!dirName) return { ok: false, error: 'invalid-skill-id' };
 
-    const skill = findSkill(skillId);
+    const skill = findSkill(skillId, workspacePath);
     if (!skill) return { ok: false, error: 'not-found' };
 
     const root = skill.scope === 'workspace' ? workspaceSkillsRoot(skill.workspacePath) : skillsRoot;
@@ -665,8 +692,18 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return { ok: true, mode };
   }
 
-  function findSkill(skillId) {
-    return skills.find((s) => s.skillId === skillId) ?? null;
+  function findSkill(skillId, workspacePath) {
+    if (workspacePath === undefined) return skills.find((s) => s.skillId === skillId) ?? null;
+    const wsKey = normalizeWorkspaceKey(workspacePath);
+    const root = wsKey ? workspaceSkillsRoot(wsKey) : skillsRoot;
+    const skill = loadSkillsFromRoot(root).find((candidate) => candidate.skillId === skillId);
+    return skill
+      ? {
+          ...skill,
+          scope: wsKey ? 'workspace' : 'global',
+          workspacePath: wsKey || null,
+        }
+      : null;
   }
 
   function readSkillContext(skillId) {
@@ -694,8 +731,8 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     };
   }
 
-  function getSkillDetail(skillId) {
-    const skill = findSkill(skillId);
+  function getSkillDetail(skillId, workspacePath) {
+    const skill = findSkill(skillId, workspacePath);
     if (!skill) return null;
     return {
       skillId: skill.skillId,
@@ -704,7 +741,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       whenToUse: skill.whenToUse || '',
       version: skill.version,
       dataLevel: skill.dataLevel,
-      enabled: isSkillMounted(skill.skillId),
+      enabled: isSkillMounted(skill.skillId, workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath)),
       scope: skill.scope,
       workspacePath: skill.workspacePath,
       iconUrl: skill.iconUrl ?? null,

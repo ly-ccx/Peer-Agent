@@ -21,7 +21,7 @@ export function SkillDetailDialog({
 }: {
   readonly skill: SkillSummary;
   readonly onClose: () => void;
-  readonly onToggle: (skillId: string, enabled: boolean) => Promise<void>;
+  readonly onToggle: (skillId: string, enabled: boolean, workspacePath?: string | null) => Promise<void>;
   readonly onUninstall?: (skillId: string) => Promise<void>;
 }) {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
@@ -35,7 +35,7 @@ export function SkillDetailDialog({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    void clientApi.getSkillDetail(skill.skillId)
+    void clientApi.getSkillDetail(skill.skillId, skill.workspacePath ?? null)
       .then((value) => {
         if (cancelled) return;
         setDetail(value);
@@ -48,7 +48,7 @@ export function SkillDetailDialog({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [skill.skillId]);
+  }, [skill.skillId, skill.workspacePath]);
 
   const current = detail ?? skill;
   const canUninstall = current.canUninstall && typeof onUninstall === 'function';
@@ -96,7 +96,7 @@ export function SkillDetailDialog({
               onCheckedChange={async (enabled) => {
                 setToggling(true);
                 try {
-                  await onToggle(current.skillId, enabled);
+                  await onToggle(current.skillId, enabled, current.workspacePath ?? null);
                   setDetail((previous) => previous ? { ...previous, enabled } : previous);
                 } finally {
                   setToggling(false);

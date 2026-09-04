@@ -80,17 +80,17 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
 test('skills IPC preserves payload and result projection', async () => {
   const { calls, handlers } = createHarness();
 
-  assert.equal(await handlers.get('skills:list')(), 'list');
-  assert.equal(await handlers.get('skills:get-detail')(null, { skillId: 'skill-1' }), 'get-detail');
+  assert.equal(await handlers.get('skills:list')(null, { workspacePaths: ['/workspace/a', '/workspace/b'] }), 'list');
+  assert.equal(await handlers.get('skills:get-detail')(null, { skillId: 'skill-1', workspacePath: '/workspace/b' }), 'get-detail');
   assert.equal(await handlers.get('skills:get-detail')(null), 'get-detail');
-  assert.equal(await handlers.get('skills:refresh')(), 'refresh');
+  assert.equal(await handlers.get('skills:refresh')(null, { workspacePaths: ['/workspace/a'] }), 'refresh');
   assert.equal(await handlers.get('skills:upload')(null, { zipBase64: 'emlw' }), 'upload');
-  assert.equal(await handlers.get('skills:enable')(null, { skillId: 'skill-1' }), 'enable');
-  assert.equal(await handlers.get('skills:disable')(null, { skillId: 'skill-1' }), 'disable');
+  assert.equal(await handlers.get('skills:enable')(null, { skillId: 'skill-1', workspacePath: '/workspace/a' }), 'enable');
+  assert.equal(await handlers.get('skills:disable')(null, { skillId: 'skill-1', workspacePath: '/workspace/b' }), 'disable');
   assert.equal(await handlers.get('skills:list-available')(), 'list-available');
   assert.equal(await handlers.get('skills:link')(null, { skillId: 'skill-2' }), 'link');
   assert.equal(await handlers.get('skills:unlink')(null, { skillId: 'skill-2' }), 'unlink');
-  assert.equal(await handlers.get('skills:uninstall')(null, { skillId: 'skill-3' }), 'uninstall');
+  assert.equal(await handlers.get('skills:uninstall')(null, { skillId: 'skill-3', workspacePath: '/workspace/b' }), 'uninstall');
   assert.equal(await handlers.get('skills:marketplace:list')(), 'marketplace-list');
   assert.equal(await handlers.get('skills:marketplace:get-detail')(null, { catalogId: 'owned/demo' }), 'marketplace-get-detail');
   assert.equal(await handlers.get('skills:marketplace:install')(null, { catalogId: 'owned/demo' }), 'marketplace-install');
@@ -106,17 +106,17 @@ test('skills IPC preserves payload and result projection', async () => {
   assert.equal(await handlers.get('skills:qoder:list-taxonomies')(), 'qoder-list-taxonomies');
 
   assert.deepEqual(calls, [
-    ['list'],
-    ['get-detail', 'skill-1'],
-    ['get-detail', undefined],
-    ['refresh'],
+    ['list', ['/workspace/a', '/workspace/b']],
+    ['get-detail', 'skill-1', '/workspace/b'],
+    ['get-detail', undefined, undefined],
+    ['refresh', ['/workspace/a']],
     ['upload', 'emlw'],
-    ['enable', 'skill-1'],
-    ['disable', 'skill-1'],
+    ['enable', 'skill-1', '/workspace/a'],
+    ['disable', 'skill-1', '/workspace/b'],
     ['list-available'],
     ['link', 'skill-2'],
     ['unlink', 'skill-2'],
-    ['uninstall', 'skill-3'],
+    ['uninstall', 'skill-3', '/workspace/b'],
     ['marketplace-list'],
     ['marketplace-get-detail', 'owned/demo'],
     ['marketplace-install', 'owned/demo'],

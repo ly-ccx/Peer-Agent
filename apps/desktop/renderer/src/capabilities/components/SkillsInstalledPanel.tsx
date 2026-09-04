@@ -60,7 +60,7 @@ function SkillSection({
       <div className="skill-grid">
         {skills.map((skill) => (
           <article
-            key={skill.skillId}
+            key={`${skill.scope}:${skill.workspacePath ?? 'global'}:${skill.skillId}`}
             className={`skill-card ${skill.enabled ? '' : 'disabled'}`}
             tabIndex={0}
             role="button"
@@ -105,11 +105,13 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>([]);
 
   const loadSkills = useCallback(async () => {
     try {
-      const list = await clientApi.listSkills();
+      const workspaceState = await clientApi.workspaceList().catch(() => ({ workspaces: [], activeWorkspace: null }));
+      setWorkspaces(workspaceState.workspaces);
+      const list = await clientApi.listSkills(workspaceState.workspaces.map((workspace) => workspace.path));
       setSkills(list);
       onSkillsCountChange?.(list.length);
     } finally {
@@ -122,22 +124,15 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
     catch { setAvailable([]); }
   }, []);
 
-  const loadWorkspace = useCallback(async () => {
-    const result = await clientApi.workspaceList();
-    setActiveWorkspace(result.activeWorkspace);
-  }, []);
-
   useEffect(() => {
     void loadSkills();
     void loadAvailable();
-    void loadWorkspace();
-  }, [loadSkills, loadAvailable, loadWorkspace]);
+  }, [loadSkills, loadAvailable]);
 
   useEffect(() => clientApi.onWorkspacesChanged(() => {
     setSelectedSkill(null);
     void loadSkills();
-    void loadWorkspace();
-  }), [loadSkills, loadWorkspace]);
+  }), [loadSkills]);
 
   const filteredSkills = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -147,26 +142,30 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
       || skill.description?.toLowerCase().includes(query));
   }, [skills, searchQuery]);
 
-  const workspaceSkills = useMemo(
-    () => filteredSkills.filter((skill) => skill.scope === 'workspace'),
-    [filteredSkills],
-  );
+  const workspaceGroups = useMemo(() => workspaces.map((workspace) => ({
+    ...workspace,
+    skills: filteredSkills.filter((skill) => skill.scope === 'workspace' && skill.workspacePath === workspace.path),
+  })), [filteredSkills, workspaces]);
   const globalSkills = useMemo(
     () => filteredSkills.filter((skill) => skill.scope !== 'workspace'),
     [filteredSkills],
   );
   const borrowable = useMemo(() => available.filter((skill) => !skill.linked), [available]);
 
-  const setSkillEnabled = useCallback(async (skillId: string, enabled: boolean) => {
-    const updated = enabled
-      ? await clientApi.enableSkill(skillId)
-      : await clientApi.disableSkill(skillId);
-    setSkills(updated);
-    setSelectedSkill((current) => current?.skillId === skillId ? { ...current, enabled } : current);
+  const setSkillEnabled = useCallback(async (skillId: string, enabled: boolean, workspacePath?: string | null) => {
+    if (enabled) await clientApi.enableSkill(skillId, workspacePath);
+    else await clientApi.disableSkill(skillId, workspacePath);
+    setSkills((current) => current.map((skill) => skill.skillId === skillId && skill.workspacePath === workspacePath
+      ? { ...skill, enabled }
+      : skill));
+    setSelectedSkill((current) => current?.skillId === skillId && current.workspacePath === workspacePath
+      ? { ...current, enabled }
+      : current);
   }, []);
 
   const uninstallSkill = useCallback(async (skillId: string) => {
-    const result = await clientApi.uninstallSkill(skillId);
+    const workspacePath = selectedSkill?.workspacePath ?? null;
+    const result = await clientApi.uninstallSkill(skillId, workspacePath);
     if (!result.ok) {
       const reason = result.error === 'workspace-skill-not-uninstallable'
         ? '项目级 Skill 不能从这里删除源文件'
@@ -179,7 +178,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
     }
     // 刷新列表，但不要在这里硬卸载详情弹窗；由 SkillDetailDialog 走 Overlay requestClose 退场。
     await Promise.all([loadSkills(), loadAvailable()]);
-  }, [loadAvailable, loadSkills]);
+  }, [loadAvailable, loadSkills, selectedSkill?.workspacePath]);
 
   const handleLink = useCallback(async (skill: AvailableSkillSummary) => {
     setBusyId(skill.skillId);
@@ -214,19 +213,22 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
         <section className="skill-empty"><p>没有找到 Skill</p></section>
       ) : (
         <>
-          <SkillSection
-            title={`工作空间${activeWorkspace ? ` · ${activeWorkspace.split('/').filter(Boolean).at(-1)}` : ''}`}
-            description={activeWorkspace ?? '尚未选择工作空间'}
-            skills={workspaceSkills}
-            onSelect={setSelectedSkill}
-            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled); }}
-          />
+          {workspaceGroups.map((workspace) => (
+            <SkillSection
+              key={workspace.path}
+              title={`工作空间 · ${workspace.name || workspace.path.split('/').filter(Boolean).at(-1) || workspace.path}`}
+              description={workspace.path}
+              skills={workspace.skills}
+              onSelect={setSelectedSkill}
+              onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, skill.workspacePath); }}
+            />
+          ))}
           <SkillSection
             title="全局"
             description="安装在用户目录中，可挂载到任意工作空间"
             skills={globalSkills}
             onSelect={setSelectedSkill}
-            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled); }}
+            onToggle={(skill) => { void setSkillEnabled(skill.skillId, !skill.enabled, null); }}
           />
         </>
       )}

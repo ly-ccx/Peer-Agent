@@ -36,16 +36,16 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
 
   return Object.freeze([
     owner('skills-ipc', (ipc) => {
-      ipc.handle('skills:list', () => ports.list());
-      ipc.handle('skills:get-detail', (_event, { skillId } = {}) => ports.getDetail(skillId));
-      ipc.handle('skills:refresh', () => ports.refresh());
+      ipc.handle('skills:list', (_event, { workspacePaths } = {}) => ports.list(workspacePaths));
+      ipc.handle('skills:get-detail', (_event, { skillId, workspacePath } = {}) => ports.getDetail(skillId, workspacePath));
+      ipc.handle('skills:refresh', (_event, { workspacePaths } = {}) => ports.refresh(workspacePaths));
       ipc.handle('skills:upload', (_event, { zipBase64 }) => ports.upload(zipBase64));
-      ipc.handle('skills:enable', (_event, { skillId }) => ports.enable(skillId));
-      ipc.handle('skills:disable', (_event, { skillId }) => ports.disable(skillId));
+      ipc.handle('skills:enable', (_event, { skillId, workspacePath } = {}) => ports.enable(skillId, workspacePath));
+      ipc.handle('skills:disable', (_event, { skillId, workspacePath } = {}) => ports.disable(skillId, workspacePath));
       ipc.handle('skills:list-available', () => ports.listAvailable());
       ipc.handle('skills:link', (_event, { skillId }) => ports.link(skillId));
       ipc.handle('skills:unlink', (_event, { skillId }) => ports.unlink(skillId));
-      ipc.handle('skills:uninstall', (_event, { skillId }) => ports.uninstall(skillId));
+      ipc.handle('skills:uninstall', (_event, { skillId, workspacePath } = {}) => ports.uninstall(skillId, workspacePath));
       ipc.handle('skills:marketplace:list', () => ports.marketplaceList());
       ipc.handle('skills:marketplace:get-detail', (_event, { catalogId } = {}) => ports.marketplaceGetDetail(catalogId));
       ipc.handle('skills:marketplace:install', (_event, { catalogId } = {}) => ports.marketplaceInstall(catalogId));

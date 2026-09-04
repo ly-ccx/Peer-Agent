@@ -2439,26 +2439,26 @@ function registerDesktopIpcHost() {
     }),
     ...createSkillsIpcRegistrations({
       skills: {
-        list: () => skillStore?.listSkills() ?? [],
-        getDetail: (skillId) => {
+        list: (workspacePaths) => skillStore?.listSkills(workspacePaths) ?? [],
+        getDetail: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.getSkillDetail(skillId);
+          return skillStore.getSkillDetail(skillId, workspacePath);
         },
-        refresh: () => {
+        refresh: (workspacePaths) => {
           skillStore?.refresh();
-          return skillStore?.listSkills() ?? [];
+          return skillStore?.listSkills(workspacePaths) ?? [];
         },
         upload: (zipBase64) => {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
         },
-        enable: (skillId) => {
+        enable: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.enableSkill(skillId);
+          return skillStore.enableSkill(skillId, workspacePath);
         },
-        disable: (skillId) => {
+        disable: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.disableSkill(skillId);
+          return skillStore.disableSkill(skillId, workspacePath);
         },
         listAvailable: () => skillStore?.listAvailableSkills() ?? [],
         link: (skillId) => {
@@ -2469,9 +2469,9 @@ function registerDesktopIpcHost() {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.unlinkSkill(skillId);
         },
-        uninstall: (skillId) => {
+        uninstall: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.uninstallSkill(skillId);
+          return skillStore.uninstallSkill(skillId, workspacePath);
         },
         marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
         marketplaceGetDetail: (catalogId) => skillMarketplaceService?.getDetail(catalogId) ?? null,
