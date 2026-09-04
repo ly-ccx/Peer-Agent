@@ -1322,7 +1322,7 @@
 
   .task-table-head {
     @apply grid items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em];
-    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 7.5rem;
     border-color: var(--za-line);
     color: var(--za-text-muted);
     background: color-mix(in srgb, var(--za-surface-1) 55%, var(--za-surface-0));
@@ -1330,7 +1330,7 @@
 
   .task-record {
     @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
-    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 4.5rem;
+    grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 7.5rem;
     border-color: var(--za-line);
   }
 
@@ -1462,14 +1462,28 @@
     color: var(--za-text-muted);
   }
 
+  .task-row-actions {
+    @apply inline-flex items-center justify-self-end gap-1;
+  }
+
   .task-row-open {
-    @apply inline-flex items-center justify-self-end gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold;
     color: var(--za-text);
     background: transparent;
   }
 
   .task-row-open:hover {
     background: var(--za-surface-1);
+  }
+
+  .task-row-abandon {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+    color: var(--state-danger, #c0392b);
+    background: transparent;
+  }
+
+  .task-row-abandon:hover {
+    background: color-mix(in srgb, var(--state-danger, #c0392b) 12%, transparent);
   }
 
   .task-table-empty {
@@ -1624,7 +1638,7 @@
       @apply gap-2;
     }
 
-    .task-row-open {
+    .task-row-actions {
       @apply justify-self-start;
     }
 

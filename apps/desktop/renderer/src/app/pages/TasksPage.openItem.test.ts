@@ -65,3 +65,21 @@ test('result_ready opens the drawer without focusing; other rights open the main
   assert.match(appSource, /resolveTaskRelatedMessageId\(item\)/);
   assert.ok(appSource.includes("from './chat/state/taskRelatedMessageResolve'"));
 });
+
+test('paused goal rows keep abandon beside open in the same action column', async () => {
+  const [tasksPageSource, styles] = await Promise.all([
+    readTasksPageSource(),
+    readTaskOverviewStyles(),
+  ]);
+
+  assert.match(
+    tasksPageSource,
+    /className="task-row-actions"[\s\S]*?className="task-row-open"[\s\S]*?className="task-row-abandon"/,
+  );
+  assert.match(tasksPageSource, /item\.source === 'goal_plan' && item\.actionRight === 'paused'/);
+  assert.match(tasksPageSource, /void clientApi\.goalPlansDelete\(\{ planId: item\.taskId \}\)/);
+  assert.match(styles, /\.task-row-actions\s*\{/);
+  assert.match(styles, /\.task-row-abandon\s*\{/);
+  assert.match(styles, /color: var\(--state-danger, #c0392b\);/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1\.6fr\) minmax\(8rem, 0\.9fr\) minmax\(8rem, 0\.9fr\) 5rem 7\.5rem;/);
+});

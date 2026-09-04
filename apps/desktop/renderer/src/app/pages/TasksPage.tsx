@@ -281,25 +281,27 @@ export function TasksPage({
                   </div>
                 </div>
                 <time>{formatRelativeTime(item.lastActiveAt)}</time>
-                <button
-                  type="button"
-                  className="task-row-open"
-                  onClick={() => onOpenItem?.(item)}
-                >
-                  <ActionLabel label={rowOpenLabel(item)} forceArrow={rowOpenShowsArrow(item)} />
-                </button>
-                {item.source === 'goal_plan' && item.actionRight === 'paused' ? (
+                <div className="task-row-actions">
                   <button
                     type="button"
-                    className="task-row-abandon"
-                    onClick={() => {
-                      // goal_plan 项的 taskId 即 planId（投影 taskId: snapshot.planId）。
-                      void clientApi.goalPlansDelete({ planId: item.taskId });
-                    }}
+                    className="task-row-open"
+                    onClick={() => onOpenItem?.(item)}
                   >
-                    放弃
+                    <ActionLabel label={rowOpenLabel(item)} forceArrow={rowOpenShowsArrow(item)} />
                   </button>
-                ) : null}
+                  {item.source === 'goal_plan' && item.actionRight === 'paused' ? (
+                    <button
+                      type="button"
+                      className="task-row-abandon"
+                      onClick={() => {
+                        // goal_plan 项的 taskId 即 planId（投影 taskId: snapshot.planId）。
+                        void clientApi.goalPlansDelete({ planId: item.taskId });
+                      }}
+                    >
+                      放弃
+                    </button>
+                  ) : null}
+                </div>
               </article>
             );
           })
