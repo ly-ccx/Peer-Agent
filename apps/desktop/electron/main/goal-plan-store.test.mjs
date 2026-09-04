@@ -1785,6 +1785,11 @@ test('叶子全部 completed 后，过期 interruption 不能把计划钉回 int
   const recovered = store.getPlan(created.planId);
   assert.equal(recovered.status, 'completed');
   assert.equal(recovered.progress.percent, 100);
+
+  const reopened = createGoalPlanStore();
+  const reloaded = reopened.getPlan(created.planId);
+  assert.equal(reloaded.status, 'completed');
+  assert.equal(reloaded.progress.percent, 100);
 });
 
 test('stream_error 后 setPlanStatus(failed)，任务全部 completed 时 plan 恢复为 completed', () => {

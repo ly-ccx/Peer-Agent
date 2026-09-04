@@ -1705,6 +1705,15 @@ function normalizePlan(plan) {
     qualityReview: normalizeQualityReview(plan.qualityReview),
     deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
+  // 读路径只恢复「叶子已全部成功，但计划仍钉在 interrupted/failed」的过期记录。
+  // 不能对所有状态全量派生，否则 completed intake 被 markRequestedUserInput
+  // 重新打开后，读盘会立刻打回 completed。
+  if (normalized.status === 'interrupted' || normalized.status === 'failed') {
+    const derivedStatus = derivePlanStatus(normalized.status, plan.tasks);
+    if (derivedStatus === TERMINAL_OK) {
+      normalized.status = derivedStatus;
+    }
+  }
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
   const timing = normalizeGoalTiming(plan.timing);
