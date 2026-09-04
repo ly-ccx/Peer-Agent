@@ -225,13 +225,14 @@ export function createQoderMarketplaceService({ apiClient, installSkillFromZip }
       return { ...detail, skillMd };
     },
 
-    async install({ skillId, scope = 'global', iconUrl = null }) {
+    async install({ skillId, scope = 'global', workspacePath = null, iconUrl = null }) {
       const id = requiredString(skillId, 'skill_id');
       const installScope = scope === 'workspace' ? 'workspace' : 'global';
       const detail = await apiClient.getSkillDetail({ skillId: id });
       const zipBuffer = await apiClient.downloadZip(detail.downloadUrl);
       const installed = await installSkillFromZip(zipBuffer, {
         scope: installScope,
+        workspacePath: installScope === 'workspace' ? workspacePath : null,
         source: 'qoder-marketplace',
         iconUrl,
         meta: {

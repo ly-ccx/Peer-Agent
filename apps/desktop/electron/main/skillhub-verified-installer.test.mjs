@@ -48,6 +48,7 @@ test('verifies Ed25519, MD5 and content hash before entering the existing Skill 
   assert.equal(installed, value.zipBuffer);
   assert.deepEqual(installOptions, {
     scope: 'global',
+    workspacePath: null,
     source: 'skillhub',
     iconUrl: null,
     meta: {
@@ -72,12 +73,14 @@ test('forwards install scope to Skill Store and echoes it in the result', async 
   const result = await installer.install({
     ...identity,
     scope: 'workspace',
+    workspacePath: '/Users/demo/other',
     iconUrl: 'https://example.com/icon.png',
   });
   assert.equal(result.ok, true);
   assert.equal(result.scope, 'workspace');
   assert.deepEqual(installOptions, {
     scope: 'workspace',
+    workspacePath: '/Users/demo/other',
     source: 'skillhub',
     iconUrl: 'https://example.com/icon.png',
     meta: {

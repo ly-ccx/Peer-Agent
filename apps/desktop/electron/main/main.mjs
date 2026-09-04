@@ -179,6 +179,7 @@ import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mj
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
+import { validateSkillInstallTarget } from './skill-install-target.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
@@ -2493,7 +2494,8 @@ function registerDesktopIpcHost() {
         },
         skillHubInstall: (identity) => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
-          return skillHubMarketplaceService.install(identity);
+          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
+          return skillHubMarketplaceService.install(validated);
         },
         skillHubListCategories: () => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
@@ -2509,7 +2511,8 @@ function registerDesktopIpcHost() {
         },
         qoderInstall: (identity) => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
-          return qoderMarketplaceService.install(identity);
+          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
+          return qoderMarketplaceService.install(validated);
         },
         qoderListTaxonomies: () => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');

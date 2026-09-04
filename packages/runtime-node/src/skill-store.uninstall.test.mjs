@@ -151,6 +151,38 @@ test('installSkillFromZip writes workspace/skills when scope=workspace', () => {
   );
 });
 
+test('installSkillFromZip writes an explicit workspace without changing the active workspace', () => {
+  const { store, userDataPath, workspaceRoot } = createStoreFixture();
+  const otherWorkspace = path.join(path.dirname(workspaceRoot), 'other-workspace');
+  mkdirSync(otherWorkspace, { recursive: true });
+
+  const installed = store.installSkillFromZip(makeSkillZip('explicit-workspace-skill'), {
+    scope: 'workspace',
+    workspacePath: otherWorkspace,
+    source: 'skillhub',
+  });
+
+  assert.equal(installed.installScope, 'workspace');
+  assert.equal(
+    existsSync(path.join(otherWorkspace, 'skills', 'explicit-workspace-skill', 'SKILL.md')),
+    true,
+  );
+  assert.equal(existsSync(path.join(workspaceRoot, 'skills', 'explicit-workspace-skill')), false);
+  assert.equal(existsSync(path.join(userDataPath, 'skills', 'explicit-workspace-skill')), false);
+  assert.equal(store.getWorkspacePath(), workspaceRoot);
+});
+
+test('installSkillFromZip ignores workspacePath for global scope', () => {
+  const { store, userDataPath, workspaceRoot } = createStoreFixture();
+  const installed = store.installSkillFromZip(makeSkillZip('global-explicit-target'), {
+    scope: 'global',
+    workspacePath: workspaceRoot,
+  });
+  assert.equal(installed.installScope, 'global');
+  assert.equal(existsSync(path.join(userDataPath, 'skills', 'global-explicit-target', 'SKILL.md')), true);
+  assert.equal(existsSync(path.join(workspaceRoot, 'skills', 'global-explicit-target')), false);
+});
+
 test('uninstall deletes a managed workspace install and keeps the workspace root', () => {
   const { store, workspaceRoot } = createStoreFixture();
   const target = path.join(workspaceRoot, 'skills', 'workspace-managed-skill');

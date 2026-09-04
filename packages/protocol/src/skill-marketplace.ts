@@ -121,8 +121,9 @@ export interface SkillHubInstallRequest {
   readonly namespace: string;
   readonly slug: string;
   readonly version: string;
-  /** 默认 global；workspace 需已打开工作区。 */
+  /** 默认 global；workspace 必须同时指定一个由 Desktop 主进程校验的登记工作区。 */
   readonly scope?: SkillHubInstallScope;
+  readonly workspacePath?: string;
   /** 市场图标 URL；安装时写入本地 _meta.json，供已安装列表展示。 */
   readonly iconUrl?: string | null;
 }
@@ -243,6 +244,7 @@ export type QoderInstallScope = 'global' | 'workspace';
 export interface QoderInstallIdentity {
   readonly skillId: string;
   readonly scope?: QoderInstallScope;
+  readonly workspacePath?: string;
   readonly iconUrl?: string | null;
 }
 

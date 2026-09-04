@@ -720,19 +720,26 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * @param {Buffer} zipBuffer
    * @param {{
    *   scope?: 'global' | 'workspace',
+   *   workspacePath?: string | null,
    *   source?: string | null,
    *   iconUrl?: string | null,
    *   meta?: Record<string, unknown>,
    * }} [options]
    * - global（默认）：写入 userData/skills
-   * - workspace：写入当前工作区 skills/；无工作区时抛 workspace_required
+   * - workspace：优先写入本次明确指定的 workspacePath/skills，否则回退当前工作区；均缺失时抛 workspace_required
    * - source / iconUrl / meta：安装后合并写入 _meta.json（市场图标与来源）
    */
-  function installSkillFromZip(zipBuffer, { scope = 'global', source = null, iconUrl = null, meta = null } = {}) {
+  function installSkillFromZip(zipBuffer, {
+    scope = 'global',
+    workspacePath: requestedWorkspacePath = null,
+    source = null,
+    iconUrl = null,
+    meta = null,
+  } = {}) {
     const installScope = scope === 'workspace' ? 'workspace' : 'global';
     let targetRoot = skillsRoot;
     if (installScope === 'workspace') {
-      const ws = getWorkspacePath();
+      const ws = normalizeWorkspaceKey(requestedWorkspacePath) ?? getWorkspacePath();
       if (!ws) throw new Error('workspace_required');
       targetRoot = path.join(ws, 'skills');
     }
@@ -788,12 +795,28 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     }
 
     refresh();
-    const installed = listSkills().find((s) => s.skillId === skillId) ?? null;
-    if (!installed) {
+    const installedInActiveScope = listSkills().find((s) => s.skillId === skillId) ?? null;
+    const installedAtTarget = installedInActiveScope ?? loadSingleSkill(destDir, skillId);
+    if (!installedAtTarget) {
       // 文件已落盘但无法加载（如 description 为空）时明确失败，避免 UI 假成功。
       throw new Error('skill_install_unreadable');
     }
-    return { ...installed, installScope };
+    if (installedInActiveScope) return { ...installedInActiveScope, installScope };
+    return {
+      skillId: installedAtTarget.skillId,
+      name: installedAtTarget.name,
+      description: installedAtTarget.description,
+      whenToUse: installedAtTarget.whenToUse || '',
+      version: installedAtTarget.version,
+      dataLevel: installedAtTarget.dataLevel,
+      enabled: false,
+      scope: 'workspace',
+      workspacePath: normalizeWorkspaceKey(requestedWorkspacePath),
+      iconUrl: installedAtTarget.iconUrl ?? null,
+      source: installedAtTarget.source ?? null,
+      canUninstall: true,
+      installScope,
+    };
   }
 
   function installSkillFromTgz(tgzBuffer) {
