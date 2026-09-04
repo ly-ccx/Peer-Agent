@@ -11,6 +11,14 @@
     border-radius: var(--radius-lg);
   }
 
+  .workbench-open-notice {
+    @apply mx-7 mt-4 mb-0 px-3 py-2 text-sm;
+    border-radius: var(--radius-sm, 8px);
+    color: var(--za-text);
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+  }
+
   .task-overview-scroll-region {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
     /* 给常驻底栏留出高度，末卡也不被外壳圆角裁切 */

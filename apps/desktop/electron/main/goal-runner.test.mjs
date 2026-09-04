@@ -1590,6 +1590,72 @@ test('recoverContextCheckpoints supersedes stale preparing checkpoint', () => {
   assert.equal(after.runner.contextCheckpoint, undefined);
 });
 
+test('recoverContextCheckpoints interrupts disk-running plans that have no live session', () => {
+  for (const runnerStatus of ['running', 'exploring']) {
+    const plan = store.createPlan({
+      conversationId: `conv-stale-${runnerStatus}`,
+      title: 'Stale running card',
+      goal: 'Should not look alive after restart',
+      tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+    });
+    store.recordApproval(plan.planId, { decision: 'approve' });
+    store.setPlanStatus(plan.planId, 'executing');
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: runnerStatus,
+      intent: 'execute',
+      phase: 'act',
+    });
+    const runner = createRunner({
+      runtime: { async runGoalTurn() { return {}; } },
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    const result = runner.recoverContextCheckpoints();
+    assert.ok(
+      result.recovered.some((item) => item.planId === plan.planId && item.action === 'interrupt_stale_runner'),
+      `expected interrupt_stale_runner for ${runnerStatus}`,
+    );
+    const after = store.getPlan(plan.planId);
+    assert.equal(after.runner.status, 'idle');
+    assert.equal(after.runner.interruption?.source, 'process_recovery');
+    assert.equal(after.runner.interruption?.reason, 'process_recovery');
+    assert.equal(after.runner.interruption?.recoverable, true);
+  }
+});
+
+test('recoverContextCheckpoints does not interrupt a live in-memory runner', async () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-live-session',
+    title: 'Live runner',
+    goal: 'Keep running while the process is alive',
+    tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+  });
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const runner = createRunner({
+    runtime: {
+      async runGoalTurn() {
+        await blocked;
+        return {};
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await runner.start(plan.planId);
+  const result = runner.recoverContextCheckpoints();
+  assert.ok(
+    !result.recovered.some((item) => item.planId === plan.planId && item.action === 'interrupt_stale_runner'),
+  );
+  const after = store.getPlan(plan.planId);
+  assert.equal(after.runner.status, 'running');
+  assert.equal(after.runner.interruption, undefined);
+  release();
+  await runner.waitForIdle?.(plan.planId).catch(() => {});
+});
+
 test('qualityReview: 有交付绑定且完成门通过后会写上 qualityReview', async () => {
   const plan = createApprovedPlan({
     deliveryBinding: {

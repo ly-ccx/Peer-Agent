@@ -800,6 +800,7 @@ export function createGoalRunner({
    * - preparing: drop stale preparing marker
    * - committed: ensure runner is resuming_after_compaction and schedule pump
    * - compacting_context / resuming_after_compaction without checkpoint: resume running if possible
+   * - running / exploring with no in-memory session: process died; mark idle + process_recovery
    */
   function recoverContextCheckpoints({ maxAgeMs = 24 * 60 * 60 * 1000 } = {}) {
     if (typeof goalPlanStore.listPlans !== 'function') {
@@ -887,6 +888,34 @@ export function createGoalRunner({
         } catch (error) {
           skipped.push({ planId, reason: 'unstick_failed', error: error?.message || String(error) });
           continue;
+        }
+      }
+
+      // Disk still says the runner is live, but this process has no session.
+      // After a restart that is a zombie "Peer 正在推进" card, not a running task.
+      if ((status === 'running' || status === 'exploring') && !getSession(planId)) {
+        try {
+          const interruptedAt = now();
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'idle',
+            intent: runner.intent || 'execute',
+            phase: runner.phase || 'act',
+            interruption: {
+              source: 'process_recovery',
+              reason: 'process_recovery',
+              interruptedAt,
+              recoverable: true,
+            },
+            updatedAt: interruptedAt,
+          });
+          recovered.push({ planId, action: 'interrupt_stale_runner', previousStatus: status });
+        } catch (error) {
+          skipped.push({
+            planId,
+            reason: 'interrupt_stale_failed',
+            error: error?.message || String(error),
+          });
         }
       }
     }

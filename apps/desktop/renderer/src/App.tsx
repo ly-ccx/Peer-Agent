@@ -16,7 +16,10 @@ import {
   resolveResultDrawerAcceptanceTargets,
   type OpenResultOptions,
 } from './app/state/resultDrawerAcceptance';
-import { resolveWorkbenchConversationId } from './app/state/openWorkbenchConversation';
+import {
+  MISSING_WORKBENCH_CONVERSATION_NOTICE,
+  resolveWorkbenchConversationId,
+} from './app/state/openWorkbenchConversation';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -269,6 +272,7 @@ function MainApp() {
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [workbenchOpenNotice, setWorkbenchOpenNotice] = useState<string | null>(null);
   const [notificationMessageTarget, setNotificationMessageTarget] = useState<{
     conversationId: string;
     messageId: string;
@@ -988,6 +992,11 @@ function MainApp() {
                 </section>
               ) : activePage === 'home' ? (
                 <section className="primary-page-shell task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
+                  {workbenchOpenNotice ? (
+                    <p className="workbench-open-notice" role="status" aria-live="polite">
+                      {workbenchOpenNotice}
+                    </p>
+                  ) : null}
                   <div className="task-overview-scroll-region">
                   {homeScope === 'all' ? (
                     <GlobalWorkbenchPage
@@ -1004,11 +1013,12 @@ function MainApp() {
                         }
                         void resolveWorkbenchConversationId(item).then((conversationId) => {
                           if (conversationId) {
+                            setWorkbenchOpenNotice(null);
                             handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
                             focusTaskRelatedMessage({ ...item, conversationId });
                             return;
                           }
-                          openCollectionDrawer('tasks');
+                          setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
                         });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
@@ -1041,11 +1051,12 @@ function MainApp() {
                         }
                         void resolveWorkbenchConversationId(item).then((conversationId) => {
                           if (conversationId) {
+                            setWorkbenchOpenNotice(null);
                             handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
                             focusTaskRelatedMessage({ ...item, conversationId });
                             return;
                           }
-                          openCollectionDrawer('tasks');
+                          setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
                         });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
@@ -1249,10 +1260,19 @@ function MainApp() {
                           </button>
                         </div>
                         <div className="workbench-collection-drawer-body">
+                          {workbenchOpenNotice ? (
+                            <p className="workbench-open-notice" role="status" aria-live="polite">
+                              {workbenchOpenNotice}
+                            </p>
+                          ) : null}
                           <TasksPage
                             workspacePath={activeWorkspace}
                             onOpenItem={(item) => {
-                              if (!item.conversationId) return;
+                              if (!item.conversationId) {
+                                setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
+                                return;
+                              }
+                              setWorkbenchOpenNotice(null);
                               if (item.actionRight === 'result_ready') {
                                 openResultDrawer(item);
                                 return;

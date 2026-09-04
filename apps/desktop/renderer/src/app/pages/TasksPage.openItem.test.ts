@@ -42,7 +42,9 @@ test('task row view button opens the matching task details', async () => {
   );
   const openItemHandler =
     appSource.match(/<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?\n                            \}\}/)?.[0] ?? '';
-  assert.match(openItemHandler, /if \(!item\.conversationId\) return;/);
+  assert.match(openItemHandler, /if \(!item\.conversationId\) \{/);
+  assert.match(openItemHandler, /setWorkbenchOpenNotice\(MISSING_WORKBENCH_CONVERSATION_NOTICE\)/);
+  assert.match(appSource, /className="workbench-open-notice"/);
   assert.match(openItemHandler, /handleSelectConversation\(String\(item\.conversationId\)\);/);
   assert.match(openItemHandler, /focusTaskRelatedMessage\(item\)/);
   assert.match(openItemHandler, /openResultDrawer\(item\)/);
