@@ -6,6 +6,7 @@ import {
   sidebarConversationActivity,
 } from '../state/compactionStateView';
 import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
+import { useSidebarInterruption } from '../hooks/useSidebarInterruption';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 import { workspaceLabelFromPath } from './workspacePathDisplay';
 
@@ -152,7 +153,9 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
 }: SidebarConversationRowProps) {
   const activity = sidebarConversationActivity({ isRunning, compactionState });
   const isCompactionVisible = activity.kind === 'compaction';
-  const showCompletedUnread = shouldShowCompletedUnreadDot({
+  const interrupted = useSidebarInterruption(conv.id, conv.updatedAt, isRunning);
+  const showInterruption = interrupted && !isCompactionVisible;
+  const showCompletedUnread = !interrupted && shouldShowCompletedUnreadDot({
     conversationId: conv.id,
     isRunning,
     isCompactionVisible,
@@ -240,6 +243,11 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
           {compactPercentText ? (
             <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
           ) : null}
+        </span>
+      ) : null}
+      {showInterruption ? (
+        <span className="sidebar-conv-awaiting" title={isZh ? '回复未完成，可进入会话继续' : 'Response incomplete. Open the conversation to continue.'}>
+          {isZh ? '已中断' : 'Interrupted'}
         </span>
       ) : null}
       {pendingApprovalCount > 0 ? (
