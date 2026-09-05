@@ -1,5 +1,5 @@
 import type { ContextUsageBreakdown } from '@peer-agent/protocol';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { formatTokenCount } from '../../state/format';
 import { PeerIcon } from '../../../ui/icons/PeerIcon';
@@ -14,6 +14,7 @@ export function ContextUsagePanel({
   summaryLabel,
   degraded = false,
   footerLines = [],
+  accountUsage,
 }: {
   readonly percent: number | null;
   readonly usedTokens: number | null;
@@ -23,6 +24,7 @@ export function ContextUsagePanel({
   readonly summaryLabel: string;
   readonly degraded?: boolean;
   readonly footerLines?: readonly string[];
+  readonly accountUsage?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
@@ -69,9 +71,12 @@ export function ContextUsagePanel({
       setCoords({ left, top });
     };
     updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    if (panelRef.current) observer.observe(panelRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
@@ -171,6 +176,7 @@ export function ContextUsagePanel({
               ))}
             </div>
           ) : null}
+          {accountUsage}
         </div>,
         document.body,
       )

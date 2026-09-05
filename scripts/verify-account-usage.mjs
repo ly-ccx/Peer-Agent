@@ -10,6 +10,10 @@ const suites = [
   .filter((name) => name.startsWith('account-usage-') && name.endsWith('.test.mjs'))
   .map((name) => `${dir}/${name}`));
 suites.push(
+  'apps/desktop/renderer/src/chat/components/thread/contextAccountUsageSummary.test.ts',
+  'apps/desktop/renderer/src/chat/components/thread/contextAccountUsageRequest.test.ts',
+  'apps/desktop/renderer/src/chat/components/thread/TokenUsageDisplay.test.ts',
+  'apps/desktop/renderer/src/chat/components/thread/contextUsagePanelModel.test.ts',
   'apps/desktop/renderer/src/app/components/accountUsageView.test.ts',
   'apps/desktop/renderer/src/app/components/accountUsagePresentation.test.ts',
   'apps/desktop/renderer/src/app/components/accountUsageIdentity.test.ts',
