@@ -1535,16 +1535,26 @@ export function createGoalRunner({
       const explorer = withRequest?.runner?.explorers?.at(-1);
       if (!explorer) continue;
       dispatched.push({ explorer, plan: withRequest });
+    }
+
+    let explorerToolCalls = 0;
+    let cursor = 0;
+    const runOne = async ({ explorer }) => {
+      const currentPlan = goalPlanStore.getPlan(planId);
+      if (session.cancelled || !currentPlan) return;
+      const startedAt = now();
+      const withRequest = goalPlanStore.setRunnerState(planId, {
+        explorers: currentPlan.runner.explorers.map((run) => run.explorerId === explorer.explorerId
+          ? { ...run, status: 'running', updatedAt: startedAt }
+          : run),
+        updatedAt: startedAt,
+      });
+      explorer = withRequest.runner.explorers.find((run) => run.explorerId === explorer.explorerId);
       emit('goalRunner:explorerStarted', {
         planId,
         explorerId: explorer.explorerId,
         question: explorer.request?.question,
       });
-    }
-
-    let explorerToolCalls = 0;
-    let cursor = 0;
-    const runOne = async ({ explorer, plan: withRequest }) => {
       try {
         const report = await explorerRunner.runExplorer({
           plan: withRequest,

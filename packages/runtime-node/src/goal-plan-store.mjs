@@ -3387,10 +3387,14 @@ export function createGoalPlanStore({
     // 本轮进度：以被回填 Explorer 所属 batch 重算 done/total；该 explorer 不属于任何
     // batch（旧单发路径）时保持既有 batch 不变。
     const reportedBatchId = nextRun.batchId;
+    // Late reports remain evidence, but cannot reactivate a suspended/terminal runner.
+    const preserveLifecycle = current.enabled === false
+      || ['paused', 'interrupted', 'blocked', 'failed', 'completed', 'cancelled', 'waiting_user'].includes(current.status)
+      || ['paused', 'interrupted', 'blocked', 'failed', 'completed', 'cancelled', 'waiting_user'].includes(plan.status);
     const nextRunner = normalizeRunnerState({
       ...current,
-      status: stillRunning ? 'exploring' : 'idle',
-      intent: stillRunning ? 'explore' : 'verify',
+      status: preserveLifecycle ? current.status : stillRunning ? 'exploring' : 'idle',
+      intent: preserveLifecycle ? current.intent : stillRunning ? 'explore' : 'verify',
       explorerCount: countExplorerRuns(nextExplorers),
       explorers: nextExplorers,
       explorerBatch: reportedBatchId
