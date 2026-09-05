@@ -12,7 +12,8 @@ export function ContextAccountUsage({ provider, isZh }: { provider: LlmProviderC
     const controller = createContextAccountUsageRequest(provider,
       (input) => clientApi.llmGetSubscriptionQuota(input), setState);
     request.current = controller;
-    void controller.load(false);
+    // Each panel open requests a fresh observation rather than the client cache.
+    void controller.load(true);
     return () => { controller.dispose(); request.current = null; };
   }, [provider]);
   return <div className="ctx-usage-panel-notes" role="status" aria-busy={state.loading}>

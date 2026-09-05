@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import type { LlmProviderConfigView, LlmSubscriptionQuota } from '@peer-agent/protocol';
 import { createContextAccountUsageRequest, type ContextAccountUsageState } from './contextAccountUsageRequest.ts';
 
@@ -33,6 +34,51 @@ for (const [dimension, fields] of Object.entries(dimensions)) {
     });
   }
 }
+test('context-account/open-wiring/forces-refresh-and-disposes', () => {
+  const source = readFileSync(new URL('./ContextAccountUsage.tsx', import.meta.url), 'utf8');
+  assert.match(source, /void controller\.load\(true\)/);
+  assert.doesNotMatch(source, /controller\.load\(false\)/);
+  assert.match(source, /return \(\) => \{ controller\.dispose\(\)/);
+});
+
+for (const ending of ['success', 'failure']) {
+  test(`context-account/open-close-reopen/force-true/late-${ending}`, async () => {
+    const old = deferred();
+    const states: ContextAccountUsageState[] = [];
+    const calls: { id: string; force: boolean }[] = [];
+    const fetchQuota = async (input: { id: string; force: boolean }) => {
+      calls.push(input);
+      return calls.length === 1 ? old.promise : snapshot;
+    };
+    const first = createContextAccountUsageRequest(provider, fetchQuota, state => states.push(state));
+    const pending = first.load(true);
+    first.dispose();
+    const reopened = createContextAccountUsageRequest(provider, fetchQuota, state => states.push(state));
+    await reopened.load(true);
+    assert.deepEqual(calls, [{ id: provider.id, force: true }, { id: provider.id, force: true }]);
+    assert.deepEqual(states.at(-1), { quota: snapshot, loading: false });
+    const before = states.length;
+    if (ending === 'success') old.resolve({ ...snapshot, fetchedAt: 'old' });
+    else old.reject(new Error('late failure'));
+    await pending;
+    assert.equal(states.length, before);
+    reopened.dispose();
+  });
+}
+
+test('context-account/open/forced-refresh-failure/ends-loading', async () => {
+  const states: ContextAccountUsageState[] = [];
+  const controller = createContextAccountUsageRequest(provider, async input => {
+    assert.equal(input.force, true);
+    throw new Error('private');
+  }, state => states.push(state));
+  await controller.load(true);
+  assert.equal(states.at(-1)?.loading, false);
+  assert.equal(states.at(-1)?.quota?.status, 'fetch_failed');
+  assert.equal(states.at(-1)?.quota?.error, undefined);
+  controller.dispose();
+});
+
 function deferred() {
   let resolve!: (value: LlmSubscriptionQuota) => void;
   let reject!: (error: Error) => void;
