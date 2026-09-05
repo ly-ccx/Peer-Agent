@@ -329,6 +329,7 @@ export {
   resolveGeminiCodeAssistProjectId,
   supportsSubscriptionQuota,
 } from './subscription-quota.mjs';
+export { createAccountUsageAdapters } from './account-usage-adapters.mjs';
 export {
   decryptQoderModelCache,
   extractEmbeddedAuthWasmBytes,

@@ -759,7 +759,8 @@ export async function fetchProviderSubscriptionQuota({
   }
 
   const credentialId = provider.credentialId || provider.groupId || provider.id;
-  const cacheKey = `${credentialId}:${authMethod}`;
+  const cacheKey = JSON.stringify([credentialId, authMethod, provider.channelId, provider.baseUrl,
+    provider.accountUsageRevision, provider.oauthStatus?.accountId, provider.oauthStatus?.email]);
   const cached = quotaCache.get(cacheKey);
   if (!force && cached && cached.expiresAt > Date.now()) {
     return { ...cached.result, cached: true };

@@ -134,7 +134,7 @@ import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
-import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
+import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
   applyGoalMessageRoute,
   consumesRequestedUserInput,

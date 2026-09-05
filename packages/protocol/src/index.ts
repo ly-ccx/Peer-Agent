@@ -527,6 +527,8 @@ export interface LlmOAuthStatus {
   readonly expiresAt?: string;
 }
 
+export type { AccountUsageSource, AccountUsageScope, AccountUsageBalance, AccountUsageSpend, AccountUsageUnavailable, AccountUsageLocal } from './account-usage.js';
+
 /** 订阅额度窗口（session / weekly / model 等）。 */
 export interface LlmSubscriptionQuotaWindow {
   readonly id: string;
@@ -534,6 +536,12 @@ export interface LlmSubscriptionQuotaWindow {
   readonly remainingPercent?: number;
   readonly usedPercent?: number;
   readonly resetsAt?: string;
+  readonly used?: number;
+  readonly limit?: number;
+  readonly remaining?: number;
+  readonly unit?: 'requests' | 'tokens' | 'credits' | 'currency';
+  readonly source?: import('./account-usage.js').AccountUsageSource;
+  readonly scope?: import('./account-usage.js').AccountUsageScope;
 }
 
 /**
@@ -541,7 +549,16 @@ export interface LlmSubscriptionQuotaWindow {
  * success=false 时用 status/error 表达未登录、过期或拉取失败，UI 应降级展示。
  */
 export interface LlmSubscriptionQuota {
+  readonly accountUsageRevision?: string;
+  /** Remote query outcome; localUsage can remain available on failure. */
   readonly success: boolean;
+  readonly balances?: readonly import('./account-usage.js').AccountUsageBalance[];
+  readonly spend?: readonly import('./account-usage.js').AccountUsageSpend[];
+  readonly localUsage?: import('./account-usage.js').AccountUsageLocal;
+  readonly unavailable?: readonly import('./account-usage.js').AccountUsageUnavailable[];
+  readonly partial?: boolean;
+  readonly stale?: boolean;
+  readonly channelId?: string;
   readonly status?: string;
   readonly providerId?: string;
   readonly authMethod?: LlmAuthMethod;
@@ -628,6 +645,8 @@ export interface LlmProviderConfig {
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {
+  /** Ephemeral main-owned identity for account observations; contains no credential material. */
+  readonly accountUsageRevision?: string;
   readonly apiKeyMasked: string;
   readonly apiKeyConfigured: boolean;
   // OAuth 渠道登录后存在,仅表达登录态而不暴露 token。
