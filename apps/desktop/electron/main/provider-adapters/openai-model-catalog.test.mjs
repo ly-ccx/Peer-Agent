@@ -38,9 +38,9 @@ test('sortNewestFirst orders by created desc, missing last', () => {
   assert.deepEqual(sorted.map((m) => m.id), ['c', 'd', 'a', 'b']);
 });
 
-test('subscription catalog: default is newest (gpt-5.5) and first entry', () => {
-  assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-5.5');
-  assert.equal(SUBSCRIPTION_CATALOG[0].id, 'gpt-5.5');
+test('subscription catalog: default is newest (gpt-6-astra) and first entry', () => {
+  assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-6-astra');
+  assert.equal(SUBSCRIPTION_CATALOG[0].id, 'gpt-6-astra');
   // FALLBACK_MODELS 是同一份清单的兼容别名。
   assert.equal(FALLBACK_MODELS, SUBSCRIPTION_CATALOG);
 });
@@ -57,6 +57,21 @@ test('subscription catalog includes gpt-5.5 pricing and context metadata', () =>
   assert.equal(model.longContextInputPrice, 10);
   assert.equal(model.longContextCacheReadPrice, 1);
   assert.equal(model.longContextOutputPrice, 45);
+});
+
+test('GPT-6 Astra uses subscription context with official capability and pricing metadata', () => {
+  const model = getSubscriptionModelMetadata('gpt-6-astra');
+  assert.ok(model);
+  assert.equal(model.label, 'GPT-6 Astra');
+  assert.equal(model.contextWindow, 272_000);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.equal(model.inputPrice, 10);
+  assert.equal(model.cacheReadPrice, 1);
+  assert.equal(model.outputPrice, 50);
+  assert.equal(model.supportsVision, true);
+  assert.equal(model.supportsReasoning, true);
+  assert.equal(model.supportsPromptCaching, true);
+  assert.deepEqual(model.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
 });
 
 test('GPT-5.6 subscription models expose cache pricing and max reasoning', () => {
@@ -79,6 +94,7 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
 
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-astra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-terra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-luna'), true);
@@ -96,11 +112,12 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   assert.equal(res.source, 'builtin');
   assert.equal(res.error, undefined);
   assert.equal(res.models[0].contextWindow, 272_000);
-  assert.equal(res.models[0].inputPrice, 5);
-  assert.equal(res.models[0].longContextOutputPrice, 45);
+  assert.equal(res.models[0].inputPrice, 10);
+  assert.equal(res.models[0].outputPrice, 50);
   assert.deepEqual(
     res.models.map((m) => m.id),
     [
+      'gpt-6-astra',
       'gpt-5.5',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
@@ -115,11 +132,12 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 7);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 8);
 });
 
-test('isSubscriptionUsableModel keeps gpt-5 family, drops API-only models', () => {
+test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {
   assert.equal(isSubscriptionUsableModel('gpt-5.5'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-6-astra'), true);
   assert.equal(isSubscriptionUsableModel('gpt-5.4-mini'), true);
   assert.equal(isSubscriptionUsableModel('gpt-4o'), false);
   assert.equal(isSubscriptionUsableModel('o3'), false);

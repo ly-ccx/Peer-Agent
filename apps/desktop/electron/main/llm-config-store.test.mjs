@@ -79,23 +79,50 @@ function withStore(fn) {
   }
 }
 
-test('subscription provider creation applies gpt-5.5 pricing and context metadata', () => withStore(({ configFile }) => {
+test('subscription provider creation defaults to GPT-6 Astra metadata', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
 
-  assert.equal(provider.model, 'gpt-5.5');
+  assert.equal(provider.model, 'gpt-6-astra');
   assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
-  assert.equal(provider.inputPrice, 5);
-  assert.equal(provider.cacheReadPrice, 0.5);
-  assert.equal(provider.outputPrice, 30);
+  assert.equal(provider.inputPrice, 10);
+  assert.equal(provider.cacheReadPrice, 1);
+  assert.equal(provider.outputPrice, 50);
   assert.equal(provider.cacheWritePrice, undefined);
-  assert.equal(provider.longContextInputThreshold, 272_000);
-  assert.equal(provider.longContextInputPrice, 10);
-  assert.equal(provider.longContextCacheReadPrice, 1);
-  assert.equal(provider.longContextOutputPrice, 45);
+  assert.equal(provider.longContextInputThreshold, undefined);
+  assert.equal(provider.longContextInputPrice, undefined);
+  assert.equal(provider.longContextCacheReadPrice, undefined);
+  assert.equal(provider.longContextOutputPrice, undefined);
   assert.equal(provider.supportsPromptCaching, true);
   assert.equal(provider.supportsReasoning, true);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+}));
+
+test('GPT-6 Astra subscription metadata persists across config reload', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const created = store.addProvider({
+    provider: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-6-astra',
+    modelLabel: 'GPT-6 Astra',
+    metadataSource: 'builtin',
+  });
+
+  const reloaded = createLlmConfigStore({ configFile });
+  const provider = reloaded.listProviders().find((item) => item.id === created.id);
+  assert.ok(provider);
+  assert.equal(provider.model, 'gpt-6-astra');
+  assert.equal(provider.modelLabel, 'GPT-6 Astra');
+  assert.equal(provider.contextWindow, 272_000);
+  assert.equal(provider.maxOutputTokens, 128_000);
+  assert.equal(provider.inputPrice, 10);
+  assert.equal(provider.cacheReadPrice, 1);
+  assert.equal(provider.outputPrice, 50);
+  assert.equal(provider.supportsVision, true);
+  assert.equal(provider.supportsReasoning, true);
+  assert.equal(provider.supportsPromptCaching, true);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
 }));
 
 test('GPT-5.6 subscription model persists prompt cache and reasoning effort metadata', () => withStore(({ configFile }) => {
@@ -131,7 +158,7 @@ test('subscription provider supports multiple configured models in one group', (
   assert.equal(second.modelLabel, 'GPT-5.4');
   assert.deepEqual(
     store.listProviders().map((provider) => provider.model),
-    ['gpt-5.5', 'gpt-5.4'],
+    ['gpt-6-astra', 'gpt-5.4'],
   );
 }));
 
@@ -144,7 +171,7 @@ test('chat provider compatibility list returns configured records without catalo
   const chat = store.listChatProviders();
 
   assert.deepEqual(chat.map((provider) => provider.id), configured.map((provider) => provider.id));
-  assert.deepEqual(chat.map((provider) => provider.model), ['gpt-5.5', 'gpt-5.4']);
+  assert.deepEqual(chat.map((provider) => provider.model), ['gpt-6-astra', 'gpt-5.4']);
   assert.equal(new Set(chat.map((provider) => provider.id)).size, chat.length);
 }));
 

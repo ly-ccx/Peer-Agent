@@ -19,6 +19,20 @@ import {
 // 订阅(codex 平面)权威模型清单。按"新→旧"排列,第一项即默认"最新"。
 // label 用 ChatGPT 客户端展示名,id 用 codex 端点接受的小写标识。
 const SUBSCRIPTION_CATALOG = [
+  // GPT-6 Astra 官方能力与价格；ChatGPT OAuth 订阅上下文按产品约束沿用 272k。
+  {
+    id: 'gpt-6-astra',
+    label: 'GPT-6 Astra',
+    contextWindow: 272_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 10,
+    outputPrice: 50,
+    cacheReadPrice: 1,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
@@ -111,7 +125,7 @@ const SUBSCRIPTION_CATALOG = [
 ];
 
 // 订阅默认模型(新建订阅 / 迁移旧值时落到此)。
-const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-5.5';
+const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-6-astra';
 
 // 合法订阅模型 id 集合,用于迁移时判定旧值是否仍有效。
 const SUBSCRIPTION_MODEL_IDS = new Set(SUBSCRIPTION_CATALOG.map((m) => m.id));
@@ -177,10 +191,10 @@ function rewriteDeepSeekCatalogRequest({ baseUrl, wire, headers = {}, apiKey } =
   return { root: openaiRoot, wire: 'openai-chat', headers: nextHeaders };
 }
 
-// 订阅 codex 端点真正可用的模型前缀。仅 gpt-5 家族。
+// 订阅 codex 端点仅允许权威内置目录中的模型。
 function isSubscriptionUsableModel(id) {
   if (typeof id !== 'string') return false;
-  return /^gpt-5/i.test(id);
+  return SUBSCRIPTION_MODEL_IDS.has(id);
 }
 
 // 仅保留对话相关模型(gpt / o 系列),过滤 embedding / tts / whisper / image 等。
