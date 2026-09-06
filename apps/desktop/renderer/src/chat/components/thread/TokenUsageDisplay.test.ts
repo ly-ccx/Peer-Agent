@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   effortIndexForLevel,
@@ -7,6 +8,8 @@ import {
   snapEffortValue,
 } from './effortSlider.ts';
 import { resolveStickyContextDisplay } from './stickyContextDisplay.ts';
+
+const tokenUsageSource = readFileSync(new URL('./TokenUsageDisplay.tsx', import.meta.url), 'utf8');
 
 describe('reasoning effort slider', () => {
   it('uses the persisted effort for idle display and the slider value only while previewing', () => {
@@ -41,6 +44,21 @@ describe('reasoning effort slider', () => {
   });
 });
 
+
+describe('TokenUsageDisplay hook order', () => {
+  it('does not call hooks after the hasInfo early return', () => {
+    const afterHasInfo = tokenUsageSource.split(/if\s*\(\s*!hasInfo\s*\)\s*return\s+null;/)[1] ?? '';
+    assert.ok(afterHasInfo.length > 0, 'expected hasInfo early return');
+    assert.doesNotMatch(
+      afterHasInfo,
+      /\buse(Memo|Effect|LayoutEffect|State|Callback|Ref|Id|ImperativeHandle)\s*\(/,
+    );
+    assert.match(
+      tokenUsageSource.split(/if\s*\(\s*!hasInfo\s*\)\s*return\s+null;/)[0] ?? '',
+      /const contextOptionDefinition = useMemo\(/,
+    );
+  });
+});
 
 describe('resolveStickyContextDisplay', () => {
   it('keeps lastKnown percent/tokens when live values are temporarily unknown', async () => {

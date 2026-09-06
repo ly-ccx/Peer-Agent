@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 const panelSource = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
+const contextSource = readFileSync(new URL('./WorkbenchContext.tsx', import.meta.url), 'utf8');
 const browserViewSource = readFileSync(new URL('./views/BrowserView.tsx', import.meta.url), 'utf8');
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
 
@@ -30,7 +31,8 @@ describe('workbench view visibility', () => {
   });
 
   it('reuses one BrowserView instance per conversation instead of remounting the foreground key', () => {
-    assert.match(panelSource, /mountedBrowserConversations\(conversationId, preparedBrowserConversations\)/);
+    assert.match(panelSource, /mountedBrowserConversations\(/);
+    assert.match(panelSource, /stabilizeMountedBrowserOrder\(/);
     assert.match(panelSource, /key=\{`mounted-browser-\$\{id\}`\}/);
     assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
     assert.match(
@@ -39,13 +41,24 @@ describe('workbench view visibility', () => {
     );
   });
 
-  it('keeps a prepared background Browser guest mounted off-screen instead of display:none', () => {
+  it('keeps a prepared background Browser guest mounted without display:none or fixed reparent', () => {
     assert.match(panelSource, /workbench-view--prepared-browser/);
     assert.match(panelSource, /claimForeground=\{id === conversationId\}/);
     assert.match(
       workbenchStyles,
-      /\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,
+      /\.workbench-view\.workbench-view--browser\[data-active='false'\],\s*\n\s*\.workbench-view--prepared-browser\[data-active='false'\]\s*\{\s*display:\s*flex;/,
     );
+    assert.doesNotMatch(
+      workbenchStyles,
+      /\.workbench-view--prepared-browser\[data-active='false'\][\s\S]{0,200}position:\s*fixed/,
+    );
+  });
+
+  it('tracks the previous conversation in state so Strict Mode cannot drop a live page', () => {
+    assert.match(contextSource, /const \[trackedConversationId, setTrackedConversationId\] = useState\(conversationId\)/);
+    assert.match(contextSource, /if \(trackedConversationId !== conversationId\)/);
+    assert.match(contextSource, /rememberLeavingBrowserConversation\(/);
+    assert.doesNotMatch(contextSource, /previousConversationIdRef/);
   });
 
   it('exposes an address-bar control to open the current http(s) page in the default browser', () => {

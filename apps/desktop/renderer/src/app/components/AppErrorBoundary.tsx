@@ -7,6 +7,7 @@ type Props = {
 
 type State = {
   readonly error: Error | null;
+  readonly componentStack: string | null;
 };
 
 /**
@@ -14,18 +15,19 @@ type State = {
  * 启动权限门 / 主题 / bootstrap 任一抛错时至少给出可恢复 UI。
  */
 export class AppErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, componentStack: null };
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    return { error, componentStack: null };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[AppErrorBoundary]', error, info.componentStack);
+    this.setState({ componentStack: info.componentStack ?? null });
   }
 
   render() {
-    const { error } = this.state;
+    const { error, componentStack } = this.state;
     if (!error) return this.props.children;
     const isZh = this.props.isZh !== false;
     return (
@@ -59,6 +61,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             }}
           >
             {error.message}
+            {componentStack ? `\n${componentStack}` : ''}
           </pre>
           <button
             type="button"

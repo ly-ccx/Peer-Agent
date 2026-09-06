@@ -104,6 +104,10 @@ export function rememberLeavingBrowserConversation(
 
 /**
  * 当前前台会话加上后台活页名单。前台必须在同一数组里，切回来才能复用同一个 BrowserView。
+ *
+ * 返回值只表达「谁该挂着」，不保证 DOM 顺序。渲染前必须再走
+ * `stabilizeMountedBrowserOrder`：Electron `<webview>` 的 guest WebContents
+ * 在宿主节点被 insertBefore/appendChild 挪动时会被销毁并整页重载。
  */
 export function mountedBrowserConversations(
   conversationId: string | null,
@@ -114,4 +118,22 @@ export function mountedBrowserConversations(
   const prepared = preparedIds.filter((id) => id && id !== currentId);
   if (!currentId) return prepared.slice(-limit);
   return rememberPreparedBrowser(prepared, currentId, limit);
+}
+
+/**
+ * 把下一帧要挂着的会话排成「只追加、只删除」的稳定顺序。
+ * 切走再切回时集合不变则顺序不变，React 就不会挪 webview 宿主节点。
+ */
+export function stabilizeMountedBrowserOrder(
+  previousOrder: readonly string[],
+  nextIds: readonly string[],
+): string[] {
+  const nextSet = new Set(nextIds.filter((id) => Boolean(id)));
+  const kept = previousOrder.filter((id) => nextSet.has(id));
+  const keptSet = new Set(kept);
+  const added: string[] = [];
+  for (const id of nextSet) {
+    if (!keptSet.has(id)) added.push(id);
+  }
+  return [...kept, ...added];
 }
