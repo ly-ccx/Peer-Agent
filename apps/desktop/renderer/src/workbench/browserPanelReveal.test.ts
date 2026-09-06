@@ -132,30 +132,31 @@ test('switch away and back keeps the visited session alive (local layout keep-al
 });
 
 test('stabilizeMountedBrowserOrder keeps host order when switching away and back', () => {
-  let prepared: string[] = [];
   let order: string[] = [];
-
-  const mount = (current: string, nextPrepared: readonly string[]) => {
-    prepared = [...nextPrepared];
-    const nextIds = mountedBrowserConversations(current, prepared);
+  const mount = (current: string, livePrepared: readonly string[]) => {
+    const nextIds = mountedBrowserConversations(current, livePrepared);
     order = stabilizeMountedBrowserOrder(order, nextIds);
-    return order;
+    return [...order];
   };
 
   // 前台 A 先挂上。
   assert.deepEqual(mount('A', []), ['A']);
 
-  // 切到 B：A 非空白入活页，B 追加在后面，A 的宿主下标不变。
-  prepared = rememberLeavingBrowserConversation(prepared, 'A', false);
-  assert.deepEqual(mount('B', prepared), ['A', 'B']);
+  // 切到 B：A 非空白入活页，B 作为前台追加，A 的宿主下标不变。
+  const preparedAfterLeavingA = rememberLeavingBrowserConversation([], 'A', false);
+  assert.deepEqual(preparedAfterLeavingA, ['A']);
+  assert.deepEqual(mount('B', preparedAfterLeavingA), ['A', 'B']);
 
-  // 切回 A：LRU 名单变成 ['B','A']，稳定顺序仍是 ['A','B']。
-  prepared = rememberLeavingBrowserConversation(prepared, 'B', true);
-  assert.deepEqual(mount('A', prepared), ['A', 'B']);
-  assert.deepEqual(
-    stabilizeMountedBrowserOrder(['A', 'B'], mountedBrowserConversations('A', prepared)),
-    ['A', 'B'],
-  );
+  // 切回 A，且 B 也非空白：LRU 名单变成 ['B','A']，稳定顺序仍是 ['A','B']。
+  const preparedAfterLeavingB = rememberLeavingBrowserConversation(preparedAfterLeavingA, 'B', false);
+  assert.deepEqual(preparedAfterLeavingB, ['A', 'B']);
+  assert.deepEqual(mountedBrowserConversations('A', preparedAfterLeavingB), ['B', 'A']);
+  assert.deepEqual(mount('A', preparedAfterLeavingB), ['A', 'B']);
+
+  // B 若是空白 about:blank，不占名额；只卸 B，A 仍留在原下标。
+  order = ['A', 'B'];
+  const preparedBlankB = rememberLeavingBrowserConversation(['A'], 'B', true);
+  assert.deepEqual(stabilizeMountedBrowserOrder(order, mountedBrowserConversations('A', preparedBlankB)), ['A']);
 });
 
 test('stabilizeMountedBrowserOrder only appends newcomers and drops evictions', () => {
