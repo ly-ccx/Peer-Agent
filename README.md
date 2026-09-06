@@ -189,9 +189,18 @@ It doesn't matter where work enters — config, permissions, and Evidence are al
 ### Option A — Desktop (recommended for most users)
 
 1. Download a release from **[GitHub Releases](https://github.com/ly-ccx/Peer-Agent/releases)**
+
+   | Platform | First-class artifact | Notes |
+   | --- | --- | --- |
+   | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | Stage-1 ad-hoc signed |
+   | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
+   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage` (preferred) or `.deb` | Unsigned (stage-1). In-app auto-update is AppImage-only (`latest-linux.yml` / `beta-linux.yml`). Ubuntu 22+/24+ AppImage users may need `libfuse2`. linux-arm64 Desktop is not a Release asset yet. |
+
 2. Install and open Peer Agent
 3. Add a model provider / API key in settings
 4. Start a conversation — or hand it a real goal and let **Agent** mode drive
+
+On Linux Wayland, if the window fails to appear, try X11 or `ELECTRON_OZONE_PLATFORM_HINT=auto`.
 
 ### Option B — CLI / TUI via npm
 
@@ -215,6 +224,12 @@ pnpm install
 
 # Desktop (Electron)
 pnpm --filter @peer-agent/desktop dev
+
+# Linux Desktop unpacked dir (sandbox / smoke)
+pnpm pack:linux
+
+# Linux Desktop distributables (AppImage + .deb; needs libdbus-1-dev, fakeroot, dpkg)
+pnpm dist:linux
 
 # Terminal agent (TUI)
 pnpm --filter @peer-agent/tui dev
@@ -301,7 +316,7 @@ The long-term product spine:
 
 | Pillar | Meaning |
 | --- | --- |
-| **Cross-platform** | Same product truth on macOS first, then broader desktop / environment coverage without forking the core model. |
+| **Cross-platform** | Same product truth on macOS, Windows, and Linux Desktop x64 today, then broader coverage (arm64 Desktop, signing) without forking the core model. |
 | **Unified core flow** | Desktop, TUI, CLI, Automation, MCP, plugins, and skills share one runtime chain: projection → permission → execution → Evidence. |
 | **Task flow** | Work is accepted, clarified, planned, executed, and closed as a governed task — not freelanced chat. |
 | **Self-closed loop** | Explore → plan → act → verify → adjust, with success criteria and Evidence as the completion gate. |
@@ -336,7 +351,7 @@ Philosophy stays fixed while the surface grows: **cognition is pluggable; author
 | Area | Status |
 | --- | --- |
 | Broader marketplace ecosystem | 🚧 Growing |
-| Cross-platform hardening / packaging | 🚧 Ongoing |
+| Cross-platform hardening / packaging | 🚧 Ongoing — Linux Desktop x64 (AppImage / `.deb`) is first-class; linux-arm64 Desktop and Linux signing remain follow-ups |
 
 ### Planned — not implemented yet
 

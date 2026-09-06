@@ -96,19 +96,33 @@ nsis:
   # nsis 安装包为多架构合成的单一产物，不带 ${arch}（否则模板里 arch 为空会留下多余连字符）。
   artifactName: Peer-Agent-Setup-${version}.${ext}
 
-# ── Linux（沙箱 / CI 用 unpacked dir；正式分发可再加 AppImage）──
+# ── Linux Desktop（正式分发）──
+# 阶段一产物：AppImage x64（便携 + electron-updater 通道）与 .deb x64（apt 便利）。
+# 二者均未签名，与 mac 阶段一 ad-hoc 同级。linux-arm64 / 代码签名留待后续。
+# 沙箱 / 本地 unpacked 仍走 `pnpm pack:linux`（显式 --linux dir），不作为 Release 资产。
 linux:
   icon: build/icon.png
   category: Development
   executableName: peer-agent
+  synopsis: Local-first Task Flow Agent
+  desktop:
+    StartupWMClass: peer-agent
   target:
-    - target: dir
+    - target: AppImage
       arch: [x64]
+    - target: deb
+      arch: [x64]
+
+appImage:
+  artifactName: Peer-Agent-${version}-${arch}.${ext}
+
+deb:
+  artifactName: Peer-Agent-${version}-${arch}.${ext}
 
 # ── 发布 (GitHub Releases) ──
 # 通道分流由 tag 名驱动（见 .github/workflows/release.yml）：
-#   - 纯 vX.Y.Z         → 正式 Release（latest 通道，latest-mac.yml / latest.yml）
-#   - vX.Y.Z-beta.N     → 预发布 Release（beta 通道，beta-mac.yml / beta.yml）
+#   - 纯 vX.Y.Z         → 正式 Release（latest 通道，latest-mac.yml / latest.yml / latest-linux.yml）
+#   - vX.Y.Z-beta.N     → 预发布 Release（beta 通道，beta-mac.yml / beta.yml / beta-linux.yml）
 # generateUpdatesFilesForAllChannels 确保即使一次构建也按版本号语义写入对应通道清单。
 publish:
   provider: github

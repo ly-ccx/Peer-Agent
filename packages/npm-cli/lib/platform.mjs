@@ -1,8 +1,10 @@
 /**
  * Map Node process.platform / process.arch to the GitHub Release CLI archive name.
  *
- * First-class Release assets: peer-darwin-arm64.tar.gz, peer-linux-x64.tar.gz.
- * Other keys stay recognized so installers fail with a precise
+ * First-class CLI Release assets: peer-darwin-arm64.tar.gz, peer-linux-x64.tar.gz.
+ * Desktop Linux x64 is a separate Release track (AppImage / .deb + latest-linux.yml);
+ * this matrix only names CLI archives and must not be read as "Linux is CLI-only".
+ * Other CLI keys stay recognized so installers fail with a precise
  * "not yet published" message instead of inventing a wrong URL.
  */
 

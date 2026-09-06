@@ -34,7 +34,8 @@ locale:zh-CN
 ## CLI（仅命令行）
 
 - 本版 GitHub Release 附带 CLI 归档（与 Desktop 同 tag / 同版本）。
-- 资产示例：`peer-darwin-arm64.tar.gz` / `peer-linux-x64.tar.gz`（内含 `peer` + `peer-credential-helper`，**必须同目录**）。
+- Desktop Linux x64 一等产物（若本版走正式打包轨道）：`Peer-Agent-<ver>-x64.AppImage` / `.deb` + `latest-linux.yml`（或 beta 等价清单）。
+- CLI 资产示例：`peer-darwin-arm64.tar.gz` / `peer-linux-x64.tar.gz`（内含 `peer` + `peer-credential-helper`，**必须同目录**）。
 - 安装方式：
   - **npm（有 `NPM_TOKEN` 且 publish 成功时）**：`npm i -g @peer-agent/cli`（或 `pnpm add -g @peer-agent/cli`），`postinstall` 自动拉本版归档。
   - **手动**：解压归档后将目录加入 `PATH`，执行 `peer --version` 校验，再运行 `peer`。
@@ -56,7 +57,8 @@ locale:en-US
 ## CLI (command-line only)
 
 - This GitHub Release ships a CLI archive under the same tag / version as Desktop.
-- Asset example: `peer-darwin-arm64.tar.gz` / `peer-linux-x64.tar.gz` (contains `peer` + `peer-credential-helper`; **must stay in the same directory**).
+- Desktop Linux x64 first-class assets (when this release ships the formal packaging track): `Peer-Agent-<ver>-x64.AppImage` / `.deb` plus `latest-linux.yml` (or the beta-channel equivalent).
+- CLI asset example: `peer-darwin-arm64.tar.gz` / `peer-linux-x64.tar.gz` (contains `peer` + `peer-credential-helper`; **must stay in the same directory**).
 - Install:
   - **npm** (when `NPM_TOKEN` is set and publish succeeds): `npm i -g @peer-agent/cli` (or `pnpm add -g @peer-agent/cli`); `postinstall` pulls this version's archive.
   - **Manual**: unpack, add the directory to `PATH`, run `peer --version`, then `peer`.
