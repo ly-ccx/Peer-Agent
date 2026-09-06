@@ -96,6 +96,15 @@ nsis:
   # nsis 安装包为多架构合成的单一产物，不带 ${arch}（否则模板里 arch 为空会留下多余连字符）。
   artifactName: Peer-Agent-Setup-${version}.${ext}
 
+# ── Linux（沙箱 / CI 用 unpacked dir；正式分发可再加 AppImage）──
+linux:
+  icon: build/icon.png
+  category: Development
+  executableName: peer-agent
+  target:
+    - target: dir
+      arch: [x64]
+
 # ── 发布 (GitHub Releases) ──
 # 通道分流由 tag 名驱动（见 .github/workflows/release.yml）：
 #   - 纯 vX.Y.Z         → 正式 Release（latest 通道，latest-mac.yml / latest.yml）

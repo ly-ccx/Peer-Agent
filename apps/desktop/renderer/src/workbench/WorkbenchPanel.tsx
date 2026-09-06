@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
@@ -151,15 +151,17 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
 
   // Electron <webview> 在宿主节点被 React 重排（insertBefore）时会销毁 guest。
   // 活页集合用 LRU，渲染顺序必须「只追加 / 只删除」，切回同一会话才能复用 WebContents。
+  // 顺序只存在 ref 里：当帧就能算出稳定名单，不必 setState 再渲一次。
   const rawMountedBrowserIds = mountedBrowserConversations(
     conversationId,
     preparedBrowserConversations,
   );
-  const [browserMountOrder, setBrowserMountOrder] = useState(rawMountedBrowserIds);
-  const mountedBrowserIds = stabilizeMountedBrowserOrder(browserMountOrder, rawMountedBrowserIds);
-  if (mountedBrowserIds.join('\0') !== browserMountOrder.join('\0')) {
-    setBrowserMountOrder(mountedBrowserIds);
-  }
+  const browserMountOrderRef = useRef<string[]>([]);
+  const mountedBrowserIds = stabilizeMountedBrowserOrder(
+    browserMountOrderRef.current,
+    rawMountedBrowserIds,
+  );
+  browserMountOrderRef.current = mountedBrowserIds;
 
   // 拖拽分隔线。
   // Electron <webview> 会在 guest 层吃掉 pointerup：分隔条停在 data-active，
