@@ -12,6 +12,7 @@
     "test": "pnpm ipc:check && node --test \"electron/main/**/*.test.mjs\" \"renderer/src/**/*.test.ts\" \"scripts/webview-keepalive-probe.test.mjs\"",
     "test:webview-probe": "node --test scripts/webview-keepalive-probe.test.mjs",
     "smoke:packaged": "node scripts/packaged-desktop-smoke.mjs",
+    "e2e:keepalive-cdp": "node scripts/packaged-keepalive-cdp.mjs",
     "ipc:generate": "node scripts/sync-ipc-catalog.mjs",
     "ipc:check": "node scripts/sync-ipc-catalog.mjs --check",
     "typecheck": "tsc -p tsconfig.json",
