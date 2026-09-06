@@ -35,6 +35,7 @@ import {
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
+import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
@@ -916,6 +917,7 @@ function MainApp() {
   const isZh = (session?.locale ?? '').toLowerCase().startsWith('zh');
 
   return (
+    <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
       {showMainShell ? (
         <>
@@ -1440,5 +1442,6 @@ function MainApp() {
           知识库：peer-knowledge/knowledge/experience/full-disk-access-startup-gate-archive.md */}
       {false && <FullDiskAccessStartupGate enabled={showMainShell} isZh={isZh} />}
     </main>
+    </BackgroundRunsProvider>
   );
 }

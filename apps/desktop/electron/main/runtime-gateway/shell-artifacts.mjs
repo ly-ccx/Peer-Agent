@@ -31,6 +31,8 @@ export function createShellArtifactStore({ userDataPath }) {
     classification,
     startedAt,
     completedAt,
+    conversationId = null,
+    runInBackground = false,
   }) {
     const artifactDir = path.join(rootPath, dateKey(), taskId);
     await mkdir(artifactDir, { recursive: true });
@@ -46,6 +48,8 @@ export function createShellArtifactStore({ userDataPath }) {
       classification,
       startedAt,
       completedAt,
+      conversationId,
+      runInBackground,
       stdoutTruncated: cappedStdout.truncated,
       stderrTruncated: cappedStderr.truncated,
       stdoutChars: String(stdout ?? '').length,

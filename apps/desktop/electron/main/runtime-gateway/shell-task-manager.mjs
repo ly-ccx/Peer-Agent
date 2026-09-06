@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { buildShellSpawnArgs } from './shell-env-snapshot.mjs';
+import { readTaskListeners } from './shell-task-listeners.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
@@ -48,15 +50,44 @@ function terminateChild(child, signal = 'SIGTERM') {
   child.kill(signal);
 }
 
+function processGroupExists(pid) {
+  if (process.platform === 'win32' || !pid) return false;
+  try { process.kill(-pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+
+// A leader exiting does not prove its children have exited. Keep the task in
+// stopping until its owned group is cleared, even when children closed stdio.
+async function terminateTaskGroup(task) {
+  terminateChild(task.child, 'SIGTERM');
+  const deadline = Date.now() + 2000;
+  while (processGroupExists(task.child.pid) && Date.now() < deadline) await delay(25);
+  if (processGroupExists(task.child.pid)) {
+    terminateChild(task.child, 'SIGKILL');
+    // Let the kernel deliver KILL before completion observers probe the port.
+    for (let n = 0; n < 40 && processGroupExists(task.child.pid); n++) await delay(25);
+  }
+}
+
 export function createShellTaskManager({ artifactStore, logger = console } = {}) {
   const tasks = new Map();
 
   function listTasks() {
+    for (const task of tasks.values()) {
+      if (task.status !== 'running' || !task.runInBackground || task.listenerRead) continue;
+      if (Date.now() - (task.listenersReadAt ?? 0) < 2000) continue;
+      task.listenerRead = readTaskListeners(task.child.pid).then((listeners) => {
+        task.listeners = task.status === 'running' ? listeners : [];
+        task.listenersReadAt = Date.now();
+      }).finally(() => { task.listenerRead = null; });
+    }
     return [...tasks.values()].map((task) => ({
       taskId: task.taskId,
       toolCallId: task.toolCallId,
       command: task.command,
       cwd: task.cwd,
+      conversationId: task.conversationId,
+      runInBackground: task.runInBackground,
       description: task.description,
       status: task.status,
       startedAt: task.startedAt,
@@ -64,6 +95,11 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
       exitCode: task.exitCode,
       timedOut: task.timedOut,
       promptDetected: task.promptDetected,
+      stopReason: task.stopReason,
+      stdout: task.stdout ?? '',
+      stderr: task.stderr ?? '',
+      listeners: task.status === 'running' ? (task.listeners ?? []) : [],
+      artifactRef: task.artifact?.artifactRef ?? null,
     }));
   }
 
@@ -77,19 +113,21 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
       return { stopped: false, reason: 'shell_task_not_running', taskId: task.taskId };
     }
     task.stopReason = 'user_stopped';
-    terminateChild(task.child, 'SIGTERM');
-    setTimeout(() => {
-      if (task.status === 'running') terminateChild(task.child, 'SIGKILL');
-    }, 2_000).unref?.();
+    task.status = 'stopping';
+    task.termination ??= terminateTaskGroup(task);
     return { stopped: true, taskId: task.taskId, toolCallId: task.toolCallId };
   }
 
-  function stopActiveTask() {
-    const active = [...tasks.values()].reverse().find((task) => task.status === 'running');
+  function stopActiveTask(conversationId = null) {
+    const active = [...tasks.values()].reverse().find((task) =>
+      task.status === 'running' && !task.runInBackground
+      && task.conversationId === conversationId);
     return active ? stopTask(active.taskId) : { stopped: false, reason: 'no_running_shell_task' };
   }
 
   function runTask({
+    runInBackground = false,
+    conversationId = null,
     toolCallId,
     command,
     cwd,
@@ -99,7 +137,7 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
   }) {
     const taskId = `shell_${randomUUID()}`;
     const startedAt = new Date().toISOString();
-    const timeout = clampTimeout(timeoutMs);
+    const timeout = runInBackground && timeoutMs == null ? null : clampTimeout(timeoutMs);
     // Shell 环境快照：有快照 → source 快照后 eval 命令（PATH 含用户 .zshrc 注入的路径）；
     // 无快照 → fallback 到 login shell（-lc）。对齐 Claude Code ShellSnapshot 机制。
     const { shell: spawnShell, args: spawnArgs } = buildShellSpawnArgs(command);
@@ -116,6 +154,8 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
     });
 
     const task = {
+      conversationId,
+      runInBackground,
       taskId,
       toolCallId,
       command,
@@ -136,39 +176,49 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
     let stdout = '';
     let stderr = '';
 
-    const timer = setTimeout(() => {
+    const timer = timeout === null ? null : setTimeout(() => {
       task.timedOut = true;
       task.stopReason = 'timeout';
-      terminateChild(child, 'SIGTERM');
-      setTimeout(() => {
-        if (task.status === 'running') terminateChild(child, 'SIGKILL');
-      }, 2_000).unref?.();
+      task.status = 'stopping';
+      task.termination ??= terminateTaskGroup(task);
     }, timeout);
 
+    let settled = false;
     const completion = new Promise((resolve) => {
       child.stdout.on('data', (chunk) => {
         const text = chunk.toString();
         stdout = appendCapped(stdout, text);
+        task.stdout = `${task.stdout ?? ''}${text}`.slice(-32_000);
         if (PROMPT_PATTERN.test(text)) task.promptDetected = true;
       });
 
       child.stderr.on('data', (chunk) => {
         const text = chunk.toString();
         stderr = appendCapped(stderr, text);
+        task.stderr = `${task.stderr ?? ''}${text}`.slice(-32_000);
         if (PROMPT_PATTERN.test(text)) task.promptDetected = true;
       });
 
       child.on('error', (error) => {
         clearTimeout(timer);
         stderr = appendCapped(stderr, error.message);
+        task.stderr = `${task.stderr ?? ''}${error.message}`.slice(-32_000);
         task.status = 'failed';
         task.completedAt = new Date().toISOString();
         logger.error?.('[runtime-gateway] shell task failed:', error);
         resolveTask(resolve);
       });
 
-      child.on('close', (exitCode, signal) => {
+      child.on('close', async (exitCode, signal) => {
+        if (settled) return;
         clearTimeout(timer);
+        // Also clean an orphaned owned group if the leader exits naturally.
+        if (!task.termination && processGroupExists(child.pid)) {
+          task.status = 'stopping';
+          task.termination = terminateTaskGroup(task);
+        }
+        await task.termination;
+        if (settled) return;
         task.exitCode = exitCode;
         task.completedAt = new Date().toISOString();
         if (task.stopReason || task.timedOut || signal) {
@@ -180,24 +230,36 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
       });
 
       async function resolveTask(done) {
+        if (settled) return;
+        settled = true;
+        task.stdout ??= '';
+        task.stderr ??= '';
         let artifact = {
           artifactRef: null,
           artifactRefs: [],
           truncated: false,
         };
         if (artifactStore) {
-          artifact = await artifactStore.writeTaskArtifacts({
-            taskId,
-            toolCallId,
-            command,
-            cwd,
-            stdout,
-            stderr,
-            classification,
-            startedAt,
-            completedAt: task.completedAt,
-          });
+          try {
+            artifact = await artifactStore.writeTaskArtifacts({
+              taskId,
+              toolCallId,
+              command,
+              cwd,
+              stdout,
+              stderr,
+              classification,
+              startedAt,
+              completedAt: task.completedAt,
+              conversationId,
+              runInBackground,
+            });
+          } catch (error) {
+            task.stderr = appendCapped(task.stderr, `\nArtifact write failed: ${error.message}`);
+            logger.error?.('[runtime-gateway] shell artifact failed:', error);
+          }
         }
+        task.artifact = artifact;
         done({
           taskId,
           toolCallId,
@@ -216,6 +278,7 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
       }
     });
 
+    task.completion = completion;
     return {
       taskId,
       startedAt,
@@ -228,5 +291,10 @@ export function createShellTaskManager({ artifactStore, logger = console } = {})
     runTask,
     stopTask,
     stopActiveTask,
+    async dispose() {
+      const active = [...tasks.values()].filter((task) => task.status === 'running' || task.status === 'stopping');
+      for (const task of active) stopTask(task.taskId);
+      await Promise.all([...tasks.values()].map((task) => task.completion));
+    },
   };
 }

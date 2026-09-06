@@ -6,9 +6,9 @@ test('migrates legacy workbench capability ids', () => {
   assert.equal(normalizeWorkbenchTab('goal'), 'plan');
   assert.equal(normalizeWorkbenchTab('terminal'), 'plan');
   assert.equal(normalizeWorkbenchTab('diff'), 'documents');
-  assert.equal(normalizeWorkbenchTab('background'), 'threads');
-  assert.equal(normalizeWorkbenchTab('shell'), 'threads');
-  assert.equal(normalizeWorkbenchTab('threads'), 'threads');
+  assert.equal(normalizeWorkbenchTab('background'), 'plan');
+  assert.equal(normalizeWorkbenchTab('shell'), 'plan');
+  assert.equal(normalizeWorkbenchTab('threads'), 'plan');
 });
 
 test('normalizes a persisted tab map and drops invalid values', () => {
@@ -21,6 +21,6 @@ test('normalizes a persisted tab map and drops invalid values', () => {
   }), {
     a: 'documents',
     b: 'browser',
-    e: 'threads',
+    e: 'plan',
   });
 });

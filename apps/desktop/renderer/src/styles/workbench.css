@@ -2053,7 +2053,34 @@
     font-style: italic;
   }
 
-  /* 后台线程 Tab：列表 + 详情双栏。 */
+  .background-runtime-panel { padding: 12px; color: var(--za-text); font-size: var(--ui-font-body); }
+  .background-runtime-panel > * { position: relative; z-index: 1; }
+  .background-runtime-header { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+  .background-runtime-header h2 { margin: 0; font-size: var(--ui-font-heading-sm); font-weight: 600; }
+  .background-runtime-header > .background-run-meta { margin-left: auto; }
+  .background-runtime-panel button { min-height: 32px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 5px 8px; }
+  .background-runtime-panel button:hover { background: var(--ui-surface-hover); }
+  .background-runtime-panel button:disabled { opacity: .5; cursor: default; }
+  .background-runtime-panel button:focus-visible, .background-runtime-trigger:focus-visible, .background-runtime-panel summary:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+  .background-runtime-list { display: flex; flex-direction: column; gap: 4px; }
+  .background-runtime-list .background-run-row { width: 100%; min-height: 52px; padding: 8px; text-align: left; border-radius: var(--ui-radius-row); }
+  .background-run-row-heading { display: flex; align-items: baseline; gap: 12px; }
+  .background-run-row-heading > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .background-run-row-heading small { flex-shrink: 0; font-size: var(--ui-font-meta); }
+  .background-run-meta { color: var(--za-text-faint); font-size: var(--ui-font-meta); overflow-wrap: anywhere; }
+  .background-run-row > .background-run-meta { display: block; margin-top: 4px; }
+  .background-run-detail { overflow-wrap: anywhere; }
+  .background-run-detail h3 { margin: 8px 0; font-size: var(--ui-font-heading-sm); }
+  .background-run-detail p { margin: 8px 0; }
+  .background-run-detail details { border-top: 1px solid var(--ui-border-subtle); padding: 8px 0; }
+  .background-run-detail summary { cursor: pointer; min-height: 32px; padding: 5px 0; }
+  .background-run-detail dd { margin: 4px 0 12px; }
+  .background-run-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--ui-font-meta); }
+  .background-run-output { max-height: 180px; overflow: auto; }
+  .background-run-confirm { border-top: 1px solid var(--ui-border-subtle); margin-top: 12px; padding-top: 8px; }
+  .background-runtime-panel .background-run-destructive { color: var(--za-danger, #b94040); }
+
+  /* 全局后台任务及工作台关联入口共用同一视图。 */
   .workbench-view--threads {
     padding: 12px 12px 16px;
   }

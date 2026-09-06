@@ -8,6 +8,8 @@ import { createLocalInteractionProvider } from './local-interaction-provider.mjs
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
 import { createLocalSearchAggregateProvider } from './local-search-aggregate-provider.mjs';
 import { createLocalShellProvider } from './local-shell-provider.mjs';
+import { getApplicationShellTasks } from './application-shell-tasks.mjs';
+import { getApplicationShellSessions } from './application-shell-sessions.mjs';
 import { createLocalWebProvider } from './local-web-provider.mjs';
 import { createLocalBrowserControlProvider } from './local-browser-control-provider.mjs';
 import { createLocalExternalBrowserProvider } from './local-external-browser-provider.mjs';
@@ -43,6 +45,10 @@ export function createLocalToolHost({
   const activeShellProvider = shellProvider ?? createLocalShellProvider({
     workspaceRoot,
     userDataPath,
+    ...(userDataPath ? {
+      taskManager: getApplicationShellTasks(userDataPath),
+      sessionManager: getApplicationShellSessions(userDataPath, workspaceRoot),
+    } : {}),
     hookRunner: activeHookRunner,
   });
   const mcpProvider = mcpRegistry ? createLocalMcpProvider({ mcpRegistry, credentialResolver: mcpCredentialResolver }) : null;

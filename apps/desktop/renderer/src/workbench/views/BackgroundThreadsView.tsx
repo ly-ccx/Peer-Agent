@@ -1,59 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
-export interface ShellThreadTask {
-  readonly taskId: string;
-  readonly toolCallId?: string;
-  readonly command: string;
-  readonly cwd?: string;
-  readonly status: string;
-  readonly startedAt?: string;
-  readonly completedAt?: string | null;
-  readonly exitCode?: number | null;
-  readonly stopReason?: string | null;
-  readonly stdout?: string;
-  readonly stderr?: string;
-}
+import type { ManagedShellTask } from '@peer-agent/protocol';
+import { backgroundTaskList, backgroundTaskStatus, backgroundTaskAddresses } from '../backgroundTaskPresentation';
+export type ShellThreadTask = ManagedShellTask;
 
 interface BackgroundThreadsViewProps {
   readonly isZh: boolean;
   /** 工作台卡片点击后要聚焦的 shell taskId（不含 shell: 前缀）。 */
   readonly focusTaskId?: string | null;
-}
-
-function asTask(raw: unknown): ShellThreadTask | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const row = raw as Record<string, unknown>;
-  const taskId = typeof row.taskId === 'string' ? row.taskId.trim() : '';
-  if (!taskId) return null;
-  return {
-    taskId,
-    toolCallId: typeof row.toolCallId === 'string' ? row.toolCallId : undefined,
-    command: typeof row.command === 'string' ? row.command : '',
-    cwd: typeof row.cwd === 'string' ? row.cwd : undefined,
-    status: typeof row.status === 'string' ? row.status : 'unknown',
-    startedAt: typeof row.startedAt === 'string' ? row.startedAt : undefined,
-    completedAt:
-      typeof row.completedAt === 'string'
-        ? row.completedAt
-        : row.completedAt === null
-          ? null
-          : undefined,
-    exitCode: typeof row.exitCode === 'number' ? row.exitCode : row.exitCode === null ? null : undefined,
-    stopReason: typeof row.stopReason === 'string' ? row.stopReason : null,
-    stdout: typeof row.stdout === 'string' ? row.stdout : undefined,
-    stderr: typeof row.stderr === 'string' ? row.stderr : undefined,
-  };
-}
-
-function statusLabel(isZh: boolean, status: string): string {
-  const s = status.toLowerCase();
-  if (s === 'running') return isZh ? '运行中' : 'Running';
-  if (s === 'completed') return isZh ? '已完成' : 'Completed';
-  if (s === 'failed') return isZh ? '失败' : 'Failed';
-  if (s === 'cancelled') return isZh ? '已停止' : 'Stopped';
-  if (s === 'timed_out') return isZh ? '超时' : 'Timed out';
-  return status || (isZh ? '未知' : 'Unknown');
 }
 
 function formatTime(iso?: string | null): string {
@@ -78,20 +33,12 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stopError, setStopError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
       const listed = await clientApi.listShellTasks();
-      const next = (Array.isArray(listed) ? listed : [])
-        .map(asTask)
-        .filter((item): item is ShellThreadTask => item != null);
-      // 运行中优先，其余按开始时间倒序。
-      next.sort((a, b) => {
-        const ar = a.status === 'running' ? 0 : 1;
-        const br = b.status === 'running' ? 0 : 1;
-        if (ar !== br) return ar - br;
-        return Date.parse(b.startedAt ?? '') - Date.parse(a.startedAt ?? '');
-      });
+      const next = backgroundTaskList(listed);
       setTasks(next);
       setError(null);
     } catch (err) {
@@ -124,26 +71,30 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
 
   const stopTask = useCallback(async (taskId: string) => {
     setBusyId(taskId);
+    setStopError(null);
     try {
-      await clientApi.stopShellTask(taskId);
+      const result = await clientApi.stopShellTask(taskId);
+      if (result.stopped !== true) {
+        throw new Error(String(result.reason ?? (isZh ? '未能停止任务' : 'Could not stop task')));
+      }
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setStopError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
-  }, [reload]);
+  }, [isZh, reload]);
 
   if (tasks.length === 0) {
     return (
       <div className="workbench-empty bg-threads-empty">
         <div className="workbench-empty-title">
-          {isZh ? '暂无后台线程' : 'No background threads'}
+          {isZh ? '暂无后台任务' : 'No background tasks'}
         </div>
         <p className="workbench-empty-hint">
           {isZh
-            ? 'Peer 通过 shell 开启后台任务后，会显示在这里，可查看命令与停止。'
-            : 'Background shell tasks started by Peer will show up here for inspect/stop.'}
+            ? 'Peer 托管的后台服务和命令会显示在这里。全局可见，不随会话切换停止。'
+            : 'Peer-managed background services and commands appear here, across conversations.'}
         </p>
         {error ? <p className="workbench-empty-meta">{error}</p> : null}
       </div>
@@ -164,7 +115,7 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
               className={`bg-threads-item${active ? ' is-active' : ''}${running ? ' is-running' : ''}`}
               onClick={() => setSelectedId(task.taskId)}
             >
-              <span className="bg-threads-item-status">{statusLabel(isZh, task.status)}</span>
+              <span className="bg-threads-item-status">{backgroundTaskStatus(task, isZh)}</span>
               <span className="bg-threads-item-command" title={task.command}>
                 {truncate(task.command || task.taskId, 80)}
               </span>
@@ -180,7 +131,7 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
             <div className="bg-threads-detail-header">
               <div>
                 <div className="bg-threads-detail-status">
-                  {statusLabel(isZh, selected.status)}
+                  {backgroundTaskStatus(selected, isZh)}
                 </div>
                 <div className="bg-threads-detail-id" title={selected.taskId}>
                   {selected.taskId}
@@ -208,6 +159,22 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
               <span>cwd</span>
               <pre>{selected.cwd || '—'}</pre>
             </label>
+            <label className="bg-threads-field">
+              <span>{isZh ? '来源会话（仅作追溯）' : 'Source conversation (provenance only)'}</span>
+              <pre>{selected.conversationId || (isZh ? '无来源会话' : 'No source conversation')}</pre>
+            </label>
+            <label className="bg-threads-field">
+              <span>{isZh ? '工具调用' : 'Tool call'}</span>
+              <pre>{selected.toolCallId || '—'}</pre>
+            </label>
+            <label className="bg-threads-field">
+              <span>{isZh ? 'TCP 监听地址（不代表 HTTP 就绪）' : 'TCP listeners (not HTTP readiness)'}</span>
+              <pre>{backgroundTaskAddresses(selected).join('\n') || (isZh ? '暂无已观测的监听地址' : 'No observed listener')}</pre>
+            </label>
+            <label className="bg-threads-field">
+              <span>{isZh ? '日志证据' : 'Log evidence'}</span>
+              <pre>{selected.artifactRef || (isZh ? '任务结束后保存；下方为实时日志尾部' : 'Saved on completion; live log tails below')}</pre>
+            </label>
             <div className="bg-threads-meta-row">
               <span>{isZh ? '开始' : 'Started'}: {formatTime(selected.startedAt)}</span>
               <span>{isZh ? '结束' : 'Ended'}: {formatTime(selected.completedAt)}</span>
@@ -227,12 +194,13 @@ export function BackgroundThreadsView({ isZh, focusTaskId }: BackgroundThreadsVi
                 <pre className="bg-threads-output">{selected.stderr}</pre>
               </label>
             ) : null}
-            {error ? <p className="bg-threads-error">{error}</p> : null}
+            {stopError ? <p className="bg-threads-error" role="alert">{stopError}</p> : null}
+            {error ? <p className="bg-threads-error" role="alert">{error}</p> : null}
           </>
         ) : (
           <div className="workbench-empty">
             <div className="workbench-empty-title">
-              {isZh ? '选择一个后台线程' : 'Select a background thread'}
+              {isZh ? '选择一个后台任务' : 'Select a background task'}
             </div>
           </div>
         )}

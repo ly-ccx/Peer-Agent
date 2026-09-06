@@ -50,6 +50,21 @@ function materializeShellProviderResult({ command, cwd, execution }) {
     };
   }
 
+  if (result.status === 'success' && outputPreview.status === 'running' && outputPreview.backgroundTaskId) {
+    return {
+      success: true,
+      output: formatContextResult({
+        kind: 'local_tool_result_ref', tool: 'bash', command,
+        cwd: outputPreview.cwd ?? cwd, status: 'running',
+        taskId: outputPreview.backgroundTaskId,
+        backgroundTaskId: outputPreview.backgroundTaskId,
+        toolCallId: result.toolCallId,
+        evidence: result.evidence,
+        exitCode: null,
+      }),
+    };
+  }
+
   const status = result.status || 'failed';
   const reason = outputPreview.reason || result.error || 'shell capability failed';
   return {
@@ -70,6 +85,7 @@ function materializeShellProviderResult({ command, cwd, execution }) {
 }
 
 async function executeLocalShellLegacy({
+  executionContext = {},
   args,
   cwd,
   artifactStore,
@@ -87,11 +103,12 @@ async function executeLocalShellLegacy({
     toolCallId: `legacy-shell:${randomUUID()}`,
     capabilityId: 'local.shell.exec',
     toolName: 'bash',
-    arguments: { command },
-    argumentsPreview: { command },
+    arguments: { command, ...(args.runInBackground === true ? { runInBackground: true } : {}) },
+    argumentsPreview: { command, ...(args.runInBackground === true ? { runInBackground: true } : {}) },
     occurredAt: nowIso(),
   };
   const execution = await provider.executeCapability({ call }, {
+    ...executionContext,
     workspaceRoot: cwd,
     locale,
   });
@@ -123,6 +140,7 @@ async function executeLocalFileLegacy({ name, args, cwd, toolContext, requestPer
 }
 
 async function runLegacyTool({
+  executionContext,
   name,
   args,
   cwd,
@@ -137,6 +155,7 @@ async function runLegacyTool({
   try {
     if (name === 'bash') {
       return await executeLocalShellLegacy({
+        executionContext,
         args,
         cwd,
         artifactStore,
@@ -214,6 +233,7 @@ export function createLegacyLlmLocalToolProvider({ artifactStore, fileProvider, 
     const args = readLegacyArgs(call);
     const cwd = context.workspaceRoot || process.cwd();
     const legacyResult = await runLegacyTool({
+      executionContext: context,
       name,
       args,
       cwd,

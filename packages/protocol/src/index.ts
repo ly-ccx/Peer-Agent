@@ -923,6 +923,35 @@ export interface PermissionGrant {
   readonly decidedAt: string;
 }
 
+/** Application-owned shell process snapshot. Source conversation is provenance, not ownership. */
+export interface ManagedShellTask {
+  readonly taskId: string;
+  readonly toolCallId?: string;
+  readonly command: string;
+  readonly cwd?: string;
+  readonly conversationId?: string | null;
+  readonly runInBackground?: boolean;
+  readonly description?: string;
+  readonly status: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string | null;
+  readonly exitCode?: number | null;
+  readonly timedOut?: boolean;
+  readonly stopReason?: string | null;
+  readonly promptDetected?: boolean;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly artifactRef?: string | null;
+  /** Observed TCP listeners, not HTTP readiness inferred from log output. */
+  readonly listeners?: readonly {
+    readonly host: string;
+    readonly port: number;
+    readonly pid: number;
+    readonly transport: 'tcp';
+    readonly observedAt: string;
+  }[];
+}
+
 export interface LocalShellExecInput {
   readonly command: string;
   readonly cwd?: string;

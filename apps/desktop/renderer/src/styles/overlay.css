@@ -36,6 +36,39 @@
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
+  /* Anchored content keeps unified admission without blocking the work surface. */
+  .pa-overlay-backdrop.pa-overlay--anchored {
+    display: block;
+    padding: 0;
+    pointer-events: none;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .pa-overlay--anchored > .pa-overlay-panel {
+    position: fixed;
+    pointer-events: auto;
+    width: min(360px, calc(100vw - 24px));
+    max-height: min(480px, calc(100vh - 24px));
+    overflow: auto;
+    border-radius: var(--radius-xl);
+    border-color: var(--ui-border-subtle);
+    box-shadow: var(--shadow-popover);
+    background: var(--ui-surface-elevated);
+  }
+  .pa-overlay--anchored > .pa-overlay-panel::before {
+    background: var(--glass-popover);
+    backdrop-filter: var(--blur-popover);
+    -webkit-backdrop-filter: var(--blur-popover);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .pa-overlay--anchored > .pa-overlay-panel::before {
+      background: var(--ui-surface-elevated);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+
   .pa-overlay-panel::before {
     content: '';
     position: absolute;

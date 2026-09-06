@@ -43,6 +43,8 @@ import { applyCookiesToSession } from './session-import/apply-cookies.mjs';
 import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
+import { getApplicationShellTasks, disposeApplicationShellTasks } from './runtime-gateway/application-shell-tasks.mjs';
+import { getApplicationShellSessions, disposeApplicationShellConversation, disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
@@ -1883,7 +1885,13 @@ const conversationApplicationService = createConversationApplicationService({
   unpinConversation: (id) => conversationStore.unpinConversation(id),
   reorderPinnedConversations: (ids) => conversationStore.reorderPinnedConversations(ids),
   autoArchiveConversations: (params) => conversationStore.autoArchiveConversations(params),
-  deleteConversation: (id) => conversationStore.deleteConversation(id),
+  deleteConversation: (id) => {
+    const result = conversationStore.deleteConversation(id);
+    void disposeApplicationShellConversation(dataHome, id).catch((error) => {
+      console.warn('[main] conversation shell cleanup failed:', error);
+    });
+    return result;
+  },
   addUsage: (id, usage) => conversationStore.addUsage(id, usage),
   listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
   deletePlanByConversation: (id) => goalPlanStore.deletePlanByConversation(id),
@@ -3848,6 +3856,8 @@ function startLocalRuntime() {
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,
     userDataPath,
+    taskManager: getApplicationShellTasks(userDataPath),
+    sessionManager: getApplicationShellSessions(userDataPath, resourcesRoot),
   });
 
   localToolHost = createLocalToolHost({
@@ -3868,9 +3878,16 @@ function startLocalRuntime() {
   flushPendingRuntimeEvents();
   return {
     name: 'local-tool-host-events',
-    dispose: () => {
-      localToolHost?.unsubscribeRuntimeEvents?.();
-      localToolHost = null;
+    dispose: async () => {
+      try {
+        await Promise.all([
+          disposeApplicationShellTasks(userDataPath),
+          disposeApplicationShellSessions(userDataPath),
+        ]);
+      } finally {
+        localToolHost?.unsubscribeRuntimeEvents?.();
+        localToolHost = null;
+      }
     },
   };
 }

@@ -13,6 +13,9 @@ import {
   createRuntimeToolRegistry,
 } from '../tools/index.mjs';
 
+import { getApplicationShellTasks, disposeApplicationShellTasks } from '../runtime-gateway/application-shell-tasks.mjs';
+import { disposeApplicationShellSessions } from '../runtime-gateway/application-shell-sessions.mjs';
+
 let tmpDir;
 let browserToolRegistry;
 let browserRuntimeProjection;
@@ -28,7 +31,9 @@ describe('projected model tool executor', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await disposeApplicationShellTasks(tmpDir);
+    await disposeApplicationShellSessions(tmpDir);
     delete process.env.PEER_AGENT_HOME;
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -248,6 +253,33 @@ describe('projected model tool executor', () => {
     assert.equal(permissionRequests[0].confirmation.kind, 'high_risk');
     const parsed = JSON.parse(result.output);
     assert.equal(parsed.reason, 'goal_high_risk_denied');
+  });
+
+  it('projects managed launch into the application registry with source and explicit stop', async () => {
+    const controller = new AbortController();
+    const result = await executeProjectedModelTool({
+      name: 'bash', args: { command: 'node -e "setInterval(() => {}, 1000)"', runInBackground: true },
+      toolCallId: 'managed-projection', workspacePath: tmpDir,
+      toolContext: { conversationId: 'source-A', mode: 'chat' },
+      goalPlanStore: { listPlansByConversation: () => [{ status: 'executing' }] },
+      requestPermission: async () => ({ granted: true }),
+      locale: 'en-US', signal: controller.signal,
+      shellApprovalDecider: async () => ({ granted: true, reason: 'test_allow' }),
+    });
+    assert.equal(result.success, true, result.output);
+    const taskId = result.execution.result.outputPreview.backgroundTaskId;
+    assert.ok(taskId);
+    const manager = getApplicationShellTasks(tmpDir);
+    assert.equal(manager.listTasks().find((task) => task.taskId === taskId).conversationId, 'source-A');
+    controller.abort(); // Accepted background ownership no longer belongs to this turn.
+    assert.equal(manager.listTasks().find((task) => task.taskId === taskId).status, 'running');
+    const stop = await executeProjectedModelTool({
+      name: 'shell_stop', args: { taskId }, toolCallId: 'stop-projection',
+      workspacePath: tmpDir, toolContext: { conversationId: 'source-A', mode: 'chat' }, locale: 'en-US',
+      goalPlanStore: { listPlansByConversation: () => [{ status: 'executing' }] },
+      requestPermission: async () => ({ granted: true }),
+    });
+    assert.equal(stop.success, true, stop.output);
   });
 
   it('propagates abort signals to projected shell execution', async () => {

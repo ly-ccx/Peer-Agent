@@ -884,7 +884,7 @@ export interface BootstrapPreloadApi {
     readonly filledUsername?: boolean;
     readonly error?: string;
   }>;
-  readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
+  readonly listShellTasks: () => Promise<readonly import('@peer-agent/protocol').ManagedShellTask[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;
   readonly listShellPermissionRules: () => Promise<readonly Record<string, unknown>[]>;

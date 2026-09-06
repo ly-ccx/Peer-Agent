@@ -1,12 +1,11 @@
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'threads';
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents';
 
 function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
   return (
     value === 'plan' ||
     value === 'browser' ||
     value === 'files' ||
-    value === 'documents' ||
-    value === 'threads'
+    value === 'documents'
   );
 }
 
@@ -14,8 +13,8 @@ function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
 export function normalizeWorkbenchTab(value: unknown): WorkbenchTabId | null {
   if (value === 'goal' || value === 'terminal') return 'plan';
   if (value === 'diff') return 'documents';
-  // 兼容旧命名：后台线程曾规划为 background / shell。
-  if (value === 'background' || value === 'shell') return 'threads';
+  // Retired background tabs must never restore a blank, duplicate management surface.
+  if (value === 'background' || value === 'shell' || value === 'threads') return 'plan';
   return isWorkbenchTab(value) ? value : null;
 }
 

@@ -3,7 +3,6 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
-import { BackgroundThreadsView } from './views/BackgroundThreadsView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -97,19 +96,7 @@ const TABS: readonly TabDef[] = [
       </svg>
     ),
   },
-  {
-    id: 'threads',
-    labelZh: '后台线程',
-    labelEn: 'Threads',
-    icon: (
-      <svg width="15" height="15" {...ICON_PROPS}>
-        <path d="M4 6h16" />
-        <path d="M4 12h16" />
-        <path d="M4 18h10" />
-        <circle cx="18" cy="18" r="2" />
-      </svg>
-    ),
-  },
+
 ];
 
 interface WorkbenchPanelProps {
@@ -126,7 +113,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setActiveTab,
     setWidth,
     setMaximized,
-    focusThreadTaskId,
     hasGoalPlan,
     registerGoalSlot,
     sidebarAutoCollapsed,
@@ -417,12 +403,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             onBrowseFiles={() => setActiveTab('files')}
           />
         </div>
-        <div
-          className="workbench-view workbench-view--threads"
-          data-active={activeTab === 'threads'}
-        >
-          <BackgroundThreadsView isZh={isZh} focusTaskId={focusThreadTaskId} />
-        </div>
+
       </div>
     </aside>
   );
