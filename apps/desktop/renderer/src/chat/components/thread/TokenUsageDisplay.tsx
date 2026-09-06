@@ -447,6 +447,23 @@ export function TokenUsageDisplay({
   const handleModelMenuChange = useCallback((next: string) => {
     onModelChange?.(next);
   }, [onModelChange]);
+  // 这三份 useMemo 必须留在 hasInfo early return 之前。草稿态（无 provider /
+  // 无 usage）hasInfo=false；打开会话后 contextAccounting 一到 hasInfo=true，
+  // 若此时才第一次调用 hook，会触发 React #310。
+  const contextOptionDefinition = useMemo(
+    () => (defaultProvider ? contextWindowDefinition(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const selectedContextWindow = useMemo(
+    () => (defaultProvider ? selectedModelContextWindow(defaultProvider) : undefined),
+    [defaultProvider],
+  );
+  const contextOptionValues = useMemo(
+    () => (defaultProvider
+      ? resolveLlmModelOptionValues(defaultProvider.modelOptions, defaultProvider.modelOptionValues)
+      : {}),
+    [defaultProvider],
+  );
 
   const hasInfo = tokenUsage || activeUsage || contextAccounting || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
@@ -522,20 +539,6 @@ export function TokenUsageDisplay({
       ]
     : [];
   const ctxTooltip = ctxTooltipLines.join('\n');
-  const contextOptionDefinition = useMemo(
-    () => (defaultProvider ? contextWindowDefinition(defaultProvider) : undefined),
-    [defaultProvider],
-  );
-  const selectedContextWindow = useMemo(
-    () => (defaultProvider ? selectedModelContextWindow(defaultProvider) : undefined),
-    [defaultProvider],
-  );
-  const contextOptionValues = useMemo(
-    () => (defaultProvider
-      ? resolveLlmModelOptionValues(defaultProvider.modelOptions, defaultProvider.modelOptionValues)
-      : {}),
-    [defaultProvider],
-  );
   const selectedContextOptionValue = contextOptionDefinition
     ? String(contextOptionValues[contextOptionDefinition.id] ?? contextOptionDefinition.defaultValue)
     : '';

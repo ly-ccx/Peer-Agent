@@ -102,7 +102,11 @@ const now = Date.now();
 store.appendMessage(convA.id, { id: 'seed-a', role: 'user', content: 'seed conversation A', timestamp: now });
 store.appendMessage(convB.id, { id: 'seed-b', role: 'user', content: 'seed conversation B', timestamp: now + 1 });
 
+const extraArgs = (process.env.PEER_AGENT_PACKAGED_ARGS || '')
+  .split(/\s+/)
+  .filter(Boolean);
 const child = spawn(binary, [
+  ...extraArgs,
   `--remote-debugging-port=${port}`,
   '--no-sandbox',
   '--disable-gpu',
@@ -181,10 +185,23 @@ try {
     }
   };
 
-  const clickConversation = async (title) => {
+  const clickConversation = async (title, conversationId) => {
+    const clicked = await page.evaluate((id) => {
+      const expand = document.querySelector(
+        'button[aria-label="Expand unassigned"], button[aria-label="展开未归属"]',
+      );
+      if (expand instanceof HTMLElement) expand.click();
+      const row = document.querySelector(`[data-conversation-id="${id}"]`);
+      if (row instanceof HTMLElement) {
+        row.click();
+        return true;
+      }
+      return false;
+    }, conversationId);
+    if (clicked) return true;
     await expandUnassigned();
     const locators = [
-      page.getByRole('button', { name: title }),
+      page.locator(`[data-conversation-id="${conversationId}"]`),
       page.locator('.sidebar-conv-title', { hasText: title }),
       page.getByText(title, { exact: true }),
     ];
@@ -205,13 +222,13 @@ try {
     return null;
   };
 
-  report.openedA = await clickConversation('KeepAlive A');
+  report.openedA = await clickConversation('KeepAlive A', convA.id);
   await wait(1_200);
   report.rendererError = await snapshotError();
   report.rendererCrashedOnOpenA = Boolean(report.rendererError);
 
   if (!report.rendererCrashedOnOpenA) {
-    const workbenchToggle = page.locator('button[aria-label*="Workbench"], button[aria-label*="工作台"], button[title*="Workbench"], button[title*="工作台"]');
+    const workbenchToggle = page.locator('button[aria-label="Show workbench"], button[aria-label="显示工作台"], button[aria-label="Hide workbench"], button[aria-label="隐藏工作台"]');
     if (await workbenchToggle.count()) {
       await workbenchToggle.first().click().catch(() => {});
       await wait(400);
@@ -222,7 +239,7 @@ try {
       await wait(400);
     }
 
-    const address = page.locator('input[aria-label*="Address"], input[placeholder*="http"], .browser-address input, input.browser-address-input');
+    const address = page.locator('input.browser-address-input');
     if (await address.count()) {
       await address.first().fill(pageUrl);
       await address.first().press('Enter');
@@ -259,9 +276,9 @@ try {
       }).catch(() => {});
     }
 
-    report.openedB = await clickConversation('KeepAlive B');
+    report.openedB = await clickConversation('KeepAlive B', convB.id);
     await wait(800);
-    await clickConversation('KeepAlive A');
+    await clickConversation('KeepAlive A', convA.id);
     await wait(1_200);
     const after = await readGuest();
     report.afterSwitchWebContentsId = after.webContentsId ?? null;
