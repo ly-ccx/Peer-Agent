@@ -225,11 +225,13 @@ export function WorkbenchProvider({
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
   const [preparedBrowserConversations, setPreparedBrowserConversations] = useState<string[]>([]);
-  const previousConversationIdRef = useRef<string | null>(conversationId);
+  // 用 state 而不是 ref 记上一帧会话：Strict Mode 会双调用 render，
+  // 若在第一次调用里改 ref，第二次会以为「已经切过」而丢掉即将离场的活页，
+  // 第一帧卸掉 webview，随后 setState 再挂上 → guest 整页重载。
+  const [trackedConversationId, setTrackedConversationId] = useState(conversationId);
   let livePreparedBrowserConversations = preparedBrowserConversations;
-  if (previousConversationIdRef.current !== conversationId) {
-    const leavingId = previousConversationIdRef.current;
-    previousConversationIdRef.current = conversationId;
+  if (trackedConversationId !== conversationId) {
+    const leavingId = trackedConversationId;
     if (leavingId) {
       const leavingKey = workbenchSessionKey(leavingId);
       const leavingSession = browserSessionMap[leavingKey]
@@ -240,9 +242,10 @@ export function WorkbenchProvider({
         leavingId,
         isBlankBrowserSession(leavingSession),
       );
-      if (livePreparedBrowserConversations.join('\0') !== preparedBrowserConversations.join('\0')) {
-        setPreparedBrowserConversations(livePreparedBrowserConversations);
-      }
+    }
+    setTrackedConversationId(conversationId);
+    if (livePreparedBrowserConversations.join('\0') !== preparedBrowserConversations.join('\0')) {
+      setPreparedBrowserConversations(livePreparedBrowserConversations);
     }
   }
 

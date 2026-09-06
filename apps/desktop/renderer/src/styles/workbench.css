@@ -204,24 +204,22 @@
   }
 
   /* 一级视图保持挂载以保留各自会话，但非活动视图必须退出布局和合成树。
-   * 不能只隐藏祖先的 visibility：文档预览页会在子层重新设为 visible，导致切换 Tab 后旧预览穿透并重叠；
-   * Electron webview 也需要 display:none 才能可靠移除 guest surface 的残留画面。 */
+   * 不能只隐藏祖先的 visibility：文档预览页会在子层重新设为 visible，导致切换 Tab 后旧预览穿透并重叠。 */
   .workbench-view[data-active='false'] {
     display: none;
   }
 
-  /* 后台 Task 拉起的会话浏览器必须保持 guest 可初始化，但不能抢前台画面。
-   * display:none 会阻止 Electron webview 进入就绪态，所以改成离屏挂载。 */
+  /* Browser guest 不能走 display:none，也不能在「前台槽 / 离屏 fixed」之间切换定位方案：
+   * Electron <webview> 在 display 切换或宿主被移出原包含块时会销毁 WebContents 并整页重载。
+   * 前台会话切到 Files/Plan、以及后台保活会话，都留在同一个 absolute 槽里，只藏 visibility。
+   * 后台页给一个最小盒，避免工作台收起（宽为 0）时 guest 无法初始化。 */
+  .workbench-view.workbench-view--browser[data-active='false'],
   .workbench-view--prepared-browser[data-active='false'] {
     display: flex;
     visibility: hidden;
     pointer-events: none;
-    position: fixed;
-    inset: auto auto 0 0;
-    width: 960px;
-    height: 720px;
-    transform: translate(-200vw, -200vh);
-    overflow: hidden;
+    min-width: 960px;
+    min-height: 720px;
   }
 
   .workbench-view[data-active='true'] {
