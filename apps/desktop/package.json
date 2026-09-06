@@ -3,6 +3,8 @@
   "version": "0.0.11",
   "description": "Peer Agent Desktop - local-first Task Flow Agent",
   "author": "Peer Agent Team <dev@peer-agent.local>",
+  "homepage": "https://github.com/ly-ccx/Peer-Agent",
+  "desktopName": "com.peeragent.desktop",
   "private": true,
   "type": "module",
   "main": "electron/main/main.mjs",
@@ -21,6 +23,7 @@
     "dist": "pnpm --dir ../.. marketplace:build && node ../../scripts/build-credential-helper.mjs --profile release && electron-builder && pnpm verify:packaged",
     "dist:mac": "pnpm --dir ../.. marketplace:build && node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --mac && pnpm verify:packaged",
     "dist:win": "pnpm --dir ../.. marketplace:build && node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --win && pnpm verify:packaged",
+    "dist:linux": "pnpm --dir ../.. marketplace:build && node ../../scripts/build-credential-helper.mjs --profile release && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux --x64 && pnpm verify:packaged",
     "verify:packaged": "node scripts/verify-packaged-runtime.cjs",
     "publish:stable": "bash scripts/publish.sh stable",
     "publish:beta": "bash scripts/publish.sh beta",
@@ -64,5 +67,8 @@
     "typescript": "^5.9.3",
     "wait-on": "^9.0.3"
   },
-  "repository": ""
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ly-ccx/Peer-Agent.git"
+  }
 }

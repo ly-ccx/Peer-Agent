@@ -189,9 +189,18 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 ### 方式 A —— Desktop（大多数用户推荐）
 
 1. 从 **[GitHub Releases](https://github.com/ly-ccx/Peer-Agent/releases)** 下载发行包
+
+   | 平台 | 一等产物 | 说明 |
+   | --- | --- | --- |
+   | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | 阶段一 ad-hoc 签名 |
+   | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
+   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage`（推荐便携）或 `.deb` | 阶段一未签名。应用内自动更新只支持 AppImage（`latest-linux.yml` / `beta-linux.yml`）。Ubuntu 22+/24+ 跑 AppImage 可能需要 `libfuse2`。linux-arm64 Desktop 尚未作为 Release 资产。 |
+
 2. 安装并打开 Peer Agent
 3. 在设置中添加模型服务商 / API Key
 4. 开始对话 —— 或直接给它一个真实目标，让 **Agent** 模式推进
+
+Linux Wayland 下如果窗口起不来，可改用 X11 或设置 `ELECTRON_OZONE_PLATFORM_HINT=auto`。
 
 ### 方式 B —— 通过 npm 安装 CLI / TUI
 
@@ -215,6 +224,12 @@ pnpm install
 
 # Desktop（Electron）
 pnpm --filter @peer-agent/desktop dev
+
+# Linux Desktop unpacked dir（沙箱 / 冒烟）
+pnpm pack:linux
+
+# Linux Desktop 发行包（AppImage + .deb；需要 libdbus-1-dev、fakeroot、dpkg）
+pnpm dist:linux
 
 # 终端 Agent（TUI）
 pnpm --filter @peer-agent/tui dev
@@ -301,7 +316,7 @@ Peer Agent 的目标是成为面向真实工作的 **跨平台 Agent 操作系�
 
 | 支柱 | 含义 |
 | --- | --- |
-| **跨平台** | 以 macOS 为先，再扩展更广的桌面 / 运行环境，不分裂核心模型。 |
+| **跨平台** | 今天已覆盖 macOS、Windows 与 Linux Desktop x64，再扩展（arm64 Desktop、签名）时不分裂核心模型。 |
 | **统一核心流** | Desktop、TUI、CLI、Automation、MCP、插件与技能共享同一条运行时链：投影 → 授权 → 执行 → Evidence。 |
 | **任务流转** | 工作以受治理任务被签收、澄清、规划、执行与关闭 —— 而不是闲聊式乱做。 |
 | **自我闭环** | 探索 → 规划 → 行动 → 验证 → 调整，以成功标准与 Evidence 作为完成闸门。 |
@@ -336,7 +351,7 @@ Peer Agent 的目标是成为面向真实工作的 **跨平台 Agent 操作系�
 | 领域 | 状态 |
 | --- | --- |
 | 更广泛的 marketplace 生态 | 🚧 建设中 |
-| 跨平台加固 / 打包 | 🚧 持续推进 |
+| 跨平台加固 / 打包 | 🚧 持续推进 —— Linux Desktop x64（AppImage / `.deb`）已是一等产物；linux-arm64 Desktop 与 Linux 签名仍待后续 |
 
 ### 规划中 —— 尚未实现
 

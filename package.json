@@ -13,7 +13,7 @@
     "architecture:check": "node scripts/check-architecture-governance.mjs",
     "marketplace:build": "node marketplace/build-catalog.mjs",
     "marketplace:test": "node --test marketplace/*.test.mjs",
-    "changelog:test": "node --test scripts/build-changelog.test.mjs scripts/check-release-readiness.test.mjs scripts/package-cli-archive.test.mjs",
+    "changelog:test": "node --test scripts/build-changelog.test.mjs scripts/check-release-readiness.test.mjs scripts/package-cli-archive.test.mjs scripts/check-desktop-release-matrix.test.mjs",
     "package:cli": "node scripts/package-cli-archive.mjs",
     "version:check": "node scripts/check-version.mjs",
     "release:source-check": "node scripts/check-release-source.mjs",
@@ -29,6 +29,8 @@
     "dist": "pnpm build && pnpm --filter @peer-agent/desktop dist",
     "dist:mac": "pnpm build && pnpm --filter @peer-agent/desktop dist:mac",
     "dist:win": "pnpm build && pnpm --filter @peer-agent/desktop dist:win",
+    "pack:linux": "pnpm build && pnpm --filter @peer-agent/desktop pack:linux",
+    "dist:linux": "pnpm build && pnpm --filter @peer-agent/desktop dist:linux",
     "check": "pnpm architecture:check && pnpm typecheck && pnpm build:core",
     "dev:lab": "pnpm --filter @peer-agent/desktop run dev:lab"
   },

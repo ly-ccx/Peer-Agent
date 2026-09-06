@@ -189,11 +189,15 @@ describe('auto-updater phase-locking integration contract', () => {
     assert.match(macBlock, /state\.stallWatchdog\?\.notifyProgress\(\);/);
     assert.match(macBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
 
-    // Windows 路径同样受看门狗保护。
+    // Windows / Linux AppImage 共用 electron-updater 默认下载路径，同样受看门狗保护。
     const winIdx = source.indexOf('export async function downloadUpdate()');
     const winBlock = source.slice(winIdx, macIdx);
     assert.match(winBlock, /startDownloadStallWatchdog\(\);/);
     assert.match(winBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
+    assert.match(winBlock, /if \(process\.platform === 'darwin'\)/);
+    assert.match(winBlock, /autoUpdater\.downloadUpdate\(\)/);
+    assert.doesNotMatch(winBlock, /process\.platform === 'win32'/);
+    assert.doesNotMatch(winBlock, /process\.platform === 'linux'/);
 
     // 看门狗触发时置 error 并提供 Release 页面兜底（睡眠断流的恢复路径）。
     const stallFnIdx = source.indexOf('function startDownloadStallWatchdog()');

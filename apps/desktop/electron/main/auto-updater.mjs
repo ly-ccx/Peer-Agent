@@ -343,6 +343,8 @@ export async function downloadUpdate() {
   }
   // mac 走自管下载链路：应用为 ad-hoc 签名，Squirrel 的「下载→签名校验→原子替换」
   // 会在校验步骤失败（code requirement 不满足）。改为自管下载 dmg + 手动打开。
+  // Windows NSIS 与 Linux AppImage 走 electron-updater 默认链路
+  // （latest.yml / latest-linux.yml）。.deb 安装不走应用内自动更新。
   if (process.platform === 'darwin') {
     return downloadUpdateMacManual();
   }

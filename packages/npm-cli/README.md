@@ -46,6 +46,8 @@ Press **Y** or **Enter** to confirm, or **N** / **Esc** to dismiss. Restart `pee
 
 ## Supported platforms (today)
 
+This table is the **CLI installer** matrix only. Desktop Linux x64 ships separately on the same Release tag as `Peer-Agent-<ver>-x64.AppImage` / `.deb`.
+
 | Platform | Archive | Notes |
 |----------|---------|-------|
 | macOS arm64 | `peer-darwin-arm64.tar.gz` | First-class |

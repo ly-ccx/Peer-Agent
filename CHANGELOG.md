@@ -4,6 +4,10 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+### Notes
+
+- Linux Desktop x64 is now a first-class GitHub Release asset (`Peer-Agent-<ver>-x64.AppImage` / `.deb`) with updater channel files (`latest-linux.yml` / `beta-linux.yml`). Builds are unsigned in stage-1 (same posture as mac ad-hoc). linux-arm64 Desktop and Linux code signing remain follow-ups. The CLI archive matrix is unchanged.
+
 ## [0.0.11] - 2026-09-02
 
 ### Notes
