@@ -105,8 +105,12 @@ linux:
   category: Development
   executableName: peer-agent
   synopsis: Local-first Task Flow Agent
+  # Linux ${arch} 默认是 x86_64 / amd64；阶段一只出 x64，文件名与 mac/win 的 x64 约定对齐。
+  syncDesktopName: true
   desktop:
-    StartupWMClass: peer-agent
+    entry:
+      Name: Peer Agent
+      StartupWMClass: com.peeragent.desktop
   target:
     - target: AppImage
       arch: [x64]
@@ -114,10 +118,10 @@ linux:
       arch: [x64]
 
 appImage:
-  artifactName: Peer-Agent-${version}-${arch}.${ext}
+  artifactName: Peer-Agent-${version}-x64.${ext}
 
 deb:
-  artifactName: Peer-Agent-${version}-${arch}.${ext}
+  artifactName: Peer-Agent-${version}-x64.${ext}
 
 # ── 发布 (GitHub Releases) ──
 # 通道分流由 tag 名驱动（见 .github/workflows/release.yml）：

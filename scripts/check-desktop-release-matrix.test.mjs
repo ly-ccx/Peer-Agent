@@ -20,6 +20,7 @@ test('electron-builder ships Linux Desktop AppImage + deb x64', () => {
   assert.match(yml, /latest-linux\.yml/);
   assert.match(yml, /beta-linux\.yml/);
   assert.match(yml, /artifactName: Peer-Agent-\$\{version\}-\$\{arch\}\.\$\{ext\}/);
+  assert.match(linuxBlock, /artifactName: Peer-Agent-\$\{version\}-x64\.\$\{ext\}/);
 });
 
 test('release.yml builds and publishes Linux Desktop artifacts', () => {
