@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
@@ -9,7 +9,7 @@ import {
   WORKBENCH_MAX_WIDTH,
   WORKBENCH_DEFAULT_WIDTH,
 } from './WorkbenchContext';
-import { mountedBrowserConversations } from './browserPanelReveal';
+import { mountedBrowserConversations, stabilizeMountedBrowserOrder } from './browserPanelReveal';
 import {
   WORKBENCH_MAXIMIZE_RATIO,
   clampWorkbenchWidth,
@@ -148,6 +148,18 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     registerGoalSlot(goalSlotRef.current);
     return () => registerGoalSlot(null);
   }, [registerGoalSlot]);
+
+  // Electron <webview> 在宿主节点被 React 重排（insertBefore）时会销毁 guest。
+  // 活页集合用 LRU，渲染顺序必须「只追加 / 只删除」，切回同一会话才能复用 WebContents。
+  const rawMountedBrowserIds = mountedBrowserConversations(
+    conversationId,
+    preparedBrowserConversations,
+  );
+  const [browserMountOrder, setBrowserMountOrder] = useState(rawMountedBrowserIds);
+  const mountedBrowserIds = stabilizeMountedBrowserOrder(browserMountOrder, rawMountedBrowserIds);
+  if (mountedBrowserIds.join('\0') !== browserMountOrder.join('\0')) {
+    setBrowserMountOrder(mountedBrowserIds);
+  }
 
   // 拖拽分隔线。
   // Electron <webview> 会在 guest 层吃掉 pointerup：分隔条停在 data-active，
@@ -363,43 +375,24 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           data-active={activeTab === 'plan'}
           ref={goalSlotRef}
         />
-        {layoutHost === 'root'
-          ? mountedBrowserConversations(conversationId, preparedBrowserConversations).map((id) => (
-            <div
-              key={`mounted-browser-${id}`}
-              className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
-              data-active={id === conversationId ? activeTab === 'browser' : false}
-              aria-hidden={id === conversationId ? undefined : true}
-            >
-              <BrowserView
-                isZh={isZh}
-                conversationId={id}
-                session={id === conversationId ? browserSession : resolveBrowserSession(id)}
-                onSessionChange={id === conversationId
-                  ? setBrowserSession
-                  : (next) => setBrowserSessionFor(id, next)}
-                claimForeground={id === conversationId}
-              />
-            </div>
-          ))
-          : mountedBrowserConversations(conversationId, preparedBrowserConversations).map((id) => (
-            <div
-              key={`mounted-browser-${id}`}
-              className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
-              data-active={id === conversationId ? activeTab === 'browser' : false}
-              aria-hidden={id === conversationId ? undefined : true}
-            >
-              <BrowserView
-                isZh={isZh}
-                conversationId={id}
-                session={id === conversationId ? browserSession : resolveBrowserSession(id)}
-                onSessionChange={id === conversationId
-                  ? setBrowserSession
-                  : (next) => setBrowserSessionFor(id, next)}
-                claimForeground={id === conversationId}
-              />
-            </div>
-          ))}
+        {mountedBrowserIds.map((id) => (
+          <div
+            key={`mounted-browser-${id}`}
+            className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
+            data-active={id === conversationId ? activeTab === 'browser' : false}
+            aria-hidden={id === conversationId ? undefined : true}
+          >
+            <BrowserView
+              isZh={isZh}
+              conversationId={id}
+              session={id === conversationId ? browserSession : resolveBrowserSession(id)}
+              onSessionChange={id === conversationId
+                ? setBrowserSession
+                : (next) => setBrowserSessionFor(id, next)}
+              claimForeground={id === conversationId}
+            />
+          </div>
+        ))}
         <div
           className="workbench-view workbench-view--files"
           data-active={activeTab === 'files'}
