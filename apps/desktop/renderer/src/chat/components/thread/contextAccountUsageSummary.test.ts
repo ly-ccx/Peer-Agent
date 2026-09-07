@@ -37,6 +37,41 @@ for (const [id, cn, en] of [['weekly', '本周剩余可用', 'Weekly remaining']
     });
   }
 }
+const now = Date.parse('2026-09-07T00:00:00Z');
+for (const id of ['session', 'weekly', 'monthly']) {
+  for (const zh of [true, false]) {
+    for (const state of ['future', 'missing', 'invalid', 'past', 'exact'] as const) {
+      test(`summary/reset/${id}/${zh ? 'zh' : 'en'}/${state}`, () => {
+        const resetsAt = state === 'missing' ? undefined : state === 'invalid' ? 'bad-time'
+          : new Date(now + (state === 'future' ? 54 * 3600_000 : state === 'past' ? -1 : 0)).toISOString();
+        const quota: LlmSubscriptionQuota = { success: true, windows: [{ id, remainingPercent: 35, resetsAt }] };
+        const line = summary(quota, false, zh, now)[0];
+        assert.match(line, /35%/);
+        if (state === 'future') assert.ok(line.endsWith(zh ? '2天6小时后重置' : 'Resets in 2d 6h'));
+        else if (state === 'past' || state === 'exact') assert.match(line, zh ? /已到重置时间，待更新/ : /Reset time reached, awaiting update/);
+        else assert.doesNotMatch(line, /重置|Reset/);
+      });
+    }
+  }
+}
+test('summary/reset/units-and-clock-advance', () => {
+  for (const [delta, expected] of [[1, '1分钟'], [28 * 60_000, '28分钟'], [5 * 3600_000, '5小时'], [86400_000, '1天']] as const) {
+    const quota: LlmSubscriptionQuota = { success: true, remainingPercent: 35, resetsAt: new Date(now + delta).toISOString() };
+    assert.ok(summary(quota, false, true, now)[0].endsWith(`${expected}后重置`));
+    assert.match(summary(quota, false, true, now + delta)[0], /已到重置时间/);
+  }
+});
+test('summary/reset/windows-do-not-borrow-top-level-time', () => {
+  const quota: LlmSubscriptionQuota = { success: true, resetsAt: new Date(now + 99 * 86400_000).toISOString(), windows: [
+    { id: 'session', remainingPercent: 90, resetsAt: new Date(now + 3600_000).toISOString() },
+    { id: 'weekly', remainingPercent: 35, resetsAt: new Date(now + 2 * 86400_000).toISOString() },
+    { id: 'monthly', remainingPercent: 70 },
+  ] };
+  const lines = summary(quota, false, true, now);
+  assert.match(lines[0], /90% · 1小时后重置/);
+  assert.match(lines[1], /35% · 2天后重置/);
+  assert.equal(lines[2], '本月剩余可用 70%');
+});
 test('summary/empty/loading-is-not-zero', () => {
   assert.match(summary(undefined, true, true)[0], /查询中/);
   assert.doesNotMatch(summary(undefined, false, true)[0], /0/);

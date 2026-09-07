@@ -16,7 +16,17 @@ export function ContextAccountUsage({ provider, isZh }: { provider: LlmProviderC
     void controller.load(true);
     return () => { controller.dispose(); request.current = null; };
   }, [provider]);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const refresh = () => setNow(Date.now());
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
   return <div className="ctx-usage-panel-notes" role="status" aria-busy={state.loading}>
-    {contextAccountUsageSummary(state.quota, state.loading, isZh).map((line, index) => <p key={index}>{line}</p>)}
+    {contextAccountUsageSummary(state.quota, state.loading, isZh, now).map((line, index) => <p key={index}>{line}</p>)}
   </div>;
 }
