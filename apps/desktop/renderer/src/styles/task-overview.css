@@ -1843,6 +1843,11 @@
   box-shadow: none;
 }
 
+.conversation-chat-drawer .selection-child-banner {
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* 结果视图在 body 内按内容高度自然排布；滚动由 drawer body 负责，避免 h-full 再叠一层百分比。 */
 .conversation-result-view {
   @apply flex min-h-0 flex-col;
