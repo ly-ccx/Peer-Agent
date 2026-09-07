@@ -29,6 +29,28 @@ test('normalizes SkillHub list responses and encodes filters', async () => {
   assert.match(urls[0], /category=dev/);
 });
 
+test('normalizes install identity from detail owner independently of public namespace', async () => {
+  const client = createSkillHubApiClient({ fetchImpl: async () => jsonResponse({
+    namespace: { handle: 'tencent-adm' },
+    owner: { handle: 'u_b0de8114' },
+    slug: 'tencent-docs',
+  }) });
+  assert.deepEqual(
+    await client.getSkillInstallIdentity({ namespace: 'tencent-adm', slug: 'tencent-docs' }),
+    { namespace: 'tencent-adm', slug: 'tencent-docs', publisher: 'u_b0de8114' },
+  );
+});
+
+test('rejects install detail without a publisher owner handle', async () => {
+  const client = createSkillHubApiClient({ fetchImpl: async () => jsonResponse({
+    namespace: { handle: 'owner' }, slug: 'demo-skill', owner: null,
+  }) });
+  await assert.rejects(
+    () => client.getSkillInstallIdentity({ namespace: 'owner', slug: 'demo-skill' }),
+    /skillhub_invalid_detail_owner/,
+  );
+});
+
 test('encodes official SkillHub sortBy values including updated_at', async () => {
   const urls = [];
   const client = createSkillHubApiClient({ baseUrl: 'https://skillhub.test/', fetchImpl: async (url) => {

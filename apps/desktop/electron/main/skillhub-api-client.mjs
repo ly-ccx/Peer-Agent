@@ -11,6 +11,14 @@ function requiredInteger(value, label) {
   return value;
 }
 
+function normalizeInstallIdentity(raw) {
+  return Object.freeze({
+    namespace: requiredString(raw?.namespace?.handle, 'detail_namespace'),
+    slug: requiredString(raw?.slug, 'detail_slug'),
+    publisher: requiredString(raw?.owner?.handle, 'detail_owner'),
+  });
+}
+
 function normalizeSkill(raw) {
   const namespace = raw?.namespace;
   const slug = requiredString(raw?.slug, 'slug');
@@ -95,6 +103,10 @@ export function createSkillHubApiClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl 
     },
     getSkillDetail({ namespace, slug }) {
       return request(`/api/v1/skills/${encodeURIComponent(requiredString(slug, 'slug'))}?${queryString({ namespace: requiredString(namespace, 'namespace') })}`);
+    },
+    async getSkillInstallIdentity(identity) {
+      const detail = await this.getSkillDetail(identity);
+      return normalizeInstallIdentity(detail);
     },
     getSkillFiles({ namespace, slug, version }) {
       return request(`/api/v1/skills/${encodeURIComponent(requiredString(slug, 'slug'))}/files?${queryString({ version: requiredString(version, 'version'), namespace: requiredString(namespace, 'namespace') })}`);

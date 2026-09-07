@@ -35,6 +35,18 @@ describe('skillHubInstallError', () => {
       describeSkillHubInstallErrorCode('workspace_required'),
       /工作区/,
     );
+    assert.match(
+      describeSkillHubInstallErrorCode('skillhub_signature_publisher_mismatch'),
+      /签名发布者.*技能所有者/,
+    );
+    assert.match(
+      describeSkillHubInstallErrorCode('skillhub_signature_coordinate_mismatch'),
+      /技能名称或版本/,
+    );
+    assert.match(
+      describeSkillHubInstallErrorCode('skillhub_detail_identity_mismatch'),
+      /详情.*坐标/,
+    );
   });
 
   it('formats install dialog text with human message and code', () => {

@@ -13,15 +13,16 @@ function makeZip(skill = '# Skill', extra = 'hello') {
   zip.addFile('_meta.json', Buffer.from('{}'));
   return zip.toBuffer();
 }
-function fixture({ zipBuffer = makeZip(), keyId = 'platform-v1', overridePayload = {}, tamperSignature = false } = {}) {
+function fixture({ zipBuffer = makeZip(), keyId = 'platform-v1', installIdentity = { namespace: identity.namespace, slug: identity.slug, publisher: identity.namespace }, overridePayload = {}, tamperSignature = false } = {}) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const rawKey = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
   const calculated = computeSkillHubContentHash(new AdmZip(zipBuffer).getEntries());
-  const payload = JSON.stringify({ content_hash: calculated.contentHash, file_count: calculated.fileCount, issuer: 'skillhub.cn', package_md5: md5(zipBuffer), publisher_user_name: identity.namespace, skill_slug: identity.slug, skill_version: identity.version, v: 1, ...overridePayload });
+  const payload = JSON.stringify({ content_hash: calculated.contentHash, file_count: calculated.fileCount, issuer: 'skillhub.cn', package_md5: md5(zipBuffer), publisher_user_name: installIdentity.publisher, skill_slug: identity.slug, skill_version: identity.version, v: 1, ...overridePayload });
   const signature = sign(null, Buffer.from(payload), privateKey);
   if (tamperSignature) signature[0] ^= 0xff;
   return {
     zipBuffer, apiClient: {
+      getSkillInstallIdentity: async () => installIdentity,
       getVersionSignature: async () => ({ signed: true, content_hash: calculated.contentHash, hash_version: 1, key_id: keyId, payload, signature: signature.toString('base64') }),
       getPlatformKeys: async () => ({ keys: [{ key_id: 'platform-v1', algorithm: 'Ed25519', status: 'active', issuer: 'skillhub.cn', public_key_raw_b64: rawKey }] }),
       downloadSkill: async () => zipBuffer,
@@ -58,6 +59,25 @@ test('verifies Ed25519, MD5 and content hash before entering the existing Skill 
       version: '1.0.0',
     },
   });
+});
+
+test('accepts a public namespace that differs from the verified publisher owner', async () => {
+  const value = fixture({ installIdentity: { namespace: 'tencent-adm', slug: 'demo', publisher: 'u_b0de8114' } });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: async () => ({ id: 'demo' }) });
+  const result = await installer.install({ ...identity, namespace: 'tencent-adm' });
+  assert.equal(result.ok, true);
+});
+
+test('rejects a publisher mismatch when the public namespace is an alias', async () => {
+  const value = fixture({
+    installIdentity: { namespace: 'tencent-adm', slug: 'demo', publisher: 'u_b0de8114' },
+    overridePayload: { publisher_user_name: 'another-publisher' },
+  });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: async () => ({ id: 'demo' }) });
+  await assert.rejects(
+    () => installer.install({ ...identity, namespace: 'tencent-adm' }),
+    /skillhub_signature_publisher_mismatch/,
+  );
 });
 
 test('forwards install scope to Skill Store and echoes it in the result', async () => {
@@ -110,7 +130,7 @@ test('rejects an invalid signature, unknown key id, and untrusted key issuer bef
   }
 });
 
-test('rejects a tampered ZIP, wrong content hash, coordinate substitution, and unknown hash version', async () => {
+test('rejects a tampered ZIP, wrong content hash, identity substitution, and unknown hash version', async () => {
   const signed = fixture();
   const tampered = makeZip('# Changed');
   const unknownVersion = fixture();
@@ -118,8 +138,11 @@ test('rejects a tampered ZIP, wrong content hash, coordinate substitution, and u
   const variants = [
     [{ ...signed.apiClient, downloadSkill: async () => tampered }, /(package_md5)_mismatch/],
     [fixture({ overridePayload: { content_hash: '0'.repeat(64) } }).apiClient, /(content_hash)_mismatch/],
-    [fixture({ overridePayload: { skill_slug: 'another' } }).apiClient, /(identity)_mismatch/],
-    [fixture({ overridePayload: { publisher_user_name: 'another' } }).apiClient, /(identity)_mismatch/],
+    [fixture({ overridePayload: { skill_slug: 'another' } }).apiClient, /signature_coordinate_mismatch/],
+    [fixture({ overridePayload: { skill_version: '2.0.0' } }).apiClient, /signature_coordinate_mismatch/],
+    [fixture({ overridePayload: { publisher_user_name: 'another' } }).apiClient, /signature_publisher_mismatch/],
+    [{ ...signed.apiClient, getSkillInstallIdentity: async () => ({ namespace: 'another', slug: 'demo', publisher: 'owner' }) }, /detail_identity_mismatch/],
+    [{ ...signed.apiClient, getSkillInstallIdentity: async () => ({ namespace: 'owner', slug: 'another', publisher: 'owner' }) }, /detail_identity_mismatch/],
     [{ ...unknownVersion.apiClient, getVersionSignature: async () => ({ ...unknownSignature, hash_version: 2 }) }, /hash_version_unsupported/],
   ];
   for (const [apiClient, expected] of variants) {
