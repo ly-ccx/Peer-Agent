@@ -26,7 +26,7 @@ import {
 } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
 import { ContextUsagePanel } from './ContextUsagePanel';
-import { resolveStickyContextDisplay } from './stickyContextDisplay';
+import { contextDisplayScopeKey, resolveStickyContextDisplay } from './stickyContextDisplay';
 
 /** 上下文档位标签：极简，如 500k / 1M / 272k。 */
 function formatContextWindowLabel(tokens: number | undefined): string {
@@ -374,11 +374,13 @@ export function TokenUsageDisplay({
 
   // Live occupancy still comes only from shared contextAccounting.
   // When a turn temporarily drops it to unknown, stick to lastKnown for display.
-  // Scope by conversation + model so sticky values never leak across sessions.
-  const stickyScopeKey = [
+  // A new compaction epoch invalidates the old percent, tokens and breakdown.
+  // The render-time scope guard below applies this before the cache effect runs.
+  const stickyScopeKey = contextDisplayScopeKey(
     contextAccounting?.conversationId ?? (emptyContext ? 'empty' : 'unknown'),
     contextAccounting?.modelKey ?? selectedModelProviderId ?? defaultProvider?.id ?? 'default',
-  ].join('|');
+    contextAccounting?.compactionEpoch,
+  );
   const liveContextTokens =
     typeof contextAccounting?.authoritativeInputTokens === 'number'
       && Number.isFinite(contextAccounting.authoritativeInputTokens)

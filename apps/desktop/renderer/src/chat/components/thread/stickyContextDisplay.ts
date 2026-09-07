@@ -1,3 +1,12 @@
+/** A compaction invalidates all cached display values, even before effects run. */
+export function contextDisplayScopeKey(
+  conversationId: string,
+  modelKey: string,
+  compactionEpoch: number | undefined,
+): string {
+  return JSON.stringify([conversationId, modelKey, compactionEpoch ?? 0]);
+}
+
 /**
  * Presentation-only sticky display for context occupancy.
  * Live values still come only from shared contextAccounting; when a turn
