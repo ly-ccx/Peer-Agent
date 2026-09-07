@@ -20,6 +20,10 @@ export type SidebarConversationMeta = {
   readonly archivedAt?: string | null;
   readonly pinnedAt?: string | null;
   readonly pinnedOrder?: number | null;
+  readonly selectionOrigin?: {
+    readonly parentConversationId: string;
+    readonly reference: { readonly exactText: string };
+  } | null;
   readonly automationOrigin?: {
     readonly kind: 'automation_run';
     readonly automationId: string;
@@ -298,6 +302,11 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
           >
             {conv.title || (isZh ? '新对话' : 'New Chat')}
           </span>
+          {conv.selectionOrigin ? (
+            <span className="sidebar-conv-parent" title={conv.selectionOrigin.reference.exactText}>
+              {isZh ? '来自父会话' : 'From parent'}
+            </span>
+          ) : null}
           {showWorkspace && workspaceLabelFromPath(conv.workspacePath) ? (
             <span className="sidebar-conv-workspace" title={conv.workspacePath ?? undefined}>
               {workspaceLabelFromPath(conv.workspacePath)}

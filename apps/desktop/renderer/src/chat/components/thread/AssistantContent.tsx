@@ -27,6 +27,7 @@ import type {
   ToolCallGroup,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
+import { mapSelectionMessageSources, type SelectionMessageSource } from '../../state/selectionMessageSource';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
 import { buildBatchSearchView } from '../../state/batchSearchLaneView';
 import { neutralizeToolCallSyntaxForDisplay } from '../../state/historicalLocalRecord';
@@ -119,6 +120,7 @@ function AssistantContentImpl({
     () => (segments?.length ? groupSegments(segments) : []),
     [segments],
   );
+  const selectionSources = useMemo(() => mapSelectionMessageSources(content, groups), [content, groups]);
   // 消息级事实：交互卡之后是否已有 user 回复。未回复时正文需外露，否则选项会「悬空」。
   const answeredText = useContext(InteractionAnsweredContext);
   // 交互卡（request_user_input）需要用户点击，单独抽出、始终渲染在折叠面板外。
@@ -189,7 +191,7 @@ function AssistantContentImpl({
           if (run.kind === 'text') {
             return (
               <div key={`stream-text-${idx}`} className="segment-text-after-tools">
-                <MarkdownMessage content={run.group.content} />
+                <MarkdownMessage content={run.group.content} selectionSource={selectionSources.get(run.group) ?? null} />
               </div>
             );
           }
@@ -257,6 +259,7 @@ function AssistantContentImpl({
       {hasCollapsibleProcess && collapsibleGroups.length > 0 ? (
         <ProcessingDetailsSection
           groups={collapsibleGroups}
+          selectionSources={selectionSources}
           isActive={processingIsActive}
           label={processingSummary}
           isZh={isZh}
@@ -265,11 +268,11 @@ function AssistantContentImpl({
       {finalTextGroups.length > 0 ? (
         finalTextGroups.map((textGroup, idx) => (
           <div key={`final-text-${idx}`} className="segment-text-after-tools">
-            <MarkdownMessage content={textGroup.content} />
+            <MarkdownMessage content={textGroup.content} selectionSource={selectionSources.get(textGroup) ?? null} />
           </div>
         ))
       ) : !groups.some(isProcessingGroup) ? (
-        <TimelineGroups groups={groups} isZh={isZh} />
+        <TimelineGroups groups={groups} isZh={isZh} selectionSources={selectionSources} />
       ) : null}
       {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}
       {interactionCalls.map((tc, idx) => (
@@ -288,8 +291,9 @@ function isProcessingGroup(group: SegmentGroup): group is ProcessingGroup {
   return group.type === 'thinking' || group.type === 'tool-call-group';
 }
 
-function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh }: {
+function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh, selectionSources }: {
   readonly groups: SegmentGroup[];
+  readonly selectionSources?: ReadonlyMap<SegmentGroup, SelectionMessageSource>;
   readonly isActive: boolean;
   readonly label: string;
   readonly isZh: boolean;
@@ -338,7 +342,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
                     : `Show ${processingWindow.omittedCount} earlier event${processingWindow.omittedCount === 1 ? '' : 's'}`)}
             </button>
           ) : null}
-          <TimelineGroups groups={visibleGroups} isZh={isZh} />
+          <TimelineGroups groups={visibleGroups} isZh={isZh} selectionSources={selectionSources} />
         </div>
       ) : null}
     </div>
@@ -370,14 +374,15 @@ function ThinkingTextGroup({ content, isZh }: {
                 : `Show ${textWindow.omittedCharacterCount.toLocaleString()} earlier characters`)}
         </button>
       ) : null}
-      <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(visibleContent)} />
+      <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(visibleContent)} selectionSource={null} />
     </div>
   );
 }
 
-function TimelineGroups({ groups, isZh }: {
+function TimelineGroups({ groups, isZh, selectionSources }: {
   readonly groups: SegmentGroup[];
   readonly isZh: boolean;
+  readonly selectionSources?: ReadonlyMap<SegmentGroup, SelectionMessageSource>;
 }) {
   return groups.map((group, groupIndex) => {
     if (group.type === 'thinking') {
@@ -392,7 +397,7 @@ function TimelineGroups({ groups, isZh }: {
     if (group.type === 'text') {
       return (
         <div key={`text-${groupIndex}`} className="segment-text-after-tools">
-          <MarkdownMessage content={group.content} />
+          <MarkdownMessage content={group.content} selectionSource={selectionSources?.get(group) ?? null} />
         </div>
       );
     }

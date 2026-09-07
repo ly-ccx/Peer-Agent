@@ -213,6 +213,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
+  selectionQuote: (params) => ipcRenderer.invoke('selection:quote', params),
+  selectionCreateChild: (params) => ipcRenderer.invoke('selection:create-child', params),
+  selectionListChildren: (params) => ipcRenderer.invoke('selection:list-children', params),
+  selectionReadChild: (params) => ipcRenderer.invoke('selection:read-child', params),
+  selectionSaveDraft: (params) => ipcRenderer.invoke('selection:save-draft', params),
   onConversationsChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('conversations:changed', handler);

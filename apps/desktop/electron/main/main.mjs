@@ -161,6 +161,7 @@ import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
 import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
 import { createConversationSessionIpcRegistrations } from './ipc/register-conversation-session-ipc.mjs';
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
+import { createSelectionIpcRegistrations } from './ipc/register-selection-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createProductLinkService } from './product-links.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
@@ -2383,6 +2384,11 @@ function registerDesktopIpcHost() {
     }),
     ...createConversationSessionIpcRegistrations({
       conversationSession: conversationSessionApplicationService,
+    }),
+    ...createSelectionIpcRegistrations({
+      store: conversationStore,
+      resolveRuntimeState: (id) => llmChatService.getSelectionRuntimeState(id),
+      authorizeWindow: trustedWindowRegistry.authorize,
     }),
     ...createDataIpcRegistrations({
       conversations: conversationApplicationService,

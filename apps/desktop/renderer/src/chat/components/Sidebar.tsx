@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
 import { BrandWordmark } from '../../app/components/BrandWordmark';
+
 import { EditProjectDialog, type ProjectWorkspace } from './EditProjectDialog';
 import { abbreviateWorkspacePath } from './workspacePathDisplay';
 import { useConfirm } from '../../app/components/ConfirmProvider';
@@ -44,6 +45,11 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** 选区子会话的父会话来源；列表用它显示「来自父会话」。 */
+  selectionOrigin?: {
+    parentConversationId: string;
+    reference: { exactText: string };
+  } | null;
   /** Durable automation Fresh Run origin; rename-safe badge signal. */
   automationOrigin?: {
     kind: 'automation_run';
@@ -708,6 +714,7 @@ export function Sidebar({
             />
           ) : null}
         </button>
+
         <button type="button" className={`sidebar-automation-nav${activePage === 'automations' ? ' active' : ''}`} onClick={onOpenAutomations}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M8 2v3M16 2v3M4 9h16" />

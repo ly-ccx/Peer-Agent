@@ -80,6 +80,8 @@ export async function coordinateDesktopProviderRequest({
  * send -> observe -> overflow retry 的状态机；这里仅适配 Desktop 的消息形态、
  * compactor 与 provider transport。
  */
+import { projectSelectionRequestMessages } from '../selection-background-context.mjs';
+
 export async function executeDesktopProviderRequest({
   request,
   send,
@@ -113,7 +115,7 @@ export async function executeDesktopProviderRequest({
     buildRequest(state) {
       const projectedMessages = applyMicrocompaction(state.messages, { log: () => {} }).messages;
       return buildCanonicalRequest({
-        messages: projectedMessages,
+        messages: projectSelectionRequestMessages(projectedMessages, request?.conversationId),
         systemPrompt: state.systemPrompt,
         tools: request?.tools ?? null,
         model: request?.providerConfig?.model ?? null,

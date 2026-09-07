@@ -35,6 +35,7 @@ import {
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
+import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace';
 import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
@@ -97,6 +98,11 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** 选区子会话的父会话来源；列表用它显示「来自父会话」。 */
+  selectionOrigin?: {
+    parentConversationId: string;
+    reference: { exactText: string };
+  } | null;
   /** Durable automation Fresh Run origin; rename-safe badge signal. */
   automationOrigin?: {
     kind: 'automation_run';
@@ -1078,7 +1084,7 @@ function MainApp() {
                 </section>
               ) : (
                 <section className="thread thread-has-header">
-                  <ChatSurface
+                  <SelectionChatWorkspace
                   i18n={i18n}
                   providers={providers}
                   conversationId={activeConversationId}

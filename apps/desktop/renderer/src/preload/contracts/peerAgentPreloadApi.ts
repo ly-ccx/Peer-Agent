@@ -1,3 +1,5 @@
 import type { BootstrapPreloadApi } from './bootstrapPreloadApi';
 
-export interface PeerAgentPreloadApi extends BootstrapPreloadApi {}
+import type { ChatPreloadApi } from './chatPreloadApi';
+
+export interface PeerAgentPreloadApi extends BootstrapPreloadApi, ChatPreloadApi {}

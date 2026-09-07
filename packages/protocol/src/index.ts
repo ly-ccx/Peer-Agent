@@ -1,3 +1,5 @@
+export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
+
 export type LocalAccessLevel =
   | 'ask_before_local'
   | 'session_local'

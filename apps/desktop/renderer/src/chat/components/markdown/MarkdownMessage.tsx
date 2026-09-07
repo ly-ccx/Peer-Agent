@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { highlightCode } from './codeHighlighter';
 import { renderInlineLines } from './InlineMarkdown';
-import { parseMarkdownBlocks } from './markdownParser';
+import { parseMarkdownBlocks, markdownBlockSources } from './markdownParser';
 import { stripHistoricalLocalRecordForDisplay } from '../../state/historicalLocalRecord';
 
 const HISTORICAL_PREVIEW_MARKER = '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]';
@@ -122,17 +122,25 @@ function CodeBlockContent({ content, language }: {
   return <code data-language={language}>{content}</code>;
 }
 
-function MarkdownMessageImpl({ content }: { readonly content: string }) {
+function MarkdownMessageImpl({ content, selectionSource }: {
+  readonly content: string;
+  readonly selectionSource?: { readonly text: string; readonly start: number } | null;
+}) {
+  const source = selectionSource === undefined ? { text: content, start: 0 } : selectionSource;
+  const sourceMatches = source !== null && Number.isInteger(source.start) && source.start >= 0
+    && source.text.slice(source.start, source.start + content.length) === content;
   const sanitized = stripHistoricalLocalRecordForDisplay(content);
   const blocks = parseMarkdownBlocks(sanitized);
   if (blocks.length === 0) return null;
 
   return (
-    <div className="markdown-content">
+    <div className="markdown-content" data-selection-source={sanitized === content && sourceMatches ? source.text : undefined}>
       {blocks.map((block, index) => {
+        const offsets = sanitized === content && sourceMatches
+          ? markdownBlockSources.get(block)?.offsets.map((offset) => source.start + offset) : undefined;
         if (block.type === 'heading') {
           const Heading = `h${Math.min(block.depth + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6';
-          return <Heading key={`heading-${index}`}>{renderInlineLines(block.content, `heading-${index}`)}</Heading>;
+          return <Heading key={`heading-${index}`}>{renderInlineLines(block.content, `heading-${index}`, offsets)}</Heading>;
         }
         if (block.type === 'list') {
           const Tag = block.ordered ? 'ol' : 'ul';
@@ -193,7 +201,7 @@ function MarkdownMessageImpl({ content }: { readonly content: string }) {
         if (block.content.startsWith(HISTORICAL_PREVIEW_MARKER)) {
           return <HistoricalPreviewBlock key={`historical-preview-${index}`} content={block.content} />;
         }
-        return <p key={`paragraph-${index}`}>{renderInlineLines(block.content, `paragraph-${index}`)}</p>;
+        return <p key={`paragraph-${index}`}>{renderInlineLines(block.content, `paragraph-${index}`, offsets)}</p>;
       })}
     </div>
   );
