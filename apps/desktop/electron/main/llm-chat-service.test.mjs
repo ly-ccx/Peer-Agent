@@ -588,9 +588,9 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            // 增大可压缩的旧历史，使压前请求越过 24k 窗口的 80% 软线；
-            // 24k 同时为受治理 System Context、canonical checkpoint 和增长预算留出稳定的压后空间。
-            contextWindow: 24_000,
+            // 32k 窗口为当前 System Context、checkpoint 和增长预算留出压后空间。
+            // 配套 29k observed usage 与两条 32k 字符旧历史，确保真实触发压缩而非跳过。
+            contextWindow: 32_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -613,8 +613,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
               modelKey: 'p1::test-model',
-              inputTokens: 21_000,
-              contextWindow: 24_000,
+              inputTokens: 29_000,
+              contextWindow: 32_000,
             }),
           }),
         },
@@ -622,8 +622,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(16_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(16_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(32_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(32_000)}` },
           { role: 'user', content: latestUser },
         ],
         streamId: 's-compact-continue',
@@ -692,7 +692,7 @@ describe('llm chat service tool materialization', () => {
             isDefault: true,
             apiKeyConfigured: true,
             // 保持与上一个自动压缩集成场景相同的可实现预算。
-            contextWindow: 24_000,
+            contextWindow: 32_000,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -702,8 +702,8 @@ describe('llm chat service tool materialization', () => {
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
               modelKey: 'p1::test-model',
-              inputTokens: 21_000,
-              contextWindow: 24_000,
+              inputTokens: 29_000,
+              contextWindow: 32_000,
             }),
           }),
         },
@@ -714,8 +714,8 @@ describe('llm chat service tool materialization', () => {
 
       await service.sendMessage({
         messages: [
-          { role: 'user', content: `old question ${'x'.repeat(16_000)}` },
-          { role: 'assistant', content: `old answer ${'y'.repeat(16_000)}` },
+          { role: 'user', content: `old question ${'x'.repeat(32_000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(32_000)}` },
           { role: 'user', content: 'latest user survives only if compaction persists' },
         ],
         streamId: 's-compact-persist-fail',
