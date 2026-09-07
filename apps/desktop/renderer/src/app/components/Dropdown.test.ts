@@ -15,9 +15,9 @@ test('closed trigger can override option labels without changing menu items', ()
   assert.doesNotMatch(source, /triggerLabelOverride \?\? opt\.label/);
 });
 
-test('open menus clamp against visible webviews instead of overflowing into native layers', () => {
-  assert.match(source, /collectVisibleWebviewOccluders, placeDropdownMenu/);
-  assert.match(source, /occluders: collectVisibleWebviewOccluders\(\)/);
+test('open menus clamp against the open workbench and visible webviews', () => {
+  assert.match(source, /collectDropdownOccluders, placeDropdownMenu/);
+  assert.match(source, /occluders: collectDropdownOccluders\(\)/);
   assert.match(source, /width: menuRef\.current\?\.offsetWidth \?\? rect\.width/);
 });
 

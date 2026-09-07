@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  collectDropdownOccluders,
+  collectOpenWorkbenchOccluders,
   collectVisibleWebviewOccluders,
   isVisibleDropdownOccluder,
   placeDropdownMenu,
@@ -127,4 +129,61 @@ test('ignores a webview whose workbench view ancestor is hidden', () => {
       : { visibility: 'visible', display: 'flex' }),
   );
   assert.deepEqual(boxes, []);
+});
+
+test('slides left of an open Goal workbench panel instead of overlapping it', () => {
+  const placed = placeDropdownMenu({
+    trigger,
+    menu: { width: 260, height: 220 },
+    viewport: { width: 1280, height: 800 },
+    preferredPlacement: 'down',
+    occluders: [{ left: 700, top: 0, right: 1280, bottom: 800 }],
+  });
+  assert.equal(placed.left, 432);
+  assert.ok(placed.left + 260 <= 692);
+});
+
+test('collects an open workbench panel and ignores a closed zero-width panel', () => {
+  const openPanel = {
+    className: 'workbench-panel workbench-panel--open',
+    getBoundingClientRect: () => ({ left: 700, top: 0, right: 1280, bottom: 800, width: 580, height: 800 }),
+  };
+  const closedPanel = {
+    className: 'workbench-panel',
+    getBoundingClientRect: () => ({ left: 1280, top: 0, right: 1280, bottom: 800, width: 0, height: 800 }),
+  };
+  const visible = { visibility: 'visible', display: 'flex' };
+  const collected = collectOpenWorkbenchOccluders(
+    {
+      querySelectorAll: (selector: string) => {
+        assert.equal(selector, '.workbench-panel--open');
+        return [openPanel] as unknown as ArrayLike<Element>;
+      },
+    },
+    () => visible,
+  );
+  assert.deepEqual(collected, [{ left: 700, top: 0, right: 1280, bottom: 800 }]);
+
+  const ignored = collectOpenWorkbenchOccluders(
+    { querySelectorAll: () => [closedPanel] as unknown as ArrayLike<Element> },
+    () => visible,
+  );
+  assert.deepEqual(ignored, []);
+});
+
+test('dropdown occluders include the open workbench even when no webview is visible', () => {
+  const openPanel = {
+    getBoundingClientRect: () => ({ left: 700, top: 0, right: 1280, bottom: 800, width: 580, height: 800 }),
+  };
+  const boxes = collectDropdownOccluders(
+    {
+      querySelectorAll: (selector: string) => (
+        selector === '.workbench-panel--open'
+          ? [openPanel] as unknown as ArrayLike<Element>
+          : []
+      ),
+    },
+    () => ({ visibility: 'visible', display: 'flex' }),
+  );
+  assert.deepEqual(boxes, [{ left: 700, top: 0, right: 1280, bottom: 800 }]);
 });

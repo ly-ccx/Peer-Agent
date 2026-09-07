@@ -64,7 +64,7 @@ function rightBoundForMenu(
 
 /**
  * Place a portal dropdown against the trigger, then pull it left if it would
- * overflow the viewport or a native occluder such as a visible Electron webview.
+ * overflow the viewport, an open workbench panel, or a visible Electron webview.
  */
 export function placeDropdownMenu(input: DropdownPlacementInput): DropdownPlacement {
   const gap = input.gap ?? DROPDOWN_MENU_GAP;
@@ -114,14 +114,23 @@ function hasHiddenAncestor(
   return false;
 }
 
-export function collectVisibleWebviewOccluders(
-  doc: { querySelectorAll(selectors: string): ArrayLike<Element> } = document,
-  computeStyle: (el: Element) => DropdownOccluderStyle = (el) => {
-    const style = window.getComputedStyle(el);
-    return { visibility: style.visibility, display: style.display };
-  },
+type OccluderDocument = { querySelectorAll(selectors: string): ArrayLike<Element> };
+type OccluderStyleFn = (el: Element) => DropdownOccluderStyle;
+
+const defaultOccluderStyle: OccluderStyleFn = (el) => {
+  const style = window.getComputedStyle(el);
+  return { visibility: style.visibility, display: style.display };
+};
+
+export const DROPDOWN_WEBVIEW_OCCLUDER_SELECTOR = 'webview.browser-webview';
+export const DROPDOWN_WORKBENCH_OCCLUDER_SELECTOR = '.workbench-panel--open';
+
+function collectOccluderBoxes(
+  doc: OccluderDocument,
+  computeStyle: OccluderStyleFn,
+  selector: string,
 ): DropdownBox[] {
-  const nodes = doc.querySelectorAll('webview.browser-webview');
+  const nodes = doc.querySelectorAll(selector);
   const boxes: DropdownBox[] = [];
   for (let i = 0; i < nodes.length; i += 1) {
     const el = nodes[i];
@@ -131,4 +140,29 @@ export function collectVisibleWebviewOccluders(
     boxes.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
   }
   return boxes;
+}
+
+export function collectVisibleWebviewOccluders(
+  doc: OccluderDocument = document,
+  computeStyle: OccluderStyleFn = defaultOccluderStyle,
+): DropdownBox[] {
+  return collectOccluderBoxes(doc, computeStyle, DROPDOWN_WEBVIEW_OCCLUDER_SELECTOR);
+}
+
+export function collectOpenWorkbenchOccluders(
+  doc: OccluderDocument = document,
+  computeStyle: OccluderStyleFn = defaultOccluderStyle,
+): DropdownBox[] {
+  return collectOccluderBoxes(doc, computeStyle, DROPDOWN_WORKBENCH_OCCLUDER_SELECTOR);
+}
+
+/** Open workbench (Goal / Browser / Files) plus any still-visible native webview. */
+export function collectDropdownOccluders(
+  doc: OccluderDocument = document,
+  computeStyle: OccluderStyleFn = defaultOccluderStyle,
+): DropdownBox[] {
+  return [
+    ...collectOpenWorkbenchOccluders(doc, computeStyle),
+    ...collectVisibleWebviewOccluders(doc, computeStyle),
+  ];
 }

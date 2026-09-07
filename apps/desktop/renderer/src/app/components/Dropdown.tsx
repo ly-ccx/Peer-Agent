@@ -7,7 +7,7 @@ import {
   type DropdownOption,
   type DropdownTab,
 } from './dropdownMenu';
-import { collectVisibleWebviewOccluders, placeDropdownMenu } from './dropdownPosition';
+import { collectDropdownOccluders, placeDropdownMenu } from './dropdownPosition';
 
 export type { DropdownOption, DropdownTab } from './dropdownMenu';
 export { filterDropdownOptions, resolveDropdownActiveTab } from './dropdownMenu';
@@ -99,7 +99,7 @@ export function Dropdown({
     : footerAction?.label;
 
   // 依据触发器在视口中的位置计算 fixed 菜单坐标。
-  // 菜单可能比触发器更宽（composer 源头选择），碰到视口右边或可见 webview 时往左收，避免被原生层切掉。
+  // 菜单可能比触发器更宽（composer 源头选择），碰到视口右边、打开的工作台或可见 webview 时往左收。
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
@@ -118,7 +118,7 @@ export function Dropdown({
       },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       preferredPlacement: menuPlacement,
-      occluders: collectVisibleWebviewOccluders(),
+      occluders: collectDropdownOccluders(),
     });
     setCoords({ left: placed.left, top: placed.top, width: rect.width, placement: placed.placement });
   }, [menuPlacement]);
