@@ -2977,9 +2977,8 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   if (!goalRunner) return;
   // 串行收口同会话 intake 流：等待原 sendMessage finally 释放 Runtime turn 后，
   // 再启动 Runner。仅发送 UI done 或同步 cancel 都不足以证明 session 已空闲。
-  // failed 计划的 re-arm 走 resume()：消费中断标记并把计划恢复为 executing；
-  // start() 对 failed 计划不会消费 interruption，会被 persist 重新派生回 failed。
-  const isFailedRearm = plan.status === 'failed';
+  // Both failed and interrupted re-arms use resume() to consume suspension.
+  // Recheck after the foreground stream releases, rather than capture stale state.
   void serializeAcceptedGoalRunnerHandoff({
     forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
       plan.conversationId,
@@ -2989,7 +2988,7 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
       shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
       || shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
     ),
-    startRunner: () => (isFailedRearm
+    startRunner: () => (shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
       ? goalRunner.resume(plan.planId, { reason: 'goal_accepted_rearm' })
       : goalRunner.start(plan.planId)),
   }).catch((error) => {

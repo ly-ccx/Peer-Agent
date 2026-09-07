@@ -1426,12 +1426,12 @@ export function createGoalRunner({
         lastError: undefined,
       });
     } else {
-      // canResumeFailedRun（用户显式恢复已失败的 Runner 计划）= 明确消费中断标记（恢复执行）；
-      // 其它 resume（如 intake 契约的中断→继续）保留 interruption，避免后续收敛把
-      // 中断契约误判为 pure_qa 而静默删除（审计：mark_interrupted keep 后仍被删）。
+      // An admitted interrupted run must consume the old suspension before its
+      // next turn; otherwise ordinary persistence derives interrupted again.
+      // Other resumes retain the intake interruption protection.
       goalPlanStore.resumeRunner(planId, {
         ...runnerPatch,
-        ...(canResumeFailedRun ? { consumedInterruption: true } : {}),
+        ...((canResumeFailedRun || plan.status === 'interrupted') ? { consumedInterruption: true } : {}),
       });
     }
     appendRunEvent(planId, {
