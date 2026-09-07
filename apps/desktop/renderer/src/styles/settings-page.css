@@ -25,19 +25,20 @@
 .settings-nav-header {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
   padding: 0 var(--space-2) var(--space-2);
 }
 .settings-nav-header button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-3);
   background: none;
   border: none;
   color: var(--graphite-soft);
   cursor: pointer;
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  margin: 0;
   border-radius: var(--radius-sm);
+  -webkit-app-region: no-drag;
   transition: color var(--za-motion-fast), background var(--za-motion-fast);
 }
 .settings-nav-header button:hover {
