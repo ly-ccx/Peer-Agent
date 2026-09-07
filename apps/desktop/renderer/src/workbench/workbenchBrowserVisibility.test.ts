@@ -41,6 +41,13 @@ describe('workbench view visibility', () => {
     );
   });
 
+  it('disables pointer events on kept-alive Browser guests so they cannot steal Goal or Files wheel', () => {
+    assert.match(
+      workbenchStyles,
+      /\.workbench-view\.workbench-view--browser\[data-active='false'\] \.browser-webview,\s*\n\s*\.workbench-view--prepared-browser\[data-active='false'\] \.browser-webview,\s*\n\s*\.workbench-view\.workbench-view--browser\[data-active='false'\] \.browser-webview\[data-active='true'\],\s*\n\s*\.workbench-view--prepared-browser\[data-active='false'\] \.browser-webview\[data-active='true'\]\s*\{\s*pointer-events:\s*none !important;/,
+    );
+  });
+
   it('keeps a prepared background Browser guest mounted without display:none or fixed reparent', () => {
     assert.match(panelSource, /workbench-view--prepared-browser/);
     assert.match(panelSource, /claimForeground=\{id === conversationId\}/);

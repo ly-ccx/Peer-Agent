@@ -30,6 +30,40 @@
   pointer-events: none !important;
 }
 
+/* Goal portal 滚动必须在 @layer 外：goal-panel.css 的 .goal-panel-body 是未分层规则，
+   层内 min-height:0 / overflow-y:auto 压不过它。父槽 overflow:hidden 会把任务裁掉，
+   内层却长成内容高度，滚轮没有可滚动端口。 */
+.workbench-view--goal {
+  inset-block-start: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workbench-view--goal[data-active='false'] {
+  display: none;
+}
+
+.workbench-view--goal > .goal-panel-body {
+  position: static;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  border-top: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Electron <webview> 不继承祖先 pointer-events:none。非 Browser tab 时必须把 guest
+   自己打成 none，否则保活页会叠在 Goal/Files 上截走滚轮。 */
+.workbench-view.workbench-view--browser[data-active='false'] .browser-webview,
+.workbench-view--prepared-browser[data-active='false'] .browser-webview,
+.workbench-view.workbench-view--browser[data-active='false'] .browser-webview[data-active='true'],
+.workbench-view--prepared-browser[data-active='false'] .browser-webview[data-active='true'] {
+  pointer-events: none !important;
+}
+
 @layer components {
   .workbench-panel {
     position: relative;
@@ -227,18 +261,7 @@
     pointer-events: auto;
   }
 
-  /* GoalView slot：portal target，避免内部多余 padding。
-   * 与 documents/browser 一致：贴顶覆盖，去掉 .workbench-view 默认 24px 顶部安全区。
-   * 外层 overflow:hidden，避免与内部投影的 .goal-panel-body 形成双层滚动嵌套
-   * （双层 overflow-y:auto 会让滚轮焦点在内外层之间抢夺，导致右栏滚动卡顿）。
-   * 唯一滚动容器交给内层 .goal-panel-body（见下方 flex:1 + min-height:0 + overflow-y:auto）。 */
-  .workbench-view--goal {
-    inset-block-start: 0;
-    padding: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
+  /* GoalView slot 的 overflow / flex 滚动契约在 @layer 外（见文件顶部）。 */
 
   /* 子视图占位骨架样式 */
   .workbench-empty {
@@ -274,17 +297,6 @@
     border: 1px solid var(--ui-border-subtle, var(--za-line));
     border-radius: var(--ui-radius-control, var(--za-radius-sm));
     word-break: break-all;
-  }
-
-  /* 当 Goal portal body 投影进 GoalView slot 时，铺满 */
-  .workbench-view--goal > .goal-panel-body {
-    position: static;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    border-top: none;
-    overflow-y: auto;
-    overflow-x: hidden;
   }
 
   /* Diff 视图：文件 git diff 展示 */
