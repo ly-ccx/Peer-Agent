@@ -6,7 +6,45 @@ All notable changes to Peer Agent are tracked here.
 
 ### Notes
 
-- Linux Desktop x64 is now a first-class GitHub Release asset (`Peer-Agent-<ver>-x64.AppImage` / `.deb`) with updater channel files (`latest-linux.yml` / `beta-linux.yml`). Builds are unsigned in stage-1 (same posture as mac ad-hoc). linux-arm64 Desktop and Linux code signing remain follow-ups. The CLI archive matrix is unchanged.
+- Nothing yet.
+
+## [0.0.12] - 2026-09-07
+
+### Notes
+
+- Selection side-chat now persists only on the first send: opening the panel prepares a draft, closing an unsent panel leaves no empty session, and the list shows the parent pointer.
+- Linux Desktop x64 is a first-class GitHub Release asset (`Peer-Agent-<ver>-x64.AppImage` / `.deb`) with updater channel files (`latest-linux.yml` / `beta-linux.yml`). Builds are unsigned in stage-1 (same posture as mac ad-hoc). linux-arm64 Desktop and Linux code signing remain follow-ups. The CLI archive matrix is unchanged.
+- The chat header can manage global background runs; the usage panel sums provider balances and shows quota-reset countdown.
+- Goal distinguishes interruption from failure: plans recover after restart, failed plans can re-arm, and intake upgrades consume stale interruptions.
+
+### Features
+
+- Persist selection children on send, with a visible parent pointer in the conversation list.
+- Linux x64 desktop packages and updater channel files on GitHub Releases.
+- Global background-run management from the chat header.
+- Unified usage / quota display, including remaining allowance and reset countdown.
+- GPT-6 Astra in the subscription catalog.
+- Skill install workspace picker; the sidebar lists skills from every workspace.
+
+### Improved
+
+- Goal panel scrolling, explorer lifecycle, and activity UI.
+- Context occupancy display refreshes after compaction.
+- SkillHub install identity is pinned to the publisher owner.
+- Selection-child banner sits flush under the drawer header.
+
+### Fixed
+
+- Switching conversations no longer reloads Workbench Browser pages from scratch.
+- Sidebar can show interrupted conversation status.
+- Failed / interrupted Goal plans consume interruption before re-arming; intake → accepted_goal clears leftover waiting_user.
+- Preload skips privileged settings sync while Electron is still on `about:blank`.
+- Compaction fixture window matches the current System Context budget.
+
+### CLI
+
+- First-class CLI archives remain `peer-darwin-arm64.tar.gz` and `peer-linux-x64.tar.gz`.
+- Install with `npm i -g @peer-agent/cli@latest`; `postinstall` downloads this release's archive.
 
 ## [0.0.11] - 2026-09-02
 
