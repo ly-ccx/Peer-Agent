@@ -18,6 +18,10 @@ const ipcRenderer = Object.freeze({
 });
 
 function readInitialSettings() {
+  // Electron can preload the initial empty document before loadURL/loadFile.
+  // It has no trusted location yet; do not issue a privileged sync request.
+  const href = globalThis.location?.href;
+  if (!href || href === 'about:blank') return {};
   try {
     const result = ipcRenderer.sendSync('settings:get-sync');
     if (result && typeof result === 'object' && !Array.isArray(result)) return result;
