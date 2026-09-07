@@ -1,3 +1,5 @@
+export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
+
 export type LocalAccessLevel =
   | 'ask_before_local'
   | 'session_local'
@@ -96,6 +98,11 @@ export interface SkillSummary {
    * 例：skillhub、aone-open；本地手工 skill 可为空。
    */
   readonly source?: string | null;
+  /**
+   * 运行时根据安装来源、作用域与路径边界计算的卸载能力。
+   * 界面必须使用该字段，不可仅凭 scope 推断，以免误删工作区源码。
+   */
+  readonly canUninstall?: boolean;
 }
 
 export interface SkillDetail extends SkillSummary {
@@ -522,6 +529,8 @@ export interface LlmOAuthStatus {
   readonly expiresAt?: string;
 }
 
+export type { AccountUsageSource, AccountUsageScope, AccountUsageBalance, AccountUsageSpend, AccountUsageUnavailable, AccountUsageLocal } from './account-usage.js';
+
 /** 订阅额度窗口（session / weekly / model 等）。 */
 export interface LlmSubscriptionQuotaWindow {
   readonly id: string;
@@ -529,6 +538,12 @@ export interface LlmSubscriptionQuotaWindow {
   readonly remainingPercent?: number;
   readonly usedPercent?: number;
   readonly resetsAt?: string;
+  readonly used?: number;
+  readonly limit?: number;
+  readonly remaining?: number;
+  readonly unit?: 'requests' | 'tokens' | 'credits' | 'currency';
+  readonly source?: import('./account-usage.js').AccountUsageSource;
+  readonly scope?: import('./account-usage.js').AccountUsageScope;
 }
 
 /**
@@ -536,7 +551,16 @@ export interface LlmSubscriptionQuotaWindow {
  * success=false 时用 status/error 表达未登录、过期或拉取失败，UI 应降级展示。
  */
 export interface LlmSubscriptionQuota {
+  readonly accountUsageRevision?: string;
+  /** Remote query outcome; localUsage can remain available on failure. */
   readonly success: boolean;
+  readonly balances?: readonly import('./account-usage.js').AccountUsageBalance[];
+  readonly spend?: readonly import('./account-usage.js').AccountUsageSpend[];
+  readonly localUsage?: import('./account-usage.js').AccountUsageLocal;
+  readonly unavailable?: readonly import('./account-usage.js').AccountUsageUnavailable[];
+  readonly partial?: boolean;
+  readonly stale?: boolean;
+  readonly channelId?: string;
   readonly status?: string;
   readonly providerId?: string;
   readonly authMethod?: LlmAuthMethod;
@@ -623,6 +647,8 @@ export interface LlmProviderConfig {
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {
+  /** Ephemeral main-owned identity for account observations; contains no credential material. */
+  readonly accountUsageRevision?: string;
   readonly apiKeyMasked: string;
   readonly apiKeyConfigured: boolean;
   // OAuth 渠道登录后存在,仅表达登录态而不暴露 token。
@@ -897,6 +923,35 @@ export interface PermissionGrant {
   readonly duration: PermissionDuration;
   readonly scope?: string;
   readonly decidedAt: string;
+}
+
+/** Application-owned shell process snapshot. Source conversation is provenance, not ownership. */
+export interface ManagedShellTask {
+  readonly taskId: string;
+  readonly toolCallId?: string;
+  readonly command: string;
+  readonly cwd?: string;
+  readonly conversationId?: string | null;
+  readonly runInBackground?: boolean;
+  readonly description?: string;
+  readonly status: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string | null;
+  readonly exitCode?: number | null;
+  readonly timedOut?: boolean;
+  readonly stopReason?: string | null;
+  readonly promptDetected?: boolean;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly artifactRef?: string | null;
+  /** Observed TCP listeners, not HTTP readiness inferred from log output. */
+  readonly listeners?: readonly {
+    readonly host: string;
+    readonly port: number;
+    readonly pid: number;
+    readonly transport: 'tcp';
+    readonly observedAt: string;
+  }[];
 }
 
 export interface LocalShellExecInput {

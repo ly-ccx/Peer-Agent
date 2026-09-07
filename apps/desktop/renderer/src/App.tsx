@@ -16,7 +16,10 @@ import {
   resolveResultDrawerAcceptanceTargets,
   type OpenResultOptions,
 } from './app/state/resultDrawerAcceptance';
-import { resolveWorkbenchConversationId } from './app/state/openWorkbenchConversation';
+import {
+  MISSING_WORKBENCH_CONVERSATION_NOTICE,
+  resolveWorkbenchConversationId,
+} from './app/state/openWorkbenchConversation';
 import { AutomationCenter } from './automations/AutomationCenter';
 import { getAutomationCopy } from './automations/automationI18n';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
@@ -32,6 +35,8 @@ import {
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
+import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace';
+import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
@@ -93,6 +98,11 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** 选区子会话的父会话来源；列表用它显示「来自父会话」。 */
+  selectionOrigin?: {
+    parentConversationId: string;
+    reference: { exactText: string };
+  } | null;
   /** Durable automation Fresh Run origin; rename-safe badge signal. */
   automationOrigin?: {
     kind: 'automation_run';
@@ -269,6 +279,7 @@ function MainApp() {
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [workbenchOpenNotice, setWorkbenchOpenNotice] = useState<string | null>(null);
   const [notificationMessageTarget, setNotificationMessageTarget] = useState<{
     conversationId: string;
     messageId: string;
@@ -912,6 +923,7 @@ function MainApp() {
   const isZh = (session?.locale ?? '').toLowerCase().startsWith('zh');
 
   return (
+    <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
       {showMainShell ? (
         <>
@@ -988,6 +1000,11 @@ function MainApp() {
                 </section>
               ) : activePage === 'home' ? (
                 <section className="primary-page-shell task-overview-page-layer" aria-label={isZh ? '工作台' : 'Workbench'}>
+                  {workbenchOpenNotice ? (
+                    <p className="workbench-open-notice" role="status" aria-live="polite">
+                      {workbenchOpenNotice}
+                    </p>
+                  ) : null}
                   <div className="task-overview-scroll-region">
                   {homeScope === 'all' ? (
                     <GlobalWorkbenchPage
@@ -1004,11 +1021,12 @@ function MainApp() {
                         }
                         void resolveWorkbenchConversationId(item).then((conversationId) => {
                           if (conversationId) {
+                            setWorkbenchOpenNotice(null);
                             handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
                             focusTaskRelatedMessage({ ...item, conversationId });
                             return;
                           }
-                          openCollectionDrawer('tasks');
+                          setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
                         });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
@@ -1041,11 +1059,12 @@ function MainApp() {
                         }
                         void resolveWorkbenchConversationId(item).then((conversationId) => {
                           if (conversationId) {
+                            setWorkbenchOpenNotice(null);
                             handleSelectConversation(String(conversationId), item.deliveryWorkspacePath ?? null);
                             focusTaskRelatedMessage({ ...item, conversationId });
                             return;
                           }
-                          openCollectionDrawer('tasks');
+                          setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
                         });
                       }}
                       onAcceptResult={(item: TaskOverviewItem) => acceptResultFromWorkbench(item)}
@@ -1065,7 +1084,7 @@ function MainApp() {
                 </section>
               ) : (
                 <section className="thread thread-has-header">
-                  <ChatSurface
+                  <SelectionChatWorkspace
                   i18n={i18n}
                   providers={providers}
                   conversationId={activeConversationId}
@@ -1249,10 +1268,19 @@ function MainApp() {
                           </button>
                         </div>
                         <div className="workbench-collection-drawer-body">
+                          {workbenchOpenNotice ? (
+                            <p className="workbench-open-notice" role="status" aria-live="polite">
+                              {workbenchOpenNotice}
+                            </p>
+                          ) : null}
                           <TasksPage
                             workspacePath={activeWorkspace}
                             onOpenItem={(item) => {
-                              if (!item.conversationId) return;
+                              if (!item.conversationId) {
+                                setWorkbenchOpenNotice(MISSING_WORKBENCH_CONVERSATION_NOTICE);
+                                return;
+                              }
+                              setWorkbenchOpenNotice(null);
                               if (item.actionRight === 'result_ready') {
                                 openResultDrawer(item);
                                 return;
@@ -1420,5 +1448,6 @@ function MainApp() {
           知识库：peer-knowledge/knowledge/experience/full-disk-access-startup-gate-archive.md */}
       {false && <FullDiskAccessStartupGate enabled={showMainShell} isZh={isZh} />}
     </main>
+    </BackgroundRunsProvider>
   );
 }

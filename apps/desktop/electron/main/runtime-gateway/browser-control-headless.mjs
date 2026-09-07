@@ -70,6 +70,7 @@ export function createHeadlessBrowserManager({ electron } = {}) {
       webPreferences: {
         partition: 'persist:peer-browser',
         backgroundThrottling: false,
+        offscreen: true,
       },
     });
     window.contentView.addChildView(view);

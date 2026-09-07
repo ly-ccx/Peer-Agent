@@ -46,3 +46,17 @@ test('handle buttons open the related conversation instead of toggling an in-pla
   assert.doesNotMatch(app, /if \(isWorkbenchHandoffCard\(item\)\) return;/);
   assert.match(app, /resolveWorkbenchConversationId\(item\)/);
 });
+
+test('missing conversation shows a notice instead of opening the tasks drawer', async () => {
+  const app = await readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /MISSING_WORKBENCH_CONVERSATION_NOTICE/);
+  assert.match(app, /className="workbench-open-notice"/);
+  const openItemHandlers = [...app.matchAll(
+    /onOpenItem=\{\(item: TaskOverviewItem, options\?: OpenResultOptions\) => \{[\s\S]*?\n                      \}\}/g,
+  )].map((match) => match[0]);
+  assert.equal(openItemHandlers.length, 2);
+  for (const handler of openItemHandlers) {
+    assert.match(handler, /setWorkbenchOpenNotice\(MISSING_WORKBENCH_CONVERSATION_NOTICE\)/);
+    assert.doesNotMatch(handler, /openCollectionDrawer\('tasks'\)/);
+  }
+});

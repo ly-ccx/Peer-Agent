@@ -3,13 +3,12 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
-import { BackgroundThreadsView } from './views/BackgroundThreadsView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
   WORKBENCH_DEFAULT_WIDTH,
 } from './WorkbenchContext';
-import { mountedBrowserConversations } from './browserPanelReveal';
+import { mountedBrowserConversations, stabilizeMountedBrowserOrder } from './browserPanelReveal';
 import {
   WORKBENCH_MAXIMIZE_RATIO,
   clampWorkbenchWidth,
@@ -97,19 +96,7 @@ const TABS: readonly TabDef[] = [
       </svg>
     ),
   },
-  {
-    id: 'threads',
-    labelZh: '后台线程',
-    labelEn: 'Threads',
-    icon: (
-      <svg width="15" height="15" {...ICON_PROPS}>
-        <path d="M4 6h16" />
-        <path d="M4 12h16" />
-        <path d="M4 18h10" />
-        <circle cx="18" cy="18" r="2" />
-      </svg>
-    ),
-  },
+
 ];
 
 interface WorkbenchPanelProps {
@@ -126,7 +113,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setActiveTab,
     setWidth,
     setMaximized,
-    focusThreadTaskId,
     hasGoalPlan,
     registerGoalSlot,
     sidebarAutoCollapsed,
@@ -148,6 +134,20 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     registerGoalSlot(goalSlotRef.current);
     return () => registerGoalSlot(null);
   }, [registerGoalSlot]);
+
+  // Electron <webview> 在宿主节点被 React 重排（insertBefore）时会销毁 guest。
+  // 活页集合用 LRU，渲染顺序必须「只追加 / 只删除」，切回同一会话才能复用 WebContents。
+  // 顺序只存在 ref 里：当帧就能算出稳定名单，不必 setState 再渲一次。
+  const rawMountedBrowserIds = mountedBrowserConversations(
+    conversationId,
+    preparedBrowserConversations,
+  );
+  const browserMountOrderRef = useRef<string[]>([]);
+  const mountedBrowserIds = stabilizeMountedBrowserOrder(
+    browserMountOrderRef.current,
+    rawMountedBrowserIds,
+  );
+  browserMountOrderRef.current = mountedBrowserIds;
 
   // 拖拽分隔线。
   // Electron <webview> 会在 guest 层吃掉 pointerup：分隔条停在 data-active，
@@ -363,40 +363,24 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           data-active={activeTab === 'plan'}
           ref={goalSlotRef}
         />
-        {layoutHost === 'root'
-          ? mountedBrowserConversations(conversationId, preparedBrowserConversations).map((id) => (
-            <div
-              key={`mounted-browser-${id}`}
-              className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
-              data-active={id === conversationId ? activeTab === 'browser' : false}
-              aria-hidden={id === conversationId ? undefined : true}
-            >
-              <BrowserView
-                isZh={isZh}
-                conversationId={id}
-                session={id === conversationId ? browserSession : resolveBrowserSession(id)}
-                onSessionChange={id === conversationId
-                  ? setBrowserSession
-                  : (next) => setBrowserSessionFor(id, next)}
-                claimForeground={id === conversationId}
-              />
-            </div>
-          ))
-          : (
-            <div
-              className="workbench-view workbench-view--browser"
-              data-active={activeTab === 'browser'}
-            >
-              <BrowserView
-                key={conversationId ?? '__none'}
-                isZh={isZh}
-                conversationId={conversationId}
-                session={browserSession}
-                onSessionChange={setBrowserSession}
-                claimForeground
-              />
-            </div>
-          )}
+        {mountedBrowserIds.map((id) => (
+          <div
+            key={`mounted-browser-${id}`}
+            className={`workbench-view workbench-view--browser${id === conversationId ? '' : ' workbench-view--prepared-browser'}`}
+            data-active={id === conversationId ? activeTab === 'browser' : false}
+            aria-hidden={id === conversationId ? undefined : true}
+          >
+            <BrowserView
+              isZh={isZh}
+              conversationId={id}
+              session={id === conversationId ? browserSession : resolveBrowserSession(id)}
+              onSessionChange={id === conversationId
+                ? setBrowserSession
+                : (next) => setBrowserSessionFor(id, next)}
+              claimForeground={id === conversationId}
+            />
+          </div>
+        ))}
         <div
           className="workbench-view workbench-view--files"
           data-active={activeTab === 'files'}
@@ -414,12 +398,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             onBrowseFiles={() => setActiveTab('files')}
           />
         </div>
-        <div
-          className="workbench-view workbench-view--threads"
-          data-active={activeTab === 'threads'}
-        >
-          <BackgroundThreadsView isZh={isZh} focusTaskId={focusThreadTaskId} />
-        </div>
+
       </div>
     </aside>
   );

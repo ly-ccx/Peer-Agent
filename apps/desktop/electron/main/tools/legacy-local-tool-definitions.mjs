@@ -52,6 +52,10 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
           type: 'string',
           description: 'The bash command to execute.',
         },
+        runInBackground: {
+          type: 'boolean',
+          description: 'Run as a Peer-managed background task. Use for long-running services instead of shell &; returns a task ID for explicit management.',
+        },
       },
       required: ['command'],
       additionalProperties: false,

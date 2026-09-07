@@ -30,6 +30,8 @@ export interface ChatAttachment {
    * 不得一律写成 user_upload。
    */
   sourceKind?: ChatAttachmentSourceKind;
+  /** Exact source identity returned by the host; user material, never execution authority. */
+  selectionReference?: import('@peer-agent/protocol').SelectionReference;
   /**
    * 工作区相对路径（@ 文件引用）。只钉路径、默认不内联全文时用它让模型自己读。
    */

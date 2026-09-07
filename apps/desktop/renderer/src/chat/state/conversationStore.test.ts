@@ -599,4 +599,15 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('A'), EMPTY_CONVERSATION_STATE);
     assert.equal(notified, 1);
   });
+
+  it('adoptBucket moves draft state onto a persisted conversation id', () => {
+    const store = new ConversationStore();
+    store.setDraft('draft-open', 'child question');
+    store.commitLoad('draft-open', { messages: [msg('u1', 'hello')] });
+    store.adoptBucket('draft-open', 'real-child');
+    assert.equal(store.getSnapshot('draft-open'), EMPTY_CONVERSATION_STATE);
+    assert.equal(store.getSnapshot('real-child').draft, 'child question');
+    assert.equal(store.getSnapshot('real-child').loadStatus, 'ready');
+    assert.equal(store.getSnapshot('real-child').messages[0]?.id, 'u1');
+  });
 });

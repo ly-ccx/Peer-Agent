@@ -42,7 +42,9 @@ test('task row view button opens the matching task details', async () => {
   );
   const openItemHandler =
     appSource.match(/<TasksPage[\s\S]*?onOpenItem=\{\(item\) => \{[\s\S]*?\n                            \}\}/)?.[0] ?? '';
-  assert.match(openItemHandler, /if \(!item\.conversationId\) return;/);
+  assert.match(openItemHandler, /if \(!item\.conversationId\) \{/);
+  assert.match(openItemHandler, /setWorkbenchOpenNotice\(MISSING_WORKBENCH_CONVERSATION_NOTICE\)/);
+  assert.match(appSource, /className="workbench-open-notice"/);
   assert.match(openItemHandler, /handleSelectConversation\(String\(item\.conversationId\)\);/);
   assert.match(openItemHandler, /focusTaskRelatedMessage\(item\)/);
   assert.match(openItemHandler, /openResultDrawer\(item\)/);
@@ -64,4 +66,22 @@ test('result_ready opens the drawer without focusing; other rights open the main
   assert.match(appSource, /setNotificationMessageTarget\(\{/);
   assert.match(appSource, /resolveTaskRelatedMessageId\(item\)/);
   assert.ok(appSource.includes("from './chat/state/taskRelatedMessageResolve'"));
+});
+
+test('paused goal rows keep abandon beside open in the same action column', async () => {
+  const [tasksPageSource, styles] = await Promise.all([
+    readTasksPageSource(),
+    readTaskOverviewStyles(),
+  ]);
+
+  assert.match(
+    tasksPageSource,
+    /className="task-row-actions"[\s\S]*?className="task-row-open"[\s\S]*?className="task-row-abandon"/,
+  );
+  assert.match(tasksPageSource, /item\.source === 'goal_plan' && item\.actionRight === 'paused'/);
+  assert.match(tasksPageSource, /void clientApi\.goalPlansDelete\(\{ planId: item\.taskId \}\)/);
+  assert.match(styles, /\.task-row-actions\s*\{/);
+  assert.match(styles, /\.task-row-abandon\s*\{/);
+  assert.match(styles, /color: var\(--state-danger, #c0392b\);/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1\.6fr\) minmax\(8rem, 0\.9fr\) minmax\(8rem, 0\.9fr\) 5rem 7\.5rem;/);
 });

@@ -13,10 +13,12 @@ import {
 } from './task-notification-policy.mjs';
 
 describe('task-notification-policy transitions', () => {
-  it('detects completed / failed / waiting_user attention transitions', () => {
+  it('detects completed / failed / waiting_user / interrupted attention transitions', () => {
     assert.equal(isAttentionTransition('executing', 'completed'), true);
     assert.equal(isAttentionTransition('executing', 'failed'), true);
     assert.equal(isAttentionTransition('executing', 'waiting_user'), true);
+    assert.equal(isAttentionTransition('executing', 'interrupted'), true);
+    assert.equal(isAttentionTransition('interrupted', 'interrupted'), false);
     assert.equal(isAttentionTransition('waiting_user', 'waiting_user'), false);
     assert.equal(isAttentionTransition('executing', 'cancelled'), false);
     assert.equal(isAttentionTransition('executing', 'executing'), false);
@@ -66,6 +68,31 @@ describe('task-notification-policy decide', () => {
     assert.equal(d.action, 'notify');
     assert.equal(d.copy.title, '任务失败');
     assert.match(d.copy.body, /npm install 失败/);
+  });
+
+  it('notifies on interrupted suspension without failure wording', () => {
+    // ADR 73：interrupted 是可恢复挂起态，弹温和提醒而非「任务失败」。
+    const d = decideTaskNotification({
+      ...base,
+      previousStatus: 'executing',
+      nextStatus: 'interrupted',
+    });
+    assert.equal(d.action, 'notify');
+    assert.equal(d.attentionVersion, 1);
+    assert.equal(d.copy.title, '已暂停，待恢复');
+    assert.equal(d.copy.body, '给登录页加暗色模式');
+    assert.ok(!d.copy.title.includes('失败'));
+  });
+
+  it('skips interrupted notification when setting disabled', () => {
+    const d = decideTaskNotification({
+      ...base,
+      previousStatus: 'executing',
+      nextStatus: 'interrupted',
+      settings: { enabled: true, completed: true, failed: true, waitingUser: true, interrupted: false },
+    });
+    assert.equal(d.action, 'skip');
+    assert.equal(d.reason, 'settings_interrupted_disabled');
   });
 
   it('notifies on waiting_user with confirmation title', () => {

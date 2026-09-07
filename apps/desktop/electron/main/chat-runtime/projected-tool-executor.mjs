@@ -16,6 +16,8 @@ import { createLocalGoalProvider } from '../runtime-gateway/local-goal-provider.
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from '../runtime-gateway/local-skill-provider.mjs';
 import { createShellArtifactStore } from '../runtime-gateway/shell-artifacts.mjs';
+import { getApplicationShellTasks } from '../runtime-gateway/application-shell-tasks.mjs';
+import { getApplicationShellSessions } from '../runtime-gateway/application-shell-sessions.mjs';
 import { nowIso } from '../runtime-gateway/tool-result-factory.mjs';
 import {
   DEFAULT_RUNTIME_PROJECTION,
@@ -299,10 +301,12 @@ export async function executeProjectedModelTool({
       userDataPath,
       artifactStore: shellArtifactStore,
       approvalDecider: shellApprovalDecider,
+      taskManager: getApplicationShellTasks(userDataPath),
+      sessionManager: getApplicationShellSessions(userDataPath, cwd),
       hookRunner,
     }),
   });
-  const execution = await host.execute({ call: projection.call }, {
+  const execution = await host.execute({ call: projection.call, conversationId }, {
     toolContext: effectiveToolContext,
     requestPermission,
     signal,

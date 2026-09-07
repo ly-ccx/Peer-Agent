@@ -308,8 +308,15 @@ function pushTextWithBareImagePaths(nodes: ReactNode[], text: string, keyPrefix:
   return localIndex;
 }
 
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonly number[]): ReactNode[] {
   const nodes: ReactNode[] = [];
+  const mappedText = (start: number, end: number) => {
+    const children: ReactNode[] = [];
+    pushTextWithBareImagePaths(children, text.slice(start, end), `${keyPrefix}-${start}`, 0);
+    return offsets
+      ? <span key={`${keyPrefix}-source-${start}`} data-source-offsets={JSON.stringify(offsets.slice(start, end + 1))}>{children}</span>
+      : children;
+  };
   let cursor = 0;
   let tokenIndex = 0;
 
@@ -328,12 +335,12 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
     candidates.sort((a, b) => a.start - b.start);
     const next = candidates[0];
     if (!next) {
-      tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor), keyPrefix, tokenIndex);
+      nodes.push(mappedText(cursor, text.length));
       break;
     }
 
     if (next.start > cursor) {
-      tokenIndex = pushTextWithBareImagePaths(nodes, text.slice(cursor, next.start), keyPrefix, tokenIndex);
+      nodes.push(mappedText(cursor, next.start));
     }
     if (next.type === 'image') {
       const key = `${keyPrefix}-inline-${tokenIndex}`;
@@ -407,9 +414,9 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
     if (next.type === 'code') {
       nodes.push(<FilePathCode key={key} raw={content} />);
     } else if (next.type === 'strong') {
-      nodes.push(<strong key={key}>{renderInlineMarkdown(content, key)}</strong>);
+      nodes.push(<strong key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1))}</strong>);
     } else {
-      nodes.push(<em key={key}>{renderInlineMarkdown(content, key)}</em>);
+      nodes.push(<em key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1))}</em>);
     }
     tokenIndex += 1;
     cursor = contentEnd + next.marker.length;
@@ -418,9 +425,11 @@ function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
   return nodes;
 }
 
-export function renderInlineLines(text: string, keyPrefix: string) {
+export function renderInlineLines(text: string, keyPrefix: string, offsets?: readonly number[]) {
+  let start = 0;
   return text.split('\n').flatMap((line, index) => {
-    const nodes = renderInlineMarkdown(line, `${keyPrefix}-${index}`);
+    const nodes = renderInlineMarkdown(line, `${keyPrefix}-${index}`, offsets?.slice(start, start + line.length + 1));
+    start += line.length + 1;
     return index === 0 ? nodes : [<br key={`${keyPrefix}-br-${index}`} />, ...nodes];
   });
 }

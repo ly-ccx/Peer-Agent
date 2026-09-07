@@ -359,6 +359,22 @@ export class ConversationStore {
     this.setState(conversationId, { streamStatus: 'confirmed', ...patch, loadStatus: 'ready' });
   }
 
+  /**
+   * 把草稿桶的草稿、消息、流状态迁移到真实会话桶。
+   * 用于选区子会话首次发送：打开时只准备草稿，发送时创建持久会话后接续。
+   */
+  adoptBucket(fromConversationId: string | null, toConversationId: string): void {
+    const fromKey = resolveConversationBucketId(fromConversationId);
+    const toKey = resolveConversationBucketId(toConversationId);
+    if (fromKey === toKey) return;
+    const source = this.buckets.get(fromKey);
+    if (!source) return;
+    this.buckets.set(toKey, { ...source, loadStatus: 'ready' });
+    this.buckets.delete(fromKey);
+    this.notify(fromKey);
+    this.notify(toKey);
+  }
+
   /** 丢弃某会话桶（会话删除时清理内存）。 */
   reset(conversationId: string | null): void {
     const bucketId = resolveConversationBucketId(conversationId);

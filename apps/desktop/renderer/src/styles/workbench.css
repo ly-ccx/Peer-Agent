@@ -30,6 +30,40 @@
   pointer-events: none !important;
 }
 
+/* Goal portal 滚动必须在 @layer 外：goal-panel.css 的 .goal-panel-body 是未分层规则，
+   层内 min-height:0 / overflow-y:auto 压不过它。父槽 overflow:hidden 会把任务裁掉，
+   内层却长成内容高度，滚轮没有可滚动端口。 */
+.workbench-view--goal {
+  inset-block-start: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workbench-view--goal[data-active='false'] {
+  display: none;
+}
+
+.workbench-view--goal > .goal-panel-body {
+  position: static;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  border-top: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Electron <webview> 不继承祖先 pointer-events:none。非 Browser tab 时必须把 guest
+   自己打成 none，否则保活页会叠在 Goal/Files 上截走滚轮。 */
+.workbench-view.workbench-view--browser[data-active='false'] .browser-webview,
+.workbench-view--prepared-browser[data-active='false'] .browser-webview,
+.workbench-view.workbench-view--browser[data-active='false'] .browser-webview[data-active='true'],
+.workbench-view--prepared-browser[data-active='false'] .browser-webview[data-active='true'] {
+  pointer-events: none !important;
+}
+
 @layer components {
   .workbench-panel {
     position: relative;
@@ -204,24 +238,22 @@
   }
 
   /* 一级视图保持挂载以保留各自会话，但非活动视图必须退出布局和合成树。
-   * 不能只隐藏祖先的 visibility：文档预览页会在子层重新设为 visible，导致切换 Tab 后旧预览穿透并重叠；
-   * Electron webview 也需要 display:none 才能可靠移除 guest surface 的残留画面。 */
+   * 不能只隐藏祖先的 visibility：文档预览页会在子层重新设为 visible，导致切换 Tab 后旧预览穿透并重叠。 */
   .workbench-view[data-active='false'] {
     display: none;
   }
 
-  /* 后台 Task 拉起的会话浏览器必须保持 guest 可初始化，但不能抢前台画面。
-   * display:none 会阻止 Electron webview 进入就绪态，所以改成离屏挂载。 */
+  /* Browser guest 不能走 display:none，也不能在「前台槽 / 离屏 fixed」之间切换定位方案：
+   * Electron <webview> 在 display 切换或宿主被移出原包含块时会销毁 WebContents 并整页重载。
+   * 前台会话切到 Files/Plan、以及后台保活会话，都留在同一个 absolute 槽里，只藏 visibility。
+   * 后台页给一个最小盒，避免工作台收起（宽为 0）时 guest 无法初始化。 */
+  .workbench-view.workbench-view--browser[data-active='false'],
   .workbench-view--prepared-browser[data-active='false'] {
     display: flex;
     visibility: hidden;
     pointer-events: none;
-    position: fixed;
-    inset: auto auto 0 0;
-    width: 960px;
-    height: 720px;
-    transform: translate(-200vw, -200vh);
-    overflow: hidden;
+    min-width: 960px;
+    min-height: 720px;
   }
 
   .workbench-view[data-active='true'] {
@@ -229,18 +261,7 @@
     pointer-events: auto;
   }
 
-  /* GoalView slot：portal target，避免内部多余 padding。
-   * 与 documents/browser 一致：贴顶覆盖，去掉 .workbench-view 默认 24px 顶部安全区。
-   * 外层 overflow:hidden，避免与内部投影的 .goal-panel-body 形成双层滚动嵌套
-   * （双层 overflow-y:auto 会让滚轮焦点在内外层之间抢夺，导致右栏滚动卡顿）。
-   * 唯一滚动容器交给内层 .goal-panel-body（见下方 flex:1 + min-height:0 + overflow-y:auto）。 */
-  .workbench-view--goal {
-    inset-block-start: 0;
-    padding: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
+  /* GoalView slot 的 overflow / flex 滚动契约在 @layer 外（见文件顶部）。 */
 
   /* 子视图占位骨架样式 */
   .workbench-empty {
@@ -276,17 +297,6 @@
     border: 1px solid var(--ui-border-subtle, var(--za-line));
     border-radius: var(--ui-radius-control, var(--za-radius-sm));
     word-break: break-all;
-  }
-
-  /* 当 Goal portal body 投影进 GoalView slot 时，铺满 */
-  .workbench-view--goal > .goal-panel-body {
-    position: static;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    border-top: none;
-    overflow-y: auto;
-    overflow-x: hidden;
   }
 
   /* Diff 视图：文件 git diff 展示 */
@@ -2053,7 +2063,34 @@
     font-style: italic;
   }
 
-  /* 后台线程 Tab：列表 + 详情双栏。 */
+  .background-runtime-panel { padding: 12px; color: var(--za-text); font-size: var(--ui-font-body); }
+  .background-runtime-panel > * { position: relative; z-index: 1; }
+  .background-runtime-header { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+  .background-runtime-header h2 { margin: 0; font-size: var(--ui-font-heading-sm); font-weight: 600; }
+  .background-runtime-header > .background-run-meta { margin-left: auto; }
+  .background-runtime-panel button { min-height: 32px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 5px 8px; }
+  .background-runtime-panel button:hover { background: var(--ui-surface-hover); }
+  .background-runtime-panel button:disabled { opacity: .5; cursor: default; }
+  .background-runtime-panel button:focus-visible, .background-runtime-trigger:focus-visible, .background-runtime-panel summary:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+  .background-runtime-list { display: flex; flex-direction: column; gap: 4px; }
+  .background-runtime-list .background-run-row { width: 100%; min-height: 52px; padding: 8px; text-align: left; border-radius: var(--ui-radius-row); }
+  .background-run-row-heading { display: flex; align-items: baseline; gap: 12px; }
+  .background-run-row-heading > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .background-run-row-heading small { flex-shrink: 0; font-size: var(--ui-font-meta); }
+  .background-run-meta { color: var(--za-text-faint); font-size: var(--ui-font-meta); overflow-wrap: anywhere; }
+  .background-run-row > .background-run-meta { display: block; margin-top: 4px; }
+  .background-run-detail { overflow-wrap: anywhere; }
+  .background-run-detail h3 { margin: 8px 0; font-size: var(--ui-font-heading-sm); }
+  .background-run-detail p { margin: 8px 0; }
+  .background-run-detail details { border-top: 1px solid var(--ui-border-subtle); padding: 8px 0; }
+  .background-run-detail summary { cursor: pointer; min-height: 32px; padding: 5px 0; }
+  .background-run-detail dd { margin: 4px 0 12px; }
+  .background-run-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--ui-font-meta); }
+  .background-run-output { max-height: 180px; overflow: auto; }
+  .background-run-confirm { border-top: 1px solid var(--ui-border-subtle); margin-top: 12px; padding-top: 8px; }
+  .background-runtime-panel .background-run-destructive { color: var(--za-danger, #b94040); }
+
+  /* 全局后台任务及工作台关联入口共用同一视图。 */
   .workbench-view--threads {
     padding: 12px 12px 16px;
   }

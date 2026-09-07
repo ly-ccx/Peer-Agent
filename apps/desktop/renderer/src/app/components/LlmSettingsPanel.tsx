@@ -38,10 +38,14 @@ import {
   subscriptionLoginLabel,
 } from './llmSubscriptionAuth';
 import {
-  formatQuotaLine,
   isOAuthMethod,
   supportsSubscriptionQuotaMethod,
 } from './llmSubscriptionQuota';
+import { AccountUsageDetails } from './AccountUsageDetails';
+import { accountUsageRefreshFailed } from './accountUsageRefresh';
+import { observeAccountUsageRequest } from './accountUsageRequest';
+import { createAccountUsageRequestOrder } from './accountUsageRequestOrder';
+import { accountUsageViewIdentity, currentAccountUsage } from './accountUsageIdentity';
 
 interface PendingProviderDraft extends Record<string, unknown> {
   readonly channelId: string;
@@ -605,6 +609,9 @@ export function LlmSettingsPanel({
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [quotaResults, setQuotaResults] = useState<Record<string, LlmSubscriptionQuota>>({});
   const [quotaLoadingId, setQuotaLoadingId] = useState<string | null>(null);
+  const quotaRequestOrder = useRef(createAccountUsageRequestOrder());
+  const quotaProviders = useRef(providers);
+  quotaProviders.current = providers;
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
   const [oauthPending, setOauthPending] = useState<{
@@ -1309,28 +1316,21 @@ export function LlmSettingsPanel({
     }
   };
 
-  const handleRefreshQuota = async (id: string, force = true) => {
+  const handleRefreshQuota = async (id: string, force = true, active = () => true) => {
+    if (!active()) return;
+    const ticket = quotaRequestOrder.current.begin(id);
+    const provider = quotaProviders.current.find((item) => item.id === id);
+    if (!provider) return;
+    const identity = accountUsageViewIdentity(provider);
+    const current = () => active() && ticket.current() && identity === accountUsageViewIdentity(quotaProviders.current.find((item) => item.id === id));
     setQuotaLoadingId(id);
-    try {
-      const result = await clientApi.llmGetSubscriptionQuota({ id, force });
-      setQuotaResults((prev) => ({ ...prev, [id]: result }));
-    } catch (err: unknown) {
-      // 静默/手动刷新失败时保留上次成功结果，避免把已展示额度冲成错误态。
-      setQuotaResults((prev) => {
-        if (prev[id]?.success) return prev;
-        return {
-          ...prev,
-          [id]: {
-            success: false,
-            status: 'fetch_failed',
-            error: err instanceof Error ? err.message : 'Quota fetch failed',
-            fetchedAt: new Date().toISOString(),
-          },
-        };
-      });
-    } finally {
-      setQuotaLoadingId((current) => (current === id ? null : current));
-    }
+    await observeAccountUsageRequest(
+      () => clientApi.llmGetSubscriptionQuota({ id, force }),
+      current,
+      (result) => setQuotaResults((prev) => current() ? { ...prev, [id]: result } : prev),
+      () => setQuotaResults((prev) => current() ? { ...prev, [id]: accountUsageRefreshFailed(prev[id], provider.accountUsageRevision) } : prev),
+    );
+    if (ticket.finish()) setQuotaLoadingId((loading) => (loading === id ? null : loading));
   };
 
   // 进入设置页：先 force=false 立刻拿到主进程上次成功/TTL 缓存，再 force=true 静默刷新。
@@ -1351,23 +1351,17 @@ export function LlmSettingsPanel({
     void (async () => {
       for (const id of headIds) {
         if (cancelled) return;
-        // 先展示缓存（含 TTL 过期后的上次成功结果）
-        try {
-          const cached = await clientApi.llmGetSubscriptionQuota({ id, force: false });
-          if (cancelled) return;
-          setQuotaResults((prev) => ({ ...prev, [id]: cached }));
-        } catch {
-          /* silent; 下方仍会 force 刷新 */
-        }
+        // Cache observations use the same ordering guard as manual refreshes.
+        await handleRefreshQuota(id, false, () => !cancelled);
         if (cancelled) return;
         // 再后台静默拉最新
-        await handleRefreshQuota(id, true);
+        await handleRefreshQuota(id, true, () => !cancelled);
       }
     })();
     return () => { cancelled = true; };
     // 仅在 providers 列表身份变化时触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers.map((provider) => `${provider.id}:${provider.oauthStatus?.status ?? ''}`).join('|')]);
+  }, [providers.map(accountUsageViewIdentity).join('|')]);
 
   // ADR 28: 拉起 ChatGPT 订阅 OAuth 登录(browser 模式)。token 由 main 进程写入。
   // 链路契约:"先登录、成功后才落盘"。
@@ -1699,33 +1693,12 @@ export function LlmSettingsPanel({
               </div>
             
               </div>
-              {supportsSubscriptionQuotaMethod(head.authMethod) ? (
-                <div className="llm-group-header-quota">
-                  <div className="llm-subscription-quota llm-group-quota">
-                    <span
-                      className={`llm-subscription-quota-text${quotaResults[head.id] && !quotaResults[head.id].success ? ' is-error' : ''}`}
-                      title={formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN') ?? undefined}
-                    >
-                      {formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN')
-                        ?? (quotaLoadingId === head.id
-                          ? (i18n.locale === 'zh-CN' ? '额度加载中…' : 'Loading quota…')
-                          : '')}
-                    </span>
-                    <button
-                      type="button"
-                      className="llm-subscription-quota-refresh"
-                      disabled={quotaLoadingId === head.id}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void handleRefreshQuota(head.id);
-                      }}
-                    >
-                      {quotaLoadingId === head.id ? '…' : (i18n.locale === 'zh-CN' ? '刷新额度' : 'Quota')}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+              <AccountUsageDetails
+                quota={currentAccountUsage(quotaResults[head.id], head)}
+                loading={quotaLoadingId === head.id}
+                zh={i18n.locale === 'zh-CN'}
+                onRefresh={() => void handleRefreshQuota(head.id)}
+              />
             </div>
             {!collapsed ? (
               <div className="llm-group-models">

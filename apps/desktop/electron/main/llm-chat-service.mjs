@@ -10,6 +10,7 @@ import {
   renderStableSystemContext,
 } from './llm-prompts.mjs';
 import { taskAcceptanceFromMessages } from '@peer-agent/system-context';
+import { withSelectionRequestContext } from './selection-background-context.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
 import {
@@ -836,6 +837,24 @@ export function createLlmChatService({
       activeStreams.delete(streamId);
     }, TERMINAL_RETENTION_MS);
     if (typeof record.cleanupTimer?.unref === 'function') record.cleanupTimer.unref();
+  }
+
+  /** Host-only attestation for selection capture; never accept this from renderer. */
+  function getSelectionRuntimeState(conversationId) {
+    const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
+    if (!history) return { conversationId, contentRevision: null, status: 'unknown' };
+    const records = [...activeStreams.values()].filter((record) =>
+      record.conversationId === conversationId && isRunning(record));
+    const base = { conversationId, contentRevision: history.contentRevision };
+    if (records.length > 1) return { ...base, status: 'unknown' };
+    if (records.length === 1) {
+      const activeMessageId = records[0].assistantMessageId;
+      return typeof activeMessageId === 'string' && activeMessageId
+        ? { ...base, status: 'running', activeMessageId }
+        : { ...base, status: 'unknown' };
+    }
+    // A persisted streaming marker without a live stream may be an interrupted run.
+    return { ...base, status: history.excludedFromMessageId ? 'unknown' : 'idle' };
   }
 
   function listActiveConversationIds() {
@@ -1850,7 +1869,7 @@ export function createLlmChatService({
   }
 
   return {
-    sendMessage,
+    sendMessage: (params) => withSelectionRequestContext(conversationStore, params?.conversationId, () => sendMessage(params)),
     abort,
     forceCompleteConversationStreams,
     setWorkspacePath,
@@ -1859,5 +1878,6 @@ export function createLlmChatService({
     reattach,
     listActiveConversationIds,
     listActiveStreams,
+    getSelectionRuntimeState,
   };
 }

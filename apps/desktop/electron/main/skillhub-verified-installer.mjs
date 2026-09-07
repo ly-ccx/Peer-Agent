@@ -69,11 +69,12 @@ export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip
   if (!apiClient || typeof installSkillFromZip !== 'function') throw new TypeError('installer dependencies are required');
   return Object.freeze({
     async install(identity) {
-      const { namespace, slug, version, scope = 'global', iconUrl = null } = identity;
+      const { namespace, slug, version, scope = 'global', workspacePath = null, iconUrl = null } = identity;
       const installScope = scope === 'workspace' ? 'workspace' : 'global';
-      const [signatureResponse, keyResponse, zipBuffer] = await Promise.all([
-        apiClient.getVersionSignature(identity), apiClient.getPlatformKeys(), apiClient.downloadSkill(identity),
+      const [installIdentity, signatureResponse, keyResponse, zipBuffer] = await Promise.all([
+        apiClient.getSkillInstallIdentity(identity), apiClient.getVersionSignature(identity), apiClient.getPlatformKeys(), apiClient.downloadSkill(identity),
       ]);
+      if (installIdentity.namespace !== namespace || installIdentity.slug !== slug) throw new Error('skillhub_detail_identity_mismatch');
       const signature = unwrap(signatureResponse);
       if (signature?.signed !== true || typeof signature.payload !== 'string') throw new Error('skillhub_signature_required');
       const publicKey = selectPlatformKey(keyResponse, signature.key_id);
@@ -83,7 +84,8 @@ export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip
       try { payload = JSON.parse(signature.payload); } catch { throw new Error('skillhub_signature_payload_invalid'); }
       if (signature.hash_version !== 1 || payload.v !== 1) throw new Error('skillhub_hash_version_unsupported');
       if (payload.issuer !== 'skillhub.cn') throw new Error('skillhub_signature_issuer_invalid');
-      if (payload.publisher_user_name !== namespace || payload.skill_slug !== slug || payload.skill_version !== version) throw new Error('skillhub_signature_identity_mismatch');
+      if (payload.publisher_user_name !== installIdentity.publisher) throw new Error('skillhub_signature_publisher_mismatch');
+      if (payload.skill_slug !== slug || payload.skill_version !== version) throw new Error('skillhub_signature_coordinate_mismatch');
       if (signature.content_hash && signature.content_hash !== payload.content_hash) throw new Error('skillhub_signature_content_hash_mismatch');
       const entries = validateArchive(zipBuffer);
       if (digest('md5', zipBuffer) !== payload.package_md5) throw new Error('skillhub_package_md5_mismatch');
@@ -92,6 +94,7 @@ export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip
       if (calculated.contentHash !== payload.content_hash) throw new Error('skillhub_content_hash_mismatch');
       const installed = await installSkillFromZip(zipBuffer, {
         scope: installScope,
+        workspacePath: installScope === 'workspace' ? workspacePath : null,
         source: 'skillhub',
         iconUrl: typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl.trim() : null,
         meta: {

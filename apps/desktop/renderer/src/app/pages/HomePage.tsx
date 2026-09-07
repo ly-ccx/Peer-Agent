@@ -1,6 +1,5 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { TaskOverviewPage } from './TaskOverviewPage';
 
@@ -40,20 +39,11 @@ export function HomePage({
   readonly onOpenTools?: () => void;
   readonly enabled?: boolean;
 }) {
-  const workbench = useWorkbenchOptional();
   const isGlobal = !workspacePath;
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
-    // 后台 shell 线程：打开右侧「后台线程」Tab，不跳会话。
-    if (
-      item.source === 'shell_background' ||
-      item.nextAction === 'open_background_thread'
-    ) {
-      workbench?.openBackgroundThread(item.taskId);
-      return;
-    }
     onOpenItem?.(item, options);
-  }, [onOpenItem, workbench]);
+  }, [onOpenItem]);
 
   return (
     <TaskOverviewPage
@@ -63,7 +53,7 @@ export function HomePage({
           ? '一张卡是一件事。点进去继续这件事。'
           : '一张卡是一件事。点进去继续这件事。'
       }
-      filter={(item) => item.actionRight !== 'terminal'}
+      filter={(item) => item.actionRight !== 'terminal' && item.source !== 'shell_background' && item.nextAction !== 'open_background_thread'}
       emptyLabel={
         isGlobal
           ? '还没有任务。发出第一条后，这里会显示需要你处理的事项。'

@@ -884,17 +884,17 @@ export interface BootstrapPreloadApi {
     readonly filledUsername?: boolean;
     readonly error?: string;
   }>;
-  readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
+  readonly listShellTasks: () => Promise<readonly import('@peer-agent/protocol').ManagedShellTask[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;
   readonly listShellPermissionRules: () => Promise<readonly Record<string, unknown>[]>;
   readonly addShellPermissionRule: (rule: Record<string, unknown>) => Promise<readonly Record<string, unknown>[]>;
-  readonly listSkills: () => Promise<readonly SkillSummary[]>;
-  readonly getSkillDetail: (skillId: string) => Promise<SkillDetail | null>;
-  readonly refreshSkills: () => Promise<readonly SkillSummary[]>;
+  readonly listSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
+  readonly getSkillDetail: (skillId: string, workspacePath?: string | null) => Promise<SkillDetail | null>;
+  readonly refreshSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
   readonly uploadSkill: (zipBase64: string) => Promise<SkillSummary | null>;
-  readonly enableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
-  readonly disableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
+  readonly enableSkill: (skillId: string, workspacePath?: string | null) => Promise<readonly SkillSummary[]>;
+  readonly disableSkill: (skillId: string, workspacePath?: string | null) => Promise<readonly SkillSummary[]>;
   /** 列出 a1 公共仓等借用来源中的可借技能（含 linked 标记）。 */
   readonly listAvailableSkills: () => Promise<readonly AvailableSkillSummary[]>;
   /** 在本地 userData/skills 下建软链，借用指定来源技能。 */
@@ -907,7 +907,7 @@ export interface BootstrapPreloadApi {
    * - 借用软链：仅取消链接
    * - workspace Skill：拒绝删除源文件
    */
-  readonly uninstallSkill: (skillId: string) => Promise<SkillLinkResult>;
+  readonly uninstallSkill: (skillId: string, workspacePath?: string | null) => Promise<SkillLinkResult>;
   readonly listMarketplaceSkills: () => Promise<SkillMarketplaceCatalog>;
   readonly getMarketplaceSkillDetail: (catalogId: string) => Promise<SkillMarketplaceEntry | null>;
   readonly installMarketplaceSkill: (catalogId: string) => Promise<SkillMarketplaceInstallResult>;
@@ -998,8 +998,8 @@ export interface BootstrapPreloadApi {
     paginated?: boolean;
     includeMessageCount?: boolean;
   }) => Promise<
-    | readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]
-    | { items: readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]; nextCursor: string | null; hasMore: boolean; total: number }
+    | readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string; selectionOrigin?: { parentConversationId: string; reference: { exactText: string } } | null }[]
+    | { items: readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string; selectionOrigin?: { parentConversationId: string; reference: { exactText: string } } | null }[]; nextCursor: string | null; hasMore: boolean; total: number }
   >;
     readonly conversationsSearch: (params?: {
     query?: string;
@@ -1024,7 +1024,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; fastMode?: boolean; preferredExecutionIsolation?: 'none' | 'worktree'; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; contentRevision: number; selectionDraft?: import('@peer-agent/protocol').SelectionDraft; selectionOrigin?: import('@peer-agent/protocol').SelectionOrigin; title: string; mode?: string; fastMode?: boolean; preferredExecutionIsolation?: 'none' | 'worktree'; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;

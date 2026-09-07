@@ -1,5 +1,9 @@
 import type { MarkdownBlock, MarkdownHeadingBlock } from './markdownTypes.ts';
 import { sanitizeMarkdownFences } from './markdownFenceSanitizer.ts';
+import { normalizeMarkdownSource, sourceLineStarts, type MarkdownSourceText } from './markdownSource.ts';
+
+/** Metadata stays out of the public block shape and is tied to this parse result. */
+export const markdownBlockSources = new WeakMap<MarkdownBlock, MarkdownSourceText>();
 
 export type { MarkdownBlock } from './markdownTypes.ts';
 export { sanitizeMarkdownFences } from './markdownFenceSanitizer.ts';
@@ -74,8 +78,18 @@ function isMarkdownBlockStart(line: string) {
 export function parseMarkdownBlocks(markdown: string): readonly MarkdownBlock[] {
   // Pre-parse cleanup: fix high-confidence fence/path-backtick mistakes from model output.
   const cleaned = sanitizeMarkdownFences(markdown);
-  const lines = cleaned.replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n?/g, '\n').split('\n');
+  const normalized = normalizeMarkdownSource(cleaned);
+  const lines = normalized.text.split('\n');
+  const lineStarts = sourceLineStarts(normalized.text);
   const blocks: MarkdownBlock[] = [];
+  const appendMapped = (block: MarkdownBlock, start: number, length: number) => {
+    blocks.push(block);
+    // Fence repair can insert/delete characters. Never claim its offsets are original.
+    if (cleaned === markdown) markdownBlockSources.set(block, {
+      text: normalized.text.slice(start, start + length),
+      offsets: normalized.offsets.slice(start, start + length + 1),
+    });
+  };
   let index = 0;
 
   while (index < lines.length) {
@@ -101,11 +115,11 @@ export function parseMarkdownBlocks(markdown: string): readonly MarkdownBlock[] 
 
     const heading = line.match(/^\s*(#{1,6})\s+(.+)$/);
     if (heading) {
-      blocks.push({
+      appendMapped({
         type: 'heading',
         depth: heading[1].length as MarkdownHeadingBlock['depth'],
         content: heading[2],
-      });
+      }, lineStarts[index] + line.length - heading[2].length, heading[2].length);
       index += 1;
       continue;
     }
@@ -161,13 +175,15 @@ export function parseMarkdownBlocks(markdown: string): readonly MarkdownBlock[] 
       continue;
     }
 
+    const paragraphStart = lineStarts[index];
     const paragraphLines: string[] = [line];
     index += 1;
     while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines[index])) {
       paragraphLines.push(lines[index]);
       index += 1;
     }
-    blocks.push({ type: 'paragraph', content: paragraphLines.join('\n') });
+    const content = paragraphLines.join('\n');
+    appendMapped({ type: 'paragraph', content }, paragraphStart, content.length);
   }
 
   return blocks;

@@ -75,6 +75,43 @@
   flex-direction: column;
 }
 
+.selection-child-banner {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  z-index: 24;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+  background: color-mix(in srgb, var(--chrome-canvas) 88%, transparent);
+  color: var(--ink-base);
+  font-size: var(--ui-font-control, 0.8125rem);
+  line-height: 1.45;
+}
+
+.selection-child-banner [role='note'] {
+  min-width: 0;
+}
+
+.selection-child-banner blockquote {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid color-mix(in srgb, var(--ink-hairline) 80%, transparent);
+  color: var(--ink-fade);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-surface:has(> .selection-child-banner) .chat-thread {
+  padding-top: calc(40px + var(--space-4) + 4.5rem);
+}
+
+.chat-surface:has(> .selection-child-banner) .current-turn-context {
+  top: calc(40px + 4.5rem);
+}
+
 .current-turn-context {
   position: absolute;
   top: 40px;

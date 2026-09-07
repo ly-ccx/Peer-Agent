@@ -147,3 +147,25 @@ test('isStalledAcceptedGoalRunner distinguishes a running-but-zero-turn Goal', (
     false,
   );
 });
+
+test('isStalledAcceptedGoalRunner treats leftover accepted waiting_user as stalled', () => {
+  const leftover = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'accepted',
+    runner: {
+      enabled: true,
+      status: 'waiting_user',
+      blockedReason: 'requested_user_input',
+      turnCount: 0,
+    },
+  };
+  assert.equal(isStalledAcceptedGoalRunner(leftover), true);
+  assert.equal(
+    isStalledAcceptedGoalRunner({
+      ...leftover,
+      runner: { ...leftover.runner, turnCount: 3 },
+    }),
+    false,
+  );
+});

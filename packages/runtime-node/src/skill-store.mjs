@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml';
 const SKILL_FILENAME = 'SKILL.md';
 const ASSETS_DIR = 'assets';
 const SETTINGS_FILENAME = 'settings.json';
+const MANAGED_INSTALL_SOURCES = new Set(['skillhub', 'qoder-marketplace']);
 
 /**
  * Minimal tar parser — extracts regular files from a tar buffer.
@@ -149,8 +150,9 @@ function resolveSkillPresentation(frontmatter, skillDir) {
         : '';
   const iconFromMeta = typeof meta.iconUrl === 'string' ? meta.iconUrl : '';
   const source = (sourceFromFm || sourceFromMeta || '').trim() || null;
+  const managedSource = sourceFromMeta.trim().toLowerCase();
   const iconUrl = (iconFromFm || iconFromMeta || '').trim() || null;
-  return { source, iconUrl };
+  return { source, managedSource, iconUrl };
 }
 
 function loadSingleSkill(skillDir, dirName) {
@@ -186,7 +188,7 @@ function loadSingleSkill(skillDir, dirName) {
     : [];
   // 对齐 Claude Code SKILL.md frontmatter。license 可能是字符串、文件路径引用、或不写。
   const license = typeof frontmatter.license === 'string' ? frontmatter.license : null;
-  const { source, iconUrl } = resolveSkillPresentation(frontmatter, skillDir);
+  const { source, managedSource, iconUrl } = resolveSkillPresentation(frontmatter, skillDir);
 
   // 通用过滤规则：description 为空（缺失/纯空白）的 skill 视为无效噪音，直接丢弃。
   // 该判定只看 description，不针对任何特定前缀；由于 loadSingleSkill 是唯一解析入口，
@@ -206,6 +208,7 @@ function loadSingleSkill(skillDir, dirName) {
     instructions: body,
     skillDir,
     source,
+    managedSource,
     iconUrl,
   };
 }
@@ -392,22 +395,68 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return skills;
   }
 
-  function listSkills() {
-    return skills.map(({ skillId, name, description, whenToUse, version, dataLevel, scope, workspacePath: skillWorkspacePath, iconUrl, source }) => ({
-      skillId,
-      name,
-      description,
+  function isManagedWorkspaceSkill(skill) {
+    if (skill?.scope !== 'workspace' || !MANAGED_INSTALL_SOURCES.has(skill.managedSource)) return false;
+    const workspaceRoot = workspaceSkillsRoot(skill.workspacePath);
+    if (!workspaceRoot) return false;
+    const expectedTarget = path.join(workspaceRoot, safeSkillDirName(skill.skillId) || '');
+    if (path.resolve(skill.skillDir) !== path.resolve(expectedTarget)) return false;
+    try {
+      const lst = lstatSync(expectedTarget);
+      if (lst.isSymbolicLink() || !lst.isDirectory()) return false;
+      const rootReal = realpathSync(workspaceRoot);
+      const targetReal = realpathSync(expectedTarget);
+      const relative = path.relative(rootReal, targetReal);
+      return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+    } catch {
+      return false;
+    }
+  }
+
+  function summarizeSkill(skill, wsKey = activeWorkspaceKey) {
+    return {
+      skillId: skill.skillId,
+      name: skill.name,
+      description: skill.description,
       // Layer 2 清单 reminder 的发现性提示。空字符串保留以便消费方判空。
-      whenToUse: whenToUse || '',
-      version,
-      dataLevel,
-      // enabled = 对本工作区是否挂载（全局硬禁用优先）。
-      enabled: isSkillMounted(skillId),
-      scope,
-      workspacePath: skillWorkspacePath,
-      iconUrl: iconUrl ?? null,
-      source: source ?? null,
-    }));
+      whenToUse: skill.whenToUse || '',
+      version: skill.version,
+      dataLevel: skill.dataLevel,
+      // enabled = 对目标工作区是否挂载（全局硬禁用优先）。
+      enabled: isSkillMounted(skill.skillId, wsKey),
+      scope: skill.scope,
+      workspacePath: skill.workspacePath,
+      iconUrl: skill.iconUrl ?? null,
+      source: skill.source ?? null,
+      canUninstall: skill.scope === 'global' || isManagedWorkspaceSkill(skill),
+    };
+  }
+
+  /**
+   * 默认返回运行时（当前激活工作区）投影。
+   * 传入 workspacePaths 时，为公共管理页返回所有目标工作区 Skill，并只附带一份全局 Skill。
+   */
+  function listSkills(workspacePaths) {
+    if (!Array.isArray(workspacePaths)) return skills.map((skill) => summarizeSkill(skill));
+
+    loadSettings();
+    const normalizedPaths = [...new Set(workspacePaths.map(normalizeWorkspaceKey).filter(Boolean))];
+    const workspaceSkills = normalizedPaths.flatMap((wsKey) => {
+      const root = workspaceSkillsRoot(wsKey);
+      return root
+        ? loadSkillsFromRoot(root).map((skill) => summarizeSkill({
+            ...skill,
+            scope: 'workspace',
+            workspacePath: wsKey,
+          }, wsKey))
+        : [];
+    });
+    const globalSkills = loadSkillsFromRoot(skillsRoot).map((skill) => summarizeSkill({
+      ...skill,
+      scope: 'global',
+      workspacePath: null,
+    }, null));
+    return [...workspaceSkills, ...globalSkills];
   }
 
   function ensureWorkspaceDisabledSet(wsKey = activeWorkspaceKey) {
@@ -419,11 +468,11 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return workspaceDisabledMap.get(wsKey);
   }
 
-  /** 对本工作区挂载 skill（打开开关）。 */
-  function enableSkill(skillId) {
+  /** 对目标工作区挂载 skill（打开开关）；未指定时沿用当前激活工作区。 */
+  function enableSkill(skillId, workspacePath) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
-    const wsKey = activeWorkspaceKey;
+    const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
     if (wsKey) {
       const set = ensureWorkspaceDisabledSet(wsKey);
       set?.delete(id);
@@ -433,17 +482,17 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       globalDisabledSet.delete(id);
     }
     saveSettings();
-    return listSkills();
+    return workspacePath === undefined ? listSkills() : listSkills(wsKey ? [wsKey] : []);
   }
 
   /**
-   * 对本工作区卸载 skill（关闭开关）。不删除全局安装包。
-   * 无工作区上下文时回退为全局禁用（兼容旧 CLI/测试路径）。
+   * 对目标工作区卸载 skill（关闭开关）。不删除全局安装包。
+   * 未指定工作区时沿用当前上下文；显式 null 回退为全局禁用。
    */
-  function disableSkill(skillId) {
+  function disableSkill(skillId, workspacePath) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
-    const wsKey = activeWorkspaceKey;
+    const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
     if (wsKey) {
       const set = ensureWorkspaceDisabledSet(wsKey);
       set?.add(id);
@@ -452,7 +501,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       globalDisabledSet.add(id);
     }
     saveSettings();
-    return listSkills();
+    return workspacePath === undefined ? listSkills() : listSkills(wsKey ? [wsKey] : []);
   }
 
   // 校验 skillId 合法且不含路径穿越，返回安全的目录名。非法返回 null。
@@ -583,38 +632,48 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * 卸载用户安装的 Skill：
    * - userData/skills 下的软链：仅取消借用（不删除来源）
    * - userData/skills 下的真实目录：递归删除
-   * - workspace Skill：拒绝删除源文件
-   * - 路径逃逸 / 非 userData 安装：拒绝
+   * - workspace/skills 下由支持的市场来源安装的真实目录：递归删除
+   * - workspace 手写 Skill、符号链接、路径逃逸：拒绝删除
    */
-  function uninstallSkill(skillId) {
+  function uninstallSkill(skillId, workspacePath) {
     const dirName = safeSkillDirName(skillId);
     if (!dirName) return { ok: false, error: 'invalid-skill-id' };
 
-    const skill = findSkill(skillId);
+    const skill = findSkill(skillId, workspacePath);
     if (!skill) return { ok: false, error: 'not-found' };
-    if (skill.scope === 'workspace') {
+
+    const root = skill.scope === 'workspace' ? workspaceSkillsRoot(skill.workspacePath) : skillsRoot;
+    if (!root) return { ok: false, error: 'workspace-skill-not-uninstallable' };
+    if (skill.scope === 'workspace' && !isManagedWorkspaceSkill(skill)) {
       return { ok: false, error: 'workspace-skill-not-uninstallable' };
     }
 
-    const target = path.join(skillsRoot, dirName);
-    if (!existsSync(target) && !isLinkedEntry(dirName)) {
-      return { ok: false, error: 'not-found' };
+    const target = path.join(root, dirName);
+    const relativeTarget = path.relative(root, target);
+    if (!relativeTarget || relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) {
+      return { ok: false, error: 'path-escape' };
     }
+    if (path.resolve(skill.skillDir) !== path.resolve(target)) {
+      return { ok: false, error: 'path-mismatch' };
+    }
+    if (!existsSync(target)) return { ok: false, error: 'not-found' };
 
     let mode = 'deleted';
     try {
-      if (isLinkedEntry(dirName)) {
+      const lst = lstatSync(target);
+      if (lst.isSymbolicLink()) {
+        if (skill.scope === 'workspace') return { ok: false, error: 'workspace-skill-not-uninstallable' };
         unlinkSync(target);
         mode = 'unlinked';
       } else {
-        const skillsRootReal = realpathSync(skillsRoot);
+        const rootReal = realpathSync(root);
         const targetReal = realpathSync(target);
-        const relative = path.relative(skillsRootReal, targetReal);
+        const relative = path.relative(rootReal, targetReal);
         if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
           return { ok: false, error: 'path-escape' };
         }
-        // 只允许删除 userData/skills 下的一级安装目录。
-        if (path.dirname(targetReal) !== skillsRootReal) {
+        // 只允许删除受管 skills 根目录下的一级安装目录。
+        if (path.dirname(targetReal) !== rootReal) {
           return { ok: false, error: 'path-escape' };
         }
         rmSync(target, { recursive: true, force: false });
@@ -633,8 +692,18 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     return { ok: true, mode };
   }
 
-  function findSkill(skillId) {
-    return skills.find((s) => s.skillId === skillId) ?? null;
+  function findSkill(skillId, workspacePath) {
+    if (workspacePath === undefined) return skills.find((s) => s.skillId === skillId) ?? null;
+    const wsKey = normalizeWorkspaceKey(workspacePath);
+    const root = wsKey ? workspaceSkillsRoot(wsKey) : skillsRoot;
+    const skill = loadSkillsFromRoot(root).find((candidate) => candidate.skillId === skillId);
+    return skill
+      ? {
+          ...skill,
+          scope: wsKey ? 'workspace' : 'global',
+          workspacePath: wsKey || null,
+        }
+      : null;
   }
 
   function readSkillContext(skillId) {
@@ -662,8 +731,8 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     };
   }
 
-  function getSkillDetail(skillId) {
-    const skill = findSkill(skillId);
+  function getSkillDetail(skillId, workspacePath) {
+    const skill = findSkill(skillId, workspacePath);
     if (!skill) return null;
     return {
       skillId: skill.skillId,
@@ -672,11 +741,12 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
       whenToUse: skill.whenToUse || '',
       version: skill.version,
       dataLevel: skill.dataLevel,
-      enabled: isSkillMounted(skill.skillId),
+      enabled: isSkillMounted(skill.skillId, workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath)),
       scope: skill.scope,
       workspacePath: skill.workspacePath,
       iconUrl: skill.iconUrl ?? null,
       source: skill.source ?? null,
+      canUninstall: skill.scope === 'global' || isManagedWorkspaceSkill(skill),
       instructions: skill.instructions,
       sourcePath: path.join(skill.skillDir, SKILL_FILENAME),
     };
@@ -687,19 +757,26 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * @param {Buffer} zipBuffer
    * @param {{
    *   scope?: 'global' | 'workspace',
+   *   workspacePath?: string | null,
    *   source?: string | null,
    *   iconUrl?: string | null,
    *   meta?: Record<string, unknown>,
    * }} [options]
    * - global（默认）：写入 userData/skills
-   * - workspace：写入当前工作区 skills/；无工作区时抛 workspace_required
+   * - workspace：优先写入本次明确指定的 workspacePath/skills，否则回退当前工作区；均缺失时抛 workspace_required
    * - source / iconUrl / meta：安装后合并写入 _meta.json（市场图标与来源）
    */
-  function installSkillFromZip(zipBuffer, { scope = 'global', source = null, iconUrl = null, meta = null } = {}) {
+  function installSkillFromZip(zipBuffer, {
+    scope = 'global',
+    workspacePath: requestedWorkspacePath = null,
+    source = null,
+    iconUrl = null,
+    meta = null,
+  } = {}) {
     const installScope = scope === 'workspace' ? 'workspace' : 'global';
     let targetRoot = skillsRoot;
     if (installScope === 'workspace') {
-      const ws = getWorkspacePath();
+      const ws = normalizeWorkspaceKey(requestedWorkspacePath) ?? getWorkspacePath();
       if (!ws) throw new Error('workspace_required');
       targetRoot = path.join(ws, 'skills');
     }
@@ -755,12 +832,28 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     }
 
     refresh();
-    const installed = listSkills().find((s) => s.skillId === skillId) ?? null;
-    if (!installed) {
+    const installedInActiveScope = listSkills().find((s) => s.skillId === skillId) ?? null;
+    const installedAtTarget = installedInActiveScope ?? loadSingleSkill(destDir, skillId);
+    if (!installedAtTarget) {
       // 文件已落盘但无法加载（如 description 为空）时明确失败，避免 UI 假成功。
       throw new Error('skill_install_unreadable');
     }
-    return { ...installed, installScope };
+    if (installedInActiveScope) return { ...installedInActiveScope, installScope };
+    return {
+      skillId: installedAtTarget.skillId,
+      name: installedAtTarget.name,
+      description: installedAtTarget.description,
+      whenToUse: installedAtTarget.whenToUse || '',
+      version: installedAtTarget.version,
+      dataLevel: installedAtTarget.dataLevel,
+      enabled: false,
+      scope: 'workspace',
+      workspacePath: normalizeWorkspaceKey(requestedWorkspacePath),
+      iconUrl: installedAtTarget.iconUrl ?? null,
+      source: installedAtTarget.source ?? null,
+      canUninstall: true,
+      installScope,
+    };
   }
 
   function installSkillFromTgz(tgzBuffer) {

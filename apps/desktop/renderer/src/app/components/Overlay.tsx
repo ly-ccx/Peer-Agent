@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { positionAnchoredOverlay } from './anchoredOverlay';
 import { createPortal } from 'react-dom';
 import { isTopmostOverlay, OVERLAY_SELECTOR } from './overlayStack';
 
 /**
- * Overlay —— 统一的模态浮层基座（表达层）。
+ * Overlay —— 统一浮层基座（默认模态；anchor 为非模态，均仅负责表达）。
  *
- * 设计语言依据：docs/architecture/14-product-design-language.md §11.3「弹出层动效准入」。
+ * 设计语言依据：peer-knowledge/knowledge/specifications/14-product-design-language.md §11.3「弹出层动效准入」。
  * 所有模态 / 浮层必须经由本组件挂载，避免每处手写 backdrop 而漏掉过渡动效。
  *
  * 统一职责：
@@ -25,8 +26,16 @@ export function Overlay({
   ariaLabel,
   panelClassName,
   backdropClassName,
+  anchor,
+  id,
+  onEscape,
   children,
 }: {
+  /** Supplying an anchor selects the non-modal, viewport-clamped variant. */
+  readonly anchor?: HTMLElement;
+  readonly id?: string;
+  /** Return true when an inner confirmation consumed Escape. */
+  readonly onEscape?: () => boolean;
   readonly onClose?: () => void;
   readonly closeOnBackdrop?: boolean;
   readonly ariaLabel?: string;
@@ -44,6 +53,35 @@ export function Overlay({
 }) {
   const [closing, setClosing] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const place = () => setPlacement(positionAnchoredOverlay(
+      anchor.getBoundingClientRect(),
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(panel);
+    observer.observe(anchor);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    panel.focus({ preventScroll: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      // Outside clicks keep their new focus; keyboard/close-button dismissal restores the trigger.
+      if (anchor.isConnected && (panel.contains(document.activeElement) || document.activeElement === document.body)) {
+        anchor.focus({ preventScroll: true });
+      }
+    };
+  }, [anchor]);
   // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
   const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -69,11 +107,23 @@ export function Overlay({
       const overlays = Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
       if (!isTopmostOverlay(overlayRef.current, overlays)) return;
       event.stopImmediatePropagation();
-      requestClose();
+      event.preventDefault();
+      if (!onEscape?.()) requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, requestClose]);
+  }, [onClose, onEscape, requestClose]);
+
+  useEffect(() => {
+    if (!anchor || !closeOnBackdrop) return;
+    const outside = (event: PointerEvent) => {
+      if (!isTopmostOverlay(overlayRef.current, Array.from(document.querySelectorAll(OVERLAY_SELECTOR)))) return;
+      const target = event.target;
+      if (target instanceof Node && !panelRef.current?.contains(target) && !anchor.contains(target)) requestClose();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [anchor, closeOnBackdrop, requestClose]);
 
   // 进入退场态后启动兜底定时器；时长略大于退场动画（--za-motion-fast=120ms）。
   useEffect(() => {
@@ -94,14 +144,18 @@ export function Overlay({
     <div
       ref={overlayRef}
       data-peer-overlay="true"
-      className={backdropClassName ? `${backdropBase} ${backdropClassName}` : backdropBase}
+      className={`${backdropBase}${anchor ? ' pa-overlay--anchored' : ''}${backdropClassName ? ` ${backdropClassName}` : ''}`}
       role="presentation"
       onClick={closeOnBackdrop && onClose ? requestClose : undefined}
     >
       <div
         className={panelClassName ? `${panelBase} ${panelClassName}` : panelBase}
+        ref={panelRef}
+        id={id}
+        style={anchor ? placement : undefined}
+        tabIndex={anchor ? -1 : undefined}
         role="dialog"
-        aria-modal="true"
+        aria-modal={anchor ? undefined : true}
         aria-label={ariaLabel}
         onClick={(event) => event.stopPropagation()}
         onAnimationEnd={closing ? finishClose : undefined}

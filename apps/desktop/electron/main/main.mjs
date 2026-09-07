@@ -43,6 +43,8 @@ import { applyCookiesToSession } from './session-import/apply-cookies.mjs';
 import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
+import { getApplicationShellTasks, disposeApplicationShellTasks } from './runtime-gateway/application-shell-tasks.mjs';
+import { getApplicationShellSessions, disposeApplicationShellConversation, disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
@@ -96,6 +98,7 @@ import {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from '@peer-agent/runtime-node';
@@ -133,7 +136,7 @@ import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
-import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
+import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
   applyGoalMessageRoute,
   consumesRequestedUserInput,
@@ -158,6 +161,7 @@ import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
 import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
 import { createConversationSessionIpcRegistrations } from './ipc/register-conversation-session-ipc.mjs';
 import { createDataIpcRegistrations } from './ipc/register-data-ipc.mjs';
+import { createSelectionIpcRegistrations } from './ipc/register-selection-ipc.mjs';
 import { createDesktopIpcRegistrations } from './ipc/register-desktop-ipc.mjs';
 import { createProductLinkService } from './product-links.mjs';
 import { createGoalIpcRegistrations } from './ipc/register-goal-ipc.mjs';
@@ -178,6 +182,7 @@ import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mj
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
+import { validateSkillInstallTarget } from './skill-install-target.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
@@ -872,7 +877,13 @@ function buildGoalRunnerReminder(plan, turnNumber) {
     kind: 'goal-runner',
     scope: 'turn',
     layer: 'L6_MODE_REMINDER',
-    content: 'Continue autonomously within the active goal, boundaries, and success criteria. Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path. If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+    content: [
+      'Continue autonomously within the active goal, boundaries, and success criteria.',
+      'Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path.',
+      'Open tasks are not finished by narrating the next read/search/edit. In this same turn emit a real tool call (read_file, bash, edit_file, or write_file).',
+      'Do not send a planning-only reply such as "现在读" / "先读取" / "Let me read" and then stop.',
+      'If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+    ].join(' '),
   };
 }
 
@@ -1875,7 +1886,13 @@ const conversationApplicationService = createConversationApplicationService({
   unpinConversation: (id) => conversationStore.unpinConversation(id),
   reorderPinnedConversations: (ids) => conversationStore.reorderPinnedConversations(ids),
   autoArchiveConversations: (params) => conversationStore.autoArchiveConversations(params),
-  deleteConversation: (id) => conversationStore.deleteConversation(id),
+  deleteConversation: (id) => {
+    const result = conversationStore.deleteConversation(id);
+    void disposeApplicationShellConversation(dataHome, id).catch((error) => {
+      console.warn('[main] conversation shell cleanup failed:', error);
+    });
+    return result;
+  },
   addUsage: (id, usage) => conversationStore.addUsage(id, usage),
   listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
   deletePlanByConversation: (id) => goalPlanStore.deletePlanByConversation(id),
@@ -2368,6 +2385,11 @@ function registerDesktopIpcHost() {
     ...createConversationSessionIpcRegistrations({
       conversationSession: conversationSessionApplicationService,
     }),
+    ...createSelectionIpcRegistrations({
+      store: conversationStore,
+      resolveRuntimeState: (id) => llmChatService.getSelectionRuntimeState(id),
+      authorizeWindow: trustedWindowRegistry.authorize,
+    }),
     ...createDataIpcRegistrations({
       conversations: conversationApplicationService,
       promptSnapshots: {
@@ -2431,26 +2453,26 @@ function registerDesktopIpcHost() {
     }),
     ...createSkillsIpcRegistrations({
       skills: {
-        list: () => skillStore?.listSkills() ?? [],
-        getDetail: (skillId) => {
+        list: (workspacePaths) => skillStore?.listSkills(workspacePaths) ?? [],
+        getDetail: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.getSkillDetail(skillId);
+          return skillStore.getSkillDetail(skillId, workspacePath);
         },
-        refresh: () => {
+        refresh: (workspacePaths) => {
           skillStore?.refresh();
-          return skillStore?.listSkills() ?? [];
+          return skillStore?.listSkills(workspacePaths) ?? [];
         },
         upload: (zipBase64) => {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
         },
-        enable: (skillId) => {
+        enable: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.enableSkill(skillId);
+          return skillStore.enableSkill(skillId, workspacePath);
         },
-        disable: (skillId) => {
+        disable: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.disableSkill(skillId);
+          return skillStore.disableSkill(skillId, workspacePath);
         },
         listAvailable: () => skillStore?.listAvailableSkills() ?? [],
         link: (skillId) => {
@@ -2461,9 +2483,9 @@ function registerDesktopIpcHost() {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.unlinkSkill(skillId);
         },
-        uninstall: (skillId) => {
+        uninstall: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
-          return skillStore.uninstallSkill(skillId);
+          return skillStore.uninstallSkill(skillId, workspacePath);
         },
         marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
         marketplaceGetDetail: (catalogId) => skillMarketplaceService?.getDetail(catalogId) ?? null,
@@ -2486,7 +2508,8 @@ function registerDesktopIpcHost() {
         },
         skillHubInstall: (identity) => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
-          return skillHubMarketplaceService.install(identity);
+          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
+          return skillHubMarketplaceService.install(validated);
         },
         skillHubListCategories: () => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
@@ -2502,7 +2525,8 @@ function registerDesktopIpcHost() {
         },
         qoderInstall: (identity) => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
-          return qoderMarketplaceService.install(identity);
+          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
+          return qoderMarketplaceService.install(validated);
         },
         qoderListTaxonomies: () => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
@@ -2953,13 +2977,20 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   if (!goalRunner) return;
   // 串行收口同会话 intake 流：等待原 sendMessage finally 释放 Runtime turn 后，
   // 再启动 Runner。仅发送 UI done 或同步 cancel 都不足以证明 session 已空闲。
+  // Both failed and interrupted re-arms use resume() to consume suspension.
+  // Recheck after the foreground stream releases, rather than capture stale state.
   void serializeAcceptedGoalRunnerHandoff({
     forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
       plan.conversationId,
       { reason: 'goal_handoff' },
     ) ?? { released: Promise.resolve() },
-    isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId)),
-    startRunner: () => goalRunner.start(plan.planId),
+    isStillAccepted: () => (
+      shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
+      || shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
+    ),
+    startRunner: () => (shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
+      ? goalRunner.resume(plan.planId, { reason: 'goal_accepted_rearm' })
+      : goalRunner.start(plan.planId)),
   }).catch((error) => {
     console.error('[main] plan-change auto-start goal runner failed:', error?.message || error);
   });
@@ -3157,13 +3188,13 @@ function handleChatSend({
             route,
             activeGoalPlan: activeGoal,
           });
-          applyGoalMessageRoute({
+          const appliedRoute = applyGoalMessageRoute({
             route,
             activeGoalPlan: activeGoal,
             goalPlanStore,
             pauseRunner: (planId) => goalRunner?.pause(planId),
           });
-          if (route.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
+          if (appliedRoute?.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({
               forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
                 conversationId,
@@ -3830,6 +3861,8 @@ function startLocalRuntime() {
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,
     userDataPath,
+    taskManager: getApplicationShellTasks(userDataPath),
+    sessionManager: getApplicationShellSessions(userDataPath, resourcesRoot),
   });
 
   localToolHost = createLocalToolHost({
@@ -3850,9 +3883,16 @@ function startLocalRuntime() {
   flushPendingRuntimeEvents();
   return {
     name: 'local-tool-host-events',
-    dispose: () => {
-      localToolHost?.unsubscribeRuntimeEvents?.();
-      localToolHost = null;
+    dispose: async () => {
+      try {
+        await Promise.all([
+          disposeApplicationShellTasks(userDataPath),
+          disposeApplicationShellSessions(userDataPath),
+        ]);
+      } finally {
+        localToolHost?.unsubscribeRuntimeEvents?.();
+        localToolHost = null;
+      }
     },
   };
 }

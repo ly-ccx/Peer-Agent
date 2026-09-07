@@ -1,23 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-/**
- * 与 GoalPlanPanel.runnerFingerprint 保持同构：双通道等价快照去重契约。
- * 不 import TS 组件（node:test 纯逻辑），避免把 React 渲染拉进单测。
- */
-function runnerFingerprint(runner: Record<string, unknown> | null | undefined): string {
-  if (!runner) return '';
-  return [
-    runner.status ?? '',
-    runner.phase ?? '',
-    runner.enabled === true ? '1' : runner.enabled === false ? '0' : '',
-    runner.roundCount ?? '',
-    runner.toolCallCount ?? '',
-    runner.intent ?? '',
-    runner.currentTaskId ?? '',
-    runner.lastTickAt ?? '',
-    runner.lastError ?? '',
-  ].join('|');
+import { runnerFingerprint } from './runnerFingerprint.ts';
+
+for (const status of ['queued', 'running', 'completed', 'failed', 'cancelled']) {
+  it(`detects explorer-only updates: ${status}`, () => {
+    const before = { status: 'exploring', explorers: [{ explorerId: 'e1', status: 'queued' }] };
+    const after = { ...before, explorers: [{ explorerId: 'e1', status, updatedAt: '2026-09-05' }] };
+    assert.notEqual(runnerFingerprint(before), runnerFingerprint(after));
+    assert.equal(runnerFingerprint(after), runnerFingerprint(structuredClone(after)));
+  });
 }
 
 describe('runnerFingerprint (P1 dual-channel dedupe)', () => {

@@ -48,6 +48,22 @@ const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
 const MAX_IMAGE_PREVIEW_EDGE = 640;
 const MAX_IMAGE_PREVIEW_DATA_URL_CHARS = 512 * 1024;
+const EXECUTE_JS_TIMEOUT_MS = 8_000;
+const MAX_DOM_CHARS = 1_000_000;
+
+/**
+ * 给 executeJavaScript 这类可能永不 resolve 的 Promise 加超时门卫，
+ * 避免页面脚本死循环 / 断点 / 跨域 iframe 挂起时把工具调用永久卡死。
+ * 超时返回 null，调用方据上下文给「超时」语义（而非永久挂起）。
+ */
+function withTimeout(promise, ms = EXECUTE_JS_TIMEOUT_MS) {
+  const timer = new Promise((resolve) => {
+    const id = setTimeout(() => resolve(null), ms);
+    // 不让 timer 保持事件循环存活
+    if (typeof id === 'object' && typeof id.unref === 'function') id.unref();
+  });
+  return Promise.race([promise, timer]);
+}
 
 function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
@@ -847,11 +863,14 @@ export function createLocalBrowserControlProvider({
   resolveWebContents = (id) => electronWebContents.fromId(id),
   ensureBrowserReady = null,
   browserReadyTimeoutMs = 2_500,
+  // 便于测试注入：read_dom 的 executeJavaScript 超时（默认 8s）。
+  executeJSTimeoutMs = EXECUTE_JS_TIMEOUT_MS,
   // 后台静默浏览器支持：面板未打开时降级执行的 headless 会话管理器。
   // 传 false 显式禁用（保持旧行为）；默认在 electron 环境可用时惰性创建。
   headlessManager = undefined,
 } = {}) {
   const store = artifactStore ?? createBrowserArtifactStore({ userDataPath });
+  const executeJsWithTimeout = (p) => withTimeout(p, executeJSTimeoutMs);
   let headless = headlessManager === false ? null : headlessManager ?? null;
   if (!headless && headlessManager !== false) {
     try {
@@ -1538,9 +1557,12 @@ export function createLocalBrowserControlProvider({
         let roleCount = 0;
         let roleTruncated = false;
         if (format === 'roles') {
-          const snapshot = await wc.executeJavaScript(buildRolesSnapshotJs(selector), true);
-          if (selector && snapshot == null) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          const snapshot = await executeJsWithTimeout(wc.executeJavaScript(buildRolesSnapshotJs(selector), true));
+          if (snapshot == null) {
+            if (selector) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '读取 DOM 超时（页面脚本未在限定时间内返回）' : 'DOM read timed out', dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
           const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
           roleCount = Number.isFinite(snapshot?.count) ? snapshot.count : nodes.length;
@@ -1551,11 +1573,15 @@ export function createLocalBrowserControlProvider({
           const expr = selector
             ? buildElementJs(selector, `return el.${prop};`)
             : `(() => { const el = document.body; return el ? el.${prop} : ''; })()`;
-          const dom = await wc.executeJavaScript(expr, true);
-          if (selector && dom == null) {
-            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+          const dom = await executeJsWithTimeout(wc.executeJavaScript(expr, true));
+          if (dom == null) {
+            if (selector) {
+              return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? `未找到匹配 selector 的元素：${selector}` : `No element matched selector: ${selector}`, dataLevel: 'D2_sensitive', status: 'failed' }) };
+            }
+            return { call, permissionGrant, result: createFailedClientToolResult({ call, locale, reason: zh ? '读取 DOM 超时（页面脚本未在限定时间内返回）' : 'DOM read timed out', dataLevel: 'D2_sensitive', status: 'failed' }) };
           }
-          fullText = String(dom ?? '');
+          const rawDom = String(dom ?? '');
+          fullText = rawDom.length > MAX_DOM_CHARS ? `${rawDom.slice(0, MAX_DOM_CHARS)}…` : rawDom;
         }
         const artifact = await store.writeTextArtifact({
           actionId,

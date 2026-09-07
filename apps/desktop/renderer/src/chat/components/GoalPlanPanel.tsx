@@ -18,6 +18,7 @@ import {
   formatGoalDeliveryHandoff,
   formatGoalDeliveryHandoffLamp,
   formatGoalDeliveryRoute,
+  isQualityReviewBlockingMerge,
   projectGoalTiming,
 } from '@peer-agent/protocol';
 import { snapshotDeliveryLine, type TaskDeliveryLine } from '../state/taskBoundBranch';
@@ -72,21 +73,8 @@ function shouldRefreshForConversation(
 }
 
 /** Runner 展示指纹：双通道可能投递等价快照，避免重复 setState。 */
-function runnerFingerprint(runner: GoalPlan['runner'] | Partial<GoalRunnerState> | null | undefined): string {
-  if (!runner) return '';
-  const r = runner as Record<string, unknown>;
-  return [
-    r.status ?? '',
-    r.phase ?? '',
-    r.enabled === true ? '1' : r.enabled === false ? '0' : '',
-    r.roundCount ?? '',
-    r.toolCallCount ?? '',
-    r.intent ?? '',
-    r.currentTaskId ?? '',
-    r.lastTickAt ?? '',
-    r.lastError ?? '',
-  ].join('|');
-}
+import { runnerFingerprint } from './goal/runnerFingerprint';
+import { GoalActivityLabel } from './goal/GoalActivityLabel';
 
 function patchPlanRunner(
   plans: readonly GoalPlan[],
@@ -235,6 +223,7 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
     accepted: '已接受',
     executing: '执行中',
     paused: '已暂停',
+    interrupted: '已中断',
     completed: '已完成',
     cancelled: '已取消',
     failed: '已失败',
@@ -246,6 +235,7 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
     accepted: 'Accepted',
     executing: 'Executing',
     paused: 'Paused',
+    interrupted: 'Interrupted',
     completed: 'Completed',
     cancelled: 'Cancelled',
     failed: 'Failed',
@@ -402,7 +392,7 @@ function formatGoalTimingLabel(
 function explorerStatusLabel(status: GoalExplorerRun['status'], isZh: boolean): string {
   const zh: Record<GoalExplorerRun['status'], string> = {
     queued: '排队中',
-    running: '探索中',
+    running: '调查中',
     completed: '已完成',
     failed: '已失败',
     cancelled: '已取消',
@@ -1365,9 +1355,12 @@ function RunnerSection({
         </div>
       </div>
       {explorers.length > 0 ? (
-        <details className="goal-runner-explorers">
+        <details className="goal-runner-explorers" open={explorers.some((e) => e.status === 'running' || e.status === 'queued')}>
           <summary>
-            {isZh ? `Explorer 子任务 ×${explorers.length}` : `Explorers ×${explorers.length}`}
+            <svg className="goal-runner-explorer-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+              <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {isZh ? `后台调查 ×${explorers.length}` : `Background investigations ×${explorers.length}`}
           </summary>
           <ul className="goal-runner-explorer-list">
             {explorers.map((explorer) => (
@@ -1641,7 +1634,7 @@ const PlanCard = memo(function PlanCard({
   // 画「任务线 → 发版线」会暗示一个不存在的合并。
   const showMergeRoute = isolated;
   const handoffStatus = plan.deliveryHandoff?.status;
-  const qualityReviewPending = plan.deliveryHandoff?.stoppedReason === 'quality_review_pending';
+  const qualityReviewPending = isQualityReviewBlockingMerge(plan);
   const canMergeIntoSource = isolated
     && plan.status === 'completed'
     && handoffStatus !== 'delivered'
@@ -1907,6 +1900,7 @@ const PlanCard = memo(function PlanCard({
               {nextStepCopy.guidance}
             </div>
           ) : null}
+          <GoalActivityLabel plan={plan} isZh={isZh} />
           <GoalContractSection plan={plan} isZh={isZh} editorRef={criteriaEditorRef} />
           <PlanProjectionSection
             plan={plan}
@@ -1916,7 +1910,6 @@ const PlanCard = memo(function PlanCard({
             onToggleTasks={() => setTasksExpanded((v) => !v)}
             isZh={isZh}
           />
-          <RunTraceSection plan={plan} isZh={isZh} />
           {plan.runner && plan.runner.enabled ? (
             <RunnerSection
               plan={plan}
@@ -1927,6 +1920,7 @@ const PlanCard = memo(function PlanCard({
               onManualConfirm={onManualConfirm}
             />
           ) : null}
+          <RunTraceSection plan={plan} isZh={isZh} />
         </div>
       ) : null}
     </section>
@@ -2126,7 +2120,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       if (!shouldRefreshForConversation(payload, normalizedConversationId, plansRef.current)) {
         return;
       }
-      if (payload?.changeKind === 'runner-progress' || payload?.runner) {
+      if (payload?.changeKind === 'runner-progress') {
         const patched = patchPlanRunner(
           plansRef.current,
           payload.planId,
@@ -2404,7 +2398,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                     ✓
                   </span>
                 ) : null}
-                <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
+                <span className="goal-panel-toggle-summary">
+                  <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
+                  <GoalActivityLabel plan={activePlan} isZh={isZh} />
+                </span>
                 {(() => {
                   const lampHandoff = formatGoalDeliveryHandoffLamp(activePlan, {
                     locale: isZh ? 'zh' : 'en',

@@ -986,3 +986,48 @@ test('read_dom format=roles 支持 frame:N 前缀', async () => {
   assert.equal(execution.result.status, 'success');
   assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#panel")')));
 });
+
+test('read_dom 超时：executeJavaScript 永不 resolve 时不永久挂起而是返回 timed out', async () => {
+  // 构造一个 executeJavaScript 返回永不 resolve promise 的 webContents，
+  // 模拟页面脚本死循环/断点/跨域 iframe 挂起，验证 withTimeout 门卫生效。
+  const scripts = [];
+  const browser = {
+    isDestroyed: () => false,
+    getURL: () => 'https://example.com/slow',
+    getTitle: () => 'Slow page',
+    sendInputEvent: () => {},
+    executeJavaScript: (expr) => {
+      scripts.push(expr);
+      return new Promise(() => {}); // 永不 resolve
+    },
+  };
+  registerBrowserWebContents({
+    webContentsId: 61,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-slow',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-actions-test',
+    resolveWebContents: () => browser,
+    ensureBrowserReady: async () => {},
+    executeJSTimeoutMs: 50, // 注入短超时，快速验证
+  });
+  const started = Date.now();
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.readDom', 'browser_read_dom', { format: 'text' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  const elapsed = Date.now() - started;
+  // 关键断言：调用在超时预算内返回（不挂起），且 status=failed。
+  assert.equal(execution.result.status, 'failed');
+  // 错误文本在 result 的某个字段（reason/message/error 之一），序列化后应含 timed out / 超时。
+  const serialized = JSON.stringify(execution.result);
+  assert.match(serialized, /timed out|超时/i);
+  assert.ok(elapsed < 2_000, `read_dom 应在 1s 内返回而非永久挂起，实际 ${elapsed}ms`);
+});

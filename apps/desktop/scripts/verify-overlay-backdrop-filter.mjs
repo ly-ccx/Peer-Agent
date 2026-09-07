@@ -13,7 +13,7 @@ const css = cssFiles.map((name) => readFileSync(join(assetsDir, name), 'utf8')).
 
 function ruleBody(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  const match = css.match(new RegExp(`(?:^|[{}])\\s*${escaped}\\s*\\{([^}]*)\\}`));
   assert.ok(match, `production CSS is missing ${selector}`);
   return match[1];
 }
@@ -27,4 +27,11 @@ for (const selector of ['.pa-overlay-backdrop', '.pa-overlay-panel:before']) {
   );
 }
 
-console.log('Production Overlay CSS retains standard backdrop-filter declarations.');
+const anchored = ruleBody('.pa-overlay--anchored>.pa-overlay-panel:before');
+assert.match(anchored, /(?:^|;)backdrop-filter:var\(--blur-popover\)(?:;|$)/);
+const surface = ruleBody('.pa-overlay--anchored>.pa-overlay-panel');
+assert.match(surface, /(?:^|;)border-radius:var\(--radius-xl\)(?:;|$)/);
+assert.match(surface, /(?:^|;)pointer-events:auto(?:;|$)/);
+const nonModal = ruleBody('.pa-overlay-backdrop.pa-overlay--anchored');
+assert.match(nonModal, /(?:^|;)pointer-events:none(?:;|$)/);
+console.log('Production Overlay CSS preserves modal filters and non-modal surface boundaries.');

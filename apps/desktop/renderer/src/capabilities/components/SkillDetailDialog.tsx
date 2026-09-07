@@ -21,7 +21,7 @@ export function SkillDetailDialog({
 }: {
   readonly skill: SkillSummary;
   readonly onClose: () => void;
-  readonly onToggle: (skillId: string, enabled: boolean) => Promise<void>;
+  readonly onToggle: (skillId: string, enabled: boolean, workspacePath?: string | null) => Promise<void>;
   readonly onUninstall?: (skillId: string) => Promise<void>;
 }) {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
@@ -35,7 +35,7 @@ export function SkillDetailDialog({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    void clientApi.getSkillDetail(skill.skillId)
+    void clientApi.getSkillDetail(skill.skillId, skill.workspacePath ?? null)
       .then((value) => {
         if (cancelled) return;
         setDetail(value);
@@ -48,10 +48,10 @@ export function SkillDetailDialog({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [skill.skillId]);
+  }, [skill.skillId, skill.workspacePath]);
 
   const current = detail ?? skill;
-  const canUninstall = current.scope !== 'workspace' && typeof onUninstall === 'function';
+  const canUninstall = current.canUninstall && typeof onUninstall === 'function';
 
   /** 卸载成功后走 Overlay requestClose，保留统一退场动画；不要直接 onClose 硬卸载。 */
   const handleUninstall = async (requestClose: () => void) => {
@@ -96,7 +96,7 @@ export function SkillDetailDialog({
               onCheckedChange={async (enabled) => {
                 setToggling(true);
                 try {
-                  await onToggle(current.skillId, enabled);
+                  await onToggle(current.skillId, enabled, current.workspacePath ?? null);
                   setDetail((previous) => previous ? { ...previous, enabled } : previous);
                 } finally {
                   setToggling(false);
@@ -127,7 +127,11 @@ export function SkillDetailDialog({
             <footer className="skill-detail-footer">
               {confirmUninstall ? (
                 <div className="skill-uninstall-confirm" role="group" aria-label="确认卸载">
-                  <p>确认卸载「{current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。</p>
+                  <p>
+                    {current.scope === 'workspace'
+                      ? `确认卸载「${current.name}」？当前工作区中的安装目录会被永久删除，且无法撤销。`
+                      : `确认卸载「${current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。`}
+                  </p>
                   <div className="skill-uninstall-actions">
                     <button
                       type="button"

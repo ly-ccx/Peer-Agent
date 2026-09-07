@@ -126,6 +126,14 @@ test('nested workspace session lists do not crop a single selected capsule shado
     sidebarCss,
     '.sidebar-workspace-tasks.channel-conversation-list',
   );
+  const nestedBaseBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks',
+  );
+  const nestedInnerBody = ruleBody(
+    sidebarCss,
+    '.sidebar-workspace-tasks-inner',
+  );
   const nestedRowBody = ruleBody(
     sidebarCss,
     '.sidebar-workspace-tasks.channel-conversation-list .conversation-row',
@@ -135,11 +143,15 @@ test('nested workspace session lists do not crop a single selected capsule shado
     '.channel-conversation-list .conversation-row.active',
   );
 
-  assert.match(nestedListBody, /overflow:\s*visible;/);
-  assert.doesNotMatch(nestedListBody, /overflow-x:\s*hidden;/);
-  assert.doesNotMatch(nestedListBody, /overflow-y:\s*auto;/);
-  assert.match(nestedListBody, /padding:\s*6px 4px 6px 6px;/);
-  assert.doesNotMatch(nestedListBody, /padding:\s*0 var\(--space-2\);/);
+  // 外层作为动画轨：0fr↔1fr 展开需要 overflow:hidden 以干净裁剪收起态内容。
+  assert.match(nestedListBody, /overflow:\s*hidden;/);
+  assert.match(nestedBaseBody, /grid-template-rows:\s*0fr/);
+  assert.match(nestedBaseBody, /transition:\s*grid-template-rows\s+var\(--za-motion-medium\)/);
+  // 内层承载水平内边距,给选中胶囊 0.5px 描边留出呼吸空间,避免展开态被裁剪。
+  assert.match(nestedInnerBody, /overflow:\s*hidden;/);
+  assert.match(nestedInnerBody, /padding:\s*2px 6px 6px 6px;/);
+  assert.doesNotMatch(nestedInnerBody, /overflow-x:\s*hidden;/);
+  assert.doesNotMatch(nestedInnerBody, /overflow-y:\s*auto;/);
   assert.match(nestedRowBody, /--sidebar-conv-row-pad-x:\s*8px;/);
   assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
 });

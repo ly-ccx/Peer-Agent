@@ -1,0 +1,93 @@
+/* Account observations use the same Frost surfaces and controls as channel settings. */
+.account-usage {
+  width: 100%;
+  min-width: 0;
+  color: var(--graphite-base);
+  font-size: 12px;
+  line-height: 1.5;
+  border-top: 1px solid var(--chrome-hairline);
+  padding-top: var(--space-2);
+  container-type: inline-size;
+}
+.account-usage *, .account-usage *::before, .account-usage *::after { box-sizing: border-box; }
+.account-usage :is(p, h4, h5, dl, dd, ul) { margin: 0; }
+.account-usage :is(button, strong, dd) { font-variant-numeric: tabular-nums; }
+.account-usage-toolbar { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.account-usage .account-usage-toggle,
+.account-usage .account-usage-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+}
+.account-usage .account-usage-toggle { justify-content: flex-start; flex: 1; min-width: 0; text-align: left; }
+.account-usage .account-usage-refresh { flex-shrink: 0; border-color: var(--chrome-hairline); background: var(--control-fill); }
+.account-usage-title { font-weight: 600; color: var(--graphite-base); white-space: nowrap; }
+.account-usage-chevron { flex: 0 0 14px; transition: transform var(--za-motion-fast) var(--za-ease-out); }
+.account-usage-toggle[aria-expanded="true"] .account-usage-chevron { transform: rotate(90deg); }
+.account-usage .account-usage-refresh:disabled { cursor: progress; opacity: 0.6; }
+.account-usage :is(.account-usage-toggle, .account-usage-refresh):focus-visible { outline: 2px solid var(--graphite-soft); outline-offset: 2px; }
+@media (hover: hover) {
+  .account-usage .account-usage-toggle:hover { background: var(--paper-hover); }
+  .account-usage .account-usage-refresh:hover:not(:disabled) { background: var(--control-fill-hover); color: var(--graphite-base); }
+}
+.account-usage-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); font-size: 11px; }
+.account-usage-badge { display: inline-block; flex-shrink: 0; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--control-fill); color: var(--graphite-soft); font-size: 10px; font-weight: 400; white-space: nowrap; }
+.account-usage-body { display: grid; gap: var(--space-4); padding: var(--space-3) var(--space-2) var(--space-1); }
+.account-usage-body[hidden] { display: none; }
+.account-usage-status:empty { display: none; }
+.account-usage-status { padding: var(--space-2) var(--space-3); border: 1px solid var(--chrome-hairline); border-radius: var(--radius-sm); background: var(--control-fill); color: var(--graphite-soft); }
+.account-usage-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.account-usage-section-heading h4 { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); font-size: 12px; font-weight: 600; }
+.account-usage-plan { font-size: 11px; font-weight: 400; color: var(--graphite-soft); }
+.account-usage time { color: var(--graphite-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.account-usage-balances { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.account-usage-balance { min-width: 0; display: grid; gap: var(--space-1); padding: var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--chrome-hairline); background: var(--control-composer); }
+.account-usage-label { color: var(--graphite-soft); font-size: 11px; }
+.account-usage-source { margin-left: var(--space-2); font-size: 10px; }
+.account-usage-balance > strong { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.account-usage-balance-parts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); color: var(--graphite-soft); font-size: 11px; overflow-wrap: anywhere; }
+.account-usage-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--space-2); }
+.account-usage-window { min-width: 0; padding: var(--space-3); border: 1px solid var(--chrome-hairline); border-radius: var(--radius-sm); background: var(--control-composer); }
+.account-usage-window-top { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-bottom: var(--space-2); }
+.account-usage-window-top > strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.account-usage-percent { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.account-usage-percent small { color: var(--graphite-soft); font-size: 10px; font-weight: 400; }
+.account-usage-percent .account-usage-limit-label { margin-left: var(--space-1); color: var(--state-danger); }
+.account-usage-track { height: 4px; border-radius: var(--radius-sm); background: var(--paper-sunken); overflow: hidden; }
+.account-usage-track > span { display: block; width: 100%; height: 100%; background: var(--graphite-soft); transform-origin: left; border-radius: inherit; }
+.account-usage-window[data-tone="high"] .account-usage-track > span { background: var(--state-danger); }
+.account-usage-window-meta { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2); font-size: 11px; color: var(--graphite-soft); overflow-wrap: anywhere; }
+.account-usage-spend { margin-top: var(--space-3); }
+.account-usage-spend h5 { font-size: 11px; font-weight: 500; color: var(--graphite-soft); margin-bottom: var(--space-2); }
+.account-usage-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); gap: var(--space-3); }
+.account-usage-vendor > .account-usage-metrics { margin-top: var(--space-3); }
+.account-usage-metrics > div { min-width: 0; }
+.account-usage-metrics dt { font-size: 11px; color: var(--graphite-soft); margin-bottom: 3px; }
+.account-usage-metrics dd { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.account-usage-notes { list-style: none; padding: 0; display: grid; gap: var(--space-1); margin-top: var(--space-3) !important; color: var(--graphite-soft); font-size: 11px; }
+.account-usage-notes li { display: flex; align-items: baseline; gap: var(--space-2); overflow-wrap: anywhere; }
+.account-usage-note-label { flex: 0 0 4em; font-weight: 500; }
+.account-usage-auth { display: inline-block; margin-left: var(--space-2); color: var(--graphite-soft); font-size: 10px; }
+.account-usage-local { border-top: 1px solid var(--chrome-hairline); padding-top: var(--space-3); }
+.account-usage-estimate { font-size: 11px; color: var(--graphite-soft); font-variant-numeric: tabular-nums; }
+.account-usage-estimate strong { color: var(--graphite-base); font-size: 12px; font-weight: 500; }
+.account-usage-range { margin-top: var(--space-3) !important; font-size: 11px; color: var(--graphite-soft); font-variant-numeric: tabular-nums; }
+.account-usage-footnote { margin-top: var(--space-1) !important; font-size: 11px; line-height: 1.65; color: var(--graphite-soft); overflow-wrap: anywhere; }
+@container (max-width: 420px) {
+  .account-usage-toggle { flex-wrap: wrap; }
+  .account-usage-preview { display: none; }
+  .account-usage-toggle .account-usage-badge { font-size: 10px; }
+  .account-usage-notes li { flex-direction: column; gap: 0; }
+  .account-usage-note-label { flex-basis: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .account-usage-chevron { transition: none; } }

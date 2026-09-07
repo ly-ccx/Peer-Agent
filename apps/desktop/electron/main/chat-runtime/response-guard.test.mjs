@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   hasEmptyWriteNarration,
+  hasIncompleteActionNarration,
   hasLiteralToolCallSyntax,
   hasUnsupportedToolClaim,
   shouldRetryNoToolResponse,
@@ -45,16 +46,17 @@ describe('shouldRetryNoToolResponse with literal tool-call syntax', () => {
     assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
-  it('does not treat planning text as an unsupported tool response', () => {
+  it('retries file-read preambles that never emitted a tool call', () => {
     const text = [
       'Let me continue with the goal.',
       'I need to read the full Dropdown.tsx and TokenUsageDisplay.tsx files.',
       'Let me read the key files I need to modify.',
     ].join(' ');
-    assert.equal(shouldRetryNoToolResponse(text), false);
+    assert.equal(hasIncompleteActionNarration(text), true);
+    assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
-  it('does not treat Chinese file-read preambles as unsupported tool responses', () => {
+  it('retries Chinese file-read preambles instead of sendDone', () => {
     const text = [
       '好的，用户让我继续推进 task-3。我需要：',
       '1. 修改 TokenUsageDisplay 组件。',
@@ -62,15 +64,27 @@ describe('shouldRetryNoToolResponse with literal tool-call syntax', () => {
       '让我先读取这两个文件的完整内容，然后做修改。',
       '好，现在改调用方。先完整读两个文件。',
     ].join('\n');
-    assert.equal(shouldRetryNoToolResponse(text), false);
+    assert.equal(hasIncompleteActionNarration(text), true);
+    assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
-  it('does not treat command names in planning text as unsupported tool responses', () => {
-    assert.equal(shouldRetryNoToolResponse('Let me run pnpm test and then check git status.'), false);
+  it('retries Goal Runner locate-gate narration from the stalled session', () => {
+    const text = '继续推进计划。现在读 `isQualityReady` 定义与 pending 写入分支。先精确读取这两个定义。用 read_file 一次拉全。';
+    assert.equal(hasIncompleteActionNarration(text), true);
+    assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
-  it('does not hard-fail normal execution claims without protocol markup', () => {
-    assert.equal(shouldRetryNoToolResponse('I ran git status and checked the files.'), false);
+  it('does not treat command names in unrelated planning as incomplete file reads', () => {
+    assert.equal(hasIncompleteActionNarration('Let me run pnpm test and then check git status.'), false);
+  });
+
+  it('retries past-tense execution claims that had no tool call', () => {
+    assert.equal(hasUnsupportedToolClaim('I ran git status and checked the files.'), true);
+    assert.equal(shouldRetryNoToolResponse('I ran git status and checked the files.'), true);
+    assert.equal(shouldRetryNoToolResponse('我检查了：不是工具失败。'), true);
+  });
+
+  it('does not treat a write-later coding plan as empty write narration', () => {
     assert.equal(shouldRetryNoToolResponse('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
   });
 
@@ -100,7 +114,7 @@ describe('empty write narration guard', () => {
 
   it('correction text requires real tool calls and 32KB chunked writes', () => {
     const correction = unsupportedToolResponseCorrection();
-    assert.match(correction, /write_file or edit_file/i);
+    assert.match(correction, /read_file|write_file or edit_file/i);
     assert.match(correction, /32KB/);
     assert.match(correction, /chunked writes/i);
     assert.match(correction, /开始写入|正在写入/);

@@ -10,6 +10,8 @@ import type {
   ContinuityContextItem,
   GoalRunnerStatus,
   LlmProviderConfigView,
+  SelectionRange,
+  SelectionReference,
 } from '@peer-agent/protocol';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import type React from 'react';
@@ -18,6 +20,8 @@ import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
+import { SelectionQuoteAction } from './SelectionQuoteAction';
+import { appendSelectionQuote } from '../state/selectionQuoteAttachment';
 import { PeerIcon } from '../../ui/icons';
 import { updateModelOptionSelection } from '../../app/components/llmModelConfiguration';
 import { isWorkspaceRequiredNotice, registeredWorkspacePath, workspaceRequiredNotice } from '../state/registeredWorkspace';
@@ -464,10 +468,23 @@ export function ChatSurface({
   messageTarget,
   onOpenAutomationRun,
   onClose,
+  onOpenSelectionChild,
+  onSelectionChildSend,
+  pendingSendText,
+  onPendingSendConsumed,
+  banner,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
+  readonly onOpenSelectionChild?: (payload: { selection: SelectionRange; reference: SelectionReference; requestId: string }) => void;
+  /** 选区子会话首次发送时调用：先创建持久子会话，再返回真实 conversationId。 */
+  readonly onSelectionChildSend?: () => Promise<{ conversationId: string } | null>;
+  /** 背景缺失确认后继续发送的草稿文本。 */
+  readonly pendingSendText?: string;
+  readonly onPendingSendConsumed?: () => void;
+  /** Optional strip rendered under the 40px chat header, e.g. a selection child banner. */
+  readonly banner?: React.ReactNode;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly automationOrigin?: {
@@ -1314,7 +1331,7 @@ export function ChatSurface({
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);
-    if (!conversationId) {
+    if (!conversationId || conversationId.startsWith('draft-')) {
       // 草稿态：不拉磁盘、不进左侧列表；直接 ready，允许输入与发送。
       // 再次点「新建任务」时 conversationId 仍为 null，本 effect 不会重跑，draft 得以保留。
       // 模型选择沿用上次使用的模型（可解析时），而不是强制显示全局默认。
@@ -1357,8 +1374,10 @@ export function ChatSurface({
       if (cancelled) return;
       // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
       // reattach 全部收敛；静默刷新则保持 ready，避免闪空。
+      // 选区子会话首次发送会在 await 期间写入本地回合；必须读最新桶，不能用 effect 开始时的空快照。
+      const liveMessages = conversationStore.getSnapshot(conversationId).messages;
       convActions.set({
-        messages: loaded,
+        messages: liveMessages.length > loaded.length ? liveMessages : loaded,
         tokenUsage: usage,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
@@ -1964,8 +1983,10 @@ export function ChatSurface({
     sentAttachments: ChatAttachment[],
     submitEffort?: string,
     historyOverride?: readonly ChatMsg[],
+    targetConversationIdOverride?: string,
   ) => {
-    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
+    const targetConversationId = targetConversationIdOverride ?? conversationId;
+    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !targetConversationId || loadStatus !== 'ready') return false;
     setStreamError(null);
     setActiveUsage(null);
     setProviderRecoveryNotice(null);
@@ -1975,27 +1996,29 @@ export function ChatSurface({
     // 捕获发起会话并复用共享的 runCompaction 安全链路；完成后的消息与上下文快照
     // 统一由 chat:compaction 事件投影，避免命令路径再做第二次状态收尾。
     if (text === '/compact' && sentAttachments.length === 0) {
-      await runCompaction(conversationId);
+      await runCompaction(targetConversationId);
       return true;
     }
 
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
-    const baseHistory = historyOverride ?? messages;
+    const baseHistory = historyOverride ?? conversationStore.getSnapshot(targetConversationId).messages;
     const clearedHistory = clearInterruptedMarkers(baseHistory);
-    setMessages([...clearedHistory.messages, userMsg, assistantMsg]);
+    conversationStore.setState(targetConversationId, {
+      messages: [...clearedHistory.messages, userMsg, assistantMsg],
+    });
 
     // Continuing a conversation retires historical interrupted markers so Desktop no longer
     // shows a stale "已中断" label on older assistant turns after CLI/Desktop resume.
     if (clearedHistory.changed) {
       await clientApi.conversationsReplaceMessages({
-        id: conversationId,
+        id: targetConversationId,
         messages: serializeConversationMessages(clearedHistory.messages),
       });
     }
-    await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now, attachments: userMsg.attachments } });
-    await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now } });
+    await clientApi.conversationsAppendMessage({ id: targetConversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now, attachments: userMsg.attachments } });
+    await clientApi.conversationsAppendMessage({ id: targetConversationId, message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now } });
     onConversationUpdated?.();
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2004,8 +2027,8 @@ export function ChatSurface({
     setTurnStartedAt(turnStartedAt);
     // 应用级路由器凭 streamId 反查会话桶：登记归属并把 streamId/turnStartedAt 写入本会话桶，
     // 使后台流事件（delta/done/…）即使 ChatSurface 已切走也能落到正确的桶。
-    conversationStore.routeStream(streamId, conversationId);
-    conversationStore.setState(conversationId, { streamId, turnStartedAt });
+    conversationStore.routeStream(streamId, targetConversationId);
+    conversationStore.setState(targetConversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
     const contextMessages = [...clearedHistory.messages, userMsg];
@@ -2015,7 +2038,7 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId: targetConversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -2150,6 +2173,18 @@ export function ChatSurface({
       return;
     }
 
+    // 选区子会话首次发送：先创建持久子会话，再用真实 conversationId 发送。
+    if (onSelectionChildSend) {
+      const created = await onSelectionChildSend();
+      if (!created) return;
+      conversationStore.adoptBucket(conversationId!, created.conversationId);
+      conversationStore.setDraft(created.conversationId, '');
+      setAttachments([]);
+      setAttachmentError(null);
+      await submitMessage(text, sentAttachments, effort, undefined, created.conversationId);
+      return;
+    }
+
     conversationStore.setDraft(conversationId, '');
     setAttachments([]);
     setAttachmentError(null);
@@ -2182,7 +2217,20 @@ export function ChatSurface({
     isZh,
     editingMessage,
     handleEditMessage,
+    onSelectionChildSend,
   ]);
+
+  const pendingSendConsumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const text = pendingSendText?.trim() ?? '';
+    if (!text || pendingSendConsumedRef.current === text) return;
+    if (!conversationId || conversationId.startsWith('draft-')) return;
+    if (loadStatus !== 'ready' || isStreaming || !hasProvider) return;
+    pendingSendConsumedRef.current = text;
+    conversationStore.setDraft(conversationId, text);
+    onPendingSendConsumed?.();
+    void handleSend();
+  }, [pendingSendText, conversationId, loadStatus, isStreaming, hasProvider, handleSend, onPendingSendConsumed]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -2774,6 +2822,7 @@ export function ChatSurface({
           recomputeKey={messages.length}
         />
       ) : null}
+      {banner ? <div className="selection-child-banner">{banner}</div> : null}
       {currentTurnContext ? (
         <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
           <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
@@ -2962,6 +3011,10 @@ export function ChatSurface({
             - goal:批准即冻结目标契约并自动启动 Runner 托管自驱(A1)。
             点击复用与右侧面板同一条 goalPlansApprove 治理链路，状态互相消解。
             实质性追问（request_user_input）仍走对话流，二者正交。 */}
+        <SelectionQuoteAction root={threadRef} conversationId={conversationId} onOpenChild={onOpenSelectionChild} onQuote={(reference) => {
+          if (conversationIdRef.current !== reference.sourceConversationId) return;
+          setAttachments((previous) => appendSelectionQuote(previous, reference));
+        }} />
         <ChatGoalApprovalCard
           conversationId={conversationId}
           isZh={isZh}

@@ -67,7 +67,8 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
     }
   };
 
-  // 完成态安装按钮的 label：Windows = 重启安装；mac = 安装。
+  // 完成态安装按钮的 label：ready-to-open（mac 自管 dmg）= 打开安装包；
+  // downloaded（Windows NSIS / Linux AppImage）= 重启安装。
   const installLabel =
     phase === 'ready-to-open'
       ? i18n.t('updater.badge.openInstaller')

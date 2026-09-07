@@ -18,6 +18,7 @@ import {
 } from '@peer-agent/credential-helper';
 import { getDataHome, pathOf } from './data-store.mjs';
 import { createDesktopModelCredentialClient } from './model-credential-client.mjs';
+import { createAccountUsageRevisions } from './account-usage-revision.mjs';
 import {
   deriveOAuthStatus,
   enrichTestResultWithDiagnostics,
@@ -276,6 +277,7 @@ export function createLlmConfigStore({
   providerFetch = fetchWithConnectionRecovery,
 } = {}) {
   let productionCredentialClient;
+  const accountUsageRevisions = createAccountUsageRevisions();
   function credentials() {
     if (providedCredentialClient) return providedCredentialClient;
     productionCredentialClient ??= createDesktopModelCredentialClient({
@@ -357,6 +359,8 @@ export function createLlmConfigStore({
     const snapshot = snapshotGroupSecrets(groupId);
     try {
       mutateSecrets();
+      const next = snapshotGroupSecrets(groupId);
+      if (snapshot.apiKey !== next.apiKey || snapshot.oauthTokens !== next.oauthTokens) accountUsageRevisions.invalidate(groupId);
       return writeMetadata();
     } catch (error) {
       try {
@@ -900,6 +904,7 @@ export function createLlmConfigStore({
       wireOverride: item.wireOverride,
       authMethod: item.authMethod || 'api_key',
       oauthStatus,
+      accountUsageRevision: accountUsageRevisions.revision(item),
       name: item.name,
       baseUrl: item.baseUrl,
       model: item.model,

@@ -182,6 +182,32 @@
   background: transparent;
 }
 
+.goal-panel-toggle-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.goal-panel-toggle-summary .goal-panel-current-activity {
+  color: color-mix(in srgb, var(--za-text-soft) 35%, var(--za-text-muted));
+  font-size: var(--ui-font-caption, 11px);
+  font-weight: 400;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+.goal-panel-current-activity {
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 12px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 /* A：折叠态在 header 直接显示活跃计划标题 + X/Y 迷你进度。 */
 .goal-panel-toggle-active {
   display: inline-flex;
@@ -1620,9 +1646,26 @@
 }
 
 .goal-runner-explorers > summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
   cursor: pointer;
   color: var(--za-text-soft);
   user-select: none;
+}
+
+.goal-runner-explorers > summary::-webkit-details-marker {
+  display: none;
+}
+
+.goal-runner-explorer-chevron {
+  flex: none;
+  transform: rotate(0deg);
+}
+
+.goal-runner-explorers[open] > summary .goal-runner-explorer-chevron {
+  transform: rotate(90deg);
 }
 
 .goal-runner-explorer-list {

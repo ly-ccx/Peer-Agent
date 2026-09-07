@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { clientApi } from '../../clientApi';
 import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
 import { BrandWordmark } from '../../app/components/BrandWordmark';
+
 import { EditProjectDialog, type ProjectWorkspace } from './EditProjectDialog';
 import { abbreviateWorkspacePath } from './workspacePathDisplay';
 import { useConfirm } from '../../app/components/ConfirmProvider';
@@ -44,6 +45,11 @@ interface ConversationMeta {
   archivedAt?: string | null;
   pinnedAt?: string | null;
   pinnedOrder?: number | null;
+  /** 选区子会话的父会话来源；列表用它显示「来自父会话」。 */
+  selectionOrigin?: {
+    parentConversationId: string;
+    reference: { exactText: string };
+  } | null;
   /** Durable automation Fresh Run origin; rename-safe badge signal. */
   automationOrigin?: {
     kind: 'automation_run';
@@ -708,6 +714,7 @@ export function Sidebar({
             />
           ) : null}
         </button>
+
         <button type="button" className={`sidebar-automation-nav${activePage === 'automations' ? ' active' : ''}`} onClick={onOpenAutomations}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M8 2v3M16 2v3M4 9h16" />
@@ -849,12 +856,19 @@ export function Sidebar({
                     </svg>
                   </button>
                 </div>
-                {isTreeOpen ? (
-                  <div className="channel-conversation-list sidebar-workspace-tasks">
+                <div
+                  className={[
+                    'channel-conversation-list',
+                    'sidebar-workspace-tasks',
+                    isTreeOpen ? 'is-open' : 'is-collapsed',
+                  ].filter(Boolean).join(' ')}
+                  inert={isTreeOpen ? undefined : true}
+                >
+                  <div className="sidebar-workspace-tasks-inner">
                     {taskPreview.visible.map((conv) => renderConversationRow(conv, { pinnedGroup: Boolean(conv.pinnedAt) && !isArchivedView }))}
                     {renderWorkspaceTaskMore(ws.path, workspaceTasks.length, canShowMore)}
                   </div>
-                ) : null}
+                </div>
                 {projectPopoverPath === ws.path ? (
                   <div ref={projectPopoverRef} className="sidebar-project-popover" role="dialog" aria-label={isZh ? '项目文件夹' : 'Project folders'}>
                     <div className="sidebar-project-popover-title">{ws.name}</div>
@@ -935,8 +949,15 @@ export function Sidebar({
                   <span className="sidebar-workspace-name">{isZh ? '未归属' : 'Unassigned'}</span>
                 </span>
               </div>
-              {isUnassignedOpen ? (
-                <div className="channel-conversation-list sidebar-workspace-tasks">
+              <div
+                className={[
+                  'channel-conversation-list',
+                  'sidebar-workspace-tasks',
+                  isUnassignedOpen ? 'is-open' : 'is-collapsed',
+                ].filter(Boolean).join(' ')}
+                inert={isUnassignedOpen ? undefined : true}
+              >
+                <div className="sidebar-workspace-tasks-inner">
                   {previewWorkspaceTasks(
                     sortWorkspaceTasks(groupedTasks.unassigned, isArchivedView),
                     revealedCount(UNASSIGNED_WORKSPACE_KEY),
@@ -952,7 +973,7 @@ export function Sidebar({
                     ).canShowMore || pageHasMore(UNASSIGNED_WORKSPACE_KEY),
                   )}
                 </div>
-              ) : null}
+              </div>
             </div>
           ) : null}
         </div>

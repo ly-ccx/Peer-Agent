@@ -18,6 +18,10 @@ const ipcRenderer = Object.freeze({
 });
 
 function readInitialSettings() {
+  // Electron can preload the initial empty document before loadURL/loadFile.
+  // It has no trusted location yet; do not issue a privileged sync request.
+  const href = globalThis.location?.href;
+  if (!href || href === 'about:blank') return {};
   try {
     const result = ipcRenderer.sendSync('settings:get-sync');
     if (result && typeof result === 'object' && !Array.isArray(result)) return result;
@@ -145,16 +149,16 @@ contextBridge.exposeInMainWorld('peerAgent', {
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),
   listShellPermissionRules: () => ipcRenderer.invoke('shell:permissions:list'),
   addShellPermissionRule: (rule) => ipcRenderer.invoke('shell:permissions:add', rule),
-  listSkills: () => ipcRenderer.invoke('skills:list'),
-  getSkillDetail: (skillId) => ipcRenderer.invoke('skills:get-detail', { skillId }),
-  refreshSkills: () => ipcRenderer.invoke('skills:refresh'),
+  listSkills: (workspacePaths) => ipcRenderer.invoke('skills:list', { workspacePaths }),
+  getSkillDetail: (skillId, workspacePath) => ipcRenderer.invoke('skills:get-detail', { skillId, workspacePath }),
+  refreshSkills: (workspacePaths) => ipcRenderer.invoke('skills:refresh', { workspacePaths }),
   uploadSkill: (zipBase64) => ipcRenderer.invoke('skills:upload', { zipBase64 }),
-  enableSkill: (skillId) => ipcRenderer.invoke('skills:enable', { skillId }),
-  disableSkill: (skillId) => ipcRenderer.invoke('skills:disable', { skillId }),
+  enableSkill: (skillId, workspacePath) => ipcRenderer.invoke('skills:enable', { skillId, workspacePath }),
+  disableSkill: (skillId, workspacePath) => ipcRenderer.invoke('skills:disable', { skillId, workspacePath }),
   listAvailableSkills: () => ipcRenderer.invoke('skills:list-available'),
   linkSkill: (skillId) => ipcRenderer.invoke('skills:link', { skillId }),
   unlinkSkill: (skillId) => ipcRenderer.invoke('skills:unlink', { skillId }),
-  uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', { skillId }),
+  uninstallSkill: (skillId, workspacePath) => ipcRenderer.invoke('skills:uninstall', { skillId, workspacePath }),
   listMarketplaceSkills: () => ipcRenderer.invoke('skills:marketplace:list'),
   getMarketplaceSkillDetail: (catalogId) => ipcRenderer.invoke('skills:marketplace:get-detail', { catalogId }),
   installMarketplaceSkill: (catalogId) => ipcRenderer.invoke('skills:marketplace:install', { catalogId }),
@@ -213,6 +217,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
+  selectionQuote: (params) => ipcRenderer.invoke('selection:quote', params),
+  selectionCreateChild: (params) => ipcRenderer.invoke('selection:create-child', params),
+  selectionListChildren: (params) => ipcRenderer.invoke('selection:list-children', params),
+  selectionReadChild: (params) => ipcRenderer.invoke('selection:read-child', params),
+  selectionSaveDraft: (params) => ipcRenderer.invoke('selection:save-draft', params),
   onConversationsChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('conversations:changed', handler);

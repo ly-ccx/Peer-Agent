@@ -1,6 +1,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, watchFile, unwatchFile } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
+import { readPersistedHistoryFiles } from './persisted-history.mjs';
+import { buildInheritedBackground } from './inherited-background.mjs';
+import { validateSelectionReference } from './selection-reference.mjs';
+import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
 
@@ -777,6 +781,99 @@ export function createConversationStore(options = {}) {
     return { ...meta, messageCount: 0 };
   }
 
+  /** Internal host-only creation. Source is persisted content, not renderer text.
+   * The initial adapter accepts the canonical plain-content block only.
+   */
+  function resolveSelectionReference({ conversationId, selection, runtimeState }, history = getPersistedConversationHistory(conversationId)) {
+    const fail = (code) => { throw Object.assign(new Error(code), { code }); };
+    if (!history) fail('SOURCE_MISSING');
+    if (runtimeState?.conversationId !== conversationId || runtimeState?.contentRevision !== history.contentRevision
+      || !['idle', 'running'].includes(runtimeState?.status)) fail('SOURCE_RUNTIME_UNKNOWN');
+    const message = history.messages.find((row) => row.id === selection?.messageId);
+    if (!message || selection?.blockId !== 'content' || typeof message.content !== 'string') fail('SOURCE_NOT_SELECTABLE');
+    if (runtimeState.status === 'running' && runtimeState.activeMessageId === message.id) fail('SOURCE_NOT_COMMITTED');
+    return validateSelectionReference(selection, {
+      conversationId, messageId: message.id, blockId: 'content',
+      revision: history.contentRevision, committed: true, role: message.role, text: message.content,
+    });
+  }
+
+  function createSelectionChild({ parentConversationId, requestId, selection, runtimeState, capturedAt, confirmMissing = false }) {
+    const fail = (code) => { throw Object.assign(new Error(code), { code }); };
+    if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200) fail('CHILD_REQUEST_INVALID');
+    if (!selection || typeof selection !== 'object' || Array.isArray(selection)) fail('INVALID_SELECTION');
+    // Fixed field order makes retry identity independent of object insertion order.
+    // Do not persist arbitrary renderer fields (including authority/runtime data).
+    const requestSelection = {
+      conversationId: selection.conversationId, messageId: selection.messageId,
+      blockId: selection.blockId, revision: selection.revision,
+      start: selection.start, end: selection.end, exactText: selection.exactText,
+      sourceTextHash: selection.sourceTextHash,
+    };
+    return withFileLock(indexFile, () => {
+      const index = readIndex();
+      const parent = index.find((row) => row.id === parentConversationId);
+      if (!parent) fail('CHILD_PARENT_MISSING');
+      const existing = index.find((row) => row.selectionOrigin?.parentConversationId === parentConversationId
+        && row.selectionOrigin?.requestId === requestId);
+      if (existing) {
+        if (JSON.stringify(existing.selectionOrigin.requestSelection) !== JSON.stringify(requestSelection)) fail('CHILD_REQUEST_CONFLICT');
+        return withMessageCount(existing);
+      }
+      const history = getPersistedConversationHistory(parentConversationId);
+      const reference = resolveSelectionReference({ conversationId: parentConversationId, selection, runtimeState }, history);
+      const snapshot = buildInheritedBackground(history, {
+        expectedRevision: selection.revision, runtimeState, capturedAt,
+      });
+      if (snapshot.requiresMissingConfirmation && !confirmMissing) fail('BACKGROUND_CONFIRMATION_REQUIRED');
+      if (JSON.stringify(getPersistedConversationHistory(parentConversationId)) !== JSON.stringify(history)) fail('BACKGROUND_VERSION_CHANGED');
+      const snapshotId = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).put(snapshot);
+      const now = new Date().toISOString();
+      const child = normalizeMeta({
+        id: randomUUID(), title: [...reference.exactText].slice(0, 60).join(''),
+        workspacePath: parent.workspacePath, mode: 'chat', fastMode: false,
+        modelProviderId: parent.modelProviderId, model: parent.model, effort: parent.effort,
+        status: 'active', messageCount: 0, contentRevision: 0, createdAt: now, updatedAt: now,
+        selectionOrigin: { schemaVersion: 1, parentConversationId, requestId,
+          requestSelection: structuredClone(requestSelection), reference, snapshotId, createdAt: now },
+        selectionDraft: { text: '', references: [reference] },
+      });
+      // One atomic index replacement publishes identity, relationship and draft together.
+      // A failed publication may leave an unreferenced snapshot, never a half child.
+      writeJsonl(indexFile, [...index, child]);
+      return withMessageCount(child);
+    });
+  }
+
+  function listSelectionChildren(parentConversationId) {
+    return readIndex().filter((row) => row.selectionOrigin?.parentConversationId === parentConversationId)
+      .map(({ selectionOrigin, selectionDraft, ...meta }) => ({ ...withMessageCount(meta),
+        parentConversationId, sourceReference: selectionOrigin.reference,
+        hasDraft: Boolean(selectionDraft?.text || selectionDraft?.references?.length) }));
+  }
+
+  /** Internal draft write. Only references already owned by this session can be retained. */
+  function updateSelectionChildDraft(id, draft) {
+    const fail = (code) => { throw Object.assign(new Error(code), { code }); };
+    if (!draft || typeof draft.text !== 'string' || !Array.isArray(draft.referenceIds)
+      || draft.referenceIds.length > 5 || draft.referenceIds.some((value) => typeof value !== 'string')) fail('CHILD_DRAFT_INVALID');
+    return withFileLock(indexFile, () => {
+      const index = readIndex();
+      const child = index.find((row) => row.id === id);
+      if (!child?.selectionOrigin) fail('SESSION_CHILD_MISSING');
+      const owned = new Map([
+        child.selectionOrigin.reference,
+        ...(child.selectionDraft?.references ?? []),
+      ].filter(Boolean).map((reference) => [reference.id, reference]));
+      const ids = [...new Set(draft.referenceIds)];
+      if (ids.some((referenceId) => !owned.has(referenceId))) fail('CHILD_DRAFT_REFERENCE_INVALID');
+      child.selectionDraft = { text: draft.text, references: ids.map((referenceId) => owned.get(referenceId)) };
+      // Draft edits are not committed conversation content and do not move its watermark.
+      writeJsonl(indexFile, index);
+      return structuredClone(child.selectionDraft);
+    });
+  }
+
   function updateMode(id, mode) {
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
@@ -874,6 +971,39 @@ export function createConversationStore(options = {}) {
     // no longer matches.
     writeJson(contextSnapshotFile(id), normalized);
     return withMessageCount(meta);
+  }
+
+  /** Persisted history only. A streaming sidecar marks a provisional tail.
+   * Callers must additionally exclude runtime-active messages before freezing.
+   * Never use this read as an authorization check.
+   */
+  function getPersistedConversationHistory(id) {
+    const meta = readIndex().find((entry) => entry.id === id);
+    if (!meta) return null;
+    return readPersistedHistoryFiles({
+      historyFile: convFile(id),
+      sidecarFile: streamPatchFile(id),
+      conversationId: meta.id,
+      contentRevision: meta.contentRevision,
+    });
+  }
+
+  /** Internal capture API: runtimeState must be resolved by the authorized host.
+   * This does not create a child or authorize access to another conversation.
+   */
+  function captureInheritedBackground(id, options) {
+    const history = getPersistedConversationHistory(id);
+    const snapshot = buildInheritedBackground(history, options);
+    const latest = getPersistedConversationHistory(id);
+    if (!latest || JSON.stringify(latest) !== JSON.stringify(history)) {
+      throw Object.assign(new Error('BACKGROUND_VERSION_CHANGED'), { code: 'BACKGROUND_VERSION_CHANGED' });
+    }
+    const snapshots = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds'));
+    return { snapshotId: snapshots.put(snapshot), snapshot };
+  }
+
+  function readInheritedBackground(snapshotId) {
+    return createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).read(snapshotId);
   }
 
   function getConversation(id) {
@@ -1526,6 +1656,13 @@ export function createConversationStore(options = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    getPersistedConversationHistory,
+    resolveSelectionReference,
+    createSelectionChild: changed(createSelectionChild, 'created'),
+    listSelectionChildren,
+    updateSelectionChildDraft,
+    captureInheritedBackground,
+    readInheritedBackground,
     getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
     markRead: changed(markRead, 'metadata-updated'),

@@ -484,6 +484,7 @@ export function derivePlanStatus(currentStatus, tasks) {
     let leafTotal = 0;
     let allTerminal = true;
     let hasFailed = false;
+    let hasRunning = false;
     const walkLeaves = (nodes) => {
       for (const t of nodes || []) {
         const children = Array.isArray(t.subtasks) ? t.subtasks : [];
@@ -494,19 +495,29 @@ export function derivePlanStatus(currentStatus, tasks) {
         leafTotal += 1;
         if (t.status === TERMINAL_FAIL) hasFailed = true;
         else if (!LEAF_TERMINAL_STATUSES.has(t.status)) allTerminal = false;
+        if (t.status === 'running') hasRunning = true;
       }
     };
     walkLeaves(list);
-    return { leafTotal, allTerminal, hasFailed };
+    return { leafTotal, allTerminal, hasFailed, hasRunning };
   };
 
-  // 规则 2/3：executing 自动收尾；failed 仅在「叶子事实已全部成功完成」时恢复为 completed，
-  // 避免 stream_error 把计划永久粘在 failed。未全部终态时保持 failed（需 resumeRunner
-  // 显式恢复为 executing，或等全部叶子成功后自动 completed）。
-  if (currentStatus === 'executing' || currentStatus === 'failed') {
-    const { leafTotal, allTerminal, hasFailed } = inspectLeaves(tasks);
+  // 规则 2/3：executing 自动收尾；failed/interrupted 计划在叶子被显式重试为 running 时
+  // 恢复执行，或在叶子事实已全部成功完成时恢复为 completed。未消费的 Runner interruption
+  // 只在叶子仍未全部成功时把计划钉在 interrupted（ADR 73：可恢复挂起而非失败）；
+  // 叶子已全部成功完成时，中断只是过期的 runner 事实，不能挡住 completed。
+  // 重试预算耗尽的失败仍落 failed 终态。
+  if (
+    currentStatus === 'executing'
+    || currentStatus === 'failed'
+    || currentStatus === 'interrupted'
+  ) {
+    const { leafTotal, allTerminal, hasFailed, hasRunning } = inspectLeaves(tasks);
     if (leafTotal > 0 && allTerminal) {
       return hasFailed ? TERMINAL_FAIL : TERMINAL_OK;
+    }
+    if ((currentStatus === 'failed' || currentStatus === 'interrupted') && hasRunning) {
+      return 'executing';
     }
     return currentStatus;
   }
@@ -1392,7 +1403,7 @@ function normalizeRunTrace(trace, fallback = {}) {
   return normalized;
 }
 
-const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused', 'failed']);
+const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused', 'interrupted', 'failed']);
 
 function normalizeConversationId(value) {
   if (value === undefined || value === null) return null;
@@ -1694,6 +1705,15 @@ function normalizePlan(plan) {
     qualityReview: normalizeQualityReview(plan.qualityReview),
     deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
+  // 读路径只恢复「叶子已全部成功，但计划仍钉在 interrupted/failed」的过期记录。
+  // 不能对所有状态全量派生，否则 completed intake 被 markRequestedUserInput
+  // 重新打开后，读盘会立刻打回 completed。
+  if (normalized.status === 'interrupted' || normalized.status === 'failed') {
+    const derivedStatus = derivePlanStatus(normalized.status, plan.tasks);
+    if (derivedStatus === TERMINAL_OK) {
+      normalized.status = derivedStatus;
+    }
+  }
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
   const timing = normalizeGoalTiming(plan.timing);
@@ -1737,6 +1757,41 @@ function isActivePlan(plan) {
 
 function isInactivePlan(plan) {
   return plan?.status === 'cancelled';
+}
+
+/**
+ * 用户回复可以消费 request_user_input 的计划态。
+ * accepted + waiting_user 会出现在 intake 流错误残留、再被 goal_create_plan
+ * 升成 accepted_goal 之后；只认 executing 会让「继续」永远吃不到回复。
+ */
+export function canConsumeRequestedUserInput(plan) {
+  if (!plan) return false;
+  if (plan.status !== 'executing' && plan.status !== 'accepted') return false;
+  return ['waiting_user', 'blocked'].includes(plan.runner?.status)
+    && plan.runner?.blockedReason === 'requested_user_input';
+}
+
+/**
+ * intake → accepted_goal 升级时清掉流错误 / 收敛残留的「等用户」。
+ * 真执行中的 request_user_input 不会走这条升级缝，不能在这里清。
+ */
+function runnerPatchForAcceptedGoalUpgrade(runner) {
+  if (!runner || typeof runner !== 'object') return undefined;
+  const hasInterruption = runner.interruption != null;
+  const leftoverUserWait = runner.status === 'waiting_user'
+    && runner.blockedReason === 'requested_user_input';
+  if (!hasInterruption && !leftoverUserWait) return undefined;
+  const next = {
+    ...runner,
+    interruption: null,
+  };
+  if (leftoverUserWait) {
+    next.status = 'idle';
+    next.intent = 'execute';
+    next.phase = 'orient';
+    next.blockedReason = undefined;
+  }
+  return next;
 }
 
 export function createGoalPlanStore({
@@ -2172,19 +2227,23 @@ export function createGoalPlanStore({
         ? attachWorkspaceHeadBinding(plan, { readWorkspaceHead })
         : plan,
     );
-    // 已停止且尚未消费的执行中断是独立于叶子任务的失败事实，普通 persist 不能
-    // 把 failed 重新派生为 completed；仅 resumeRunner 能原子消费该事实并恢复执行。
-    // 可恢复中断在重试预算内仍由 running Runner 持有行动权，只记录失败尝试，不能
-    // 因为 interruption Evidence 的存在就把整个计划降级为 failed。
+    // 已停止且尚未消费的执行中断是独立于叶子任务的可恢复挂起事实（ADR 73），
+    // 普通 persist 不能把 interrupted 重新派生为 completed；仅 resumeRunner 能
+    // 原子消费该事实并恢复执行。可恢复中断在重试预算内仍由 running Runner 持有
+    // 行动权，只记录失败尝试，不能因为 interruption Evidence 的存在就把整个计划
+    // 降级为失败终态；真实叶子失败仍由 derivePlanStatus 派生为 failed。
+    const derivedStatus = options.preserveStatus
+      ? normalized.status
+      : derivePlanStatus(normalized.status, normalized.tasks);
     const hasUnconsumedInterruption = Boolean(
       normalized.runner?.interruption &&
       !(normalized.runner.interruption.recoverable === true && normalized.runner.status === 'running'),
     );
-    const nextStatus = hasUnconsumedInterruption
-      ? 'failed'
-      : options.preserveStatus
-        ? normalized.status
-        : derivePlanStatus(normalized.status, normalized.tasks);
+    // 未消费中断只拦住「还没做完」的计划。叶子已全部成功时，不能再用过期
+    // interruption 把 completed 钉回 interrupted。
+    const nextStatus = hasUnconsumedInterruption && derivedStatus !== TERMINAL_OK
+      ? 'interrupted'
+      : derivedStatus;
     const nowIso = normalized.updatedAt || new Date().toISOString();
     const planTiming = applyGoalTimingTransition(
       prevTiming,
@@ -2765,11 +2824,13 @@ export function createGoalPlanStore({
     const plan = getPlan(planId);
     if (!plan) return null;
     const acceptedAt = new Date().toISOString();
+    const upgradeRunner = runnerPatchForAcceptedGoalUpgrade(plan.runner);
     return revisePlan(planId, {
       ...patch,
       ...(!plan.targetWorkspacePath && plan.originWorkspacePath
         ? { targetWorkspacePath: plan.originWorkspacePath }
         : {}),
+      ...(upgradeRunner ? { runner: upgradeRunner } : {}),
       status: 'executing',
       workflowKind: 'goal_self_driven',
       activation: {
@@ -2816,35 +2877,19 @@ export function createGoalPlanStore({
     const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
       && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
     const shouldEmitGoalAccepted = upgradingFromIntake;
-    // normalizeRunnerState 会保留合法的 interruption 事实；这里取规范化后的 runner
-    // 快照用于升级路径（若契约无 runner 则视为无陈旧中断可消费）。
-    const upgradingFromIntakeRunner = upgradingFromIntake
-      ? normalizeRunnerState(activeGoal.runner, activeGoal.planId)
-      : null;
-    // 升级 intake → accepted_goal 是一次全新的目标接受决策。intake 期间写入的
-    // stream 中断事实（recoverable:false）属于已被取代的前一回合，不得毒化这次
-    // 升级：persist() 的 hasUnconsumedInterruption 不变量会把契约压回 failed，
-    // auto-start 闸门随即拒绝启动 Runner（turnCount=0 永久停摆）。在此原子消费
-    // 该中断并重新武装 runner，使 goal-accepted 事件后的启动闸门按 accepted 放行。
-    const staleInterruption = upgradingFromIntakeRunner?.interruption ?? null;
-    const consumedInterruptionPatch = staleInterruption
-      ? {
-        runner: {
-          ...upgradingFromIntakeRunner,
-          enabled: true,
-          status: 'running',
-          interruption: undefined,
-          updatedAt: new Date().toISOString(),
-        },
-      }
-      : null;
+    // 升级为 accepted_goal 时必须清掉 intake 残留：
+    // 1) 未消费 interruption，否则 persist 会把计划派生回 failed / interrupted；
+    // 2) 流错误收敛盖上的 waiting_user，否则 auto-start 闸门会当成真提问拦下 Runner。
+    const upgradeRunner = shouldEmitGoalAccepted
+      ? runnerPatchForAcceptedGoalUpgrade(activeGoal.runner)
+      : undefined;
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
       status: safeStatus,
       workflowKind: 'goal_self_driven',
-      ...(consumedInterruptionPatch || {}),
+      ...(upgradeRunner ? { runner: upgradeRunner } : {}),
       activation: {
         ...(activeGoal.activation || {}),
         ...(planPatch.activation || {}),
@@ -3169,14 +3214,7 @@ export function createGoalPlanStore({
    */
   function consumeRequestedUserInput(planId, event = {}) {
     const plan = getPlan(planId);
-    if (!plan) return null;
-    if (
-      plan.status !== 'executing'
-      || !['waiting_user', 'blocked'].includes(plan.runner?.status)
-      || plan.runner?.blockedReason !== 'requested_user_input'
-    ) {
-      return null;
-    }
+    if (!canConsumeRequestedUserInput(plan)) return null;
 
     const now = new Date().toISOString();
     const currentTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: planId });
@@ -3349,10 +3387,14 @@ export function createGoalPlanStore({
     // 本轮进度：以被回填 Explorer 所属 batch 重算 done/total；该 explorer 不属于任何
     // batch（旧单发路径）时保持既有 batch 不变。
     const reportedBatchId = nextRun.batchId;
+    // Late reports remain evidence, but cannot reactivate a suspended/terminal runner.
+    const preserveLifecycle = current.enabled === false
+      || ['paused', 'interrupted', 'blocked', 'failed', 'completed', 'cancelled', 'waiting_user'].includes(current.status)
+      || ['paused', 'interrupted', 'blocked', 'failed', 'completed', 'cancelled', 'waiting_user'].includes(plan.status);
     const nextRunner = normalizeRunnerState({
       ...current,
-      status: stillRunning ? 'exploring' : 'idle',
-      intent: stillRunning ? 'explore' : 'verify',
+      status: preserveLifecycle ? current.status : stillRunning ? 'exploring' : 'idle',
+      intent: preserveLifecycle ? current.intent : stillRunning ? 'explore' : 'verify',
       explorerCount: countExplorerRuns(nextExplorers),
       explorers: nextExplorers,
       explorerBatch: reportedBatchId
@@ -3656,11 +3698,26 @@ export function createGoalPlanStore({
     if (!plan) return null;
     const qualityReview = normalizeQualityReview(review);
     if (!qualityReview) return plan;
-    return persist({
+    const now = new Date().toISOString();
+    const next = {
       ...plan,
       qualityReview,
-      updatedAt: new Date().toISOString(),
-    });
+      updatedAt: now,
+    };
+    // 质检已通过时，过期的 quality_review_pending 不再代表真实阻断。
+    if (
+      qualityReview.status === 'passed'
+      && plan.deliveryHandoff?.status === 'stopped'
+      && plan.deliveryHandoff?.stoppedReason === 'quality_review_pending'
+    ) {
+      const { stoppedReason: _stalePending, ...restHandoff } = plan.deliveryHandoff;
+      next.deliveryHandoff = {
+        ...restHandoff,
+        status: 'idle',
+        updatedAt: now,
+      };
+    }
+    return persist(next);
   }
 
   function recordDeliveryHandoff(planId, handoff = {}) {

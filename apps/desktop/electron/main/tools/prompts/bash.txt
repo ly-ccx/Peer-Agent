@@ -7,6 +7,7 @@ Use this tool for:
 - Filesystem exploration such as listing directories before creating new files.
 
 Rules:
+- For long-running servers, use runInBackground=true with a foreground command (no &, nohup, or daemonization). Peer globally manages the task until explicitly stopped or the app exits. A task ID means accepted, not service readiness. Stop with the explicit task ID.
 - Use read_file instead of bash cat/head/tail when reading a known file path.
 - Use edit_file or write_file instead of shell redirection, heredocs, sed -i, perl -pi, or ad-hoc scripts when changing user files.
 - Foreground bash calls in the same conversation share one persistent shell. cwd, exported variables, and activated environments persist until timeout, abort, or the conversation ends.

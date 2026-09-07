@@ -340,6 +340,14 @@ test('derivePlanStatus: failed + 全叶子 completed → completed（stream 失�
   assert.equal(derivePlanStatus('failed', tasks), 'completed');
 });
 
+test('derivePlanStatus: interrupted + 全叶子 completed → completed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'completed' },
+  ];
+  assert.equal(derivePlanStatus('interrupted', tasks), 'completed');
+});
+
 test('derivePlanStatus: failed + 仍有未完成叶子 → 保持 failed（需 resume 才能继续）', () => {
   const tasks = [
     { taskId: 't1', status: 'completed' },
@@ -474,6 +482,58 @@ test('recordTaskEvidence: accepted 的自驱 Goal 不走 Plan 批准闸门，可
   assert.equal(after.status, 'completed');
   assert.equal(after.progress.percent, 100);
   assert.deepEqual(after.tasks[0].evidenceRefs, ['local-test-artifact://goal-store']);
+});
+
+test('recordTaskEvidence: failed 任务显式重试为 running 时恢复计划并保留失败 Evidence', () => {
+  const created = store.createGoalContract({
+    conversationId: 'conv-goal-task-retry',
+    title: '重试失败任务',
+    goal: '失败后修复并继续执行',
+    tasks: [
+      { taskId: 'g1', order: 0, title: '执行修复', status: 'pending', evidenceRefs: [] },
+      { taskId: 'g2', order: 1, title: '验证修复', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+  const failureRef = 'local-test-artifact://goal-task-failure';
+  registerEvidenceRefs(created.planId, [failureRef]);
+
+  store.recordTaskEvidence(created.planId, 'g1', {
+    status: 'failed',
+    evidenceRefs: [failureRef],
+    failureReason: 'first attempt failed',
+  });
+  store.setPlanStatus(created.planId, 'failed', { changedBy: 'system:test' });
+  assert.equal(store.getPlan(created.planId).status, 'failed');
+
+  const retried = store.recordTaskEvidence(created.planId, 'g1', { status: 'running' });
+  assert.equal(retried.status, 'executing');
+  assert.equal(retried.tasks[0].status, 'running');
+  assert.deepEqual(retried.tasks[0].evidenceRefs, [failureRef]);
+  assert.equal(retried.tasks[0].failureReason, 'first attempt failed');
+});
+
+test('recordTaskEvidence: failed 计划无 running 叶子时保持失败', () => {
+  const created = store.createGoalContract({
+    conversationId: 'conv-goal-failed-sticky',
+    title: '保持失败事实',
+    goal: '等待显式重试',
+    tasks: [
+      { taskId: 'g1', order: 0, title: '失败步骤', status: 'pending', evidenceRefs: [] },
+      { taskId: 'g2', order: 1, title: '后续步骤', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+  const failureRef = 'local-test-artifact://goal-task-sticky-failure';
+  registerEvidenceRefs(created.planId, [failureRef]);
+
+  store.recordTaskEvidence(created.planId, 'g1', {
+    status: 'failed',
+    evidenceRefs: [failureRef],
+    failureReason: 'needs retry',
+  });
+  const failed = store.setPlanStatus(created.planId, 'failed', { changedBy: 'system:test' });
+
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.tasks[1].status, 'pending');
 });
 
 test('upsertGoalContract: 复用同会话自驱 Goal，且不把调用控制字段写入 artifact', () => {
@@ -1661,21 +1721,16 @@ test('verifier: passed 必须带 evidenceRefs，且目标必须引用真实 task
 });
 
 
-test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，resume 后才可恢复', () => {
+test('未消费的 stream_error 中断经过 runner 落盘后保持 interrupted，resume 后才可恢复', () => {
   const created = approvedPlanWithTasks();
   store.setPlanStatus(created.planId, 'executing');
-  const completedLeaves = ['t1', 't2a', 't2b'];
-  const completedRefs = completedLeaves.map((taskId) => `artifact://stream-interrupted-${taskId}`);
-  registerEvidenceRefs(created.planId, completedRefs);
-  for (const taskId of completedLeaves) {
-    store.recordTaskEvidence(created.planId, taskId, {
-      status: 'completed',
-      evidenceRefs: [`artifact://stream-interrupted-${taskId}`],
-    });
-  }
-  assert.equal(store.getPlan(created.planId).status, 'completed');
+  registerEvidenceRefs(created.planId, ['artifact://stream-interrupted-t1']);
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://stream-interrupted-t1'],
+  });
+  assert.equal(store.getPlan(created.planId).status, 'executing');
 
-  store.setPlanStatus(created.planId, 'failed');
   store.setRunnerState(created.planId, {
     status: 'failed',
     phase: 'blocked',
@@ -1687,13 +1742,13 @@ test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，
   });
 
   const interrupted = store.getPlan(created.planId);
-  assert.equal(interrupted.status, 'failed');
+  assert.equal(interrupted.status, 'interrupted');
   assert.equal(interrupted.runner.interruption.source, 'stream_error');
 
   // 普通 resume（intake 中断→继续路径）：中断标记保留，避免 decideIntakeConvergence
-  // 把它误判为 pure_qa 而静默删除；未消费标记时计划保持 failed（等待显式恢复）。
+  // 把它误判为 pure_qa 而静默删除；未消费标记时计划保持 interrupted（等待显式恢复）。
   const kept = store.resumeRunner(created.planId, { phase: 'act' });
-  assert.equal(kept.status, 'failed');
+  assert.equal(kept.status, 'interrupted');
   assert.equal(kept.runner.interruption.source, 'stream_error');
 
   // 用户显式恢复失败计划（consumedInterruption:true）：消费并清除中断标记，恢复执行。
@@ -1701,6 +1756,40 @@ test('未消费的 stream_error 中断经过 runner 落盘后仍保持 failed，
   assert.equal(resumed.status, 'executing');
   assert.equal(resumed.runner.status, 'running');
   assert.equal(resumed.runner.interruption, undefined);
+});
+
+test('叶子全部 completed 后，过期 interruption 不能把计划钉回 interrupted', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  const completedLeaves = ['t1', 't2a', 't2b'];
+  const completedRefs = completedLeaves.map((taskId) => `artifact://done-interrupted-${taskId}`);
+  registerEvidenceRefs(created.planId, completedRefs);
+  for (const taskId of completedLeaves) {
+    store.recordTaskEvidence(created.planId, taskId, {
+      status: 'completed',
+      evidenceRefs: [`artifact://done-interrupted-${taskId}`],
+    });
+  }
+  assert.equal(store.getPlan(created.planId).status, 'completed');
+
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected after work finished',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+
+  const recovered = store.getPlan(created.planId);
+  assert.equal(recovered.status, 'completed');
+  assert.equal(recovered.progress.percent, 100);
+
+  const reopened = createGoalPlanStore();
+  const reloaded = reopened.getPlan(created.planId);
+  assert.equal(reloaded.status, 'completed');
+  assert.equal(reloaded.progress.percent, 100);
 });
 
 test('stream_error 后 setPlanStatus(failed)，任务全部 completed 时 plan 恢复为 completed', () => {
@@ -2051,6 +2140,39 @@ test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契
   assert.equal(upserted.tasks?.length, 2, '应写入 create_plan 的真实子任务');
   const plans = store.listPlansByConversation('conv-intake-3');
   assert.equal(plans.length, 1, '不应产生第二条悬空契约');
+});
+
+test('upsertGoalContract: intake 流错误残留的 waiting_user 在升级时清掉，才能 auto-start', () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-leftover-wait',
+    goal: '模糊目标占位',
+  });
+  store.setRunnerState(intake.planId, {
+    interruption: {
+      source: 'stream_interrupted',
+      reason: 'error',
+      interruptedAt: '2026-09-03T03:12:13.000Z',
+    },
+  });
+  store.markRequestedUserInput(intake.planId);
+  const leftover = store.getPlan(intake.planId);
+  assert.equal(leftover.runner.status, 'waiting_user');
+  assert.equal(leftover.runner.blockedReason, 'requested_user_input');
+
+  const upserted = store.upsertGoalContract('conv-intake-leftover-wait', {
+    goal: '修复质量自检合流判定缺陷',
+    title: '修复质量自检合流判定缺陷',
+    status: 'accepted',
+    activation: { kind: 'accepted_goal' },
+    tasks: [{ taskId: 't1', title: '定位合流判定', status: 'pending', evidenceRefs: [] }],
+  });
+
+  assert.equal(upserted.planId, intake.planId);
+  assert.equal(upserted.status, 'accepted');
+  assert.equal(upserted.activation?.kind, 'accepted_goal');
+  assert.equal(upserted.runner?.interruption ?? null, null);
+  assert.notEqual(upserted.runner?.status, 'waiting_user');
+  assert.equal(upserted.runner?.blockedReason ?? undefined, undefined);
 });
 
 test('upsertGoalContract: 只在 intake 升级时发出 goal-accepted，Runner 事件仍是普通 persist', () => {
@@ -2482,6 +2604,41 @@ test('consumeRequestedUserInput atomically records the decision and clears only 
     summary: '不应消费',
   }), null);
   assert.equal(store.getPlan(plan.planId).runner.blockedReason, 'permission_required');
+});
+
+test('consumeRequestedUserInput accepts leftover accepted + waiting_user', () => {
+  const plan = store.createGoalContract({
+    conversationId: 'conv-accepted-leftover-wait',
+    title: '已确认目标',
+    goal: '已确认目标',
+    status: 'accepted',
+    tasks: [{ taskId: 't1', title: '推进', status: 'pending', evidenceRefs: [] }],
+  });
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'waiting_user',
+    intent: 'block',
+    phase: 'waiting_user',
+    blockedReason: 'requested_user_input',
+    turnCount: 0,
+  });
+  store.setPlanStatus(plan.planId, 'accepted');
+
+  const leftover = store.getPlan(plan.planId);
+  assert.equal(leftover.status, 'accepted');
+  assert.equal(leftover.runner.status, 'waiting_user');
+
+  const consumed = store.consumeRequestedUserInput(plan.planId, {
+    type: 'goal_resumed',
+    summary: '用户让当前目标继续：继续',
+    payload: { intent: 'resume', messageText: '继续' },
+  });
+
+  assert.ok(consumed);
+  assert.equal(consumed.status, 'accepted');
+  assert.equal(consumed.runner.status, 'running');
+  assert.equal(consumed.runner.blockedReason, undefined);
+  assert.equal(consumed.runTrace.events.at(-1).payload.messageText, '继续');
 });
 
 test('setRunnerState blocked pauses active segment while plan stays executing', async () => {

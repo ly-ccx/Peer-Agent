@@ -62,7 +62,7 @@ export interface TuiGoalTurnRuntime {
 
 function buildGoalRunnerMessage(plan: any, turnNumber: number): string {
   const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
-  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.`;
+  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state. Open tasks are not finished by narrating the next read/search/edit; emit a real tool call in this same turn.`;
 }
 
 function createIdleWaiter(chat: Pick<ChatController, 'getSnapshot' | 'subscribe'>) {

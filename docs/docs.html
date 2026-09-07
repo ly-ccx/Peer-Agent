@@ -429,7 +429,7 @@
                 <tr>
                   <td><strong>Desktop</strong></td>
                   <td data-i18n="welcome.desktopUse">Visual Thread / Workbench / Evidence review</td>
-                  <td data-i18n="welcome.desktopNotes">Electron shell; macOS + Windows via Releases</td>
+                  <td data-i18n="welcome.desktopNotes">Electron shell; macOS, Windows, and Linux x64 via Releases</td>
                 </tr>
                 <tr>
                   <td><strong>CLI · <code>peer</code></strong></td>
@@ -492,8 +492,18 @@
                   <td>installer / package on Releases</td>
                   <td data-i18n="install.winHow">Download → run installer → launch Peer Agent</td>
                 </tr>
+                <tr>
+                  <td>Linux x64</td>
+                  <td><code>Peer-Agent-&lt;ver&gt;-x64.AppImage</code> / <code>.deb</code></td>
+                  <td data-i18n="install.linuxHow">Download AppImage, <code>chmod +x</code>, run — or install the <code>.deb</code>. In-app auto-update is AppImage-only.</td>
+                </tr>
               </tbody>
             </table>
+          </div>
+          <div class="callout" data-i18n="install.linuxGaps">
+            <strong>Linux Desktop gaps (stage-1):</strong> x64 only, unsigned (same stage-1 posture as mac ad-hoc).
+            Ubuntu 22+/24+ AppImage users may need <code>libfuse2</code>. On Wayland, if the window fails to appear, try X11 or
+            <code>ELECTRON_OZONE_PLATFORM_HINT=auto</code>. linux-arm64 Desktop is a follow-up.
           </div>
           <div class="inline-actions">
             <a class="btn btn-primary" href="https://github.com/ly-ccx/Peer-Agent/releases" target="_blank" rel="noreferrer">GitHub Releases</a>
@@ -562,6 +572,12 @@ pnpm install
 
 # Desktop
 pnpm --filter @peer-agent/desktop dev
+
+# Linux Desktop unpacked dir (sandbox / smoke)
+pnpm pack:linux
+
+# Linux Desktop distributables (AppImage + .deb)
+pnpm dist:linux
 
 # TUI source package lives at apps/tui (@peer-agent/tui)
 # Public npm installer package is packages/npm-cli (@peer-agent/cli)</code></pre>
@@ -1382,7 +1398,7 @@ Evidence owns governance.</code></pre>
             "welcome.entriesTitle": "工作从哪里进来",
             "welcome.thEntry": "入口", "welcome.thUse": "适合", "welcome.thNotes": "说明",
             "welcome.desktopUse": "可视化 Thread / Workbench / Evidence 审查",
-            "welcome.desktopNotes": "Electron 壳；macOS + Windows 走 Releases",
+            "welcome.desktopNotes": "Electron 壳；macOS、Windows、Linux x64 走 Releases",
             "welcome.cliUse": "终端 / headless 会话",
             "welcome.cliNotes": "不必装 Desktop；共享 ~/.peer-agent",
             "welcome.canTitle": "今天能做什么",
@@ -1406,6 +1422,8 @@ Evidence owns governance.</code></pre>
             "install.thPlat": "平台", "install.thArtifact": "典型产物", "install.thHow": "步骤",
             "install.macHow": "下载 → 打开 → 安装到应用程序",
             "install.winHow": "下载 → 运行安装器 → 启动 Peer Agent",
+            "install.linuxHow": "下载 AppImage 后 chmod +x 再运行，或安装 .deb。应用内自动更新只支持 AppImage。",
+            "install.linuxGaps": "Linux Desktop 阶段一缺口：仅 x64、未签名（与 mac 阶段一 ad-hoc 同级）。Ubuntu 22+/24+ 跑 AppImage 可能需要 libfuse2。Wayland 下窗口起不来时改用 X11 或 ELECTRON_OZONE_PLATFORM_HINT=auto。linux-arm64 Desktop 仍待后续。",
             "install.changelog": "更新日志",
             "install.cliTitle": "仅 CLI（@peer-agent/cli）",
             "install.cliBody": "公开安装包名：@peer-agent/cli。它是薄安装器——postinstall 会从匹配的 GitHub Release tag 下载平台二进制，然后 peer bin 启动 vendor 二进制。",

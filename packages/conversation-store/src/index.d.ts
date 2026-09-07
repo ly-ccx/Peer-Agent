@@ -79,7 +79,57 @@ export interface ConversationListParams {
   paginated?: boolean;
 }
 
+export interface InheritedBackgroundSnapshot {
+  schemaVersion: 1;
+  sourceConversationId: string;
+  sourceRevision: number;
+  capturedAt: string;
+  excludedFromMessageId: string | null;
+  coveredMessageIds: string[];
+  entries: { sourceMessageId: string; sourceRole: 'user' | 'assistant'; kind: 'summary' | 'text'; text: string }[];
+  missingItems: { sourceMessageId: string; reason: string }[];
+  characterCount: number;
+  status: 'full' | 'compacted' | 'partial';
+  requiresMissingConfirmation: boolean;
+  contentHash: string;
+}
+
+export interface SelectionChildRequest {
+  parentConversationId: string;
+  requestId: string;
+  capturedAt: string;
+  confirmMissing?: boolean;
+  selection: {
+    conversationId: string; messageId: string; blockId: 'content'; revision: number;
+    start: number; end: number; exactText: string; sourceTextHash: string;
+  };
+  runtimeState: { conversationId: string; contentRevision: number; status: 'idle' | 'running'; activeMessageId?: string | null };
+}
+
 export interface ConversationStore {
+  resolveSelectionReference?(request: { conversationId: string; selection: import('@peer-agent/protocol').SelectionRange; runtimeState: { conversationId: string; contentRevision: number; status: string; activeMessageId?: string } }): import('@peer-agent/protocol').SelectionReference;
+  /** Internal only: host must authorize and resolve runtimeState before calling. */
+  createSelectionChild?(request: SelectionChildRequest): ConversationMeta;
+  updateSelectionChildDraft?(id: string, draft: { text: string; referenceIds: string[] }): { text: string; references: Record<string, unknown>[] };
+  /** Internal metadata lookup; not a model-visible authorization boundary. */
+  listSelectionChildren?(parentConversationId: string): (ConversationMeta & { parentConversationId: string; hasDraft: boolean })[];
+  /** Internal only; authorized host supplies runtime attestation, not renderer. */
+  captureInheritedBackground?(id: string, options: {
+    expectedRevision: number;
+    capturedAt: string;
+    maxCharacters?: number;
+    runtimeState: { conversationId: string; contentRevision: number; status: 'idle' | 'running'; activeMessageId?: string | null };
+  }): { snapshotId: string; snapshot: InheritedBackgroundSnapshot };
+  /** Internal raw read. Caller must enforce parent-child access before use. */
+  readInheritedBackground?(snapshotId: string): InheritedBackgroundSnapshot;
+  /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
+  getPersistedConversationHistory?(id: string): {
+    conversationId: string;
+    contentRevision: number;
+    messages: Record<string, unknown>[];
+    excludedFromMessageId: string | null;
+    requiresRuntimeCheck: true;
+  } | null;
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];

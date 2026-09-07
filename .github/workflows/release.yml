@@ -6,15 +6,15 @@
 #
 # 链路（拆分 build / publish，消除并行发布竞态）：
 #   meta      → 从 tag 解析版本 / 通道 / releaseType / prerelease（单一事实源）
-#   build     → matrix（mac + win）各自构建 Desktop，electron-builder --publish never
-#               只产出安装包与更新清单（*-mac.yml / *.yml），不直接发布，
+#   build     → matrix（mac + win + linux）各自构建 Desktop，electron-builder --publish never
+#               只产出安装包与更新清单（*-mac.yml / *.yml / *-linux.yml），不直接发布，
 #               产物经 upload-artifact 上传。
 #   build-cli → 构建 CLI 归档（peer + peer-credential-helper 同目录），
 #               当前矩阵：darwin-arm64（macos-14）+ linux-x64（ubuntu-latest）。
 #               关键失败阻断整个 Release。
 #   release   → 单个 job 下载 Desktop + CLI 产物，一次性创建/更新同一个 GitHub Release。
 #
-# 为什么拆分：mac、win 两个 matrix job 若各自 --publish 到同一 tag，会并发
+# 为什么拆分：mac、win、linux 三个 matrix job 若各自 --publish 到同一 tag，会并发
 #   抢建 Release，导致同一 tag 出现多个 Release、产物被劈开（electron-builder
 #   + Actions matrix 的已知竞态）。集中到单个 release job 发布可彻底消除。
 #
@@ -102,6 +102,9 @@ jobs:
           - os: windows-latest
             platform: win
             ebflags: --win
+          - os: ubuntu-latest
+            platform: linux
+            ebflags: --linux --x64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -135,6 +138,12 @@ jobs:
         shell: bash
         run: node scripts/stamp-version.mjs "${{ needs.meta.outputs.version }}"
 
+      - name: Install Linux desktop build deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config fakeroot dpkg
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -142,6 +151,7 @@ jobs:
       # 从 target/release/ 拷贝 peer-credential-helper。
       # 注意（阶段一）：Windows arm64 安装包将打包 x64 native binaries（在 win-arm64
       # 上以模拟方式运行）；arm64-native 交叉编译留待阶段二。
+      # Linux Desktop 阶段一仅 x64；linux-arm64 Desktop 留待后续。
       - name: Build Rust native binaries
         run: cargo build --locked --release --package peer-credential-helper
 
@@ -149,7 +159,8 @@ jobs:
         run: pnpm --filter @peer-agent/desktop build
 
       # 只构建、不发布（--publish never）。electron-builder 仍会按通道语义生成
-      # 更新清单（beta-mac.yml / beta.yml 或 latest-mac.yml / latest.yml）。
+      # 更新清单（beta-mac.yml / beta.yml / beta-linux.yml 或
+      # latest-mac.yml / latest.yml / latest-linux.yml）。
       - name: Build (electron-builder, no publish)
         working-directory: apps/desktop
         shell: bash
@@ -173,6 +184,8 @@ jobs:
             dist-electron/*.dmg
             dist-electron/*.zip
             dist-electron/*.exe
+            dist-electron/*.AppImage
+            dist-electron/*.deb
             dist-electron/*.blockmap
             dist-electron/*.yml
           if-no-files-found: error
@@ -306,6 +319,13 @@ jobs:
           # CLI 归档必须在 Release 资产中（当前：darwin-arm64 + linux-x64）
           test -f release-assets/peer-darwin-arm64.tar.gz
           test -f release-assets/peer-linux-x64.tar.gz
+          # Desktop Linux 一等产物：AppImage + .deb + 更新清单
+          shopt -s nullglob
+          linux_appimages=(release-assets/*.AppImage)
+          linux_debs=(release-assets/*.deb)
+          test "${#linux_appimages[@]}" -ge 1
+          test "${#linux_debs[@]}" -ge 1
+          test -f release-assets/latest-linux.yml -o -f release-assets/beta-linux.yml
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

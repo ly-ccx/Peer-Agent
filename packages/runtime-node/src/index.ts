@@ -209,6 +209,7 @@ export {
 export {
   aggregateProgress,
   applyGoalTimingTransition,
+  canConsumeRequestedUserInput,
   createGoalPlanStore,
   derivePlanStatus,
   goalPlanIsSelfDriven,
@@ -253,6 +254,7 @@ export {
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
@@ -327,6 +329,7 @@ export {
   resolveGeminiCodeAssistProjectId,
   supportsSubscriptionQuota,
 } from './subscription-quota.mjs';
+export { createAccountUsageAdapters } from './account-usage-adapters.mjs';
 export {
   decryptQoderModelCache,
   extractEmbeddedAuthWasmBytes,
@@ -358,6 +361,7 @@ export {
   emptyModelResponseCorrection,
   emptyModelResponseError,
   hasEmptyWriteNarration,
+  hasIncompleteActionNarration,
   hasLiteralToolCallSyntax,
   hasUnsupportedToolClaim,
   shouldRetryNoToolResponse,

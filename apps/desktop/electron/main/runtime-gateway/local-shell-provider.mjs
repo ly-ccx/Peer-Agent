@@ -464,6 +464,8 @@ export function createLocalShellProvider({
         cwd: sessionResult.cwd,
         stdout: sessionResult.stdout,
         stderr: sessionResult.stderr,
+        conversationId: context.conversationId ?? null,
+        runInBackground: false,
         classification,
         startedAt: sessionResult.startedAt,
         completedAt: sessionResult.completedAt,
@@ -498,6 +500,8 @@ export function createLocalShellProvider({
     }
 
     const task = taskManager.runTask({
+      runInBackground,
+      conversationId: context.conversationId ?? null,
       toolCallId: call.toolCallId,
       command,
       cwd: classification.cwd,
@@ -516,7 +520,7 @@ export function createLocalShellProvider({
       }
     }
 
-    if (args.runInBackground === true) {
+    if (runInBackground) {
       if (context.signal) context.signal.removeEventListener('abort', stopOnAbort);
       if (typeof context.emitFollowUpExecution === 'function') {
         task.completion
@@ -537,7 +541,7 @@ export function createLocalShellProvider({
       }
       return {
         grant,
-        result: shellBackgroundStartedResult({ call, locale, classification, task }),
+        result: appendHookEvidence(shellBackgroundStartedResult({ call, locale, classification, task }), hookRecords, hookDecision?.behavior),
       };
     }
 
@@ -557,11 +561,29 @@ export function createLocalShellProvider({
     };
   }
 
-  async function stop(call, locale) {
+  async function stop(call, locale, context = {}) {
     const args = readShellArgs(call);
-    const stopResult = args.taskId || args.backgroundTaskId || args.toolCallId
-      ? taskManager.stopTask(args.taskId || args.backgroundTaskId || args.toolCallId)
-      : taskManager.stopActiveTask();
+    const targetId = args.taskId || args.backgroundTaskId || args.toolCallId;
+    const sourceId = context.conversationId ?? null;
+    if (targetId) {
+      const target = taskManager.listTasks().find((task) => task.taskId === targetId || task.toolCallId === targetId);
+      if (target && target.conversationId !== sourceId) {
+        const ask = context.requestPermission ?? approvalDecider;
+        const approval = typeof ask === 'function' ? await ask({
+          tool: 'shell_stop', capabilityId: 'local.shell.stop', call,
+          args: { taskId: target.taskId }, reason: 'cross_conversation_shell_stop',
+          scope: { taskId: target.taskId, sourceConversationId: target.conversationId, cwd: target.cwd },
+        }) : null;
+        if (approval?.granted !== true || context.signal?.aborted) {
+          return shellStopResult({ call, locale, stopResult: { stopped: false, reason: 'cross_conversation_shell_stop_denied' } });
+        }
+      }
+    }
+    const stopResult = targetId
+      ? taskManager.stopTask(targetId)
+      : sessionManager?.stopActiveCommand?.(sourceId)?.stopped
+        ? { stopped: true }
+        : taskManager.stopActiveTask(sourceId);
     return shellStopResult({ call, locale, stopResult });
   }
 
@@ -573,7 +595,7 @@ export function createLocalShellProvider({
       return { call, grant, result };
     }
     if (call.capabilityId === 'local.shell.stop') {
-      const { grant, result } = await stop(call, locale);
+      const { grant, result } = await stop(call, locale, context);
       return { call, grant, result };
     }
     return null;
@@ -590,6 +612,7 @@ export function createLocalShellProvider({
     stopActiveTask: taskManager.stopActiveTask,
     permissionReview,
     async dispose() {
+      await taskManager.dispose();
       if (sessionManager) await sessionManager.disposeAll();
     },
   };

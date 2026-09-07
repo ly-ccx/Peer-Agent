@@ -7,13 +7,15 @@
  * 不依赖 Electron，便于 node:test 覆盖。
  */
 
-export const NOTIFIABLE_STATUSES = Object.freeze(['completed', 'failed', 'waiting_user']);
+export const NOTIFIABLE_STATUSES = Object.freeze(['completed', 'failed', 'waiting_user', 'interrupted']);
 
 export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
   enabled: true,
   completed: true,
   failed: true,
   waitingUser: true,
+  /** ADR 73：中断挂起温和提醒，默认开。 */
+  interrupted: true,
   suppressWhenViewingSameConversation: true,
 });
 
@@ -28,6 +30,7 @@ export function normalizeNotificationSettings(value) {
     completed: raw.completed !== false,
     failed: raw.failed !== false,
     waitingUser: raw.waitingUser !== false,
+    interrupted: raw.interrupted !== false,
     suppressWhenViewingSameConversation: raw.suppressWhenViewingSameConversation !== false,
   };
 }
@@ -44,6 +47,7 @@ export function isNotifiableStatus(status) {
  * 状态是否发生「关注跃迁」。
  * - completed / failed：从非该状态进入
  * - waiting_user：从非 waiting_user 进入（同态重入不重复）
+ * - interrupted：从非 interrupted 进入（ADR 73：可恢复挂起，温和提醒不报失败）
  * - cancelled / 进度类：否
  *
  * @param {string|null|undefined} previousStatus
@@ -196,6 +200,10 @@ export function buildNotificationCopy(input = {}) {
       body: shortError ? `${taskTitle}: ${shortError}` : taskTitle,
     };
   }
+  if (status === 'interrupted') {
+    // ADR 73：执行中断是可恢复挂起而非失败，文案不使用「失败」恐吓词。
+    return { title: '已暂停，待恢复', body: taskTitle };
+  }
   if (status === 'waiting_user') {
     return {
       title: waitingTitleForReason(input.waitingReason),
@@ -265,6 +273,9 @@ export function decideTaskNotification(input = {}) {
   }
   if (status === 'waiting_user' && !settings.waitingUser) {
     return { ...base, action: 'skip', reason: 'settings_waiting_user_disabled' };
+  }
+  if (status === 'interrupted' && settings.interrupted === false) {
+    return { ...base, action: 'skip', reason: 'settings_interrupted_disabled' };
   }
 
   if (attentionVersion <= lastNotifiedVersion) {

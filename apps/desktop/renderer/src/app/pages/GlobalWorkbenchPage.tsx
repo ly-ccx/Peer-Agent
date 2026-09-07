@@ -5,7 +5,6 @@ import { prefersReducedMotion } from '../hooks/useMotionPresence';
 import type { OpenTaskOverviewItem } from '../state/resultDrawerAcceptance';
 import { formatDuration } from '../../chat/state/format';
 import { clientApi } from '../../clientApi';
-import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
 import { useTaskOverview } from '../hooks/useTaskOverview';
 import { ThreadList, type ThreadListNode } from './goalThreadGrouping';
 import {
@@ -60,20 +59,14 @@ export function GlobalWorkbenchPage({
   readonly onOpenPinnedConversation?: (id: string, workspacePath?: string | null) => void;
   readonly enabled?: boolean;
 }) {
-  const workbench = useWorkbenchOptional();
-  // 全局拉数：不传 workspacePath。Drawer 覆盖时暂停底页刷新。
-  const items = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
+  // Background runs are application status, not another user task card.
+  const overview = useTaskOverview({ enabled, workspacePath: null, includeTerminal: false });
+  const items = useMemo(() => overview.filter((item) => item.source !== 'shell_background'
+    && item.nextAction !== 'open_background_thread'), [overview]);
 
   const handleOpenItem = useCallback<OpenTaskOverviewItem>((item, options) => {
-    if (
-      item.source === 'shell_background' ||
-      item.nextAction === 'open_background_thread'
-    ) {
-      workbench?.openBackgroundThread(item.taskId);
-      return;
-    }
     onOpenItem?.(item, options);
-  }, [onOpenItem, workbench]);
+  }, [onOpenItem]);
 
   // 脉搏行只暴露 workspaceLabel（basename）。点击时用 workspaceList 反查 path，
   // 并先 workspaceSetActive，行为对齐侧栏点击工作区。

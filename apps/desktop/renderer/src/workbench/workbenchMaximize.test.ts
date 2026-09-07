@@ -70,6 +70,23 @@ describe('workbench maximize behavior', () => {
     assert.match(workbenchStyles, /\.workbench-panel--maximized[\s\S]*width:\s*100% !important/);
   });
 
+  it('keeps the Goal portal scroll chain unlayered so goal-panel.css cannot collapse the overflow port', () => {
+    const unlayeredWorkbench = withoutLayerBlocks(workbenchStyles);
+
+    assert.match(
+      unlayeredWorkbench,
+      /\.workbench-view--goal\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?display:\s*flex;/,
+    );
+    assert.match(
+      unlayeredWorkbench,
+      /\.workbench-view--goal > \.goal-panel-body\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/,
+    );
+    assert.match(
+      unlayeredWorkbench,
+      /\.workbench-view--goal\[data-active='false'\]\s*\{\s*display:\s*none;/,
+    );
+  });
+
   it('keeps the maximize grid unlayered so sidebar collapse and expand cannot pin the workbench width', () => {
     const unlayeredWorkbench = withoutLayerBlocks(workbenchStyles);
     const unlayeredSidebar = withoutLayerBlocks(sidebarStyles);

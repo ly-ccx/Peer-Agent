@@ -32,6 +32,43 @@ describe('createSkillStore', () => {
     assert.deepEqual(store.listSkills(), []);
   });
 
+  it('lists multiple workspace scopes without changing the active runtime workspace', () => {
+    const workspaceA = path.join(userDataPath, 'workspace-a');
+    const workspaceB = path.join(userDataPath, 'workspace-b');
+    writeSkill(workspaceA, 'alpha', '---\nname: Alpha\ndescription: A\n---\n# Alpha');
+    writeSkill(workspaceB, 'beta', '---\nname: Beta\ndescription: B\n---\n# Beta');
+    writeSkill(userDataPath, 'global-tool', '---\nname: Global\ndescription: G\n---\n# Global');
+
+    const store = createSkillStore({ userDataPath, workspacePath: workspaceA });
+    const listed = store.listSkills([workspaceA, workspaceB]);
+
+    assert.equal(store.getWorkspacePath(), workspaceA);
+    assert.deepEqual(
+      listed.map((skill) => [skill.skillId, skill.scope, skill.workspacePath]),
+      [
+        ['alpha', 'workspace', workspaceA],
+        ['beta', 'workspace', workspaceB],
+        ['global-tool', 'global', null],
+      ],
+    );
+  });
+
+  it('targets enablement and detail reads at an explicit workspace', () => {
+    const workspaceA = path.join(userDataPath, 'workspace-a');
+    const workspaceB = path.join(userDataPath, 'workspace-b');
+    writeSkill(workspaceA, 'shared', '---\nname: Shared A\ndescription: A\n---\n# A');
+    writeSkill(workspaceB, 'shared', '---\nname: Shared B\ndescription: B\n---\n# B');
+
+    const store = createSkillStore({ userDataPath, workspacePath: workspaceA });
+    store.disableSkill('shared', workspaceB);
+
+    const listed = store.listSkills([workspaceA, workspaceB]);
+    assert.equal(listed.find((skill) => skill.workspacePath === workspaceA)?.enabled, true);
+    assert.equal(listed.find((skill) => skill.workspacePath === workspaceB)?.enabled, false);
+    assert.equal(store.getSkillDetail('shared', workspaceB)?.name, 'Shared B');
+    assert.equal(store.getWorkspacePath(), workspaceA);
+  });
+
   it('loads a valid skill with frontmatter', () => {
     writeSkill(userDataPath, 'deploy-app', [
       '---',

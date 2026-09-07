@@ -1590,6 +1590,72 @@ test('recoverContextCheckpoints supersedes stale preparing checkpoint', () => {
   assert.equal(after.runner.contextCheckpoint, undefined);
 });
 
+test('recoverContextCheckpoints interrupts disk-running plans that have no live session', () => {
+  for (const runnerStatus of ['running', 'exploring']) {
+    const plan = store.createPlan({
+      conversationId: `conv-stale-${runnerStatus}`,
+      title: 'Stale running card',
+      goal: 'Should not look alive after restart',
+      tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+    });
+    store.recordApproval(plan.planId, { decision: 'approve' });
+    store.setPlanStatus(plan.planId, 'executing');
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: runnerStatus,
+      intent: 'execute',
+      phase: 'act',
+    });
+    const runner = createRunner({
+      runtime: { async runGoalTurn() { return {}; } },
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    const result = runner.recoverContextCheckpoints();
+    assert.ok(
+      result.recovered.some((item) => item.planId === plan.planId && item.action === 'interrupt_stale_runner'),
+      `expected interrupt_stale_runner for ${runnerStatus}`,
+    );
+    const after = store.getPlan(plan.planId);
+    assert.equal(after.runner.status, 'idle');
+    assert.equal(after.runner.interruption?.source, 'process_recovery');
+    assert.equal(after.runner.interruption?.reason, 'process_recovery');
+    assert.equal(after.runner.interruption?.recoverable, true);
+  }
+});
+
+test('recoverContextCheckpoints does not interrupt a live in-memory runner', async () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-live-session',
+    title: 'Live runner',
+    goal: 'Keep running while the process is alive',
+    tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+  });
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const runner = createRunner({
+    runtime: {
+      async runGoalTurn() {
+        await blocked;
+        return {};
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await runner.start(plan.planId);
+  const result = runner.recoverContextCheckpoints();
+  assert.ok(
+    !result.recovered.some((item) => item.planId === plan.planId && item.action === 'interrupt_stale_runner'),
+  );
+  const after = store.getPlan(plan.planId);
+  assert.equal(after.runner.status, 'running');
+  assert.equal(after.runner.interruption, undefined);
+  release();
+  await runner.waitForIdle?.(plan.planId).catch(() => {});
+});
+
 test('qualityReview: 有交付绑定且完成门通过后会写上 qualityReview', async () => {
   const plan = createApprovedPlan({
     deliveryBinding: {
@@ -1737,7 +1803,7 @@ test('start: 并发 kick 在 prepareIsolation 让出时只开一次泵', async (
   assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
 });
 
-test('verbal stop: 连续两轮纯文本且无推进才暂停（首轮宽限）', async () => {
+test('verbal stop: 连续三轮纯文本且无推进才暂停（前两轮纠偏）', async () => {
   const plan = createApprovedPlan();
   registerEvidenceRefs(plan.planId, ['artifact://verbal-1']);
   store.recordTaskEvidence(plan.planId, 't1', {
@@ -1757,17 +1823,17 @@ test('verbal stop: 连续两轮纯文本且无推进才暂停（首轮宽限）'
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(got.status, 'paused');
   assert.equal(got.runner.status, 'paused');
   assert.equal(got.runner.blockedReason, 'verbal_stop_no_remaining_progress');
   assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
-  // 首轮应记录宽限事件而不是直接暂停。
   const graceEvents = got.runTrace.events.filter(
     (event) => event.type === 'self_correction' && event.payload?.summaryCode === 'verbal_stop_grace',
   );
-  assert.equal(graceEvents.length, 1);
+  assert.equal(graceEvents.length, 2);
   assert.equal(graceEvents[0]?.payload?.turnNumber, 1);
+  assert.equal(graceEvents[1]?.payload?.turnNumber, 2);
 });
 
 test('verbal stop: 纯文本过渡回合先宽限继续，下一轮推进则不暂停', async () => {

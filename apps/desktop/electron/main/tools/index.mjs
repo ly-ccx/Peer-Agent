@@ -65,12 +65,15 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
   });
 }
 
+import { isSelectionDiscussion } from '../selection-background-context.mjs';
+
 export function createRuntimeToolProjection({
   mcpRegistry,
   skillStore,
   registry = createRuntimeToolRegistry({ mcpRegistry, skillStore }),
   projectionOptions = {},
 } = {}) {
+  if (isSelectionDiscussion()) registry = createToolRegistry({ tools: [] });
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
   const modelProjection = createModelToolProjectionFromRuntimeProjection(
     projection,

@@ -12,8 +12,9 @@ export function shouldHardBeginConversationLoad(input: {
   readonly loadStatus: ConversationLoadStatus | string;
   readonly messageCount: number;
 }): boolean {
-  // 已有可展示内容：不要 beginLoad 清空，走静默刷新。
-  if (input.loadStatus === 'ready' && input.messageCount > 0) {
+  // 桶已 ready：不要 beginLoad 清空。选区子会话首次发送会先 adopt 空草稿桶再写消息，
+  // 此时 messageCount 仍可能为 0；硬加载会把即将发出的回合冲掉。
+  if (input.loadStatus === 'ready') {
     return false;
   }
   return true;

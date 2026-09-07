@@ -115,8 +115,6 @@ interface WorkbenchState {
   filesTarget: WorkbenchFilesTarget | null;
   browserSession: BrowserSessionState;
   documentSession: DocumentSessionState;
-  /** 工作台点击后台线程卡片后，右侧 Threads 面板聚焦的 shell taskId。 */
-  focusThreadTaskId: string | null;
   /** 根工作台才承担全局 Browser 调度；会话抽屉只表达当前会话。 */
   layoutHost: 'root' | 'local';
   /** 后台 Task 已拉起、需要继续挂着 WebContents 的会话（不含当前前台会话）。 */
@@ -153,8 +151,7 @@ interface WorkbenchActions {
   ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
-  /** 展开右侧面板并打开后台线程 Tab；可选聚焦某个 shell taskId。 */
-  openBackgroundThread: (taskId?: string | null) => void;
+
   setBrowserSession: (next: BrowserSessionUpdater) => void;
   setBrowserSessionFor: (targetConversationId: string, next: BrowserSessionUpdater) => void;
   resolveBrowserSession: (targetConversationId: string | null) => BrowserSessionState;
@@ -227,13 +224,14 @@ export function WorkbenchProvider({
   const collapsedRef = useRef<boolean>(initial.sidebarOpen === false);
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
-  const [focusThreadTaskId, setFocusThreadTaskId] = useState<string | null>(null);
   const [preparedBrowserConversations, setPreparedBrowserConversations] = useState<string[]>([]);
-  const previousConversationIdRef = useRef<string | null>(conversationId);
+  // 用 state 而不是 ref 记上一帧会话：Strict Mode 会双调用 render，
+  // 若在第一次调用里改 ref，第二次会以为「已经切过」而丢掉即将离场的活页，
+  // 第一帧卸掉 webview，随后 setState 再挂上 → guest 整页重载。
+  const [trackedConversationId, setTrackedConversationId] = useState(conversationId);
   let livePreparedBrowserConversations = preparedBrowserConversations;
-  if (previousConversationIdRef.current !== conversationId) {
-    const leavingId = previousConversationIdRef.current;
-    previousConversationIdRef.current = conversationId;
+  if (trackedConversationId !== conversationId) {
+    const leavingId = trackedConversationId;
     if (leavingId) {
       const leavingKey = workbenchSessionKey(leavingId);
       const leavingSession = browserSessionMap[leavingKey]
@@ -244,9 +242,10 @@ export function WorkbenchProvider({
         leavingId,
         isBlankBrowserSession(leavingSession),
       );
-      if (livePreparedBrowserConversations.join('\0') !== preparedBrowserConversations.join('\0')) {
-        setPreparedBrowserConversations(livePreparedBrowserConversations);
-      }
+    }
+    setTrackedConversationId(conversationId);
+    if (livePreparedBrowserConversations.join('\0') !== preparedBrowserConversations.join('\0')) {
+      setPreparedBrowserConversations(livePreparedBrowserConversations);
     }
   }
 
@@ -462,17 +461,7 @@ export function WorkbenchProvider({
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
-  const openBackgroundThread = useCallback((taskId?: string | null) => {
-    const normalized =
-      typeof taskId === 'string' && taskId.trim() !== ''
-        ? taskId.replace(/^shell:/, '').trim()
-        : null;
-    setFocusThreadTaskId(normalized);
-    const key = workbenchSessionKey(conversationId);
-    setActiveTabMap((prev) => (prev[key] === 'threads' ? prev : { ...prev, [key]: 'threads' }));
-    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
-    schedulePersist();
-  }, [conversationId, schedulePersist]);
+
 
   const registerGoalSlot = useCallback((el: HTMLElement | null) => {
     setGoalSlotState((prev) => (prev === el ? prev : el));
@@ -635,7 +624,6 @@ export function WorkbenchProvider({
     filesTarget,
     browserSession,
     documentSession,
-    focusThreadTaskId,
     layoutHost,
     preparedBrowserConversations: livePreparedBrowserConversations,
     conversationId,
@@ -653,16 +641,15 @@ export function WorkbenchProvider({
     openFile,
     openDiff,
     revealInFiles,
-    openBackgroundThread,
     setBrowserSession,
     setBrowserSessionFor,
     resolveBrowserSession,
     setDocumentSession,
   }), [
     open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, focusThreadTaskId, layoutHost, livePreparedBrowserConversations, conversationId,
+    filesTarget, browserSession, documentSession, layoutHost, livePreparedBrowserConversations, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
-    setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, openBackgroundThread,
+    setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles,
     setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,
   ]);
 

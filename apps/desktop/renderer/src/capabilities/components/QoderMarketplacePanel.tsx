@@ -5,6 +5,7 @@ import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
 import { buildPageItems } from './marketplace-pagination';
+import { getMarketplaceWorkspaceTarget, getMarketplaceWorkspaceTargets, type MarketplaceWorkspaceTarget } from './marketplace-workspace-target';
 
 const PAGE_SIZE = 20;
 const EMPTY_PAGE: QoderMarketplacePage = {
@@ -83,7 +84,13 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const [installError, setInstallError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [installScope, setInstallScope] = useState<QoderInstallScope>('global');
-  const [hasWorkspace, setHasWorkspace] = useState(false);
+  const [workspaceTargets, setWorkspaceTargets] = useState<readonly MarketplaceWorkspaceTarget[]>([]);
+  const [workspaceTarget, setWorkspaceTarget] = useState<MarketplaceWorkspaceTarget | null>(null);
+  const hasWorkspace = workspaceTargets.length > 0;
+  const workspaceOptions = useMemo(
+    () => workspaceTargets.map((target) => ({ value: target.path, label: target.optionLabel })),
+    [workspaceTargets],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setPage(1); setDebouncedKeyword(keyword.trim()); }, 300);
@@ -95,11 +102,18 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     void clientApi.workspaceList()
       .then((value) => {
         if (cancelled) return;
-        const active = Array.isArray(value?.workspaces) && value.workspaces.filter((workspace: { readonly active?: boolean }) => workspace.active).length > 0;
-        setHasWorkspace(Boolean(active));
-        if (!active) setInstallScope('global');
+        const targets = getMarketplaceWorkspaceTargets(value);
+        const target = getMarketplaceWorkspaceTarget(value);
+        setWorkspaceTargets(targets);
+        setWorkspaceTarget(target);
+        if (!target) setInstallScope('global');
       })
-      .catch(() => { if (!cancelled) setHasWorkspace(false); });
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceTargets([]);
+          setWorkspaceTarget(null);
+        }
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -167,7 +181,12 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     setInstallError(null);
     setInstalling(entry.skillId);
     try {
-      await clientApi.installQoderSkill({ skillId: entry.skillId, scope: installScope, iconUrl: entry.iconUrl });
+      await clientApi.installQoderSkill({
+        skillId: entry.skillId,
+        scope: installScope,
+        workspacePath: installScope === 'workspace' ? workspaceTarget?.path : undefined,
+        iconUrl: entry.iconUrl,
+      });
       setInstalling(null);
       closeSelected();
       onInstalled?.();
@@ -315,27 +334,40 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                 <div className="skill-marketplace-install-row">
                   <div className="skill-marketplace-install-actions">
                     <span className="skill-marketplace-install-label">安装位置</span>
-                    <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={installScope === 'global'}
-                        className={installScope === 'global' ? 'is-active' : undefined}
-                        onClick={() => chooseInstallScope('global')}
-                      >
-                        全局
-                      </button>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={installScope === 'workspace'}
-                        className={installScope === 'workspace' ? 'is-active' : undefined}
-                        disabled={!hasWorkspace}
-                        title={hasWorkspace ? '安装到当前工作区 skills/' : '当前没有打开工作区'}
-                        onClick={() => chooseInstallScope('workspace')}
-                      >
-                        当前工作区
-                      </button>
+                    <div className="skill-marketplace-install-targets">
+                      <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={installScope === 'global'}
+                          className={installScope === 'global' ? 'is-active' : undefined}
+                          onClick={() => chooseInstallScope('global')}
+                        >
+                          全局
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={installScope === 'workspace'}
+                          className={installScope === 'workspace' ? 'is-active' : undefined}
+                          disabled={!hasWorkspace}
+                          onClick={() => chooseInstallScope('workspace')}
+                        >
+                          工作区
+                        </button>
+                      </div>
+                      {installScope === 'workspace' ? (
+                        <div className="skill-marketplace-workspace-picker">
+                          <Dropdown
+                            ariaLabel="选择安装工作区"
+                            value={workspaceTarget?.path ?? ''}
+                            options={workspaceOptions}
+                            placeholder="选择工作区"
+                            disabled={!hasWorkspace}
+                            onChange={(value) => setWorkspaceTarget(workspaceTargets.find((target) => target.path === value) ?? null)}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <button

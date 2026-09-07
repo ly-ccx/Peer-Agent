@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
+import { GlobalBackgroundTasksButton } from '../../../workbench/GlobalBackgroundTasksButton';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
 import { GitBranchGlyph, GitWorktreeGlyph } from '../gitGlyphs';
 
@@ -250,6 +251,7 @@ export function ChatHeader({
           localAccessLevel={localAccessLevel}
           onOpenTools={onOpenTools}
         />
+        <GlobalBackgroundTasksButton />
         {onFind ? (
           <button
             type="button"

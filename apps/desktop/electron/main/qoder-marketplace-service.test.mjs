@@ -118,8 +118,30 @@ test('install flows detail -> zip download -> installSkillFromZip with meta', as
   assert.equal(installs.length, 1);
   assert.equal(installs[0].options.source, 'qoder-marketplace');
   assert.equal(installs[0].options.scope, 'global');
+  assert.equal(installs[0].options.workspacePath, null);
   assert.equal(installs[0].options.meta.marketplace, 'qoder');
   assert.equal(installs[0].options.meta.skillId, 'official03866510');
+});
+
+test('install forwards an explicit workspace target', async () => {
+  const zipBuffer = Buffer.from('fake-zip');
+  const { client } = makeClient(LIST_PAYLOAD, DETAIL_PAYLOAD, { zipBuffer: zipBuffer.buffer });
+  let installOptions;
+  const service = createQoderMarketplaceService({
+    apiClient: client,
+    installSkillFromZip: async (_buffer, options) => {
+      installOptions = options;
+      return { skillId: 'deep-research' };
+    },
+  });
+  const result = await service.install({
+    skillId: 'official03866510',
+    scope: 'workspace',
+    workspacePath: '/Users/demo/other',
+  });
+  assert.equal(result.scope, 'workspace');
+  assert.equal(installOptions.scope, 'workspace');
+  assert.equal(installOptions.workspacePath, '/Users/demo/other');
 });
 
 test('install normalizes invalid scope to global', async () => {

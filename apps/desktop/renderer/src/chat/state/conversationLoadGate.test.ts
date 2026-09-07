@@ -18,7 +18,7 @@ describe('conversation load gate', () => {
     );
     assert.equal(
       shouldHardBeginConversationLoad({ loadStatus: 'ready', messageCount: 0 }),
-      true,
+      false,
     );
     assert.equal(
       shouldHardBeginConversationLoad({ loadStatus: 'ready', messageCount: 12 }),

@@ -35,8 +35,10 @@ const RISK_ORDER = Object.freeze({
 
 // 视为「计划已就绪、可执行」的计划状态。
 const EXECUTABLE_PLAN_STATUSES = Object.freeze(new Set(['approved', 'executing', 'completed']));
-// 终态计划状态：用于判定 intake 契约是否仍活跃（终态契约不再施加 intake 禁写闸门）。
-const GATE_TERMINAL_PLAN_STATUSES = Object.freeze(new Set(['completed', 'cancelled', 'failed']));
+// 明确终结的计划状态（用户取消或正常交付完成）：此类计划绝不再承接新的副作用。
+// 注：'failed' 在系统设计中属于可恢复的活跃计划（参见 goalPlanStore 的 ACTIVE_PLAN_STATUSES 及 canResumeFailedRun / re-arm 机制），
+// 不能将 failed 判定为终态，否则当计划因中断或单步失败而置为 failed 时，后续发起的修复/写操作会被门禁永久锁死（报 goal_plan_required_for_side_effect）。
+const GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES = Object.freeze(new Set(['completed', 'cancelled']));
 
 // ── goal 模式确定性 hooks·阶段一（见设计文档第七章）：只硬编码两条规则，不建通用框架。 ──
 
@@ -216,18 +218,18 @@ export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalP
   } catch {
     plans = [];
   }
-  // 只有非终态计划能承接新的副作用。历史 completed/cancelled/failed 计划不能被后续工作
-  // 借用；用户选择继续讨论时，application service 会先把同一计划重开为 executing。
-  const hasPlan = plans.some((plan) => !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status));
+  // 只有非终态计划能承接新的副作用。历史 completed/cancelled 计划不能被后续工作借用。
+  // 注意：failed 状态在系统语义中是可恢复的活跃计划（例如中断或未通过测试），不应视作终态，否则会永久锁死写操作通道。
+  const hasPlan = plans.some((plan) => !GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES.has(plan?.status));
   const hasApprovedPlan = plans.some(
     (plan) =>
-      !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status)
+      !GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES.has(plan?.status)
       && EXECUTABLE_PLAN_STATUSES.has(plan?.status),
   );
   // intake 判别阶段事实：存在一条 activation.kind==='intake' 且仍活跃（非终态）的契约。
   // intake 阶段只做只读/问答/澄清，闸门据此拒绝一切有副作用能力（见「方案乙」write-gate）。
   const intakeActive = plans.some(
-    (plan) => plan?.activation?.kind === 'intake' && !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status),
+    (plan) => plan?.activation?.kind === 'intake' && !GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES.has(plan?.status),
   );
   // 曾中断的 intake 契约（runner.interruption 标记）：目标曾明确（首答在推进/被执行），
   // 仅因流式中断而暂停。用户此时发「继续/新消息」= 接管续跑，不应再适用 intake 禁写闸门，
@@ -235,7 +237,7 @@ export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalP
   const interruptedIntakeActive = plans.some(
     (plan) =>
       plan?.activation?.kind === 'intake'
-      && !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status)
+      && !GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES.has(plan?.status)
       && typeof plan?.runner?.interruption === 'object'
       && plan.runner.interruption !== null,
   );
