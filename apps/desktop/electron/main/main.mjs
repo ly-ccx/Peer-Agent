@@ -3410,6 +3410,7 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
       ...provider,
       apiKey: credential.apiKey,
       accountId: credential.accountId,
+      sessionId: conversationId || streamId || undefined,
     });
     providerConfig = {
       provider: resolvedChannel.legacyProvider,

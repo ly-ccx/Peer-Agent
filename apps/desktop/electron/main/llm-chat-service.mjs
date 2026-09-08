@@ -1278,6 +1278,7 @@ export function createLlmChatService({
           apiKey: credential.apiKey,
           accountId: credential.accountId,
           oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
+          sessionId: conversationId || streamId || undefined,
         });
         const storedConversation = conversationId
           ? conversationStore?.getConversation?.(conversationId)

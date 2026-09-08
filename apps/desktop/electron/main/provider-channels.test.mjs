@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   CHANNEL_IDS,
+  OPENCODE_GO_SESSION_HEADER,
   listChannelDescriptors,
   resolveChannel,
   resolveModelCatalogRequestConfig,
@@ -657,6 +658,72 @@ describe('service templates', () => {
     });
     assert.equal(forced.wire, 'openai-responses');
     assert.equal(forced.endpoint, 'https://opencode.ai/zen/go/v1/responses');
+  });
+
+  it('adds x-opencode-session for every OpenCode Go wire and keeps other channels clean', () => {
+    const sessionId = 'conv-go-session';
+    const wires = [
+      { model: 'glm-5.2', wire: 'openai-chat' },
+      { model: 'gpt-5.6-luna', wire: 'openai-responses' },
+      { model: 'claude-opus-4-6', wire: 'anthropic-messages' },
+    ];
+    for (const item of wires) {
+      const resolved = resolveChannel({
+        channelId: CHANNEL_IDS.OPENCODE_GO,
+        authMethod: 'api_key',
+        apiKey: 'go-key',
+        model: item.model,
+        sessionId,
+      });
+      assert.equal(resolved.wire, item.wire);
+      assert.equal(resolved.headers[OPENCODE_GO_SESSION_HEADER], sessionId);
+    }
+
+    const fromConversationId = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+      conversationId: 'conv-from-id',
+    });
+    assert.equal(fromConversationId.headers[OPENCODE_GO_SESSION_HEADER], 'conv-from-id');
+
+    const missingA = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+    });
+    const missingB = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+    });
+    assert.match(missingA.headers[OPENCODE_GO_SESSION_HEADER], /^peer-[0-9a-f-]{36}$/i);
+    assert.match(missingB.headers[OPENCODE_GO_SESSION_HEADER], /^peer-[0-9a-f-]{36}$/i);
+    assert.notEqual(
+      missingA.headers[OPENCODE_GO_SESSION_HEADER],
+      missingB.headers[OPENCODE_GO_SESSION_HEADER],
+    );
+
+    const overridden = resolveChannel({
+      channelId: CHANNEL_IDS.OPENCODE_GO,
+      authMethod: 'api_key',
+      apiKey: 'go-key',
+      model: 'glm-5.2',
+      sessionId: 'auto-session',
+      customHeaders: { [OPENCODE_GO_SESSION_HEADER]: 'custom-session' },
+    });
+    assert.equal(overridden.headers[OPENCODE_GO_SESSION_HEADER], 'custom-session');
+
+    const openai = resolveChannel({
+      channelId: CHANNEL_IDS.OPENAI,
+      authMethod: 'api_key',
+      apiKey: 'sk-test',
+      sessionId,
+    });
+    assert.equal(openai.headers[OPENCODE_GO_SESSION_HEADER], undefined);
   });
 
   it('keeps DeepSeek model catalog on the OpenAI plane while chat stays on the Anthropic plane', () => {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
 
 export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
@@ -92,6 +94,8 @@ export const ALIYUN_BAILIAN_DEFAULT_MODEL = 'qwen3-coder-plus';
 export const OPENCODE_GO_OPENAI_BASE_URL = 'https://opencode.ai/zen/go/v1';
 export const OPENCODE_GO_ANTHROPIC_BASE_URL = 'https://opencode.ai/zen/go';
 export const OPENCODE_GO_DEFAULT_MODEL = 'gpt-5.6-luna';
+/** OpenCode Go requires this header on every request for routing / prompt cache. */
+export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session';
 /** @deprecated use OPENCODE_GO_DEFAULT_MODEL */
 export const OPENCODE_GO_OPENAI_DEFAULT_MODEL = OPENCODE_GO_DEFAULT_MODEL;
 /** @deprecated legacy dual-entry default */
@@ -1374,6 +1378,12 @@ function mergeHeaders(...parts) {
   return merged;
 }
 
+function resolveOpenCodeGoSessionId(config = {}) {
+  const explicit = String(config.sessionId || config.conversationId || '').trim();
+  if (explicit) return explicit;
+  return `peer-${randomUUID()}`;
+}
+
 function geminiModelPath(model) {
   const raw = String(model || '').trim();
   if (!raw) return 'models/gemini-2.5-pro';
@@ -1500,6 +1510,7 @@ export function resolveChannel(config = {}) {
     }),
     descriptor.headers,
     isOpenCodeGo && wire === 'anthropic-messages' ? buildClaudeCliIdentityHeaders() : {},
+    isOpenCodeGo ? { [OPENCODE_GO_SESSION_HEADER]: resolveOpenCodeGoSessionId(config) } : {},
     descriptor.customHeaders,
     customHeaders,
   );
