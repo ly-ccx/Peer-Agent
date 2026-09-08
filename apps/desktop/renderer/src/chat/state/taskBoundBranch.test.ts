@@ -205,8 +205,33 @@ test('env capsule shows Worktree when that is selected, and current workspace is
     '在 sept-1-changes',
   );
   assert.equal(
-    formatComposerEnvCapsule(draft, { locale: 'zh', preferredIsolation: true })?.label,
-    'Worktree · 从 sept-1-changes',
+    formatComposerEnvCapsule(draft, { locale: 'zh' })?.isolated,
+    false,
+  );
+  const draftWorktree = formatComposerEnvCapsule(draft, { locale: 'zh', preferredIsolation: true });
+  assert.equal(draftWorktree?.label, 'Worktree · 从 sept-1-changes');
+  assert.equal(draftWorktree?.isolated, true);
+
+  const boundNoTaskLine = planComposerGitChrome({
+    isDraft: false,
+    deliveryKnown: false,
+    workspaceBaseBranch: 'develop',
+    currentHead: '0.0.13',
+  }, { locale: 'zh' });
+  assert.equal(boundNoTaskLine.taskLine, null);
+  assert.equal(
+    formatComposerEnvCapsule(boundNoTaskLine, { locale: 'zh' })?.label,
+    '在 0.0.13',
+  );
+  const boundWorktree = formatComposerEnvCapsule(boundNoTaskLine, {
+    locale: 'zh',
+    preferredIsolation: true,
+  });
+  assert.equal(boundWorktree?.label, 'Worktree · 从 0.0.13');
+  assert.equal(boundWorktree?.isolated, true);
+  assert.equal(
+    formatComposerEnvCapsule(boundNoTaskLine, { locale: 'en', preferredIsolation: true })?.label,
+    'Worktree · from 0.0.13',
   );
 
   const isolated = planComposerGitChrome({
@@ -219,8 +244,14 @@ test('env capsule shows Worktree when that is selected, and current workspace is
       isolated: true,
     },
   }, { locale: 'zh' });
+  const liveIsolated = formatComposerEnvCapsule(isolated, {
+    locale: 'zh',
+    preferredIsolation: false,
+  });
+  assert.equal(liveIsolated?.label, 'Worktree · cli-drop-stream-buf');
+  assert.equal(liveIsolated?.isolated, true);
   assert.equal(
-    formatComposerEnvCapsule(isolated, { locale: 'zh', preferredIsolation: false })?.label,
+    formatComposerEnvCapsule(isolated, { locale: 'zh', preferredIsolation: true })?.label,
     'Worktree · cli-drop-stream-buf',
   );
 
@@ -277,10 +308,12 @@ test('env capsule shows Worktree when that is selected, and current workspace is
       isolated: false,
     },
   }, { locale: 'zh' });
-  assert.equal(
-    formatComposerEnvCapsule(unisolated, { locale: 'zh', preferredIsolation: true })?.label,
-    '在 cli-drop-stream-buf',
-  );
+  const liveUnisolated = formatComposerEnvCapsule(unisolated, {
+    locale: 'zh',
+    preferredIsolation: true,
+  });
+  assert.equal(liveUnisolated?.label, '在 cli-drop-stream-buf');
+  assert.equal(liveUnisolated?.isolated, false);
 });
 
 test('draft composer can pick a source branch until a session or task line is bound', () => {
