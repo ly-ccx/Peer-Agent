@@ -217,8 +217,19 @@
   flex: 1 1 auto;
 }
 
+/* Keep delivery metadata on its own line when the dock is narrow. */
+@container composer (max-width: 40rem) {
+  .goal-panel--docked .goal-panel-toggle-active {
+    flex-wrap: wrap;
+  }
+
+  .goal-panel--docked .goal-panel-toggle-summary {
+    flex-basis: calc(100% - 24px);
+  }
+}
+
 /* The text wrapper must shrink before the status, progress and chevron. */
-.goal-panel-toggle-active-text {
+.goal-panel-toggle-summary {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -227,7 +238,7 @@
   overflow: hidden;
 }
 
-.goal-panel-toggle-active-text > * {
+.goal-panel-toggle-summary > * {
   min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
@@ -235,7 +246,7 @@
   white-space: nowrap;
 }
 
-.goal-panel-toggle-active-text .goal-panel-current-activity {
+.goal-panel-toggle-summary .goal-panel-current-activity {
   max-width: 140px;
 }
 
