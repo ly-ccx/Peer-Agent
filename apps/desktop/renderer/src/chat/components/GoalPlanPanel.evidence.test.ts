@@ -117,6 +117,12 @@ test('GoalPlanPanel merge gate uses qualityReview instead of stale pending snaps
 
 test('GoalPlanPanel clears stale merge errors after delivery lands', async () => {
   const source = await readSource();
-  assert.match(source, /if \(handoffStatus === 'delivered'\) setLineError\(null\)/);
-  assert.match(source, /if \(delivered\) setLineError\(null\)/);
+  assert.match(
+    source,
+    /if \(handoffStatus === 'delivered' \|\| handoffStatus === 'delivering'\) setLineError\(null\)/,
+  );
+  assert.match(
+    source,
+    /if \(nextStatus === 'delivered' \|\| nextStatus === 'delivering'\) setLineError\(null\)/,
+  );
 });
