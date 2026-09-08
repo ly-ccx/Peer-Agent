@@ -37,8 +37,9 @@ test('result view stays a pure content component without acceptance logic', asyn
   assert.match(source, /evaluateAcceptanceCloseGate/);
   assert.match(source, /gitDiffRange/);
   assert.match(source, /建议合入/);
-  assert.match(source, /goalPlansOpenSite/);
-  assert.match(source, /打开现场/);
+  assert.doesNotMatch(source, /goalPlansOpenSite/);
+  assert.doesNotMatch(source, /打开现场/);
+  assert.doesNotMatch(source, /在编辑器打开/);
   assert.doesNotMatch(source, /goalPlansExportEvidence/);
   assert.doesNotMatch(source, /导出依据/);
   assert.match(source, /conversation-result-view__diff/);

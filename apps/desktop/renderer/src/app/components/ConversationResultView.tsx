@@ -349,24 +349,6 @@ export function ConversationResultView({
                 : null}
             </p>
           ) : null}
-          {plan ? (
-            <div className="conversation-result-view__site-actions">
-              <button
-                type="button"
-                className="conversation-result-view__site-action"
-                onClick={() => void clientApi.goalPlansOpenSite({ planId: plan.planId, mode: 'reveal' })}
-              >
-                {isZh ? '打开现场' : 'Reveal site'}
-              </button>
-              <button
-                type="button"
-                className="conversation-result-view__site-action"
-                onClick={() => void clientApi.goalPlansOpenSite({ planId: plan.planId, mode: 'editor' })}
-              >
-                {isZh ? '在编辑器打开' : 'Open in editor'}
-              </button>
-            </div>
-          ) : null}
           {hasGitChange ? (
             rangeDiff?.diffText ? (
               <div className="conversation-result-view__diff-text">

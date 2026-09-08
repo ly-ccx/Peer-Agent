@@ -1648,7 +1648,6 @@ const PlanCard = memo(function PlanCard({
     && plan.status !== 'completed'
     && plan.status !== 'cancelled'
     && plan.status !== 'failed';
-  const canOpenSite = hasDeliveryTarget(plan) || isolated;
   const canDiscardLine = hasTaskLine(plan) && plan.status !== 'executing';
   const lineDisabled = busy || isStreaming || lineBusy;
 
@@ -1664,18 +1663,6 @@ const PlanCard = memo(function PlanCard({
       setLineError(error instanceof Error ? error.message : String(error));
     } finally {
       setLineBusy(false);
-    }
-  }, [isZh, plan.planId]);
-
-  const openSite = useCallback(async (mode: 'reveal' | 'editor') => {
-    setLineError(null);
-    try {
-      const result = await clientApi.goalPlansOpenSite({ planId: plan.planId, mode });
-      if (result && result.ok === false) {
-        setLineError(isZh ? '打不开这条任务的现场。' : 'Could not open the task site.');
-      }
-    } catch (error) {
-      setLineError(error instanceof Error ? error.message : String(error));
     }
   }, [isZh, plan.planId]);
 
@@ -1850,7 +1837,7 @@ const PlanCard = memo(function PlanCard({
               ) : null}
             </div>
           ) : null}
-          {canIsolate || canOpenSite || canDiscardLine ? (
+          {canIsolate || canDiscardLine ? (
             <div className="goal-plan-delivery-actions">
               {canIsolate ? (
                 <button
@@ -1861,26 +1848,6 @@ const PlanCard = memo(function PlanCard({
                 >
                   {isZh ? '隔离执行' : 'Isolate'}
                 </button>
-              ) : null}
-              {canOpenSite ? (
-                <>
-                  <button
-                    type="button"
-                    className="goal-plan-delivery-action"
-                    disabled={lineDisabled}
-                    onClick={() => void openSite('reveal')}
-                  >
-                    {isZh ? '打开现场' : 'Reveal site'}
-                  </button>
-                  <button
-                    type="button"
-                    className="goal-plan-delivery-action"
-                    disabled={lineDisabled}
-                    onClick={() => void openSite('editor')}
-                  >
-                    {isZh ? '在编辑器打开' : 'Open in editor'}
-                  </button>
-                </>
               ) : null}
               {canDiscardLine ? (
                 <button
