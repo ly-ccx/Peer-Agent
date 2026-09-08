@@ -51,6 +51,16 @@ test('composer chrome keeps Goal left and environment right, or Goal centered wi
   );
 });
 
+test('narrow chrome stacks Worktree using the composer container and real summary class', () => {
+  assert.match(styles, /container-name:\s*composer/);
+  assert.match(styles, /@container composer \(max-width: 40rem\)[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
+  const goalStyles = readFileSync(new URL('../styles/goal-panel.css', import.meta.url), 'utf8');
+  const goalSource = readFileSync(new URL('./GoalPlanPanel.tsx', import.meta.url), 'utf8');
+  assert.match(goalSource, /className="goal-panel-toggle-summary"/);
+  assert.match(goalStyles, /\.goal-panel-toggle-summary > \* \{[^}]*text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(goalStyles, /goal-panel-toggle-active-text/);
+});
+
 test('env capsule pins to the right chrome column', () => {
   assert.match(
     styles,
