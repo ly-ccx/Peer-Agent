@@ -135,6 +135,9 @@ describe('goal delivery handoff', () => {
     assert.equal(existsSync(path.join(repository, 'user-dirty.txt')), true);
     assert.equal(git(['show', 'main:delivered.txt']), 'from isolation');
     assert.equal(existsSync(path.join(repository, 'delivered.txt')), false);
+    const parents = git(['rev-list', '--parents', '-n', '1', 'main']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.equal(git(['merge-base', prepared.deliveryBinding.taskBranch, 'main']), git(['rev-parse', prepared.deliveryBinding.taskBranch]));
   });
 
   it('rebases onto a moved target branch and still delivers without changing the user checkout', async () => {
@@ -251,7 +254,9 @@ describe('goal delivery handoff', () => {
     assert.equal(first, second);
     const next = await first;
     assert.equal(next.deliveryHandoff.status, 'delivered');
-    assert.equal(git(['rev-list', '--count', 'main']), '2');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'main']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.equal(git(['merge-base', prepared.deliveryBinding.taskBranch, 'main']), git(['rev-parse', prepared.deliveryBinding.taskBranch]));
   });
 
   it('fast-forwards a clean checkout that occupies the target branch', async () => {
@@ -268,6 +273,9 @@ describe('goal delivery handoff', () => {
     assert.equal(readFileSync(path.join(repository, 'landed.txt'), 'utf8'), 'from isolation\n');
     assert.equal(git(['status', '--porcelain']), '');
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.match(git(['log', '-1', '--pretty=%s']), /Merge task line/);
   });
 
   it('records delivered for an empty shell even when the occupied target checkout is dirty', async () => {
@@ -289,7 +297,7 @@ describe('goal delivery handoff', () => {
   it('fast-forwards when an untracked file in a collapsed directory byte-matches the task change', async () => {
     // 复现 bug：占用目标分支时，未跟踪目录会被 `status --porcelain` 折叠成目录条目（demo/），
     // 旧逻辑对目录条目碰撞保守挡 target_checkout_dirty，即使内容与任务线逐字节一致。
-    // 修复后（-uall 展开到单文件）应比对内容、暂移同内容碰撞，再 ff-only 合入。
+    // 修复后（-uall 展开到单文件）应比对内容、暂移同内容碰撞，再 --no-ff 合入。
     const content = '<!doctype html><title>version map</title>\n';
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
@@ -823,7 +831,7 @@ describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
     return name;
   }
 
-  it('keep_taskline：暂移工作区版、ff-only 合入任务线版，delivered', async () => {
+  it('keep_taskline：暂移工作区版、--no-ff 合入任务线版，delivered', async () => {
     const task = makeConflictTask('task/kt', 'demo/p.html', 'task version\n');
     mkdirSync(path.join(repository, 'demo'), { recursive: true });
     writeFileSync(path.join(repository, 'demo', 'p.html'), 'user local\n'); // 未跟踪、内容不同
@@ -833,6 +841,8 @@ describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
     assert.equal(readFileSync(path.join(repository, 'demo', 'p.html'), 'utf8'), 'task version\n');
     assert.equal(readFileSync(path.join(repository, 'demo', 'p.html.worktree-backup'), 'utf8'), 'user local\n');
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
   });
 
   it('keep_both：任务线版另存为 .taskline，工作区版保留，不合并', async () => {
