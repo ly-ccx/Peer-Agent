@@ -18,8 +18,29 @@ import {
 
 // 订阅(codex 平面)权威模型清单。按"新→旧"排列,第一项即默认"最新"。
 // label 用 ChatGPT 客户端展示名,id 用 codex 端点接受的小写标识。
+const SUBSCRIPTION_CONTEXT_OPTIONS = Object.freeze([
+  Object.freeze({
+    id: 'contextTier',
+    label: '上下文',
+    kind: 'select',
+    defaultValue: 400_000,
+    choices: Object.freeze([
+      Object.freeze({ value: 400_000, label: '400K', contextWindow: 400_000, inputTokenLimit: 400_000 }),
+      Object.freeze({ value: 1_000_000, label: '1M', contextWindow: 1_000_000, inputTokenLimit: 1_000_000 }),
+    ]),
+  }),
+]);
+
+function withSubscriptionContextOptions(metadata) {
+  return {
+    ...metadata,
+    contextWindow: SUBSCRIPTION_CONTEXT_OPTIONS[0].defaultValue,
+    modelOptions: SUBSCRIPTION_CONTEXT_OPTIONS,
+  };
+}
+
 const SUBSCRIPTION_CATALOG = [
-  // GPT-6 Astra 官方能力与价格；ChatGPT OAuth 订阅上下文按产品约束沿用 272k。
+  // ChatGPT OAuth 订阅统一提供 400K / 1M 两档；模型自身输出上限仍独立保留。
   {
     id: 'gpt-6-astra',
     label: 'GPT-6 Astra',
@@ -127,6 +148,10 @@ const SUBSCRIPTION_CATALOG = [
 // 订阅默认模型(新建订阅 / 迁移旧值时落到此)。
 const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-6-astra';
 
+for (let index = 0; index < SUBSCRIPTION_CATALOG.length; index += 1) {
+  SUBSCRIPTION_CATALOG[index] = withSubscriptionContextOptions(SUBSCRIPTION_CATALOG[index]);
+}
+
 // 合法订阅模型 id 集合,用于迁移时判定旧值是否仍有效。
 const SUBSCRIPTION_MODEL_IDS = new Set(SUBSCRIPTION_CATALOG.map((m) => m.id));
 const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.id, m]));
@@ -213,6 +238,18 @@ function sortNewestFirst(models) {
 
 function getSubscriptionModelMetadata(id) {
   return SUBSCRIPTION_MODEL_METADATA.get(id) || null;
+}
+
+function resolveSubscriptionContextWindow(metadata, values = {}) {
+  const definition = metadata?.modelOptions?.find(
+    (option) => option?.id === 'contextTier' && option.kind === 'select',
+  );
+  if (!definition) return metadata?.contextWindow;
+  const selectedValue = values?.contextTier ?? definition.defaultValue;
+  const choice = definition.choices?.find((candidate) => candidate.value === selectedValue)
+    || definition.choices?.find((candidate) => candidate.value === definition.defaultValue)
+    || definition.choices?.[0];
+  return choice?.contextWindow ?? metadata?.contextWindow;
 }
 
 /**
@@ -455,6 +492,7 @@ export {
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
+  resolveSubscriptionContextWindow,
   isChatModel,
   isLikelyChatModel,
   normalizeApiModelList,

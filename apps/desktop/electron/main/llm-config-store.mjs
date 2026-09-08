@@ -46,6 +46,7 @@ import {
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
+import { resolveSubscriptionContextWindow } from './provider-adapters/openai-model-catalog.mjs';
 import {
   fetchModelsDevRegistry,
   fillMissingPricingFromRegistry,
@@ -386,7 +387,6 @@ export function createLlmConfigStore({
     if (!metadata) return false;
     let changed = false;
     const fields = [
-      'contextWindow',
       'maxOutputTokens',
       'inputPrice',
       'outputPrice',
@@ -422,6 +422,16 @@ export function createLlmConfigStore({
     }
     if (metadata.supportsReasoning !== undefined && item.supportsReasoning !== metadata.supportsReasoning) {
       item.supportsReasoning = metadata.supportsReasoning;
+      changed = true;
+    }
+    const nextModelOptions = normalizeModelOptions(metadata.modelOptions);
+    if (JSON.stringify(item.modelOptions) !== JSON.stringify(nextModelOptions)) {
+      item.modelOptions = nextModelOptions;
+      changed = true;
+    }
+    const nextContextWindow = resolveSubscriptionContextWindow(metadata, item.modelOptionValues);
+    if (Number.isFinite(nextContextWindow) && item.contextWindow !== nextContextWindow) {
+      item.contextWindow = nextContextWindow;
       changed = true;
     }
     const effortLevels = Array.isArray(metadata.reasoningEffortLevels)
@@ -1103,9 +1113,11 @@ export function createLlmConfigStore({
       enabled: true,
       isDefault: items.length === 0,
       createdAt: new Date().toISOString(),
-      contextWindow: isSubscription ? subscriptionMetadata?.contextWindow : (contextWindow || undefined),
+      contextWindow: isSubscription
+        ? resolveSubscriptionContextWindow(subscriptionMetadata, normalizeModelOptionValues(modelOptionValues))
+        : (contextWindow || undefined),
       maxOutputTokens: isSubscription ? subscriptionMetadata?.maxOutputTokens : (maxOutputTokens || undefined),
-      modelOptions: normalizeModelOptions(modelOptions),
+      modelOptions: normalizeModelOptions(isSubscription ? subscriptionMetadata?.modelOptions : modelOptions),
       modelOptionValues: normalizeModelOptionValues(modelOptionValues),
       inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
       outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
