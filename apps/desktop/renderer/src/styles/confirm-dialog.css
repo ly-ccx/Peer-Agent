@@ -33,17 +33,20 @@
   }
 
   .pa-confirm-input {
+    appearance: none;
+    -webkit-appearance: none;
     width: 100%;
     margin-top: 4px;
     box-sizing: border-box;
     padding: 8px 10px;
     border-radius: var(--ui-radius-row);
     border: 1px solid var(--pa-border-subtle, rgba(15, 23, 42, 0.12));
-    background: var(--surface-vellum, #fff);
+    background: var(--za-control-fill);
     color: var(--pa-text-primary);
     font-size: 13px;
     line-height: 1.4;
     outline: none;
+    color-scheme: inherit;
   }
 
   .pa-confirm-input:focus {
@@ -102,6 +105,8 @@
   }
 
   .pa-confirm-btn {
+    appearance: none;
+    -webkit-appearance: none;
     min-width: 72px;
     padding: 7px 16px;
     border-radius: var(--ui-radius-row);
@@ -110,6 +115,7 @@
     font-weight: 500;
     line-height: 1.4;
     cursor: pointer;
+    color-scheme: inherit;
     transition:
       background var(--za-motion-fast, 120ms) var(--za-ease-out, ease),
       border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease),
@@ -128,8 +134,8 @@
   }
 
   .pa-confirm-btn.primary {
-    background: var(--pa-text-primary);
-    color: var(--pa-surface-card);
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
   }
 
   .pa-confirm-btn.primary:hover:not(:disabled) {
