@@ -5064,6 +5064,42 @@ button.chat-header-cap-item:focus-visible {
 
 .composer-home-model-slot {
   min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+/* Keep the send button outside the wrapping controls' width budget. */
+.composer-home-action-left {
+  flex: 1 1 auto;
+}
+
+.composer-home-model-slot .token-usage-wrap {
+  max-width: 100%;
+}
+
+.composer-home-model-slot .token-usage {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.composer-home-model-slot .token-usage > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composer-home-model-slot .composer-model-dropdown {
+  max-width: min(200px, 100%);
+}
+
+.composer-home-model-slot .pa-cascading-trigger {
+  max-width: 100%;
+}
+
+.composer-home-model-slot .token-usage-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-home-model-slot .token-usage-wrap,
