@@ -68,6 +68,16 @@ export function shouldStickMessageRailToLatest(
 }
 
 /**
+ * 虚拟列表测高完成后是否立刻贴底。
+ * 视口内/下方增高必须跟 spacer flush 落在同一帧；用户已上滑则不要抢滚动。
+ */
+export function shouldStickAfterVirtualMeasurement(input: {
+  readonly currentlyFollowing: boolean;
+}): boolean {
+  return input.currentlyFollowing;
+}
+
+/**
  * 滚动事件后如何维护 stick-to-bottom / follow。
  *
  * 关键：

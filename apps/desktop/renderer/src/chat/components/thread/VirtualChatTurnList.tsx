@@ -38,6 +38,7 @@ interface VirtualChatTurnListProps {
   ) => void;
   readonly onRegenerate: (messageIndex: number) => void;
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
+  readonly onMeasured?: (index: number) => void;
 }
 
 const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualChatTurnListProps>(
@@ -56,6 +57,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
     onBeginEdit,
     onRegenerate,
     onPreviewImage,
+    onMeasured,
   }, ref) {
     const {
       range,
@@ -68,6 +70,7 @@ const VirtualChatTurnListImpl = forwardRef<VirtualChatTurnListHandle, VirtualCha
       count: turns.length,
       scrollRef,
       enabled,
+      onMeasured,
     });
 
     useImperativeHandle(ref, () => ({

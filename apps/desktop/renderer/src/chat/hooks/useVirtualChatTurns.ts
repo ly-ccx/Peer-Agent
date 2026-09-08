@@ -14,6 +14,11 @@ interface UseVirtualChatTurnsOptions {
   readonly count: number;
   readonly scrollRef: React.RefObject<HTMLDivElement | null>;
   readonly enabled: boolean;
+  /**
+   * 视口内/下方 turn 完成测高并 flush spacer 后立刻回调。
+   * 贴底滚动必须跟这次 flush 落在同一帧，否则流式增高会先窜再被拉回。
+   */
+  readonly onMeasured?: (index: number) => void;
 }
 
 export interface ScrollToTurnOptions {
@@ -68,7 +73,13 @@ function rangesEqual(left: VirtualTurnRange, right: VirtualTurnRange): boolean {
  * - 仅当虚拟窗口索引 / padding / totalSize 真正变化时才 setState（rangeChanged）。
  * - 测量结果按 index 缓存；ResizeObserver 只观察当前窗口中的少量节点。
  */
-export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: UseVirtualChatTurnsOptions) {
+export function useVirtualChatTurns({
+  ownerKey,
+  count,
+  scrollRef,
+  enabled,
+  onMeasured,
+}: UseVirtualChatTurnsOptions) {
   const measuredSizesRef = useRef(new Map<number, number>());
   const observersRef = useRef(new IndexedResourceRegistry<HTMLElement, { dispose(): void }>());
   const forcedIndexReleaseRef = useRef(createFrameCoalescer({
@@ -126,6 +137,8 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
   countRef.current = count;
   const syncRangeRef = useRef(syncRange);
   syncRangeRef.current = syncRange;
+  const onMeasuredRef = useRef(onMeasured);
+  onMeasuredRef.current = onMeasured;
   const ownerKeyRef = useRef(ownerKey);
 
   const refreshMountedMeasurements = useCallback(() => {
@@ -253,6 +266,7 @@ export function useVirtualChatTurns({ ownerKey, count, scrollRef, enabled }: Use
       // 上方补偿仍走 rAF 合并，避免滚动惯性期间回跳。
       if (!isAboveViewport) {
         measurementFlushRef.current.flush();
+        onMeasuredRef.current?.(index);
       }
     };
 

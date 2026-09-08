@@ -179,6 +179,7 @@ import {
   planThreadScrollAfterMessagesChange,
   planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
+  shouldStickAfterVirtualMeasurement,
 } from '../state/threadScrollPolicy';
 import {
   conversationHomeGreeting,
@@ -974,6 +975,13 @@ export function ChatSurface({
     // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
     updateVirtualViewport();
   }, [saveThreadScrollSnapshot, updateCurrentTurnContext, updateVirtualViewport]);
+
+  const handleVirtualTurnMeasured = useCallback((_index: number) => {
+    if (!shouldStickAfterVirtualMeasurement({ currentlyFollowing: shouldAutoScrollRef.current })) {
+      return;
+    }
+    scrollThreadToBottom('auto');
+  }, [scrollThreadToBottom]);
 
   const threadScrollCoalescerRef = useRef(createFrameCoalescer({
     request: (callback) => requestAnimationFrame(callback),
@@ -2872,6 +2880,7 @@ export function ChatSurface({
             i18n={i18n}
             enabled={virtualizeChatTurns}
             scrollRef={threadRef}
+            onMeasured={handleVirtualTurnMeasured}
             onMessageAction={stableHandleMessageAction}
             onBeginEdit={stableBeginComposerEdit}
             onRegenerate={stableHandleRegenerate}

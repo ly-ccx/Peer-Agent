@@ -12,6 +12,11 @@
     max-width: 100%;
   }
 
+  /* 流式换段时浏览器默认 margin 会叠在 grid gap 上，卡片底边距忽高忽低。 */
+  .markdown-content > *:last-child {
+    margin-bottom: 0;
+  }
+
   .markdown-content h3,
   .markdown-content h4,
   .markdown-content h5,
@@ -32,6 +37,7 @@
   }
 
   .markdown-content p {
+    @apply m-0;
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
