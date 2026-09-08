@@ -1643,6 +1643,9 @@ const PlanCard = memo(function PlanCard({
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
+  useEffect(() => {
+    if (handoffStatus === 'delivered') setLineError(null);
+  }, [handoffStatus]);
   const canIsolate = hasDeliveryTarget(plan)
     && !isolated
     && plan.status !== 'completed'
@@ -1699,9 +1702,12 @@ const PlanCard = memo(function PlanCard({
       const reason = next && typeof next === 'object'
         ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
         : null;
+      const delivered = next && typeof next === 'object'
+        && next.deliveryHandoff?.status === 'delivered';
       const stopped = next && typeof next === 'object'
         && next.deliveryHandoff?.status === 'stopped';
-      if (stopped && reason) setLineError(reason);
+      if (delivered) setLineError(null);
+      else if (stopped && reason) setLineError(reason);
     } catch (error) {
       setLineError(error instanceof Error ? error.message : String(error));
     } finally {

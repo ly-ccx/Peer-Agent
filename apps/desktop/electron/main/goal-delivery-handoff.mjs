@@ -640,15 +640,17 @@ export function createGoalDeliveryHandoff({
   function handoffGateReason(plan) {
     if (!plan || typeof plan !== 'object') return 'missing_plan';
     if (!isCompleted(plan)) return 'plan_not_completed';
-    if (!isQualityReady(plan)) return 'quality_review_pending';
     const binding = plan.deliveryBinding;
     if (!binding) return 'missing_binding';
     const taskBranch = trim(binding.taskBranch);
     const targetBranch = mergeTargetFor(plan);
     if (!taskBranch || !targetBranch) return 'missing_binding';
+    // 非隔离计划没有合回动作：完成即直接落在当前仓。
+    // 质量自检未过只拦住真正的 Worktree 合入，不能把 direct 计划误写成 quality_review_pending。
     if (!(binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath)))) {
       return 'missing_worktree';
     }
+    if (!isQualityReady(plan)) return 'quality_review_pending';
     return null;
   }
 
@@ -820,6 +822,10 @@ export function createGoalDeliveryHandoff({
         });
       }
       if (retry) {
+        const binding = plan.deliveryBinding || {};
+        const isolated = binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath));
+        // 非隔离计划没有合回动作：点「合入」不能写成质量自检未过 / 缺绑定 / 缺现场。
+        if (!isolated) return Promise.resolve(plan);
         const reason = handoffGateReason(plan);
         if (reason) return Promise.resolve(stopPlan(plan, reason));
       }

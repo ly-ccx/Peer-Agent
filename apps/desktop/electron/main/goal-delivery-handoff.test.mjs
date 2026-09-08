@@ -400,12 +400,32 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', 'main']), git(['merge-base', 'main', 'PeerAgent/task-1']));
   });
 
-  it('retryHandoff writes quality_review_pending instead of staying silent', async () => {
+  it('retryHandoff on an unisolated Goal does not write quality_review_pending', async () => {
     const store = createStore(boundPlan({ qualityReview: undefined }));
     const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const automatic = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(completed);
     assert.equal(automatic.deliveryHandoff, undefined);
 
+    const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoff(completed);
+    assert.equal(retried.deliveryHandoff, undefined);
+  });
+
+  it('retryHandoff still writes quality_review_pending for an isolated Goal', async () => {
+    const store = createStore(boundPlan({
+      qualityReview: undefined,
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        worktreePath: path.join(worktrees, 'isolated-quality'),
+        taskBranch: 'PeerAgent/task-quality',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    mkdirSync(path.join(worktrees, 'isolated-quality'), { recursive: true });
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoff(completed);
     assert.equal(retried.deliveryHandoff.status, 'stopped');
     assert.equal(retried.deliveryHandoff.stoppedReason, 'quality_review_pending');

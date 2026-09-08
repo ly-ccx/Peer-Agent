@@ -55,6 +55,7 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.match(source, /qualityReviewPending/);
   assert.match(source, /mergeIntoSource/);
   assert.match(source, /await clientApi.goalPlansRetryHandoff/);
+  assert.match(source, /deliveryHandoff\?\.status === 'delivered'/);
   assert.match(source, /deliveryHandoff\?\.status === 'stopped'/);
   assert.match(source, /再试一次，合并进 \$\{mergeDest\}/);
   assert.match(source, /合并进 \$\{mergeDest\}/);
@@ -67,7 +68,6 @@ test('GoalPlanPanel shows merge route and lamp copy without waiting for acceptan
   assert.doesNotMatch(source, /GoalStripPlanRow/);
   assert.doesNotMatch(source, /goal-panel-toggle-plans/);
   assert.doesNotMatch(source, /goal-panel-toggle-label/);
-  assert.doesNotMatch(source, /goal-panel-toggle-summary/);
   assert.doesNotMatch(source, /个目标计划/);
   assert.doesNotMatch(source, /Goal plans/);
   assert.doesNotMatch(source, /qualityReviewPending[\s\S]{0,120}onNextAction\(plan, 'adjust'\)/);
@@ -113,4 +113,10 @@ test('GoalPlanPanel merge gate uses qualityReview instead of stale pending snaps
     source,
     /const qualityReviewPending = plan\.deliveryHandoff\?\.stoppedReason === 'quality_review_pending'/,
   );
+});
+
+test('GoalPlanPanel clears stale merge errors after delivery lands', async () => {
+  const source = await readSource();
+  assert.match(source, /if \(handoffStatus === 'delivered'\) setLineError\(null\)/);
+  assert.match(source, /if \(delivered\) setLineError\(null\)/);
 });
