@@ -48,7 +48,7 @@ test('subscription catalog: default is newest (gpt-6-astra) and first entry', ()
 test('subscription catalog includes gpt-5.5 pricing and context metadata', () => {
   const model = getSubscriptionModelMetadata('gpt-5.5');
   assert.ok(model);
-  assert.equal(model.contextWindow, 272_000);
+  assert.equal(model.contextWindow, 400_000);
   assert.equal(model.maxOutputTokens, 128_000);
   assert.equal(model.inputPrice, 5);
   assert.equal(model.cacheReadPrice, 0.5);
@@ -63,7 +63,7 @@ test('GPT-6 Astra uses subscription context with official capability and pricing
   const model = getSubscriptionModelMetadata('gpt-6-astra');
   assert.ok(model);
   assert.equal(model.label, 'GPT-6 Astra');
-  assert.equal(model.contextWindow, 272_000);
+  assert.equal(model.contextWindow, 400_000);
   assert.equal(model.maxOutputTokens, 128_000);
   assert.equal(model.inputPrice, 10);
   assert.equal(model.cacheReadPrice, 1);
@@ -83,12 +83,31 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
   for (const [id, pricing] of expected) {
     const model = getSubscriptionModelMetadata(id);
     assert.ok(model);
-    assert.equal(model.contextWindow, 272_000);
+    assert.equal(model.contextWindow, 400_000);
     assert.equal(model.inputPrice, pricing.inputPrice);
     assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
     assert.equal(model.outputPrice, pricing.outputPrice);
     assert.equal(model.supportsPromptCaching, true);
     assert.deepEqual(model.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
+  }
+});
+
+test('subscription models expose 400K and 1M context tiers', () => {
+  for (const model of SUBSCRIPTION_CATALOG) {
+    const contextOption = model.modelOptions?.find((option) => option.id === 'contextTier');
+    assert.ok(contextOption, `${model.id} should expose contextTier`);
+    assert.equal(contextOption.defaultValue, 400_000);
+    assert.deepEqual(
+      contextOption.choices.map((choice) => ({
+        value: choice.value,
+        label: choice.label,
+        contextWindow: choice.contextWindow,
+      })),
+      [
+        { value: 400_000, label: '400K', contextWindow: 400_000 },
+        { value: 1_000_000, label: '1M', contextWindow: 1_000_000 },
+      ],
+    );
   }
 });
 
@@ -111,7 +130,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' });
   assert.equal(res.source, 'builtin');
   assert.equal(res.error, undefined);
-  assert.equal(res.models[0].contextWindow, 272_000);
+  assert.equal(res.models[0].contextWindow, 400_000);
   assert.equal(res.models[0].inputPrice, 10);
   assert.equal(res.models[0].outputPrice, 50);
   assert.deepEqual(
