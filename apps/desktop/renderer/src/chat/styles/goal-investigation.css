@@ -1,0 +1,77 @@
+.goal-investigation-anchor {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Outside the capsule's clipping/blur surface. No composer reflow per batch. */
+.goal-investigation {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: min(560px, 100%);
+  opacity: 1;
+  transition: opacity var(--za-motion-medium) var(--za-ease-out),
+    transform var(--za-motion-medium) var(--za-ease-out),
+    visibility 0s;
+}
+
+.goal-investigation[data-hidden='true'] {
+  opacity: 0;
+  transform: translateY(var(--za-motion-shift-sm));
+  pointer-events: none;
+  visibility: hidden;
+  transition-delay: 0s, 0s, var(--za-motion-medium);
+}
+
+.goal-investigation-cards {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  --motion-enter-from: var(--za-motion-shift-sm);
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+
+.goal-investigation-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--za-line);
+  border-radius: 12px;
+  background: var(--glass-popover);
+  color: var(--za-text);
+  font-size: 12px;
+}
+
+.goal-investigation-question {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-investigation-card small,
+.goal-investigation-more {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--za-text-muted);
+  white-space: nowrap;
+}
+
+.goal-investigation-signal { color: var(--za-accent); flex-shrink: 0; }
+.goal-investigation-card[data-status='running'] .goal-investigation-signal {
+  --motion-pulse-floor: 0.4;
+  animation: motion-pulse-soft calc(var(--za-motion-slow) * 8) ease-in-out infinite;
+}
+.goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
+.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-investigation, .goal-investigation-cards, .goal-investigation-signal {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
