@@ -17,9 +17,13 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-3);
-  padding-top: 52px;
   border-right: 1px solid var(--pa-border-subtle);
   overflow-y: auto;
+}
+
+/* 仅 macOS 非全屏窗口需要为交通灯额外留白。 */
+:root[data-os='darwin'] .app-shell:not(.is-fullscreen) .settings-nav {
+  padding-top: 52px;
 }
 
 .settings-nav-header {
