@@ -214,6 +214,29 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* The text wrapper must shrink before the status, progress and chevron. */
+.goal-panel-toggle-active-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.goal-panel-toggle-active-text > * {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-panel-toggle-active-text .goal-panel-current-activity {
+  max-width: 140px;
 }
 
 /* A：执行中(executing)计划在折叠浮条标题前的脉冲呼吸圆点，表现「正在推进」。 */
