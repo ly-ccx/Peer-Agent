@@ -145,7 +145,13 @@ function alreadyDelivered(plan) {
 }
 
 function parsePorcelainPath(line) {
-  return line.slice(3).trim().replace(/^"(.*)"$/, '$1');
+  const raw = String(line || '').replace(/\r?\n$/, '');
+  // XY<space>path。不要先 trim 整行：` M file` 会被吃成 `M file`，slice(3) 变成错路径。
+  if (raw.length >= 4 && raw[2] === ' ') {
+    return raw.slice(3).replace(/^"(.*)"$/, '$1');
+  }
+  const match = raw.match(/^[ MADRCU?!]{1,2} (.+)$/);
+  return (match ? match[1] : raw).trim().replace(/^"(.*)"$/, '$1');
 }
 
 /**
@@ -361,16 +367,25 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
 
   // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
   // 做碰撞与逐字节内容比对。展开到单文件后逐字节比对才能命中（ADR 69 / P0 修复）。
-  const status = await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
-  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
+  // 必须走 gitRaw：git() 会 trim 整段输出，把 ` M file` 吃成 `M file`，
+  // parsePorcelainPath 的 3 字节前缀就对不上路径。
+  const status = gitRunner === git
+    ? await gitRaw(repositoryRoot, ['status', '--porcelain', '-uall'])
+    : String(await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']) || '');
+  const lines = String(status || '').split('\n').filter((line) => line.length >= 4);
   const untracked = [];
   for (const line of lines) {
     const xy = line.slice(0, 2);
+    const entry = parsePorcelainPath(line);
     if (xy !== '??') {
-      // tracked 脏（modified/staged/deleted/renamed）：环境挡，真有未提交工作。
-      return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: line.slice(3).trim() } };
+      // tracked 脏（modified/staged/deleted/renamed）：只在和任务变更集重叠时挡。
+      // 不重叠的未提交改动不影响 ff-only / 暂移同内容碰撞，继续自动合。
+      if (changedFiles.includes(entry)) {
+        return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: entry } };
+      }
+      continue;
     }
-    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
+    untracked.push(entry);
   }
 
   // 与目标工作区未跟踪文件的碰撞比对（逐字节）。
@@ -403,8 +418,9 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
 }
 
 /**
- * ADR 68：目标检出分支的脏检查分级。
- * 1. modified / staged（含删除、重命名）→ 挡：真有未提交工作。
+ * ADR 68 / 69：目标检出分支的脏检查分级。
+ * 1. modified / staged（含删除、重命名）且路径落在任务变更集内 → 挡：会盖掉你正在改的内容。
+ *    不重叠的 tracked 脏放行：ff-only 不碰这些文件。
  * 2. untracked 且与任务线变更集无路径碰撞 → 放行：纯噪音，merge 不碰它。
  * 3. untracked 且路径碰撞 → 比内容：与任务线将写入的版本逐字节一致 → 放行
  *    （调用方暂移后 merge 落地同一内容）；不一致 → 挡。
