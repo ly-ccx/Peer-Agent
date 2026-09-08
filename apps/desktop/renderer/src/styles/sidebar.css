@@ -1068,13 +1068,9 @@
   font-variant-numeric: tabular-nums;
 }
 .sidebar-conv-awaiting {
-  flex: 0 1 auto;
-  max-width: 76px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
   white-space: nowrap;
-  border-radius: var(--radius-pill);
+  border-radius: var(--ui-radius-control);
   padding: 2px 7px;
   background: var(--za-warn-soft);
   color: var(--za-warn);
