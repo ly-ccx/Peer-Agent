@@ -45,18 +45,10 @@ test('subscription catalog: default is newest (gpt-6-astra) and first entry', ()
   assert.equal(FALLBACK_MODELS, SUBSCRIPTION_CATALOG);
 });
 
-test('subscription catalog includes gpt-5.5 pricing and context metadata', () => {
-  const model = getSubscriptionModelMetadata('gpt-5.5');
-  assert.ok(model);
-  assert.equal(model.contextWindow, 400_000);
-  assert.equal(model.maxOutputTokens, 128_000);
-  assert.equal(model.inputPrice, 5);
-  assert.equal(model.cacheReadPrice, 0.5);
-  assert.equal(model.outputPrice, 30);
-  assert.equal(model.longContextInputThreshold, 272_000);
-  assert.equal(model.longContextInputPrice, 10);
-  assert.equal(model.longContextCacheReadPrice, 1);
-  assert.equal(model.longContextOutputPrice, 45);
+test('subscription catalog no longer contains the retired gpt-5.5 id', () => {
+  // gpt-5.5 已被上游 codex 端点下线(404 model_not_found)，必须从内置目录移除。
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
+  assert.equal(getSubscriptionModelMetadata('gpt-5.5'), null);
 });
 
 test('GPT-6 Astra uses subscription context with official capability and pricing metadata', () => {
@@ -112,7 +104,7 @@ test('subscription models expose 400K and 1M context tiers', () => {
 });
 
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
-  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-astra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-terra'), true);
@@ -137,7 +129,6 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
     res.models.map((m) => m.id),
     [
       'gpt-6-astra',
-      'gpt-5.5',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -151,11 +142,11 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 8);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 7);
 });
 
 test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {
-  assert.equal(isSubscriptionUsableModel('gpt-5.5'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-5.5'), false);
   assert.equal(isSubscriptionUsableModel('gpt-6-astra'), true);
   assert.equal(isSubscriptionUsableModel('gpt-5.4-mini'), true);
   assert.equal(isSubscriptionUsableModel('gpt-4o'), false);

@@ -54,28 +54,11 @@ const SUBSCRIPTION_CATALOG = [
     supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
-  {
-    id: 'gpt-5.5',
-    label: 'GPT-5.5',
-    contextWindow: 272_000,
-    maxOutputTokens: 128_000,
-    inputPrice: 5,
-    outputPrice: 30,
-    cacheReadPrice: 0.5,
-    longContextInputThreshold: 272_000,
-    longContextInputPrice: 10,
-    longContextCacheReadPrice: 1,
-    longContextOutputPrice: 45,
-    standardPricing: {
-      shortContext: { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 },
-      longContext: { inputPrice: 10, cacheReadPrice: 1, outputPrice: 45 },
-      longContextInputThreshold: 272_000,
-    },
-  },
   // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
   // Codex 原生强度包含 xhigh/max 等值；GPT-5.6 完整暴露五档，避免将 xhigh 与 max 压缩为同一产品档位。
   // ChatGPT OAuth 订阅可用上下文窗口为 272k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
-  // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
+  // 注: gpt-5.5 已被上游 codex 端点下线(404 model_not_found)，不再进入内置目录；
+  // 历史遗留的 gpt-5.5 记录由 llm-config-store 迁移逻辑自愈为默认模型。
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',

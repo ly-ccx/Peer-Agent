@@ -1,10 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  describeFetchFailure,
   orderProviderCandidates,
   resolveConversationModelBindingPatch,
   resolvePreferredProvider,
 } from './provider-recovery-broker.mjs';
+
+test('describeFetchFailure maps model_not_found 404 to a readable Chinese message', () => {
+  // 复刻 OpenAI codex 端点对已下线模型的原始报错（ModelProviderHttpError.message）。
+  const error = new Error(
+    'Model provider "openai" returned HTTP 404: {"error": {"message": "The model `gpt-5.5` does not exist or you do not have access to it.", "type": "invalid_request_error", "param": null, "code": "model_not_found"}}',
+  );
+  const text = describeFetchFailure(error);
+
+  assert.match(text, /模型 gpt-5\.5 不存在/);
+  assert.match(text, /重新选择/);
+  assert.doesNotMatch(text, /invalid_request_error/);
+});
+
+test('describeFetchFailure keeps non-model errors untouched', () => {
+  const error = new Error('fetch failed');
+  error.cause = { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:443' };
+  const text = describeFetchFailure(error);
+
+  assert.match(text, /fetch failed/);
+  assert.match(text, /ECONNREFUSED/);
+});
 
 /**
  * orderProviderCandidates 的会话级首选 provider（preferredProviderId）测试。

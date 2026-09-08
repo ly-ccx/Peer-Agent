@@ -26,6 +26,7 @@ import {
 } from './provider-connectivity.mjs';
 import {
   DEFAULT_SUBSCRIPTION_MODEL,
+  SUBSCRIPTION_CATALOG,
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
 } from './provider-adapters/openai-model-catalog.mjs';
@@ -456,8 +457,21 @@ export function createLlmConfigStore({
   function migrateSubscriptionItem(item) {
     if (!item || item.authMethod !== 'oauth_chatgpt') return false;
     let changed = false;
+    // 订阅条目自愈规则：
+    // 1) model 不在权威目录 -> 纠正为默认（历史行为，覆盖 gpt-5 / gpt-5-codex 等按量计费命名）。
+    // 2) model 与 modelLabel 错位（历史上 builtin 目录同步只更新了 label，未同步 model id，
+    //    导致显示 GPT-6 Astra 实发 gpt-5.5 的 404）：若 label 能唯一对应目录条目，则按 label
+    //    恢复真实 model id；无法恢复时回退默认。
     if (!item.model || !SUBSCRIPTION_MODEL_IDS.has(item.model)) {
-      item.model = DEFAULT_SUBSCRIPTION_MODEL;
+      const label = typeof item.modelLabel === 'string' ? item.modelLabel.trim() : '';
+      const byLabel = label
+        ? SUBSCRIPTION_CATALOG.filter((m) => m.label === label)
+        : [];
+      if (byLabel.length === 1) {
+        item.model = byLabel[0].id;
+      } else {
+        item.model = DEFAULT_SUBSCRIPTION_MODEL;
+      }
       changed = true;
     }
     if (item.supportsReasoning !== true) {
@@ -465,6 +479,13 @@ export function createLlmConfigStore({
       changed = true;
     }
     if (applySubscriptionModelMetadata(item)) changed = true;
+    // model 确定后，label 必须与目录一致：错位的 label（如 gpt-5.5 配 GPT-6 Astra）由
+    // applySubscriptionModelMetadata 之外的这步统一纠正，目录没有的 label 保持用户自定义。
+    const metadata = getSubscriptionModelMetadata(item.model);
+    if (metadata?.label && item.modelLabel !== metadata.label) {
+      item.modelLabel = metadata.label;
+      changed = true;
+    }
     return changed;
   }
 

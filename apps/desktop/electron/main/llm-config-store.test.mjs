@@ -99,6 +99,54 @@ test('subscription provider creation defaults to GPT-6 Astra metadata', () => wi
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
 }));
 
+test('subscription migration self-heals label/model mismatched records from builtin catalog sync', () => withStore(({ configFile }) => {
+  // 复刻用户本机脏数据：builtin 目录同步只写了 GPT-6 Astra 的 label，model 仍是已下线的 gpt-5.5。
+  const dirty = {
+    id: 'da0a9685-882d-40b8-a0b4-8f6d4e3ac5a6',
+    groupId: 'da0a9685-882d-40b8-a0b4-8f6d4e3ac5a6',
+    provider: 'openai',
+    channelId: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.5',
+    modelLabel: 'GPT-6 Astra',
+    metadataSource: 'builtin',
+    metadataSyncedAt: '2026-09-05T06:32:57.847Z',
+  };
+  writeFileSync(configFile, JSON.stringify({ models: [dirty], channels: [] }));
+
+  const restored = createLlmConfigStore({ configFile }).listProviders();
+  const healed = restored.find((item) => item.id === dirty.id);
+
+  assert.ok(healed, 'provider should be restored');
+  assert.equal(healed.model, 'gpt-6-astra');
+  assert.equal(healed.modelLabel, 'GPT-6 Astra');
+
+  const persisted = readPersistedModels(configFile).find((item) => item.id === dirty.id);
+  assert.equal(persisted.model, 'gpt-6-astra');
+}));
+
+test('subscription migration falls back to default when mismatched label has no unique catalog match', () => withStore(({ configFile }) => {
+  const dirty = {
+    id: '32ddcdf4-9cbd-4ca6-87b1-f3d596cc25d9',
+    groupId: '32ddcdf4-9cbd-4ca6-87b1-f3d596cc25d9',
+    provider: 'openai',
+    channelId: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.5',
+    modelLabel: 'GPT-5.5',
+    metadataSource: 'builtin',
+  };
+  writeFileSync(configFile, JSON.stringify({ models: [dirty], channels: [] }));
+
+  const restored = createLlmConfigStore({ configFile }).listProviders();
+  const healed = restored.find((item) => item.id === dirty.id);
+
+  assert.ok(healed, 'provider should be restored');
+  // label 与目录条目不再对应，回退到权威默认模型，label 同步为默认模型的展示名。
+  assert.equal(healed.model, 'gpt-6-astra');
+  assert.equal(healed.modelLabel, 'GPT-6 Astra');
+}));
+
 test('subscription context tiers project through creation, update, and reload', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const compact = store.addProvider({
@@ -217,7 +265,7 @@ test('subscription provider migration backfills pricing and context metadata', (
       authMethod: 'oauth_chatgpt',
       name: 'ChatGPT 订阅',
       baseUrl: 'https://chatgpt.com/backend-api/codex',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       apiKey: { encrypted: false, data: '' },
       oauthTokens: { encrypted: false, data: '' },
       enabled: true,
@@ -242,7 +290,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
   assert.equal(provider.cacheWritePrice, undefined);
-  assert.equal(provider.longContextOutputPrice, 45);
+  assert.equal(provider.longContextOutputPrice, undefined);
   assert.equal(provider.supportsReasoning, true);
   assert.equal(provider.supportsPromptCaching, true);
 

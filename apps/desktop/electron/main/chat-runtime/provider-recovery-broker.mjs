@@ -43,6 +43,11 @@ export function describeProviderTarget(provider) {
 
 export function describeFetchFailure(error) {
   const base = error?.message || 'stream_failed';
+  // model_not_found（404）：上游已下线/不可用的模型以可读中文呈现，避免裸抛上游 JSON。
+  const modelMatch = /model [`"']?([\w.\-]+)[`"']? does not exist/i.exec(base);
+  if (modelMatch) {
+    return `模型 ${modelMatch[1]} 不存在或当前账号无权使用，可能已被服务商下线。请在设置中重新选择该渠道的模型。`;
+  }
   const cause = error?.cause;
   if (!cause) return base;
   const code = cause.code ? String(cause.code) : '';
