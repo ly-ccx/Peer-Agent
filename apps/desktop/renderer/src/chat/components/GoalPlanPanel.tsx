@@ -75,6 +75,7 @@ function shouldRefreshForConversation(
 /** Runner 展示指纹：双通道可能投递等价快照，避免重复 setState。 */
 import { runnerFingerprint } from './goal/runnerFingerprint';
 import { GoalActivityLabel } from './goal/GoalActivityLabel';
+import { GoalInvestigation } from './goal/GoalInvestigationCards';
 
 function patchPlanRunner(
   plans: readonly GoalPlan[],
@@ -2311,6 +2312,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     hasCompletedFormalGoal && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
 
   return (
+    <div className="goal-investigation-anchor">
+      {activePlan && <GoalInvestigation key={`${conversationId}:${activePlan.planId}`} plan={activePlan} isZh={isZh} />}
     <div
       className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}${
         dockedExecuting ? ' goal-panel--executing' : ''
@@ -2490,6 +2493,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         }
         return sidePanelContainer ? createPortal(body, sidePanelContainer) : body;
       })()}
+    </div>
     </div>
   );
 }
