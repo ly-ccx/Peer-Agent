@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "0.4.3",
     "@opentui/react": "0.4.3",

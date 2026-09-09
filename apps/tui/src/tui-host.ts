@@ -35,11 +35,13 @@ export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
 
 export interface PendingApproval {
   readonly prompt: NodeRuntimePermissionPrompt;
+  readonly toolCallId?: string;
   readonly sessionId?: string;
   resolve(decision: TuiApprovalDecision): void;
 }
 
 export interface TuiExecutionContext {
+  readonly toolCallId?: string;
   readonly sessionId: string;
   readonly conversationId?: string;
   readonly streamId?: string;
@@ -186,7 +188,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       let settled = false;
       approvalQueue.push({
         prompt,
-        ...(context ? { sessionId: context.sessionId } : {}),
+        ...(context ? { sessionId: context.sessionId, toolCallId: context.toolCallId } : {}),
         resolve(decision) {
           if (settled) return;
           settled = true;
@@ -275,7 +277,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   ) => {
     const mode = normalizeTuiRuntimeMode(context?.mode);
     const bundle = bundleForMode(mode);
-    const toolCallId = `tui-tool-${++callSequence}`;
+    const toolCallId = context?.toolCallId ?? `tui-tool-${++callSequence}`;
 
     // Goal intake gate: block shell/write until a plan exists for this conversation.
     const intake = goalBridge.evaluateIntake({
@@ -357,7 +359,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       } : {}),
     });
     const execution = await (context
-      ? executionContext.run({ ...context, mode }, run)
+      ? executionContext.run({ ...context, mode, toolCallId }, run)
       : run());
     return recordExecutionEvidence(execution, {
       capabilityId,

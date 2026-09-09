@@ -108,6 +108,27 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
   }
 });
 
+test('shared metadata preserves context choices and selected values without reading secrets', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-options-'));
+  try {
+    const modelOptions = [{ id: 'context', label: 'Context', defaultValue: 'small', choices: [
+      { value: 'small', label: '32K', contextWindow: 32768 },
+      { value: 'large', label: '128K', contextWindow: 131072, inputTokenLimit: 120000, requestValue: true },
+    ] }];
+    const modelOptionValues = { context: 'large' };
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify([{
+      id: 'provider-options', model: 'test', apiKeyConfigured: true,
+      modelOptions, modelOptionValues,
+    }]));
+    const metadata = loadSharedModelMetadataList({ userDataPath });
+    assert.equal(metadata.length, 1);
+    assert.deepEqual(metadata[0]?.modelOptions, modelOptions);
+    assert.deepEqual(metadata[0]?.modelOptionValues, modelOptionValues);
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test('loadSharedModelSelection resolves an API key by provider group', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-api-'));
   try {

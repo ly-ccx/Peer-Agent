@@ -1,4 +1,5 @@
 import {
+  buildModelMenuGroups,
   resolveLlmModelOptionValues,
   type ContextAccountingSnapshot,
   type ContextUsageBreakdown,
@@ -428,24 +429,12 @@ export function TokenUsageDisplay({
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
   // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
   // 注意：必须在 hasInfo early return 之前调用 hooks，否则 hasInfo 从 false→true 会触发 React #310。
-  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => {
-    const order: string[] = [];
-    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
-    for (const prov of providers) {
-      const key = prov.groupId || prov.id;
-      let bucket = byGroup.get(key);
-      if (!bucket) {
-        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
-        byGroup.set(key, bucket);
-        order.push(key);
-      }
-      bucket.items.push({ id: prov.id, label: prov.modelLabel || prov.model, disabled: !prov.apiKeyConfigured });
-    }
-    return order.map((key) => {
-      const bucket = byGroup.get(key)!;
-      return { id: key, label: bucket.label, items: bucket.items, disabled: bucket.items.every((it) => it.disabled) };
-    });
-  }, [providers, isZh]);
+  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => buildModelMenuGroups(
+    providers.map((prov) => ({
+      id: prov.id, groupId: prov.groupId, groupLabel: getProviderDisplayName(prov, isZh),
+      model: prov.model, modelLabel: prov.modelLabel, available: Boolean(prov.apiKeyConfigured),
+    })),
+  ), [providers, isZh]);
   const handleModelMenuChange = useCallback((next: string) => {
     onModelChange?.(next);
   }, [onModelChange]);

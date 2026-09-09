@@ -436,7 +436,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * 默认返回运行时（当前激活工作区）投影。
    * 传入 workspacePaths 时，为公共管理页返回所有目标工作区 Skill，并只附带一份全局 Skill。
    */
-  function listSkills(workspacePaths) {
+  function listSkills(workspacePaths = undefined) {
     if (!Array.isArray(workspacePaths)) return skills.map((skill) => summarizeSkill(skill));
 
     loadSettings();
@@ -469,7 +469,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
   }
 
   /** 对目标工作区挂载 skill（打开开关）；未指定时沿用当前激活工作区。 */
-  function enableSkill(skillId, workspacePath) {
+  function enableSkill(skillId, workspacePath = undefined) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
     const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
@@ -489,7 +489,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
    * 对目标工作区卸载 skill（关闭开关）。不删除全局安装包。
    * 未指定工作区时沿用当前上下文；显式 null 回退为全局禁用。
    */
-  function disableSkill(skillId, workspacePath) {
+  function disableSkill(skillId, workspacePath = undefined) {
     if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
     const id = skillId.trim();
     const wsKey = workspacePath === undefined ? activeWorkspaceKey : normalizeWorkspaceKey(workspacePath);
