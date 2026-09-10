@@ -3,17 +3,32 @@ import { randomUUID } from 'node:crypto';
 import { createDeviceAuthenticator } from './device-auth.mjs';
 import { createDeviceConnections } from './device-connections.mjs';
 import { createDeviceProofVerifier } from './device-proof.mjs';
+import { createRemoteTaskRouter } from './remote-task-router.mjs';
 
-/** Device enrollment and reconnect transport. No task execution or permission grant. */
-export function attachDeviceWebSocket(server, { origin, store, capacity = 1000 }) {
+/** Device enrollment, reconnect transport and read-only task relay.
+ * No task execution and no permission grant: execution stays on the device. */
+export function attachDeviceWebSocket(server, { origin, store, capacity = 1000, now = Date.now }) {
   const base = new URL(origin);
   if (base.protocol !== 'https:' || base.origin !== origin) throw new Error('INVALID_ORIGIN');
   const auth = createDeviceAuthenticator({ store, audience: origin, capacity });
   const enrollmentProofs = createDeviceProofVerifier({ audience: origin, capacity });
   const connections = createDeviceConnections({ store, capacity });
+  // Relays a browser read to the device and correlates the answer. The cached
+  // projection is the device's own declaration; the device re-checks it.
+  const router = createRemoteTaskRouter({ connections, now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const exact = (message, fields) => message && typeof message === 'object' && !Array.isArray(message)
     && Object.keys(message).sort().join(',') === fields.sort().join(',');
+  const identifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
+  /** Projection the device publishes for this connection. Shape only. */
+  const delegationShape = message => exact(message,
+      ['type', 'protocolVersion', 'version', 'workspaceIds', 'allowTaskRead', 'allowResultExport', 'expiresAt'])
+    && message.protocolVersion === 1
+    && Number.isSafeInteger(message.version) && message.version > 0
+    && Array.isArray(message.workspaceIds) && message.workspaceIds.length > 0
+    && message.workspaceIds.length <= 32 && message.workspaceIds.every(identifier)
+    && typeof message.allowTaskRead === 'boolean' && typeof message.allowResultExport === 'boolean'
+    && Number.isSafeInteger(message.expiresAt) && message.expiresAt > now();
   const upgrade = (request, socket, head) => {
     const hosts = request.rawHeaders.filter((_, i) => i % 2 === 0).filter(v => v.toLowerCase() === 'host');
     if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(socket.remoteAddress)
@@ -84,13 +99,41 @@ export function attachDeviceWebSocket(server, { origin, store, capacity = 1000 }
               ownerId: principal.ownerId, bindingVersion: principal.bindingVersion, status: 'awaiting_device_ack' }));
             return;
           }
-          handle = connections.attach(principal, { close: () => ws.terminate() });
+          handle = connections.attach(principal, {
+            close: () => ws.terminate(),
+            // Transport write seam for task routing; refuses when not open so the
+            // router fails the submit instead of losing the request silently.
+            send: message => {
+              if (ws.readyState !== 1) throw new Error('DEVICE_UNAVAILABLE');
+              ws.send(JSON.stringify(message));
+            },
+          });
           phase = 'online'; clearTimeout(timeout);
           ws.send(JSON.stringify({ type: 'remote.welcome', protocolVersion: 1, connectionEpoch: handle.epoch,
             deviceId: principal.deviceId, ownerId: principal.ownerId, bindingVersion: principal.bindingVersion }));
         } else if (phase === 'online' && exact(message, ['type']) && message.type === 'remote.heartbeat'
             && connections.heartbeat(handle)) {
           ws.send(JSON.stringify({ type: 'remote.heartbeat' }));
+        } else if (phase === 'online' && message?.type === 'remote.delegation' && delegationShape(message)) {
+          // Routing needs the version and workspace list the device itself
+          // declares. The Gateway never derives or widens these values, and the
+          // device re-checks them before executing anything.
+          connections.setDelegation(handle, {
+            version: message.version, workspaceIds: [...message.workspaceIds],
+            allowTaskRead: message.allowTaskRead, allowResultExport: message.allowResultExport,
+            expiresAt: message.expiresAt,
+          });
+        } else if (phase === 'online' && message?.type === 'remote.task.result'
+            && message.protocolVersion === 1 && identifier(message.requestId)) {
+          const shaped = (message.status === 'ok'
+              && exact(message, ['type', 'protocolVersion', 'requestId', 'status', 'result']))
+            || ((message.status === 'rejected' || message.status === 'failed')
+              && exact(message, ['type', 'protocolVersion', 'requestId', 'status', 'code']) && identifier(message.code));
+          if (!shaped) throw new Error('MESSAGE_DENIED');
+          // A late or unknown answer is dropped, never fatal: its request may
+          // already have resolved as OUTCOME_UNKNOWN, and that outcome is honest
+          // only while the connection itself stays healthy.
+          router.settle(message);
         } else throw new Error('MESSAGE_DENIED');
       } catch { ws.terminate(); }
     });
@@ -98,8 +141,9 @@ export function attachDeviceWebSocket(server, { origin, store, capacity = 1000 }
   const sweep = setInterval(() => connections.sweep(), 5000); sweep.unref();
   return {
     connections,
+    router,
     close() {
-      clearInterval(sweep); server.off('upgrade', upgrade); connections.close();
+      clearInterval(sweep); server.off('upgrade', upgrade); connections.close(); router.close();
       for (const ws of wss.clients) ws.terminate();
       wss.close();
     },

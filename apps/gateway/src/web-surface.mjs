@@ -19,7 +19,14 @@ const page = `<!doctype html>
 <div class="field"><label for="pairing-key">一次性 Key</label><input id="pairing-key" type="password" required maxlength="256" autocomplete="off"></div>
 <div class="actions"><button id="claim" type="submit" class="btn-primary">绑定设备</button></div>
 <p id="pairing-status" class="pairing-status" role="status"></p></form>
-<p class="footnote">在线仅代表连接可用。当前版本尚未开放远程任务操作。</p>
+<form id="task-read" class="panel" hidden><h2>读取本机任务</h2>
+<p class="panel-note">只读：查看该任务在本机的当前状态，不提交任何修改。任务始终属于某台设备与某个工作区。</p>
+<div class="field"><label for="task-device">设备</label><select id="task-device"></select></div>
+<div class="field"><label for="task-workspace">工作区</label><select id="task-workspace"></select></div>
+<div class="field"><label for="task-id">任务 ID</label><input id="task-id" required maxlength="128" autocomplete="off"></div>
+<div class="actions"><button id="task-submit" type="submit" class="btn-primary">读取状态</button></div>
+<p id="task-result" class="task-result" role="status"></p></form>
+<p class="footnote">在线仅代表连接可用；读取结果由本机判定。当前版本不开放任何写入操作。</p>
 </div><script src="/assets/remote.js" defer></script></body></html>`;
 
 /**
@@ -285,9 +292,32 @@ input {
 
 input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
+/* Native select styled to match the text fields; the OS keeps the menu. */
+select {
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
 .pairing-status { margin: 0; color: var(--ink-soft); font-size: 13px; }
 
 .pairing-status:empty { display: none; }
+
+.task-result { margin: 0; color: var(--ink-soft); font-size: 13px; overflow-wrap: anywhere; }
+
+.task-result:empty { display: none; }
+
+/* Tone reinforces the sentence; the sentence itself always states the outcome. */
+.task-result-ok { color: var(--ink); }
+
+.task-result-alert { color: var(--ink); border-left: 2px solid var(--state-danger); padding-left: 8px; }
 
 .footnote {
   margin: 0;
@@ -308,6 +338,12 @@ const challenge = document.getElementById('challenge');
 const pairingKey = document.getElementById('pairing-key');
 const claim = document.getElementById('claim');
 const pairingStatus = document.getElementById('pairing-status');
+const taskForm = document.getElementById('task-read');
+const taskDevice = document.getElementById('task-device');
+const taskWorkspace = document.getElementById('task-workspace');
+const taskId = document.getElementById('task-id');
+const taskSubmit = document.getElementById('task-submit');
+const taskResult = document.getElementById('task-result');
 let authenticated = false;
 let generation = 0;
 function setStatus(text, tone) {
@@ -324,6 +360,7 @@ async function load() {
     if (current !== generation) return;
     if (response.status === 401) {
       authenticated = false; pairing.hidden = true; pairingKey.value = '';
+      taskForm.hidden = true; taskResult.textContent = '';
       login.hidden = false; logout.hidden = true;
       setStatus('请登录后查看设备。登录过期不会解除设备绑定。'); return;
     }
@@ -333,6 +370,7 @@ async function load() {
     if (!Array.isArray(payload.devices)) throw new Error('invalid');
     authenticated = true; pairing.hidden = false;
     login.hidden = true; logout.hidden = false;
+    void refreshTaskTargets();
     const empty = payload.devices.length === 0;
     setStatus(empty ? '尚未绑定电脑。请在目标电脑发起配对。' : '设备状态已更新', empty ? '' : 'ok');
     for (const device of payload.devices) {
@@ -354,6 +392,7 @@ logout.addEventListener('click', async () => {
   if (logout.disabled) return;
   ++generation; authenticated = false; pairing.hidden = true; pairingKey.value = '';
   challenge.value = ''; pairingStatus.textContent = '';
+  taskForm.hidden = true; taskResult.textContent = ''; taskId.value = '';
   devices.replaceChildren(); logout.disabled = true; refresh.disabled = true;
   try {
     const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
@@ -388,6 +427,75 @@ pairing.addEventListener('submit', async event => {
   } finally { claim.disabled = false; }
 });
 refresh.addEventListener('click', load);
+
+/** Workspaces come from the device's own delegation projection, so the page can
+ * only offer ones the machine actually allows. */
+function toOptions(entries) {
+  return entries.map(entry => {
+    const option = document.createElement('option');
+    option.value = entry.value; option.textContent = entry.label;
+    return option;
+  });
+}
+async function loadDelegations() {
+  try {
+    const response = await fetch('/api/delegations', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    return Array.isArray(payload && payload.delegations) ? payload.delegations : [];
+  } catch { return []; }
+}
+async function refreshTaskTargets() {
+  // Same generation guard the rest of the page uses: a delegation reply that
+  // lands after logout must not put the signed-in panels back on screen.
+  const current = generation;
+  const entries = await loadDelegations();
+  if (current !== generation || !authenticated) return;
+  taskDevice.replaceChildren(...toOptions(entries.map(entry => ({ value: entry.deviceId, label: entry.name || entry.deviceId }))));
+  const first = entries[0];
+  const workspaces = first && first.delegation && Array.isArray(first.delegation.workspaceIds) ? first.delegation.workspaceIds : [];
+  taskWorkspace.replaceChildren(...toOptions(workspaces.map(value => ({ value, label: value }))));
+  taskForm.hidden = entries.length === 0;
+}
+const TASK_ERROR_TEXT = {
+  DEVICE_OFFLINE: '设备当前不在线。', DEVICE_UNAVAILABLE: '设备连接不可用。',
+  DELEGATION_UNAVAILABLE: '本机尚未开放远程读取。', DELEGATION_EXPIRED: '本机委派已过期。',
+  CAPABILITY_DENIED: '本机未开放读取能力。', TASK_DENIED: '本机拒绝了这次读取。',
+  WORKSPACE_DENIED: '该任务不在允许的工作区内。', RATE_LIMITED: '请求过于频繁，请稍后重试。',
+  OUTCOME_UNKNOWN: '已发出但未收到答复，结果未知：不要当作已完成，也不要当作已失败。',
+};
+taskForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!authenticated || taskSubmit.disabled) return;
+  const current = generation;
+  const body = JSON.stringify({ deviceId: taskDevice.value, workspaceId: taskWorkspace.value, taskId: taskId.value.trim() });
+  taskSubmit.disabled = true;
+  taskResult.className = 'task-result';
+  taskResult.textContent = '正在读取…';
+  try {
+    const response = await fetch('/api/tasks/read', { method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' }, body });
+    if (current !== generation || !authenticated) return;
+    const payload = await response.json().catch(() => null);
+    if (response.status === 401) {
+      authenticated = false; taskForm.hidden = true; pairing.hidden = true;
+      login.hidden = false; logout.hidden = true; devices.replaceChildren();
+      setStatus('登录已过期，请重新登录。', 'alert'); return;
+    }
+    if (response.status !== 200) {
+      const code = payload && payload.code;
+      taskResult.textContent = '读取未完成：' + (TASK_ERROR_TEXT[code] || ('请稍后重试（' + (code || '未知错误') + '）。'));
+      taskResult.className = 'task-result task-result-alert'; return;
+    }
+    taskResult.textContent = '任务状态：' + JSON.stringify(payload.result === undefined ? payload.status : payload.result);
+    taskResult.className = 'task-result task-result-ok';
+  } catch {
+    if (current === generation && authenticated) {
+      taskResult.textContent = '结果暂时不明确，请重试；重试会产生一次新的读取请求。';
+      taskResult.className = 'task-result task-result-alert';
+    }
+  } finally { taskSubmit.disabled = false; }
+});
 load();`;
 
 /** Static same-origin surface; no embedded identity, secrets or task data. */

@@ -40,7 +40,8 @@ export function createGatewayHttpServer({ origin, handle, deviceStore, maxBodyBy
         }
       }
       const response = await handle(new Request(url, { method, headers,
-        ...(size ? { body: Buffer.concat(chunks) } : {}) }), { deviceConnections: deviceTransport?.connections });
+        ...(size ? { body: Buffer.concat(chunks) } : {}) }), { deviceConnections: deviceTransport?.connections,
+          deviceTasks: deviceTransport?.router });
       outgoing.statusCode = response.status;
       for (const [name, value] of response.headers) if (name !== 'set-cookie') outgoing.setHeader(name, value);
       const cookies = response.headers.getSetCookie();
@@ -75,5 +76,7 @@ export function createGatewayHttpServer({ origin, handle, deviceStore, maxBodyBy
         server.closeAllConnections();
       });
     },
+    // The device transport carries the task router; read routing is reached here.
+    deviceTransport,
   };
 }
