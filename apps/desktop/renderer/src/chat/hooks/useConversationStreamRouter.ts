@@ -49,7 +49,7 @@ import {
 import type { ChatMsg, ThinkingKind } from '../state/types';
 import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
-import { useTypewriterStream } from './useTypewriterStream';
+import { THINKING_TYPEWRITER_OPTIONS, useTypewriterStream } from './useTypewriterStream';
 
 let streamRouterOwner: string | null = null;
 let streamRouterOwnerSeq = 0;
@@ -198,7 +198,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     }));
   }, []);
   const textTypewriter = useTypewriterStream(appendActiveText);
-  const thinkingTypewriter = useTypewriterStream(appendActiveThinking);
+  const thinkingTypewriter = useTypewriterStream(appendActiveThinking, THINKING_TYPEWRITER_OPTIONS);
   const flushTextTypewriter = textTypewriter.flush;
   const flushThinkingTypewriter = thinkingTypewriter.flush;
   const backgroundStreamBufferRef = useRef(new BackgroundStreamBuffer());
