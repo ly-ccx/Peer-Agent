@@ -1125,9 +1125,17 @@
     row-gap: 8px;
   }
 
-  .composer-chrome-row .composer-chrome-left {
+  /* 窄容器浮条改「展开形态」：左列铺满整行，浮条本身也拉满，
+     不再按内容宽度收缩（否则内部只能在极窄预算里换行）。 */
+  .composer-chrome-row:has(.composer-chrome-right:not(:empty)) .composer-chrome-left,
+  .composer-chrome-row:not(:has(.composer-chrome-right:not(:empty))) .composer-chrome-left {
     grid-column: 1;
     max-width: 100%;
+    justify-self: stretch;
+  }
+
+  .composer-chrome-row .composer-chrome-left > .goal-panel--docked {
+    width: 100%;
   }
 
   .composer-chrome-right {

@@ -16,8 +16,23 @@ try {
    const rect=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}};
    return Object.fromEntries(['goal','title','activity','progress','goalCaret','env','branch','envCaret'].map(id=>[id,rect(document.getElementById(id))]).concat([['row',rect(document.querySelector('.composer-chrome-row'))]]));
   });
-  if(width<400) assert.ok(b.env.top>=b.goal.bottom-1,`${name}: Worktree must wrap below goal`);
-  else assert.ok(b.env.left>=b.goal.right-1 && b.env.top<b.goal.bottom,`${name}: wide layout stays side by side`);
+  if(width<400) {
+   assert.ok(b.env.top>=b.goal.bottom-1,`${name}: Worktree must wrap below goal`);
+   // 展开形态：浮条铺满整行（row 的 4px 内边距之外不留空）。
+   const leftInset=b.goal.left-b.row.left, rightInset=b.row.right-b.goal.right;
+   assert.ok(leftInset<=5 && rightInset<=5,`${name}: goal chip reaches both row edges (insets ${leftInset.toFixed(1)}/${rightInset.toFixed(1)})`);
+   assert.ok(b.goal.width>=b.row.width-12,`${name}: goal chip spans the row (${b.goal.width.toFixed(1)} of ${b.row.width.toFixed(1)})`);
+   // 标题 / 活动 / 进度 / 箭头必须同处一条文本行：垂直区间相交。
+   for(const pair of [['title','activity'],['activity','progress'],['progress','goalCaret'],['title','goalCaret']]) {
+    const a=b[pair[0]],c=b[pair[1]];
+    const sharedRow=Math.min(a.bottom,c.bottom)-Math.max(a.top,c.top);
+    assert.ok(sharedRow>0,`${name}: ${pair[0]} and ${pair[1]} stay on one line`);
+   }
+  } else {
+   assert.ok(b.env.left>=b.goal.right-1 && b.env.top<b.goal.bottom,`${name}: wide layout stays side by side`);
+   // 宽容器保持 hugging：浮条不铺满整行。
+   assert.ok(b.goal.width<=b.row.width-24,`${name}: wide goal chip still hugs its content (${b.goal.width.toFixed(1)} of ${b.row.width.toFixed(1)})`);
+  }
   for(const id of ['goal','title','activity','progress','goalCaret','env','branch','envCaret']) assert.ok(b[id].width>0 && b[id].left>=b.row.left-1 && b[id].right<=b.row.right+1,`${name}: ${id} visible and contained`);
   for(const group of [['title','activity','progress','goalCaret','env'],['branch','envCaret']]) for(let i=0;i<group.length;i++) for(let j=i+1;j<group.length;j++) {
    const a=b[group[i]],c=b[group[j]];

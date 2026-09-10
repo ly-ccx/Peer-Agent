@@ -217,14 +217,26 @@
   flex: 1 1 auto;
 }
 
-/* Keep delivery metadata on its own line when the dock is narrow. */
+/* 窄容器改用「展开形态」：浮条已在 chat-surface 拉满整行，这里保证
+   标题 / 当前活动 / 进度 / 箭头锁在同一行，靠省略号收敛而不是换行。 */
 @container composer (max-width: 40rem) {
+  .goal-panel--docked .goal-panel-toggle,
   .goal-panel--docked .goal-panel-toggle-active {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    width: 100%;
   }
 
   .goal-panel--docked .goal-panel-toggle-summary {
-    flex-basis: calc(100% - 24px);
+    flex: 1 1 auto;
+    flex-basis: auto;
+    min-width: 0;
+  }
+
+  /* 单行预算下先压缩标题文本，进度与箭头保持完整可读。 */
+  .goal-panel--docked .goal-panel-toggle-active-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: none;
   }
 }
 

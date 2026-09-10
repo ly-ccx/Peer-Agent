@@ -61,6 +61,25 @@ test('narrow chrome stacks Worktree using the composer container and real summar
   assert.doesNotMatch(goalStyles, /goal-panel-toggle-active-text/);
 });
 
+test('narrow chrome expands the goal chip to a single full-width row', () => {
+  const narrowChrome = styles.match(/@container composer \(max-width: 40rem\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.ok(narrowChrome.length > 0, 'narrow composer container block is present');
+  // 左列铺满整行，浮条自身也拉满：不再按内容宽度 hugging。
+  assert.match(narrowChrome, /\.composer-chrome-left \{[\s\S]*?justify-self:\s*stretch;/);
+  assert.match(narrowChrome, /\.composer-chrome-left > \.goal-panel--docked \{[\s\S]*?width:\s*100%;/);
+
+  const goalStyles = readFileSync(new URL('../styles/goal-panel.css', import.meta.url), 'utf8');
+  const narrowGoal = goalStyles.match(/@container composer \(max-width: 40rem\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.ok(narrowGoal.length > 0, 'narrow goal container block is present');
+  // 窄容器浮条内容锁在同一行：进度不再被 flex-wrap 挤到第二行。
+  assert.match(narrowGoal, /\.goal-panel-toggle-active \{[\s\S]*?flex-wrap:\s*nowrap;/);
+  assert.doesNotMatch(narrowGoal, /flex-wrap:\s*wrap;/);
+  assert.doesNotMatch(narrowGoal, /flex-basis:\s*calc\(100% - 24px\)/);
+  // 单行预算下由标题先收缩（省略号），进度与箭头保持完整。
+  assert.match(narrowGoal, /\.goal-panel-toggle-summary \{[\s\S]*?min-width:\s*0;/);
+  assert.match(narrowGoal, /\.goal-panel-toggle-active-title \{[\s\S]*?min-width:\s*0;/);
+});
+
 test('env capsule pins to the right chrome column', () => {
   assert.match(
     styles,
