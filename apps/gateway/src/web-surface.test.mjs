@@ -4,6 +4,9 @@ import { runInNewContext } from 'node:vm';
 import { remoteWebResponse } from './web-surface.mjs';
 import { createAccountHttp } from './account-http.mjs';
 
+/** Declarations only: prose in comments must not be mistaken for real CSS. */
+const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
 for (const state of ['anonymous', 'bound', 'revoked', 'unavailable']) {
   test(`web-device-state-${state}`, async () => {
     const nodes = new Map();
@@ -105,4 +108,100 @@ test('remoteWebResponse lists extra form-action origins and ignores junk', async
   assert.match(csp, /form-action 'self' https:\/\/id\.example:8443;/);
   assert.doesNotMatch(csp, /form-action 'self' {2}/);
   assert.equal((await remoteWebResponse('/')).headers.get('content-security-policy').includes("form-action 'self';"), true);
+});
+
+test('stylesheet is served as its own same-origin asset', async () => {
+  const response = await remoteWebResponse('/assets/remote.css');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/css/);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.match(await response.text(), /:root\s*\{/);
+  assert.equal(remoteWebResponse('/assets/remote.pcss'), null);
+});
+
+test('CSP allows the stylesheet without relaxing anything else', async () => {
+  // `default-src 'none'` blocks the stylesheet, so the surface must opt in.
+  // It must not opt into inline styles while doing so.
+  const handle = createAccountHttp({ origin: 'https://peer.example', login: {}, sessions: {}, devices: {} });
+  const csp = (await handle(new Request('https://peer.example/'))).headers.get('content-security-policy');
+  assert.match(csp, /style-src 'self'/);
+  assert.match(csp, /default-src 'none'/);
+  assert.doesNotMatch(csp, /unsafe-inline/);
+  assert.doesNotMatch(csp, /unsafe-eval/);
+});
+
+test('page links the stylesheet instead of inlining style', async () => {
+  const html = await remoteWebResponse('/').text();
+  assert.match(html, /<link rel="stylesheet" href="\/assets\/remote\.css">/);
+  assert.doesNotMatch(html, /<style/);
+  assert.doesNotMatch(html, /\sstyle="/);
+});
+
+test('[hidden] survives the layout rules', async () => {
+  // Author `display` rules outrank the UA `[hidden]` rule. Without the guard the
+  // login form, logout button and pairing panel would all be visible at once,
+  // which is exactly the show/hide state machine the script drives.
+  const css = stripComments(await remoteWebResponse('/assets/remote.css').text());
+  const guard = /\[hidden\]\s*\{\s*display:\s*none\s*!important/.exec(css);
+  assert.ok(guard, '[hidden] guard missing or not !important');
+  for (const selector of ['.panel {', '.devices {', '.actions {']) {
+    assert.ok(css.indexOf(selector) > guard.index, selector + ' must be declared after the [hidden] guard');
+  }
+});
+
+test('dark palette is provided rather than an inverted light one', async () => {
+  const css = await remoteWebResponse('/assets/remote.css').text();
+  assert.match(css, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(css, /--canvas:\s*#11141A/);
+  assert.match(css, /--ink:\s*#EDF1F6/);
+});
+
+test('device state carries a class hook and a sentence, never colour alone', async () => {
+  const seen = [];
+  for (const [online, revoked] of [[true, false], [false, false], [true, true]]) {
+    const nodes = new Map();
+    const element = () => ({ hidden: false, textContent: '', className: '', children: [], listeners: {},
+      replaceChildren() { this.children = []; }, append(...values) { this.children.push(...values); },
+      addEventListener(name, fn) { this.listeners[name] = fn; } });
+    const document = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
+    const fetch = async () => ({ status: 200, ok: true, json: async () => ({ devices: [{ name: 'mac-mini', online, revoked }] }) });
+    runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document, fetch });
+    await new Promise(resolve => setImmediate(resolve));
+    const state = nodes.get('devices').children[0].children[1];
+    seen.push({ cls: state.className, text: state.textContent });
+  }
+  assert.match(seen[0].cls, /state-online/);
+  assert.match(seen[1].cls, /state-offline/);
+  assert.match(seen[2].cls, /state-revoked/);
+  assert.match(seen[2].text, /已撤销绑定/);
+  for (const entry of seen) {
+    assert.ok(entry.text.trim().length > 0, 'state must read without colour: ' + JSON.stringify(entry));
+  }
+});
+
+test('Peer Frost red lines hold in the stylesheet', async () => {
+  const css = stripComments(await remoteWebResponse('/assets/remote.css').text());
+
+  // Red line 1: azure never on a CTA — the primary control is graphite-on-paper.
+  const primary = /\.btn-primary\s*\{[^}]*\}/.exec(css)[0];
+  assert.match(primary, /background:\s*var\(--ink\)/);
+  assert.doesNotMatch(primary, /--seal/);
+
+  // Red line 2: the H1 floor stays at 30px or larger.
+  assert.match(/h1\s*\{[^}]*\}/.exec(css)[0], /clamp\(30px/);
+
+  // Red line 3: one sans family, no serif reintroduced for headings.
+  assert.match(css, /--font-sans:/);
+  assert.doesNotMatch(css, /--font-serif/);
+
+  // Red line 5: no pure black, and no pure white (near-white canvas only).
+  assert.doesNotMatch(css, /#000000|#000\b|#FFFFFF|#FFF\b/i);
+
+  // Red line 7: the shadow budget is unused — boundaries are hairlines.
+  assert.doesNotMatch(css, /box-shadow/);
+
+  // Red line 8: every numeric radius stays within 16px.
+  for (const [, px] of css.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(px) <= 16, 'border-radius ' + px + 'px exceeds the 16px red line');
+  }
 });
