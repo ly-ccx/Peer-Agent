@@ -1,0 +1,19 @@
+{
+  "name": "@peer-agent/gateway",
+  "version": "0.0.12",
+  "private": true,
+  "type": "module",
+  "description": "ADR 75 account API backend; device routing and remote execution are not yet available.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "test": "node --test src/*.test.mjs",
+    "check": "node --check src/device-store.mjs && node --check src/device-proof.mjs && node --check src/device-auth.mjs"
+  },
+  "dependencies": {
+    "openid-client": "^6.8.8",
+    "ws": "^8.21.0"
+  }
+}
