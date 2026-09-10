@@ -96,13 +96,25 @@ refresh.addEventListener('click', load);
 load();`;
 
 /** Static same-origin surface; no embedded identity, secrets or task data. */
-export function remoteWebResponse(path) {
+export function remoteWebResponse(path, { formActionOrigins = [] } = {}) {
   const content = path === '/' || path === '/devices' ? page : path === '/assets/remote.js' ? script : null;
   if (content === null) return null;
+  // `form-action` is re-checked on every redirect hop of a form submission, not
+  // only on the initial POST target. The login form 303s to the identity provider,
+  // which may live on another origin — a different port of the same host is a
+  // different origin — so `'self'` alone silently cancels that hop and the page
+  // stays on the login form. Callers pass the issuer origin (login.issuer).
+  const formAction = ["'self'", ...formActionOrigins.filter((value) => typeof value === 'string' && value !== '')].join(' ');
   return new Response(content, { headers: {
     'content-type': path === '/assets/remote.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
     'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer',
-    'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    // Must stay `same-origin`, NOT `no-referrer`. With no-referrer the browser
+    // serializes this page as an opaque origin, so the login form POST arrives
+    // with `Origin: null` and the Origin check in account-http.mjs rejects it
+    // with 403 ORIGIN_DENIED. `same-origin` still keeps the referrer from
+    // leaking to other origins while preserving the real Origin on same-origin
+    // submissions. Regression test: web-surface.test.mjs.
+    'referrer-policy': 'same-origin',
+    'content-security-policy': `default-src 'none'; script-src 'self'; connect-src 'self'; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`,
   } });
 }

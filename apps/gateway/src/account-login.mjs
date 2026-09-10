@@ -18,6 +18,11 @@ export function createAccountLogin({ configuration, redirectUri, allowedSubject,
     return time;
   };
   return {
+    // Exposed so the web surface can whitelist the identity provider in its
+    // `form-action` CSP: the login POST 303s to the issuer and `form-action` is
+    // re-checked on that redirect hop. Reading it from here keeps one source of
+    // truth — whatever issuer login actually uses is the one the page allows.
+    issuer,
     async begin() {
       const time = clock();
       for (const [state, record] of pending) if (record.expiresAt <= time) pending.delete(state);

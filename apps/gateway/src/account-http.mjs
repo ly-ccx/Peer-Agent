@@ -15,6 +15,15 @@ const setCookie = (name, value, maxAge) => `${name}=${value}; Path=/; Secure; Ht
 export function createAccountHttp({ origin, login, sessions, devices, now = Date.now }) {
   const base = new URL(origin);
   if (base.protocol !== 'https:' || base.origin !== origin) throw new Error('INVALID_ORIGIN');
+  // CSP `form-action` is re-checked on the redirect hop of a form submission, so the
+  // identity provider's origin must be allowed or the browser cancels the login
+  // redirect and the page silently stays on the form. The surface always adds
+  // `'self'`, so only a genuinely different issuer origin needs listing. Taken from
+  // login.issuer to keep one source of truth with what login actually redirects to.
+  const issuerOrigin = (() => {
+    try { return new URL(login?.issuer).origin; } catch { return ''; }
+  })();
+  const formActionOrigins = issuerOrigin && issuerOrigin !== origin ? [issuerOrigin] : [];
   // Bounded per-account admission; source limits additionally belong at the listener/proxy.
   const pairingAttempts = new Map();
   const reply = (status, body, extra = {}) => new Response(body === null ? null : JSON.stringify(body), {
@@ -30,7 +39,7 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
     if (request.method !== 'GET' && request.headers.get('origin') !== origin) return reply(403, { error: 'ORIGIN_DENIED' });
     try {
       if (request.method === 'GET') {
-        const surface = remoteWebResponse(url.pathname);
+        const surface = remoteWebResponse(url.pathname, { formActionOrigins });
         if (surface) return surface;
       }
       if (url.pathname === '/auth/login' && request.method === 'POST') {
