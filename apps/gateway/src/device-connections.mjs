@@ -31,8 +31,17 @@ export function createDeviceConnections({ store, now = Date.now, leaseMs = 60_00
     return true;
   }
   function sweep(at) { for (const record of connections.values()) current(record, at); }
+  /** Call immediately before dispatch; offline submissions are not queued here. */
+  function resolve(ownerId, deviceId) {
+    const at = time();
+    const binding = store.getDeviceBinding(deviceId);
+    if (!binding || binding.ownerId !== ownerId || binding.revoked) throw new Error('DEVICE_UNAVAILABLE');
+    const record = connections.get(deviceId);
+    if (!current(record, at)) throw new Error('DEVICE_OFFLINE');
+    return record.handle;
+  }
   return {
-    attach(principal, { close }) {
+    attach(principal, { close, send } = {}) {
       const at = time();
       if (!principal || typeof principal.connectionId !== 'string' || !principal.connectionId
           || typeof close !== 'function' || !bindingMatches(principal)) throw new Error('DEVICE_AUTH_DENIED');
@@ -42,7 +51,16 @@ export function createDeviceConnections({ store, now = Date.now, leaseMs = 60_00
       if (!Number.isSafeInteger(epoch + 1)) throw new Error('EPOCH_EXHAUSTED');
       const handle = Object.freeze({ deviceId: principal.deviceId, connectionId: principal.connectionId, epoch: ++epoch });
       if (previous) drop(previous);
-      connections.set(principal.deviceId, { principal: { ...principal }, handle, close, expiresAt: at + leaseMs });
+      connections.set(principal.deviceId, {
+        principal: { ...principal }, handle, close,
+        // Transport write seam, injected by the socket layer. Absent in pure
+        // registry tests; route() then refuses instead of dropping a message.
+        send: typeof send === 'function' ? send : null,
+        // Projection published by the device for this connection only. Never
+        // persisted, never restored across reconnects, never used as authority.
+        delegation: null,
+        expiresAt: at + leaseMs,
+      });
       return handle;
     },
     heartbeat(handle) {
@@ -52,14 +70,24 @@ export function createDeviceConnections({ store, now = Date.now, leaseMs = 60_00
       record.expiresAt = at + leaseMs;
       return true;
     },
-    /** Call immediately before dispatch; offline submissions are not queued here. */
-    resolve(ownerId, deviceId) {
-      const at = time();
-      const binding = store.getDeviceBinding(deviceId);
-      if (!binding || binding.ownerId !== ownerId || binding.revoked) throw new Error('DEVICE_UNAVAILABLE');
+    resolve,
+    /** Routing target for one dispatch: handle plus what the device published. */
+    route(ownerId, deviceId) {
+      const handle = resolve(ownerId, deviceId);
       const record = connections.get(deviceId);
-      if (!current(record, at)) throw new Error('DEVICE_OFFLINE');
-      return record.handle;
+      return {
+        handle,
+        bindingVersion: record.principal.bindingVersion,
+        delegation: record.delegation,
+        send: record.send ?? (() => { throw new Error('DEVICE_UNAVAILABLE'); }),
+      };
+    },
+    /** Store the delegation projection for this connection. Not authority. */
+    setDelegation(handle, delegation) {
+      const record = connections.get(handle?.deviceId);
+      if (!record || record.handle !== handle) return false;
+      record.delegation = { ...delegation };
+      return true;
     },
     disconnect(handle) {
       const record = connections.get(handle?.deviceId);

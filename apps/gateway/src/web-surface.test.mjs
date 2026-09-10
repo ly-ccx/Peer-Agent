@@ -11,7 +11,7 @@ for (const state of ['anonymous', 'bound', 'revoked', 'unavailable']) {
   test(`web-device-state-${state}`, async () => {
     const nodes = new Map();
     const element = () => ({ hidden: false, textContent: '', children: [], listeners: {},
-      replaceChildren() { this.children = []; }, append(...values) { this.children.push(...values); },
+      replaceChildren(...values) { this.children = [...values]; }, append(...values) { this.children.push(...values); },
       addEventListener(name, fn) { this.listeners[name] = fn; } });
     const document = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
     const calls = [];
@@ -161,7 +161,7 @@ test('device state carries a class hook and a sentence, never colour alone', asy
   for (const [online, revoked] of [[true, false], [false, false], [true, true]]) {
     const nodes = new Map();
     const element = () => ({ hidden: false, textContent: '', className: '', children: [], listeners: {},
-      replaceChildren() { this.children = []; }, append(...values) { this.children.push(...values); },
+      replaceChildren(...values) { this.children = [...values]; }, append(...values) { this.children.push(...values); },
       addEventListener(name, fn) { this.listeners[name] = fn; } });
     const document = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
     const fetch = async () => ({ status: 200, ok: true, json: async () => ({ devices: [{ name: 'mac-mini', online, revoked }] }) });
@@ -204,4 +204,88 @@ test('Peer Frost red lines hold in the stylesheet', async () => {
   for (const [, px] of css.matchAll(/border-radius:\s*(\d+)px/g)) {
     assert.ok(Number(px) <= 16, 'border-radius ' + px + 'px exceeds the 16px red line');
   }
+});
+
+function createScriptHarness(fetch) {
+  const nodes = new Map();
+  const element = () => ({ hidden: false, textContent: '', value: '', className: '', children: [], listeners: {},
+    replaceChildren(...values) { this.children = [...values]; }, append(...values) { this.children.push(...values); },
+    addEventListener(name, fn) { this.listeners[name] = fn; } });
+  const document = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
+  return { nodes, document, element };
+}
+
+test('登录后出现只读任务入口，工作区来自委派投影，提交后展示结果', async () => {
+  const harness = createScriptHarness();
+  const calls = [];
+  const fetch = async (url, options = {}) => {
+    calls.push([url, options]);
+    if (url === '/api/devices') return { status: 200, ok: true, json: async () => ({ devices: [{ name: 'Mac', online: true }] }) };
+    if (url === '/api/delegations') return { status: 200, ok: true,
+      json: async () => ({ delegations: [{ deviceId: 'device-1', name: 'Mac', delegation: { workspaceIds: ['ws-1'] } }] }) };
+    if (url === '/api/tasks/read') return { status: 200, ok: true,
+      json: async () => ({ requestId: 'req-1', status: 'ok', result: { taskId: 'task-9', state: 'running' } }) };
+    throw new Error('unexpected ' + url);
+  };
+  runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document: harness.document, fetch });
+  const waitFor = async (check) => {
+    const end = Date.now() + 500;
+    while (!check()) {
+      if (Date.now() > end) throw new Error('TIMEOUT');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
+  await waitFor(() => harness.nodes.get('task-device')?.children.length > 0);
+  // 工作区只能来自本机上报的投影，页面不得自行编造。
+  assert.deepEqual(harness.nodes.get('task-device').children.map(option => option.value), ['device-1']);
+  assert.deepEqual(harness.nodes.get('task-workspace').children.map(option => option.value), ['ws-1']);
+  harness.nodes.get('task-id').value = 'task-9';
+  harness.nodes.get('task-device').value = 'device-1';
+  harness.nodes.get('task-workspace').value = 'ws-1';
+  await harness.nodes.get('task-read').listeners.submit({ preventDefault() {} });
+  const call = calls.find(([url]) => url === '/api/tasks/read');
+  assert.deepEqual(JSON.parse(call[1].body), { deviceId: 'device-1', workspaceId: 'ws-1', taskId: 'task-9' });
+  assert.match(harness.nodes.get('task-result').textContent, /running/);
+  assert.match(harness.nodes.get('task-result').className, /task-result-ok/);
+});
+
+test('没有可用委派时不显示只读任务入口', async () => {
+  const harness = createScriptHarness();
+  const fetch = async url => {
+    if (url === '/api/devices') return { status: 200, ok: true, json: async () => ({ devices: [{ name: 'Mac', online: false }] }) };
+    if (url === '/api/delegations') return { status: 200, ok: true, json: async () => ({ delegations: [] }) };
+    throw new Error('unexpected ' + url);
+  };
+  runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document: harness.document, fetch });
+  const end = Date.now() + 500;
+  while (harness.nodes.get('devices')?.children.length !== 1 && Date.now() < end) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(harness.nodes.get('task-read').hidden, true, '无委派投影时入口必须保持隐藏');
+});
+
+test('读取失败时给出人话解释，而不是裸错误码', async () => {
+  const harness = createScriptHarness();
+  const fetch = async (url, options = {}) => {
+    if (url === '/api/devices') return { status: 200, ok: true, json: async () => ({ devices: [{ name: 'Mac', online: true }] }) };
+    if (url === '/api/delegations') return { status: 200, ok: true,
+      json: async () => ({ delegations: [{ deviceId: 'device-1', name: 'Mac', delegation: { workspaceIds: ['ws-1'] } }] }) };
+    if (url === '/api/tasks/read') return { status: 504, ok: false, json: async () => ({ error: 'TASK_UNAVAILABLE', code: 'OUTCOME_UNKNOWN' }) };
+    throw new Error('unexpected ' + url);
+  };
+  runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document: harness.document, fetch });
+  const waitFor = async (check) => {
+    const end = Date.now() + 500;
+    while (!check()) {
+      if (Date.now() > end) throw new Error('TIMEOUT');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
+  await waitFor(() => harness.nodes.get('task-device')?.children.length > 0);
+  await harness.nodes.get('task-read').listeners.submit({ preventDefault() {} });
+  await waitFor(() => harness.nodes.get('task-result').textContent.includes('读取未完成'));
+  const text = harness.nodes.get('task-result').textContent;
+  assert.match(text, /结果未知/, '超时必须说清是未知，而不是失败或完成');
+  assert.match(harness.nodes.get('task-result').className, /task-result-alert/);
 });

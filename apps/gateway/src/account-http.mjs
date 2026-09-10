@@ -30,7 +30,34 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
     status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store',
       'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", ...extra },
   });
-  return async function handle(request, { deviceConnections } = {}) {
+  /** Bounded JSON body. Reports an oversized body instead of throwing, so a bad
+   * request becomes a status code rather than a 503. */
+  const readJsonBody = async (request, maxBytes) => {
+    const reader = request.body?.getReader();
+    if (!reader) return null;
+    const chunks = []; let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) { await reader.cancel(); return { tooLarge: true }; }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return null; }
+  };
+  // Routing failures are stable codes the page can explain. The device's own
+  // verdict passes through unchanged; an unrecognised code never becomes 200.
+  const TASK_ERROR_STATUS = {
+    INVALID_REQUEST: 400, RATE_LIMITED: 429,
+    DEVICE_OFFLINE: 409, REQUEST_EXPIRED: 409,
+    DEVICE_UNAVAILABLE: 503, DELEGATION_UNAVAILABLE: 503,
+    DELEGATION_EXPIRED: 403, WORKSPACE_DENIED: 403, CAPABILITY_DENIED: 403,
+    TASK_DENIED: 403, IDENTITY_UNBOUND: 403, EXPORT_DENIED: 403,
+    OUTCOME_UNKNOWN: 504,
+  };
+  return async function handle(request, { deviceConnections, deviceTasks } = {}) {
     const url = new URL(request.url);
     if (url.origin !== origin || (request.headers.has('host') && request.headers.get('host') !== base.host)) {
       return reply(400, { error: 'INVALID_HOST' });
@@ -81,27 +108,13 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
         if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') {
           return reply(415, { error: 'JSON_REQUIRED' });
         }
-        let body;
-        try {
-          const reader = request.body?.getReader();
-          if (!reader) return reply(400, { error: 'INVALID_REQUEST' });
-          const chunks = []; let size = 0;
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              size += value.byteLength;
-              if (size > 4096) { await reader.cancel(); return reply(413, { error: 'BODY_TOO_LARGE' }); }
-              chunks.push(value);
-            }
-          } finally { reader.releaseLock(); }
-          body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          if (!body || Array.isArray(body) || typeof body !== 'object'
-              || Object.keys(body).sort().join(',') !== 'challengeId,pairingKey'
-              || typeof body.challengeId !== 'string' || typeof body.pairingKey !== 'string') {
-            return reply(400, { error: 'INVALID_REQUEST' });
-          }
-        } catch { return reply(400, { error: 'INVALID_REQUEST' }); }
+        const body = await readJsonBody(request, 4096);
+        if (body?.tooLarge) return reply(413, { error: 'BODY_TOO_LARGE' });
+        if (!body || Array.isArray(body) || typeof body !== 'object'
+            || Object.keys(body).sort().join(',') !== 'challengeId,pairingKey'
+            || typeof body.challengeId !== 'string' || typeof body.pairingKey !== 'string') {
+          return reply(400, { error: 'INVALID_REQUEST' });
+        }
         try {
           return reply(202, devices.claimPairing(principal.ownerId, body.challengeId, body.pairingKey));
         } catch (error) {
@@ -124,6 +137,44 @@ export function createAccountHttp({ origin, login, sessions, devices, now = Date
           }
           return { ...device, online };
         }) });
+      }
+      if (url.pathname === '/api/delegations' && request.method === 'GET') {
+        // Read-only view of what each online device published, so the page can
+        // offer real workspace IDs instead of asking the user to guess them.
+        const principal = sessions.authenticate(cookie(request.headers, SESSION));
+        if (!principal) return reply(401, { error: 'AUTH_REQUIRED' });
+        if (!deviceTasks) return reply(200, { delegations: [] });
+        return reply(200, { delegations: devices.listDevices(principal.ownerId)
+          .filter(device => !device.revoked)
+          .map(device => ({ deviceId: device.deviceId, name: device.name, delegation: deviceTasks.describe(principal.ownerId, device.deviceId) }))
+          .filter(entry => entry.delegation) });
+      }
+      if (url.pathname === '/api/tasks/read' && request.method === 'POST') {
+        // Read-only task routing. Nothing is queued: an offline device is refused,
+        // and a sent-but-unanswered request is reported as unknown, never as failed.
+        const principal = sessions.authenticate(cookie(request.headers, SESSION));
+        if (!principal) return reply(401, { error: 'AUTH_REQUIRED' });
+        if (!deviceTasks) return reply(503, { error: 'SERVICE_UNAVAILABLE' });
+        if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') {
+          return reply(415, { error: 'JSON_REQUIRED' });
+        }
+        const body = await readJsonBody(request, 4096);
+        if (body?.tooLarge) return reply(413, { error: 'BODY_TOO_LARGE' });
+        if (!body || Array.isArray(body) || typeof body !== 'object'
+            || Object.keys(body).sort().join(',') !== 'deviceId,taskId,workspaceId'
+            || typeof body.deviceId !== 'string' || typeof body.workspaceId !== 'string'
+            || typeof body.taskId !== 'string') {
+          return reply(400, { error: 'INVALID_REQUEST' });
+        }
+        try {
+          const answer = await deviceTasks.submit({ ownerId: principal.ownerId, deviceId: body.deviceId,
+            workspaceId: body.workspaceId, taskId: body.taskId });
+          return reply(200, { requestId: answer.requestId, status: answer.status, result: answer.result ?? null });
+        } catch (error) {
+          const code = typeof error?.message === 'string' && /^[A-Z][A-Z_]{0,63}$/.test(error.message)
+            ? error.message : 'UNKNOWN';
+          return reply(TASK_ERROR_STATUS[code] ?? 502, { error: 'TASK_UNAVAILABLE', code });
+        }
       }
       return reply(404, { error: 'NOT_FOUND' });
     } catch {
