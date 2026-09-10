@@ -27,6 +27,7 @@
     "@peer-agent/runtime-sdk": "workspace:*",
     "@qoder-ai/qoder-agent-sdk": "^1.0.15",
     "adm-zip": "^0.5.17",
+    "ws": "^8.21.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
