@@ -15,6 +15,30 @@ export interface ModelCatalogEntry {
   readonly configured: boolean;
 }
 
+export function isRemoteCatalogSelectionBlocked(
+  channelId: string | undefined,
+  loading: boolean,
+  error: string | undefined,
+  source: LlmModelListResult['source'] | undefined,
+  catalogSize: number,
+): boolean {
+  return channelId === 'deepseek' && (loading || Boolean(error) || source !== 'remote' || catalogSize === 0);
+}
+
+export function resolveCatalogSelection(
+  catalog: readonly ModelCatalogEntry[],
+  configuredModels: readonly Pick<LlmProviderConfigView, 'model' | 'modelLabel'>[],
+  selected: ReadonlySet<string>,
+  channelId?: string,
+): LlmModelInfo[] {
+  const models = catalog.filter((entry) => selected.has(entry.model.id)).map((entry) => entry.model);
+  if (channelId === 'deepseek') return models;
+  const catalogIds = new Set(catalog.map((entry) => entry.model.id));
+  return [...models, ...configuredModels
+    .filter((model) => selected.has(model.model) && !catalogIds.has(model.model))
+    .map((model) => ({ id: model.model, label: model.modelLabel || model.model }))];
+}
+
 export function contextWindowDefinition(model: Pick<LlmModelInfo, 'modelOptions'>) {
   return model.modelOptions?.find((definition) => definition.choices.some((choice) => (
     typeof choice.contextWindow === 'number' && choice.contextWindow > 0

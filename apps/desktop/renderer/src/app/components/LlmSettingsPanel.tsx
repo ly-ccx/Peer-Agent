@@ -2148,6 +2148,7 @@ export function LlmSettingsPanel({
         <ModelCatalogDialog
           i18n={i18n}
           providerName={pendingProviderDraft.name}
+          channelId={pendingProviderDraft.channelId}
           models={catalogResult.models}
           configuredModels={[]}
           source={catalogResult.source}
@@ -2175,6 +2176,7 @@ export function LlmSettingsPanel({
           <ModelCatalogDialog
             i18n={i18n}
             providerName={target.name || target.provider}
+            channelId={target.channelId}
             models={catalogResult.models}
             configuredModels={configuredModels}
             source={catalogResult.source}

@@ -409,21 +409,39 @@ test('listModelCatalogForChannel still rewrites DeepSeek Anthropic roots when ca
   assert.equal(res.source, 'remote');
 });
 
-test('listModelCatalogForChannel falls back to the built-in DeepSeek catalog and keeps the error', async () => {
-  const res = await listModelCatalogForChannel({
-    baseUrl: 'https://api.deepseek.com/anthropic',
-    wire: 'anthropic-messages',
-    modelCatalog: {
-      channelId: 'deepseek',
-      wire: 'openai-chat',
-      baseUrl: 'https://api.deepseek.com',
-      headers: { Authorization: 'Bearer deepseek-test-key' },
-    },
-    fetchImpl: async () => ({ ok: false, status: 404, text: async () => 'not found' }),
+for (const fallbackCatalog of [undefined, [{ id: 'deepseek-chat' }]]) {
+  test(`DeepSeek remote failure rejects without static fallback (${Boolean(fallbackCatalog)})`, async () => {
+    await assert.rejects(listModelCatalogForChannel({
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      wire: 'anthropic-messages',
+      modelCatalog: {
+        channelId: 'deepseek', wire: 'openai-chat',
+        baseUrl: 'https://api.deepseek.com', fallbackCatalog,
+      },
+      fetchImpl: async () => ({ ok: false, status: 404, text: async () => 'not found' }),
+    }), /models list failed: HTTP 404 not found/);
   });
-  assert.equal(res.source, 'fallback');
-  assert.equal(res.error, 'models list failed: HTTP 404 not found');
-  assert.deepEqual(res.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+}
+
+for (const ids of [[], ['deepseek-flash', 'deepseek-v4-pro']]) {
+  test(`DeepSeek remote IDs are authoritative (${ids.length} models)`, async () => {
+    const result = await listModelCatalogForChannel({
+      modelCatalog: { channelId: 'deepseek', wire: 'openai-chat', baseUrl: 'https://api.deepseek.com' },
+      registryFetchImpl: async () => ({ ok: false }),
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: ids.map((id) => ({ id })) }) }),
+    });
+    assert.equal(result.source, 'remote');
+    assert.deepEqual(result.models.map((model) => model.id).sort(), [...ids].sort());
+  });
+}
+
+test('other channels retain explicitly configured catalog fallback', async () => {
+  const result = await listModelCatalogForChannel({
+    modelCatalog: { channelId: 'custom', baseUrl: 'https://example.test', fallbackCatalog: [{ id: 'custom-model' }] },
+    fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'boom' }),
+  });
+  assert.equal(result.source, 'fallback');
+  assert.deepEqual(result.models, [{ id: 'custom-model' }]);
 });
 
 test('listModelCatalogForChannel keeps plain remote failure for channels without a catalog override', async () => {

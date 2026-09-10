@@ -142,24 +142,6 @@ const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.i
 // 向后兼容别名:历史调用/测试以 FALLBACK_MODELS 引用同一份清单。
 const FALLBACK_MODELS = SUBSCRIPTION_CATALOG;
 
-// DeepSeek 官方静态目录兜底。
-// 事实: DeepSeek 的 Anthropic 兼容平面没有 /v1/models,模型目录只挂在
-// OpenAI 兼容平面;目录远程失败(404/断网等)时用它兜底,官方仅此两款公开模型。
-const DEEPSEEK_FALLBACK_CATALOG = Object.freeze([
-  Object.freeze({
-    id: 'deepseek-chat',
-    label: 'DeepSeek Chat',
-    contextWindow: 128_000,
-    maxOutputTokens: 8_000,
-  }),
-  Object.freeze({
-    id: 'deepseek-reasoner',
-    label: 'DeepSeek Reasoner',
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-  }),
-]);
-
 function headerValue(headers, name) {
   if (!headers || typeof headers !== 'object') return undefined;
   const target = String(name).toLowerCase();
@@ -429,8 +411,8 @@ export async function listOpenAICompatibleModels({
  * 渠道感知的模型目录统一入口。
  *
  * - requestConfig.modelCatalog 存在(渠道声明了目录平面覆盖,如 DeepSeek):
- *   用覆盖的 wire/baseUrl/headers 拉远程目录,失败时回退该渠道的静态目录
- *   (返回 source='fallback' 且保留 error 供诊断)。
+ *   用覆盖的 wire/baseUrl/headers 拉远程目录。DeepSeek 失败原样抛错；
+ *   其他渠道可使用显式 fallbackCatalog (保留 error 供诊断)。
  * - modelCatalog 不存在:与历史一致直接走 listOpenAICompatibleModels,
  *   失败原样抛错,不引入兜底。
  *
@@ -456,8 +438,9 @@ export async function listModelCatalogForChannel(requestConfig = {}) {
       modelCatalog: undefined,
     });
   } catch (error) {
-    const fallbackCatalog = override.fallbackCatalog
-      ?? (override.channelId === 'deepseek' ? DEEPSEEK_FALLBACK_CATALOG : undefined);
+    // DeepSeek's model IDs come exclusively from its remote catalog.
+    if (override.channelId === 'deepseek') throw error;
+    const fallbackCatalog = override.fallbackCatalog;
     if (!Array.isArray(fallbackCatalog) || fallbackCatalog.length === 0) {
       throw error;
     }
