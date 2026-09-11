@@ -6,6 +6,7 @@ import {
   resolveGitBranchPrefix,
 } from '../gitBranchPrefix';
 import { clientApi } from '../../clientApi';
+import { Dropdown } from './Dropdown';
 
 export interface GitPanelProps {
   readonly i18n: I18nRuntime;
@@ -124,35 +125,35 @@ export function GitPanel({ i18n, workspacePath, onGitBranchPrefixChanged }: GitP
           </div>
           <div className="general-language-select">
             {workspacePath ? (
-              localBranches.length + remoteBranches.length > 0 ? (
-                <select
-                  value={baseBranch}
-                  disabled={isSaving}
-                  aria-label={i18n.t('settings.git.baseBranch')}
-                  onChange={(event) => void handleSaveBaseBranch(event.target.value)}
-                >
-                  <option value="">{i18n.t('settings.git.baseBranch.unset')}</option>
-                  {localBranches.length > 0 ? (
-                    <optgroup label={i18n.locale.startsWith('zh') ? '本地分支' : 'Local'}>
-                      {localBranches.map((branch) => (
-                        <option key={`local:${branch}`} value={branch}>
-                          {branch === currentHead ? `${branch} (HEAD)` : branch}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                  {remoteBranches.length > 0 ? (
-                    <optgroup label={i18n.locale.startsWith('zh') ? '远程分支' : 'Remote'}>
-                      {remoteBranches.map((branch) => (
-                        <option key={`remote:${branch}`} value={branch}>
-                          {branch}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                </select>
-              ) : (
+              localBranches.length + remoteBranches.length === 0 ? (
                 <p className="general-setting-error">{i18n.t('settings.git.baseBranch.empty')}</p>
+              ) : (
+                <Dropdown
+                  value={baseBranch}
+                  options={[
+                    { value: '', label: i18n.t('settings.git.baseBranch.unset') },
+                    ...localBranches.map((branch) => ({
+                      value: branch,
+                      label: branch === currentHead ? `${branch} (HEAD)` : branch,
+                      tab: 'local',
+                    })),
+                    ...remoteBranches.map((branch) => ({
+                      value: branch,
+                      label: branch,
+                      tab: 'remote',
+                    })),
+                  ]}
+                  onChange={(value) => void handleSaveBaseBranch(value)}
+                  disabled={isSaving}
+                  ariaLabel={i18n.t('settings.git.baseBranch')}
+                  searchable={true}
+                  searchPlaceholder={i18n.locale.startsWith('zh') ? '搜索分支…' : 'Search branches…'}
+                  tabs={[
+                    { id: 'local', label: i18n.locale.startsWith('zh') ? '本地' : 'Local' },
+                    { id: 'remote', label: i18n.locale.startsWith('zh') ? '远程' : 'Remote' },
+                  ]}
+                  tabsAriaLabel={i18n.t('settings.git.baseBranch')}
+                />
               )
             ) : (
               <p className="general-setting-error">{i18n.t('settings.git.baseBranch.empty')}</p>

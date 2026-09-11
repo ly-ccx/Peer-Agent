@@ -242,7 +242,14 @@
 }
 
 .general-language-select {
-  flex: 0 0 180px;
+  flex: 0 1 180px;
+  min-width: 0;
+}
+
+/* 分支下拉：撑满槽位并让长分支名省略，而不是把整行顶开。 */
+.general-language-select .pa-dropdown {
+  width: 100%;
+  min-width: 0;
 }
 
 .general-setting-error {
