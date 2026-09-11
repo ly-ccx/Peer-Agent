@@ -15,10 +15,13 @@ for (const pending of ['refresh', 'pairing']) {
       const list = () => ({ status: 200, ok: true, json: async () => ({ devices: [{ name: 'Mac', online: true }] }) });
       const fetch = async url => {
         calls.push(url);
+        // 登录后的委派查询是合法初始化，不计入退出竞态的请求数。
+        if (url === '/api/delegations') return { status: 200, ok: true, json: async () => ({ delegations: [] }) };
         if (calls.length === 1) return list();
         if (url === '/auth/logout') return new Promise(resolve => { finishLogout = () => resolve({ ok: success }); });
         return new Promise(resolve => { finishPending = () => resolve(pending === 'refresh' ? list() : { status: 202 }); });
       };
+      const routed = () => calls.filter(url => url !== '/api/delegations');
       runInNewContext(await remoteWebResponse('/assets/remote.js').text(), { document, fetch });
       await new Promise(resolve => setImmediate(resolve));
       nodes.get('challenge').value = 'challenge'; nodes.get('pairing-key').value = 'secret';
@@ -27,7 +30,7 @@ for (const pending of ['refresh', 'pairing']) {
       const logout = nodes.get('logout').listeners.click();
       await nodes.get('refresh').listeners.click();
       await nodes.get('logout').listeners.click();
-      assert.equal(calls.length, 3, 'no refresh or duplicate logout during logout');
+      assert.equal(routed().length, 3, 'no refresh or duplicate logout during logout');
       assert.equal(nodes.get('pairing-key').value, '');
       assert.equal(nodes.get('challenge').value, '');
       finishLogout(); await logout;
@@ -40,7 +43,7 @@ for (const pending of ['refresh', 'pairing']) {
       assert.equal(nodes.get('devices').children.length, 0);
       assert.equal(nodes.get('refresh').disabled, false);
       await nodes.get('pairing').listeners.submit({ preventDefault() {} });
-      assert.equal(calls.length, 3, 'stale responses do not reauthorize submission');
+      assert.equal(routed().length, 3, 'stale responses do not reauthorize submission');
     });
   }
 }
