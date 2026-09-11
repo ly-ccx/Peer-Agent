@@ -7,7 +7,7 @@
  * - 工具执行、权限、Evidence 仍由注入的 chatRuntime 及既有能力链路负责。
  */
 
-import { derivePlanStatus, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { derivePlanStatus, goalPlanIsSelfDriven, goalPlanWaitsOnUser } from './goal-plan-store.mjs';
 import { planRequiresQualityReview } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 
@@ -2164,6 +2164,41 @@ export function createGoalRunner({
           type: 'problem_found',
           summary: `Goal Runner requested user input: ${reason}`,
           payload: { summaryCode: 'requested_user_input', reason, requestedUserInput: true },
+        });
+        appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
+        emit('goalRunner:blocked', { planId, reason, requestedUserInput: true });
+        return getState(planId);
+      }
+
+      // 模型只把叶子标成 waiting_user（goal_update_task），没有调 request_user_input。
+      // 这条路径过去只写任务、不写 runner，泵会继续排下一轮空转，用户看到
+      // 「说要等你操作、下一轮又自己开跑」。这里复用计划存储层的同一份叶子判定停机。
+      // blockedReason 仍用 requested_user_input，用户回答后才能被
+      // consumeRequestedUserInput 正常消费并续跑；失败/中止的回合不在此抢跑，留给下方错误分支。
+      const turnSettledCleanly = !result?.failed
+        && !result?.blocked
+        && result?.terminalStatus !== 'error'
+        && result?.terminalStatus !== 'aborted';
+      if (turnSettledCleanly && goalPlanWaitsOnUser(latest)) {
+        const reason = 'requested_user_input';
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'waiting_user',
+          intent: 'block',
+          phase: 'waiting_user',
+          blockedReason: reason,
+          ...blockerPatch(latest, reason, { phase: 'waiting_user' }),
+          updatedAt: now(),
+        });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner parked: remaining leaves wait on user (${reason})`,
+          payload: {
+            summaryCode: 'requested_user_input',
+            reason,
+            requestedUserInput: true,
+            source: 'leaf_waiting_user',
+          },
         });
         appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
         emit('goalRunner:blocked', { planId, reason, requestedUserInput: true });

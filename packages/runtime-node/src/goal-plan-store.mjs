@@ -1760,6 +1760,46 @@ function isInactivePlan(plan) {
 }
 
 /**
+ * 叶子任务的「只剩等用户」判定：计划里已经没有 Agent 自己能推进的活。
+ *
+ * 背景：模型可以只把某个叶子标成 waiting_user（goal_update_task）而不调
+ * request_user_input。这条路径过去只写任务、不写 runner，导致泵继续排轮，
+ * 用户会看到「说要等你操作，下一轮又自己开跑」。停机与自动开跑闸门都必须
+ * 复用同一个判定，避免两处语义漂移。
+ *
+ * 规则（只看叶子，即无 subtasks 的任务）：
+ * - 终态叶子（completed / failed / cancelled）已收口，不构成阻塞。
+ * - 叶子 waiting_user → 等用户。
+ * - 叶子 running → Agent 还能自己推进，返回 false。
+ * - 其他非终态（pending / queued 等）→ 还有没派下去的活，返回 false（宁可继续跑）。
+ *
+ * @param {object|null|undefined} plan
+ * @returns {boolean} true 表示「有叶子在等用户，且没有别的可推进活」
+ */
+export function goalPlanWaitsOnUser(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  let leafCount = 0;
+  let waitingLeafCount = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    leafCount += 1;
+    if (task.status === BLOCKED) {
+      waitingLeafCount += 1;
+    } else if (!LEAF_TERMINAL_STATUSES.has(task.status)) {
+      return false;
+    }
+  }
+  return leafCount > 0 && waitingLeafCount > 0;
+}
+
+/**
  * 用户回复可以消费 request_user_input 的计划态。
  * accepted + waiting_user 会出现在 intake 流错误残留、再被 goal_create_plan
  * 升成 accepted_goal 之后；只认 executing 会让「继续」永远吃不到回复。
