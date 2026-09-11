@@ -1,5 +1,6 @@
+/* 不再建立包含块：浮层的包含块是 .composer-chrome-row（会话列）。
+   anchor 自己的宽度只跟 docked 胶囊的标题走，拿它当尺寸基准会把浮层一起压窄。 */
 .goal-investigation-anchor {
-  position: relative;
   min-width: 0;
   max-width: 100%;
 }
@@ -9,7 +10,9 @@
   position: absolute;
   bottom: calc(100% + 12px);
   left: 0;
-  width: min(560px, 100%);
+  /* 宽度基准 = 会话列：100cqw 取 .chat-composer-wrap 的内容宽，再夹到列上限
+     --chat-content-max，正好等于 chrome 行的宽度。胶囊宽度从此不再参与。 */
+  width: min(560px, 100cqw, var(--chat-content-max));
   opacity: 1;
   transition: opacity var(--za-motion-medium) var(--za-ease-out),
     transform var(--za-motion-medium) var(--za-ease-out),
@@ -29,7 +32,10 @@
   gap: 8px;
   align-items: center;
   --motion-enter-from: var(--za-motion-shift-sm);
-  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+  /* 用 backwards 而非 both：both 会让动画结束后仍保留 to 帧的
+     translate3d(0,0,0)，那是一个非 none 的 transform，会把这一层变成 backdrop
+     root，卡片的 backdrop-filter 就只剩层内内容可采样，毛玻璃直接失效。 */
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) backwards;
 }
 
 .goal-investigation-card {
@@ -37,11 +43,18 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  flex: 1;
+  /* 按内容自适应：短问题收窄，长问题到列宽上限才截断，不再两等分。 */
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--za-line);
   border-radius: 12px;
+  /* 与 docked 胶囊同一套毛玻璃配方。--glass-popover 只是半透明底色，
+     缺了 blur 背后正文会直接透成鬼影。 */
   background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   color: var(--za-text);
   font-size: 12px;
 }
@@ -67,6 +80,16 @@
 }
 .goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
 .goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
+
+/* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色，避免半透明底 + 无模糊。 */
+@media (prefers-reduced-transparency: reduce) {
+  .goal-investigation-card {
+    background: var(--ui-surface-raised, var(--za-surface-1));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12));
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .goal-investigation, .goal-investigation-cards, .goal-investigation-signal {

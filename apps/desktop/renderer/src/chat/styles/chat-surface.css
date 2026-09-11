@@ -1065,6 +1065,10 @@
   max-width: var(--chat-content-max);
   margin: 0 auto 8px;
   padding: 0 var(--space-1);
+  /* Goal 调查浮层（.goal-investigation）的包含块。浮层的宽度/位置基准是这条
+     会话列，不是只跟标题走的 docked 胶囊；放在这里，left:0 与百分比宽度才落在
+     输入框那一列上。 */
+  position: relative;
 }
 
 /* Git 环境在右侧时：Goal 吃剩余宽度靠左，环境贴右，避免中间胶囊把左右挤叠。 */

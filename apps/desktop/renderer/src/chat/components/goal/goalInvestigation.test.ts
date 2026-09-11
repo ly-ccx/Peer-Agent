@@ -50,3 +50,41 @@ test('UI uses cancellable success-only timer, keyed conversation and reduced mot
   assert.match(css, /animation: none !important/);
   assert.match(css, /position: absolute/);
 });
+
+function block(source: string, selector: string): string {
+  const start = source.indexOf(`${selector} {`);
+  assert.notEqual(start, -1, `missing CSS block: ${selector}`);
+  const end = source.indexOf('\n}', start);
+  assert.notEqual(end, -1, `unterminated CSS block: ${selector}`);
+  return source.slice(start, end);
+}
+
+test('investigation popover sizes off the conversation column, not the docked capsule', () => {
+  const css = readFileSync(new URL('../../styles/goal-investigation.css', import.meta.url), 'utf8');
+  const chatStyles = readFileSync(new URL('../../styles/chat-surface.css', import.meta.url), 'utf8');
+  // 宽度基准 = 会话列（composer 容器宽 + 列上限），胶囊宽度不再参与。
+  assert.match(
+    block(css, '.goal-investigation'),
+    /width:\s*min\(560px,\s*100cqw,\s*var\(--chat-content-max\)\);/,
+  );
+  // 包含块搬到 chrome 行，anchor 不再建立包含块（它只跟胶囊同宽）。
+  assert.match(block(chatStyles, '.composer-chrome-row'), /position:\s*relative;/);
+  assert.doesNotMatch(block(css, '.goal-investigation-anchor'), /position:/);
+});
+
+test('investigation cards hug their content and keep the glass surface', () => {
+  const css = readFileSync(new URL('../../styles/goal-investigation.css', import.meta.url), 'utf8');
+  const card = block(css, '.goal-investigation-card');
+  assert.match(card, /flex:\s*0 1 auto;/);
+  assert.match(card, /width:\s*fit-content;/);
+  assert.doesNotMatch(card, /flex:\s*1;/);
+  assert.match(card, /backdrop-filter:\s*blur\(var\(--blur-popover\)\)/);
+  assert.match(card, /-webkit-backdrop-filter:\s*blur\(var\(--blur-popover\)\)/);
+  // 降低透明度偏好：退回不透明底色并去掉模糊。
+  const fallback = /@media \(prefers-reduced-transparency: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+  assert.match(fallback, /\.goal-investigation-card \{/);
+  assert.match(fallback, /backdrop-filter:\s*none;/);
+  // 入场动画不能停在 to 帧：translate3d(0,0,0) 会让该层成为 backdrop root，模糊失效。
+  assert.match(css, /animation:\s*motion-enter-rise[^;]*\sbackwards;/);
+  assert.doesNotMatch(css, /animation:\s*motion-enter-rise[^;]*\sboth;/);
+});
