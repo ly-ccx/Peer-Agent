@@ -19,6 +19,7 @@ import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
+import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
@@ -513,6 +514,7 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let localToolHost = null;
+let remoteAccess = null;
 // TaskOverview 聚合器：组装 goal-plan-store 与 automation-store 的投影快照，
 // 供 taskOverview:list IPC 使用（阶段 1，见 peer-2-0-gap-analysis §11）。
 const taskOverviewAggregator = createTaskOverviewAggregator({
@@ -3882,10 +3884,33 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
+  // 远程只读接入（ADR 75 M1）：默认不启动，只有显式配置了 Gateway 原点才连出去。
+  // 这样未配对的日常启动不会向服务器推送 enroll 请求；配对与常驻属后续阶段。
+  if (process.env.PEER_GATEWAY_ORIGIN) {
+    try {
+      remoteAccess = setupRemoteAccess({
+        userDataPath,
+        gatewayOrigin: process.env.PEER_GATEWAY_ORIGIN,
+        deviceName: os.hostname(),
+        workspaceId: process.env.PEER_REMOTE_WORKSPACE || 'default',
+        goalPlanStore,
+        sessionStore,
+        buildProjection: buildRuntimeProjection,
+        host: localToolHost,
+      });
+      remoteAccess.start();
+      console.log('[remote] started against %s', process.env.PEER_GATEWAY_ORIGIN);
+    } catch (error) {
+      console.warn('[remote] start failed: %s', error?.message || error);
+      remoteAccess = null;
+    }
+  }
   return {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
+        remoteAccess?.stop();
+        remoteAccess = null;
         await Promise.all([
           disposeApplicationShellTasks(userDataPath),
           disposeApplicationShellSessions(userDataPath),
