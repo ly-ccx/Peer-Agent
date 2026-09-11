@@ -27,6 +27,29 @@
   transition-delay: 0s, 0s, var(--za-motion-medium);
 }
 
+/**
+ * 正文底部净空：浮层可见时才留，不可见则为 0。
+ *
+ * 为什么需要：上面这块浮层是 `position: absolute` + `bottom: calc(100% + 12px)`，
+ * 也就是**悬在输入框上方、不占布局**。所以正文最后一行必须自己让开，否则会被浮层盖住
+ *（用户实际反馈的「子任务遮住输出」）。
+ *
+ * 为什么不能常驻：早先 .chat-thread 常驻 32px 底部内边距来干这件事，于是浮层不出现的
+ * 时候那段空间就是死区（用户反馈的「内容与输入框之间那段空白」）。改为按可见性按需施加，
+ * 两种状态都正确。
+ *
+ * 取值依据：浮层底边在 composer 顶边上方 12px，单行高度 ≈40px（卡片 padding 10px×2
+ *  + 12px 文字 + 边框），故浮层顶边约在 composer 顶边上方 52px；正文侧已有的
+ *  .chat-turn padding-bottom 为 24px，因此这里再补约 40px，可让正文末尾与浮层顶边之间
+ * 留出约 12px 呼吸。若将来浮层变成多行（当前最多渲染 2 张卡片 + 「另 N 项」徽标，
+ * 见 GoalInvestigationCards 的 slice(0, 2)），需要改为测量实际高度，而不是继续加常量。
+ *
+ * 用 :has() 做可见性条件：纯 CSS、无 JS 测量，因此不会引入新的跳动。
+ */
+.chat-surface:has(.goal-investigation:not([data-hidden='true'])) .chat-thread {
+  padding-bottom: 40px;
+}
+
 .goal-investigation-cards {
   display: flex;
   gap: 8px;

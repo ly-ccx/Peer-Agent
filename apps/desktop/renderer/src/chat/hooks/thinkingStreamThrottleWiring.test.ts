@@ -21,4 +21,28 @@ describe('stream router typewriter wiring', () => {
   it('keeps the visible text pump on per-frame pacing', () => {
     assert.match(routerSource, /useTypewriterStream\(\s*appendActiveText,?\s*\)/);
   });
+
+  it('uses handoff (not flush) for per-delta ordering so the throttle survives', () => {
+    // 逐 delta 的跨泵排序必须走 handoff：flush 会停泵并把节奏退回「首字立即写」，
+    // 于是每个 delta 都触发一次整面重渲染，节流形同虚设。
+    assert.match(routerSource, /handoffThinkingTypewriter\(\)/);
+    assert.match(routerSource, /handoffTextTypewriter\(\)/);
+
+    // 正文/思考 delta 的处理分支里不允许再出现跨泵 flush()。
+    const deltaHandlers = routerSource.slice(
+      routerSource.indexOf('const offDelta = clientApi.onChatStreamDelta'),
+      routerSource.indexOf('const offThinking = clientApi.onChatStreamThinking'),
+    );
+    assert.doesNotMatch(
+      deltaHandlers,
+      /(text|thinking)Typewriter\.flush\(\)/,
+      'text-delta handler must not force-flush the other pump',
+    );
+  });
+
+  it('still flushes on real closure boundaries (session switch / stream end)', () => {
+    // flush() 仍用于「结束/切会话」这类真收口：这些点必须真的写并把泵停掉。
+    assert.match(routerSource, /flushTextTypewriter\(\)/);
+    assert.match(routerSource, /flushThinkingTypewriter\(\)/);
+  });
 });

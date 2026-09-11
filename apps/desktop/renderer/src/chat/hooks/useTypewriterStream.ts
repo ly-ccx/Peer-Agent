@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { getStreamProfiler } from '../state/streamProfiler.ts';
 
 /**
  * 平滑流式打字机泵。
@@ -103,6 +104,33 @@ export interface TypewriterEmitDecision {
   readonly lastEmitAtMs: number;
 }
 
+export interface TypewriterHandoffDecision {
+  /** 是否需要立刻写出（buffer 为空时为 false，= 纯 no-op） */
+  readonly write: boolean;
+  /** 一次写出的字符数 */
+  readonly chars: number;
+  /** 写出后应记录的时间戳；节奏从此刻重新计算 */
+  readonly lastEmitAtMs: number;
+}
+
+/**
+ * 顺序交接决策：把当前 buffer 立即写出，保证「先到的内容先落到状态」。
+ *
+ * 正文与思考是两段不同的内容，谁先写出谁就排在前面，所以交接必须真的写。
+ * 但交接不该顺带把写入节流打掉：
+ *  - buffer 为空 = 纯 no-op（不停泵、不改节奏时钟），否则高频 delta 每来一个就重置一次；
+ *  - 有内容时写完后按「现在」重算节奏，而不是退回「首字立即写」语义，
+ *    否则交接后紧接着又会触发一次写出。
+ */
+export function planTypewriterHandoff(
+  input: { readonly bufferLength: number; readonly nowMs: number },
+): TypewriterHandoffDecision {
+  if (input.bufferLength <= 0) {
+    return { write: false, chars: 0, lastEmitAtMs: input.nowMs };
+  }
+  return { write: true, chars: input.bufferLength, lastEmitAtMs: input.nowMs };
+}
+
 /**
  * 打字机写入决策：本帧该不该写、写多少。
  *
@@ -134,6 +162,12 @@ export interface TypewriterController {
   push: (text: string) => void;
   /** 立即吐出全部剩余 buffer 并停止泵（流正常结束时调用） */
   flush: () => void;
+  /**
+   * 顺序交接：把当前 buffer 立即写出，但不停泵、不重置写入节奏。
+   * 用于「正文/思考互相切换」这类需要保序的场合——它们必须写出，但不该
+   * 顺带把写入节流打掉（那会让每个 delta 都触发一次整面重渲染）。
+   */
+  handoff: () => void;
   /** 丢弃 buffer 并停止泵（中断/出错/切换会话时调用） */
   reset: () => void;
 }
@@ -192,15 +226,49 @@ export function useTypewriterStream(
   const push = useCallback((text: string) => {
     if (!text) return;
     bufferRef.current += text;
+    // 观测：push 次数 = 前台 delta 到达速率（两个泵各自计数后汇总）。
+    const profiler = getStreamProfiler();
+    profiler.bump('typewriter.push');
+    profiler.setGauge('typewriter.bufferChars', bufferRef.current.length);
     ensureRunning();
   }, [ensureRunning]);
+
+  /**
+   * 顺序交接：把当前 buffer 立即写出，保证「先到的内容先落到状态」。
+   *
+   * 用于正文/思考互相切换时的排序（两者是不同段，谁先写出谁排前面）。
+   * 与 flush() 的区别：buffer 为空时是纯 no-op，且不停止泵、不把节奏时钟退回
+   * 「首字立即写」——否则每个 delta 的交接都会把写入节流打掉，界面重新变成
+   * 每个 chunk 一次整面重渲染。flush() 仍然用于「结束/切会话」这类真正的收口。
+   */
+  const handoff = useCallback(() => {
+    const decision = planTypewriterHandoff({
+      bufferLength: bufferRef.current.length,
+      nowMs: performance.now(),
+    });
+    if (!decision.write) return;
+    const remaining = bufferRef.current;
+    bufferRef.current = '';
+    pacerRef.current.lastEmitAtMs = decision.lastEmitAtMs;
+    const profiler = getStreamProfiler();
+    profiler.bump('typewriter.handoff');
+    profiler.bump('typewriter.handoffChars', remaining.length);
+    onTextRef.current(remaining);
+  }, []);
 
   const flush = useCallback(() => {
     stopLoop();
     pacerRef.current.lastEmitAtMs = null;
     const remaining = bufferRef.current;
     bufferRef.current = '';
-    if (remaining) onTextRef.current(remaining);
+    if (remaining) {
+      // 观测：flush 会把积压一次性写出并重置吐字节奏，等于绕过写入节流；
+      // 若它被每个 delta 触发，节流就形同虚设（排查卡顿的关键指标）。
+      const profiler = getStreamProfiler();
+      profiler.bump('typewriter.flush');
+      profiler.bump('typewriter.flushChars', remaining.length);
+      onTextRef.current(remaining);
+    }
   }, [stopLoop]);
 
   const reset = useCallback(() => {
@@ -212,5 +280,5 @@ export function useTypewriterStream(
   // 组件卸载时清理 rAF，防止泄漏。
   useEffect(() => stopLoop, [stopLoop]);
 
-  return { push, flush, reset };
+  return { push, flush, handoff, reset };
 }

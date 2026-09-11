@@ -69,7 +69,11 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--space-8) var(--space-6);
+  /* 底部不要再留白：轮次间距已下沉到 .chat-turn 的 padding-bottom（见 timeline.css，
+     注释「原 chat-thread 的轮次间距移入测量盒」），而 .chat-composer-wrap 另有 8px 顶部
+     内边距。这里若继续保留 32px，三者会叠加成约 64px 的死区，表现为「内容与输入框之间
+     有一段空白」。左右与顶部维持原值不变。 */
+  padding: 0 var(--space-6);
   padding-top: calc(40px + var(--space-4));
   display: flex;
   flex-direction: column;

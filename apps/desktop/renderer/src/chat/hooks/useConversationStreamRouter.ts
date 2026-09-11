@@ -50,6 +50,8 @@ import type { ChatMsg, ThinkingKind } from '../state/types';
 import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { THINKING_TYPEWRITER_OPTIONS, useTypewriterStream } from './useTypewriterStream';
+import { getStreamProfiler } from '../state/streamProfiler.ts';
+import { createLatestValueThrottle } from '../state/latestValueThrottle';
 
 let streamRouterOwner: string | null = null;
 let streamRouterOwnerSeq = 0;
@@ -201,7 +203,29 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   const thinkingTypewriter = useTypewriterStream(appendActiveThinking, THINKING_TYPEWRITER_OPTIONS);
   const flushTextTypewriter = textTypewriter.flush;
   const flushThinkingTypewriter = thinkingTypewriter.flush;
+  // 逐 delta 排序用 handoff（写出但保留节流节奏），收口才用 flush（写出并停泵）。
+  const handoffTextTypewriter = textTypewriter.handoff;
+  const handoffThinkingTypewriter = thinkingTypewriter.handoff;
   const backgroundStreamBufferRef = useRef(new BackgroundStreamBuffer());
+  /**
+   * context.accounting 的写入节流。
+   *
+   * 该事件是 per-chunk 的（实测主进程 thinking 速率 142–280/s）。每次写入都会同步通知
+   * 订阅者并触发 React 重渲染，把事件速率直接当写入速率会让渲染压力随输出速度线性增长，
+   * 最终触发 `Maximum update depth exceeded`（用户实测堆栈定位到原直接 setState 那一行）。
+   *
+   * 语义是「最新值优先」：中间快照对占用率展示没有意义，但最后一个值必须落库。
+   */
+  const accountingThrottleRef = useRef(
+    createLatestValueThrottle<string, ContextAccountingSnapshot>({
+      intervalMs: 200,
+      commit: (conversationId, snapshot) => {
+        conversationStore.setState(conversationId, (prev) => ({
+          contextAccounting: acceptAccountingSnapshot(prev.contextAccounting, snapshot),
+        }));
+      },
+    }),
+  );
   const backgroundFlushRef = useRef(createFrameCoalescer({
     request: (callback) => window.requestAnimationFrame(callback),
     cancel: (frameId) => window.cancelAnimationFrame(frameId),
@@ -271,25 +295,31 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           event.snapshot.conversationId,
         );
         if (!cid) return;
-        conversationStore.setState(cid, (prev) => ({
-          contextAccounting: acceptAccountingSnapshot(
-            prev.contextAccounting,
-            event.snapshot,
-          ),
-        }));
+        // 关键：accounting 是 per-chunk 事件（实测主进程 thinking 速率 142–280/s），
+        // 而每次写入都会同步通知订阅者并触发一次 React 重渲染。若把事件速率直接当
+        // 写入速率，渲染压力随输出速度线性增长，最终把 React 的嵌套更新推过上限
+        //（Maximum update depth exceeded，用户实测报错并定位到此行）。
+        // 这里改为「最新值优先」节流：中间值对占用率展示没有意义，只需保证最后一个
+        // 值一定落库。占用率数字人眼也不需要每秒刷新几十次。
+        accountingThrottleRef.current.push(cid, event.snapshot);
       }
     });
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      // 观测：分别统计正文/思考 delta 到达速率——两者是否逐 delta 交替，
+      // 决定了跨泵交接的写入成本（交替流无法靠节流降频）。
+      getStreamProfiler().bump('renderer.delta.text');
       // 兜底清除“正在重试连接”横幅：正文已在流式输出即证明连接已恢复。
       // 恢复发生在 SSE 正文阶段时，recovering-fetch 已 return，不会补发 recovered
       // 事件，横幅便会一直挂着（本次 bug 根因）。此处收到真实 delta 即收敛。
       clearRecoveryNotice(cid);
       if (cid === activeRef.current) {
-        // 保持 provider 事件顺序：另一侧 buffer 若有积压，先 flush 再追加本侧。
-        thinkingTypewriter.flush();
+        // 保持 provider 事件顺序：另一侧 buffer 若有积压，先 handoff 再追加本侧。
+        // 用 handoff 而不是 flush：两者都要保证「先到的内容先落状态」，但 flush 会把
+        // 另一侧的写入节流一起重置，导致每个 delta 都触发一次整面重渲染。
+        handoffThinkingTypewriter();
         textTypewriter.push(content);
       } else {
         backgroundStreamBufferRef.current.pushText(cid, content);
@@ -300,13 +330,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content, kind: rawKind }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      getStreamProfiler().bump('renderer.delta.thinking');
       // 推理模型常先输出 thinking 再出正文，此处同样兜底清除重试横幅。
       clearRecoveryNotice(cid);
       const kind = normalizeThinkingKind(rawKind);
       if (cid === activeRef.current) {
-        textTypewriter.flush();
+        handoffTextTypewriter();
         if (activeThinkingKindRef.current !== kind) {
-          thinkingTypewriter.flush();
+          // kind 变化必须先把旧 kind 的积压写出（否则会被并入新 kind 的段），
+          // 同样用 handoff 保留节流节奏。
+          handoffThinkingTypewriter();
           activeThinkingKindRef.current = kind;
         }
         thinkingTypewriter.push(content);
@@ -826,6 +859,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       streamRouterOwner = releaseStreamRouterLease(streamRouterOwner, ownerId);
       for (const { timer } of compactionDoneTimers.values()) clearTimeout(timer);
       compactionDoneTimers.clear();
+      // 先把待提交的 accounting 落库，再丢弃订阅：否则最后一次快照会丢。
+      accountingThrottleRef.current.flush();
       backgroundFlushRef.current.cancel();
       backgroundStreamBufferRef.current.clear();
       offRuntimeEvent();
