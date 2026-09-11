@@ -88,3 +88,22 @@ test('investigation cards hug their content and keep the glass surface', () => {
   assert.match(css, /animation:\s*motion-enter-rise[^;]*\sbackwards;/);
   assert.doesNotMatch(css, /animation:\s*motion-enter-rise[^;]*\sboth;/);
 });
+
+test('investigation cards are frosted glass, not 0.88 near-white with no elevation', () => {
+  const css = readFileSync(new URL('../../styles/goal-investigation.css', import.meta.url), 'utf8');
+  const card = block(css, '.goal-investigation-card');
+  // 材质必须从 --glass-popover 派生到更透的一档。直接用该 token（0.88）时，卡面压在
+  // 被 blur 糊成灰雾的正文上只剩约 1.9%/255 的信号，视觉上就是实心白。
+  assert.match(card, /background:\s*color-mix\(in srgb,\s*var\(--glass-popover\)\s*8[0-5]%,\s*transparent\)/);
+  assert.doesNotMatch(card, /background:\s*var\(--glass-popover\);/);
+  // 浮起观感：与 docked 胶囊同源的 --shadow-popover，外加玻璃顶边高光。
+  assert.match(card, /box-shadow:[^;]*var\(--shadow-popover/);
+  assert.match(card, /box-shadow:[^;]*var\(--glass-edge-highlight\)/);
+  // 入场动画挂在卡片自身，不能挂在 .goal-investigation-cards 祖先上：
+  // 祖先带 transform 会成为 backdrop root，子卡片模糊在入场瞬间失效。
+  assert.match(card, /animation:\s*motion-enter-rise/);
+  assert.doesNotMatch(block(css, '.goal-investigation-cards'), /animation:/);
+  // 降低动态效果时卡片自身的入场动画也要停掉。
+  const reducedMotion = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+  assert.match(reducedMotion, /\.goal-investigation-card,/);
+});

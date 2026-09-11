@@ -54,11 +54,12 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  /* 入场动画已下放到 .goal-investigation-card 自身，这里只留变量供其继承。
+     为什么不能挂在祖先上：祖先带 translate3d 时会成为 backdrop root，子卡片的
+     backdrop-filter 只能采样层内的空内容 —— 即使动画用 backwards 而非 both，
+     入场那一帧祖先仍带着位移，磨砂就会出现「刚出现时失效」的闪断。
+     挂在卡片自身则不受影响：元素自己的 backdrop-filter 不裁剪自己的采样源。 */
   --motion-enter-from: var(--za-motion-shift-sm);
-  /* 用 backwards 而非 both：both 会让动画结束后仍保留 to 帧的
-     translate3d(0,0,0)，那是一个非 none 的 transform，会把这一层变成 backdrop
-     root，卡片的 backdrop-filter 就只剩层内内容可采样，毛玻璃直接失效。 */
-  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) backwards;
 }
 
 .goal-investigation-card {
@@ -73,11 +74,21 @@
   padding: 10px 12px;
   border: 1px solid var(--za-line);
   border-radius: 12px;
-  /* 与 docked 胶囊同一套毛玻璃配方。--glass-popover 只是半透明底色，
-     缺了 blur 背后正文会直接透成鬼影。 */
-  background: var(--glass-popover);
+  /* 毛玻璃三件套：材质 + 模糊 + 浮起阴影。
+     1) --glass-popover 是 hsla(...,0.88) 的近白，压在被 blur(24px) 糊成灰雾的正文上
+        只产生约 1.9%/255 的信号（≈5 个灰阶），低于人眼阈值 —— 看着就是实心白。
+        注意方向：blur 生效时卡面反而更像实心，blur 失效时才会看到文字鬼影。
+        所以这里派生出更透的一档：82% × 0.88 ≈ 0.72，磨砂信号约 4.5%/255；
+        背景 12px 正文经 24px 模糊后为低频灰雾，仍不可读。
+     2) 阴影用与 docked 胶囊同源的 --shadow-popover，卡片才有「浮起来」的观感。
+     3) docked 胶囊刻意不叠 --glass-edge-highlight（暗色下顶部会变刺眼亮线），
+        卡片底色更透，需要这层顶边高光交代玻璃厚度。 */
+  background: color-mix(in srgb, var(--glass-popover) 82%, transparent);
   backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  box-shadow: var(--shadow-popover, 0 2px 12px rgba(26, 29, 33, 0.06)), var(--glass-edge-highlight);
+  /* 入场动画挂卡片自身而非 .goal-investigation-cards 祖先，见该容器处的说明。 */
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) backwards;
   color: var(--za-text);
   font-size: 12px;
 }
@@ -104,18 +115,21 @@
 .goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
 .goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
 
-/* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色，避免半透明底 + 无模糊。 */
+/* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色并停用模糊。
+   阴影/顶边高光沿用基础规则，不透底时它们仍然是卡片浮起的唯一交代。 */
 @media (prefers-reduced-transparency: reduce) {
   .goal-investigation-card {
     background: var(--ui-surface-raised, var(--za-surface-1));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .goal-investigation, .goal-investigation-cards, .goal-investigation-signal {
+  .goal-investigation,
+  .goal-investigation-cards,
+  .goal-investigation-card,
+  .goal-investigation-signal {
     animation: none !important;
     transition: none !important;
     transform: none !important;

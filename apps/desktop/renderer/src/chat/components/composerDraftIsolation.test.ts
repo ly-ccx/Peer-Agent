@@ -77,8 +77,13 @@ test('context ring renders the shared accounting snapshot without a local fallba
   );
   assert.match(display, /contextAccounting\?\.percent/);
   assert.match(display, /contextAccounting\?\.usageBreakdown/);
-  assert.match(display, /contextAccounting\?\.counterStatus === 'degraded'/);
-  assert.match(display, /Exact count drifted from provider usage/);
+  // 降级提示由 Runtime 内部计量状态（counterStatus）驱动，属于实现细节，已不再展示给用户。
+  // 保留反向断言，防止它被重新加回界面。
+  assert.doesNotMatch(display, /counterStatus === 'degraded'/);
+  assert.doesNotMatch(
+    display,
+    /Exact count drifted from provider usage|已降级采用 provider usage/,
+  );
   assert.match(display, /<ContextUsagePanel/);
   assert.doesNotMatch(display, /包含尚未计量的草稿|Includes uncounted draft/);
   assert.doesNotMatch(display, /contextPending\s*\?\s*'\+'\s*:/);
