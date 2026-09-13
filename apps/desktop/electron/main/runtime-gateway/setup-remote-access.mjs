@@ -19,18 +19,50 @@
  *   - A delegation is published once per connection. An app left running past its
  *     expiry fails closed (remote reads are refused) until the next reconnect.
  */
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as nodeSign } from 'node:crypto';
 import { createRemoteBindingStore, startRemoteDeviceConnector } from '@peer-agent/runtime-node';
 import { createRemoteGoalReader } from './remote-goal-read.mjs';
+import { createRemoteIdentityStore } from './remote-identity-keychain.mjs';
 
 const DELEGATION_MS = 24 * 60 * 60 * 1000;
 
-/** In-memory Ed25519 identity until the credential vault is wired. */
-function createEphemeralIdentity() {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+/** Ed25519 PKCS#8 DER header; the 32-byte seed follows it. Node's
+ * generateKeyPairSync expects a full PKCS#8 structure, not a bare seed, so the
+ * stored seed has to be re-wrapped before it can be used again. */
+const PKCS8_ED25519_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+const ED25519_SEED_BYTES = 32;
+
+/** Ed25519 identity bound to a Keychain entry so the key survives restarts.
+ * Generates a new keypair when no entry exists (first launch or after a reset).
+ * The private key is stored as base64 single-line; measurements confirm that
+ * multi-line PEM is truncated and stdin prompting is unusable headless, so
+ * base64 is the only reliable format. */
+async function createKeychainIdentity(identityStore) {
+  const raw = await identityStore.loadSecret();
+  let privateKey;
+  if (raw) {
+    const seed = Buffer.from(raw, 'base64');
+    if (seed.length !== ED25519_SEED_BYTES) {
+      // A truncated or foreign value cannot be used; clear it so the next launch
+      // starts cleanly instead of failing forever on the same bad entry.
+      await identityStore.deleteSecret().catch(() => {});
+      throw new Error('INVALID_KEYCHAIN_KEY');
+    }
+    // Re-wrap the bare seed into PKCS#8. Verified: the reconstructed key has the
+    // same public key and produces signatures that verify against it.
+    privateKey = createPrivateKey({
+      key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: 'der', type: 'pkcs8',
+    });
+  } else {
+    const fresh = generateKeyPairSync('ed25519');
+    const seed = fresh.privateKey.export({ type: 'pkcs8', format: 'der' }).slice(-ED25519_SEED_BYTES);
+    await identityStore.saveSecret(seed.toString('base64'));
+    privateKey = fresh.privateKey;
+  }
+  const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
   return {
-    publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
-    sign: async (message) => sign(null, Buffer.from(message), privateKey).toString('base64url'),
+    publicKey,
+    sign: async (message) => nodeSign(null, Buffer.from(message), privateKey).toString('base64url'),
   };
 }
 
@@ -49,12 +81,14 @@ function createEphemeralIdentity() {
  * @param {object} options.host              - local tool host (host.execute)
  * @param {object} [options.logger]
  * @param {Function} [options.connectorFactory] - host seam for tests; never remote input
+ * @param {object} [options.identityStore] - keychain seam; defaults to the real store
  */
 export function setupRemoteAccess({
   userDataPath, gatewayOrigin, deviceName, workspaceId,
   goalPlanStore, sessionStore, buildProjection, host,
   logger = { info() {}, warn() {}, error() {} },
   connectorFactory = startRemoteDeviceConnector,
+  identityStore = createRemoteIdentityStore(),
 }) {
   for (const [name, value] of Object.entries({
     userDataPath, gatewayOrigin, deviceName, workspaceId,
@@ -64,12 +98,16 @@ export function setupRemoteAccess({
   if (!goalPlanStore || !sessionStore || !buildProjection || !host) throw new Error('MISSING_DEPENDENCY');
 
   const bindingStore = createRemoteBindingStore(`${userDataPath}/remote-binding.sqlite`);
-  const identity = createEphemeralIdentity();
+  // Resolved on first start: reading the keychain is async, and a machine that
+  // never connects should not touch the keychain at all.
+  let identity = null;
   // Live connection facts. The reader must echo these exactly; a hardcoded value
   // would be rejected by admitRemoteRead (STALE_CONNECTION / BINDING_CONFLICT).
   let connectionEpoch = 0;
   let online = false;
   let connector = null;
+  // Why dialing gave up, when it did. Null while connected or never attempted.
+  let lastFailure = null;
 
   const delegationOf = () => ({
     version: 1,
@@ -175,11 +213,15 @@ export function setupRemoteAccess({
   }
 
   return {
-    /** Start connecting. Safe to call once; a second call is ignored. */
-    start() {
+    /** Start connecting. Safe to call once; a second call is ignored.
+     * Reads the keychain lazily, so a machine that never connects never touches it. */
+    async start() {
       if (connector) return;
       const binding = bindingStore.load();
       if (binding?.disabled) throw new Error('REMOTE_DISABLED');
+      // Resolve the persistent identity before dialing: the handshake signs with
+      // it, and it must be the same key the Gateway already knows for this device.
+      if (!identity) identity = await createKeychainIdentity(identityStore);
       connector = connectorFactory({
         origin: gatewayOrigin,
         store: { load: () => bindingStore.load(), save: value => bindingStore.save(value) },
@@ -194,6 +236,7 @@ export function setupRemoteAccess({
             // The epoch belongs to this connection; capture it for the reader.
             connectionEpoch = event.connectionEpoch;
             online = true;
+            lastFailure = null;
             logger.info('[remote] online epoch=%s', event.connectionEpoch);
           } else if (event?.status === 'pairing') {
             logger.info('[remote] awaiting pairing claim');
@@ -203,12 +246,22 @@ export function setupRemoteAccess({
           }
         },
       });
+      // The supervisor resolves when it gives up. Without this the surface had no
+      // way to learn that dialing stopped, so it showed "connecting…" forever.
+      connector.closed.then(({ reason, detail }) => {
+        online = false;
+        lastFailure = { reason, ...(detail?.code ? { code: detail.code } : {}), ...(detail?.message ? { message: detail.message } : {}) };
+        logger.warn('[remote] connection closed: %s%s', reason, detail?.code ? ` (${detail.code})` : '');
+      });
     },
     stop() {
       connector?.stop();
       connector = null;
       online = false;
       connectionEpoch = 0;
+      // A deliberate stop is not a failure; clearing it here keeps a later
+      // "connecting…" reading honest instead of replaying a stale reason.
+      lastFailure = null;
     },
     /** Local state for the settings surface; no secrets. */
     status() {
@@ -219,6 +272,7 @@ export function setupRemoteAccess({
         disabled: binding?.disabled === true,
         online,
         connectionEpoch,
+        lastFailure,
       };
     },
     bindingStore,

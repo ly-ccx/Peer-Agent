@@ -20,6 +20,7 @@ import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
 import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
+import { createRemoteAccessController } from './runtime-gateway/remote-access-controller.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
@@ -185,6 +186,7 @@ import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
 import { validateSkillInstallTarget } from './skill-install-target.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
+import { createRemoteAccessIpcRegistrations } from './ipc/register-remote-access-ipc.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
   createPermissionGrantService,
@@ -2372,6 +2374,11 @@ function registerDesktopIpcHost() {
       fdaDrag: browserFdaDragApplicationService,
       panelReveal: browserPanelRevealCoordinator,
     }),
+    // Resolved lazily: this host is registered before startLocalRuntime creates
+    // the controller, so the concrete controller must be looked up per call.
+    ...createRemoteAccessIpcRegistrations({
+      getRemoteAccess: () => remoteAccess,
+    }),
     ...createChatIpcRegistrations({
       chat: {
         send: handleChatSend,
@@ -3884,32 +3891,51 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
-  // 远程只读接入（ADR 75 M1）：默认不启动，只有显式配置了 Gateway 原点才连出去。
-  // 这样未配对的日常启动不会向服务器推送 enroll 请求；配对与常驻属后续阶段。
-  if (process.env.PEER_GATEWAY_ORIGIN) {
-    try {
-      remoteAccess = setupRemoteAccess({
+  // 远程只读接入（ADR 75 M1）。连接的唯一所有者是 remoteAccessController：
+  // 设置页、用户开关、常驻服务都经由它，避免多处以不同理由启停同一个连接。
+  // 环境变量只在首次引导时作为种子写入设置（不直接启动连接），随后一切以设置页为准。
+  try {
+    const current = settingsStore.getAll()?.remoteAccess;
+    const seeded = current && typeof current === 'object' && typeof current.gatewayOrigin === 'string'
+      ? current
+      : null;
+    if (!seeded?.gatewayOrigin && process.env.PEER_GATEWAY_ORIGIN) {
+      settingsStore.merge({
+        remoteAccess: {
+          enabled: true,
+          gatewayOrigin: process.env.PEER_GATEWAY_ORIGIN,
+          workspaceId: process.env.PEER_REMOTE_WORKSPACE || 'default',
+        },
+      });
+      console.log('[remote] seeded settings from environment');
+    }
+    remoteAccess = createRemoteAccessController({
+      settingsStore,
+      deviceName: os.hostname(),
+      createSession: ({ gatewayOrigin, workspaceId }) => setupRemoteAccess({
         userDataPath,
-        gatewayOrigin: process.env.PEER_GATEWAY_ORIGIN,
+        gatewayOrigin,
         deviceName: os.hostname(),
-        workspaceId: process.env.PEER_REMOTE_WORKSPACE || 'default',
+        workspaceId,
         goalPlanStore,
         sessionStore,
         buildProjection: buildRuntimeProjection,
         host: localToolHost,
-      });
-      remoteAccess.start();
-      console.log('[remote] started against %s', process.env.PEER_GATEWAY_ORIGIN);
-    } catch (error) {
-      console.warn('[remote] start failed: %s', error?.message || error);
-      remoteAccess = null;
-    }
+      }),
+    });
+    // 启动时按已保存的意图恢复连接；未配置或已关闭则什么都不做。
+    void remoteAccess.apply().catch(error => {
+      console.warn('[remote] restore failed: %s', error?.message || error);
+    });
+  } catch (error) {
+    console.warn('[remote] setup failed: %s', error?.message || error);
+    remoteAccess = null;
   }
   return {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
-        remoteAccess?.stop();
+        await remoteAccess?.stop().catch(() => {});
         remoteAccess = null;
         await Promise.all([
           disposeApplicationShellTasks(userDataPath),

@@ -31,10 +31,10 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
   let resolveClosed;
   const closed = new Promise(resolve => { resolveClosed = resolve; });
   const notify = value => { state = value.status; onState(value); };
-  const stop = (reason = 'stopped') => {
+  const stop = (reason = 'stopped', detail) => {
     if (stopped) return;
     stopped = true; clearInterval(watchdog); clearTimeout(poll);
-    try { socket.close(); } finally { resolveClosed({ reason }); }
+    try { socket.close(); } finally { resolveClosed({ reason, detail }); }
   };
   const send = message => {
     if (stopped || socket.readyState !== 1 || store.load()?.disabled) throw new Error('CONNECTION_STOPPED');
@@ -141,7 +141,12 @@ export function connectRemoteDevice({ origin, store, sign, publicKey, name, devi
     const error = event.error;
     const code = error?.code ?? error?.cause?.code;
     const transient = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'EAI_AGAIN'].includes(code);
-    stop(transient ? 'network_unavailable' : 'transport_failure');
+    // The category decides retry policy; the raw code is carried alongside it so a
+    // failure can be explained instead of collapsing into "transport_failure".
+    // Telling a bad certificate apart from a typo'd host is the difference between
+    // a fixable problem and a mystery, and neither is inferable from the category.
+    const detail = typeof code === 'string' && code ? { code } : undefined;
+    stop(transient ? 'network_unavailable' : 'transport_failure', detail);
   });
   socket.addEventListener('close', () => stop('disconnected'));
   return { closed, stop: () => stop('stopped') };

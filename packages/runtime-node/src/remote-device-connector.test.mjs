@@ -9,7 +9,7 @@ function fixture() {
     connect(options) {
       let finish;
       const call = { options, stops: 0, closed: new Promise(resolve => { finish = resolve; }),
-        stop() { this.stops++; }, finish: reason => finish({ reason }) };
+        stop() { this.stops++; }, finish: (reason, detail) => finish({ reason, detail }) };
       calls.push(call); return call;
     },
     schedule(fn, delay) { const entry = { fn, delay, cancelled: false }; scheduled.push(entry); return () => { entry.cancelled = true; }; },
@@ -46,4 +46,48 @@ test('unclassified pre-auth transport failure fails closed instead of retrying T
   const f = fixture(); f.calls[0].finish('transport_failure');
   assert.equal((await f.supervisor.closed).reason, 'transport_failure');
   assert.equal(f.scheduled.length, 0);
+});
+test('a failing connection reports the raw transport code, not just its category', async () => {
+  // Regression: every non-transient failure used to arrive as a bare
+  // 'transport_failure'. A bad certificate, a typo'd host, and a refused port all
+  // looked identical, so the settings panel could only say "connecting…" forever.
+  const f = fixture();
+  f.calls[0].finish('transport_failure', { code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+  const closed = await f.supervisor.closed;
+  assert.equal(closed.reason, 'transport_failure');
+  assert.equal(closed.detail.code, 'SELF_SIGNED_CERT_IN_CHAIN');
+  assert.equal(f.scheduled.length, 0, 'a security failure must still fail closed');
+});
+test('a thrown local defect reports why instead of a bare local_failure', async () => {
+  const detail = { code: 'ERR_INVALID_ARG_TYPE', message: 'options.publicKey must be a string' };
+  const supervisor = startRemoteDeviceConnector(
+    { store: { load: () => ({ disabled: false }) } },
+    {
+      random: () => 1,
+      connect() { throw Object.assign(new Error(detail.message), { code: detail.code }); },
+      schedule() { return () => {}; },
+    },
+  );
+  const closed = await supervisor.closed;
+  assert.equal(closed.reason, 'local_failure');
+  assert.equal(closed.detail.code, detail.code);
+  assert.equal(closed.detail.message, detail.message);
+});
+test('a rejected closed promise keeps its reason on connection_failure', async () => {
+  const supervisor = startRemoteDeviceConnector(
+    { store: { load: () => ({ disabled: false }) } },
+    {
+      random: () => 1,
+      connect() {
+        return {
+          stop() {},
+          closed: Promise.reject(Object.assign(new Error('socket teardown failed'), { code: 'ERR_SOCKET' })),
+        };
+      },
+      schedule() { return () => {}; },
+    },
+  );
+  const closed = await supervisor.closed;
+  assert.equal(closed.reason, 'connection_failure');
+  assert.equal(closed.detail.code, 'ERR_SOCKET');
 });
