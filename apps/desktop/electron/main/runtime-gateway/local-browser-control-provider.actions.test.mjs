@@ -200,10 +200,46 @@ test('click by selector uses mouseDown/Up and records viewport metadata', async 
   assert.equal(execution.result.outputPreview.x, 40);
   assert.equal(execution.result.outputPreview.y, 80);
   assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
     { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
     { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
   ]);
   assert.ok(browser.scripts.some((expr) => expr.includes('queryDeep(doc, "#go")')));
+});
+
+test('click needs no prior hover: the move is part of the click itself', async () => {
+  // Regression: a click used to dispatch only mouseDown/mouseUp. Pages that
+  // reveal or reposition a control on :hover then missed the press, and the
+  // caller had to run a separate hover first. The click now carries its own
+  // move, so one click call is self-sufficient.
+  const browser = createActionWebContents();
+  registerBrowserWebContents({
+    webContentsId: 71,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-click-no-hover',
+    active: true,
+    url: browser.getURL(),
+  });
+  const provider = createProvider(browser);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.click', 'browser_click', { selector: '#menu-trigger' }),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-a' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+  assert.equal(execution.result.status, 'success');
+  const types = browser.inputEvents.map((event) => event.type);
+  const moveIndex = types.indexOf('mouseMove');
+  const downIndex = types.indexOf('mouseDown');
+  assert.notEqual(moveIndex, -1, 'click must dispatch a mouseMove');
+  assert.ok(moveIndex < downIndex, 'the move must precede the press');
+  // And it must be the same point, not a move somewhere else.
+  assert.deepEqual(
+    { x: browser.inputEvents[moveIndex].x, y: browser.inputEvents[moveIndex].y },
+    { x: browser.inputEvents[downIndex].x, y: browser.inputEvents[downIndex].y },
+  );
 });
 
 test('click by coordinates skips element lookup', async () => {
@@ -227,6 +263,7 @@ test('click by coordinates skips element lookup', async () => {
   assert.equal(execution.result.status, 'success');
   assert.equal(execution.result.outputPreview.locatedBy, 'point');
   assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 12, y: 24 },
     { type: 'mouseDown', x: 12, y: 24, button: 'left', clickCount: 1 },
     { type: 'mouseUp', x: 12, y: 24, button: 'left', clickCount: 1 },
   ]);
@@ -253,8 +290,9 @@ test('click supports frame:N selector prefix', async () => {
   );
   assert.equal(execution.result.status, 'success');
   assert.ok(browser.scripts.some((expr) => expr.includes('frames[0]') && expr.includes('queryDeep(doc, "#submit")')));
-  assert.equal(browser.inputEvents[0].type, 'mouseDown');
-  assert.equal(browser.inputEvents[1].type, 'mouseUp');
+  assert.equal(browser.inputEvents[0].type, 'mouseMove');
+  assert.equal(browser.inputEvents[1].type, 'mouseDown');
+  assert.equal(browser.inputEvents[2].type, 'mouseUp');
 });
 
 test('click by unique role/name locates then clicks the element', async () => {
@@ -279,6 +317,7 @@ test('click by unique role/name locates then clicks the element', async () => {
   assert.equal(execution.result.outputPreview.locatedBy, 'role');
   assert.ok(browser.scripts.some((expr) => expr.includes('findRoleMatches') && expr.includes('"button"') && expr.includes('"Submit"')));
   assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
     { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
     { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
   ]);
@@ -356,6 +395,7 @@ test('click by role nth=0 picks the first of several same-named roles', async ()
   assert.equal(execution.result.outputPreview.nth, 0);
   assert.ok(browser.scripts.some((expr) => expr.includes('const wantNth = 0;')));
   assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
     { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
     { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
   ]);
@@ -407,6 +447,7 @@ test('click by unique visible text locates then clicks the element', async () =>
   assert.equal(execution.result.outputPreview.locatedBy, 'hasText');
   assert.ok(browser.scripts.some((expr) => expr.includes('findTextTestIdMatches') && expr.includes('"hasText"') && expr.includes('"Submit"')));
   assert.deepEqual(browser.inputEvents, [
+    { type: 'mouseMove', x: 40, y: 80 },
     { type: 'mouseDown', x: 40, y: 80, button: 'left', clickCount: 1 },
     { type: 'mouseUp', x: 40, y: 80, button: 'left', clickCount: 1 },
   ]);

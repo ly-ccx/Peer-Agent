@@ -1221,6 +1221,12 @@ export function createLocalBrowserControlProvider({
             if (blocked) return blocked;
           }
         }
+        // Move first so the page sees hover state and the real cursor position
+        // before the press. Without this, a click lands as a "cold" press on a
+        // page that never received a move: elements revealed or repositioned by
+        // :hover miss it, and the page observes a click at coordinates it was
+        // never told the pointer entered.
+        wc.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         wc.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, role: role || undefined, name: name || undefined, hasText: hasText || undefined, testid: testid || undefined, nth: nth ?? undefined, x: point.x, y: point.y, viewport: viewportMeta, ...targetIdentity };
