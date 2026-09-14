@@ -690,11 +690,18 @@ function assertContextAccountingPolicyIsCentralized() {
       fail(`Compaction IPC must not publish a parallel context-capacity field (${legacy}).`);
     }
   }
+  // 2026-09-14（v0.0.13）决定：Runtime 内部计量状态不向用户暴露。
+  // 旧断言要求 TokenUsageDisplay 展示「Exact count drifted from provider usage」降级说明，
+  // 该内部说明已从面板移除；这里改为反向断言，防止内部计数状态被重新加回界面。
   if (
-    !tokenUsageDisplay.includes("counterStatus === 'degraded'")
-    || !tokenUsageDisplay.includes('Exact count drifted from provider usage')
+    /counterStatus === 'degraded'|Exact count drifted from provider usage|已降级采用 provider usage/.test(
+      tokenUsageDisplay,
+    )
   ) {
-    fail('Desktop context display must surface provider count drift degradation.');
+    fail(
+      'Desktop context display must not re-expose Runtime-internal counter state '
+      + '(counterStatus / pendingUncountedChanges); keep user-facing context copy in contextUsagePanelModel.',
+    );
   }
   if (/contextPending\s*\?\s*'\+'\s*:/.test(tokenUsageDisplay)) {
     fail('Desktop context percentage must not expose pending accounting through a custom + suffix.');
