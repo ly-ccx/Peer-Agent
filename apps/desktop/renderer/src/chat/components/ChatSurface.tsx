@@ -77,6 +77,11 @@ import {
   shouldStartContextAccountingRestore,
 } from '../state/contextRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
+import { getStreamProfiler } from '../state/streamProfiler.ts';
+import {
+  createStreamingScrollScheduler,
+  type StreamingScrollScheduler,
+} from '../state/streamingScrollScheduler';
 import {
   buildMessageRailItemsIncremental,
   type MessageRailItemCache,
@@ -270,22 +275,28 @@ function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
 }
 
 function findCurrentTurnIdForScroll(container: HTMLDivElement): string | null {
-  const containerRect = container.getBoundingClientRect();
-  const probeX = containerRect.left + Math.min(Math.max(container.clientWidth / 2, 1), Math.max(containerRect.width - 1, 1));
-  const probeY = containerRect.top + CURRENT_TURN_CONTEXT_PROBE_PX;
-  const hit = container.ownerDocument.elementFromPoint(probeX, probeY);
-  const candidate = hit instanceof Element
-    ? hit.closest<HTMLElement>('[data-chat-turn-id]')
-    : null;
-  if (!candidate || !container.contains(candidate)) return null;
+  // 观测：本函数是流式热路径上最贵的一步——getBoundingClientRect + elementFromPoint
+  // （命中测试）+ 再次 getBoundingClientRect，每次都会强制同步布局。
+  // 它此前在每个 delta 写入后被调用两次（saveThreadScrollSnapshot 与
+  // updateCurrentTurnContext 各自算一遍），所以单独计时以确认量级与去重效果。
+  return getStreamProfiler().measure('scroll.hitTest', () => {
+    const containerRect = container.getBoundingClientRect();
+    const probeX = containerRect.left + Math.min(Math.max(container.clientWidth / 2, 1), Math.max(containerRect.width - 1, 1));
+    const probeY = containerRect.top + CURRENT_TURN_CONTEXT_PROBE_PX;
+    const hit = container.ownerDocument.elementFromPoint(probeX, probeY);
+    const candidate = hit instanceof Element
+      ? hit.closest<HTMLElement>('[data-chat-turn-id]')
+      : null;
+    if (!candidate || !container.contains(candidate)) return null;
 
-  const turnId = candidate.dataset.chatTurnId ?? null;
-  if (!turnId) return null;
+    const turnId = candidate.dataset.chatTurnId ?? null;
+    if (!turnId) return null;
 
-  const userMessage = candidate.querySelector<HTMLElement>('.chat-msg-user');
-  if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
+    const userMessage = candidate.querySelector<HTMLElement>('.chat-msg-user');
+    if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
 
-  return turnId;
+    return turnId;
+  });
 }
 
 interface TokenUsageState {
@@ -526,6 +537,10 @@ export function ChatSurface({
   readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
 }) {
   const isDraftConversation = conversationId === null;
+  // 观测：ChatSurface 每次渲染都会重跑整棵子树。它每秒被渲染多少次，
+  // 直接决定界面卡不卡——这个数字与「状态写入次数」未必相等，
+  // 两者不一致说明重渲染来自写入之外的触发源。
+  getStreamProfiler().bump('render.chatSurface');
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
   // 本组件不再持有 messages/isStreaming/... 的 useState 槽位，改为订阅当前会话切片；
   // 切会话 = 换订阅 key，物理上不存在「被复用的共享 messages 槽位」，跨会话串内容在架构层不可能发生。
@@ -847,7 +862,11 @@ export function ChatSurface({
   const threadRef = useRef<HTMLDivElement>(null);
   const virtualTurnListRef = useRef<VirtualChatTurnListHandle>(null);
   const messageTurnIndex = turnGroupCache.messageTurnIndex;
-  const virtualizeChatTurns = shouldVirtualizeChatTurns(chatTurns, findOpen);
+  // 观测：这次调用会遍历全部 turn × 全部 segment，且没有 memo（每次渲染都跑）。
+  // 流式期间它落在热路径上，必须单独计时，才能判断「渲染贵」到底贵在哪。
+  const virtualizeChatTurns = getStreamProfiler().measure('render.virtualizeWeight', () =>
+    shouldVirtualizeChatTurns(chatTurns, findOpen),
+  );
   const scrollToTurn = useCallback<VirtualChatTurnListHandle['scrollToTurn']>((index, options) => {
     virtualTurnListRef.current?.scrollToTurn(index, options);
   }, []);
@@ -961,20 +980,67 @@ export function ChatSurface({
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = threadRef.current;
     if (!container) return;
-    // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
-    userScrollIntentRef.current = false;
-    if (userScrollIntentClearTimerRef.current != null) {
-      window.clearTimeout(userScrollIntentClearTimerRef.current);
-      userScrollIntentClearTimerRef.current = null;
-    }
-    container.scrollTo({ top: container.scrollHeight, behavior });
-    shouldAutoScrollRef.current = true;
-    setIsThreadAtBottom((previous) => (previous ? previous : true));
-    saveThreadScrollSnapshot(conversationIdRef.current, container);
-    updateCurrentTurnContext(container);
-    // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
-    updateVirtualViewport();
+    // 观测：这是每个流式写入后都要走一遍的提交，内部包含多次强制同步布局。
+    getStreamProfiler().measure('scroll.bottom', () => {
+      // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
+      userScrollIntentRef.current = false;
+      if (userScrollIntentClearTimerRef.current != null) {
+        window.clearTimeout(userScrollIntentClearTimerRef.current);
+        userScrollIntentClearTimerRef.current = null;
+      }
+      container.scrollTo({ top: container.scrollHeight, behavior });
+      shouldAutoScrollRef.current = true;
+      setIsThreadAtBottom((previous) => (previous ? previous : true));
+      // 命中测试只做一次：saveThreadScrollSnapshot 与 updateCurrentTurnContext 需要的是
+      // 同一时刻的同一个值，此前各自算一遍，等于每次写入多做一次
+      // getBoundingClientRect + elementFromPoint（强制布局 + 命中测试）。
+      // 两次读之间没有任何写，所以合并不会改变结果。
+      const currentTurnId = findCurrentTurnIdForScroll(container);
+      saveThreadScrollSnapshot(conversationIdRef.current, container, currentTurnId);
+      updateCurrentTurnContext(container, currentTurnId);
+      // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
+      updateVirtualViewport();
+    });
   }, [saveThreadScrollSnapshot, updateCurrentTurnContext, updateVirtualViewport]);
+
+  // 调度器在 rAF 里执行，必须读「最新」回调而不是创建时捕获的旧闭包。
+  const scrollThreadToBottomRef = useRef(scrollThreadToBottom);
+  scrollThreadToBottomRef.current = scrollThreadToBottom;
+  const updateThreadBottomStateRef = useRef(updateThreadBottomState);
+  updateThreadBottomStateRef.current = updateThreadBottomState;
+  const updateCurrentTurnContextRef = useRef(updateCurrentTurnContext);
+  updateCurrentTurnContextRef.current = updateCurrentTurnContext;
+
+  /**
+   * 流式追加时的滚动调度器。
+   *
+   * messages 每次写入都会换引用，下面那个 useLayoutEffect 因此每个 delta 都要提交一次
+   * 滚动，而每次提交内部包含多次强制同步布局（scrollHeight / getBoundingClientRect /
+   * elementFromPoint 命中测试）。输出快时每秒几十次，主线程被布局吃满，整个界面卡死。
+   * 调度器把它收敛为「每帧最多一次」，且与绘制同帧（rAF 在 paint 之前），观感不变。
+   */
+  const streamingScrollSchedulerRef = useRef<StreamingScrollScheduler | null>(null);
+  if (streamingScrollSchedulerRef.current === null) {
+    streamingScrollSchedulerRef.current = createStreamingScrollScheduler({
+      scheduler: {
+        request: (callback) => requestAnimationFrame(callback),
+        cancel: (frameId) => cancelAnimationFrame(frameId),
+      },
+      // 回调在执行时读取最新的 ref/callback，而不是创建时捕获的，避免调度器持旧闭包。
+      follow: () => scrollThreadToBottomRef.current('auto'),
+      refresh: () => {
+        const container = threadRef.current;
+        updateThreadBottomStateRef.current(container);
+        updateCurrentTurnContextRef.current(container);
+      },
+    });
+  }
+  const scheduleFollowBottom = useCallback(() => {
+    streamingScrollSchedulerRef.current?.scheduleFollow();
+  }, []);
+  const scheduleScrollStateRefresh = useCallback(() => {
+    streamingScrollSchedulerRef.current?.scheduleRefresh();
+  }, []);
 
   const handleVirtualTurnMeasured = useCallback((_index: number) => {
     if (!shouldStickAfterVirtualMeasurement({ currentlyFollowing: shouldAutoScrollRef.current })) {
@@ -1777,9 +1843,9 @@ export function ChatSurface({
     });
 
     if (!plan.stickToBottom) {
-      const container = threadRef.current;
-      updateThreadBottomState(container);
-      updateCurrentTurnContext(container);
+      // 用户已向上滚：不贴底，但仍要刷新底部状态与当前轮次上下文。
+      // 这也是「每次写入一次」的布局工作，同样合并到每帧一次。
+      scheduleScrollStateRefresh();
       return;
     }
 
@@ -1787,9 +1853,14 @@ export function ChatSurface({
     // 若先按错误 totalSize 贴底，浏览器可能把 scrollTop 钳到 0，随后高度回升却停在顶部。
     // 仅在结构重写时清空虚拟测量；流式追加/替换仍走轻量贴底。
     if (plan.resetVirtualMeasurements) {
+      // 结构重写必须同步：清测量与贴底的先后顺序是这段逻辑的关键，不能推迟到下一帧。
       resetVirtualMeasurements();
+      scrollThreadToBottom('auto');
+      return;
     }
-    scrollThreadToBottom('auto');
+
+    // 流式追加：合并为每帧一次贴底提交（仍在同一帧绘制之前执行）。
+    scheduleFollowBottom();
     if (plan.reaffirmFrames <= 0) return;
 
     let cancelled = false;
@@ -1813,6 +1884,8 @@ export function ChatSurface({
     scrollThreadToBottom,
     updateCurrentTurnContext,
     updateThreadBottomState,
+    scheduleFollowBottom,
+    scheduleScrollStateRefresh,
   ]);
 
   // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅

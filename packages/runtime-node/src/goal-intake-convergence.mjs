@@ -18,6 +18,8 @@
  *     还原普通聊天体验）。
  */
 
+import { goalPlanWaitsOnUser } from './goal-plan-store.mjs';
+
 /** intake 判别契约识别：activation.kind==='intake' 表示尚未确认是否为真实目标。 */
 export function isIntakeContract(plan) {
   return plan?.activation?.kind === 'intake';
@@ -96,6 +98,9 @@ export function shouldRearmFailedGoalPlanFromChange(plan) {
  */
 export function shouldAutoStartAcceptedGoalRunnerFromChange(change, plan) {
   if (change?.changeKind !== 'goal-accepted') return false;
+  // 只剩等用户的叶子时，变更广播也不能把泵点着：这条自动路径没有新的用户意图，
+  // 拉起只会再排一轮「说要等你操作」的空转。显式用户回复不走这里。
+  if (goalPlanWaitsOnUser(plan)) return false;
   // 正常路径：accepted/executing 计划由 start() 拉起。
   if (shouldAutoStartAcceptedGoalRunner(plan)) return true;
   // re-arm 路径：中断挂起（interrupted）或失败（failed）的 accepted_goal 在收到
@@ -141,6 +146,8 @@ function isLeftoverAcceptedGoalUserWait(plan) {
  */
 export function isStalledAcceptedGoalRunner(plan) {
   if (isLeftoverAcceptedGoalUserWait(plan)) return true;
+  // 只剩等用户的叶子：不是「泵没转起来」，而是按设计停在这里，不能当成 stale kick。
+  if (goalPlanWaitsOnUser(plan)) return false;
   if (!shouldAutoStartAcceptedGoalRunner(plan)) return false;
   if (plan?.runner?.enabled !== true) return false;
   if (plan?.runner?.status !== 'running' && plan?.runner?.status !== 'exploring') return false;
@@ -169,5 +176,7 @@ export async function serializeAcceptedGoalRunnerHandoff({
 export function shouldRecoverAcceptedGoalRunnerOnConversationOpen(plan) {
   return shouldAutoStartAcceptedGoalRunner(plan)
     && plan?.runner?.enabled === true
-    && plan?.runner?.status === 'running';
+    && plan?.runner?.status === 'running'
+    // 只剩等用户的叶子时，重开会话不能自动续跑：用户还没回答。
+    && !goalPlanWaitsOnUser(plan);
 }

@@ -50,12 +50,15 @@ import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
+import { createStreamProfiler, isStreamProfilingEnabled } from './stream-profiler.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
 import { estimateUsageCostUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
+// 流式链路计时埋点（PEER_STREAM_PROFILE=1 开启；关闭时零成本）。
+const streamProfiler = createStreamProfiler({ enabled: isStreamProfilingEnabled() });
 
 const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
@@ -495,6 +498,9 @@ function wrapWebContentsForRuntimeEvents(
   const PERSIST_THROTTLE_MS = 500;
   let lastPersistAt = 0;
   const persistStreamRecord = ({ final = false, interrupted = false } = {}) => {
+    // 终态收口：accounting 落盘是节流的，窗口内最后一次观测值可能还挂在 pending 上。
+    // 在这里补写，保证 done/aborted/error 之后百分比不会停在旧值（非终态时是 no-op）。
+    if (final) streamRecord?.flushPendingAccounting?.();
     if (!conversationStore?.updateMessageById) return;
     if (!streamRecord?.conversationId) return;
     // 没有明确 assistantMessageId 时绝不回写：否则会落到会话最后一条 assistant，
@@ -503,8 +509,12 @@ function wrapWebContentsForRuntimeEvents(
     // Explorer / Verifier 等内部旁路流不落盘。
     if (streamRecord?.ephemeral) return;
     const now = Date.now();
-    if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) return;
+    if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) {
+      streamProfiler.bump('main.persist.skipped');
+      return;
+    }
     lastPersistAt = now;
+    streamProfiler.bump(final ? 'main.persist.final' : 'main.persist');
     // 终态落盘时，把已发出但未回填结果的 tool-call 段补成中断态，避免切回会话后永久转圈。
     const sourceSegments = final
       ? finalizeDanglingToolSegments(streamRecord.segments, streamRecord.terminalStatus)
@@ -534,30 +544,35 @@ function wrapWebContentsForRuntimeEvents(
       patch.interrupted = false;
     }
     try {
-      if (final) {
-        // 终态：全量落盘（会同步重写整份 JSONL，一次性成本可接受）并清理流式 sidecar。
-        conversationStore.updateMessageById(
-          streamRecord.conversationId,
-          streamRecord.assistantMessageId ?? null,
-          patch,
-        );
-      } else if (typeof conversationStore.patchStreamingMessage === 'function') {
-        // 流式中间态：只写几十 KB 的 sidecar。此前这里直接走 updateMessageById，
-        // 大会话（数 MB JSONL）每 500ms 同步读写一次，把主进程主线程打满
-        //（trace: 单次 230ms+ × 35 次），所有窗口一起卡死。
-        conversationStore.patchStreamingMessage(
-          streamRecord.conversationId,
-          streamRecord.assistantMessageId,
-          patch,
-        );
-      } else {
-        // 旧 store 兼容路径（无 sidecar 能力时保持原行为）。
-        conversationStore.updateMessageById(
-          streamRecord.conversationId,
-          streamRecord.assistantMessageId ?? null,
-          patch,
-        );
-      }
+      // 观测：这是 persist 真正落地的一步（终态全量重写 JSONL；流式态写 sidecar）。
+      // 每 500ms 一次，是主进程主线程上最重的固定开销，必须单独计时——
+      // 只有当它确实很贵时，「降低写入频率」才是正确的修法。
+      streamProfiler.measure(final ? 'main.persist.write.final' : 'main.persist.write', () => {
+        if (final) {
+          // 终态：全量落盘（会同步重写整份 JSONL，一次性成本可接受）并清理流式 sidecar。
+          conversationStore.updateMessageById(
+            streamRecord.conversationId,
+            streamRecord.assistantMessageId ?? null,
+            patch,
+          );
+        } else if (typeof conversationStore.patchStreamingMessage === 'function') {
+          // 流式中间态：只写几十 KB 的 sidecar。此前这里直接走 updateMessageById，
+          // 大会话（数 MB JSONL）每 500ms 同步读写一次，把主进程主线程打满
+          //（trace: 单次 230ms+ × 35 次），所有窗口一起卡死。
+          conversationStore.patchStreamingMessage(
+            streamRecord.conversationId,
+            streamRecord.assistantMessageId,
+            patch,
+          );
+        } else {
+          // 旧 store 兼容路径（无 sidecar 能力时保持原行为）。
+          conversationStore.updateMessageById(
+            streamRecord.conversationId,
+            streamRecord.assistantMessageId ?? null,
+            patch,
+          );
+        }
+      });
     } catch (err) {
       console.warn('[llm-chat] persist stream record failed:', err?.message || err);
     }
@@ -590,13 +605,23 @@ function wrapWebContentsForRuntimeEvents(
         return false;
       }
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
-        emitStreamRuntimeEvent({ type: 'message.delta', content: payload.content });
-        streamRecord.accumulatedText += payload.content;
-        appendTextSegment('text', payload.content);
+        if (streamProfiler.enabled) {
+          streamProfiler.bump('main.delta');
+          streamProfiler.setGauge('accTextChars', streamRecord.accumulatedText.length);
+        }
+        streamProfiler.measure('main.delta.runtimeEvent', () =>
+          emitStreamRuntimeEvent({ type: 'message.delta', content: payload.content }),
+        );
+        streamProfiler.measure('main.delta.accumulate', () => {
+          streamRecord.accumulatedText += payload.content;
+          appendTextSegment('text', payload.content);
+        });
         persistStreamRecord();
         // 复读兜底：命中尾部周期检测即视为模型卡死，主动 abort 并以 error 收口本轮。
         // delta 属于 REPLAY_UNSAFE 通道，terminalEventSent 置位后不会触发重试/切 provider。
-        const repetition = detectTailRepetition(streamRecord.accumulatedText);
+        const repetition = streamProfiler.measure('main.delta.repetition', () =>
+          detectTailRepetition(streamRecord.accumulatedText),
+        );
         if (repetition) {
           console.warn(
             `[llm-chat] repetition detected (period=${repetition.period}, repeats=${repetition.repeats}, reason=${repetition.reason}, substantiveChars=${repetition.substantiveChars}, unit=${JSON.stringify(repetition.unitPreview)}); aborting stream ${streamRecord.streamId}`,
@@ -628,17 +653,26 @@ function wrapWebContentsForRuntimeEvents(
           payload.kind === 'summary' || payload.kind === 'reasoning'
             ? payload.kind
             : undefined;
-        emitStreamRuntimeEvent({
-          type: 'reasoning.delta',
-          content: payload.content,
-          ...(thinkingKind ? { kind: thinkingKind } : {}),
-        });
+        if (streamProfiler.enabled) {
+          streamProfiler.bump('main.thinking');
+          streamProfiler.bump(`main.thinking.kind.${thinkingKind ?? 'none'}`);
+          streamProfiler.setGauge('accThinkingChars', (streamRecord.accumulatedThinking || '').length);
+        }
+        streamProfiler.measure('main.thinking.runtimeEvent', () =>
+          emitStreamRuntimeEvent({
+            type: 'reasoning.delta',
+            content: payload.content,
+            ...(thinkingKind ? { kind: thinkingKind } : {}),
+          }),
+        );
         // Keep accumulatedThinking consistent with segment join rules (summary-only breaks).
-        streamRecord.accumulatedThinking =
-          thinkingKind === 'summary'
-            ? joinSummaryThinkingContent(streamRecord.accumulatedThinking || '', payload.content)
-            : `${streamRecord.accumulatedThinking || ''}${payload.content}`;
-        appendTextSegment('thinking', payload.content, thinkingKind);
+        streamProfiler.measure('main.thinking.accumulate', () => {
+          streamRecord.accumulatedThinking =
+            thinkingKind === 'summary'
+              ? joinSummaryThinkingContent(streamRecord.accumulatedThinking || '', payload.content)
+              : `${streamRecord.accumulatedThinking || ''}${payload.content}`;
+          appendTextSegment('thinking', payload.content, thinkingKind);
+        });
         persistStreamRecord();
       } else if (channel === 'chat:stream:tool-call') {
         const toolName = typeof payload?.tool === 'string' ? payload.tool : undefined;
@@ -1174,6 +1208,39 @@ export function createLlmChatService({
       // 发生时立即写入 conversation sidecar,不再只依赖 chat:stream:done。这样被
       // 中断(aborted)或崩溃的 turn 不丢 lastObserved,restore 后圆环能恢复百分比。
       // 只拦截 provider_usage:estimated/unknown 快照不落盘,避免噪声覆盖观测事实。
+      //
+      // 落盘节流（必需）：该事件是 per-chunk 的（实测 thinking 阶段 142–280/s），而
+      // store 的 updateContextSnapshot 每次都做「读整份 index + normalize 全部行 +
+      // 全量重写 index + rename」——全是同步 I/O。trace 实测这条链占主进程同步 I/O 的
+      // 大头（writeFileSync 2436ms / readFileSync 1368ms / normalizeMeta 792ms /
+      // rename 885ms，合计约 5.5s per 16.7s 墙钟 ≈ 33%），主进程被占满时 Electron
+      // 所有窗口一起卡住（用户反馈的「整个界面卡住」）。
+      // 占用率百分比用 2s 粒度对人眼完全够；窗口内的中间快照只保留最新值，由尾部
+      // 定时器或终态收口保证最终一致（终态分支已按 persistKey 去重，不会双写）。
+      const ACCOUNTING_PERSIST_MIN_INTERVAL_MS = 2000;
+      let lastAccountingPersistAtMs = 0;
+      let pendingAccountingSnapshot = null;
+      let accountingFlushTimer = null;
+      const persistAccountingNow = (snapshot) => {
+        try {
+          conversationStore.updateContextSnapshot(streamRecord.conversationId, snapshot);
+          streamRecord.persistedContextSnapshotKey = contextSnapshotPersistKey(snapshot);
+        } catch (error) {
+          console.warn('[llm-chat] failed to persist observed context snapshot:', error?.message || error);
+        }
+        lastAccountingPersistAtMs = Date.now();
+      };
+      const flushPendingAccounting = () => {
+        if (accountingFlushTimer != null) {
+          clearTimeout(accountingFlushTimer);
+          accountingFlushTimer = null;
+        }
+        const snapshot = pendingAccountingSnapshot;
+        pendingAccountingSnapshot = null;
+        if (snapshot) persistAccountingNow(snapshot);
+      };
+      // 终态需要把窗口内最后一次观测值补写出去，所以挂到 streamRecord 上供收口点调用。
+      streamRecord.flushPendingAccounting = flushPendingAccounting;
       const emitRuntimeEventPersistingAccounting = (event) => {
         if (
           event?.type === 'context.accounting'
@@ -1183,11 +1250,21 @@ export function createLlmChatService({
           && !streamRecord.ephemeral
           && typeof conversationStore?.updateContextSnapshot === 'function'
         ) {
-          try {
-            conversationStore.updateContextSnapshot(streamRecord.conversationId, event.snapshot);
-            streamRecord.persistedContextSnapshotKey = contextSnapshotPersistKey(event.snapshot);
-          } catch (error) {
-            console.warn('[llm-chat] failed to persist observed context snapshot:', error?.message || error);
+          const now = Date.now();
+          if (now - lastAccountingPersistAtMs >= ACCOUNTING_PERSIST_MIN_INTERVAL_MS) {
+            pendingAccountingSnapshot = null;
+            persistAccountingNow(event.snapshot);
+          } else {
+            // 节流窗口内：只保留最新值，避免每个 chunk 都触发一次全量索引读写。
+            pendingAccountingSnapshot = event.snapshot;
+            if (accountingFlushTimer == null) {
+              accountingFlushTimer = setTimeout(
+                flushPendingAccounting,
+                ACCOUNTING_PERSIST_MIN_INTERVAL_MS - (now - lastAccountingPersistAtMs),
+              );
+              // 别让待写定时器拖住进程退出。
+              if (typeof accountingFlushTimer?.unref === 'function') accountingFlushTimer.unref();
+            }
           }
         }
         if (typeof emitRuntimeEvent === 'function') return emitRuntimeEvent(event);

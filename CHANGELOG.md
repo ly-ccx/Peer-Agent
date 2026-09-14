@@ -8,6 +8,33 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.0.13] - 2026-09-14
+
+### Notes
+
+- This release excludes remote control, device binding, and remote-access UI under development; these remain on the development branch for a later release.
+
+### Features
+
+- Selectable GPT context tiers and an ACP stdio agent with session model and context options.
+
+### Improved
+
+- Throttle thinking-stream updates and improve scroll scheduling, conversation notifications, Markdown spacing, and virtual-turn measurements.
+- Use the remote DeepSeek model catalog, repair subscription model labels, retire obsolete GPT-5.5 options, and include session identifiers on OpenCode Go requests.
+- Expand narrow Goal chips and improve investigation entry and branch menus.
+
+### Fixed
+
+- Create explicit merge commits when landing Goal worktrees and stop showing stale quality-review errors.
+- Preserve assistant history across multi-turn tool calls.
+- Move the pointer before local browser clicks; keep source menus clear of native browser views.
+- Correct confirmation-dialog colors, settings back targets, and window-specific top spacing.
+
+### CLI
+
+- CLI and Desktop share version 0.0.13. Actual archive availability is determined by GitHub Release assets; keep `peer` and `peer-credential-helper` together.
+
 ## [0.0.12] - 2026-09-07
 
 ### Notes

@@ -18,8 +18,11 @@ cli-dist/
 .env.*
 !.env.example
 
-# 本机工作区路径（不要提交）
+# 本机工作区路径与工件（不要提交）
+# example 模板是仓库资产，必须用否定规则保住，否则会被上面的家族通配一起忽略。
 .peer-workspace.local.json
+.peer-workspace.local.*
+!.peer-workspace.local.example.json
 
 # 设计文档（本地保留，不提交）
 docs/architecture/*
@@ -30,9 +33,10 @@ docs/architecture/*
 # 误生成的证书文件
 -
 
-# 本地调试/原型目录（不进仓库）
+# 本地调试/原型目录与根目录临时脚本（不进仓库）
 scratch/
 demo/
+_eval_gate.mjs
 
 # QA 工件（截图/验收记录，仅在本地产生）
 .peer-agent-qa/

@@ -43,7 +43,7 @@ export function normalizeAnthropicContent(content) {
           },
         });
       }
-    } else if (part.type === 'image' || part.type === 'tool_use' || part.type === 'tool_result') {
+    } else if (part.type === 'image' || part.type === 'tool_use' || part.type === 'tool_result' || part.type === 'thinking') {
       parts.push(part);
     }
   }

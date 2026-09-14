@@ -214,6 +214,7 @@ export {
   derivePlanStatus,
   goalPlanIsSelfDriven,
   goalPlanRequiresApproval,
+  goalPlanWaitsOnUser,
   normalizeGoalTiming,
 } from './goal-plan-store.mjs';
 export {
