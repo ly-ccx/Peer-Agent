@@ -93,29 +93,26 @@ function parseLocale(markdown, marker, lang) {
 
 function parseVersion(filename) {
   const label = filename.slice(1, -3);
-  const match = label.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+  const match = label.match(/^(\d+)\.(\d+)\.(\d+)$/);
   if (!match) throw new Error(`Unsupported release note filename: ${filename}`);
-  const prerelease = match[4] ?? "";
-  const beta = prerelease.match(/^beta\.(\d+)$/);
-  const channel = beta ? "beta" : "stable";
   return {
     version: `v${label}`,
     label,
-    channel,
+    channel: "stable",
     file: `v${label}.json`,
-    sort: [Number(match[1]), Number(match[2]), Number(match[3]), prerelease ? 0 : 1, beta ? Number(beta[1]) : 0, prerelease],
+    sort: [Number(match[1]), Number(match[2]), Number(match[3])],
   };
 }
 
 function compareVersions(a, b) {
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < a.sort.length; index += 1) {
     if (a.sort[index] !== b.sort[index]) return b.sort[index] - a.sort[index];
   }
-  return String(b.sort[5]).localeCompare(String(a.sort[5]), "en", { numeric: true });
+  return 0;
 }
 
 async function buildEntries() {
-  const files = (await readdir(notesDir)).filter((name) => /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.md$/.test(name));
+  const files = (await readdir(notesDir)).filter((name) => /^v\d+\.\d+\.\d+\.md$/.test(name));
   const entries = await Promise.all(files.map(async (filename) => {
     const metadata = parseVersion(filename);
     const markdown = await readFile(path.join(notesDir, filename), "utf8");
@@ -162,11 +159,10 @@ async function computeGeneratedAt() {
 async function expectedOutputs(entries, generatedAt) {
   const versions = entries.map(({ sort: _sort, zh: _zh, en: _en, ...metadata }) => metadata);
   const stable = versions.filter((entry) => entry.channel === "stable");
-  const beta = versions.filter((entry) => entry.channel === "beta");
   const manifest = {
     generatedAt,
-    latest: { stable: stable[0]?.version ?? null, beta: beta[0]?.version ?? null },
-    channels: { stable, beta },
+    latest: { stable: stable[0]?.version ?? null },
+    channels: { stable },
   };
   const outputs = new Map([[manifestPath, json(manifest)]]);
   for (const { sort: _sort, file, ...entry } of entries) outputs.set(path.join(dataDir, file), json(entry));

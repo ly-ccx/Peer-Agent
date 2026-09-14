@@ -215,10 +215,8 @@
         padding: 14px;
         box-shadow: 0 1px 0 rgba(0,0,0,0.03);
       }
-      .channel-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
-      .channel-tab, .version-link, .retry-button { border: 0; font: inherit; cursor: pointer; color: var(--ink-soft); }
-      .channel-tab { border-radius: 12px; padding: 9px 10px; background: transparent; font-size: 13px; font-weight: 650; }
-      .channel-tab[aria-selected="true"] { color: var(--ink); background: var(--bg); }
+      .release-nav-title { margin: 0 0 10px; padding: 0 4px; font-size: 12px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+      .version-link, .retry-button { border: 0; font: inherit; cursor: pointer; color: var(--ink-soft); }
       .version-list { display: grid; gap: 4px; max-height: calc(100vh - 190px); overflow: auto; }
       .version-link {
         display: flex; justify-content: space-between; gap: 8px; width: 100%;
@@ -226,7 +224,6 @@
         font-family: var(--mono); font-size: 13px;
       }
       .version-link:hover, .version-link[aria-current="true"] { color: var(--ink); background: var(--bg); }
-      .channel-count { font-family: var(--font); color: var(--ink-fade); font-size: 11px; }
       .timeline { min-width: 0; }
       .status-card { text-align: center; color: var(--ink-fade); padding: 56px 24px; }
       .retry-button { margin-top: 14px; border-radius: 980px; padding: 8px 14px; background: var(--azure); color: white; }
@@ -379,11 +376,8 @@
         </p>
       </section>
       <section class="release-browser" aria-label="Release browser">
-        <nav class="release-nav" aria-label="Release channels">
-          <div class="channel-tabs" role="tablist" aria-label="Release channels">
-            <button type="button" class="channel-tab" data-channel="stable" role="tab" aria-selected="true">正式版</button>
-            <button type="button" class="channel-tab" data-channel="beta" role="tab" aria-selected="false">Beta</button>
-          </div>
+        <nav class="release-nav" aria-label="Releases">
+          <p class="release-nav-title" data-i18n="nav.releases">稳定版本</p>
           <div id="version-list" class="version-list" aria-label="Versions"></div>
         </nav>
         <div id="timeline" class="timeline" aria-live="polite" aria-busy="true"></div>
@@ -423,8 +417,7 @@
             "footer.download": "Download",
             "preview.note": "github pages",
             "latest": "Latest",
-            "channel.stable": "Stable",
-            "channel.beta": "Beta",
+            "nav.releases": "Stable versions",
             "loading": "Loading release notes…",
             "loadError": "Release notes could not be loaded.",
             "retry": "Retry",
@@ -446,8 +439,7 @@
             "footer.download": "下载",
             "preview.note": "GitHub Pages",
             "latest": "最新",
-            "channel.stable": "正式版",
-            "channel.beta": "Beta 版",
+            "nav.releases": "正式版版本",
             "loading": "正在加载版本说明…",
             "loadError": "版本说明加载失败。",
             "retry": "重试",
@@ -455,7 +447,7 @@
             documentTitle: "Peer Agent — 更新日志"
           }
         };
-        var state = { manifest: null, channel: "stable", selected: null, entry: null, lang: "en", request: 0 };
+        var state = { manifest: null, selected: null, entry: null, lang: "en", request: 0 };
 
         function detectLang() {
           try {
@@ -475,15 +467,12 @@
           return esc.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
         }
 
-        function channelEntries(channel) {
-          return state.manifest && state.manifest.channels[channel] ? state.manifest.channels[channel] : [];
+        function releaseEntries() {
+          return state.manifest && state.manifest.channels ? state.manifest.channels.stable || [] : [];
         }
 
         function findMetadata(version) {
-          var channels = state.manifest ? state.manifest.channels : {};
-          return ["stable", "beta"].reduce(function (found, channel) {
-            return found || (channels[channel] || []).find(function (entry) { return entry.version === version; });
-          }, null);
+          return releaseEntries().find(function (entry) { return entry.version === version; }) || null;
         }
 
         function updateUrl(version, replace) {
@@ -513,15 +502,10 @@
         }
 
         function renderNavigation() {
-          document.querySelectorAll(".channel-tab").forEach(function (button) {
-            var channel = button.getAttribute("data-channel");
-            button.textContent = ui[state.lang]["channel." + channel] + " · " + channelEntries(channel).length;
-            button.setAttribute("aria-selected", channel === state.channel ? "true" : "false");
-          });
           var list = document.getElementById("version-list");
           if (!list) return;
           list.innerHTML = "";
-          channelEntries(state.channel).forEach(function (entry) {
+          releaseEntries().forEach(function (entry) {
             var button = document.createElement("button");
             button.type = "button";
             button.className = "version-link";
@@ -547,7 +531,7 @@
           var h2 = document.createElement("h2");
           h2.textContent = entry.label;
           head.appendChild(h2);
-          if (state.manifest.latest[entry.channel] === entry.version) {
+          if (state.manifest.latest.stable === entry.version) {
             var badge = document.createElement("span");
             badge.className = "badge";
             badge.textContent = ui[state.lang].latest;
@@ -602,20 +586,12 @@
         function selectVersion(version, replace) {
           var metadata = findMetadata(version);
           if (!metadata) return false;
-          state.channel = metadata.channel;
           state.selected = version;
           state.entry = null;
           renderNavigation();
           updateUrl(version, replace);
           loadVersion(version, false).catch(function () {});
           return true;
-        }
-
-        function selectChannel(channel) {
-          var entries = channelEntries(channel);
-          if (!entries.length) return;
-          state.channel = channel;
-          selectVersion(entries[0].version, false);
         }
 
         function applyLang(lang) {
@@ -648,9 +624,6 @@
             setLang(btn.getAttribute("data-lang"), true);
           });
         });
-        document.querySelectorAll(".channel-tab").forEach(function (btn) {
-          btn.addEventListener("click", function () { selectChannel(btn.getAttribute("data-channel")); });
-        });
         window.addEventListener("popstate", function () {
           var requested = requestedVersion();
           if (requested && requested !== state.selected) selectVersion(requested, true);
@@ -670,7 +643,7 @@
             .then(function (manifest) {
               state.manifest = manifest;
               var requested = requestedVersion();
-              var initial = findMetadata(requested) ? requested : (manifest.latest.stable || manifest.latest.beta);
+              var initial = findMetadata(requested) ? requested : manifest.latest.stable;
               if (!initial) { renderStatus("empty", false); return; }
               selectVersion(initial, true);
             })

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
@@ -33,10 +33,22 @@ test('v0.0.3 changelog data preserves release-note heading hierarchy', async () 
 });
 
 test('legacy release notes without subheadings remain list sections', async () => {
-  const entry = await readJson('docs/changelog-data/v0.0.1-beta.10.json');
+  const entry = await readJson('docs/changelog-data/v0.0.4.json');
   assert(entry.zh.length > 0);
   assert(entry.zh.some((section) => section.items.length > 0));
   for (const section of entry.zh) assert.equal(section.subsections, undefined);
+});
+
+test('changelog data exposes the stable channel only', async () => {
+  const manifest = await readJson('docs/changelog-data/manifest.json');
+  assert.deepEqual(Object.keys(manifest.channels), ['stable']);
+  assert.ok(!('beta' in manifest.latest));
+  assert.ok(manifest.channels.stable.length > 0);
+});
+
+test('legacy beta release notes are excluded from generated changelog data', async () => {
+  const files = await readdir(new URL('docs/changelog-data', root));
+  assert.equal(files.filter((name) => name.includes('beta')).length, 0);
 });
 
 test('web changelog renders original section titles and nested subsections', async () => {

@@ -52,7 +52,7 @@ Three first-class shells share one unified core runtime:
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current stable release: **`0.0.13`** (npm `latest`); latest published beta channel **`0.0.5-beta.4`**. Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
+> Current stable release: **`0.0.13`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 
@@ -194,7 +194,7 @@ It doesn't matter where work enters — config, permissions, and Evidence are al
    | --- | --- | --- |
    | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | Stage-1 ad-hoc signed |
    | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
-   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage` (preferred) or `.deb` | Unsigned (stage-1). In-app auto-update is AppImage-only (`latest-linux.yml` / `beta-linux.yml`). Ubuntu 22+/24+ AppImage users may need `libfuse2`. linux-arm64 Desktop is not a Release asset yet. |
+   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage` (preferred) or `.deb` | Unsigned (stage-1). In-app auto-update is AppImage-only (`latest-linux.yml`). Ubuntu 22+/24+ AppImage users may need `libfuse2`. linux-arm64 Desktop is not a Release asset yet. |
 
 2. Install and open Peer Agent
 3. Add a model provider / API key in settings
@@ -355,7 +355,7 @@ Philosophy stays fixed while the surface grows: **cognition is pluggable; author
 
 ### Planned — not implemented yet
 
-These are **direction, not shipping claims**. They are **not** available in the current beta.
+These are **direction, not shipping claims**. They are **not** available in the current release.
 
 | Area | Intent |
 | --- | --- |

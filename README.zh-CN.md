@@ -52,7 +52,7 @@
 | **CLI** | 可安装的 `@peer-agent/cli` —— 脚本化进入同一台机器 |
 
 > [!NOTE]
-> 当前正式版：**`0.0.13`**（npm `latest`）；最新已发布 beta 通道 **`0.0.5-beta.4`**。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
+> 当前正式版：**`0.0.13`**（npm `latest`）。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
 
 ---
 
@@ -194,7 +194,7 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
    | --- | --- | --- |
    | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | 阶段一 ad-hoc 签名 |
    | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
-   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage`（推荐便携）或 `.deb` | 阶段一未签名。应用内自动更新只支持 AppImage（`latest-linux.yml` / `beta-linux.yml`）。Ubuntu 22+/24+ 跑 AppImage 可能需要 `libfuse2`。linux-arm64 Desktop 尚未作为 Release 资产。 |
+   | Linux x64 | `Peer-Agent-<ver>-x64.AppImage`（推荐便携）或 `.deb` | 阶段一未签名。应用内自动更新只支持 AppImage（`latest-linux.yml`）。Ubuntu 22+/24+ 跑 AppImage 可能需要 `libfuse2`。linux-arm64 Desktop 尚未作为 Release 资产。 |
 
 2. 安装并打开 Peer Agent
 3. 在设置中添加模型服务商 / API Key
@@ -355,7 +355,7 @@ Peer Agent 的目标是成为面向真实工作的 **跨平台 Agent 操作系�
 
 ### 规划中 —— 尚未实现
 
-以下是**方向，不是交付承诺**。当前 beta 中**不可用**。
+以下是**方向，不是交付承诺**。当前版本中**不可用**。
 
 | 领域 | 意图 |
 | --- | --- |
