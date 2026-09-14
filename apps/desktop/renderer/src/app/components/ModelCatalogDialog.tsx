@@ -10,6 +10,8 @@ import {
   calculateModelSelectionChanges,
   filterModelCatalog,
   modelContextWindowRange,
+  resolveCatalogSelection,
+  isRemoteCatalogSelectionBlocked,
   type ModelMetadataSource,
 } from './llmModelConfiguration';
 
@@ -30,6 +32,7 @@ function sourceLabel(source: LlmModelListResult['source'], zh: boolean): string 
 export function ModelCatalogDialog({
   i18n,
   providerName,
+  channelId,
   models,
   configuredModels,
   source,
@@ -44,6 +47,7 @@ export function ModelCatalogDialog({
 }: {
   readonly i18n: I18nRuntime;
   readonly providerName: string;
+  readonly channelId?: string;
   readonly models: readonly LlmModelInfo[];
   readonly configuredModels: readonly LlmProviderConfigView[];
   readonly source?: LlmModelListResult['source'];
@@ -96,13 +100,8 @@ export function ModelCatalogDialog({
     const timer = window.setTimeout(() => setShowFetchComplete(false), 1200);
     return () => window.clearTimeout(timer);
   }, [error, loading]);
-  const catalogIds = new Set(catalog.map((entry) => entry.model.id));
-  const selectedModels = [
-    ...catalog.filter((entry) => selected.has(entry.model.id)).map((entry) => entry.model),
-    ...configuredModels
-      .filter((model) => selected.has(model.model) && !catalogIds.has(model.model))
-      .map((model) => ({ id: model.model, label: model.modelLabel || model.model })),
-  ];
+  const selectedModels = resolveCatalogSelection(catalog, configuredModels, selected, channelId);
+  const remoteSelectionBlocked = isRemoteCatalogSelectionBlocked(channelId, loading, error, source, catalog.length);
   const selectionChanges = calculateModelSelectionChanges(selectedModels, importedModels);
   const hasSelectionChanges = selectionChanges.additions.length > 0
     || selectionChanges.updates.length > 0
@@ -124,7 +123,7 @@ export function ModelCatalogDialog({
       setImportError(zh ? '渠道至少需要保留一个模型。' : 'A provider must keep at least one model.');
       return;
     }
-    if (!hasSelectionChanges) return;
+    if (!hasSelectionChanges || remoteSelectionBlocked) return;
     setImporting(true);
     setApplyState('applying');
     setImportError(null);
@@ -310,7 +309,7 @@ export function ModelCatalogDialog({
               type="button"
               className="primary llm-catalog-apply-button"
               onClick={() => void importSelected(requestClose)}
-              disabled={!hasSelectionChanges || wouldRemoveAll || importing}
+              disabled={!hasSelectionChanges || wouldRemoveAll || importing || remoteSelectionBlocked}
               aria-live="polite"
               data-state={applyState}
             >

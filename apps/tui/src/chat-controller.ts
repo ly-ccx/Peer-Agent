@@ -885,6 +885,7 @@ export function createChatController(options: {
         });
 
         const execution = await options.host.execute(call.capabilityId, call.arguments, {
+          toolCallId: call.toolCallId,
           sessionId: context.run.sessionId,
           ...(context.run.conversationId
             ? { conversationId: context.run.conversationId }

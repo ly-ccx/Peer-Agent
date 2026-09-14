@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { ModelReasoningEffort } from './model-catalog.ts';
+import type { LlmModelOptionDefinition, LlmModelOptionValues } from '@peer-agent/protocol';
 
 export type SharedModelAuthMethod =
   | 'api_key'
@@ -40,6 +41,8 @@ export interface StoredModelProvider {
   readonly oauthAccountId?: string;
   readonly oauthProjectId?: string | null;
   readonly contextWindow?: number;
+  readonly modelOptions?: readonly LlmModelOptionDefinition[];
+  readonly modelOptionValues?: LlmModelOptionValues;
   /** Desktop-projected reasoning levels for this model (e.g. off/low/default/high/xhigh). */
   readonly reasoningEffortLevels?: readonly string[];
   readonly reasoningDefaultEffort?: string;
@@ -83,9 +86,12 @@ export interface SharedModelMetadata {
   readonly baseUrl: string;
   readonly authMethod: SharedModelAuthMethod;
   readonly credentialStored: boolean;
+  readonly supportsReasoning?: boolean;
   readonly configFile: string;
   /** Optional context window from Desktop llm-providers.json model entry. */
   readonly contextWindow?: number;
+  readonly modelOptions?: readonly LlmModelOptionDefinition[];
+  readonly modelOptionValues?: LlmModelOptionValues;
   /**
    * Projected from Desktop llm-providers.json (model.reasoningEffortLevels).
    * Empty/missing levels fall back to the desktop BASE set.
@@ -432,8 +438,11 @@ function metadataFromSelected(
     baseUrl: selected.baseUrl?.trim() || 'https://api.openai.com/v1',
     authMethod: normalizedAuthMethod(selected),
     credentialStored: hasStoredCredential(selected),
+    supportsReasoning: selected.supportsReasoning === true,
     configFile,
     ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(selected.modelOptions ? { modelOptions: selected.modelOptions } : {}),
+    ...(selected.modelOptionValues ? { modelOptionValues: selected.modelOptionValues } : {}),
     supportedReasoningEfforts,
     defaultReasoningEffort,
   };

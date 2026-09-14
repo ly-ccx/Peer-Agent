@@ -15,6 +15,12 @@ test('closed trigger can override option labels without changing menu items', ()
   assert.doesNotMatch(source, /triggerLabelOverride \?\? opt\.label/);
 });
 
+test('open menus clamp against the open workbench and visible webviews', () => {
+  assert.match(source, /collectDropdownOccluders, placeDropdownMenu/);
+  assert.match(source, /occluders: collectDropdownOccluders\(\)/);
+  assert.match(source, /width: menuRef\.current\?\.offsetWidth \?\? rect\.width/);
+});
+
 test('source menus can render local and remote tabs without filtering untagged options', () => {
   assert.match(source, /readonly tabs\?: readonly DropdownTab\[\];/);
   assert.match(source, /role="tablist"/);

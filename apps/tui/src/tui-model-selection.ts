@@ -4,10 +4,56 @@ import type {
   RuntimeModelSelection,
 } from '@peer-agent/runtime-node';
 
+import { resolveLlmModelOptionChoice, type LlmModelOptionDefinition, type LlmModelOptionValue } from '@peer-agent/protocol';
+import type { SharedModelMetadata } from '@peer-agent/runtime-node';
+
 export interface TuiModelSelectionControl {
   readonly catalog: readonly RuntimeModelCatalogEntry[];
   getSelection(): RuntimeModelSelection;
   setSelection(selection: RuntimeModelSelection): void;
+}
+
+export interface TuiContextSelectionControl {
+  getDefinition(): LlmModelOptionDefinition | undefined;
+  getValue(): LlmModelOptionValue | undefined;
+  setValue(value: LlmModelOptionValue): void;
+  getContextWindow(): number | undefined;
+}
+
+/** Session-local capacity; follows model changes without changing catalog/global settings. */
+export function createTuiContextSelectionControl(
+  models: TuiModelSelectionControl,
+  metadata: readonly SharedModelMetadata[] = [],
+): TuiContextSelectionControl {
+  let previousKey: string | undefined;
+  let value: LlmModelOptionValue | undefined;
+  const current = () => {
+    const selection = models.getSelection();
+    const source = metadata.find((item) => item.credentialId === selection.providerId && item.model === selection.modelId);
+    const definition = source?.modelOptions?.find((item) => item.choices.some((choice) => typeof choice.contextWindow === 'number' && choice.contextWindow > 0));
+    const key = JSON.stringify([selection.providerId, selection.modelId]);
+    if (key !== previousKey) {
+      if (!definition?.choices.some((choice) => choice.value === value)) {
+        value = definition ? resolveLlmModelOptionChoice(definition, source?.modelOptionValues)?.value : undefined;
+      }
+      previousKey = key;
+    }
+    return { selection, definition };
+  };
+  return {
+    getDefinition: () => current().definition,
+    getValue: () => { current(); return value; },
+    setValue(next) {
+      const { definition } = current();
+      if (!definition?.choices.some((choice) => choice.value === next)) throw new Error('Unsupported context value');
+      value = next;
+    },
+    getContextWindow() {
+      const { selection, definition } = current();
+      const capacity = definition?.choices.find((choice) => choice.value === value)?.contextWindow;
+      return typeof capacity === 'number' && capacity > 0 ? capacity : models.catalog.find((entry) => entry.providerId === selection.providerId && entry.modelId === selection.modelId)?.contextWindow;
+    },
+  };
 }
 
 export type ModelPickerStage = 'models' | 'efforts';

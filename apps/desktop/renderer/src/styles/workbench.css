@@ -1698,8 +1698,10 @@
     visibility: hidden;
     pointer-events: none;
   }
+  /* 选中标签页不等于工作台可见：继承会话/面板的隐藏状态，避免保活 guest 穿透。
+   * 不卸载或 display:none，保留页面尺寸、加载状态和工具绑定。 */
   .browser-webview[data-active='true'] {
-    visibility: visible;
+    visibility: inherit;
     pointer-events: auto;
   }
   :root[data-workbench-resizing='true'] .browser-webview[data-active='true'] {

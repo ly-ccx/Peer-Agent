@@ -45,25 +45,17 @@ test('subscription catalog: default is newest (gpt-6-astra) and first entry', ()
   assert.equal(FALLBACK_MODELS, SUBSCRIPTION_CATALOG);
 });
 
-test('subscription catalog includes gpt-5.5 pricing and context metadata', () => {
-  const model = getSubscriptionModelMetadata('gpt-5.5');
-  assert.ok(model);
-  assert.equal(model.contextWindow, 272_000);
-  assert.equal(model.maxOutputTokens, 128_000);
-  assert.equal(model.inputPrice, 5);
-  assert.equal(model.cacheReadPrice, 0.5);
-  assert.equal(model.outputPrice, 30);
-  assert.equal(model.longContextInputThreshold, 272_000);
-  assert.equal(model.longContextInputPrice, 10);
-  assert.equal(model.longContextCacheReadPrice, 1);
-  assert.equal(model.longContextOutputPrice, 45);
+test('subscription catalog no longer contains the retired gpt-5.5 id', () => {
+  // gpt-5.5 已被上游 codex 端点下线(404 model_not_found)，必须从内置目录移除。
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
+  assert.equal(getSubscriptionModelMetadata('gpt-5.5'), null);
 });
 
 test('GPT-6 Astra uses subscription context with official capability and pricing metadata', () => {
   const model = getSubscriptionModelMetadata('gpt-6-astra');
   assert.ok(model);
   assert.equal(model.label, 'GPT-6 Astra');
-  assert.equal(model.contextWindow, 272_000);
+  assert.equal(model.contextWindow, 400_000);
   assert.equal(model.maxOutputTokens, 128_000);
   assert.equal(model.inputPrice, 10);
   assert.equal(model.cacheReadPrice, 1);
@@ -83,7 +75,7 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
   for (const [id, pricing] of expected) {
     const model = getSubscriptionModelMetadata(id);
     assert.ok(model);
-    assert.equal(model.contextWindow, 272_000);
+    assert.equal(model.contextWindow, 400_000);
     assert.equal(model.inputPrice, pricing.inputPrice);
     assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
     assert.equal(model.outputPrice, pricing.outputPrice);
@@ -92,8 +84,27 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
   }
 });
 
+test('subscription models expose 400K and 1M context tiers', () => {
+  for (const model of SUBSCRIPTION_CATALOG) {
+    const contextOption = model.modelOptions?.find((option) => option.id === 'contextTier');
+    assert.ok(contextOption, `${model.id} should expose contextTier`);
+    assert.equal(contextOption.defaultValue, 400_000);
+    assert.deepEqual(
+      contextOption.choices.map((choice) => ({
+        value: choice.value,
+        label: choice.label,
+        contextWindow: choice.contextWindow,
+      })),
+      [
+        { value: 400_000, label: '400K', contextWindow: 400_000 },
+        { value: 1_000_000, label: '1M', contextWindow: 1_000_000 },
+      ],
+    );
+  }
+});
+
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
-  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-astra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-terra'), true);
@@ -111,14 +122,13 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' });
   assert.equal(res.source, 'builtin');
   assert.equal(res.error, undefined);
-  assert.equal(res.models[0].contextWindow, 272_000);
+  assert.equal(res.models[0].contextWindow, 400_000);
   assert.equal(res.models[0].inputPrice, 10);
   assert.equal(res.models[0].outputPrice, 50);
   assert.deepEqual(
     res.models.map((m) => m.id),
     [
       'gpt-6-astra',
-      'gpt-5.5',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -132,11 +142,11 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 8);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 7);
 });
 
 test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {
-  assert.equal(isSubscriptionUsableModel('gpt-5.5'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-5.5'), false);
   assert.equal(isSubscriptionUsableModel('gpt-6-astra'), true);
   assert.equal(isSubscriptionUsableModel('gpt-5.4-mini'), true);
   assert.equal(isSubscriptionUsableModel('gpt-4o'), false);
@@ -399,21 +409,39 @@ test('listModelCatalogForChannel still rewrites DeepSeek Anthropic roots when ca
   assert.equal(res.source, 'remote');
 });
 
-test('listModelCatalogForChannel falls back to the built-in DeepSeek catalog and keeps the error', async () => {
-  const res = await listModelCatalogForChannel({
-    baseUrl: 'https://api.deepseek.com/anthropic',
-    wire: 'anthropic-messages',
-    modelCatalog: {
-      channelId: 'deepseek',
-      wire: 'openai-chat',
-      baseUrl: 'https://api.deepseek.com',
-      headers: { Authorization: 'Bearer deepseek-test-key' },
-    },
-    fetchImpl: async () => ({ ok: false, status: 404, text: async () => 'not found' }),
+for (const fallbackCatalog of [undefined, [{ id: 'deepseek-chat' }]]) {
+  test(`DeepSeek remote failure rejects without static fallback (${Boolean(fallbackCatalog)})`, async () => {
+    await assert.rejects(listModelCatalogForChannel({
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      wire: 'anthropic-messages',
+      modelCatalog: {
+        channelId: 'deepseek', wire: 'openai-chat',
+        baseUrl: 'https://api.deepseek.com', fallbackCatalog,
+      },
+      fetchImpl: async () => ({ ok: false, status: 404, text: async () => 'not found' }),
+    }), /models list failed: HTTP 404 not found/);
   });
-  assert.equal(res.source, 'fallback');
-  assert.equal(res.error, 'models list failed: HTTP 404 not found');
-  assert.deepEqual(res.models.map((model) => model.id), ['deepseek-chat', 'deepseek-reasoner']);
+}
+
+for (const ids of [[], ['deepseek-flash', 'deepseek-v4-pro']]) {
+  test(`DeepSeek remote IDs are authoritative (${ids.length} models)`, async () => {
+    const result = await listModelCatalogForChannel({
+      modelCatalog: { channelId: 'deepseek', wire: 'openai-chat', baseUrl: 'https://api.deepseek.com' },
+      registryFetchImpl: async () => ({ ok: false }),
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: ids.map((id) => ({ id })) }) }),
+    });
+    assert.equal(result.source, 'remote');
+    assert.deepEqual(result.models.map((model) => model.id).sort(), [...ids].sort());
+  });
+}
+
+test('other channels retain explicitly configured catalog fallback', async () => {
+  const result = await listModelCatalogForChannel({
+    modelCatalog: { channelId: 'custom', baseUrl: 'https://example.test', fallbackCatalog: [{ id: 'custom-model' }] },
+    fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'boom' }),
+  });
+  assert.equal(result.source, 'fallback');
+  assert.deepEqual(result.models, [{ id: 'custom-model' }]);
 });
 
 test('listModelCatalogForChannel keeps plain remote failure for channels without a catalog override', async () => {

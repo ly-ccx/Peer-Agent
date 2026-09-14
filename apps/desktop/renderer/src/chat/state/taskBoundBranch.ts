@@ -230,10 +230,31 @@ export function planComposerGitChrome(
 export const COMPOSER_ENV_ISOLATION_ON = '__composer_env_isolation_on__';
 export const COMPOSER_ENV_ISOLATION_OFF = '__composer_env_isolation_off__';
 
+function formatPreferredWorktreeCapsule(
+  name: string,
+  source: string | null,
+  isZh: boolean,
+): ComposerEnvCapsule {
+  return {
+    kind: 'source',
+    isolated: true,
+    label: source
+      ? (isZh ? `Worktree · 从 ${name}` : `Worktree · from ${name}`)
+      : 'Worktree',
+    title: source
+      ? (isZh
+        ? `下次任务将从 ${source} 开 Worktree。合回后这次隔离会结束，这个选择只表示下一次。`
+        : `The next task will fork ${source} into a Worktree. This preference applies to the next task only.`)
+      : (isZh
+        ? '下次任务将在 Worktree 里执行。合回后这次隔离会结束，这个选择只表示下一次。'
+        : 'The next task will run in a Worktree. This preference applies to the next task only.'),
+  };
+}
+
 /**
  * Collapsed chrome copy for “where this send writes”.
- * Next-task Worktree preference rewrites source lines (draft or bound),
- * but does not override a live task-line or write-mismatch.
+ * Next-task Worktree preference rewrites source lines and workspace-only
+ * collapsed copy, but does not override a live task-line or write-mismatch.
  */
 export function formatComposerEnvCapsule(
   chrome: ComposerGitChrome,
@@ -282,16 +303,7 @@ export function formatComposerEnvCapsule(
 
   if (taskLine?.kind === 'source') {
     const name = visibleBranchName(taskLine.value, taskLine.value);
-    if (preferredIsolation) {
-      return {
-        kind: 'source',
-        isolated: true,
-        label: isZh ? `Worktree · 从 ${name}` : `Worktree · from ${name}`,
-        title: isZh
-          ? `下次任务将从 ${taskLine.value} 开 Worktree。合回后这次隔离会结束，这个选择只表示下一次。`
-          : `The next task will fork ${taskLine.value} into a Worktree. This preference applies to the next task only.`,
-      };
-    }
+    if (preferredIsolation) return formatPreferredWorktreeCapsule(name, taskLine.value, isZh);
     if (taskLine.selectable) {
       return {
         kind: 'source',
@@ -310,6 +322,7 @@ export function formatComposerEnvCapsule(
 
   if (workspaceHead) {
     const name = visibleBranchName(workspaceHead.value, workspaceHead.value);
+    if (preferredIsolation) return formatPreferredWorktreeCapsule(name, workspaceHead.value, isZh);
     return {
       kind: 'workspace',
       isolated: false,
@@ -318,16 +331,7 @@ export function formatComposerEnvCapsule(
     };
   }
 
-  if (preferredIsolation) {
-    return {
-      kind: 'source',
-      isolated: true,
-      label: 'Worktree',
-      title: isZh
-        ? '下次任务将在 Worktree 里执行。合回后这次隔离会结束，这个选择只表示下一次。'
-        : 'The next task will run in a Worktree. This preference applies to the next task only.',
-    };
-  }
+  if (preferredIsolation) return formatPreferredWorktreeCapsule('', null, isZh);
 
   return {
     kind: 'workspace',

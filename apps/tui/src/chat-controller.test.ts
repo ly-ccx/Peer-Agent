@@ -17,6 +17,8 @@ import {
   type ChatSystemContextBlock,
 } from './chat-controller.ts';
 import { GOAL_CAPABILITY_IDS } from './goal-bridge.ts';
+import { createAcpModelConfig } from './acp/models.ts';
+import { createTuiModelSelectionControl, createTuiContextSelectionControl } from './tui-model-selection.ts';
 import { createPlanCoordinator, type RuntimePlan } from './plan-mode.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
 
@@ -59,6 +61,30 @@ function host(run: (
     },
     dispose: async () => {},
   };
+}
+
+for (const capacity of [32768, 131072]) {
+  test(`ACP capacity reaches controller accounting and compaction / ${capacity}`, async () => {
+    const models = createTuiModelSelectionControl({ providerId: 'p', modelId: 'm', displayName: 'M', contextWindow: 8192 });
+    const context = createTuiContextSelectionControl(models, [{ source: 'desktop-default', providerId: 'p', credentialId: 'p', displayName: 'P', model: 'm', baseUrl: '', authMethod: 'api_key', credentialStored: true, configFile: '', supportedReasoningEfforts: ['default'], defaultReasoningEffort: 'default', modelOptions: [{ id: 'capacity', label: 'Capacity', kind: 'select', defaultValue: 32768, choices: [32768, 131072].map((value) => ({ value, label: String(value), contextWindow: value })) }] }]);
+    const config = createAcpModelConfig(models, () => {}, [], false, context);
+    config.setConfigOption('context_window', JSON.stringify(capacity));
+    let summarized = false;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn: async (state) => ({ kind: 'completed', state, output: 'done' }),
+      applyToolResults: (state) => state,
+      summarizeCompaction: async () => { summarized = true; return 'A concise continuity summary.'; },
+    };
+    const controller = createChatController({ host: host(), model, getContextWindow: () => context.getContextWindow(), getModelKey: () => 'p/m' });
+    controller.restore({ mode: 'chat', messages: [], modelMessages: Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? 'assistant' as const : 'user' as const, content: `turn-${i} ${'detail '.repeat(500)}` })) });
+    const result = await controller.compact();
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    expect(summarized).toBe(true);
+    expect(controller.getSnapshot().contextAccounting?.contextWindow).toBe(capacity);
+    expect(controller.getSnapshot().contextAccounting?.compactionThresholdTokens).toBe(Math.floor(capacity * 0.8));
+  });
 }
 
 const initialState = (input: { content: string }): ChatModelState => ({

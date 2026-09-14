@@ -84,7 +84,7 @@ test('subscription provider creation defaults to GPT-6 Astra metadata', () => wi
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
 
   assert.equal(provider.model, 'gpt-6-astra');
-  assert.equal(provider.contextWindow, 272_000);
+  assert.equal(provider.contextWindow, 400_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 10);
   assert.equal(provider.cacheReadPrice, 1);
@@ -97,6 +97,88 @@ test('subscription provider creation defaults to GPT-6 Astra metadata', () => wi
   assert.equal(provider.supportsPromptCaching, true);
   assert.equal(provider.supportsReasoning, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+}));
+
+test('subscription migration self-heals label/model mismatched records from builtin catalog sync', () => withStore(({ configFile }) => {
+  // 复刻用户本机脏数据：builtin 目录同步只写了 GPT-6 Astra 的 label，model 仍是已下线的 gpt-5.5。
+  const dirty = {
+    id: 'da0a9685-882d-40b8-a0b4-8f6d4e3ac5a6',
+    groupId: 'da0a9685-882d-40b8-a0b4-8f6d4e3ac5a6',
+    provider: 'openai',
+    channelId: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.5',
+    modelLabel: 'GPT-6 Astra',
+    metadataSource: 'builtin',
+    metadataSyncedAt: '2026-09-05T06:32:57.847Z',
+  };
+  writeFileSync(configFile, JSON.stringify({ models: [dirty], channels: [] }));
+
+  const restored = createLlmConfigStore({ configFile }).listProviders();
+  const healed = restored.find((item) => item.id === dirty.id);
+
+  assert.ok(healed, 'provider should be restored');
+  assert.equal(healed.model, 'gpt-6-astra');
+  assert.equal(healed.modelLabel, 'GPT-6 Astra');
+
+  const persisted = readPersistedModels(configFile).find((item) => item.id === dirty.id);
+  assert.equal(persisted.model, 'gpt-6-astra');
+}));
+
+test('subscription migration falls back to default when mismatched label has no unique catalog match', () => withStore(({ configFile }) => {
+  const dirty = {
+    id: '32ddcdf4-9cbd-4ca6-87b1-f3d596cc25d9',
+    groupId: '32ddcdf4-9cbd-4ca6-87b1-f3d596cc25d9',
+    provider: 'openai',
+    channelId: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.5',
+    modelLabel: 'GPT-5.5',
+    metadataSource: 'builtin',
+  };
+  writeFileSync(configFile, JSON.stringify({ models: [dirty], channels: [] }));
+
+  const restored = createLlmConfigStore({ configFile }).listProviders();
+  const healed = restored.find((item) => item.id === dirty.id);
+
+  assert.ok(healed, 'provider should be restored');
+  // label 与目录条目不再对应，回退到权威默认模型，label 同步为默认模型的展示名。
+  assert.equal(healed.model, 'gpt-6-astra');
+  assert.equal(healed.modelLabel, 'GPT-6 Astra');
+}));
+
+test('subscription context tiers project through creation, update, and reload', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const compact = store.addProvider({
+    provider: 'openai',
+    authMethod: 'oauth_chatgpt',
+    modelOptionValues: { contextTier: 400_000 },
+  });
+  const extended = store.addProvider({
+    provider: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.6-sol',
+    modelOptionValues: { contextTier: 1_000_000 },
+  });
+
+  assert.equal(compact.contextWindow, 400_000);
+  assert.equal(extended.contextWindow, 1_000_000);
+
+  const initiallyRestored = createLlmConfigStore({ configFile }).listProviders();
+  assert.equal(initiallyRestored.find((item) => item.id === compact.id)?.contextWindow, 400_000);
+  assert.equal(initiallyRestored.find((item) => item.id === extended.id)?.contextWindow, 1_000_000);
+
+  const switched = store.updateProvider(compact.id, {
+    modelOptionValues: { contextTier: 1_000_000 },
+  });
+  assert.equal(switched.contextWindow, 1_000_000);
+
+  const restoredAfterSwitch = createLlmConfigStore({ configFile }).listProviders();
+  assert.equal(restoredAfterSwitch.find((item) => item.id === compact.id)?.contextWindow, 1_000_000);
+  assert.deepEqual(
+    restoredAfterSwitch.find((item) => item.id === compact.id)?.modelOptionValues,
+    { contextTier: 1_000_000 },
+  );
 }));
 
 test('GPT-6 Astra subscription metadata persists across config reload', () => withStore(({ configFile }) => {
@@ -114,7 +196,7 @@ test('GPT-6 Astra subscription metadata persists across config reload', () => wi
   assert.ok(provider);
   assert.equal(provider.model, 'gpt-6-astra');
   assert.equal(provider.modelLabel, 'GPT-6 Astra');
-  assert.equal(provider.contextWindow, 272_000);
+  assert.equal(provider.contextWindow, 400_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 10);
   assert.equal(provider.cacheReadPrice, 1);
@@ -183,7 +265,7 @@ test('subscription provider migration backfills pricing and context metadata', (
       authMethod: 'oauth_chatgpt',
       name: 'ChatGPT 订阅',
       baseUrl: 'https://chatgpt.com/backend-api/codex',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       apiKey: { encrypted: false, data: '' },
       oauthTokens: { encrypted: false, data: '' },
       enabled: true,
@@ -202,18 +284,18 @@ test('subscription provider migration backfills pricing and context metadata', (
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 272_000);
+  assert.equal(provider.contextWindow, 400_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
   assert.equal(provider.cacheWritePrice, undefined);
-  assert.equal(provider.longContextOutputPrice, 45);
+  assert.equal(provider.longContextOutputPrice, undefined);
   assert.equal(provider.supportsReasoning, true);
   assert.equal(provider.supportsPromptCaching, true);
 
   const persisted = readPersistedModels(configFile)[0];
-  assert.equal(persisted.contextWindow, 272_000);
+  assert.equal(persisted.contextWindow, 400_000);
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);
@@ -239,12 +321,12 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 272_000);
+  assert.equal(provider.contextWindow, 400_000);
   assert.equal(provider.supportsPromptCaching, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const [persisted] = readPersistedModels(configFile);
-  assert.equal(persisted.contextWindow, 272_000);
+  assert.equal(persisted.contextWindow, 400_000);
   assert.equal(persisted.supportsPromptCaching, true);
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));

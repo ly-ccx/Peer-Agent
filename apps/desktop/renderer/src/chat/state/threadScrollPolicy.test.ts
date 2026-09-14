@@ -5,6 +5,7 @@ import {
   planThreadScrollAfterMessagesChange,
   planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
+  shouldStickAfterVirtualMeasurement,
   shouldStickMessageRailToLatest,
 } from './threadScrollPolicy.ts';
 
@@ -75,6 +76,16 @@ describe('thread scroll policy after compaction', () => {
     assert.equal(shouldStickMessageRailToLatest(15, 16), false);
     assert.equal(shouldStickMessageRailToLatest(0, 10), true);
     assert.equal(shouldStickMessageRailToLatest(5, 0), false);
+  });
+});
+
+describe('stick after virtual measurement', () => {
+  it('sticks in the same frame while following', () => {
+    assert.equal(shouldStickAfterVirtualMeasurement({ currentlyFollowing: true }), true);
+  });
+
+  it('does not steal scroll after the user leaves the bottom', () => {
+    assert.equal(shouldStickAfterVirtualMeasurement({ currentlyFollowing: false }), false);
   });
 });
 

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { executeProjectedModelTool } from './chat-runtime/projected-tool-executor.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { resetCircuitBreaker } from './context-compactor.mjs';
+import { disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
 
 let tmpDir;
 
@@ -92,7 +93,10 @@ describe('llm chat service tool materialization', () => {
     process.env.PEER_AGENT_HOME = tmpDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Projected Bash calls keep application-owned shells alive between commands.
+    // Release this fixture's sessions before removing their workspace.
+    await disposeApplicationShellSessions(tmpDir);
     delete process.env.PEER_AGENT_HOME;
     rmSync(tmpDir, { recursive: true, force: true });
   });

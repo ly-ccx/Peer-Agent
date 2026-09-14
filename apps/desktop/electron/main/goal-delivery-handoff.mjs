@@ -145,7 +145,13 @@ function alreadyDelivered(plan) {
 }
 
 function parsePorcelainPath(line) {
-  return line.slice(3).trim().replace(/^"(.*)"$/, '$1');
+  const raw = String(line || '').replace(/\r?\n$/, '');
+  // XY<space>path。不要先 trim 整行：` M file` 会被吃成 `M file`，slice(3) 变成错路径。
+  if (raw.length >= 4 && raw[2] === ' ') {
+    return raw.slice(3).replace(/^"(.*)"$/, '$1');
+  }
+  const match = raw.match(/^[ MADRCU?!]{1,2} (.+)$/);
+  return (match ? match[1] : raw).trim().replace(/^"(.*)"$/, '$1');
 }
 
 /**
@@ -218,7 +224,7 @@ function relPath(repositoryRoot, p) {
 /**
  * ADR 69 P2：按用户决断执行收口。仅处理「目标分支被工作区占用 + 未跟踪同名文件内容不同」的冲突。
  * resolutions: [{ path, choice }]，choice ∈ keep_taskline | keep_worktree | keep_both。
- *  - keep_taskline：暂移工作区版为 <path>.worktree-backup，ff-only 合并任务线，任务线版落地（动 git 目标线）。
+ *  - keep_taskline：暂移工作区版为 <path>.worktree-backup，--no-ff 合并任务线，任务线版落地（动 git 目标线）。
  *  - keep_worktree：不动 git，只把该线标记为已决（内容已在工作区，线可另行删除）。
  *  - keep_both：任务线版另存为 <path>.taskline，工作区版保留，不合并目标线。
  * 全部为 keep_taskline 且合并成功 → delivered；否则标记 conflict_resolved 停在原地。
@@ -255,7 +261,13 @@ export async function resolveHandoffConflicts({ plan, resolutions, gitRunner = g
     }
     if (needsMerge) {
       try {
-        await gitRunner(repositoryRoot, ['merge', '--ff-only', taskBranch]);
+        await gitRunner(repositoryRoot, [
+          'merge',
+          '--no-ff',
+          '-m',
+          mergeCommitMessage(targetBranch, taskBranch),
+          taskBranch,
+        ]);
       } catch (error) {
         for (const { abs, content } of parked) { try { writeFileSync(abs, content); } catch { /* 尽力恢复 */ } }
         return { ok: false, reason: 'merge_failed', detail: String(error?.message || error).slice(0, 300) };
@@ -361,16 +373,25 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
 
   // -uall：默认模式会把全未跟踪目录折叠成目录条目（如 demo/），无法对单文件
   // 做碰撞与逐字节内容比对。展开到单文件后逐字节比对才能命中（ADR 69 / P0 修复）。
-  const status = await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']);
-  const lines = status.split('\n').map((line) => line.trim()).filter(Boolean);
+  // 必须走 gitRaw：git() 会 trim 整段输出，把 ` M file` 吃成 `M file`，
+  // parsePorcelainPath 的 3 字节前缀就对不上路径。
+  const status = gitRunner === git
+    ? await gitRaw(repositoryRoot, ['status', '--porcelain', '-uall'])
+    : String(await gitRunner(repositoryRoot, ['status', '--porcelain', '-uall']) || '');
+  const lines = String(status || '').split('\n').filter((line) => line.length >= 4);
   const untracked = [];
   for (const line of lines) {
     const xy = line.slice(0, 2);
+    const entry = parsePorcelainPath(line);
     if (xy !== '??') {
-      // tracked 脏（modified/staged/deleted/renamed）：环境挡，真有未提交工作。
-      return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: line.slice(3).trim() } };
+      // tracked 脏（modified/staged/deleted/renamed）：只在和任务变更集重叠时挡。
+      // 不重叠的未提交改动不影响 --no-ff / 暂移同内容碰撞，继续自动合。
+      if (changedFiles.includes(entry)) {
+        return { ...base, verdict: 'BLOCKED_ENV', reason: 'target_checkout_dirty', detail: { ...base.detail, blockingEntry: entry } };
+      }
+      continue;
     }
-    untracked.push(line.slice(3).trim().replace(/"(.*)"/, '$1'));
+    untracked.push(entry);
   }
 
   // 与目标工作区未跟踪文件的碰撞比对（逐字节）。
@@ -395,7 +416,7 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
     return { ...base, verdict: 'CONFLICT', reason: 'untracked_content_differs' };
   }
   if (collisions.length > 0 || untracked.length === 0) {
-    // 可自动合：无冲突，碰撞均为同内容（调用方暂移后 ff-only 落地同一内容）。
+    // 可自动合：无冲突，碰撞均为同内容（调用方暂移后 --no-ff 落地同一内容）。
     return { ...base, verdict: 'AUTO_MERGE', reason: collisions.length > 0 ? 'identical_collisions' : 'clean' };
   }
   // 无碰撞但有变更集：干净快进。
@@ -403,8 +424,9 @@ export async function triageTaskLine({ repositoryRoot, taskBranch, targetBranch,
 }
 
 /**
- * ADR 68：目标检出分支的脏检查分级。
- * 1. modified / staged（含删除、重命名）→ 挡：真有未提交工作。
+ * ADR 68 / 69：目标检出分支的脏检查分级。
+ * 1. modified / staged（含删除、重命名）且路径落在任务变更集内 → 挡：会盖掉你正在改的内容。
+ *    不重叠的 tracked 脏放行：merge 不碰这些文件。
  * 2. untracked 且与任务线变更集无路径碰撞 → 放行：纯噪音，merge 不碰它。
  * 3. untracked 且路径碰撞 → 比内容：与任务线将写入的版本逐字节一致 → 放行
  *    （调用方暂移后 merge 落地同一内容）；不一致 → 挡。
@@ -429,6 +451,28 @@ async function commitWorktreeIfNeeded(worktreePath, message) {
   await git(worktreePath, ['add', '-A']);
   await git(worktreePath, ['commit', '-m', message]);
   return git(worktreePath, ['rev-parse', 'HEAD']);
+}
+
+function mergeCommitMessage(targetBranch, taskBranch) {
+  return `Merge task line ${taskBranch} into ${targetBranch}`;
+}
+
+// 在目标分支上造一个显式合并提交：第一父是目标 tip，第二父是任务线 tip，树取任务线。
+// 这样合入后 git log 一定能看到新提交，同时任务线仍是祖先（verifyDirectDeliveryLanded 仍幂等）。
+async function createMergeCommit({ cwd, targetBranch, taskBranch }) {
+  const targetTip = await git(cwd, ['rev-parse', targetBranch]);
+  const taskTip = await git(cwd, ['rev-parse', taskBranch]);
+  const tree = await git(cwd, ['rev-parse', `${taskTip}^{tree}`]);
+  return git(cwd, [
+    'commit-tree',
+    tree,
+    '-p',
+    targetTip,
+    '-p',
+    taskTip,
+    '-m',
+    mergeCommitMessage(targetBranch, taskBranch),
+  ]);
 }
 
 async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, taskBranch, isolated = false }) {
@@ -491,7 +535,7 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
           : undefined,
       };
     }
-    // 同内容碰撞：git merge --ff-only 对 untracked 碰撞一律拒绝（即使字节一致），
+    // 同内容碰撞：git merge --no-ff 对 untracked 碰撞一律拒绝（即使字节一致），
     // 先暂移，merge 成功后任务线版本落地同一内容；失败则按原字节恢复。
     const parked = [];
     try {
@@ -500,8 +544,14 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
         parked.push({ absolute, content: readFileSync(absolute) });
         rmSync(absolute);
       }
-      // occupy target: merge --ff-only
-      await git(repositoryRoot, ['merge', '--ff-only', taskBranch]);
+      // occupy target: 显式合并提交，git log 一定能看到合入动作。
+      await git(repositoryRoot, [
+        'merge',
+        '--no-ff',
+        '-m',
+        mergeCommitMessage(targetBranch, taskBranch),
+        taskBranch,
+      ]);
       return {
         ok: true,
         commitSha: await git(repositoryRoot, ['rev-parse', 'HEAD']),
@@ -513,7 +563,7 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
         try {
           writeFileSync(absolute, content);
         } catch {
-          // 恢复尽力而为；ff-only 失败时 merge 未写入任何文件
+          // 恢复尽力而为；merge 失败时尽量还原暂移文件
         }
       }
       const reason = error?.handoffReason || classifyGitError(error) || 'merge_conflict';
@@ -529,10 +579,15 @@ async function mergeIntoTarget({ repositoryRoot, worktreePath, targetBranch, tas
   }
 
   try {
-    await git(worktreePath, ['update-ref', `refs/heads/${targetBranch}`, taskBranch]);
+    const mergeSha = await createMergeCommit({
+      cwd: worktreePath,
+      targetBranch,
+      taskBranch,
+    });
+    await git(worktreePath, ['update-ref', `refs/heads/${targetBranch}`, mergeSha]);
     return {
       ok: true,
-      commitSha: await git(worktreePath, ['rev-parse', targetBranch]),
+      commitSha: mergeSha,
       checkout,
     };
   } catch (error) {
@@ -585,15 +640,17 @@ export function createGoalDeliveryHandoff({
   function handoffGateReason(plan) {
     if (!plan || typeof plan !== 'object') return 'missing_plan';
     if (!isCompleted(plan)) return 'plan_not_completed';
-    if (!isQualityReady(plan)) return 'quality_review_pending';
     const binding = plan.deliveryBinding;
     if (!binding) return 'missing_binding';
     const taskBranch = trim(binding.taskBranch);
     const targetBranch = mergeTargetFor(plan);
     if (!taskBranch || !targetBranch) return 'missing_binding';
+    // 非隔离计划没有合回动作：完成即直接落在当前仓。
+    // 质量自检未过只拦住真正的 Worktree 合入，不能把 direct 计划误写成 quality_review_pending。
     if (!(binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath)))) {
       return 'missing_worktree';
     }
+    if (!isQualityReady(plan)) return 'quality_review_pending';
     return null;
   }
 
@@ -765,6 +822,10 @@ export function createGoalDeliveryHandoff({
         });
       }
       if (retry) {
+        const binding = plan.deliveryBinding || {};
+        const isolated = binding.executionIsolation === 'worktree' && Boolean(trim(binding.worktreePath));
+        // 非隔离计划没有合回动作：点「合入」不能写成质量自检未过 / 缺绑定 / 缺现场。
+        if (!isolated) return Promise.resolve(plan);
         const reason = handoffGateReason(plan);
         if (reason) return Promise.resolve(stopPlan(plan, reason));
       }

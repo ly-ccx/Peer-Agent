@@ -1,4 +1,5 @@
 import {
+  buildModelMenuGroups,
   resolveLlmModelOptionValues,
   type ContextAccountingSnapshot,
   type ContextUsageBreakdown,
@@ -428,24 +429,12 @@ export function TokenUsageDisplay({
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
   // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
   // 注意：必须在 hasInfo early return 之前调用 hooks，否则 hasInfo 从 false→true 会触发 React #310。
-  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => {
-    const order: string[] = [];
-    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
-    for (const prov of providers) {
-      const key = prov.groupId || prov.id;
-      let bucket = byGroup.get(key);
-      if (!bucket) {
-        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
-        byGroup.set(key, bucket);
-        order.push(key);
-      }
-      bucket.items.push({ id: prov.id, label: prov.modelLabel || prov.model, disabled: !prov.apiKeyConfigured });
-    }
-    return order.map((key) => {
-      const bucket = byGroup.get(key)!;
-      return { id: key, label: bucket.label, items: bucket.items, disabled: bucket.items.every((it) => it.disabled) };
-    });
-  }, [providers, isZh]);
+  const modelGroups: readonly CascadingMenuGroup[] = useMemo(() => buildModelMenuGroups(
+    providers.map((prov) => ({
+      id: prov.id, groupId: prov.groupId, groupLabel: getProviderDisplayName(prov, isZh),
+      model: prov.model, modelLabel: prov.modelLabel, available: Boolean(prov.apiKeyConfigured),
+    })),
+  ), [providers, isZh]);
   const handleModelMenuChange = useCallback((next: string) => {
     onModelChange?.(next);
   }, [onModelChange]);
@@ -516,21 +505,15 @@ export function TokenUsageDisplay({
   // 从未有过计量结果时仍显示「?」；禁止用草稿字符或本地估算伪装成有效百分比。
   const ctxPercent = stickyDisplay.percent;
   const hasCtxRing = ctxWindow != null;
-  const contextCounterDegraded = contextAccounting?.counterStatus === 'degraded';
-  // 圆环 hover：展示用户可理解的上下文计量、漂移告警与附加诊断。
-  // pendingUncountedChanges 是 Runtime 内部状态，不向用户暴露实现细节。
+  // 圆环 hover：只展示用户可理解的上下文计量与附加诊断。
+  // pendingUncountedChanges 与 counterStatus 都是 Runtime 内部计量状态，不向用户暴露；
+  // 后者原先会在面板底部显示一句内部降级说明，已移除。
+  // 数字与占用率不受影响：仍取自同一份共享快照。
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
         currentContextTokens != null && ctxPercent != null
           ? `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`
           : `${isZh ? '上下文待计量' : 'Context pending measurement'} / ${formatTokenCount(ctxWindow)}`,
-        ...(contextCounterDegraded
-          ? [
-              isZh
-                ? '精确计数与 provider usage 漂移，已降级采用 provider usage'
-                : 'Exact count drifted from provider usage; using provider usage',
-            ]
-          : []),
         ...(showCacheHit
           ? [
               isZh
@@ -629,7 +612,6 @@ export function TokenUsageDisplay({
             breakdown={stickyBreakdown}
             isZh={isZh}
             summaryLabel={ctxTooltip}
-            degraded={contextCounterDegraded}
             footerLines={ctxTooltipLines.slice(1)}
             accountUsage={accountProvider ? <ContextAccountUsage key={accountUsageViewIdentity(accountProvider)} provider={accountProvider} isZh={isZh} /> : null}
           />

@@ -236,3 +236,19 @@ test('workspace rows hide the new-task plus off-flow so the running dot can sit 
   assert.match(hoverDotBody, /transform:\s*translateX\(calc\(-18px - 6px\)\);/);
   assert.match(focusDotBody, /transform:\s*translateX\(calc\(-18px - 6px\)\);/);
 });
+
+test('interrupted sidebar badge uses short copy, full width, and control radius', () => {
+  const awaitingBody = ruleBody(sidebarCss, '.sidebar-conv-awaiting');
+
+  assert.match(sidebarRowSource, /\{isZh \? '中断' : 'Interrupted'\}/);
+  assert.doesNotMatch(sidebarRowSource, /已中断/);
+
+  assert.match(awaitingBody, /flex:\s*0 0 auto;/);
+  assert.match(awaitingBody, /white-space:\s*nowrap;/);
+  assert.doesNotMatch(awaitingBody, /max-width:/);
+  assert.doesNotMatch(awaitingBody, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(awaitingBody, /overflow:\s*hidden/);
+
+  assert.match(awaitingBody, /border-radius:\s*var\(--ui-radius-control\)/);
+  assert.doesNotMatch(awaitingBody, /--radius-pill/);
+});

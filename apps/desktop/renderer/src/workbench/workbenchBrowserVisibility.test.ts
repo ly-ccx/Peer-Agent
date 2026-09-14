@@ -8,6 +8,17 @@ const browserViewSource = readFileSync(new URL('./views/BrowserView.tsx', import
 const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
 
 describe('workbench view visibility', () => {
+  it('inherits selected-page visibility from its conversation and panel instead of escaping hidden ancestors', () => {
+    assert.match(
+      workbenchStyles,
+      /\.browser-webview\[data-active='true'\]\s*\{\s*visibility:\s*inherit;/,
+    );
+    assert.doesNotMatch(
+      workbenchStyles,
+      /\.browser-webview\[data-active='true'\]\s*\{\s*visibility:\s*visible;/,
+    );
+  });
+
   it('keeps BrowserView mounted so browser tabs and page sessions survive workbench tab switches', () => {
     // root/local 分支现在都用模板字符串 class（workbench-view--browser + 可能 workbench-view--prepared-browser），
     // 关键不变量是：浏览器视图常驻渲染（不通过 activeTab==='browser' && <BrowserView> 条件卸载），

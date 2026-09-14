@@ -1,0 +1,137 @@
+/* 不再建立包含块：浮层的包含块是 .composer-chrome-row（会话列）。
+   anchor 自己的宽度只跟 docked 胶囊的标题走，拿它当尺寸基准会把浮层一起压窄。 */
+.goal-investigation-anchor {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Outside the capsule's clipping/blur surface. No composer reflow per batch. */
+.goal-investigation {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  /* 宽度基准 = 会话列：100cqw 取 .chat-composer-wrap 的内容宽，再夹到列上限
+     --chat-content-max，正好等于 chrome 行的宽度。胶囊宽度从此不再参与。 */
+  width: min(560px, 100cqw, var(--chat-content-max));
+  opacity: 1;
+  transition: opacity var(--za-motion-medium) var(--za-ease-out),
+    transform var(--za-motion-medium) var(--za-ease-out),
+    visibility 0s;
+}
+
+.goal-investigation[data-hidden='true'] {
+  opacity: 0;
+  transform: translateY(var(--za-motion-shift-sm));
+  pointer-events: none;
+  visibility: hidden;
+  transition-delay: 0s, 0s, var(--za-motion-medium);
+}
+
+/**
+ * 正文底部净空：浮层可见时才留，不可见则为 0。
+ *
+ * 为什么需要：上面这块浮层是 `position: absolute` + `bottom: calc(100% + 12px)`，
+ * 也就是**悬在输入框上方、不占布局**。所以正文最后一行必须自己让开，否则会被浮层盖住
+ *（用户实际反馈的「子任务遮住输出」）。
+ *
+ * 为什么不能常驻：早先 .chat-thread 常驻 32px 底部内边距来干这件事，于是浮层不出现的
+ * 时候那段空间就是死区（用户反馈的「内容与输入框之间那段空白」）。改为按可见性按需施加，
+ * 两种状态都正确。
+ *
+ * 取值依据：浮层底边在 composer 顶边上方 12px，单行高度 ≈40px（卡片 padding 10px×2
+ *  + 12px 文字 + 边框），故浮层顶边约在 composer 顶边上方 52px；正文侧已有的
+ *  .chat-turn padding-bottom 为 24px，因此这里再补约 40px，可让正文末尾与浮层顶边之间
+ * 留出约 12px 呼吸。若将来浮层变成多行（当前最多渲染 2 张卡片 + 「另 N 项」徽标，
+ * 见 GoalInvestigationCards 的 slice(0, 2)），需要改为测量实际高度，而不是继续加常量。
+ *
+ * 用 :has() 做可见性条件：纯 CSS、无 JS 测量，因此不会引入新的跳动。
+ */
+.chat-surface:has(.goal-investigation:not([data-hidden='true'])) .chat-thread {
+  padding-bottom: 40px;
+}
+
+.goal-investigation-cards {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  /* 入场动画已下放到 .goal-investigation-card 自身，这里只留变量供其继承。
+     为什么不能挂在祖先上：祖先带 translate3d 时会成为 backdrop root，子卡片的
+     backdrop-filter 只能采样层内的空内容 —— 即使动画用 backwards 而非 both，
+     入场那一帧祖先仍带着位移，磨砂就会出现「刚出现时失效」的闪断。
+     挂在卡片自身则不受影响：元素自己的 backdrop-filter 不裁剪自己的采样源。 */
+  --motion-enter-from: var(--za-motion-shift-sm);
+}
+
+.goal-investigation-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  /* 按内容自适应：短问题收窄，长问题到列宽上限才截断，不再两等分。 */
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--za-line);
+  border-radius: 12px;
+  /* 毛玻璃三件套：材质 + 模糊 + 浮起阴影。
+     1) --glass-popover 是 hsla(...,0.88) 的近白，压在被 blur(24px) 糊成灰雾的正文上
+        只产生约 1.9%/255 的信号（≈5 个灰阶），低于人眼阈值 —— 看着就是实心白。
+        注意方向：blur 生效时卡面反而更像实心，blur 失效时才会看到文字鬼影。
+        所以这里派生出更透的一档：82% × 0.88 ≈ 0.72，磨砂信号约 4.5%/255；
+        背景 12px 正文经 24px 模糊后为低频灰雾，仍不可读。
+     2) 阴影用与 docked 胶囊同源的 --shadow-popover，卡片才有「浮起来」的观感。
+     3) docked 胶囊刻意不叠 --glass-edge-highlight（暗色下顶部会变刺眼亮线），
+        卡片底色更透，需要这层顶边高光交代玻璃厚度。 */
+  background: color-mix(in srgb, var(--glass-popover) 82%, transparent);
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  box-shadow: var(--shadow-popover, 0 2px 12px rgba(26, 29, 33, 0.06)), var(--glass-edge-highlight);
+  /* 入场动画挂卡片自身而非 .goal-investigation-cards 祖先，见该容器处的说明。 */
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) backwards;
+  color: var(--za-text);
+  font-size: 12px;
+}
+
+.goal-investigation-question {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-investigation-card small,
+.goal-investigation-more {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--za-text-muted);
+  white-space: nowrap;
+}
+
+.goal-investigation-signal { color: var(--za-accent); flex-shrink: 0; }
+.goal-investigation-card[data-status='running'] .goal-investigation-signal {
+  --motion-pulse-floor: 0.4;
+  animation: motion-pulse-soft calc(var(--za-motion-slow) * 8) ease-in-out infinite;
+}
+.goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
+.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
+
+/* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色并停用模糊。
+   阴影/顶边高光沿用基础规则，不透底时它们仍然是卡片浮起的唯一交代。 */
+@media (prefers-reduced-transparency: reduce) {
+  .goal-investigation-card {
+    background: var(--ui-surface-raised, var(--za-surface-1));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-investigation,
+  .goal-investigation-cards,
+  .goal-investigation-card,
+  .goal-investigation-signal {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

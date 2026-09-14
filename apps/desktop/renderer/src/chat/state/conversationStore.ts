@@ -30,6 +30,7 @@ import type {
 } from '@peer-agent/protocol';
 
 import type { ChatMode, EffortLevel } from './preferences';
+import { getStreamProfiler } from './streamProfiler.ts';
 import { IDLE_COMPACTION_STATE } from './types.ts';
 import type {
   ChatMsg,
@@ -127,6 +128,52 @@ const CONVERSATION_STATE_KEYS = Object.keys(
   EMPTY_CONVERSATION_STATE,
 ) as (keyof ConversationRuntimeState)[];
 
+/**
+ * 通知重入补发的最大轮数。
+ *
+ * 订阅者在通知回调里回写 store 时，补发会一轮接一轮；这个上限保证它不会变成活锁。
+ * 达到上限后停止补发并告警（少一次渲染好过卡死渲染进程）。
+ */
+const MAX_DEFERRED_NOTIFY_ROUNDS = 8;
+
+/**
+ * 通知风暴检测阈值（始终生效，无需任何开关）。
+ *
+ * 「Maximum update depth exceeded」抛错时的那一帧往往落在 store 通知上，但那一帧只是受害者；
+ * 真正把 React 嵌套更新推过 50 次上限的源头在别处。同一桶在极短时间里被反复通知时打印
+ * 写入方调用栈，用来定位源头，而不是继续静态猜。
+ *
+ * 之所以不挂在埋点开关后面：定位这个 bug 需要用户复现一次，而要求用户先记得开开关
+ * 已经失败过一次（拿回来的日志只有主进程那一半）。这里正常路径的开销只是每次通知一次
+ * Date.now() 比较；只有真的判定为风暴时才建栈。
+ */
+const NOTIFY_STORM_WINDOW_MS = 16;
+const NOTIFY_STORM_THRESHOLD = 20;
+
+/**
+ * 会话状态「是否发生实质变化」的判定。
+ *
+ * 只比较引用不够：很多写法会重建一个内容相同的数组，例如
+ * `setPendingPermissionCalls([])`、`segments: []`、`messageQueue: [...queue]`。
+ * 纯引用比较会把它们判成「变了」→ 通知订阅者 → 触发重渲染；一旦这种写入位于依赖
+ * 不稳定的 effect 里，就会演变成无限更新（React 抛 Maximum update depth exceeded）。
+ *
+ * 因此对数组做浅比较（长度 + 逐元素引用）：内容相同的新数组不再产生通知。
+ * 只比一层是安全的——本 store 的写入都是不可变更新（被改动的元素会换成新对象引用，
+ * 例如 appendThinking 会构造新的末尾消息对象），语义变化不会漏判。
+ */
+function isConversationValueEqual(previous: unknown, next: unknown): boolean {
+  if (Object.is(previous, next)) return true;
+  if (Array.isArray(previous) && Array.isArray(next)) {
+    if (previous.length !== next.length) return false;
+    for (let index = 0; index < previous.length; index += 1) {
+      if (!Object.is(previous[index], next[index])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 /** 高频工具参数进度由局部提示订阅，不应唤醒整棵 ChatSurface。 */
 export function areConversationStatesEqualForSurface(
   previous: ConversationRuntimeState,
@@ -172,6 +219,18 @@ export class ConversationStore {
   private readonly listeners = new Map<string, Set<Listener>>();
   /** streamId → conversationId 路由表（发送/压缩/reattach 时登记）。 */
   private readonly streamRoutes = new Map<string, string>();
+  /** 是否正处于「通知订阅者」的过程中（用于识别通知重入）。 */
+  private notifying = false;
+  /** 通知重入时被推迟补发的桶。 */
+  private readonly deferredNotifyBuckets = new Set<string>();
+  private deferredNotifyScheduled = false;
+  /** 本轮补发次数与超限告警标记（见 scheduleDeferredNotify）。 */
+  private deferredNotifyRounds = 0;
+  private deferredNotifyOverflowWarned = false;
+  /** 通知风暴检测状态（见 trackNotifyStorm）。 */
+  private notifyStormWindowStartMs = 0;
+  private notifyStormCount = 0;
+  private notifyStormReported = false;
 
   /** 判断某会话/草稿桶是否已经建立；用于只在首次进入时播种界面默认值。 */
   hasBucket(conversationId: string | null): boolean {
@@ -231,7 +290,7 @@ export class ConversationStore {
     if (!delta) return;
     let changed = false;
     for (const key of Object.keys(delta) as (keyof ConversationRuntimeState)[]) {
-      if (!Object.is(prev[key], (delta as ConversationRuntimeState)[key])) {
+      if (!isConversationValueEqual(prev[key], (delta as ConversationRuntimeState)[key])) {
         changed = true;
         break;
       }
@@ -239,7 +298,11 @@ export class ConversationStore {
     if (!changed) return;
     const next: ConversationRuntimeState = { ...prev, ...delta };
     this.buckets.set(bucketId, next);
-    this.notify(bucketId);
+    // 观测：每次真正写入都会同步通知订阅者（useSyncExternalStore → React 重渲染）。
+    // 流式期间这个频率直接决定界面卡不卡，所以单独计时。
+    const profiler = getStreamProfiler();
+    profiler.bump('write.store');
+    profiler.measure('write.store.notify', () => this.notify(bucketId));
   }
 
   /** 设置当前会话输入草稿。 */
@@ -438,10 +501,92 @@ export class ConversationStore {
     return settled;
   }
 
+  /**
+   * 通知某桶的订阅者。
+   *
+   * 重入保护：监听器回调里可能再次写入同一个 store（例如订阅了某个字段的组件在回调里
+   * 又写另一个字段）。此时若直接递归通知，就会在同一次 JS 调用栈里连续触发 React 的
+   * 更新；累计超过 React 的嵌套更新上限（50）后即抛
+   * `Maximum update depth exceeded`（本项目实际报过的错误）。
+   *
+   * 因此：嵌套写入不递归通知，改为合并成一次微任务补发——通知不丢、按桶保序，
+   * 但不再嵌进 React 的渲染/提交阶段。正常路径（无重入）仍然完全同步，行为不变。
+   */
   private notify(conversationId: string): void {
+    this.trackNotifyStorm(conversationId);
+    if (this.notifying) {
+      this.deferredNotifyBuckets.add(conversationId);
+      this.scheduleDeferredNotify();
+      return;
+    }
+    // 一次全新的外层写入：重置补发预算，下一次重入又有完整的补发额度。
+    this.deferredNotifyRounds = 0;
+    this.deferredNotifyOverflowWarned = false;
+    this.notifying = true;
+    try {
+      this.notifyBucketNow(conversationId);
+    } finally {
+      this.notifying = false;
+    }
+  }
+
+  private notifyBucketNow(conversationId: string): void {
     const set = this.listeners.get(conversationId);
     if (!set) return;
     for (const listener of set) listener();
+  }
+
+  /**
+   * 通知风暴检测：同一桶在极短时间窗口内被反复通知时，打印一次写入方调用栈。
+   *
+   * 为什么需要它：报错堆栈里出现 store 通知，只说明「第 50 次嵌套更新发生在这里」，
+   * 不代表循环源在这里。把源头定位权交还给一次真机复现，比继续静态猜测更可靠。
+   *
+   * 始终开启：正常路径每次通知只多一次 Date.now() 比较，只有判定成立才建栈。
+   */
+  private trackNotifyStorm(conversationId: string): void {
+    const now = Date.now();
+    if (now - this.notifyStormWindowStartMs > NOTIFY_STORM_WINDOW_MS) {
+      this.notifyStormWindowStartMs = now;
+      this.notifyStormCount = 0;
+      this.notifyStormReported = false;
+    }
+    this.notifyStormCount += 1;
+    if (this.notifyStormCount < NOTIFY_STORM_THRESHOLD || this.notifyStormReported) return;
+    this.notifyStormReported = true;
+    console.warn(
+      `[conversationStore] ${NOTIFY_STORM_WINDOW_MS}ms 内桶 ${conversationId} 被通知 ` +
+        `${this.notifyStormCount} 次，疑似更新循环。写入方调用栈：\n${new Error('notify storm').stack}`,
+    );
+  }
+
+  private scheduleDeferredNotify(): void {
+    if (this.deferredNotifyScheduled) return;
+    // 防御活锁：订阅者若「每次收到通知都回写 store」，补发会一轮接一轮。到达上限后
+    // 停止补发并告警——宁可少一次渲染，也不能让渲染进程卡死。
+    if (this.deferredNotifyRounds >= MAX_DEFERRED_NOTIFY_ROUNDS) {
+      if (!this.deferredNotifyOverflowWarned) {
+        this.deferredNotifyOverflowWarned = true;
+        console.warn(
+          '[conversationStore] 通知重入超过上限，已停止补发；请检查订阅者是否在通知回调里回写 store',
+        );
+      }
+      return;
+    }
+    this.deferredNotifyRounds += 1;
+    this.deferredNotifyScheduled = true;
+    queueMicrotask(() => {
+      this.deferredNotifyScheduled = false;
+      if (this.deferredNotifyBuckets.size === 0) return;
+      const buckets = Array.from(this.deferredNotifyBuckets);
+      this.deferredNotifyBuckets.clear();
+      this.notifying = true;
+      try {
+        for (const bucket of buckets) this.notifyBucketNow(bucket);
+      } finally {
+        this.notifying = false;
+      }
+    });
   }
 }
 

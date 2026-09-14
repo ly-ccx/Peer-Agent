@@ -75,6 +75,7 @@ function shouldRefreshForConversation(
 /** Runner 展示指纹：双通道可能投递等价快照，避免重复 setState。 */
 import { runnerFingerprint } from './goal/runnerFingerprint';
 import { GoalActivityLabel } from './goal/GoalActivityLabel';
+import { GoalInvestigation } from './goal/GoalInvestigationCards';
 
 function patchPlanRunner(
   plans: readonly GoalPlan[],
@@ -1643,12 +1644,14 @@ const PlanCard = memo(function PlanCard({
   const confirm = useConfirm();
   const [lineBusy, setLineBusy] = useState(false);
   const [lineError, setLineError] = useState<string | null>(null);
+  useEffect(() => {
+    if (handoffStatus === 'delivered' || handoffStatus === 'delivering') setLineError(null);
+  }, [handoffStatus]);
   const canIsolate = hasDeliveryTarget(plan)
     && !isolated
     && plan.status !== 'completed'
     && plan.status !== 'cancelled'
     && plan.status !== 'failed';
-  const canOpenSite = hasDeliveryTarget(plan) || isolated;
   const canDiscardLine = hasTaskLine(plan) && plan.status !== 'executing';
   const lineDisabled = busy || isStreaming || lineBusy;
 
@@ -1664,18 +1667,6 @@ const PlanCard = memo(function PlanCard({
       setLineError(error instanceof Error ? error.message : String(error));
     } finally {
       setLineBusy(false);
-    }
-  }, [isZh, plan.planId]);
-
-  const openSite = useCallback(async (mode: 'reveal' | 'editor') => {
-    setLineError(null);
-    try {
-      const result = await clientApi.goalPlansOpenSite({ planId: plan.planId, mode });
-      if (result && result.ok === false) {
-        setLineError(isZh ? '打不开这条任务的现场。' : 'Could not open the task site.');
-      }
-    } catch (error) {
-      setLineError(error instanceof Error ? error.message : String(error));
     }
   }, [isZh, plan.planId]);
 
@@ -1712,9 +1703,12 @@ const PlanCard = memo(function PlanCard({
       const reason = next && typeof next === 'object'
         ? formatGoalDeliveryHandoff(next, { locale: isZh ? 'zh' : 'en' })
         : null;
-      const stopped = next && typeof next === 'object'
-        && next.deliveryHandoff?.status === 'stopped';
-      if (stopped && reason) setLineError(reason);
+      const nextStatus = next && typeof next === 'object'
+        ? next.deliveryHandoff?.status
+        : undefined;
+      const stopped = nextStatus === 'stopped';
+      if (nextStatus === 'delivered' || nextStatus === 'delivering') setLineError(null);
+      else if (stopped && reason) setLineError(reason);
     } catch (error) {
       setLineError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1850,7 +1844,7 @@ const PlanCard = memo(function PlanCard({
               ) : null}
             </div>
           ) : null}
-          {canIsolate || canOpenSite || canDiscardLine ? (
+          {canIsolate || canDiscardLine ? (
             <div className="goal-plan-delivery-actions">
               {canIsolate ? (
                 <button
@@ -1861,26 +1855,6 @@ const PlanCard = memo(function PlanCard({
                 >
                   {isZh ? '隔离执行' : 'Isolate'}
                 </button>
-              ) : null}
-              {canOpenSite ? (
-                <>
-                  <button
-                    type="button"
-                    className="goal-plan-delivery-action"
-                    disabled={lineDisabled}
-                    onClick={() => void openSite('reveal')}
-                  >
-                    {isZh ? '打开现场' : 'Reveal site'}
-                  </button>
-                  <button
-                    type="button"
-                    className="goal-plan-delivery-action"
-                    disabled={lineDisabled}
-                    onClick={() => void openSite('editor')}
-                  >
-                    {isZh ? '在编辑器打开' : 'Open in editor'}
-                  </button>
-                </>
               ) : null}
               {canDiscardLine ? (
                 <button
@@ -2338,6 +2312,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     hasCompletedFormalGoal && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
 
   return (
+    <div className="goal-investigation-anchor">
+      {activePlan && <GoalInvestigation key={`${conversationId}:${activePlan.planId}`} plan={activePlan} isZh={isZh} />}
     <div
       className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}${
         dockedExecuting ? ' goal-panel--executing' : ''
@@ -2517,6 +2493,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         }
         return sidePanelContainer ? createPortal(body, sidePanelContainer) : body;
       })()}
+    </div>
     </div>
   );
 }

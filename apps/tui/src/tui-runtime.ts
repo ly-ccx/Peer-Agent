@@ -12,7 +12,7 @@ import {
   resolveTuiModelConfig,
   type TuiModelConfig,
 } from './model-config.ts';
-import { createTuiModelSelectionControl, type TuiModelSelectionControl } from './tui-model-selection.ts';
+import { createTuiContextSelectionControl, createTuiModelSelectionControl, type TuiContextSelectionControl, type TuiModelSelectionControl } from './tui-model-selection.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
@@ -49,6 +49,7 @@ export interface TuiRuntime {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelSelection: TuiModelSelectionControl;
+  readonly contextSelection: TuiContextSelectionControl;
   readonly modelConfig: TuiModelConfig;
   readonly languageStore: TuiLanguageStore;
   readonly themeStore: TuiThemeStore;
@@ -273,6 +274,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
       ?? (modelConfig.configured ? ['off', 'low', 'default', 'high'] : ['default']),
     catalog: modelConfig.catalog,
   });
+  const contextSelection = createTuiContextSelectionControl(modelSelection, modelConfig.sharedProviders);
   const systemPrompt = (context: ProviderSystemPromptContext) => {
     const selection = modelSelection.getSelection();
     const providerMetadata = modelConfig.sharedProviders?.find(
@@ -320,12 +322,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           authMethodFor(modelSelection.getSelection().providerId),
           sessionFastMode,
         ),
-        getContextWindow: () => {
-          const selection = modelSelection.getSelection();
-          return modelSelection.catalog.find((entry) => (
-            entry.providerId === selection.providerId && entry.modelId === selection.modelId
-          ))?.contextWindow;
-        },
+        getContextWindow: () => contextSelection.getContextWindow(),
         toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
         getSystemPrompt: systemPrompt,
       })
@@ -335,6 +332,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     host,
     model,
     modelSelection,
+    contextSelection,
     modelConfig,
     languageStore,
     themeStore,

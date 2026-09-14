@@ -557,11 +557,13 @@ describe('TUI Runtime host', () => {
     const workspaceRoot = await createWorkspace();
     const host = createHost(workspaceRoot);
     const context = sessionContext('once-session');
+    const approvalIds: string[] = [];
     let approvalCount = 0;
     const unsubscribe = host.subscribeApproval((approval) => {
       if (!approval) return;
       approvalCount += 1;
       expect(approval.sessionId).toBe('once-session');
+      approvalIds.push(approval.toolCallId ?? 'missing');
       approval.resolve('allow-once');
     });
 
@@ -576,6 +578,9 @@ describe('TUI Runtime host', () => {
     expect(first.result.status).toBe('completed');
     expect(second.result.status).toBe('completed');
     expect(approvalCount).toBe(2);
+    expect(first.result.toolCallId).toBeString();
+    expect(second.result.toolCallId).toBeString();
+    expect(approvalIds).toEqual([first.result.toolCallId ?? '', second.result.toolCallId ?? '']);
   });
 
   test('allow for session reuses a capability grant only in the matching session', async () => {

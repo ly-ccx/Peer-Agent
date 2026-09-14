@@ -17,27 +17,32 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-3);
-  padding-top: 52px;
   border-right: 1px solid var(--pa-border-subtle);
   overflow-y: auto;
+}
+
+/* 仅 macOS 非全屏窗口需要为交通灯额外留白。 */
+:root[data-os='darwin'] .app-shell:not(.is-fullscreen) .settings-nav {
+  padding-top: 52px;
 }
 
 .settings-nav-header {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
   padding: 0 var(--space-2) var(--space-2);
 }
 .settings-nav-header button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-3);
   background: none;
   border: none;
   color: var(--graphite-soft);
   cursor: pointer;
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  margin: 0;
   border-radius: var(--radius-sm);
+  -webkit-app-region: no-drag;
   transition: color var(--za-motion-fast), background var(--za-motion-fast);
 }
 .settings-nav-header button:hover {
@@ -237,7 +242,14 @@
 }
 
 .general-language-select {
-  flex: 0 0 180px;
+  flex: 0 1 180px;
+  min-width: 0;
+}
+
+/* 分支下拉：撑满槽位并让长分支名省略，而不是把整行顶开。 */
+.general-language-select .pa-dropdown {
+  width: 100%;
+  min-width: 0;
 }
 
 .general-setting-error {

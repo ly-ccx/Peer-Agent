@@ -12,7 +12,6 @@ export function ContextUsagePanel({
   breakdown,
   isZh,
   summaryLabel,
-  degraded = false,
   footerLines = [],
   accountUsage,
 }: {
@@ -22,7 +21,6 @@ export function ContextUsagePanel({
   readonly breakdown: ContextUsageBreakdown | null | undefined;
   readonly isZh: boolean;
   readonly summaryLabel: string;
-  readonly degraded?: boolean;
   readonly footerLines?: readonly string[];
   readonly accountUsage?: ReactNode;
 }) {
@@ -201,7 +199,6 @@ export function ContextUsagePanel({
         />
         <span className="ctx-pct">
           {percent == null ? '?' : `${Math.round(percent)}%`}
-          {degraded ? '!' : ''}
         </span>
       </button>
       {panel}

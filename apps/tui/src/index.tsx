@@ -1,22 +1,29 @@
 #!/usr/bin/env bun
 
-import { createCliRenderer } from '@opentui/core';
-import { createRoot } from '@opentui/react';
+// ACP must branch before loading any terminal UI or local runtime modules.
+if (process.argv[2] === 'acp') {
+  const { runAcpStdio } = await import('./acp/stdio.ts');
+  await runAcpStdio(process.argv.slice(3));
+  process.exit(process.exitCode ?? 0);
+}
+
+const { createCliRenderer } = await import('@opentui/core');
+const { createRoot } = await import('@opentui/react');
 import os from 'node:os';
 import path from 'node:path';
 
-import { App } from './app.tsx';
+const { App } = await import('./app.tsx');
 import {
   formatPeerHelp,
   parsePeerArgv,
   shouldRefuseInteractiveTui,
 } from './cli-argv.ts';
-import { runPeerExec } from './cli-exec.ts';
+const { runPeerExec } = await import('./cli-exec.ts');
 import { CLI_EXIT } from './cli-exit.ts';
 import { handleCliVersionArgs } from './cli-version.ts';
 import { createCliUpdateController } from './cli-update.ts';
 import { createTuiLocalAccessStore } from './tui-local-access-store.ts';
-import { createTuiRuntime } from './tui-runtime.ts';
+const { createTuiRuntime } = await import('./tui-runtime.ts');
 import { createTuiShutdown } from './tui-shutdown.ts';
 import { flushTuiPerfSync } from './tui-perf.ts';
 import { formatTerminalTitle } from './terminal-title.ts';

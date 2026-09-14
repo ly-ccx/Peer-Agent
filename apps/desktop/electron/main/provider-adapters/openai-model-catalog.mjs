@@ -18,8 +18,29 @@ import {
 
 // 订阅(codex 平面)权威模型清单。按"新→旧"排列,第一项即默认"最新"。
 // label 用 ChatGPT 客户端展示名,id 用 codex 端点接受的小写标识。
+const SUBSCRIPTION_CONTEXT_OPTIONS = Object.freeze([
+  Object.freeze({
+    id: 'contextTier',
+    label: '上下文',
+    kind: 'select',
+    defaultValue: 400_000,
+    choices: Object.freeze([
+      Object.freeze({ value: 400_000, label: '400K', contextWindow: 400_000, inputTokenLimit: 400_000 }),
+      Object.freeze({ value: 1_000_000, label: '1M', contextWindow: 1_000_000, inputTokenLimit: 1_000_000 }),
+    ]),
+  }),
+]);
+
+function withSubscriptionContextOptions(metadata) {
+  return {
+    ...metadata,
+    contextWindow: SUBSCRIPTION_CONTEXT_OPTIONS[0].defaultValue,
+    modelOptions: SUBSCRIPTION_CONTEXT_OPTIONS,
+  };
+}
+
 const SUBSCRIPTION_CATALOG = [
-  // GPT-6 Astra 官方能力与价格；ChatGPT OAuth 订阅上下文按产品约束沿用 272k。
+  // ChatGPT OAuth 订阅统一提供 400K / 1M 两档；模型自身输出上限仍独立保留。
   {
     id: 'gpt-6-astra',
     label: 'GPT-6 Astra',
@@ -33,28 +54,11 @@ const SUBSCRIPTION_CATALOG = [
     supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
-  {
-    id: 'gpt-5.5',
-    label: 'GPT-5.5',
-    contextWindow: 272_000,
-    maxOutputTokens: 128_000,
-    inputPrice: 5,
-    outputPrice: 30,
-    cacheReadPrice: 0.5,
-    longContextInputThreshold: 272_000,
-    longContextInputPrice: 10,
-    longContextCacheReadPrice: 1,
-    longContextOutputPrice: 45,
-    standardPricing: {
-      shortContext: { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 },
-      longContext: { inputPrice: 10, cacheReadPrice: 1, outputPrice: 45 },
-      longContextInputThreshold: 272_000,
-    },
-  },
   // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
   // Codex 原生强度包含 xhigh/max 等值；GPT-5.6 完整暴露五档，避免将 xhigh 与 max 压缩为同一产品档位。
   // ChatGPT OAuth 订阅可用上下文窗口为 272k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
-  // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
+  // 注: gpt-5.5 已被上游 codex 端点下线(404 model_not_found)，不再进入内置目录；
+  // 历史遗留的 gpt-5.5 记录由 llm-config-store 迁移逻辑自愈为默认模型。
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
@@ -127,30 +131,16 @@ const SUBSCRIPTION_CATALOG = [
 // 订阅默认模型(新建订阅 / 迁移旧值时落到此)。
 const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-6-astra';
 
+for (let index = 0; index < SUBSCRIPTION_CATALOG.length; index += 1) {
+  SUBSCRIPTION_CATALOG[index] = withSubscriptionContextOptions(SUBSCRIPTION_CATALOG[index]);
+}
+
 // 合法订阅模型 id 集合,用于迁移时判定旧值是否仍有效。
 const SUBSCRIPTION_MODEL_IDS = new Set(SUBSCRIPTION_CATALOG.map((m) => m.id));
 const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.id, m]));
 
 // 向后兼容别名:历史调用/测试以 FALLBACK_MODELS 引用同一份清单。
 const FALLBACK_MODELS = SUBSCRIPTION_CATALOG;
-
-// DeepSeek 官方静态目录兜底。
-// 事实: DeepSeek 的 Anthropic 兼容平面没有 /v1/models,模型目录只挂在
-// OpenAI 兼容平面;目录远程失败(404/断网等)时用它兜底,官方仅此两款公开模型。
-const DEEPSEEK_FALLBACK_CATALOG = Object.freeze([
-  Object.freeze({
-    id: 'deepseek-chat',
-    label: 'DeepSeek Chat',
-    contextWindow: 128_000,
-    maxOutputTokens: 8_000,
-  }),
-  Object.freeze({
-    id: 'deepseek-reasoner',
-    label: 'DeepSeek Reasoner',
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-  }),
-]);
 
 function headerValue(headers, name) {
   if (!headers || typeof headers !== 'object') return undefined;
@@ -213,6 +203,18 @@ function sortNewestFirst(models) {
 
 function getSubscriptionModelMetadata(id) {
   return SUBSCRIPTION_MODEL_METADATA.get(id) || null;
+}
+
+function resolveSubscriptionContextWindow(metadata, values = {}) {
+  const definition = metadata?.modelOptions?.find(
+    (option) => option?.id === 'contextTier' && option.kind === 'select',
+  );
+  if (!definition) return metadata?.contextWindow;
+  const selectedValue = values?.contextTier ?? definition.defaultValue;
+  const choice = definition.choices?.find((candidate) => candidate.value === selectedValue)
+    || definition.choices?.find((candidate) => candidate.value === definition.defaultValue)
+    || definition.choices?.[0];
+  return choice?.contextWindow ?? metadata?.contextWindow;
 }
 
 /**
@@ -409,8 +411,8 @@ export async function listOpenAICompatibleModels({
  * 渠道感知的模型目录统一入口。
  *
  * - requestConfig.modelCatalog 存在(渠道声明了目录平面覆盖,如 DeepSeek):
- *   用覆盖的 wire/baseUrl/headers 拉远程目录,失败时回退该渠道的静态目录
- *   (返回 source='fallback' 且保留 error 供诊断)。
+ *   用覆盖的 wire/baseUrl/headers 拉远程目录。DeepSeek 失败原样抛错；
+ *   其他渠道可使用显式 fallbackCatalog (保留 error 供诊断)。
  * - modelCatalog 不存在:与历史一致直接走 listOpenAICompatibleModels,
  *   失败原样抛错,不引入兜底。
  *
@@ -436,8 +438,9 @@ export async function listModelCatalogForChannel(requestConfig = {}) {
       modelCatalog: undefined,
     });
   } catch (error) {
-    const fallbackCatalog = override.fallbackCatalog
-      ?? (override.channelId === 'deepseek' ? DEEPSEEK_FALLBACK_CATALOG : undefined);
+    // DeepSeek's model IDs come exclusively from its remote catalog.
+    if (override.channelId === 'deepseek') throw error;
+    const fallbackCatalog = override.fallbackCatalog;
     if (!Array.isArray(fallbackCatalog) || fallbackCatalog.length === 0) {
       throw error;
     }
@@ -455,6 +458,7 @@ export {
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
+  resolveSubscriptionContextWindow,
   isChatModel,
   isLikelyChatModel,
   normalizeApiModelList,

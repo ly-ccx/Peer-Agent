@@ -135,6 +135,9 @@ describe('goal delivery handoff', () => {
     assert.equal(existsSync(path.join(repository, 'user-dirty.txt')), true);
     assert.equal(git(['show', 'main:delivered.txt']), 'from isolation');
     assert.equal(existsSync(path.join(repository, 'delivered.txt')), false);
+    const parents = git(['rev-list', '--parents', '-n', '1', 'main']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.equal(git(['merge-base', prepared.deliveryBinding.taskBranch, 'main']), git(['rev-parse', prepared.deliveryBinding.taskBranch]));
   });
 
   it('rebases onto a moved target branch and still delivers without changing the user checkout', async () => {
@@ -251,7 +254,9 @@ describe('goal delivery handoff', () => {
     assert.equal(first, second);
     const next = await first;
     assert.equal(next.deliveryHandoff.status, 'delivered');
-    assert.equal(git(['rev-list', '--count', 'main']), '2');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'main']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.equal(git(['merge-base', prepared.deliveryBinding.taskBranch, 'main']), git(['rev-parse', prepared.deliveryBinding.taskBranch]));
   });
 
   it('fast-forwards a clean checkout that occupies the target branch', async () => {
@@ -268,6 +273,9 @@ describe('goal delivery handoff', () => {
     assert.equal(readFileSync(path.join(repository, 'landed.txt'), 'utf8'), 'from isolation\n');
     assert.equal(git(['status', '--porcelain']), '');
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
+    assert.match(git(['log', '-1', '--pretty=%s']), /Merge task line/);
   });
 
   it('records delivered for an empty shell even when the occupied target checkout is dirty', async () => {
@@ -289,7 +297,7 @@ describe('goal delivery handoff', () => {
   it('fast-forwards when an untracked file in a collapsed directory byte-matches the task change', async () => {
     // 复现 bug：占用目标分支时，未跟踪目录会被 `status --porcelain` 折叠成目录条目（demo/），
     // 旧逻辑对目录条目碰撞保守挡 target_checkout_dirty，即使内容与任务线逐字节一致。
-    // 修复后（-uall 展开到单文件）应比对内容、暂移同内容碰撞，再 ff-only 合入。
+    // 修复后（-uall 展开到单文件）应比对内容、暂移同内容碰撞，再 --no-ff 合入。
     const content = '<!doctype html><title>version map</title>\n';
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
@@ -316,36 +324,50 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
   });
 
-  it('stops when the occupied target checkout has modified tracked files', async () => {
-    // ADR 68：untracked 噪音不再挡；modified tracked 才是真脏。
-    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
+  it('fast-forwards when occupied-target dirty files do not overlap the task change', async () => {
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing something else\n');
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
       worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
       goalPlanStore: store,
     });
     const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
-    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'blocked.txt'), 'should not land\n');
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'landed.txt'), 'from isolation\n');
+    const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
+    const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
+    assert.equal(next.deliveryHandoff.status, 'delivered');
+    assert.equal(readFileSync(path.join(repository, 'landed.txt'), 'utf8'), 'from isolation\n');
+    assert.equal(readFileSync(path.join(repository, 'README.md'), 'utf8'), 'user is editing something else\n');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+  });
+
+  it('stops when occupied-target dirty files overlap the task change', async () => {
+    const store = createStore(boundPlan());
+    const isolation = createGoalWorktreeAdapter({
+      worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
+      goalPlanStore: store,
+    });
+    const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'README.md'), 'task version\n');
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
     const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const mainBefore = git(['rev-parse', 'main']);
     const next = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(accepted);
     assert.equal(next.deliveryHandoff.status, 'stopped');
     assert.equal(next.deliveryHandoff.stoppedReason, 'target_checkout_dirty');
     assert.equal(git(['rev-parse', 'main']), mainBefore);
-    assert.equal(existsSync(path.join(repository, 'blocked.txt')), false);
     assert.equal(readFileSync(path.join(repository, 'README.md'), 'utf8'), 'user is editing\n');
   });
 
-  it('retries an explicitly stopped handoff after the checkout is clean', async () => {
-    // ADR 68：用 modified tracked 文件制造真脏；untracked 噪音不再挡合回。
-    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
+  it('retries an explicitly stopped handoff after the overlapping dirty file is clean', async () => {
     const store = createStore(boundPlan());
     const isolation = createGoalWorktreeAdapter({
       worktreeAdapter: createAutomationWorktreeAdapter({ rootDir: worktrees, artifactDir: artifacts }),
       goalPlanStore: store,
     });
     const prepared = await isolation.prepareForPlan(store.getPlan('plan-handoff-1'));
-    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'retry.txt'), 'later\n');
+    writeFileSync(path.join(prepared.deliveryBinding.worktreePath, 'README.md'), 'task version\n');
+    writeFileSync(path.join(repository, 'README.md'), 'user is editing\n');
     const accepted = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const handoff = createGoalDeliveryHandoff({ goalPlanStore: store });
     const stopped = await handoff.handoffPlan(accepted);
@@ -353,7 +375,7 @@ describe('goal delivery handoff', () => {
     execFileSync('git', ['-C', repository, 'checkout', '--', 'README.md']);
     const retried = await handoff.retryHandoff(store.getPlan('plan-handoff-1'));
     assert.equal(retried.deliveryHandoff.status, 'delivered');
-    assert.equal(readFileSync(path.join(repository, 'retry.txt'), 'utf8'), 'later\n');
+    assert.equal(readFileSync(path.join(repository, 'README.md'), 'utf8'), 'task version\n');
   });
 
   it('does not merge a completed Goal that was not isolated', async () => {
@@ -378,12 +400,32 @@ describe('goal delivery handoff', () => {
     assert.equal(git(['rev-parse', 'main']), git(['merge-base', 'main', 'PeerAgent/task-1']));
   });
 
-  it('retryHandoff writes quality_review_pending instead of staying silent', async () => {
+  it('retryHandoff on an unisolated Goal does not write quality_review_pending', async () => {
     const store = createStore(boundPlan({ qualityReview: undefined }));
     const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const automatic = await createGoalDeliveryHandoff({ goalPlanStore: store }).handoffPlan(completed);
     assert.equal(automatic.deliveryHandoff, undefined);
 
+    const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoff(completed);
+    assert.equal(retried.deliveryHandoff, undefined);
+  });
+
+  it('retryHandoff still writes quality_review_pending for an isolated Goal', async () => {
+    const store = createStore(boundPlan({
+      qualityReview: undefined,
+      deliveryBinding: {
+        repoId: 'live-repo',
+        targetWorkspacePath: repository,
+        targetBranch: 'main',
+        targetBranchSource: 'workspace_head',
+        executionIsolation: 'worktree',
+        worktreePath: path.join(worktrees, 'isolated-quality'),
+        taskBranch: 'PeerAgent/task-quality',
+        boundAt: '2026-08-22T06:00:00.000Z',
+      },
+    }));
+    mkdirSync(path.join(worktrees, 'isolated-quality'), { recursive: true });
+    const completed = store.setPlan(markCompleted(store.getPlan('plan-handoff-1')));
     const retried = await createGoalDeliveryHandoff({ goalPlanStore: store }).retryHandoff(completed);
     assert.equal(retried.deliveryHandoff.status, 'stopped');
     assert.equal(retried.deliveryHandoff.stoppedReason, 'quality_review_pending');
@@ -770,13 +812,24 @@ describe('triageTaskLine (ADR 69 分类器)', () => {
     assert.deepEqual(res.detail.collisions, [{ path: 'demo.txt', kind: 'different' }]);
   });
 
-  it('BLOCKED_ENV：目标工作区 tracked 脏 → 环境挡', async () => {
-    const task = makeTaskBranch('task/blocked', { 'b.txt': 'y\n' });
-    writeFileSync(path.join(repository, 'README.md'), 'dirty tracked edit\n'); // tracked 未提交改动
+  it('AUTO_MERGE：tracked 脏与任务变更集不重叠 → 仍可自动合', async () => {
+    const task = makeTaskBranch('task/unrelated-dirty', { 'new-file.txt': 'hello\n' });
+    writeFileSync(path.join(repository, 'README.md'), 'dirty tracked edit\n');
+    const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
+    assert.equal(res.verdict, 'AUTO_MERGE');
+    assert.equal(res.reason, 'clean');
+    assert.equal(res.detail.blockingEntry, null);
+    assert.ok(res.detail.changedFiles.includes('new-file.txt'));
+    assert.equal(res.detail.changedFiles.includes('README.md'), false);
+  });
+
+  it('BLOCKED_ENV：tracked 脏与任务变更集重叠 → 环境挡', async () => {
+    const task = makeTaskBranch('task/blocked', { 'README.md': 'task version\n' });
+    writeFileSync(path.join(repository, 'README.md'), 'dirty tracked edit\n');
     const res = await triageTaskLine({ repositoryRoot: repository, taskBranch: task, targetBranch: 'main' });
     assert.equal(res.verdict, 'BLOCKED_ENV');
     assert.equal(res.reason, 'target_checkout_dirty');
-    assert.ok(res.detail.blockingEntry);
+    assert.equal(res.detail.blockingEntry, 'README.md');
   });
 });
 
@@ -798,7 +851,7 @@ describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
     return name;
   }
 
-  it('keep_taskline：暂移工作区版、ff-only 合入任务线版，delivered', async () => {
+  it('keep_taskline：暂移工作区版、--no-ff 合入任务线版，delivered', async () => {
     const task = makeConflictTask('task/kt', 'demo/p.html', 'task version\n');
     mkdirSync(path.join(repository, 'demo'), { recursive: true });
     writeFileSync(path.join(repository, 'demo', 'p.html'), 'user local\n'); // 未跟踪、内容不同
@@ -808,6 +861,8 @@ describe('resolveHandoffConflicts (ADR 69 P2 收口执行器)', () => {
     assert.equal(readFileSync(path.join(repository, 'demo', 'p.html'), 'utf8'), 'task version\n');
     assert.equal(readFileSync(path.join(repository, 'demo', 'p.html.worktree-backup'), 'utf8'), 'user local\n');
     assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(/\s+/);
+    assert.equal(parents.length, 3);
   });
 
   it('keep_both：任务线版另存为 .taskline，工作区版保留，不合并', async () => {

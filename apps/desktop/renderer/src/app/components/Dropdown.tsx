@@ -7,6 +7,7 @@ import {
   type DropdownOption,
   type DropdownTab,
 } from './dropdownMenu';
+import { collectDropdownOccluders, placeDropdownMenu } from './dropdownPosition';
 
 export type { DropdownOption, DropdownTab } from './dropdownMenu';
 export { filterDropdownOptions, resolveDropdownActiveTab } from './dropdownMenu';
@@ -97,24 +98,29 @@ export function Dropdown({
     ? footerAction.label(query)
     : footerAction?.label;
 
-  // 依据触发器在视口中的位置计算 fixed 菜单坐标，并按可用空间自适应上下方向。
+  // 依据触发器在视口中的位置计算 fixed 菜单坐标。
+  // 菜单可能比触发器更宽（composer 源头选择），碰到视口右边、打开的工作台或可见 webview 时往左收。
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const gap = 4;
-    const viewportH = window.innerHeight;
-    const menuH = menuRef.current?.offsetHeight ?? 0;
-    const spaceBelow = viewportH - rect.bottom - gap;
-    const spaceAbove = rect.top - gap;
-    let placement: 'down' | 'up' = menuPlacement;
-    if (placement === 'down' && spaceBelow < menuH && spaceAbove > spaceBelow) {
-      placement = 'up';
-    } else if (placement === 'up' && spaceAbove < menuH && spaceBelow > spaceAbove) {
-      placement = 'down';
-    }
-    const top = placement === 'down' ? rect.bottom + gap : Math.max(gap, rect.top - menuH - gap);
-    setCoords({ left: rect.left, top, width: rect.width, placement });
+    const placed = placeDropdownMenu({
+      trigger: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+      },
+      menu: {
+        width: menuRef.current?.offsetWidth ?? rect.width,
+        height: menuRef.current?.offsetHeight ?? 0,
+      },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      preferredPlacement: menuPlacement,
+      occluders: collectDropdownOccluders(),
+    });
+    setCoords({ left: placed.left, top: placed.top, width: rect.width, placement: placed.placement });
   }, [menuPlacement]);
 
   // 点击/触摸组件外部时关闭。菜单已被 portal 移出 root，需同时排除菜单自身。

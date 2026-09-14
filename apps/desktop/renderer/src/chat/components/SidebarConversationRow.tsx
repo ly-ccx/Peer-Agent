@@ -251,7 +251,7 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
       ) : null}
       {showInterruption ? (
         <span className="sidebar-conv-awaiting" title={isZh ? '回复未完成，可进入会话继续' : 'Response incomplete. Open the conversation to continue.'}>
-          {isZh ? '已中断' : 'Interrupted'}
+          {isZh ? '中断' : 'Interrupted'}
         </span>
       ) : null}
       {pendingApprovalCount > 0 ? (

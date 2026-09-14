@@ -69,7 +69,11 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--space-8) var(--space-6);
+  /* 底部不要再留白：轮次间距已下沉到 .chat-turn 的 padding-bottom（见 timeline.css，
+     注释「原 chat-thread 的轮次间距移入测量盒」），而 .chat-composer-wrap 另有 8px 顶部
+     内边距。这里若继续保留 32px，三者会叠加成约 64px 的死区，表现为「内容与输入框之间
+     有一段空白」。左右与顶部维持原值不变。 */
+  padding: 0 var(--space-6);
   padding-top: calc(40px + var(--space-4));
   display: flex;
   flex-direction: column;
@@ -1052,6 +1056,11 @@
   background: var(--chrome-canvas);
 }
 
+.chat-composer-wrap {
+  container-type: inline-size;
+  container-name: composer;
+}
+
 .composer-chrome-row {
   display: grid;
   align-items: center;
@@ -1060,6 +1069,10 @@
   max-width: var(--chat-content-max);
   margin: 0 auto 8px;
   padding: 0 var(--space-1);
+  /* Goal 调查浮层（.goal-investigation）的包含块。浮层的宽度/位置基准是这条
+     会话列，不是只跟标题走的 docked 胶囊；放在这里，left:0 与百分比宽度才落在
+     输入框那一列上。 */
+  position: relative;
 }
 
 /* Git 环境在右侧时：Goal 吃剩余宽度靠左，环境贴右，避免中间胶囊把左右挤叠。 */
@@ -1104,6 +1117,39 @@
   justify-self: end;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+.composer-chrome-row .composer-env-capsule,
+.composer-chrome-row .composer-env-capsule-dropdown,
+.composer-chrome-row .pa-dropdown-trigger {
+  max-width: min(16rem, 100%);
+}
+
+/* Respond to the conversation column, not the application window. */
+@container composer (max-width: 40rem) {
+  .composer-chrome-row:has(.composer-chrome-right:not(:empty)),
+  .composer-chrome-row:not(:has(.composer-chrome-right:not(:empty))) {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  /* 窄容器浮条改「展开形态」：左列铺满整行，浮条本身也拉满，
+     不再按内容宽度收缩（否则内部只能在极窄预算里换行）。 */
+  .composer-chrome-row:has(.composer-chrome-right:not(:empty)) .composer-chrome-left,
+  .composer-chrome-row:not(:has(.composer-chrome-right:not(:empty))) .composer-chrome-left {
+    grid-column: 1;
+    max-width: 100%;
+    justify-self: stretch;
+  }
+
+  .composer-chrome-row .composer-chrome-left > .goal-panel--docked {
+    width: 100%;
+  }
+
+  .composer-chrome-right {
+    grid-column: 1;
+    max-width: 100%;
+  }
 }
 
 .composer-context-row {
@@ -5064,6 +5110,42 @@ button.chat-header-cap-item:focus-visible {
 
 .composer-home-model-slot {
   min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+/* Keep the send button outside the wrapping controls' width budget. */
+.composer-home-action-left {
+  flex: 1 1 auto;
+}
+
+.composer-home-model-slot .token-usage-wrap {
+  max-width: 100%;
+}
+
+.composer-home-model-slot .token-usage {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.composer-home-model-slot .token-usage > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composer-home-model-slot .composer-model-dropdown {
+  max-width: min(200px, 100%);
+}
+
+.composer-home-model-slot .pa-cascading-trigger {
+  max-width: 100%;
+}
+
+.composer-home-model-slot .token-usage-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-home-model-slot .token-usage-wrap,

@@ -11,9 +11,53 @@ import {
   modelMetadataPatch,
   parseReasoningEffortMap,
   updateModelOptionSelection,
+  resolveCatalogSelection,
+  isRemoteCatalogSelectionBlocked,
 } from './llmModelConfiguration.ts';
 
 describe('LLM model configuration rules', () => {
+  for (const channel of ['deepseek', 'openai', undefined]) {
+    for (const overlap of [false, true]) {
+      for (const hasLegacy of [false, true]) {
+        for (const empty of [false, true]) {
+          it(`catalog selection channel=${channel} overlap=${overlap} legacy=${hasLegacy} empty=${empty}`, () => {
+            const configured = [
+              ...(overlap ? [{ model: 'remote-a' }] : []),
+              ...(hasLegacy ? [{ model: 'legacy' }] : []),
+            ];
+            const before = structuredClone(configured);
+            const remote = empty ? [] : [{ id: 'remote-a', label: 'remote-a' }, { id: 'remote-b', label: 'remote-b' }];
+            const selected = new Set(['remote-a', 'remote-b', ...configured.map((m) => m.model)]);
+            const result = resolveCatalogSelection(buildModelCatalog(remote, configured), configured, selected, channel);
+            const expected = [...remote.map((m) => m.id), ...(channel === 'deepseek' ? [] : configured.filter((m) => !remote.some((r) => r.id === m.model)).map((m) => m.model))];
+            assert.deepEqual(result.map((m) => m.id), expected);
+            assert.deepEqual(configured, before, 'selection must not mutate saved configuration');
+          });
+        }
+      }
+    }
+  }
+
+  for (const state of ['success', 'empty', 'failure', 'refreshing', 'fallback'] as const) {
+    for (const legacy of [false, true]) {
+      it(`DeepSeek apply boundary state=${state} legacy=${legacy}`, () => {
+        const saved = legacy ? [{ model: 'legacy' }] : [];
+        const snapshot = structuredClone(saved);
+        const remote = state === 'empty' ? [] : [{ id: 'remote', label: 'remote' }];
+        const result = resolveCatalogSelection(buildModelCatalog(remote, saved), saved, new Set(['remote', 'legacy']), 'deepseek');
+        const blocked = isRemoteCatalogSelectionBlocked('deepseek', state === 'refreshing', state === 'failure' ? 'network failed' : undefined, state === 'fallback' ? 'fallback' : 'remote', remote.length);
+        assert.equal(blocked, state !== 'success');
+        assert.deepEqual(saved, snapshot, 'refresh/selection never writes configuration');
+        if (!blocked) {
+          const changes = calculateModelSelectionChanges(result, saved as never);
+          assert.deepEqual(changes.additions.map((m) => m.id), ['remote']);
+          assert.deepEqual(changes.removals.map((m) => m.model), legacy ? ['legacy'] : []);
+        }
+        assert.equal(isRemoteCatalogSelectionBlocked('openai', true, 'error', undefined, 0), false);
+      });
+    }
+  }
+
   it('deduplicates a remote catalog and marks configured models', () => {
     const catalog = buildModelCatalog([
       { id: 'model-a', label: 'Model A' },

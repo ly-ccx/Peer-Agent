@@ -1,5 +1,7 @@
 export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
 
+export { buildModelMenuGroups, modelMenuChannelName, type ModelMenuRow } from './model-menu.ts';
+
 export type LocalAccessLevel =
   | 'ask_before_local'
   | 'session_local'
