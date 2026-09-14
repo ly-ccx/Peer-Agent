@@ -71,8 +71,9 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    /* 桌面基础材质由 .app-layout 统一提供，Workbench 仅承载内容。 */
-    background: transparent;
+    /* 与聊天主区 (.thread) 同 token 的实色纸面：右列不再让 .app-layout 的
+       半透明玻璃底与窗口 vibrancy 透出，两栏拼成同一块背景。 */
+    background: var(--chrome-canvas, var(--za-app-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none;
@@ -89,6 +90,14 @@
   .workbench-panel:not(.workbench-panel--open) {
     width: 0 !important;
     border-left: none;
+  }
+
+  /* Workbench 打开时，中间聊天纸面 (.thread) 收掉右侧两个圆角，两栏拼成同一块背景；
+     闭合态保持四角圆润的悬浮纸面观感。仅在根布局生效：抽屉内 Workbench 用的
+     layoutHost='local'，不会写根节点的 data-workbench-open。 */
+  :root[data-workbench-open='true'] .thread {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
   }
 
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
