@@ -150,6 +150,9 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
     readSource('../../../../electron/main/llm-chat-service.mjs'),
     readSource('./GoalPlanPanel.tsx'),
   ]);
+  // The create-branch dialog now owns its own markup and source picker, so the
+  // push-by-default assertions below read that module instead of ChatSurface.
+  const createBranchDialog = await readSource('./CreateBranchDialog.tsx');
 
   assert.match(surface, /workspaceIsGit === false/);
   assert.match(surface, /composer-chrome-row[\s\S]*composer-chrome-left[\s\S]*GoalPlanPanel[\s\S]*composer-chrome-right[\s\S]*<ComposerDraftControls/);
@@ -196,22 +199,23 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /handleOpenCreateBranchDialog/);
   assert.match(surface, /resolveComposerCreateSourceBranch/);
   assert.match(surface, /handleSelectBoundBranch\(name\)/);
-  assert.match(surface, /Create a branch from \$\{createBranchDialog\.source\}/);
-  assert.match(surface, /panelClassName="pa-confirm-dialog"/);
+  assert.match(surface, /CreateBranchDialog/);
+  assert.match(surface, /setCreateBranchDialog\(\{ source \}\)/);
+  assert.match(createBranchDialog, /panelClassName="pa-confirm-dialog"/);
   assert.doesNotMatch(surface, /disabled: \(query\) => !isSafeComposerBranchName\(query\)/);
   assert.match(surface, /源头/);
   assert.match(surface, /远程源头/);
   assert.doesNotMatch(surface, /gitCheckout|git checkout/);
   // Create-branch dialog pushes to the remote by default (opt-out checkbox).
-  assert.match(surface, /pa-confirm-check/);
-  assert.match(surface, /创建后推送到远端（git push -u）/);
-  assert.match(surface, /setCreateBranchDialog\(\{ source, name: '', push: true, upstream: '' \}\)/);
+  assert.match(createBranchDialog, /pa-confirm-check/);
+  assert.match(createBranchDialog, /创建后推送到远端（git push -u）/);
+  assert.match(createBranchDialog, /const \[push, setPush\] = useState\(true\)/);
   assert.match(surface, /push: shouldPush,/);
   assert.match(surface, /upstreamRemote: upstream\?\.remote/);
   assert.match(surface, /upstreamBranch: upstream\?\.branch/);
-  assert.match(surface, /跟踪到/);
+  assert.match(createBranchDialog, /跟踪到/);
   assert.match(surface, /parseComposerUpstreamSpec/);
-  assert.match(surface, /defaultComposerUpstreamSpec/);
+  assert.match(createBranchDialog, /defaultComposerUpstreamSpec/);
   assert.match(surface, /pushed === false/);
   assert.match(surface, /branchPushNotice/);
   assert.match(surface, /branch-push-notice/);

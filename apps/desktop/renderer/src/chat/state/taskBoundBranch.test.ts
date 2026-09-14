@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  COMPOSER_ENV_ISOLATION_OFF,
+  COMPOSER_ENV_ISOLATION_ON,
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
   defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
   formatComposerEnvCapsule,
+  isComposerEnvSentinel,
   isInternalIsolationBranch,
   parseComposerUpstreamSpec,
   planComposerGitChrome,
@@ -373,18 +376,11 @@ test('composer branch options hide isolation UUID paths unless already selected'
   assert.equal(formatComposerBranchOptionLabel('PeerAgent/0.0.6'), '0.0.6');
 });
 
-test('create-from source prefers the highlighted list row over current selection', () => {
+test('create-from source uses the checked branch, never the hovered list row', () => {
+  // The capsule list highlight follows the mouse, so the source must not be derived from it.
+  // Passing a highlighted row is no longer even representable: the field is gone from the input.
   assert.equal(
     resolveComposerCreateSourceBranch({
-      highlighted: 'PeerAgent/0.0.5',
-      selected: 'main',
-      currentHead: '0.0.7',
-    }),
-    'PeerAgent/0.0.5',
-  );
-  assert.equal(
-    resolveComposerCreateSourceBranch({
-      highlighted: '  ',
       selected: 'main',
       currentHead: '0.0.7',
     }),
@@ -392,12 +388,82 @@ test('create-from source prefers the highlighted list row over current selection
   );
   assert.equal(
     resolveComposerCreateSourceBranch({
-      highlighted: null,
+      selected: '  main  ',
+      currentHead: '0.0.7',
+    }),
+    'main',
+  );
+});
+
+test('create-from source falls back to the workspace HEAD', () => {
+  assert.equal(
+    resolveComposerCreateSourceBranch({
       selected: null,
       currentHead: '0.0.7',
     }),
     '0.0.7',
   );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      selected: '   ',
+      currentHead: '0.0.7',
+    }),
+    '0.0.7',
+  );
+});
+
+test('create-from source rejects isolation sentinels instead of forking from them', () => {
+  // The "Worktree / 当前工作区" rows carry sentinel values that are not branch names.
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      selected: COMPOSER_ENV_ISOLATION_ON,
+      currentHead: '0.0.7',
+    }),
+    '0.0.7',
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      selected: COMPOSER_ENV_ISOLATION_OFF,
+      currentHead: '0.0.7',
+    }),
+    '0.0.7',
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      selected: COMPOSER_ENV_ISOLATION_ON,
+      currentHead: COMPOSER_ENV_ISOLATION_OFF,
+    }),
+    null,
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({
+      selected: null,
+      currentHead: COMPOSER_ENV_ISOLATION_ON,
+    }),
+    null,
+  );
+});
+
+test('create-from source is null when there is nothing usable to fork from', () => {
+  // null (not '') so callers cannot hand git an empty start point.
+  assert.equal(
+    resolveComposerCreateSourceBranch({ selected: null, currentHead: null }),
+    null,
+  );
+  assert.equal(
+    resolveComposerCreateSourceBranch({ selected: '  ', currentHead: '  ' }),
+    null,
+  );
+});
+
+test('isComposerEnvSentinel recognises only the capsule isolation values', () => {
+  assert.equal(isComposerEnvSentinel(COMPOSER_ENV_ISOLATION_ON), true);
+  assert.equal(isComposerEnvSentinel(COMPOSER_ENV_ISOLATION_OFF), true);
+  assert.equal(isComposerEnvSentinel('main'), false);
+  assert.equal(isComposerEnvSentinel('origin/0.0.14'), false);
+  assert.equal(isComposerEnvSentinel(''), false);
+  assert.equal(isComposerEnvSentinel(null), false);
+  assert.equal(isComposerEnvSentinel(undefined), false);
 });
 
 test('create-branch upstream defaults to origin plus the local name', () => {

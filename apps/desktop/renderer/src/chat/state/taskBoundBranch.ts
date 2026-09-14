@@ -388,15 +388,35 @@ export function parseComposerUpstreamSpec(
   return { remote, branch };
 }
 
-/** Create-from source: highlighted list row, else current selection, else workspace HEAD. */
+/**
+ * True when a value is a composer execution-environment sentinel rather than a branch name.
+ * The capsule menu renders "Worktree / 当前工作区" rows with these values; they must never
+ * leak into a git command as a source branch.
+ */
+export function isComposerEnvSentinel(value: string | null | undefined): boolean {
+  return value === COMPOSER_ENV_ISOLATION_ON || value === COMPOSER_ENV_ISOLATION_OFF;
+}
+
+/**
+ * Source branch for "create branch".
+ *
+ * Only real user choices count: the current selection, else the workspace HEAD.
+ * The list highlight is deliberately ignored. `activeIndex` follows the mouse, so
+ * forwarding it made "create branch" fork whichever row the pointer last crossed
+ * instead of the checked row. Sentinels are not branch names either.
+ *
+ * Returns null when there is nothing usable to fork from; callers must not fall back
+ * to an empty string, which would turn into a malformed git command.
+ */
 export function resolveComposerCreateSourceBranch(input: {
-  readonly highlighted?: string | null;
   readonly selected?: string | null;
   readonly currentHead?: string | null;
 }): string | null {
-  return trimBranch(input.highlighted)
-    ?? trimBranch(input.selected)
-    ?? trimBranch(input.currentHead);
+  const selected = trimBranch(input.selected);
+  if (selected && !isComposerEnvSentinel(selected)) return selected;
+  const currentHead = trimBranch(input.currentHead);
+  if (currentHead && !isComposerEnvSentinel(currentHead)) return currentHead;
+  return null;
 }
 
 export type ComposerBranchKind = 'local' | 'remote';

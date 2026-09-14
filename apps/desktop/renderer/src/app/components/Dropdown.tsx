@@ -14,7 +14,15 @@ export { filterDropdownOptions, resolveDropdownActiveTab } from './dropdownMenu'
 
 export interface DropdownFooterAction {
   readonly label: string | ((query: string) => string);
-  readonly onSelect: (query: string, highlightedValue?: string) => void;
+  /**
+   * Fired when the footer button is activated. Only the live search text is forwarded.
+   *
+   * The highlighted row is deliberately NOT passed: `activeIndex` follows the mouse
+   * (every row does `onMouseEnter` -> `setActiveIndex`), so forwarding it made callers
+   * treat "whichever row the pointer last crossed" as the user's choice. A footer action
+   * that needs the selection should read `value` from its own state instead.
+   */
+  readonly onSelect: (query: string) => void;
   readonly disabled?: boolean | ((query: string) => boolean);
 }
 
@@ -192,10 +200,10 @@ export function Dropdown({
 
   const runFooter = useCallback(() => {
     if (!footerAction || footerDisabled) return false;
-    footerAction.onSelect(query, visibleOptions[activeIndex]?.value);
+    footerAction.onSelect(query);
     setOpen(false);
     return true;
-  }, [activeIndex, footerAction, footerDisabled, query, visibleOptions]);
+  }, [footerAction, footerDisabled, query]);
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     switch (event.key) {

@@ -53,15 +53,16 @@ import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { useWorkspaceGit } from '../hooks/useWorkspaceGit';
 import { GitBranchGlyph, GitWorktreeGlyph } from './gitGlyphs';
+import { CreateBranchDialog, type CreateBranchRequest } from './CreateBranchDialog';
 import { loadComposerEntry, resolveComposerHydration, saveComposerEntry } from '../state/composerPersistence';
 import {
   COMPOSER_ENV_ISOLATION_OFF,
   COMPOSER_ENV_ISOLATION_ON,
   buildComposerBranchOptions,
   canSelectComposerSourceBranch,
-  defaultComposerUpstreamSpec,
   formatComposerBranchOptionLabel,
   formatComposerEnvCapsule,
+  isComposerEnvSentinel,
   isSafeComposerBranchName,
   parseComposerUpstreamSpec,
   planComposerGitChrome,
@@ -634,9 +635,6 @@ export function ChatSurface({
   const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
   const [createBranchDialog, setCreateBranchDialog] = useState<{
     readonly source: string;
-    readonly name: string;
-    readonly push: boolean;
-    readonly upstream: string;
   } | null>(null);
   const [branchPushNotice, setBranchPushNotice] = useState<{
     readonly branchName: string;
@@ -2639,6 +2637,29 @@ export function ChatSurface({
     }),
     [gitChrome, isZh, preferredWorktree],
   );
+  /**
+   * Forkable branches only — no isolation sentinels, and not gated on the capsule's
+   * `selectable` flag, because the create-branch dialog needs a pickable list even when
+   * the capsule itself is not offering branch switching.
+   */
+  const composerBranchOptions = useMemo<readonly DropdownOption[]>(() => {
+    const localGroup = isZh ? '源头' : 'Source';
+    const remoteGroup = isZh ? '远程源头' : 'Remote source';
+    return buildComposerBranchOptions({
+      branches: workspaceGit?.ok ? workspaceGit.branches : [],
+      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
+      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
+      selected: gitChrome.taskLine?.value,
+    }).map((option) => ({
+      value: option.value,
+      label: formatComposerBranchOptionLabel(option.value),
+      group: option.kind === 'remote' ? remoteGroup : localGroup,
+      tab: option.kind,
+      hint: option.kind === 'remote'
+        ? (isZh ? '远程' : 'remote')
+        : (isZh ? '本地' : 'local'),
+    }));
+  }, [gitChrome.taskLine?.value, isZh, workspaceGit]);
   const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
     const isolationGroup = isZh ? '下次任务' : 'Next task';
     const isolationOptions: DropdownOption[] = [
@@ -2656,24 +2677,8 @@ export function ChatSurface({
       },
     ];
     if (!gitChrome.taskLine?.selectable) return isolationOptions;
-    const localGroup = isZh ? '源头' : 'Source';
-    const remoteGroup = isZh ? '远程源头' : 'Remote source';
-    const branchOptions = buildComposerBranchOptions({
-      branches: workspaceGit?.ok ? workspaceGit.branches : [],
-      localBranches: workspaceGit?.ok ? workspaceGit.localBranches : [],
-      remoteBranches: workspaceGit?.ok ? workspaceGit.remoteBranches : [],
-      selected: gitChrome.taskLine.value,
-    }).map((option) => ({
-      value: option.value,
-      label: formatComposerBranchOptionLabel(option.value),
-      group: option.kind === 'remote' ? remoteGroup : localGroup,
-      tab: option.kind,
-      hint: option.kind === 'remote'
-        ? (isZh ? '远程' : 'remote')
-        : (isZh ? '本地' : 'local'),
-    }));
-    return [...isolationOptions, ...branchOptions];
-  }, [gitChrome.taskLine, isZh, workspaceGit]);
+    return [...isolationOptions, ...composerBranchOptions];
+  }, [composerBranchOptions, gitChrome.taskLine?.selectable, isZh]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (next === COMPOSER_ENV_ISOLATION_ON) {
@@ -2701,33 +2706,27 @@ export function ChatSurface({
         setPendingBaseBranch(previous);
       });
   }, [canSelectBoundBranch, changePreferredWorktree, gitChrome.taskLine?.value, isStreaming, onWorkspaceUpdated, workspacePath]);
-  const handleCreateBoundBranch = useCallback((
-    rawName: string,
-    sourceBranch?: string | null,
-    push?: boolean,
-    rawUpstream?: string | null,
-  ) => {
-    const name = rawName.trim();
+  const handleCreateBoundBranch = useCallback((request: CreateBranchRequest) => {
+    const name = request.name.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
     if (!isSafeComposerBranchName(name)) return;
-    const shouldPush = push !== false;
-    const upstream = shouldPush ? parseComposerUpstreamSpec(rawUpstream, name) : null;
+    // The dialog owns the source choice; re-check here so a sentinel ("Worktree" row) can
+    // never reach git even if a caller constructs the request by hand.
+    const source = request.source.trim();
+    if (!source || isComposerEnvSentinel(source)) return;
+    const shouldPush = request.push;
+    const upstream = shouldPush ? parseComposerUpstreamSpec(request.upstream, name) : null;
     if (shouldPush && !upstream) return;
-    const startPoint = resolveComposerCreateSourceBranch({
-      highlighted: sourceBranch,
-      selected: gitChrome.taskLine?.value,
-      currentHead: workspaceGit?.current,
-    }) ?? undefined;
     void clientApi.gitCreateBranch({
       workspaceRoot: workspacePath,
       name,
-      startPoint,
+      startPoint: source,
       push: shouldPush,
       upstreamRemote: upstream?.remote,
       upstreamBranch: upstream?.branch,
     }).then((created) => {
       if (created?.ok !== true) return;
-      if (push !== false && created.pushed === false) {
+      if (shouldPush && created.pushed === false) {
         setBranchPushNotice({
           branchName: name,
           reason: created.pushError || 'push_failed',
@@ -2740,21 +2739,23 @@ export function ChatSurface({
     }).catch(() => {});
   }, [
     canSelectBoundBranch,
-    gitChrome.taskLine?.value,
     handleSelectBoundBranch,
     refreshWorkspaceGit,
-    workspaceGit?.current,
     workspacePath,
   ]);
-  const handleOpenCreateBranchDialog = useCallback((highlightedValue?: string) => {
+  /**
+   * Opens the create-branch dialog. Takes no branch argument on purpose: the capsule list
+   * highlight follows the mouse, so the source must be chosen inside the dialog instead.
+   * The dialog only needs a sensible default seed, which is the checked branch or HEAD.
+   */
+  const handleOpenCreateBranchDialog = useCallback(() => {
     if (!canSelectBoundBranch) return;
     const source = resolveComposerCreateSourceBranch({
-      highlighted: highlightedValue,
       selected: gitChrome.taskLine?.value,
       currentHead: workspaceGit?.current,
     });
     if (!source) return;
-    setCreateBranchDialog({ source, name: '', push: true, upstream: '' });
+    setCreateBranchDialog({ source });
   }, [canSelectBoundBranch, gitChrome.taskLine?.value, workspaceGit?.current]);
   const handleGoalRequestFocus = useCallback(() => {
     if (workbenchOpen && workbenchActiveTab === 'plan') {
@@ -3199,8 +3200,8 @@ export function ChatSurface({
                 emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
                 footerAction={canSelectBoundBranch ? {
                   label: isZh ? '创建分支' : 'Create branch',
-                  onSelect: (_query, highlightedValue) => {
-                    handleOpenCreateBranchDialog(highlightedValue);
+                  onSelect: () => {
+                    handleOpenCreateBranchDialog();
                   },
                 } : undefined}
               />
@@ -3296,97 +3297,13 @@ export function ChatSurface({
         ) : null}
       </div>
       {createBranchDialog ? (
-        <Overlay
-          onClose={() => setCreateBranchDialog(null)}
-          ariaLabel={isZh ? '创建分支' : 'Create Branch'}
-          panelClassName="pa-confirm-dialog"
-        >
-          {({ requestClose }) => {
-            const nameOk = isSafeComposerBranchName(createBranchDialog.name);
-            const upstream = createBranchDialog.push
-              ? parseComposerUpstreamSpec(createBranchDialog.upstream, createBranchDialog.name)
-              : null;
-            const canConfirm = nameOk && (!createBranchDialog.push || upstream != null);
-            const patchDialog = (next: Partial<{ name: string; push: boolean; upstream: string }>) => {
-              setCreateBranchDialog({
-                source: createBranchDialog.source,
-                name: createBranchDialog.name,
-                push: createBranchDialog.push,
-                upstream: createBranchDialog.upstream,
-                ...next,
-              });
-            };
-            const confirmCreate = () => {
-              if (!canConfirm) return;
-              handleCreateBoundBranch(
-                createBranchDialog.name,
-                createBranchDialog.source,
-                createBranchDialog.push,
-                createBranchDialog.upstream,
-              );
-              requestClose();
-            };
-            return (
-              <div className="pa-confirm-body">
-                <h2 className="pa-confirm-title">{isZh ? '创建分支' : 'Create Branch'}</h2>
-                <p className="pa-confirm-message">
-                  {isZh
-                    ? `从 ${createBranchDialog.source} 创建分支`
-                    : `Create a branch from ${createBranchDialog.source}`}
-                </p>
-                <input
-                  className="pa-confirm-input"
-                  value={createBranchDialog.name}
-                  onChange={(event) => patchDialog({ name: event.target.value })}
-                  placeholder={isZh ? '分支名' : 'Branch name'}
-                  autoFocus
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    confirmCreate();
-                  }}
-                />
-                <label className="pa-confirm-check">
-                  <input
-                    type="checkbox"
-                    checked={createBranchDialog.push}
-                    onChange={(event) => patchDialog({ push: event.target.checked })}
-                  />
-                  <span>{isZh ? '创建后推送到远端（git push -u）' : 'Push to remote after creating (git push -u)'}</span>
-                </label>
-                {createBranchDialog.push ? (
-                  <label className="pa-confirm-field">
-                    <span className="pa-confirm-field-label">{isZh ? '跟踪到' : 'Track'}</span>
-                    <input
-                      className="pa-confirm-input"
-                      value={createBranchDialog.upstream}
-                      onChange={(event) => patchDialog({ upstream: event.target.value })}
-                      placeholder={defaultComposerUpstreamSpec(createBranchDialog.name) || 'origin/branch'}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter') return;
-                        event.preventDefault();
-                        confirmCreate();
-                      }}
-                    />
-                  </label>
-                ) : null}
-                <div className="pa-confirm-actions is-spread">
-                  <button type="button" className="pa-confirm-btn ghost" onClick={requestClose}>
-                    {isZh ? '取消 Esc' : 'Cancel Esc'}
-                  </button>
-                  <button
-                    type="button"
-                    className="pa-confirm-btn primary"
-                    disabled={!canConfirm}
-                    onClick={confirmCreate}
-                  >
-                    {isZh ? '确认' : 'Confirm'}
-                  </button>
-                </div>
-              </div>
-            );
-          }}
-        </Overlay>
+        <CreateBranchDialog
+          isZh={isZh}
+          sourceOptions={composerBranchOptions}
+          initialSource={createBranchDialog.source}
+          onCancel={() => setCreateBranchDialog(null)}
+          onConfirm={handleCreateBoundBranch}
+        />
       ) : null}
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
