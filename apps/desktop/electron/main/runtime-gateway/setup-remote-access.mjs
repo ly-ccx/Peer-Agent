@@ -10,10 +10,16 @@
  *     connectionEpoch) come from the local binding and the live connection,
  *     never from the remote request body.
  *
+ * Identity across restarts:
+ *   - The Ed25519 private key is persisted in the OS keychain (see
+ *     remote-identity-keychain.mjs) and the pairing lives in the local binding
+ *     store, so a paired device reconnects after a restart without re-pairing.
+ *   - A missing or unreadable keychain entry means "no identity yet": a fresh key
+ *     is generated and stored, and the device has to be paired again. A corrupt
+ *     entry is deleted and refused rather than silently replaced, so a broken
+ *     keychain cannot quietly orphan an existing binding.
+ *
  * Known limitations, stated plainly:
- *   - No credential vault: the Ed25519 key lives in memory and is regenerated on
- *     every launch, so a binding only survives while the process does. Restarting
- *     the app requires re-pairing. Wiring the vault is the next step.
  *   - The delegation (allowed workspaces, read/export flags, expiry) is local
  *     configuration with no settings UI yet; it defaults to a single workspace.
  *   - A delegation is published once per connection. An app left running past its

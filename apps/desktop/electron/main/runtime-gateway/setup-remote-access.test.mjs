@@ -218,6 +218,30 @@ test('重启后从钥匙串恢复同一身份（公钥不变）', async () => {
   assert.equal(identityStore.writes.length, 1, '恢复路径不应再次写入');
 });
 
+test('重启后复用磁盘上的绑定，不把已配对设备当成新设备', async () => {
+  // One "install" is a data dir plus a keychain; a restart keeps both and only
+  // swaps the setup instance. Sharing userDataPath means the real binding
+  // SQLite is on the path, so this pins the actual persistence, not a stub.
+  const userDataPath = freshDir();
+  const identityStore = memoryIdentityStore();
+
+  // First launch: nothing paired yet, so the connector must not claim a device.
+  const first = await withConnection({ userDataPath, identityStore });
+  assert.equal(first.options.deviceId, undefined, '首次启动不应凭空带 deviceId');
+
+  // Pairing succeeds and the handshake writes the binding to disk.
+  first.remote.bindingStore.save({
+    origin: 'https://peer.example', deviceId: 'device-99', ownerId: 'owner-1', bindingVersion: 4,
+  });
+
+  // Restart: same data dir, same keychain, brand-new instance.
+  const second = await withConnection({ userDataPath, identityStore });
+  assert.equal(second.options.deviceId, 'device-99', '重启后必须复用磁盘上的绑定，否则会被当成新设备重新配对');
+  assert.equal(second.remote.status().deviceId, 'device-99', '设置页读到的状态也应已绑定');
+  assert.equal(second.options.publicKey, first.options.publicKey, '公钥也必须跨重启一致');
+  assert.equal(identityStore.writes.length, 1, '恢复路径不应再写钥匙串');
+});
+
 test('钥匙串内容损坏时清掉并拒绝，不静默降级', async () => {
   const identityStore = memoryIdentityStore(Buffer.from('short').toString('base64'));
   const remote = setupRemoteAccess({
