@@ -2238,3 +2238,87 @@
     }
   }
 }
+
+/* 任务上下文栏（Task Context Rail）· Qoder 式右侧信息分区。
+ * 只读投影：环境信息 / 后台进程 / 产出。事实源见
+ * peer-knowledge/design/product/task-context-rail.md。 */
+@layer components {
+  /* 与文件/文档视图一致：贴顶铺满，去掉默认顶部安全区。 */
+  .workbench-view--context {
+    inset-block-start: 0;
+  }
+
+  .task-context-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 12px 2px 20px;
+  }
+
+  /* 分区之间用细分隔线分节；空分区由调用侧整段不渲染（不写占位文案）。 */
+  .task-context-section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px 12px;
+  }
+  .task-context-section + .task-context-section {
+    border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+  }
+
+  .task-context-section-title {
+    margin: 0 0 6px;
+    font-size: var(--ui-font-meta, 12px);
+    font-weight: 500;
+    color: var(--za-text-faint);
+  }
+
+  /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
+  .task-context-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 26px;
+    padding: 3px 6px;
+    border: none;
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
+    background: transparent;
+    color: var(--za-text);
+    font-size: var(--ui-font-meta, 12px);
+    text-align: left;
+    transition: background var(--za-motion-fast) ease;
+  }
+  .task-context-row--action {
+    cursor: pointer;
+  }
+  .task-context-row--action:hover {
+    background: var(--chrome-hover);
+  }
+  .task-context-row--action:focus-visible {
+    outline: 2px solid var(--za-focus);
+    outline-offset: 1px;
+  }
+
+  .task-context-row-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: var(--za-text-faint);
+  }
+
+  .task-context-row-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .task-context-more {
+    margin: 2px 0 0 6px;
+    font-size: var(--ui-font-caption, 11px);
+    color: var(--za-text-muted);
+  }
+}

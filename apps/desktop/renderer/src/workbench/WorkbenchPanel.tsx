@@ -3,6 +3,7 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
+import { TaskContextRailView } from './views/TaskContextRailView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -93,6 +94,21 @@ const TABS: readonly TabDef[] = [
         <path d="M6 3h8l4 4v14H6z" />
         <path d="M14 3v5h5" />
         <path d="M9 13h6M9 17h6" />
+      </svg>
+    ),
+  },
+  {
+    // 「上下文」= 任务上下文栏（Task Context Rail）：环境信息 / 后台进程 / 产出。
+    // 只读投影，复用既有事实源，不承载后台运行的管理职责（见设计文档）。
+    id: 'context',
+    labelZh: '上下文',
+    labelEn: 'Context',
+    icon: (
+      <svg width="15" height="15" {...ICON_PROPS}>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <circle cx="9" cy="6" r="2" />
+        <circle cx="15" cy="12" r="2" />
+        <circle cx="7" cy="18" r="2" />
       </svg>
     ),
   },
@@ -396,6 +412,17 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             session={documentSession}
             onSessionChange={setDocumentSession}
             onBrowseFiles={() => setActiveTab('files')}
+          />
+        </div>
+
+        <div
+          className="workbench-view workbench-view--context"
+          data-active={activeTab === 'context'}
+        >
+          <TaskContextRailView
+            isZh={isZh}
+            workspacePath={workspacePath}
+            conversationId={conversationId}
           />
         </div>
 

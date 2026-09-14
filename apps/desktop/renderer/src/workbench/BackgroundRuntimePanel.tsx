@@ -6,7 +6,7 @@ import { BackgroundRunDetails } from './BackgroundRunDetails';
 import { backgroundTaskStatus } from './backgroundTaskPresentation';
 import { backgroundReadPresentation, backgroundRunSource, isActiveRun, isFailedRun, orderBackgroundRuns, reconcileStopRequest, visibleBackgroundRuns, type StopRequest } from './backgroundRuntimeState';
 
-export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, sources, onSource, isZh, onClose, id, stops }: {
+export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, sources, onSource, isZh, onClose, id, stops, initialTaskId = null }: {
   readonly stops: BackgroundRunStops;
   readonly anchor: HTMLElement;
   readonly snapshot: readonly ManagedShellTask[] | null;
@@ -17,8 +17,10 @@ export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, source
   readonly isZh: boolean;
   readonly onClose: () => void;
   readonly id: string;
+  /** 由外部（任务上下文栏）指定要直接展开的运行；仍走同一个详情视图。 */
+  readonly initialTaskId?: string | null;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialTaskId);
   const listScroll = useRef(0);
   const lastRow = useRef<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
