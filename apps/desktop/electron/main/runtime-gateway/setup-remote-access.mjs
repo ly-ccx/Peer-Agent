@@ -108,6 +108,11 @@ export function setupRemoteAccess({
   let connector = null;
   // Why dialing gave up, when it did. Null while connected or never attempted.
   let lastFailure = null;
+  // The challenge the server issued for this device to claim. Present only while
+  // the connection is parked in 'pairing': it is what the user carries to the web
+  // page to finish binding, and it expires, so it is cleared as soon as the
+  // connection moves on or stops.
+  let pairing = null;
 
   const delegationOf = () => ({
     version: 1,
@@ -237,8 +242,19 @@ export function setupRemoteAccess({
             connectionEpoch = event.connectionEpoch;
             online = true;
             lastFailure = null;
+            // Claimed: the challenge is spent and must not be offered again.
+            pairing = null;
             logger.info('[remote] online epoch=%s', event.connectionEpoch);
           } else if (event?.status === 'pairing') {
+            // Keep what the user needs to finish binding. Without this the
+            // challenge only reached the log, so the surface had nothing to show
+            // and pairing could not be completed from the app at all.
+            pairing = event.pairing ? {
+              challengeId: event.pairing.challengeId,
+              pairingKey: event.pairing.pairingKey,
+              deviceId: event.pairing.deviceId,
+              expiresAt: event.pairing.expiresAt,
+            } : null;
             logger.info('[remote] awaiting pairing claim');
           } else if (event?.status) {
             online = false;
@@ -250,6 +266,8 @@ export function setupRemoteAccess({
       // way to learn that dialing stopped, so it showed "connecting…" forever.
       connector.closed.then(({ reason, detail }) => {
         online = false;
+        // The connection is gone, so any challenge it carried is dead too.
+        pairing = null;
         lastFailure = { reason, ...(detail?.code ? { code: detail.code } : {}), ...(detail?.message ? { message: detail.message } : {}) };
         logger.warn('[remote] connection closed: %s%s', reason, detail?.code ? ` (${detail.code})` : '');
       });
@@ -262,6 +280,9 @@ export function setupRemoteAccess({
       // A deliberate stop is not a failure; clearing it here keeps a later
       // "connecting…" reading honest instead of replaying a stale reason.
       lastFailure = null;
+      // Likewise a stopped connection holds no live challenge; showing a stale one
+      // would invite the user to claim something the server no longer honours.
+      pairing = null;
     },
     /** Local state for the settings surface; no secrets. */
     status() {
@@ -273,6 +294,7 @@ export function setupRemoteAccess({
         online,
         connectionEpoch,
         lastFailure,
+        pairing,
       };
     },
     bindingStore,

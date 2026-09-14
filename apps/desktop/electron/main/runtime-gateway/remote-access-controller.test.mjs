@@ -80,10 +80,10 @@ test('开启后建立连接并暴露状态（不含密钥）', async () => {
   assert.equal(log[0].gatewayOrigin, 'https://peer.example');
   assert.equal(log[0].deviceName, 'mac');
   // 状态里不得出现身份/密钥字段。lastFailure 是连接诊断（分类 + 错误码），
-  // 不含任何密钥材料，正是让失败可见所必需的字段。
+  // pairing 是待认领的挑战（用户必须能拿到才能绑定），两者都不含长期密钥材料。
   assert.deepEqual(
     Object.keys(status).sort(),
-    ['active', 'connectionEpoch', 'deviceId', 'lastFailure', 'online', 'settings'],
+    ['active', 'connectionEpoch', 'deviceId', 'lastFailure', 'online', 'pairing', 'settings'],
   );
 });
 

@@ -100,6 +100,8 @@ export function createRemoteAccessController({
       // Present only after a dial actually failed, so the surface can stop
       // reporting "connecting…" for a connection that already gave up.
       lastFailure: live.lastFailure ?? null,
+      // Present only while the server is waiting for this device to be claimed.
+      pairing: live.pairing ?? null,
     };
   }
 

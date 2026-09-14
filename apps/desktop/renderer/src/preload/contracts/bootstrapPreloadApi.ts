@@ -88,6 +88,14 @@ export type RemoteAccessFailure = {
   code?: string;
   message?: string;
 };
+/** What the user carries to the gateway page to bind this device. Issued by the
+ * server, present only while the connection is parked in 'pairing'. */
+export type RemoteAccessPairing = {
+  challengeId: string;
+  pairingKey: string;
+  deviceId: string;
+  expiresAt: number;
+};
 export type RemoteAccessIpcResult = {
   ok: boolean;
   status?: {
@@ -98,6 +106,8 @@ export type RemoteAccessIpcResult = {
     connectionEpoch: number;
     /** Set once dialing has given up, so a failed connect is not shown as pending. */
     lastFailure?: RemoteAccessFailure | null;
+    /** Set while the server waits for this device to be claimed. */
+    pairing?: RemoteAccessPairing | null;
   };
   error?: string;
 };

@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { clientApi } from '../../clientApi';
-import type { RemoteAccessIpcResult, RemoteAccessPatch } from '../../preload/contracts/bootstrapPreloadApi';
-
-type Status = NonNullable<RemoteAccessIpcResult['status']>;
+import type { RemoteAccessPatch } from '../../preload/contracts/bootstrapPreloadApi';
+import type { Status } from './remoteAccessPresentation';
+import { connectionSummary, describeFailure } from './remoteAccessPresentation';
 
 export function RemoteAccessPanel() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -15,7 +15,14 @@ export function RemoteAccessPanel() {
     else setError(r.error ?? 'unknown');
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+    // A pairing challenge arrives from the server after the dial succeeds, and it
+    // expires. Without polling, a panel opened before the challenge arrived would
+    // never show it and the device could not be claimed.
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+  }, [refresh]);
 
   async function apply(patch: RemoteAccessPatch) {
     setIsSaving(true);
@@ -83,34 +90,61 @@ export function RemoteAccessPanel() {
           连接失败：{describeFailure(status.lastFailure)}
         </p>
       )}
+
+      {status.pairing && <PairingBlock pairing={status.pairing} gatewayOrigin={s.gatewayOrigin} />}
     </div>
   );
 }
 
-/** One line for the status row. A failure is reported as a failure, never as a
- * pending connection: "connecting…" for a dial that already gave up hides the
- * only information the user needs to fix it. */
-function connectionSummary(status: Status): string {
-  if (status.online) return `已连接${status.deviceId ? ` (${status.deviceId})` : ''}`;
-  if (status.lastFailure) return '连接失败';
-  return status.active ? '正在连接…' : '未连接';
-}
+/** The handoff to the gateway page. The device is not usable until the user
+ * claims it there, so this block has to state what to copy, where to paste it,
+ * and how long it stays valid. */
+function PairingBlock({ pairing, gatewayOrigin }: {
+  pairing: NonNullable<Status['pairing']>;
+  gatewayOrigin: string;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
 
-const FAILURE_HINTS: Record<string, string> = {
-  SELF_SIGNED_CERT_IN_CHAIN: '证书链不受信任。若网络中有 TLS 代理，请把它的根证书加入系统信任，或让 Node 读取系统根证书。',
-  UNABLE_TO_VERIFY_LEAF_SIGNATURE: '无法验证服务器证书，可能被中间代理替换。',
-  DEPTH_ZERO_SELF_SIGNED_CERT: '服务器使用了自签证书。',
-  CERT_HAS_EXPIRED: '服务器证书已过期。',
-  ENOTFOUND: '域名解析失败。请检查 Gateway 地址拼写与网络。',
-  ECONNREFUSED: '服务器拒绝连接。请确认 Gateway 正在运行、端口可达。',
-  ETIMEDOUT: '连接超时。请检查网络或防火墙。',
-};
+  async function copy(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied((c) => (c === label ? null : c)), 2000);
+    } catch { setCopied(null); }
+  }
 
-/** Turn a structured failure into something a person can act on. */
-function describeFailure(failure: NonNullable<Status['lastFailure']>): string {
-  const hint = failure.code ? FAILURE_HINTS[failure.code] : undefined;
-  const code = failure.code ? `[${failure.code}] ` : '';
-  if (hint) return `${code}${hint}`;
-  if (failure.message) return `${code}${failure.message}`;
-  return `${code}${failure.reason}`;
+  const remaining = pairing.expiresAt - Date.now();
+  const expired = remaining <= 0;
+
+  return (
+    <div className="general-setting-block" style={{ marginTop: 12, padding: 12, border: '1px solid var(--line, #ddd)', borderRadius: 6 }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>待认领：这台设备还没有绑定</p>
+      <p className="general-setting-copy" style={{ marginTop: 4 }}>
+        打开 <a href={gatewayOrigin || 'https://gw.peer-wo.com'} target="_blank" rel="noreferrer">{gatewayOrigin || 'https://gw.peer-wo.com'}</a>
+        ，在「添加设备」里填入下面两项完成绑定。
+      </p>
+
+      <div className="general-setting-row">
+        <label className="setting-label">挑战 ID</label>
+        <code style={{ wordBreak: 'break-all' }}>{pairing.challengeId}</code>
+        <button onClick={() => copy('challengeId', pairing.challengeId)} style={{ marginLeft: 8 }}>
+          {copied === 'challengeId' ? '已复制' : '复制'}
+        </button>
+      </div>
+
+      <div className="general-setting-row">
+        <label className="setting-label">一次性 Key</label>
+        <code style={{ wordBreak: 'break-all' }}>{pairing.pairingKey}</code>
+        <button onClick={() => copy('pairingKey', pairing.pairingKey)} style={{ marginLeft: 8 }}>
+          {copied === 'pairingKey' ? '已复制' : '复制'}
+        </button>
+      </div>
+
+      <p className="general-setting-copy" style={{ marginTop: 4 }}>
+        {expired
+          ? '这次挑战已过期，关闭再打开远程连接可重新获取。'
+          : `有效期剩余约 ${Math.max(1, Math.round(remaining / 60000))} 分钟。一次性 Key 请勿转发。`}
+      </p>
+    </div>
+  );
 }

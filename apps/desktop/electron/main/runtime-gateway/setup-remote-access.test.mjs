@@ -8,6 +8,14 @@ import { setupRemoteAccess } from './setup-remote-access.mjs';
 /** Each case gets a real (empty) data dir so the binding SQLite can open. */
 const freshDir = () => mkdtempSync(join(tmpdir(), 'peer-remote-'));
 
+/** Pairing fixtures shaped like the real wire message: the handshake validates
+ * challengeId/deviceId as ids and the pairing key as exactly 32 url-safe chars
+ * (/^[A-Za-z0-9_-]{32}$/). Made-up short values would let these tests pass while
+ * the real connection rejected every challenge. */
+const PAIR_C = '11111111-2222-4333-8444-555555555555';
+const PAIR_D = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+const PAIR_K = 'AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+
 /** In-memory stand-in for the keychain, so tests never touch the real one. */
 function memoryIdentityStore(initial = null) {
   let value = initial;
@@ -229,6 +237,109 @@ test('签名可被对应公钥验证（身份真的可用）', async () => {
   const message = Buffer.from('handshake-challenge');
   const signature = Buffer.from(await options.sign(message.toString()), 'base64url');
   assert.ok(verify(null, message, createPublicKey(options.publicKey), signature), '签名必须验证通过');
+});
+
+test('服务器下发配对挑战后，状态里能拿到挑战 ID 与一次性 Key', async () => {
+  // Regression: the challenge used to be logged and dropped, so the settings
+  // surface had nothing to show and the device could never be claimed.
+  const { remote, options } = await withConnection();
+  assert.equal(remote.status().pairing, null, '刚启动时还没有挑战');
+
+  const expiresAt = Date.now() + 300_000;
+  // 用与真实 wire 一致的形状：challengeId/deviceId 是 uuid，
+  // pairingKey 必须恰好 32 字符（handshake 用 /^[A-Za-z0-9_-]{32}$/ 校验）。
+  // 用假形状会让测试在真实链路上失真。
+  const challengeId = '11111111-2222-4333-8444-555555555555';
+  const deviceId = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  const pairingKey = 'AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+  options.onState({
+    status: 'pairing',
+    pairing: { type: 'remote.pairing', challengeId, pairingKey, deviceId, expiresAt },
+  });
+
+  assert.deepEqual(remote.status().pairing, {
+    challengeId, pairingKey, deviceId, expiresAt,
+  });
+  assert.equal(remote.status().online, false, '等待认领时不算在线');
+});
+
+test('认领成功后不再展示已用掉的挑战', async () => {
+  const { remote, options } = await withConnection();
+  options.onState({ status: 'pairing', pairing: { challengeId: PAIR_C, pairingKey: PAIR_K, deviceId: PAIR_D, expiresAt: Date.now() + 1000 } });
+  assert.ok(remote.status().pairing, '先确认挑战已被记录');
+
+  bind(remote, options);
+  assert.equal(remote.status().pairing, null, '认领后挑战是一次性的，不应再展示');
+  assert.equal(remote.status().online, true);
+});
+
+test('主动停止会清掉配对挑战，不展示已失效的一次性 Key', async () => {
+  const { remote, options } = await withConnection();
+  options.onState({ status: 'pairing', pairing: { challengeId: PAIR_C, pairingKey: PAIR_K, deviceId: PAIR_D, expiresAt: Date.now() + 1000 } });
+  assert.ok(remote.status().pairing, '先确认挑战已被记录');
+
+  remote.stop();
+  assert.equal(remote.status().pairing, null, '停止后不应残留挑战');
+});
+
+test('连接关闭会清掉配对挑战（连接没了挑战也就失效）', async () => {
+  let resolveClosed;
+  let captured = null;
+  const failing = {
+    stop() {},
+    closed: new Promise(resolve => { resolveClosed = resolve; }),
+  };
+  const remote = setupRemoteAccess({
+    userDataPath: freshDir(), gatewayOrigin: 'https://peer.example',
+    deviceName: 'test-mac', workspaceId: 'ws-1',
+    goalPlanStore, sessionStore, buildProjection: projection, host: createHost(),
+    identityStore: memoryIdentityStore(),
+    connectorFactory(options) { captured = options; return failing; },
+  });
+  await remote.start();
+  captured.onState({ status: 'pairing', pairing: { challengeId: PAIR_C, pairingKey: PAIR_K, deviceId: PAIR_D, expiresAt: Date.now() + 1000 } });
+  assert.ok(remote.status().pairing, '先确认挑战已被记录');
+
+  resolveClosed({ reason: 'disconnected' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(remote.status().pairing, null, '连接断了，挑战必须一起清掉');
+  assert.equal(remote.status().lastFailure.reason, 'disconnected');
+});
+
+test('缺少配对详情时不假装有挑战', async () => {
+  const { remote, options } = await withConnection();
+  // 服务器只报了状态、没带挑战体：展示半个挑战会误导用户去认领。
+  options.onState({ status: 'pairing' });
+  assert.equal(remote.status().pairing, null);
+});
+
+test('一次性 Key 不写进日志（只在状态里给 UI）', async () => {
+  // 配对 Key 是一次性凭据。日志会被复制、上报、长期留存，所以它不能出现在那里；
+  // 需要它的只有设置页，走 status() 读取。
+  const lines = [];
+  let captured = null;
+  const remote = setupRemoteAccess({
+    userDataPath: freshDir(), gatewayOrigin: 'https://peer.example',
+    deviceName: 'test-mac', workspaceId: 'ws-1',
+    goalPlanStore, sessionStore, buildProjection: projection, host: createHost(),
+    identityStore: memoryIdentityStore(),
+    logger: {
+      info: (...args) => lines.push(args.join(' ')),
+      warn: (...args) => lines.push(args.join(' ')),
+      error: (...args) => lines.push(args.join(' ')),
+    },
+    connectorFactory(options) { captured = options; return stubConnector(); },
+  });
+  await remote.start();
+  captured.onState({ status: 'pairing', pairing: { challengeId: PAIR_C, pairingKey: PAIR_K, deviceId: PAIR_D, expiresAt: Date.now() + 60_000 } });
+
+  const joined = lines.join('\n');
+  assert.ok(lines.length > 0, '应当确实记录了状态（否则这个断言是空的）');
+  assert.doesNotMatch(joined, new RegExp(PAIR_K), '配对 Key 绝不能出现在日志里');
+  assert.doesNotMatch(joined, new RegExp(PAIR_C), '挑战 ID 也不应进日志');
+  // 同时确认信息本身没丢：UI 仍然拿得到。
+  assert.equal(remote.status().pairing.pairingKey, PAIR_K);
 });
 
 test('连接放弃时把失败原因报给状态读取方，而不是永远停在连接中', async () => {
