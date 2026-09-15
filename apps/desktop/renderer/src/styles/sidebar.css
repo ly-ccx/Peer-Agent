@@ -131,8 +131,9 @@
   background: var(--za-warning, #f0a020);
 }
 
-/* 全屏时 macOS 交通灯被系统隐藏,收掉侧栏为其预留的顶部留白(权威状态来自 main 广播)。 */
-.app-shell.is-fullscreen .app-sidebar {
+/* 非 darwin 全屏没有系统交通灯,顶部预留只是死空白,收成 12px。
+   darwin 全屏不收:原生全屏只是默认隐藏交通灯,指针移到左上角会重新浮现。 */
+:root:not([data-os='darwin']) .app-shell.is-fullscreen .app-sidebar {
   padding-top: var(--space-3, 12px);
 }
 
@@ -707,12 +708,25 @@
   box-shadow: none;
   color: var(--graphite-base);
 }
+/* 印记式选中：毛玻璃底 + 发丝边，不用投影抬升，也不画左侧印记。
+   与 .sidebar-conversation-item.active 同一配方，侧栏内只有一套选中语言。 */
 .channel-conversation-list .conversation-row.active {
-  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
-  border-color: transparent;
-  box-shadow: var(--za-sidebar-active-shadow, none);
+  background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));
+  -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
+  backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
+  border-color: var(--za-sidebar-active-border, var(--chrome-hairline));
+  box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   color: var(--graphite-base);
   font-weight: 400;
+}
+/* 系统开启「减少透明度」时退回不透明选中底。 */
+@media (prefers-reduced-transparency: reduce) {
+  .channel-conversation-list .conversation-row.active {
+    background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
 }
 .channel-conversation-list .conversation-row.is-running {
   color: var(--graphite-base);
@@ -881,15 +895,13 @@
   box-shadow: none;
   color: var(--graphite-base);
 }
-/* 云端式选中浮层：毛玻璃底 + 轻边 + 左侧 azure 印记，避免实心浅蓝灰底。 */
+/* 云端式选中浮层：毛玻璃底 + 轻边，避免实心浅蓝灰底；不画左侧印记。 */
 .sidebar-conversation-item.active {
   background: var(--glass-control, var(--ui-surface-selected, var(--za-sidebar-thread-active-bg)));
   -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
   backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
   border-color: color-mix(in srgb, var(--chrome-hairline, var(--za-line)) 72%, transparent);
-  box-shadow:
-    inset 2px 0 0 var(--azure-trace),
-    var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
+  box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   color: var(--graphite-base);
   font-weight: 500;
 }
@@ -899,7 +911,7 @@
     background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    box-shadow: inset 2px 0 0 var(--azure-trace);
+    box-shadow: none;
   }
 }
 .sidebar-conv-automation-badge {

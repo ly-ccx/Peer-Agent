@@ -103,7 +103,7 @@ test('pin lives in the trailing action slot instead of a leading gutter', () => 
   );
 });
 
-test('selected conversation rows use a restrained ambient lift, not a card shadow', () => {
+test('selected conversation rows use a hairline capsule, not a lifted card or a side mark', () => {
   const activeBody = ruleBody(
     sidebarCss,
     '.channel-conversation-list .conversation-row.active',
@@ -111,17 +111,43 @@ test('selected conversation rows use a restrained ambient lift, not a card shado
   const layeredActiveBody = ruleBody(chatSidebarCss, '.conversation-row.active');
   const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
 
-  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
-  assert.doesNotMatch(activeBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
-  assert.doesNotMatch(layeredActiveBody, /--shadow-soft|--shadow-composer/);
-  assert.match(layeredActiveHoverBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
-  assert.doesNotMatch(layeredActiveHoverBody, /--shadow-soft|--shadow-composer/);
+  for (const body of [activeBody, layeredActiveBody, layeredActiveHoverBody]) {
+    // 胶囊选中:发丝边 + 毛玻璃底,不画左侧印记,也不用投影抬升。
+    assert.doesNotMatch(body, /inset\s+2px\s+0\s+0\s+var\(--azure-trace\)/);
+    assert.doesNotMatch(body, /--za-sidebar-active[-]shadow|--shadow-soft|--shadow-composer/);
+    assert.match(body, /border-color:\s*var\(--za-sidebar-active-border/);
+    assert.match(body, /background:\s*var\(--za-sidebar-active-bg/);
+  }
 
-  assert.match(tokensCss, /--za-sidebar-active-shadow:\s*0 0 0 0\.5px/);
+  // 毛玻璃底由基础选中规则提供,悬停变体不额外声明。
+  for (const body of [activeBody, layeredActiveBody]) {
+    assert.match(body, /backdrop-filter:\s*blur\(var\(--blur-control/);
+  }
+  assert.doesNotMatch(layeredActiveHoverBody, /backdrop-filter/);
+
+  // 发丝边 token 在四套主题中保留。
+  assert.match(tokensCss, /--za-sidebar-active-border:\s*#DCE0E8;/);
 });
 
-test('nested workspace session lists do not crop a single selected capsule shadow', () => {
+test('reduced transparency drops the frosted base and keeps no side mark', () => {
+  const overrideBody = ruleBody(
+    sidebarCss,
+    '.channel-conversation-list .conversation-row.active',
+  );
+  const reducedBlock =
+    sidebarCss.match(
+      /@media \(prefers-reduced-transparency: reduce\) \{\n  \.channel-conversation-list \.conversation-row\.active \{[\s\S]*?\n  \}\n\}/,
+    )?.[0] ?? '';
+
+  assert.notEqual(reducedBlock, '', 'expected a reduced-transparency override');
+  assert.match(reducedBlock, /background:\s*var\(--ui-surface-selected/);
+  assert.match(reducedBlock, /backdrop-filter:\s*none;/);
+  assert.doesNotMatch(reducedBlock, /inset\s+2px\s+0\s+0\s+var\(--azure-trace\)/);
+  // 基础态仍是毛玻璃,不是实心底。
+  assert.match(overrideBody, /backdrop-filter:\s*blur\(var\(--blur-control/);
+});
+
+test('nested workspace session lists do not crop the selected row mark', () => {
   const nestedListBody = ruleBody(
     sidebarCss,
     '.sidebar-workspace-tasks.channel-conversation-list',
@@ -147,13 +173,13 @@ test('nested workspace session lists do not crop a single selected capsule shado
   assert.match(nestedListBody, /overflow:\s*hidden;/);
   assert.match(nestedBaseBody, /grid-template-rows:\s*0fr/);
   assert.match(nestedBaseBody, /transition:\s*grid-template-rows\s+var\(--za-motion-medium\)/);
-  // 内层承载水平内边距,给选中胶囊 0.5px 描边留出呼吸空间,避免展开态被裁剪。
+  // 内层承载水平内边距,让毛玻璃选中底在展开态不被裁剪。
   assert.match(nestedInnerBody, /overflow:\s*hidden;/);
   assert.match(nestedInnerBody, /padding:\s*2px 6px 6px 6px;/);
   assert.doesNotMatch(nestedInnerBody, /overflow-x:\s*hidden;/);
   assert.doesNotMatch(nestedInnerBody, /overflow-y:\s*auto;/);
   assert.match(nestedRowBody, /--sidebar-conv-row-pad-x:\s*8px;/);
-  assert.match(activeBody, /box-shadow:\s*var\(--za-sidebar-active-shadow/);
+  assert.doesNotMatch(activeBody, /inset\s+2px\s+0\s+0\s+var\(--azure-trace\)/);
 });
 
 test('selected highlight lives on the conversation, not the workspace row', () => {
