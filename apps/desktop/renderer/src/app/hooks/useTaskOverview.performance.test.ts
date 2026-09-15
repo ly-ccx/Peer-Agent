@@ -58,6 +58,19 @@ test('visibilitychange resumes with one immediate sync', async () => {
   );
 });
 
+test('the monitor rail polls only while its workbench tab is visible', async () => {
+  // Workbench 视图槽常挂载（只靠 data-active 显隐），监控栏因此必须显式门控；
+  // 否则从未打开该 tab 的会话也会多挂一路 taskOverview 轮询与广播订阅。
+  const rail = await readFile(
+    new URL('../../workbench/views/TaskMonitorRailView.tsx', import.meta.url),
+    'utf8',
+  );
+  const panel = await readFile(new URL('../../workbench/WorkbenchPanel.tsx', import.meta.url), 'utf8');
+
+  assert.match(rail, /enabled:\s*active && !!conversationId/);
+  assert.match(panel, /active=\{open && activeTab === 'monitor'\}/);
+});
+
 
 test('TaskOverview fallback poll is slower than broadcast cadence', async () => {
   const source = await readHook();

@@ -3,7 +3,7 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
-import { TaskContextRailView } from './views/TaskContextRailView';
+import { TaskMonitorRailView } from './views/TaskMonitorRailView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -98,17 +98,15 @@ const TABS: readonly TabDef[] = [
     ),
   },
   {
-    // 「上下文」= 任务上下文栏（Task Context Rail）：环境信息 / 后台进程 / 产出。
-    // 只读投影，复用既有事实源，不承载后台运行的管理职责（见设计文档）。
-    id: 'context',
-    labelZh: '上下文',
-    labelEn: 'Context',
+    // 「监控」= 任务监控栏（Task Monitor Rail）：后台任务（内联详情）+ 产出。
+    // 环境信息不在此栏（归中间对话面板的 composer 环境胶囊）。
+    // 后台任务是会话作用域的合并视图：写操作复用 Provider 的同一 stops 链路。
+    id: 'monitor',
+    labelZh: '监控',
+    labelEn: 'Monitor',
     icon: (
       <svg width="15" height="15" {...ICON_PROPS}>
-        <path d="M4 6h16M4 12h16M4 18h16" />
-        <circle cx="9" cy="6" r="2" />
-        <circle cx="15" cy="12" r="2" />
-        <circle cx="7" cy="18" r="2" />
+        <path d="M3 12h4l2.5-6 4 12 2.5-6H21" />
       </svg>
     ),
   },
@@ -416,13 +414,14 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         </div>
 
         <div
-          className="workbench-view workbench-view--context"
-          data-active={activeTab === 'context'}
+          className="workbench-view workbench-view--monitor"
+          data-active={activeTab === 'monitor'}
         >
-          <TaskContextRailView
+          <TaskMonitorRailView
             isZh={isZh}
             workspacePath={workspacePath}
             conversationId={conversationId}
+            active={open && activeTab === 'monitor'}
           />
         </div>
 

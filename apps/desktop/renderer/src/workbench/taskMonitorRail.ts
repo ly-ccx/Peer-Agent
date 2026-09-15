@@ -10,51 +10,33 @@ import {
 } from '../app/pages/taskOverviewArtifacts.ts';
 
 /**
- * 任务上下文栏（Task Context Rail）投影 —— 只读。
+ * 任务监控栏（Task Monitor Rail）投影 —— 只读。
  *
  * 治理边界（AGENTS.md / peer-knowledge design/product/task-context-rail.md）：
  * - 本模块只做「已有权威事实 → 展示行」的投影，不产生新的事实来源；
- *   所有事实仍来自 main 进程的 Runtime 快照、taskOverview:list 与 git IPC。
- * - 后台运行区是**投影**，不是第二个管理面：参考 bd9fd0b4 把后台运行管理收敛到
- *   ChatHeader 的决定，本栏不提供停止/重跑等写操作，点击行交由既有详情视图处理。
+ *   所有事实仍来自 main 进程的 Runtime 快照与 taskOverview:list。
+ * - **环境信息不在此栏**：分支/本地/提交推送属于中间对话面板的 composer 环境胶囊
+ *   （ChatSurface 的 envCapsule / formatComposerEnvCapsule），本栏不得重复展示。
+ * - 后台任务区是**会话作用域的合并视图**：把 Runtime 快照里本会话的后台运行
+ *   合并进来，行内直接展开既有 BackgroundRunDetails 详情（停止等写操作复用
+ *   Provider 的同一 stops 链路），不再跳去 ChatHeader 弹层。
  * - 产出区必须复用 projectTaskOverviewArtifacts 的过滤规则，不得放宽
  *   （tool-result:// / local-shell-artifact:// / goal-plan:// 等治理 ref 永不展示）。
  */
 
-/** 环境信息行：值本身可点击打开对应详情，故带 openTarget 描述跳转意图而非回调。 */
-export type TaskContextEnvironmentTarget = 'branch' | 'workspace' | null;
-
-export interface TaskContextEnvironmentRow {
-  readonly id: 'branch' | 'workspace' | 'location';
-  /** 行首图标语义（UI 层按此选图标，不解析文案）。 */
-  readonly icon: 'branch' | 'folder' | 'device';
-  readonly label: string;
-  readonly value: string;
-  /** 完整值（如绝对路径），用于 title 提示；与 value 相同时省略。 */
-  readonly detail?: string;
-  readonly openTarget: TaskContextEnvironmentTarget;
-}
-
-export interface TaskContextEnvironmentInput {
-  readonly workspacePath: string | null;
-  /** null = 未知/读取中；false = 明确不是 git 仓库。 */
-  readonly workspaceIsGit: boolean | null;
-  readonly currentBranch: string | null;
-}
-
-export interface TaskContextRunRow {
+export interface TaskMonitorRunRow {
   readonly taskId: string;
   readonly command: string;
   readonly cwdLabel: string;
   readonly statusLabel: string;
   readonly active: boolean;
+  /** 失败/超时的运行提升排位权重（监控语义：异常优先被看见）。 */
+  readonly failed: boolean;
 }
 
-export interface TaskContextRailProjection {
-  readonly environment: readonly TaskContextEnvironmentRow[];
-  readonly runs: readonly TaskContextRunRow[];
+export interface TaskMonitorRailProjection {
+  readonly runs: readonly TaskMonitorRunRow[];
   readonly artifacts: TaskArtifactProjection;
-  readonly artifactError: string | null;
 }
 
 /** 末段路径标签：与 BackgroundRunDetails 的 cwd 呈现保持一致（只取最后一段）。 */
@@ -70,74 +52,18 @@ function emptyArtifactProjection(): TaskArtifactProjection {
 }
 
 /**
- * 环境信息投影。缺数据时返回空数组，由 UI 决定是否渲染分区——
- * 不写占位文案（对齐 Qoder 空分区行为，见设计文档 §2.2）。
- */
-export function projectTaskContextEnvironment(
-  input: TaskContextEnvironmentInput,
-  isZh: boolean,
-): readonly TaskContextEnvironmentRow[] {
-  const rows: TaskContextEnvironmentRow[] = [];
-  const workspacePath = typeof input.workspacePath === 'string' && input.workspacePath.trim()
-    ? input.workspacePath.trim()
-    : null;
-
-  // 分支：只有明确是 git 仓库且读到分支名才展示。读取中或非仓库时不编造值。
-  if (input.workspaceIsGit === true && input.currentBranch) {
-    rows.push({
-      id: 'branch',
-      icon: 'branch',
-      label: isZh ? '分支' : 'Branch',
-      value: input.currentBranch,
-      openTarget: 'branch',
-    });
-  } else if (input.workspaceIsGit === false) {
-    rows.push({
-      id: 'branch',
-      icon: 'branch',
-      label: isZh ? '分支' : 'Branch',
-      value: isZh ? '非 git 仓库' : 'Not a git repo',
-      openTarget: null,
-    });
-  }
-
-  if (workspacePath) {
-    rows.push({
-      id: 'workspace',
-      icon: 'folder',
-      label: isZh ? '工作区' : 'Workspace',
-      value: pathTailLabel(workspacePath),
-      detail: workspacePath,
-      openTarget: 'workspace',
-    });
-  }
-
-  // 运行位置：桌面端能力执行固定发生在本机（端云能力代理：本地负责能力与执行）。
-  if (workspacePath) {
-    rows.push({
-      id: 'location',
-      icon: 'device',
-      label: isZh ? '运行位置' : 'Runs on',
-      value: isZh ? '本地' : 'Local',
-      openTarget: null,
-    });
-  }
-
-  return rows;
-}
-
-/**
- * 后台进程投影：**按会话作用域过滤**。
+ * 后台任务投影：**按会话作用域合并**。
  *
  * 与 ChatHeader 的全局后台运行入口语义不同：那里是跨会话的全局管理面，
- * 这里只回答「本任务的会话起了哪些后台运行」。因此这不是重复的管理面，
- * 而是同一份 Runtime 快照在会话作用域下的只读视图。
+ * 这里只回答「本任务的会话起了哪些后台运行」。因此这不是第二个全局管理面，
+ * 而是同一份 Runtime 快照在会话作用域下的监控视图；写操作仍走 Provider 的
+ * 同一 stops 链路（单一 poller、单一请求状态）。
  */
-export function projectTaskContextRuns(
+export function projectTaskMonitorRuns(
   tasks: readonly ManagedShellTask[] | null | undefined,
   conversationId: string | null,
   isZh: boolean,
-): readonly TaskContextRunRow[] {
+): readonly TaskMonitorRunRow[] {
   if (!conversationId || !tasks) return [];
   const scoped = backgroundTaskList(tasks, { sourceConversation: conversationId });
   return orderBackgroundRuns(scoped).map((task) => ({
@@ -146,6 +72,7 @@ export function projectTaskContextRuns(
     cwdLabel: pathTailLabel(task.cwd),
     statusLabel: backgroundTaskStatus(task, isZh),
     active: isActiveRun(task),
+    failed: task.status === 'failed' || task.timedOut === true,
   }));
 }
 
@@ -153,7 +80,7 @@ export function projectTaskContextRuns(
  * 产出投影：复用任务总览的产物投影（含治理 ref 过滤与每类展示上限）。
  * 传入的 item 必须是本会话的那一条；找不到时返回空投影，不报错。
  */
-export function projectTaskContextArtifacts(
+export function projectTaskMonitorArtifacts(
   item: TaskOverviewItem | null | undefined,
 ): TaskArtifactProjection {
   if (!item) return emptyArtifactProjection();

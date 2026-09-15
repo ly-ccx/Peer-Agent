@@ -2239,16 +2239,17 @@
   }
 }
 
-/* 任务上下文栏（Task Context Rail）· Qoder 式右侧信息分区。
- * 只读投影：环境信息 / 后台进程 / 产出。事实源见
- * peer-knowledge/design/product/task-context-rail.md。 */
+/* 任务监控栏（Task Monitor Rail）· Qoder 式右侧信息区。
+ * 会话作用域合并视图：后台任务（内联详情）+ 产出。
+ * 环境信息不在此栏（归中间对话面板的 composer 环境胶囊）。
+ * 事实源见 peer-knowledge/design/product/task-context-rail.md。 */
 @layer components {
   /* 与文件/文档视图一致：贴顶铺满，去掉默认顶部安全区。 */
-  .workbench-view--context {
+  .workbench-view--monitor {
     inset-block-start: 0;
   }
 
-  .task-context-rail {
+  .task-monitor-rail {
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -2256,17 +2257,17 @@
   }
 
   /* 分区之间用细分隔线分节；空分区由调用侧整段不渲染（不写占位文案）。 */
-  .task-context-section {
+  .task-monitor-section {
     display: flex;
     flex-direction: column;
     gap: 2px;
     padding: 10px 12px 12px;
   }
-  .task-context-section + .task-context-section {
+  .task-monitor-section + .task-monitor-section {
     border-top: 1px solid var(--ui-border-subtle, var(--za-line));
   }
 
-  .task-context-section-title {
+  .task-monitor-section-title {
     margin: 0 0 6px;
     font-size: var(--ui-font-meta, 12px);
     font-weight: 500;
@@ -2274,7 +2275,7 @@
   }
 
   /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
-  .task-context-row {
+  .task-monitor-row {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2289,18 +2290,18 @@
     text-align: left;
     transition: background var(--za-motion-fast) ease;
   }
-  .task-context-row--action {
+  .task-monitor-row--action {
     cursor: pointer;
   }
-  .task-context-row--action:hover {
+  .task-monitor-row--action:hover {
     background: var(--chrome-hover);
   }
-  .task-context-row--action:focus-visible {
+  .task-monitor-row--action:focus-visible {
     outline: 2px solid var(--za-focus);
     outline-offset: 1px;
   }
 
-  .task-context-row-icon {
+  .task-monitor-row-icon {
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
@@ -2308,7 +2309,7 @@
     color: var(--za-text-faint);
   }
 
-  .task-context-row-value {
+  .task-monitor-row-value {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -2316,9 +2317,18 @@
     text-overflow: ellipsis;
   }
 
-  .task-context-more {
+  .task-monitor-more {
     margin: 2px 0 0 6px;
     font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
+  }
+
+  /* 内联后台任务详情：嵌在监控栏内，视觉上从属对应行。 */
+  .task-monitor-run-details {
+    margin: 6px 0 4px;
+    padding: 10px 10px 12px;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
+    background: var(--za-surface-1);
   }
 }
