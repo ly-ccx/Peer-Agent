@@ -21,8 +21,9 @@
   overflow-y: auto;
 }
 
-/* 仅 macOS 非全屏窗口需要为交通灯额外留白。 */
-:root[data-os='darwin'] .app-shell:not(.is-fullscreen) .settings-nav {
+/* 仅 macOS 需要为交通灯额外留白。全屏同样保留:原生全屏只是默认隐藏交通灯,
+   指针移到左上角会连同菜单栏一起重新浮现,而应用无法感知该状态。 */
+:root[data-os='darwin'] .settings-nav {
   padding-top: 52px;
 }
 

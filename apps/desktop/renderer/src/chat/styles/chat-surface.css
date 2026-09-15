@@ -3693,11 +3693,12 @@
   padding-top: calc(40px + var(--space-4));
 }
 
-/* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
-   避免会话标题与红绿灯重叠。仅 darwin 生效:Windows/Linux 无系统交通灯,
-   hiddenInset 窗口左上角没有任何控件,保留 78px 只会挤压标题空间。 */
+/* 侧栏折叠时主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,避免页头控件与
+   红绿灯重叠。仅 darwin 生效:Windows/Linux 无系统交通灯,hiddenInset 窗口左上角
+   没有任何控件,保留 78px 只会挤压标题空间。
+   全屏同样保留:原生全屏只是把交通灯默认隐藏,指针移到左上角就会连同菜单栏一起浮现,
+   而 main 只广播全屏状态、拿不到交通灯可见性,无法只在它们出现时才让位。 */
 :root[data-os='darwin'][data-sidebar-collapsed='true']
-  .app-shell:not(.is-fullscreen)
   .chat-header {
   padding-left: 78px;
 }

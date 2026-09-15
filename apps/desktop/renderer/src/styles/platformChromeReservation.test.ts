@@ -9,16 +9,19 @@ import { fileURLToPath } from 'node:url';
  *
  * 矩阵（顶部留白均源于 macOS 交通灯预留）：
  *                        darwin常态   darwin全屏   非darwin常态   非darwin全屏
- *  .app-sidebar 顶部      40px         12px          12px           12px
- *  .thread(无header)顶部  52px         24px          24px           24px
- *  折叠 .chat-header 左缘 78px         无            无             无
+ *  .app-sidebar 顶部      40px         40px          12px           12px
+ *  .thread(无header)顶部  52px         52px          24px           24px
+ *  折叠 .chat-header 左缘 78px         78px          无             无
  *
  * 依据：main 以 titleBarStyle 'hiddenInset' 建窗且未设 titleBarOverlay，
  * 非 darwin 平台窗口没有任何系统窗口控件，交通灯预留只产生死空白。
- * main.tsx 挂 :root[data-os]；本测试钉住三个 CSS 文件里的门控不被回退。
+ * darwin 全屏必须与 darwin 常态同样留白：原生全屏只是把交通灯「默认隐藏」，
+ * 指针移到左上角会连同菜单栏一起重新浮现，而 main 只广播全屏状态、拿不到
+ * 交通灯可见性，无法只在它们出现时才让位——全屏收掉预留会让控件被灯压住。
+ * main.tsx 挂 :root[data-os]；本测试钉住四个 CSS 文件里的门控不被回退。
  */
 
-// 设置导航矩阵：darwin 常态 52px；darwin 全屏 / win32 常态 / win32 全屏均为 --space-4。
+// 设置导航矩阵：darwin（常态与全屏）52px；win32（常态与全屏）为 --space-4。
 const stylesDir = dirname(fileURLToPath(import.meta.url));
 const settingsCss = readFileSync(join(stylesDir, './settings-page.css'), 'utf8');
 
@@ -35,12 +38,13 @@ for (const os of ['darwin', 'win32']) {
         .filter(([, selector, body]) => /\.settings-nav\s*$/.test(selector) && /padding-top:/.test(body));
       assert.equal(overrides.length, 1);
       const selector = overrides[0][1].replace(/\/\*[\s\S]*?\*\//g, '').trim();
-      assert.equal(selector, ":root[data-os='darwin'] .app-shell:not(.is-fullscreen) .settings-nav");
+      assert.equal(selector, ":root[data-os='darwin'] .settings-nav");
       assert.match(overrides[0][2], /padding-top:\s*52px/);
       const reservedOs = selector.match(/data-os='([^']+)'/)?.[1];
-      const excludesFullscreen = selector.includes(':not(.is-fullscreen)');
-      const applies = os === reservedOs && !(fullscreen && excludesFullscreen);
-      assert.equal(applies, os === 'darwin' && !fullscreen);
+      // 全屏不再参与门控：darwin 全屏同样要给交通灯留白。
+      assert.doesNotMatch(selector, /is-fullscreen/);
+      const applies = os === reservedOs;
+      assert.equal(applies, os === 'darwin');
       assert.match(ruleBody(settingsCss, '.settings-nav-header button'), /-webkit-app-region:\s*no-drag/);
     });
   }
@@ -58,19 +62,25 @@ function ruleBody(css: string, selector: string) {
   return match[1];
 }
 
-test('sidebar top reservation: darwin keeps 40px, non-darwin and fullscreen collapse to 12px', () => {
-  // darwin × 常态：基础规则保留交通灯预留。
+test('sidebar top reservation: darwin keeps 40px windowed and fullscreen, non-darwin collapses to 12px', () => {
+  // darwin（常态与全屏）：基础规则保留 40px 交通灯预留。
   assert.match(ruleBody(sidebarCss, '.app-sidebar'), /padding-top:\s*40px/);
 
-  // 非 darwin × 常态：收成 12px（与全屏一致）。
+  // 非 darwin × 常态：收成 12px。
   const nonDarwinSidebar = ruleBody(sidebarCss, ":root:not([data-os='darwin']) .app-sidebar");
   assert.match(nonDarwinSidebar, /padding-top:\s*var\(--space-3,\s*12px\)/);
 
-  // darwin × 全屏：既有收起规则保持 12px。
+  // 非 darwin × 全屏：同样收成 12px。
   assert.match(
-    ruleBody(sidebarCss, '.app-shell.is-fullscreen .app-sidebar'),
+    ruleBody(sidebarCss, ":root:not([data-os='darwin']) .app-shell.is-fullscreen .app-sidebar"),
     /padding-top:\s*var\(--space-3,\s*12px\)/,
   );
+
+  // 不允许存在未门控平台的全屏收起规则，否则 darwin 全屏会被压掉交通灯预留。
+  const ungatedFullscreen = sidebarCss.match(
+    /(?:^|[{}])\s*\.app-shell\.is-fullscreen \.app-sidebar\s*\{/,
+  );
+  assert.equal(ungatedFullscreen, null, 'fullscreen sidebar override must be gated to non-darwin');
 });
 
 test('bare thread top reservation: darwin keeps 52px, non-darwin collapses to 24px without touching has-header', () => {
@@ -88,17 +98,34 @@ test('bare thread top reservation: darwin keeps 52px, non-darwin collapses to 24
   // 带 header 的 thread 不受平台门控影响（页头是功能内容，非交通灯预留）。
   assert.match(ruleBody(shellCss, '.thread.thread-has-header'), /pt-0/);
 
-  // darwin × 全屏：既有收起规则保持 pt-6（=24px）。
-  assert.match(ruleBody(shellCss, '.app-shell.is-fullscreen .thread'), /pt-6/);
+  // 非 darwin × 全屏：无 header 的 thread 收成 pt-6（=24px）；darwin 全屏保留 52px。
+  assert.match(
+    ruleBody(shellCss, ":root:not([data-os='darwin']) .app-shell.is-fullscreen .thread"),
+    /pt-6/,
+  );
+  const ungatedThreadFullscreen = shellCss.match(
+    /(?:^|[{}])\s*\.app-shell\.is-fullscreen \.thread\s*\{/,
+  );
+  assert.equal(
+    ungatedThreadFullscreen,
+    null,
+    'fullscreen bare-thread override must be gated to non-darwin',
+  );
 });
 
-test('collapsed chat-header left reservation is darwin-only', () => {
-  // 78px 左预留必须同时门控 [data-os='darwin'] 与折叠态、排除全屏。
+test('collapsed chat-header left reservation is darwin-only, windowed and fullscreen', () => {
+  // 78px 左预留必须门控 [data-os='darwin'] 与折叠态；全屏同样保留（交通灯会重现）。
   const collapsedHeader = ruleBody(
     chatSurfaceCss,
-    ":root[data-os='darwin'][data-sidebar-collapsed='true'] .app-shell:not(.is-fullscreen) .chat-header",
+    ":root[data-os='darwin'][data-sidebar-collapsed='true'] .chat-header",
   );
   assert.match(collapsedHeader, /padding-left:\s*78px/);
+
+  // 不允许残留「排除全屏」的变体，否则 darwin 全屏页头控件会被交通灯压住。
+  const excludesFullscreen = chatSurfaceCss.match(
+    /:root\[data-os='darwin'\]\[data-sidebar-collapsed='true'\][^{]*:not\(\.is-fullscreen\)[^{]*\.chat-header/,
+  );
+  assert.equal(excludesFullscreen, null, 'collapsed header reservation must not exclude fullscreen');
 
   // 不允许存在未门控平台的 78px 规则（防止回退成非 darwin 也生效）。
   const ungated = chatSurfaceCss.match(

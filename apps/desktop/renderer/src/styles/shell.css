@@ -100,8 +100,9 @@
     contain: layout;
   }
 
-  /* 全屏时 macOS 交通灯被系统隐藏,收掉为其预留的顶部留白(权威状态来自 main 广播)。 */
-  .app-shell.is-fullscreen .thread {
+  /* 非 darwin 全屏没有系统交通灯,无 header 的 thread 收成普通 24px。
+     darwin 全屏保留 52px:原生全屏只是默认隐藏交通灯,指针移到左上角会重新浮现。 */
+  :root:not([data-os='darwin']) .app-shell.is-fullscreen .thread {
     @apply pt-6;
   }
 
