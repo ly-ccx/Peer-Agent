@@ -46,6 +46,24 @@ function positiveTokenLimit(value, fallback) {
   return Number.isFinite(num) && num > 0 ? Math.floor(num) : fallback;
 }
 
+// 渠道声明的输出上限(maxOutputTokens)是 max_tokens 的硬天花板: 上游按
+// [1, maxOutputTokens] 校验, 越界直接 400 (GLM 网关 code 1210)。
+// 开思考时 max_tokens = 思考预算 + 回复预算, 因此两者都必须夹进天花板内,
+// 同时保持 max_tokens > budget_tokens (Anthropic 契约要求)。
+// 分配顺序: 先给回复留一份预算(最多半个输出窗口), 思考预算再退让到剩余空间。
+function clampAnthropicThinkingAllocation({ outputCeiling, budgetTokens, replyTokenLimit }) {
+  const limit = positiveTokenLimit(outputCeiling, null);
+  if (!limit) return { budgetTokens, maxTokens: budgetTokens + replyTokenLimit };
+  // 天花板小于 2 时无法同时满足"夹进上限"和"max_tokens > budget_tokens", 退化到最小合法请求。
+  if (limit < 2) return { budgetTokens: 1, maxTokens: limit };
+  const replyReserve = Math.max(1, Math.min(replyTokenLimit, Math.floor(limit / 2)));
+  const clampedBudget = Math.max(1, Math.min(budgetTokens, limit - replyReserve));
+  return {
+    budgetTokens: clampedBudget,
+    maxTokens: Math.max(clampedBudget + 1, Math.min(clampedBudget + replyTokenLimit, limit)),
+  };
+}
+
 function mappedEffortValue(effort, map, fallbackMap, fallbackKey = 'default') {
   const key = effort === 'default' ? 'medium' : effort;
   const candidates = effort === 'default' ? ['default', 'medium'] : [String(effort || '')];
@@ -356,12 +374,18 @@ export function encodeAnthropicMessagesRequest({
       body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
     } else if (paramStyle === 'anthropic-enabled-budget') {
       const budgetTokens = mappedNumericEffort(effort, reasoningEffortMap, ANTHROPIC_THINKING_BUDGET) ?? ANTHROPIC_THINKING_BUDGET.default;
+      // max_tokens 必须严格大于 budget_tokens, 并额外预留回复 token;
+      // 但整体不得越过渠道声明的输出上限(maxOutputTokens), 否则上游 400。
+      const allocation = clampAnthropicThinkingAllocation({
+        outputCeiling: maxOutputTokens,
+        budgetTokens,
+        replyTokenLimit,
+      });
       body.thinking = {
         type: 'enabled',
-        budget_tokens: budgetTokens,
+        budget_tokens: allocation.budgetTokens,
       };
-      // max_tokens 必须严格大于 budget_tokens，并额外预留回复 token。
-      body.max_tokens = budgetTokens + replyTokenLimit;
+      body.max_tokens = allocation.maxTokens;
     }
   }
   // 部分网关(如 idealab adaptive 链路)只写缓存、从不返回 cache_read，

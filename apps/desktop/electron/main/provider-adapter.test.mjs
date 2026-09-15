@@ -338,7 +338,12 @@ describe('Provider adapters', () => {
       assert.equal(captured.body.system[0].text, 'system');
       assert.equal(captured.body.system[0].cache_control.type, 'ephemeral');
       assert.equal(captured.body.thinking.type, 'enabled');
-      assert.equal(captured.body.max_tokens, 32768 + 4096);
+      // 渠道声明的输出上限 4096 是 max_tokens 的天花板: 旧实现发 32768 + 4096 = 36864
+      // 会被上游按 [1, maxOutputTokens] 校验直接 400 (GLM 网关 code 1210)。
+      assert.equal(captured.body.thinking.budget_tokens, 2048);
+      assert.equal(captured.body.max_tokens, 4096);
+      assert.ok(captured.body.max_tokens > captured.body.thinking.budget_tokens);
+      assert.ok(captured.body.max_tokens <= 4096);
       assert.equal(result.ok, true);
       assert.equal(result.textContent, 'hello');
       assert.equal(result.stopReason, 'tool_use');

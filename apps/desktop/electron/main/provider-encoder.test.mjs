@@ -359,11 +359,30 @@ describe('Provider message encoders', () => {
     });
 
     assert.equal(body.thinking.type, 'enabled');
-    assert.equal(body.thinking.budget_tokens, 32768);
+    // 渠道声明的输出上限 8192 是 max_tokens 的天花板: 思考预算退让到半个窗口。
+    assert.equal(body.thinking.budget_tokens, 4096);
+    assert.equal(body.max_tokens, 8192);
     // 回归保护: 开启 thinking 时 max_tokens 必须严格大于 budget_tokens，
     // 否则 Anthropic API 返回 400，"深度"模式必挂。
-    assert.equal(body.max_tokens, 32768 + 8192);
     assert.ok(body.max_tokens > body.thinking.budget_tokens);
+    // 回归保护: max_tokens 绝不能越过渠道声明的输出上限，
+    // 否则上游按 [1, maxOutputTokens] 校验直接 400 (GLM 网关 code 1210)。
+    assert.ok(body.max_tokens <= 8192);
+  });
+
+  it('keeps the full thinking budget when no channel output ceiling is declared', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort: 'high',
+      supportsReasoning: true,
+    });
+
+    // 未声明上限时保持既有语义: budget 不缩水, max_tokens = budget + 回复预算。
+    assert.equal(body.thinking.budget_tokens, 32768);
+    assert.equal(body.max_tokens, 32768 + 16384);
   });
 
   it('sends Anthropic adaptive thinking when requested by provider encoder policy', () => {
