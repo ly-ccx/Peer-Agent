@@ -297,6 +297,50 @@ describe('Provider message encoders', () => {
     assert.equal(body.reasoning_effort, 'xhigh');
   });
 
+  it('strips message-level name from chat-completions history (opencode-go 400 回归)', () => {
+    // 线上 400: messages[4]: "name" is not supported by this endpoint。
+    // 恢复历史里的 tool 消息由 conversation-history-projector 附带 name，
+    // chat-completions 编码边界必须剥离（工具身份由 tool_call_id 配对承载），
+    // 否则 opencode zen 等严格网关直接拒绝整个请求。
+    const body = encodeOpenAIChatRequest({
+      model: 'glm-5.3-flash',
+      messages: [
+        { role: 'user', content: '为什么侧边栏打开会报错？' },
+        {
+          role: 'assistant',
+          content: '查一下',
+          tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: 'ok' },
+      ],
+      tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object', properties: {} } } }],
+    });
+
+    assert.equal(body.messages[0].name, undefined);
+    assert.equal(body.messages[1].name, undefined);
+    assert.equal(body.messages[2].name, undefined);
+    // tool 消息的其他字段保持完整，配对链路不受影响。
+    assert.equal(body.messages[2].tool_call_id, 'call_1');
+    assert.equal(body.messages[2].content, 'ok');
+  });
+
+  it('keeps message-level name for the Gemini wire (native tool_name 依赖)', () => {
+    const body = encodeGeminiGenerateContentRequest({
+      messages: [
+        { role: 'user', content: 'inspect' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: '/tmp' },
+      ],
+      tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object', properties: {} } } }],
+    });
+
+    assert.equal(body.contents[2].parts[0].functionResponse.name, 'bash');
+  });
+
   it('maps OpenAI-compatible reasoning effort through provider-specific effort map', () => {
     const reasoningEffortMap = {
       minimal: 'high',

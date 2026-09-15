@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { encodeAnthropicMessagesRequest } from './provider-encoders/request-encoder.mjs';
+import { encodeAnthropicMessagesRequest, encodeOpenAIChatRequest } from './provider-encoders/request-encoder.mjs';
 
 // 回归背景（线上 400 复现）: GLM Coding Plan(国区) 走 anthropic-messages wire，
 // 渠道声明的输出上限 maxOutputTokens = 131072（models.dev limit.output）。
@@ -90,4 +90,29 @@ test('stays inside a degenerate ceiling instead of overflowing it', () => {
   const body = encodeAnthropic({ effort: 'high', maxOutputTokens: 1 });
 
   assert.ok(body.max_tokens <= 1, `max_tokens ${body.max_tokens} 越过退化上限 1`);
+});
+
+test('strips message-level name from chat-completions history (opencode-go 400 回归)', () => {
+  // 线上 400: messages[4]: "name" is not supported by this endpoint。
+  // 恢复历史里的 tool 消息由 conversation-history-projector 附带 name，
+  // chat-completions 编码边界必须剥离（工具身份由 tool_call_id 配对承载）。
+  const body = encodeOpenAIChatRequest({
+    model: 'glm-5.3-flash',
+    messages: [
+      { role: 'user', name: 'peer', content: 'hello' },
+      {
+        role: 'assistant',
+        content: 'run',
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: 'ok' },
+    ],
+    tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object', properties: {} } } }],
+  });
+
+  assert.equal(body.messages[0].name, undefined);
+  assert.equal(body.messages[1].name, undefined);
+  assert.equal(body.messages[2].name, undefined);
+  assert.equal(body.messages[2].tool_call_id, 'call_1');
+  assert.equal(body.messages[2].content, 'ok');
 });
