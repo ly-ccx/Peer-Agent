@@ -112,8 +112,9 @@ test('selected conversation rows use a hairline capsule, not a lifted card or a 
   const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
 
   for (const body of [activeBody, layeredActiveBody, layeredActiveHoverBody]) {
-    // 胶囊选中:发丝边 + 毛玻璃底,不画左侧印记,也不用投影抬升。
+    // 胶囊选中:发丝边 + 毛玻璃底。不画左侧印记,不加顶部玻璃高光,也不用投影抬升。
     assert.doesNotMatch(body, /inset\s+2px\s+0\s+0\s+var\(--azure-trace\)/);
+    assert.doesNotMatch(body, /--glass-edge-highlight/);
     assert.doesNotMatch(body, /--za-sidebar-active[-]shadow|--shadow-soft|--shadow-composer/);
     assert.match(body, /border-color:\s*var\(--za-sidebar-active-border/);
     assert.match(body, /background:\s*var\(--za-sidebar-active-bg/);

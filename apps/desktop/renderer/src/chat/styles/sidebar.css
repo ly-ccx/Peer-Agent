@@ -253,20 +253,18 @@
     box-shadow: none;
   }
 
-  /* 选中态：与 .channel-conversation-list .conversation-row.active 同一配方；不画左侧印记。 */
+  /* 选中态：毛玻璃底 + 发丝边，不画左侧印记，也不加顶部高光。 */
   .conversation-row.active {
     border-color: var(--za-sidebar-active-border, var(--chrome-hairline));
     background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));
     -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
     backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
-    box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   }
 
   /* 悬停不换选中语言:发丝边保持,毛玻璃底由基础选中规则提供。 */
   .conversation-row.active:hover {
     background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));
     border-color: var(--za-sidebar-active-border, var(--chrome-hairline));
-    box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   }
 
   .conversation-main {
