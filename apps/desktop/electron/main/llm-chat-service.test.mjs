@@ -2631,3 +2631,56 @@ describe('ephemeral verifier/explorer stream isolation', () => {
     assert.equal(patches.length, 0);
   });
 });
+
+describe('force-complete final persist', () => {
+  it('writes JSONL when goal handoff sends done through raw webContents', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const patches = [];
+    let resolveFetch;
+    globalThis.fetch = () => new Promise((resolve) => { resolveFetch = resolve; });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          addUsage: () => null,
+          patchStreamingMessage: () => true,
+          updateMessageById: (id, messageId, patch) => {
+            patches.push({ id, messageId, patch: JSON.parse(JSON.stringify(patch)) });
+            return { id, messages: [] };
+          },
+        },
+      });
+
+      const sendPromise = service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 's-force',
+        conversationId: 'c-force',
+        assistantMessageId: 'a-force',
+        webContents: { send: () => {} },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      service.forceCompleteConversationStreams('c-force', { reason: 'goal_handoff', graceMs: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.ok(
+        patches.some((entry) => entry.id === 'c-force' && entry.messageId === 'a-force'),
+        'force-complete must flush sidecar into JSONL',
+      );
+      resolveFetch(new Response(sse(['[DONE]']), { status: 200 }));
+      await sendPromise;
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+});

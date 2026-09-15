@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, after } from 'node:test';
 import { createConversationStore } from './index.mjs';
+import { selectionTextHash } from './selection-reference.mjs';
 
 /**
  * 流式 sidecar 契约（性能修复的行为锚点）：
@@ -75,5 +76,57 @@ describe('conversation-store streaming sidecar', () => {
     store.clearStreamPatch(conv.id);
     store.clearStreamPatch(conv.id);
     assert.ok(!existsSync(join(dir, `${conv.id}.stream.json`)));
+  });
+
+  it('refuses to quote sidecar-only content as committed JSONL', () => {
+    const conv = seedConversation();
+    const text = 'visible on screen';
+    store.patchStreamingMessage(conv.id, 'a1', { content: text });
+    const history = store.getPersistedConversationHistory(conv.id);
+    const selection = {
+      conversationId: conv.id,
+      messageId: 'a1',
+      blockId: 'content',
+      revision: history.contentRevision,
+      start: 0,
+      end: text.length,
+      exactText: text,
+      sourceTextHash: selectionTextHash(text),
+    };
+    const runtimeState = {
+      conversationId: conv.id,
+      contentRevision: history.contentRevision,
+      status: 'idle',
+    };
+    assert.throws(
+      () => store.resolveSelectionReference({ conversationId: conv.id, selection, runtimeState }),
+      { code: 'SOURCE_NOT_COMMITTED' },
+    );
+  });
+
+  it('quotes after final persist writes JSONL and clears sidecar', () => {
+    const conv = seedConversation();
+    const text = 'visible on screen';
+    store.patchStreamingMessage(conv.id, 'a1', { content: text });
+    store.updateMessageById(conv.id, 'a1', { content: text });
+    assert.ok(!existsSync(join(dir, `${conv.id}.stream.json`)));
+    const history = store.getPersistedConversationHistory(conv.id);
+    const selection = {
+      conversationId: conv.id,
+      messageId: 'a1',
+      blockId: 'content',
+      revision: history.contentRevision,
+      start: 0,
+      end: text.length,
+      exactText: text,
+      sourceTextHash: selectionTextHash(text),
+    };
+    const runtimeState = {
+      conversationId: conv.id,
+      contentRevision: history.contentRevision,
+      status: 'idle',
+    };
+    const reference = store.resolveSelectionReference({ conversationId: conv.id, selection, runtimeState });
+    assert.equal(reference.exactText, text);
   });
 });

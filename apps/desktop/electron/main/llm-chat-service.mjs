@@ -1832,6 +1832,11 @@ export function createLlmChatService({
           record.terminalStatus = reason === 'goal_handoff' ? 'goal_handoff' : 'done';
           record.interrupted = false;
         }
+        // UI done is not persistence. Sending through raw webContents skips the
+        // wrapWebContents persist-on-done path, so sidecar can outlive the stream
+        // and leave JSONL empty. Always flush here (idempotent if the wrapper
+        // already wrote the same final patch).
+        record.persist?.({ final: true, interrupted: false });
 
         try {
           runtimeSessions.cancelStream(streamId, reason);

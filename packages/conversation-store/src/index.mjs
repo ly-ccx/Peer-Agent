@@ -789,6 +789,13 @@ export function createConversationStore(options = {}) {
     if (!history) fail('SOURCE_MISSING');
     if (runtimeState?.conversationId !== conversationId || runtimeState?.contentRevision !== history.contentRevision
       || !['idle', 'running'].includes(runtimeState?.status)) fail('SOURCE_RUNTIME_UNKNOWN');
+    // Sidecar / excluded rows are still streaming drafts. Do not validate a
+    // screen range against empty or stale JSONL (that becomes INVALID_SELECTION_RANGE).
+    if (history.excludedFromMessageId && selection?.messageId === history.excludedFromMessageId) {
+      fail('SOURCE_NOT_COMMITTED');
+    }
+    const sidecar = readJson(streamPatchFile(conversationId));
+    if (sidecar?.version === 1 && sidecar.messageId === selection?.messageId) fail('SOURCE_NOT_COMMITTED');
     const message = history.messages.find((row) => row.id === selection?.messageId);
     if (!message || selection?.blockId !== 'content' || typeof message.content !== 'string') fail('SOURCE_NOT_SELECTABLE');
     if (runtimeState.status === 'running' && runtimeState.activeMessageId === message.id) fail('SOURCE_NOT_COMMITTED');
