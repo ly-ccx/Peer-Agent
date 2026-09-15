@@ -253,7 +253,7 @@
     box-shadow: none;
   }
 
-  /* 印记式选中：与 .channel-conversation-list .conversation-row.active 同一配方；不画左侧印记。 */
+  /* 选中态：与 .channel-conversation-list .conversation-row.active 同一配方；不画左侧印记。 */
   .conversation-row.active {
     border-color: var(--za-sidebar-active-border, var(--chrome-hairline));
     background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));

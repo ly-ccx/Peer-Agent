@@ -708,7 +708,7 @@
   box-shadow: none;
   color: var(--graphite-base);
 }
-/* 印记式选中：毛玻璃底 + 发丝边，不用投影抬升，也不画左侧印记。
+/* 选中态：毛玻璃底 + 发丝边，不用投影抬升，也不画左侧印记。
    与 .sidebar-conversation-item.active 同一配方，侧栏内只有一套选中语言。 */
 .channel-conversation-list .conversation-row.active {
   background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));

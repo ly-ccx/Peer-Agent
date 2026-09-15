@@ -147,7 +147,7 @@ test('reduced transparency drops the frosted base and keeps no side mark', () =>
   assert.match(overrideBody, /backdrop-filter:\s*blur\(var\(--blur-control/);
 });
 
-test('nested workspace session lists do not crop the selected row mark', () => {
+test('nested workspace session lists do not crop the selected row background', () => {
   const nestedListBody = ruleBody(
     sidebarCss,
     '.sidebar-workspace-tasks.channel-conversation-list',
