@@ -71,8 +71,9 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    /* 桌面基础材质由 .app-layout 统一提供，Workbench 仅承载内容。 */
-    background: transparent;
+    /* 与会话区 (.chat-surface) 同一块纸面底色，消除两栏之间的割裂感。
+       不再复用 .app-layout 的毛玻璃壳材质——右侧与中间必须是同一张纸。 */
+    background: var(--chrome-canvas, var(--za-app-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none;
@@ -1003,7 +1004,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--za-surface-1);
+    /* 与会话区同一纸面底色：webview 空白/未加载时不再露出灰底割裂面。 */
+    background: var(--chrome-canvas, var(--za-app-bg));
   }
 
   .document-view {
