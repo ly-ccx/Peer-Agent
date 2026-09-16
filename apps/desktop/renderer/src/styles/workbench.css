@@ -2266,10 +2266,11 @@
   }
 }
 
-/* 会话内任务监控卡片：ChatSurface 内的悬浮卡片，不是 Workbench tab，也不是分栏。
- * 定位：absolute 于 .chat-surface（padding-box），顶起于 40px 会话头部之下；
- * 正文让位由 .chat-surface--with-monitor 的 padding-right 完成，头部（absolute）不受影响。
- * 会话作用域合并视图：环境 + 进度 + 后台任务（内联详情）+ 产出。 */
+/* 会话内任务监控：控制中心式多卡片堆叠（用户 2026-09-16 定稿方向）。
+ * 外层 .task-monitor-rail 是无底色的堆叠容器（absolute 于 .chat-surface，头部之下）；
+ * 每个分区是独立毛玻璃小卡（.task-monitor-section）：大圆角、自身阴影、可滚动堆叠；
+ * 环境信息是 tile 半宽小卡矩阵（对齐控制中心 Wi-Fi/蓝牙形态），其余为全宽卡。
+ * 正文让位仍由 .chat-surface--with-monitor 的 padding-right 完成，头部不受影响。 */
 @layer components {
   .task-monitor-rail {
     position: absolute;
@@ -2283,11 +2284,11 @@
     width: var(--task-monitor-card, clamp(280px, 24%, 340px));
     min-height: 0;
     padding: 0;
-    overflow: hidden;
-    border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-panel, 12px);
-    background: var(--za-surface-1);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.2);
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
     color: var(--za-text);
     animation: task-monitor-card-in 220ms var(--za-ease-standard);
   }
@@ -2317,10 +2318,10 @@
     flex: 0 0 40px;
     height: 40px;
     min-height: 40px;
-    padding: 0 10px 0 14px;
-    border-bottom: 1px solid var(--chrome-hairline);
+    padding: 0 6px 0 10px;
     font-size: var(--ui-font-label, 13px);
     font-weight: 600;
+    color: var(--za-text);
     -webkit-app-region: no-drag;
   }
 
@@ -2357,25 +2358,68 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-    padding: 12px 2px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 2px 20px;
+    scrollbar-width: thin;
   }
 
-  /* 分区之间用细分隔线分节；空分区由调用侧整段不渲染（不写占位文案）。 */
+  /* ── 控制中心式小卡 ──
+   * 每个分区是一张独立毛玻璃卡：大圆角、自身阴影、独立于相邻卡片。 */
   .task-monitor-section {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     padding: 10px 12px 12px;
+    border: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 55%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 82%, transparent);
+    backdrop-filter: blur(18px) saturate(1.15);
+    -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
   }
   .task-monitor-section + .task-monitor-section {
-    border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-top: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 55%, transparent);
+  }
+
+  /* 环境信息 tile 矩阵：半宽小卡两两并排（控制中心 Wi-Fi/蓝牙形态）。 */
+  .task-monitor-tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .task-monitor-section--tile {
+    padding: 9px 10px 10px;
+    border-radius: 14px;
+  }
+  .task-monitor-tile-value {
+    overflow: hidden;
+    color: var(--za-text);
+    font-size: var(--ui-font-meta, 12px);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .task-monitor-section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 0 0 6px;
     font-size: var(--ui-font-meta, 12px);
     font-weight: 500;
     color: var(--za-text-faint);
+  }
+  .task-monitor-section-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--za-text-muted);
+  }
+  .task-monitor-section-icon svg {
+    width: 13px;
+    height: 13px;
   }
 
   /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
@@ -2454,12 +2498,12 @@
     background: var(--ui-accent, var(--azure-seal));
   }
 
-  /* 内联后台任务详情：嵌在监控栏内，视觉上从属对应行。 */
+  /* 内联后台任务详情：嵌在对应小卡内的圆角子块。 */
   .task-monitor-run-details {
     margin: 6px 0 4px;
     padding: 10px 10px 12px;
-    border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-control, var(--za-radius-sm));
-    background: var(--za-surface-1);
+    border: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 45%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 92%, transparent);
   }
 }

@@ -104,11 +104,28 @@ function ArtifactIcon({ kind }: { readonly kind: 'code' | 'file' | 'image' }) {
   );
 }
 
-/** 分区容器：空分区保留标题、不写占位文案（对齐 Qoder 空分区行为）。 */
-function MonitorSection({ title, children }: { readonly title: string; readonly children: React.ReactNode }) {
+/** 分区 = 独立小卡（控制中心式堆叠）：每张卡自带圆角/毛玻璃/阴影/内边距。
+ * variant：wide 全宽卡；tile 半宽小卡（与相邻 tile 并排，对齐控制中心 Wi-Fi/蓝牙形态）。 */
+function MonitorSection({
+  title,
+  variant = 'wide',
+  icon,
+  children,
+}: {
+  readonly title: string;
+  readonly variant?: 'wide' | 'tile';
+  readonly icon?: React.ReactNode;
+  readonly children: React.ReactNode;
+}) {
   return (
-    <section className="task-monitor-section" aria-label={title}>
-      <h3 className="task-monitor-section-title">{title}</h3>
+    <section
+      className={`task-monitor-section task-monitor-section--${variant}`}
+      aria-label={title}
+    >
+      <h3 className="task-monitor-section-title">
+        {icon ? <span className="task-monitor-section-icon">{icon}</span> : null}
+        <span>{title}</span>
+      </h3>
       {children}
     </section>
   );
@@ -236,16 +253,21 @@ export function TaskMonitorRailView({
         </button>
       </header>
       <div className="task-monitor-scroll">
-      <MonitorSection title={isZh ? '环境信息' : 'Environment'}>
+      {/* 环境信息：tile 小卡矩阵（控制中心式），分支/工作区/运行位置各自成卡。 */}
+      <div className="task-monitor-tiles">
         {environment.map((row) => (
-          <MonitorRow
+          <MonitorSection
             key={row.id}
+            title={row.label}
+            variant="tile"
             icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
-            value={row.value}
-            detail={row.detail ?? `${row.label}: ${row.value}`}
-          />
+          >
+            <div className="task-monitor-tile-value" title={row.detail ?? row.value}>
+              {row.value}
+            </div>
+          </MonitorSection>
         ))}
-      </MonitorSection>
+      </div>
 
       {overviewItem?.planProgress ? (
         <MonitorSection title={isZh ? '任务进度' : 'Progress'}>
