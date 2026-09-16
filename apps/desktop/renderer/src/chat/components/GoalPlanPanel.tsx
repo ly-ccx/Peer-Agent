@@ -1091,18 +1091,23 @@ function TaskNode({
   const hasEvidence = evidenceRefs.length > 0;
   const [expanded, setExpanded] = useState(false);
   const evidenceCount = evidenceRefs.length;
-  const summaryText = task.failureReason
-    ? task.failureReason
-    : task.blockedReason
-      ? task.blockedReason
+  // 原因字段按状态门控：failureReason 只在 failed 态展示，blockedReason 只在
+  // waiting_user 态展示。已落盘的旧数据可能在状态翻转后残留原因字段，
+  // 这里兜底过滤，真值清理在 store 的 recordTaskEvidence（唯一事实源）。
+  const effectiveFailureReason = task.status === 'failed' ? task.failureReason : undefined;
+  const effectiveBlockedReason = task.status === 'waiting_user' ? task.blockedReason : undefined;
+  const summaryText = effectiveFailureReason
+    ? effectiveFailureReason
+    : effectiveBlockedReason
+      ? effectiveBlockedReason
       : task.status === 'completed' && hasEvidence
         ? isZh
           ? `证据 ${evidenceCount} 条`
           : `${evidenceCount} evidence`
         : null;
   const canExpand =
-    !!task.failureReason ||
-    !!task.blockedReason ||
+    !!effectiveFailureReason ||
+    !!effectiveBlockedReason ||
     (task.status === 'completed' && hasEvidence) ||
     (task.subtasks?.length ?? 0) > 0;
   return (
@@ -1134,7 +1139,7 @@ function TaskNode({
       {summaryText ? (
         <div
           className={`goal-task-summary${
-            task.failureReason ? ' goal-task-summary--error' : task.blockedReason ? ' goal-task-summary--warn' : ''
+            effectiveFailureReason ? ' goal-task-summary--error' : effectiveBlockedReason ? ' goal-task-summary--warn' : ''
           }`}
         >
           {summaryText}
@@ -1142,11 +1147,11 @@ function TaskNode({
       ) : null}
       {expanded ? (
         <div className="goal-task-detail-wrap">
-          {task.failureReason ? (
-            <div className="goal-task-detail goal-task-detail--error">{task.failureReason}</div>
+          {effectiveFailureReason ? (
+            <div className="goal-task-detail goal-task-detail--error">{effectiveFailureReason}</div>
           ) : null}
-          {task.blockedReason ? (
-            <div className="goal-task-detail goal-task-detail--warn">{task.blockedReason}</div>
+          {effectiveBlockedReason ? (
+            <div className="goal-task-detail goal-task-detail--warn">{effectiveBlockedReason}</div>
           ) : null}
           {hasEvidence ? (
             <div className="goal-task-detail">
