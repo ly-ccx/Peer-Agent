@@ -2266,10 +2266,9 @@
   }
 }
 
-/* 会话内任务监控：控制中心式多卡片堆叠（用户 2026-09-16 定稿方向）。
- * 外层 .task-monitor-rail 是无底色的堆叠容器（absolute 于 .chat-surface，头部之下）；
- * 每个分区是独立毛玻璃小卡（.task-monitor-section）：大圆角、自身阴影、可滚动堆叠；
- * 环境信息是 tile 半宽小卡矩阵（对齐控制中心 Wi-Fi/蓝牙形态），其余为全宽卡。
+/* 会话内任务监控卡片：单张圆角卡片 + 内部分区标签（用户截图定稿）。
+ * 外层 .task-monitor-rail 是 absolute 定位容器（头部之下）；.task-monitor-card 是唯一卡片面：
+ * 浅底、大圆角、轻阴影；分区之间只用留白 + 细分隔线，不再每项独立成卡。
  * 正文让位仍由 .chat-surface--with-monitor 的 padding-right 完成，头部不受影响。 */
 @layer components {
   .task-monitor-rail {
@@ -2280,17 +2279,22 @@
     z-index: 25;
     display: flex;
     flex-direction: column;
-    gap: 0;
     width: var(--task-monitor-card, clamp(280px, 24%, 340px));
     min-height: 0;
-    padding: 0;
-    overflow: visible;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    color: var(--za-text);
     animation: task-monitor-card-in 220ms var(--za-ease-standard);
+  }
+
+  .task-monitor-card {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, 12px);
+    background: var(--za-surface-1);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+    color: var(--za-text);
   }
 
   @keyframes task-monitor-card-in {
@@ -2318,10 +2322,10 @@
     flex: 0 0 40px;
     height: 40px;
     min-height: 40px;
-    padding: 0 6px 0 10px;
+    padding: 0 8px 0 14px;
+    border-bottom: 1px solid var(--chrome-hairline);
     font-size: var(--ui-font-label, 13px);
     font-weight: 600;
-    color: var(--za-text);
     -webkit-app-region: no-drag;
   }
 
@@ -2360,66 +2364,30 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 0 2px 20px;
+    gap: 2px;
+    padding: 10px 6px 12px;
     scrollbar-width: thin;
   }
 
-  /* ── 控制中心式小卡 ──
-   * 每个分区是一张独立毛玻璃卡：大圆角、自身阴影、独立于相邻卡片。 */
+  /* ── 卡内分区：只用留白 + 细分隔线，不再独立成卡 ── */
   .task-monitor-section {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 10px 12px 12px;
-    border: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 55%, transparent);
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 82%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
-    -webkit-backdrop-filter: blur(18px) saturate(1.15);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+    gap: 1px;
+    padding: 6px 8px 4px;
   }
   .task-monitor-section + .task-monitor-section {
-    border-top: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 55%, transparent);
-  }
-
-  /* 环境信息 tile 矩阵：半宽小卡两两并排（控制中心 Wi-Fi/蓝牙形态）。 */
-  .task-monitor-tiles {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .task-monitor-section--tile {
-    padding: 9px 10px 10px;
-    border-radius: 14px;
-  }
-  .task-monitor-tile-value {
-    overflow: hidden;
-    color: var(--za-text);
-    font-size: var(--ui-font-meta, 12px);
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ui-border-subtle, color-mix(in srgb, var(--za-line, #2a2f3a) 40%, transparent));
   }
 
   .task-monitor-section-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 0 6px;
-    font-size: var(--ui-font-meta, 12px);
-    font-weight: 500;
+    margin: 0 0 4px;
+    font-size: var(--ui-font-meta, 11px);
+    font-weight: 600;
+    letter-spacing: 0.03em;
     color: var(--za-text-faint);
-  }
-  .task-monitor-section-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--za-text-muted);
-  }
-  .task-monitor-section-icon svg {
-    width: 13px;
-    height: 13px;
   }
 
   /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
@@ -2461,14 +2429,25 @@
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
+    color: var(--za-text);
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
+  /* 底部「查看更多 (N)」：居中弱化的文字按钮，对齐截图形态。 */
   .task-monitor-more {
-    margin: 2px 0 0 6px;
+    margin: 6px auto 2px;
+    padding: 4px 10px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
     font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
+    cursor: pointer;
+  }
+  .task-monitor-more:hover {
+    background: var(--chrome-hover);
+    color: var(--za-text);
   }
 
   .task-monitor-progress-row {

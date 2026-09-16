@@ -20,27 +20,30 @@ function assertIndependentControls(): void {
   assert.doesNotMatch(workbenchState, /'monitor'\s*\|/);
 }
 
-// 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；多卡片堆叠形态。
-test('监控区挂载在 chat-surface 内为多卡片堆叠，正文让位且头部不被挤压', () => {
+// 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；单卡+内部分区形态。
+test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头部不被挤压', () => {
   assert.match(chatSurface, /className=\{`chat-surface\$\{showEmptyHome[^}]*\}\$\{taskMonitorOpen \? ' chat-surface--with-monitor' : ''\}`\}/);
   assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,420}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
   // 卡片渲染在 .chat-surface 的 JSX 子树内（同层还有 ChatFindBar/overlays，但不在 chat-workspace 直挂）。
   assert.doesNotMatch(chatSurface, /chat-workspace">\s*<TaskMonitorRailView/);
   // 头部是 absolute 且整行（left:0;right:0），padding-right 只作用于 in-flow 正文列。
-  // 槽位变量单一事实源：卡片宽 340px + 双侧 space-3 边距，正文右缘恒等于卡片左缘减边距。
   assert.match(chatStyles, /\.chat-surface--with-monitor \{\s*--task-monitor-card: clamp\(280px, 24%, 340px\);/);
   assert.match(chatStyles, /padding-right: calc\(var\(--task-monitor-card\) \+ var\(--space-3\) \* 2\);/);
-  // 外层是无底色堆叠容器（非单一面板）；每张小卡自带圆角+阴影。
+  // 唯一卡片面：.task-monitor-card 承担底色/圆角/阴影；外层 rail 只定位。
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?position: absolute;/);
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?top: calc\(40px \+ var\(--space-2\)\);/);
-  assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?background: transparent;/);
-  assert.match(workbenchStyles, /\.task-monitor-section \{[\s\S]*?border-radius: 14px;/);
-  assert.match(workbenchStyles, /\.task-monitor-section \{[\s\S]*?backdrop-filter: blur\(18px\)/);
-  assert.match(workbenchStyles, /\.task-monitor-section \{[\s\S]*?box-shadow: 0 6px 20px/);
-  // 环境信息是 tile 半宽小卡矩阵；组件按 tile variant 渲染。
-  assert.match(monitorView, /task-monitor-tiles/);
-  assert.match(monitorView, /variant="tile"/);
-  assert.match(monitorView, /className=\{`task-monitor-section task-monitor-section--\$\{variant\}`\}/);
+  assert.match(workbenchStyles, /\.task-monitor-card \{[\s\S]*?border-radius: var\(--ui-radius-panel, 12px\);/);
+  assert.match(workbenchStyles, /\.task-monitor-card \{[\s\S]*?box-shadow: 0 10px 32px/);
+  // 分区不独立成卡：只有留白+细分隔线。
+  assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid/);
+  assert.doesNotMatch(workbenchStyles, /\.task-monitor-section \{[\s\S]{0,320}backdrop-filter/);
+  assert.doesNotMatch(workbenchStyles, /task-monitor-tiles|task-monitor-section--tile/);
+  // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。
+  assert.match(monitorView, /技能与 MCP/);
+  assert.match(monitorView, /网页查阅/);
+  assert.match(monitorView, /listSkills\(\)/);
+  assert.match(monitorView, /browserSession\?\.tabs/);
+  assert.match(monitorView, /查看更多 \(\$\{hiddenTotal\}\)/);
   assert.match(monitorView, /className="task-monitor-rail" aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);
 });
 
@@ -64,8 +67,8 @@ test('并存宽度钳制按卡片宿主选择且不改持久化宽度', () => {
   assert.match(workbenchStyles, /calc\(100vw[\s\S]{0,140}- 372px - 360px\)/);
 });
 
-test('环境胶囊继续留在 composer，详细环境进入监控小卡矩阵', () => {
+test('环境胶囊继续留在 composer，详细环境进入监控卡分区', () => {
   assert.match(chatSurface, /composer-env-capsule-dropdown/);
   assert.match(monitorView, /projectTaskMonitorEnvironment/);
-  assert.match(monitorView, /task-monitor-tile-value/);
+  assert.match(monitorView, /环境信息/);
 });
