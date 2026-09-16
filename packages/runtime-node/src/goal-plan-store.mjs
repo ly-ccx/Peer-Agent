@@ -3575,14 +3575,31 @@ export function createGoalPlanStore({
     const now = new Date().toISOString();
     const { tasks, found } = updateTaskInTree(plan.tasks, taskId, (t) => {
       const nextRefs = mergedRefs(t.evidenceRefs, change.evidenceRefs);
+      const nextStatus = status ?? t.status;
       const updated = {
         ...t,
-        status: status ?? t.status,
+        status: nextStatus,
         evidenceRefs: nextRefs,
       };
       if (change.result !== undefined) updated.result = change.result;
       if (change.failureReason !== undefined) updated.failureReason = change.failureReason;
       if (change.blockedReason !== undefined) updated.blockedReason = change.blockedReason;
+      // 残留原因字段治理：状态翻转后，与新状态矛盾的旧原因不应跨过状态变更存活。
+      // - 转入 completed 时清除旧 failureReason（失败后重试成功的翻转，即
+      //   “已完成却还展示失败原因”缺陷的真值修复）；failed→running 的重试
+      //   保留 failureReason 作为失败审计（见既有契约测试『保留失败 Evidence』）。
+      // - 离开 waiting_user 时清除旧 blockedReason（阻塞解除后旧原因不再适用）。
+      // 显式传入的 change.failureReason / change.blockedReason 优先（上面已先写入），
+      // 此处仅清除调用方未显式声明的残留值。cancelOpenTasks 用 blockedReason 记录
+      // 取消原因（cancelled 态）不经此路径，不受影响。
+      if (nextStatus === TERMINAL_OK && updated.failureReason !== undefined
+        && change.failureReason === undefined) {
+        delete updated.failureReason;
+      }
+      if (nextStatus !== BLOCKED && updated.blockedReason !== undefined
+        && change.blockedReason === undefined) {
+        delete updated.blockedReason;
+      }
       if (status === 'running' && !t.startedAt) updated.startedAt = now;
       if (status === TERMINAL_OK || status === TERMINAL_FAIL || status === TERMINAL_CANCEL) {
         updated.completedAt = now;
@@ -3614,13 +3631,22 @@ export function createGoalPlanStore({
             : 'pending';
       const parent = getPlan(updatedPlan.parentPlanId);
       if (parent) {
-        const linked = updateTaskInTree(parent.tasks, updatedPlan.sourceTaskId, (task) => ({
-          ...task,
-          status: delegatedStatus,
-          executionMode: 'delegated',
-          childPlanIds: [...new Set([...(task.childPlanIds || []), updatedPlan.planId])],
-          ...(childFailed ? { blockedReason: `派生子目标 ${updatedPlan.title} 未成功完成` } : {}),
-        }));
+        const linked = updateTaskInTree(parent.tasks, updatedPlan.sourceTaskId, (task) => {
+          const linkedTask = {
+            ...task,
+            status: delegatedStatus,
+            executionMode: 'delegated',
+            childPlanIds: [...new Set([...(task.childPlanIds || []), updatedPlan.planId])],
+          };
+          if (childFailed) {
+            linkedTask.blockedReason = `派生子目标 ${updatedPlan.title} 未成功完成`;
+          } else if (linkedTask.blockedReason !== undefined) {
+            // 子目标不再失败时，清除上一轮派生链接写入的残留 blockedReason，
+            // 避免父任务状态已翻转（running/waiting_user）仍展示旧阻塞原因。
+            delete linkedTask.blockedReason;
+          }
+          return linkedTask;
+        });
         if (linked.found) {
           persist({ ...parent, tasks: linked.tasks, updatedAt: now });
           const relationEventType = childFailed
