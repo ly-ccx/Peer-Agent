@@ -215,7 +215,7 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
         {previewOpen ? (
           <LocalImageLightbox
             dataUrl={previewDataUrl}
-            name={raw}
+            path={absPath}
             onClose={() => setPreviewOpen(false)}
           />
         ) : null}
@@ -242,37 +242,126 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   );
 }
 
+/**
+ * 暗房式图片查看器：图片带 alpha 感知投影浮在磨砂遮罩上，
+ * 底部胶囊工具条提供尺寸、缩放切换、在文件管理器中显示、复制路径与关闭。
+ */
 function LocalImageLightbox({
   dataUrl,
-  name,
+  path,
   onClose,
 }: {
   dataUrl: string;
-  name: string;
+  path: string;
   onClose: () => void;
 }) {
+  const isZh = navigator.language.toLowerCase().startsWith('zh');
+  const [zoomed, setZoomed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+
+  const zoomLabel = zoomed
+    ? (isZh ? '适应窗口' : 'Fit to window')
+    : (isZh ? '查看原始尺寸' : 'View actual size');
+
+  const handleCopyPath = () => {
+    void navigator.clipboard.writeText(path).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
     <Overlay
-      ariaLabel={name}
+      ariaLabel={fileName}
       backdropClassName="markdown-local-image-lightbox"
-      panelClassName="markdown-local-image-lightbox-figure"
+      panelClassName={`markdown-local-image-lightbox-panel${zoomed ? ' is-zoomed' : ''}`}
       onClose={onClose}
     >
       {({ requestClose }) => (
-        <figure>
-          <img src={dataUrl} alt={name} />
-          <figcaption>
-            <span className="markdown-local-image-lightbox-name">{name}</span>
-            <button
-              type="button"
-              className="markdown-local-image-lightbox-close"
-              onClick={requestClose}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </figcaption>
-        </figure>
+        <>
+          <div className="markdown-local-image-lightbox-stage">
+            <img
+              src={dataUrl}
+              alt={fileName}
+              draggable={false}
+              title={zoomLabel}
+              onClick={() => setZoomed((value) => !value)}
+              onLoad={(event) => {
+                const img = event.currentTarget;
+                setDims({ w: img.naturalWidth, h: img.naturalHeight });
+              }}
+            />
+          </div>
+          <div className="markdown-local-image-lightbox-bar">
+            <div className="markdown-local-image-lightbox-info">
+              <span className="markdown-local-image-lightbox-name">{fileName}</span>
+              <span className="markdown-local-image-lightbox-path" title={path}>
+                <bdi>{path}</bdi>
+              </span>
+            </div>
+            <div className="markdown-local-image-lightbox-actions">
+              {dims ? (
+                <span className="markdown-local-image-lightbox-dims">{dims.w} × {dims.h}</span>
+              ) : null}
+              <button
+                type="button"
+                title={zoomLabel}
+                aria-label={zoomLabel}
+                onClick={() => setZoomed((value) => !value)}
+              >
+                {zoomed ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
+                  </svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                title={isZh ? '在文件管理器中显示' : 'Reveal in file manager'}
+                aria-label={isZh ? '在文件管理器中显示' : 'Reveal in file manager'}
+                onClick={() => void clientApi.openPath(path, undefined, { mode: 'reveal' })}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title={copied ? (isZh ? '已复制' : 'Copied') : (isZh ? '复制路径' : 'Copy path')}
+                aria-label={copied ? (isZh ? '已复制' : 'Copied') : (isZh ? '复制路径' : 'Copy path')}
+                onClick={handleCopyPath}
+              >
+                {copied ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                )}
+              </button>
+              <span className="markdown-local-image-lightbox-divider" aria-hidden="true" />
+              <button
+                type="button"
+                title={isZh ? '关闭预览' : 'Close preview'}
+                aria-label={isZh ? '关闭预览' : 'Close preview'}
+                onClick={requestClose}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </Overlay>
   );

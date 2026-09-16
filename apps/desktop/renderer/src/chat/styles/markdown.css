@@ -344,59 +344,170 @@
   }
 }
 
-/* Lightbox sits outside .markdown-content stacking; fixed to viewport. */
+/* 暗房式图片查看器：Overlay 基座负责入退场动效与遮罩，修饰类只调遮罩观感。
+   z-index 1200：压住 chat-surface 内的浮动层（composer、回到底部等 1200/1201）。 */
 .markdown-local-image-lightbox {
-  position: fixed;
-  inset: 0;
   z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(5, 7, 10, 0.74);
+  backdrop-filter: blur(28px) saturate(1.25);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
   cursor: zoom-out;
 }
 
-.markdown-local-image-lightbox-figure {
-  margin: 0;
-  max-width: min(96vw, 1100px);
-  max-height: 92vh;
+/* 面板只作透明容器：图片自带投影浮在遮罩上，不套基座的卡片 chrome。 */
+.pa-overlay-panel.markdown-local-image-lightbox-panel {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 14px;
+  max-width: min(94vw, 1280px);
+  max-height: 94vh;
   cursor: default;
 }
 
-.markdown-local-image-lightbox-figure img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(92vh - 40px);
-  object-fit: contain;
-  border-radius: 8px;
-  background: #111;
+.pa-overlay-panel.markdown-local-image-lightbox-panel::before {
+  display: none;
 }
 
-.markdown-local-image-lightbox-figure figcaption {
+.pa-overlay-panel.markdown-local-image-lightbox-panel.is-zoomed {
+  max-width: 94vw;
+}
+
+.markdown-local-image-lightbox-stage {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+}
+
+.markdown-local-image-lightbox-stage img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  max-height: calc(94vh - 76px);
+  object-fit: contain;
+  cursor: zoom-in;
+  user-select: none;
+  /* drop-shadow 跟随 alpha 通道：圆角/透明截图按可见轮廓投影，不会像 box-shadow 画出矩形底。 */
+  filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
+}
+
+.markdown-local-image-lightbox-panel.is-zoomed .markdown-local-image-lightbox-stage {
+  overflow: auto;
+  width: 100%;
+  max-height: calc(94vh - 76px);
+}
+
+.markdown-local-image-lightbox-panel.is-zoomed .markdown-local-image-lightbox-stage img {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
+}
+
+/* 底部胶囊工具条：文件名 + 路径（开头省略）+ 尺寸与操作。 */
+.markdown-local-image-lightbox-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: #f5f5f5;
-  font-size: 12px;
+  gap: 16px;
+  max-width: min(92vw, 760px);
+  padding: 8px 10px 8px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(22, 25, 32, 0.66);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: #edf1f6;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .markdown-local-image-lightbox-bar {
+    background: #16181f;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+.markdown-local-image-lightbox-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .markdown-local-image-lightbox-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.markdown-local-image-lightbox-path {
+  max-width: 340px;
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: rgba(237, 241, 246, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* rtl 省略：截断开头的目录层级，保住末尾文件名可见。 */
+  direction: rtl;
+  text-align: left;
+}
+
+.markdown-local-image-lightbox-path bdi {
+  unicode-bidi: isolate;
+}
+
+.markdown-local-image-lightbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.markdown-local-image-lightbox-dims {
+  padding: 0 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(237, 241, 246, 0.55);
   white-space: nowrap;
 }
 
-.markdown-local-image-lightbox-close {
+.markdown-local-image-lightbox-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: 0;
+  border-radius: 8px;
   background: transparent;
-  color: #fff;
-  font-size: 22px;
-  line-height: 1;
+  color: rgba(237, 241, 246, 0.82);
   cursor: pointer;
-  padding: 0 4px;
+  transition:
+    background var(--za-motion-fast) ease,
+    color var(--za-motion-fast) ease;
+}
+
+.markdown-local-image-lightbox-actions button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.markdown-local-image-lightbox-actions button:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.markdown-local-image-lightbox-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: rgba(255, 255, 255, 0.14);
 }
