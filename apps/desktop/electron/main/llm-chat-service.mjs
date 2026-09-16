@@ -54,6 +54,7 @@ import { createStreamProfiler, isStreamProfilingEnabled } from './stream-profile
 import { createUsageRequestLog } from './usage-request-log.mjs';
 import { estimateUsageCostUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
+import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -748,10 +749,13 @@ function wrapWebContentsForRuntimeEvents(
           // 终态重复写会造成双写,据 persistKey 去重。
           && contextSnapshotPersistKey(payload.contextAccounting)
             !== streamRecord.persistedContextSnapshotKey) {
-          conversationStore.updateContextSnapshot(
-            streamRecord.conversationId,
-            payload.contextAccounting,
-          );
+          persistContextAccounting({
+            store: conversationStore,
+            conversationId: streamRecord.conversationId,
+            streamId: streamRecord.streamId,
+            snapshot: payload.contextAccounting,
+            emit: emitRuntimeEvent,
+          });
         }
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
@@ -1223,7 +1227,13 @@ export function createLlmChatService({
       let accountingFlushTimer = null;
       const persistAccountingNow = (snapshot) => {
         try {
-          conversationStore.updateContextSnapshot(streamRecord.conversationId, snapshot);
+          persistContextAccounting({
+            store: conversationStore,
+            conversationId: streamRecord.conversationId,
+            streamId,
+            snapshot,
+            emit: emitRuntimeEvent,
+          });
           streamRecord.persistedContextSnapshotKey = contextSnapshotPersistKey(snapshot);
         } catch (error) {
           console.warn('[llm-chat] failed to persist observed context snapshot:', error?.message || error);
@@ -1241,17 +1251,32 @@ export function createLlmChatService({
       };
       // 终态需要把窗口内最后一次观测值补写出去，所以挂到 streamRecord 上供收口点调用。
       streamRecord.flushPendingAccounting = flushPendingAccounting;
+      let latestAccountingCompactionEpoch = 0;
       const emitRuntimeEventPersistingAccounting = (event) => {
+        const advancedCompaction = event?.type === 'context.accounting'
+          && event.snapshot?.version === 1
+          && event.snapshot.compactionEpoch > latestAccountingCompactionEpoch;
+        if (advancedCompaction) {
+          latestAccountingCompactionEpoch = event.snapshot.compactionEpoch;
+          // A pre-compaction observation must never be flushed into the new
+          // history. Publish even an unknown post-compaction snapshot so the
+          // renderer can invalidate its old epoch without inventing a percent.
+          pendingAccountingSnapshot = null;
+          if (accountingFlushTimer != null) {
+            clearTimeout(accountingFlushTimer);
+            accountingFlushTimer = null;
+          }
+        }
         if (
           event?.type === 'context.accounting'
           && event.snapshot?.version === 1
-          && event.snapshot.pressureSource === 'provider_usage'
+          && (event.snapshot.pressureSource === 'provider_usage' || advancedCompaction)
           && streamRecord.conversationId
           && !streamRecord.ephemeral
           && typeof conversationStore?.updateContextSnapshot === 'function'
         ) {
           const now = Date.now();
-          if (now - lastAccountingPersistAtMs >= ACCOUNTING_PERSIST_MIN_INTERVAL_MS) {
+          if (advancedCompaction || now - lastAccountingPersistAtMs >= ACCOUNTING_PERSIST_MIN_INTERVAL_MS) {
             pendingAccountingSnapshot = null;
             persistAccountingNow(event.snapshot);
           } else {

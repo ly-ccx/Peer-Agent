@@ -564,6 +564,8 @@ describe('llm chat service tool materialization', () => {
     const events = [];
     const capturedBodies = [];
     const latestUser = 'please answer the latest request exactly';
+    const accountingEvents = [];
+    const savedAccounting = [];
     let automationContextStatus = 'collecting';
 
     globalThis.fetch = async (_url, init) => {
@@ -598,7 +600,13 @@ describe('llm chat service tool materialization', () => {
           }],
           getDecryptedApiKey: () => 'test-key',
         },
+        emitRuntimeEvent: (event) => accountingEvents.push(event),
         conversationStore: {
+          updateContextSnapshot(id, snapshot) {
+            const contextSnapshot = { ...snapshot, conversationId: id, contentRevision: 42 };
+            savedAccounting.push(contextSnapshot);
+            return { id, contextSnapshot };
+          },
           getConversation: () => ({
             contentRevision: 0,
             automationCreateContext: {
@@ -641,6 +649,10 @@ describe('llm chat service tool materialization', () => {
     }
 
     assert.equal(capturedBodies.length, 2);
+    const firstNewEpoch = savedAccounting.findIndex((snapshot) => snapshot.compactionEpoch > 0);
+    assert.ok(firstNewEpoch >= 0);
+    assert.ok(savedAccounting.slice(firstNewEpoch).every((snapshot) => snapshot.compactionEpoch > 0),
+      'old pending accounting must not be flushed on terminal after compaction');
     const summaryBodyText = JSON.stringify(capturedBodies[0]);
     assert.doesNotMatch(summaryBodyText, new RegExp(latestUser));
     const compactionSystemPrompt = capturedBodies[0].messages.find((message) => message.role === 'system')?.content ?? '';
@@ -663,6 +675,12 @@ describe('llm chat service tool materialization', () => {
     );
     const deltaIndex = events.findIndex((event) => event.channel === 'chat:stream:delta');
     const doneIndex = events.findIndex((event) => event.channel === 'chat:stream:done');
+    const postCompaction = savedAccounting.find((snapshot) => snapshot.compactionEpoch > 0);
+    assert.ok(postCompaction, 'new compaction epoch must be persisted even without provider usage');
+    assert.equal(postCompaction.authoritativeInputTokens, null);
+    assert.equal(postCompaction.percent, null, 'unknown must not reuse the pre-compaction percentage');
+    assert.ok(accountingEvents.some((event) => event.type === 'context.accounting'
+      && event.snapshot === postCompaction), 'accepted new epoch must reach live consumers');
     assert.ok(compactionDoneIndex >= 0, 'expected compaction done event');
     assert.ok(deltaIndex > compactionDoneIndex, 'expected model delta after compaction done');
     assert.ok(doneIndex > compactionDoneIndex, 'expected stream done after compaction done');
@@ -2300,6 +2318,210 @@ describe('llm chat service main-side persistence (方案 3)', () => {
       getDecryptedApiKey: () => 'test-key',
     };
   }
+
+  it('publishes the accepted storage revision through real service terminal persistence', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const accepted = [];
+    const events = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'done' } }] },
+      { choices: [{ delta: {} }], usage: { prompt_tokens: 100, completion_tokens: 1 } },
+      '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: openaiProviderStore(),
+        emitRuntimeEvent: (event) => events.push(event),
+        conversationStore: {
+          addUsage: () => null,
+          updateMessageById: () => ({ id: 'accounting-service' }),
+          updateContextSnapshot(id, snapshot) {
+            const contextSnapshot = { ...snapshot, conversationId: id, contentRevision: 42 };
+            accepted.push(contextSnapshot);
+            return { id, contextSnapshot };
+          },
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 'accounting-service-stream', conversationId: 'accounting-service',
+        assistantMessageId: 'assistant', webContents: { send() {} },
+      });
+      assert.ok(accepted.length > 0, 'service must actually persist accounting');
+      const published = events.filter((event) => event.type === 'context.accounting'
+        && event.snapshot.contentRevision === 42);
+      assert.equal(published.length, accepted.length, 'every write publishes its accepted result');
+      assert.deepEqual(published.at(-1).snapshot, accepted.at(-1));
+      assert.equal(published.at(-1).streamId, 'accounting-service-stream');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('cancels a queued old observation across automatic compaction before timer and terminal flush', async () => {
+    resetCircuitBreaker();
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const timers = new Set();
+    const writes = [];
+    const trace = [];
+    let requests = 0;
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'peer-pending-compact-'));
+    const file = path.join(dir, 'fixture.txt');
+    writeFileSync(file, 'isolated tool result');
+    // Observe real scheduling, including elapsed-time-adjusted delays; do not
+    // assume the throttle always schedules exactly 2000 ms.
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      const handle = originalSetTimeout(callback, delay, ...args);
+      if (new Error().stack?.includes('emitRuntimeEventPersistingAccounting')) {
+        timers.add(handle);
+        trace.push({ type: 'queued', delay });
+      }
+      return handle;
+    };
+    globalThis.clearTimeout = (handle) => {
+      if (timers.delete(handle)) trace.push({ type: 'cancelled' });
+      return originalClearTimeout(handle);
+    };
+    globalThis.fetch = async () => {
+      requests += 1;
+      if (requests === 1) return new Response(sse([
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: 'read-pending-fixture', type: 'function',
+          function: { name: 'read_file', arguments: JSON.stringify({ path: file }) } }] } }],
+          usage: { prompt_tokens: 110000, completion_tokens: 10 } },
+        '[DONE]',
+      ]), { status: 200 });
+      if (requests === 2) return new Response(sse([
+        { choices: [{ delta: { content: 'Summary of previous discussion; continue the isolated request.' } }] }, '[DONE]',
+      ]), { status: 200 });
+      assert.equal(requests, 3, 'tool request, compaction summary, post-compaction request');
+      trace.push({ type: 'new-request' });
+      // Let any uncancelled old throttle callback fire while the new epoch is
+      // live, then exercise terminal flush as well.
+      await new Promise((resolve) => originalSetTimeout(resolve, 2200));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'finished after compaction' } }],
+          usage: { prompt_tokens: 10000, completion_tokens: 2 } }, '[DONE]',
+      ]), { status: 200 });
+    };
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          ...openaiProviderStore(),
+          listProviders: () => [{ ...openaiProviderStore().listProviders()[0], contextWindow: 128000 }],
+        },
+        conversationStore: {
+          getConversation: () => ({ contentRevision: 0, messages: [],
+            contextSnapshot: observedContextSnapshot({ conversationId: 'pending-compact',
+              modelKey: 'p1::test-model', inputTokens: 1000, contextWindow: 128000 }) }),
+          updateContextSnapshot(id, snapshot) {
+            const contextSnapshot = { ...snapshot, contentRevision: 42, conversationId: id };
+            writes.push(contextSnapshot);
+            trace.push({ type: 'write', epoch: snapshot.compactionEpoch, percent: snapshot.percent });
+            return { id, contextSnapshot };
+          },
+        },
+      });
+      await service.sendMessage({
+        messages: [
+          { role: 'user', content: `old question ${'x'.repeat(32000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(32000)}` },
+          { role: 'user', content: 'Read the isolated fixture and continue.' },
+        ],
+        workspacePath: dir, streamId: 'pending-compact-stream', conversationId: 'pending-compact',
+        webContents: { send(channel, payload) {
+          if (channel === 'chat:tool:permission-request') service.resolveToolPermission({
+            toolCallId: payload.call.toolCallId, granted: true, duration: 'scope',
+            scope: payload.call.capabilityId, decidedAt: new Date().toISOString(),
+          });
+        } },
+      });
+      const firstNew = trace.findIndex((event) => event.type === 'write' && event.epoch > 0);
+      const queued = trace.findIndex((event) => event.type === 'queued');
+      const cancelled = trace.findIndex((event) => event.type === 'cancelled');
+      assert.ok(queued >= 0 && cancelled > queued && firstNew > cancelled, JSON.stringify(trace));
+      const firstNewWrite = writes.findIndex((snapshot) => snapshot.compactionEpoch > 0);
+      assert.ok(writes.slice(firstNewWrite).every((snapshot) => snapshot.compactionEpoch > 0), JSON.stringify(trace));
+      assert.equal(requests, 3);
+      console.log('PENDING_COMPACTION_TRACE', JSON.stringify(trace));
+    } finally {
+      globalThis.fetch = previousFetch;
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      for (const timer of timers) originalClearTimeout(timer);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('publishes accepted accounting on the real throttle timer before the stream ends', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const accepted = [];
+    const events = [];
+    let controller;
+    const encoder = new TextEncoder();
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      start(value) { controller = value; },
+    }), { status: 200 });
+    let sending;
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: openaiProviderStore(),
+        emitRuntimeEvent: (event) => events.push(event),
+        conversationStore: {
+          addUsage: () => null,
+          updateMessageById: () => ({ id: 'timer-accounting' }),
+          getConversation: () => ({
+            id: 'timer-accounting', contentRevision: 0, messages: [],
+            contextSnapshot: observedContextSnapshot({
+              conversationId: 'timer-accounting', modelKey: 'p1::test-model',
+              inputTokens: 100, contextWindow: 100000,
+            }),
+          }),
+          updateContextSnapshot(id, snapshot) {
+            const contextSnapshot = { ...snapshot, conversationId: id, contentRevision: 42 };
+            accepted.push(contextSnapshot);
+            return { id, contextSnapshot };
+          },
+        },
+      });
+      sending = service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 'timer-accounting-stream', conversationId: 'timer-accounting',
+        assistantMessageId: 'assistant', webContents: { send() {} },
+      });
+      const waitFor = async (predicate) => {
+        const deadline = Date.now() + 5000;
+        while (!predicate()) {
+          assert.ok(Date.now() < deadline, 'timed out waiting for accounting publication');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      };
+      await waitFor(() => controller != null);
+      controller.enqueue(encoder.encode(sse([
+        { choices: [{ delta: { content: 'first' } }], usage: { prompt_tokens: 100, completion_tokens: 1 } },
+      ])));
+      await waitFor(() => accepted.length > 0);
+      const before = accepted.length;
+      controller.enqueue(encoder.encode(sse([{ choices: [{ delta: { content: ' more' } }] }])));
+      await waitFor(() => accepted.length > before);
+      const published = events.filter((event) => event.type === 'context.accounting'
+        && event.snapshot.contentRevision === 42);
+      assert.equal(published.length, accepted.length);
+      assert.deepEqual(published.at(-1).snapshot, accepted.at(-1));
+      assert.equal(published.at(-1).streamId, 'timer-accounting-stream');
+    } finally {
+      if (controller) {
+        controller.enqueue(encoder.encode(sse(['[DONE]'])));
+        controller.close();
+      }
+      if (sending) await sending;
+      globalThis.fetch = previousFetch;
+    }
+  });
 
   it('persists assistant content+segments by id on done, even with no visible session (background turn)', async () => {
     const { createLlmChatService } = await loadService();

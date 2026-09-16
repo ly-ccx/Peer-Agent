@@ -36,6 +36,7 @@ import { reduceCompactionLifecycle } from '../state/compactionLifecycle';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
 import { IDLE_COMPACTION_STATE } from '../state/types';
+import { acceptAccountingSnapshot } from '../state/contextAccountingSnapshot';
 import {
   EMPTY_VISIBLE_MODEL_RESPONSE_ERROR,
   getTextContent,
@@ -148,19 +149,6 @@ function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void
       interrupted: m.interrupted,
     })),
   });
-}
-
-function acceptAccountingSnapshot(
-  previous: ContextAccountingSnapshot | null,
-  next: ContextAccountingSnapshot,
-): ContextAccountingSnapshot {
-  if (previous == null || previous.modelKey !== next.modelKey) return next;
-  if (next.contentRevision < previous.contentRevision) return previous;
-  if (
-    next.contentRevision === previous.contentRevision
-    && next.revision <= previous.revision
-  ) return previous;
-  return next;
 }
 
 /**
