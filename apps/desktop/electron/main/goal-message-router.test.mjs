@@ -485,6 +485,42 @@ test('applyGoalMessageRoute: paused verbal-stop 的跟进会 resume 并 kick Run
   assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'append']);
 });
 
+test('applyGoalMessageRoute: interrupted Goal 说继续会调 resumeRunner', () => {
+  const interruptedPlan = {
+    planId: 'goal-interrupted',
+    status: 'interrupted',
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    runner: {
+      enabled: true,
+      status: 'failed',
+      phase: 'blocked',
+      interruption: { source: 'stream_error', reason: 'socket disconnected' },
+    },
+  };
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan: interruptedPlan });
+  const calls = [];
+  const result = applyGoalMessageRoute({
+    route,
+    activeGoalPlan: interruptedPlan,
+    goalPlanStore: {
+      resumeRunner(planId, patch) {
+        calls.push(['resume', planId, patch]);
+        return { ...interruptedPlan, status: 'executing' };
+      },
+      appendRunEvent(planId, event) {
+        calls.push(['append', planId, event.type]);
+        return { ...interruptedPlan, status: 'executing' };
+      },
+    },
+  });
+
+  assert.equal(route.intent, 'resume');
+  assert.equal(result.type, 'kick_stalled_runner');
+  assert.equal(result.goalPlanId, 'goal-interrupted');
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'append']);
+});
+
 test('applyGoalMessageRoute: running 但 0 回合的继续会改成 kick_stalled_runner', () => {
   const stalledPlan = {
     planId: 'goal-stalled',

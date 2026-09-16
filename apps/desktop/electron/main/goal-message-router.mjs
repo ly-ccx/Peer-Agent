@@ -215,6 +215,7 @@ export function applyGoalMessageRoute({
     && route.intent !== 'correction'
     && (
       activeGoalPlan?.status === 'paused'
+      || activeGoalPlan?.status === 'interrupted'
       || activeGoalPlan?.runner?.status === 'paused'
     );
   if (

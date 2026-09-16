@@ -1796,9 +1796,11 @@ test('未消费的 stream_error 中断经过 runner 落盘后保持 interrupted�
   assert.equal(interrupted.runner.interruption.source, 'stream_error');
 
   // 普通 resume（intake 中断→继续路径）：中断标记保留，避免 decideIntakeConvergence
-  // 把它误判为 pure_qa 而静默删除；未消费标记时计划保持 interrupted（等待显式恢复）。
+  // 把它误判为 pure_qa 而静默删除。Runner 一旦 running，计划必须回到 executing，
+  // 不能再同时显示「已中断」和「运行中」。
   const kept = store.resumeRunner(created.planId, { phase: 'act' });
-  assert.equal(kept.status, 'interrupted');
+  assert.equal(kept.status, 'executing');
+  assert.equal(kept.runner.status, 'running');
   assert.equal(kept.runner.interruption.source, 'stream_error');
 
   // 用户显式恢复失败计划（consumedInterruption:true）：消费并清除中断标记，恢复执行。
@@ -1806,6 +1808,68 @@ test('未消费的 stream_error 中断经过 runner 落盘后保持 interrupted�
   assert.equal(resumed.status, 'executing');
   assert.equal(resumed.runner.status, 'running');
   assert.equal(resumed.runner.interruption, undefined);
+});
+
+test('未消费中断且 Runner 继续跑时，plan.status 变为 executing', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+  assert.equal(store.getPlan(created.planId).status, 'interrupted');
+  assert.equal(store.getPlan(created.planId).timing.activeSegmentStartedAt, undefined);
+
+  const continued = store.setRunnerState(created.planId, {
+    status: 'running',
+    phase: 'act',
+  });
+  assert.equal(continued.status, 'executing');
+  assert.equal(continued.runner.status, 'running');
+  assert.equal(continued.runner.interruption.source, 'stream_error');
+  assert.ok(continued.timing.activeSegmentStartedAt);
+});
+
+test('未消费中断且叶子被标为 running 时，plan.status 变为 executing', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+  assert.equal(store.getPlan(created.planId).status, 'interrupted');
+
+  const continued = store.recordTaskEvidence(created.planId, 't2a', { status: 'running' });
+  assert.equal(continued.status, 'executing');
+  assert.equal(continued.runner.interruption.source, 'stream_error');
+});
+
+test('未消费中断且工作已停时，pending 叶子不能把计划钉回 executing', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+  const interrupted = store.getPlan(created.planId);
+  assert.equal(interrupted.status, 'interrupted');
+  assert.equal(interrupted.tasks[1].subtasks[0].status, 'pending');
+  assert.equal(store.getPlan(created.planId).status, 'interrupted');
 });
 
 test('叶子全部 completed 后，过期 interruption 不能把计划钉回 interrupted', () => {
@@ -2250,9 +2314,9 @@ test('upsertGoalContract: 只在 intake 升级时发出 goal-accepted，Runner �
 test('upsertGoalContract: 升级消费陈旧 stream 中断，goal-accepted 后 Runner 闸门放行（回归：turnCount=0 停摆）', () => {
   // 复刻事故现场（plan 464f9554）：
   // 1. goal 首答建立 intake 契约；2. 普通回合流错误写入 recoverable:false 中断，
-  //    persist 的 hasUnconsumedInterruption 不变量把契约派生为 failed；
+  //    persist 的 hasUnconsumedInterruption 不变量把契约派生为 interrupted；
   // 3. 用户续聊后模型调用 goal_create_plan 升级 intake → accepted_goal。
-  // 修复前：升级写入被不变量压回 failed → auto-start 闸门拒绝 → Runner 永不启动。
+  // 修复前：升级写入被不变量压回 interrupted/failed → auto-start 闸门拒绝 → Runner 永不启动。
   // 修复后：升级是全新的目标接受决策，陈旧中断被原子消费，闸门按 accepted 放行。
   const intake = store.createIntakeContract({
     conversationId: 'conv-stale-interruption',
@@ -2271,7 +2335,7 @@ test('upsertGoalContract: 升级消费陈旧 stream 中断，goal-accepted 后 R
     },
   });
   const poisoned = store.getPlan(intake.planId);
-  assert.equal(poisoned.status, 'failed', '中断写入后契约被毒化为 failed（事故现场）');
+  assert.equal(poisoned.status, 'interrupted', '中断写入后契约被钉为 interrupted（事故现场）');
   assert.equal(poisoned.runner.interruption.source, 'stream_interrupted');
 
   const upgraded = store.upsertGoalContract('conv-stale-interruption', {
@@ -2582,6 +2646,22 @@ test('applyGoalTimingTransition: first executing opens segment; pause closes; re
   assert.equal(completed.activeAccumulatedMs, 30_000);
   assert.equal(completed.activeMs, 30_000);
   assert.equal(completed.wallClockMs, 60_000);
+});
+
+test('applyGoalTimingTransition: interrupted closes the live segment; resume reopens it', () => {
+  const t0 = '2026-01-01T00:00:00.000Z';
+  const t1 = '2026-01-01T00:00:10.000Z';
+  const t2 = '2026-01-01T00:00:40.000Z';
+
+  const started = applyGoalTimingTransition(undefined, 'approved', 'executing', t0);
+  const interrupted = applyGoalTimingTransition(started, 'executing', 'interrupted', t1);
+  assert.equal(interrupted.activeSegmentStartedAt, undefined);
+  assert.equal(interrupted.activeAccumulatedMs, 10_000);
+
+  const resumed = applyGoalTimingTransition(interrupted, 'interrupted', 'executing', t2);
+  assert.equal(resumed.startedAt, t0);
+  assert.equal(resumed.activeSegmentStartedAt, t2);
+  assert.equal(resumed.activeAccumulatedMs, 10_000);
 });
 
 test('normalizeGoalTiming: empty / invalid timing becomes undefined', () => {

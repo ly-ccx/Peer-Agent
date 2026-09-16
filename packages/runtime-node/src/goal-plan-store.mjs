@@ -23,6 +23,8 @@ import {
   collectHeldEvidenceRefs,
   isAcceptanceClosePatch,
 } from '@peer-agent/protocol';
+import { normalizeVisualRepair } from './goal-visual-repair.mjs';
+import { projectUiCompletion } from './goal-ui-completion.mjs';
 
 /**
  * Goal 计划持久化 store —— 见 Goal 模式设计。
@@ -219,8 +221,8 @@ const LEAF_TERMINAL_STATUSES = new Set([TERMINAL_OK, TERMINAL_FAIL, TERMINAL_CAN
 
 /** Plan 终态：关闭 active segment 并落盘 duration。 */
 const PLAN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
-/** 停表状态：人在回路 / 暂停。 */
-const PLAN_PAUSE_STATUSES = new Set(['paused']);
+/** 停表状态：人在回路 / 暂停 / 已中断挂起。 */
+const PLAN_PAUSE_STATUSES = new Set(['paused', 'interrupted']);
 /** 开表状态：真正在跑。 */
 const PLAN_ACTIVE_STATUSES = new Set(['executing']);
 /**
@@ -479,6 +481,18 @@ export function aggregateProgress(tasks) {
  * @param {Array} tasks 顶层子任务树
  * @returns {string} 派生后的 plan.status
  */
+function hasRunningLeaf(nodes) {
+  for (const t of nodes || []) {
+    const children = Array.isArray(t.subtasks) ? t.subtasks : [];
+    if (children.length > 0) {
+      if (hasRunningLeaf(children)) return true;
+      continue;
+    }
+    if (t.status === 'running') return true;
+  }
+  return false;
+}
+
 export function derivePlanStatus(currentStatus, tasks) {
   const inspectLeaves = (list) => {
     let leafTotal = 0;
@@ -504,9 +518,10 @@ export function derivePlanStatus(currentStatus, tasks) {
 
   // 规则 2/3：executing 自动收尾；failed/interrupted 计划在叶子被显式重试为 running 时
   // 恢复执行，或在叶子事实已全部成功完成时恢复为 completed。未消费的 Runner interruption
-  // 只在叶子仍未全部成功时把计划钉在 interrupted（ADR 73：可恢复挂起而非失败）；
-  // 叶子已全部成功完成时，中断只是过期的 runner 事实，不能挡住 completed。
-  // 重试预算耗尽的失败仍落 failed 终态。
+  // 只在「工作已停」且叶子仍未全部成功时由 persist 钉在 interrupted（ADR 73：可恢复挂起
+  // 而非失败）。叶子或 Runner 继续执行时，persist 必须让计划回到 executing，不能把
+  // 「已中断」和「运行中」钉在同一条契约上。叶子已全部成功完成时，中断只是过期的
+  // runner 事实，不能挡住 completed。重试预算耗尽的失败仍落 failed 终态。
   if (
     currentStatus === 'executing'
     || currentStatus === 'failed'
@@ -1667,6 +1682,12 @@ function normalizeRunnerState(runner, planId) {
   if (typeof runner.lastError === 'string' && runner.lastError.trim()) {
     next.lastError = runner.lastError.trim();
   }
+  if (runner.visualRepair === null) {
+    // Explicit clear: do not keep a previous host-normalized repair brief.
+  } else {
+    const visualRepair = normalizeVisualRepair(runner.visualRepair);
+    if (visualRepair) next.visualRepair = visualRepair;
+  }
   return next;
 }
 
@@ -1820,6 +1841,7 @@ function runnerPatchForAcceptedGoalUpgrade(runner) {
   const hasInterruption = runner.interruption != null;
   const leftoverUserWait = runner.status === 'waiting_user'
     && runner.blockedReason === 'requested_user_input';
+  const leftoverFailedRun = runner.status === 'failed' || runner.status === 'blocked';
   if (!hasInterruption && !leftoverUserWait) return undefined;
   const next = {
     ...runner,
@@ -1831,6 +1853,15 @@ function runnerPatchForAcceptedGoalUpgrade(runner) {
     next.phase = 'orient';
     next.blockedReason = undefined;
   }
+  // 陈旧流中断把 runner 钉在 failed/blocked。升级是新的接受决策，必须重新武装，
+  // 否则 auto-start 闸门看到 failed 会拒绝，出现 turnCount=0 停摆。
+  if (hasInterruption && leftoverFailedRun) {
+    next.enabled = true;
+    next.status = 'running';
+    next.intent = 'execute';
+    next.phase = 'orient';
+    next.blockedReason = undefined;
+  }
   return next;
 }
 
@@ -1838,7 +1869,9 @@ export function createGoalPlanStore({
   storeDir = pathOf('goalPlans'),
   onChange,
   readWorkspaceHead,
+  readUiDelivery,
 } = {}) {
+  const guardUiCompletion = plan => projectUiCompletion(plan, readUiDelivery, readEvidenceIndex);
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
   const changeFile = path.join(storeDir, '.changes.jsonl');
@@ -2048,11 +2081,11 @@ export function createGoalPlanStore({
     const overlay = runnerProgressOverlay.get(planId);
     if (!overlay) return null;
     const normalized = normalizePlan(overlay);
-    const next = {
+    const next = guardUiCompletion({
       ...normalized,
       status: derivePlanStatus(normalized.status, normalized.tasks),
       progress: aggregateProgress(normalized.tasks),
-    };
+    });
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
     // 落盘后保留 overlay 内容一致；完整 persist 路径会清 overlay。
@@ -2268,10 +2301,11 @@ export function createGoalPlanStore({
         : plan,
     );
     // 已停止且尚未消费的执行中断是独立于叶子任务的可恢复挂起事实（ADR 73），
-    // 普通 persist 不能把 interrupted 重新派生为 completed；仅 resumeRunner 能
-    // 原子消费该事实并恢复执行。可恢复中断在重试预算内仍由 running Runner 持有
-    // 行动权，只记录失败尝试，不能因为 interruption Evidence 的存在就把整个计划
-    // 降级为失败终态；真实叶子失败仍由 derivePlanStatus 派生为 failed。
+    // 普通 persist 不能把 interrupted 重新派生为 completed。叶子或 Runner 一旦
+    // 继续执行，计划必须回到 executing，不能再钉在 interrupted 上；仅当工作已停
+    // 且叶子尚未全部成功时，才保持 interrupted。可恢复中断在重试预算内仍由
+    // running Runner 持有行动权，只记录失败尝试，不能因为 interruption Evidence
+    // 的存在就把整个计划降级为失败终态；真实叶子失败仍由 derivePlanStatus 派生为 failed。
     const derivedStatus = options.preserveStatus
       ? normalized.status
       : derivePlanStatus(normalized.status, normalized.tasks);
@@ -2279,11 +2313,24 @@ export function createGoalPlanStore({
       normalized.runner?.interruption &&
       !(normalized.runner.interruption.recoverable === true && normalized.runner.status === 'running'),
     );
-    // 未消费中断只拦住「还没做完」的计划。叶子已全部成功时，不能再用过期
-    // interruption 把 completed 钉回 interrupted。
-    const nextStatus = hasUnconsumedInterruption && derivedStatus !== TERMINAL_OK
-      ? 'interrupted'
-      : derivedStatus;
+    const runnerWorkContinues = RUNNER_ACTIVE_STATUSES.has(normalized.runner?.status);
+    const workContinues = runnerWorkContinues || hasRunningLeaf(normalized.tasks);
+    // 未消费中断只拦住「还没做完、也没在跑」的计划。叶子已全部成功时，不能再用过期
+    // interruption 把 completed 钉回 interrupted。 pending 未开工不算继续执行。
+    // Completed leaves do not override a failed completion check. Keep this
+    // independent of interrupted-run recovery: a verification block is current
+    // evidence, not an obsolete interruption attached to successful work.
+    const verificationBlocked = normalized.runner?.status === 'blocked'
+      && normalized.runner?.intent === 'verify';
+    const visualRepairOpen = Boolean(normalized.runner?.visualRepair)
+      && normalized.runner?.status === 'running'
+      && normalized.runner?.phase === 'repair';
+    const candidateStatus = (verificationBlocked || visualRepairOpen) && derivedStatus === TERMINAL_OK
+      ? 'executing'
+      : hasUnconsumedInterruption && derivedStatus !== TERMINAL_OK
+        ? (workContinues ? 'executing' : 'interrupted')
+        : derivedStatus;
+    const nextStatus = guardUiCompletion({ ...normalized, status: candidateStatus }).status;
     const nowIso = normalized.updatedAt || new Date().toISOString();
     const planTiming = applyGoalTimingTransition(
       prevTiming,
@@ -2325,6 +2372,12 @@ export function createGoalPlanStore({
     return !isInactivePlan(meta);
   }
 
+  function projectUiMeta(meta) {
+    if (meta.status !== TERMINAL_OK || typeof readUiDelivery !== 'function') return meta;
+    const plan = getPlan(meta.planId);
+    return plan ? { ...meta, status: plan.status } : { ...meta, status: 'executing' };
+  }
+
   function listPlans() {
     let stat = null;
     try {
@@ -2338,7 +2391,7 @@ export function createGoalPlanStore({
       listPlansCache.mtimeMs === stat.mtimeMs &&
       listPlansCache.size === stat.size
     ) {
-      return listPlansCache.plans.slice();
+      return listPlansCache.plans.map(projectUiMeta);
     }
     const plans = readIndex()
       .map(normalizePlan)
@@ -2351,7 +2404,7 @@ export function createGoalPlanStore({
       size: stat.size,
       plans,
     };
-    return plans.slice();
+    return plans.map(projectUiMeta);
   }
 
   function listPlansByConversation(conversationId) {
@@ -2529,8 +2582,8 @@ export function createGoalPlanStore({
 
   function getPlan(planId) {
     const overlay = runnerProgressOverlay.get(planId);
-    if (overlay) return normalizePlan(overlay);
-    return normalizePlan(readJson(planFile(planId)));
+    if (overlay) return guardUiCompletion(normalizePlan(overlay));
+    return guardUiCompletion(normalizePlan(readJson(planFile(planId))));
   }
 
   /**
@@ -3152,12 +3205,15 @@ export function createGoalPlanStore({
     // 写盘节流到 1s，避免 CLI 后台跑时跨进程刷新把 Desktop 打卡。
     if (changeKind === 'runner-progress') {
       const normalized = normalizePlan(nextPlan);
-      const next = {
+      const next = guardUiCompletion({
         ...normalized,
-        status: derivePlanStatus(normalized.status, normalized.tasks),
+        status: (nextRunner?.visualRepair && nextRunner.status === 'running' && nextRunner.phase === 'repair'
+          && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK)
+          ? 'executing'
+          : derivePlanStatus(normalized.status, normalized.tasks),
         progress: aggregateProgress(normalized.tasks),
         ...(normalized.timing ? { timing: normalized.timing } : {}),
-      };
+      });
       runnerProgressOverlay.set(planId, next);
       scheduleRunnerProgressPersist(planId);
       // soft progress：IPC 合并；硬状态跃迁仍走下面即时 persist 路径。
@@ -3173,6 +3229,7 @@ export function createGoalPlanStore({
       runner: nextRunner,
       prevStatus: plan.status,
       prevTiming: timing ?? plan.timing,
+      preserveStatus: ['cancelled', 'paused'].includes(plan.status),
     });
   }
 
