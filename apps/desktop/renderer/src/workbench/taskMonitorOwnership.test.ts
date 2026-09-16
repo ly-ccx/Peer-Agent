@@ -29,13 +29,17 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   // 头部是 absolute 且整行（left:0;right:0），padding-right 只作用于 in-flow 正文列。
   assert.match(chatStyles, /\.chat-surface--with-monitor \{\s*--task-monitor-card: clamp\(280px, 24%, 340px\);/);
   assert.match(chatStyles, /padding-right: calc\(var\(--task-monitor-card\) \+ var\(--space-3\) \* 2\);/);
-  // 唯一卡片面：.task-monitor-card 承担底色/圆角/阴影；外层 rail 只定位。
+  // 裸内容形态：监控区无背景色、无边框、无圆角、无阴影（不是一块完整卡片）。
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?position: absolute;/);
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?top: calc\(40px \+ var\(--space-2\)\);/);
-  assert.match(workbenchStyles, /\.task-monitor-card \{[\s\S]*?border-radius: var\(--ui-radius-panel, 12px\);/);
-  assert.match(workbenchStyles, /\.task-monitor-card \{[\s\S]*?box-shadow: 0 10px 32px/);
-  // 分区不独立成卡：只有留白+细分隔线。
-  assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid/);
+  // .task-monitor-card 不得再携带面样式（背景/边框/圆角/阴影全部移除）。
+  const cardBlock = workbenchStyles.match(/\.task-monitor-card \{[\s\S]*?\}/)?.[0] ?? '';
+  assert.equal(/background(?!-)/.test(cardBlock), false);
+  assert.equal(/border(?!-radius)/.test(cardBlock), false);
+  assert.equal(/box-shadow/.test(cardBlock), false);
+  // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
+  assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
+  assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
   assert.doesNotMatch(workbenchStyles, /\.task-monitor-section \{[\s\S]{0,320}backdrop-filter/);
   assert.doesNotMatch(workbenchStyles, /task-monitor-tiles|task-monitor-section--tile/);
   // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。

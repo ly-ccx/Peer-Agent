@@ -2266,9 +2266,9 @@
   }
 }
 
-/* 会话内任务监控卡片：单张圆角卡片 + 内部分区标签（用户截图定稿）。
- * 外层 .task-monitor-rail 是 absolute 定位容器（头部之下）；.task-monitor-card 是唯一卡片面：
- * 浅底、大圆角、轻阴影；分区之间只用留白 + 细分隔线，不再每项独立成卡。
+/* 会话内任务监控：无背景裸内容（用户截图定稿，2026-09-16 终版）。
+ * 没有卡片面板——无背景色、无边框、无圆角、无阴影；
+ * 右侧就是分区标签 + 图标行直接浮在会话区域上，只靠留白和一条极细分隔线组织。
  * 正文让位仍由 .chat-surface--with-monitor 的 padding-right 完成，头部不受影响。 */
 @layer components {
   .task-monitor-rail {
@@ -2289,11 +2289,7 @@
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
-    overflow: hidden;
-    border: 1px solid var(--ui-border-subtle, var(--za-line));
-    border-radius: var(--ui-radius-panel, 12px);
-    background: var(--za-surface-1);
-    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+    overflow: visible;
     color: var(--za-text);
   }
 
@@ -2319,11 +2315,10 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    flex: 0 0 40px;
-    height: 40px;
-    min-height: 40px;
-    padding: 0 8px 0 14px;
-    border-bottom: 1px solid var(--chrome-hairline);
+    flex: 0 0 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 2px 0 4px;
     font-size: var(--ui-font-label, 13px);
     font-weight: 600;
     -webkit-app-region: no-drag;
@@ -2365,21 +2360,21 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 10px 6px 12px;
+    padding: 4px 2px 12px;
     scrollbar-width: thin;
   }
 
-  /* ── 卡内分区：只用留白 + 细分隔线，不再独立成卡 ── */
+  /* ── 分区：留白 + 一条极细分隔线，无任何卡片盒子 ── */
   .task-monitor-section {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding: 6px 8px 4px;
+    padding: 4px 4px 4px;
   }
   .task-monitor-section + .task-monitor-section {
-    margin-top: 4px;
+    margin-top: 2px;
     padding-top: 8px;
-    border-top: 1px solid var(--ui-border-subtle, color-mix(in srgb, var(--za-line, #2a2f3a) 40%, transparent));
+    border-top: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 28%, transparent);
   }
 
   .task-monitor-section-title {
@@ -2390,14 +2385,15 @@
     color: var(--za-text-faint);
   }
 
-  /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
+  /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。
+   * 裸内容形态：hover 才出现极轻的行底色，静止时完全无背景。 */
   .task-monitor-row {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
-    min-height: 26px;
-    padding: 3px 6px;
+    min-height: 25px;
+    padding: 3px 4px;
     border: none;
     border-radius: var(--ui-radius-control, var(--za-radius-sm));
     background: transparent;
@@ -2410,7 +2406,7 @@
     cursor: pointer;
   }
   .task-monitor-row--action:hover {
-    background: var(--chrome-hover);
+    background: color-mix(in srgb, var(--za-line, #2a2f3a) 32%, transparent);
   }
   .task-monitor-row--action:focus-visible {
     outline: 2px solid var(--za-focus);
@@ -2446,7 +2442,7 @@
     cursor: pointer;
   }
   .task-monitor-more:hover {
-    background: var(--chrome-hover);
+    background: color-mix(in srgb, var(--za-line, #2a2f3a) 32%, transparent);
     color: var(--za-text);
   }
 
@@ -2478,11 +2474,11 @@
   }
 
   /* 内联后台任务详情：嵌在对应小卡内的圆角子块。 */
+  /* 内联后台任务详情：展开时才出现的极轻块（唯一有底色的地方，因为含日志文本需要可读底）。 */
   .task-monitor-run-details {
     margin: 6px 0 4px;
     padding: 10px 10px 12px;
-    border: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 45%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 92%, transparent);
+    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 55%, transparent);
   }
 }
