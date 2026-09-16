@@ -15,6 +15,8 @@ export function normalizeWorkbenchTab(value: unknown): WorkbenchTabId | null {
   if (value === 'diff') return 'documents';
   // Retired background tabs must never restore a blank, duplicate management surface.
   if (value === 'background' || value === 'shell' || value === 'threads') return 'plan';
+  // 任务监控栏已归当前 ChatSurface；旧 Workbench context/monitor 不能恢复空白 tab。
+  if (value === 'context' || value === 'monitor') return 'plan';
   return isWorkbenchTab(value) ? value : null;
 }
 

@@ -8,6 +8,33 @@
   grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
 }
 
+/* 会话监控卡片与独立 Workbench 同时打开时，只钳制实际显示宽度，不改用户持久化值。
+   为聊天正文保留 360px、为监控卡片保留 372px（340px 卡片 + 双侧边距）；任一侧关闭后自动恢复。
+   卡片挂载在 .chat-surface 内（chat-workspace > chat-surface > task-monitor-rail）。 */
+:root[data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail) {
+  --za-workbench-current-width: clamp(
+    320px,
+    var(--za-workbench-width, 420px),
+    calc(100vw - var(--za-sidebar-current-width, var(--za-sidebar-width)) - 372px - 360px)
+  );
+}
+
+:root[data-sidebar-collapsed='true'][data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail) {
+  --za-workbench-current-width: clamp(
+    320px,
+    var(--za-workbench-width, 420px),
+    calc(100vw - 372px - 360px)
+  );
+}
+
+:root[data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail)
+  > .workbench-panel--open:not(.workbench-panel--maximized) {
+  width: var(--za-workbench-current-width) !important;
+}
+
 :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
   visibility: hidden;
   pointer-events: none;
@@ -71,8 +98,9 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    /* 桌面基础材质由 .app-layout 统一提供，Workbench 仅承载内容。 */
-    background: transparent;
+    /* 与聊天主区 (.thread) 同 token 的实色纸面：右列不再让 .app-layout 的
+       半透明玻璃底与窗口 vibrancy 透出，两栏拼成同一块背景。 */
+    background: var(--chrome-canvas, var(--za-app-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none;
@@ -89,6 +117,14 @@
   .workbench-panel:not(.workbench-panel--open) {
     width: 0 !important;
     border-left: none;
+  }
+
+  /* Workbench 打开时，中间聊天纸面 (.thread) 收掉右侧两个圆角，两栏拼成同一块背景；
+     闭合态保持四角圆润的悬浮纸面观感。仅在根布局生效：抽屉内 Workbench 用的
+     layoutHost='local'，不会写根节点的 data-workbench-open。 */
+  :root[data-workbench-open='true'] .thread {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
   }
 
   /* 拖拽分隔线：保留 6px hit area，1px 指示条由 ::after 自身表达。 */
@@ -2227,5 +2263,226 @@
       width: 100%;
       opacity: 0.6;
     }
+  }
+}
+
+/* 会话内任务监控卡片：单张圆角卡片 + 内部分区标签（用户截图定稿）。
+ * 外层 .task-monitor-rail 是 absolute 定位容器（头部之下）；.task-monitor-card 是唯一卡片面：
+ * 浅底、大圆角、轻阴影；分区之间只用留白 + 细分隔线，不再每项独立成卡。
+ * 正文让位仍由 .chat-surface--with-monitor 的 padding-right 完成，头部不受影响。 */
+@layer components {
+  .task-monitor-rail {
+    position: absolute;
+    top: calc(40px + var(--space-2));
+    right: var(--space-3);
+    bottom: var(--space-3);
+    z-index: 25;
+    display: flex;
+    flex-direction: column;
+    width: var(--task-monitor-card, clamp(280px, 24%, 340px));
+    min-height: 0;
+    animation: task-monitor-card-in 220ms var(--za-ease-standard);
+  }
+
+  .task-monitor-card {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, 12px);
+    background: var(--za-surface-1);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+    color: var(--za-text);
+  }
+
+  @keyframes task-monitor-card-in {
+    from {
+      opacity: 0;
+      transform: translateX(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .task-monitor-rail {
+      animation: none;
+    }
+  }
+
+  .task-monitor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex: 0 0 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 8px 0 14px;
+    border-bottom: 1px solid var(--chrome-hairline);
+    font-size: var(--ui-font-label, 13px);
+    font-weight: 600;
+    -webkit-app-region: no-drag;
+  }
+
+  .task-monitor-updated {
+    margin-left: auto;
+    color: var(--za-text-muted);
+    font-size: var(--ui-font-meta, 11px);
+    font-weight: 400;
+  }
+
+  .task-monitor-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-frost-sm);
+    background: transparent;
+    color: var(--za-text-muted);
+    cursor: pointer;
+  }
+  .task-monitor-close:hover {
+    background: var(--chrome-hover);
+    color: var(--za-text);
+  }
+  .task-monitor-close:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+
+  .task-monitor-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 6px 12px;
+    scrollbar-width: thin;
+  }
+
+  /* ── 卡内分区：只用留白 + 细分隔线，不再独立成卡 ── */
+  .task-monitor-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 8px 4px;
+  }
+  .task-monitor-section + .task-monitor-section {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ui-border-subtle, color-mix(in srgb, var(--za-line, #2a2f3a) 40%, transparent));
+  }
+
+  .task-monitor-section-title {
+    margin: 0 0 4px;
+    font-size: var(--ui-font-meta, 11px);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--za-text-faint);
+  }
+
+  /* 单行结构：左图标承担类型识别，右侧直接是值本身，不写字段名。 */
+  .task-monitor-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 26px;
+    padding: 3px 6px;
+    border: none;
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
+    background: transparent;
+    color: var(--za-text);
+    font-size: var(--ui-font-meta, 12px);
+    text-align: left;
+    transition: background var(--za-motion-fast) ease;
+  }
+  .task-monitor-row--action {
+    cursor: pointer;
+  }
+  .task-monitor-row--action:hover {
+    background: var(--chrome-hover);
+  }
+  .task-monitor-row--action:focus-visible {
+    outline: 2px solid var(--za-focus);
+    outline-offset: 1px;
+  }
+
+  .task-monitor-row-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: var(--za-text-faint);
+  }
+
+  .task-monitor-row-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--za-text);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* 底部「查看更多 (N)」：居中弱化的文字按钮，对齐截图形态。 */
+  .task-monitor-more {
+    margin: 6px auto 2px;
+    padding: 4px 10px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    font-size: var(--ui-font-caption, 11px);
+    color: var(--za-text-muted);
+    cursor: pointer;
+  }
+  .task-monitor-more:hover {
+    background: var(--chrome-hover);
+    color: var(--za-text);
+  }
+
+  .task-monitor-progress-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 3px 6px 7px;
+    color: var(--za-text-muted);
+    font-size: var(--ui-font-caption, 11px);
+  }
+  .task-monitor-progress-row strong {
+    color: var(--za-text);
+    font-weight: 600;
+  }
+  .task-monitor-progress-track {
+    height: 4px;
+    margin: 0 6px 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--chrome-hover);
+  }
+  .task-monitor-progress-track > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--ui-accent, var(--azure-seal));
+  }
+
+  /* 内联后台任务详情：嵌在对应小卡内的圆角子块。 */
+  .task-monitor-run-details {
+    margin: 6px 0 4px;
+    padding: 10px 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--za-line, #2a2f3a) 45%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 92%, transparent);
   }
 }

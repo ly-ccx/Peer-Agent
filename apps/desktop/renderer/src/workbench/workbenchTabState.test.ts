@@ -9,6 +9,9 @@ test('migrates legacy workbench capability ids', () => {
   assert.equal(normalizeWorkbenchTab('background'), 'plan');
   assert.equal(normalizeWorkbenchTab('shell'), 'plan');
   assert.equal(normalizeWorkbenchTab('threads'), 'plan');
+  // 任务监控栏已归 ChatSurface；旧 Workbench 值回退到 plan，不能恢复空白 tab。
+  assert.equal(normalizeWorkbenchTab('context'), 'plan');
+  assert.equal(normalizeWorkbenchTab('monitor'), 'plan');
 });
 
 test('normalizes a persisted tab map and drops invalid values', () => {

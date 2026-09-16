@@ -397,3 +397,10 @@ export {
   sanitizeQoderToolPairing,
   sendQoderPrivateStream,
 } from './provider-adapters/qoder-private-adapter.mjs';
+// ADR 75 remote access: outbound device connector + local binding store.
+// Not exported before because nothing in production consumed them; the desktop
+// setup-remote-access module is the first real caller.
+// connectRemoteDevice is deliberately not re-exported: it is an internal detail
+// of startRemoteDeviceConnector.
+export { startRemoteDeviceConnector } from './remote-device-connector.mjs';
+export { createRemoteBindingStore } from './remote-binding-store.mjs';
