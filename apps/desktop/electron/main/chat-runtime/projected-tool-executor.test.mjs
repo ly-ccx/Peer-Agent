@@ -229,8 +229,9 @@ describe('projected model tool executor', () => {
     assert.equal(parsed.reason, 'goal_irreversible_denied');
   });
 
-  it('requires Goal high-risk confirmation with a dedicated capability id', async () => {
+  it('does not prepend a Goal high-risk confirmation in front of ordinary L4 bash', async () => {
     const permissionRequests = [];
+    const shellApprovals = [];
     const result = await executeProjectedModelTool({
       name: 'bash',
       args: { command: 'node build.js' },
@@ -244,15 +245,18 @@ describe('projected model tool executor', () => {
         permissionRequests.push(request);
         return { granted: false };
       },
+      shellApprovalDecider: async (request) => {
+        shellApprovals.push(request);
+        return { granted: false, reason: 'local_user_denied' };
+      },
     });
 
+    assert.equal(
+      permissionRequests.some((request) => request.capabilityId === 'goal.high_risk.action'),
+      false,
+    );
+    assert.equal(shellApprovals.length >= 1, true);
     assert.equal(result.success, false);
-    assert.equal(permissionRequests.length, 1);
-    assert.equal(permissionRequests[0].capabilityId, 'goal.high_risk.action');
-    assert.equal(permissionRequests[0].reason, 'goal_high_risk_confirmation');
-    assert.equal(permissionRequests[0].confirmation.kind, 'high_risk');
-    const parsed = JSON.parse(result.output);
-    assert.equal(parsed.reason, 'goal_high_risk_denied');
   });
 
   it('projects managed launch into the application registry with source and explicit stop', async () => {

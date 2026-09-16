@@ -222,6 +222,103 @@ describe('chat permission gate', () => {
     assert.equal((await pending).granted, false);
   });
 
+  it('reuses an approved source toolCall instead of asking a second local grant', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    const first = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'tc_preview',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'goal.high_risk.action',
+      toolName: 'desktop_preview',
+      args: { action: 'observe', scene: 'background-runtime' },
+      riskLevel: 'L4_privileged',
+    });
+
+    assert.equal(events.length, 1);
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-preview',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await first).granted, true);
+
+    const second = await gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'tc_preview',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'local.desktop.preview',
+      toolName: 'desktop_preview',
+      args: { action: 'observe', scene: 'background-runtime' },
+      riskLevel: 'L4_privileged',
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal(second.granted, true);
+    assert.equal(second.reason, 'local_user_approved_same_tool_call');
+  });
+
+  it('still asks when a later toolCall is a different source id', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    const first = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'tc_preview_1',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'local.desktop.preview',
+      toolName: 'desktop_preview',
+      args: { action: 'observe' },
+      riskLevel: 'L4_privileged',
+    });
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-preview-1',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await first).granted, true);
+
+    const second = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'tc_preview_2',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'local.desktop.preview',
+      toolName: 'desktop_preview',
+      args: { action: 'observe' },
+      riskLevel: 'L4_privileged',
+    });
+    assert.equal(events.length, 2);
+    gate.settlePermissionRequest(events[1].payload.call.toolCallId, {
+      grantId: 'g-preview-2',
+      toolCallId: events[1].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await second).granted, true);
+  });
+
   it('uses full local mode to auto-approve file writes and all shell approvals', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];

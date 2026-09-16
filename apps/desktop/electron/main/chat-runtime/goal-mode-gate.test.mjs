@@ -45,16 +45,17 @@ describe('evaluateGoalModeGate', () => {
     }
   });
 
-  it('keeps Goal hooks active in legacy chat wire mode when a plan exists', () => {
+  it('keeps Goal irreversible confirmation in legacy chat wire mode when a plan exists', () => {
     const r = evaluateGoalModeGate({
       mode: 'chat',
       toolName: 'bash',
       riskLevel: 'L4_privileged',
+      args: { command: 'git push origin dev' },
       planGate: { hasPlan: true, hasApprovedPlan: true },
     });
     assert.equal(r.allowed, true);
     assert.equal(r.requiresConfirmation, true);
-    assert.equal(r.confirmation?.kind, 'high_risk');
+    assert.equal(r.confirmation?.kind, 'git_push');
   });
 
   it('always allows planning/interaction tools in plan mode without a plan', () => {
@@ -533,12 +534,36 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
     assert.equal(r.confirmation?.kind, 'git_push');
   });
 
-  it('requires confirmation for high-risk non-irreversible actions', () => {
+  it('does not require Goal confirmation for observational L4 desktop preview', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'desktop_preview',
+      riskLevel: 'L4_privileged',
+      args: { action: 'observe', scene: 'background-runtime' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
+
+  it('does not require Goal confirmation for ordinary L4 bash', () => {
     const r = evaluateGoalModeGate({
       mode: 'goal',
       toolName: 'bash',
       riskLevel: 'L4_privileged',
       args: { command: 'node build.js' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
+
+  it('requires confirmation for L5 destructive actions', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'bash',
+      riskLevel: 'L5_destructive',
+      args: { command: 'mkfs.ext4 /dev/sda' },
       workspacePath: '/ws',
     });
     assert.equal(r.allowed, true);

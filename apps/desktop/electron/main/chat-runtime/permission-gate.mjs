@@ -133,6 +133,15 @@ function buildPermissionScopeKey({ conversationId, workspacePath, call }) {
   return `${conversationScope}::${workspaceScope}::${buildPermissionSignature(call)}`;
 }
 
+const PERMISSION_ID_PREFIX = 'chat-permission:';
+
+function sourceToolCallIdFromPermissionId(permissionId) {
+  if (typeof permissionId !== 'string' || permissionId.length === 0) return null;
+  return permissionId.startsWith(PERMISSION_ID_PREFIX)
+    ? permissionId.slice(PERMISSION_ID_PREFIX.length)
+    : permissionId;
+}
+
 function createAutoAccessGrant({ toolCallId, scope, reason }) {
   return {
     granted: true,
@@ -219,7 +228,23 @@ function automationCapabilityDecision(policy, call) {
 export function createChatPermissionGate({ activeStreams, accessLevel: initialAccessLevel = 'ask_before_local' } = {}) {
   const pendingPermissionRequests = new Map();
   const approvedPermissionScopes = new Map();
+  const approvedSourceToolCalls = new Map();
   let accessLevel = normalizeLocalAccessLevel(initialAccessLevel);
+
+  function reuseApprovedSourceToolCall(call) {
+    const sourceId = sourceToolCallIdFromPermissionId(call?.toolCallId);
+    const remembered = sourceId ? approvedSourceToolCalls.get(sourceId) : null;
+    if (!remembered?.grant?.granted) return null;
+    return {
+      granted: true,
+      grant: {
+        ...remembered.grant,
+        toolCallId: call.toolCallId,
+        duration: 'once',
+      },
+      reason: 'local_user_approved_same_tool_call',
+    };
+  }
 
   function setAccessLevel(nextAccessLevel) {
     accessLevel = normalizeLocalAccessLevel(nextAccessLevel);
@@ -263,6 +288,11 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         resolvePermission(accessGrant);
         return;
       }
+      const sourceGrant = reuseApprovedSourceToolCall(call);
+      if (sourceGrant) {
+        resolvePermission(sourceGrant);
+        return;
+      }
       registerPendingPermission({
         streamId,
         call,
@@ -298,6 +328,11 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
           scope: call.capabilityId,
           reason: 'local_access_level_full',
         }));
+        return;
+      }
+      const sourceGrant = reuseApprovedSourceToolCall(call);
+      if (sourceGrant) {
+        resolvePermission(sourceGrant);
         return;
       }
       registerPendingPermission({
@@ -357,6 +392,11 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         resolvePermission(accessGrant);
         return;
       }
+      const sourceGrant = reuseApprovedSourceToolCall(permissionCall);
+      if (sourceGrant) {
+        resolvePermission(sourceGrant);
+        return;
+      }
       registerPendingPermission({
         streamId,
         call: permissionCall,
@@ -378,6 +418,10 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         ...grant,
         scope: grant.scope || pending.scope,
       });
+    }
+    if (grant?.granted) {
+      const sourceId = sourceToolCallIdFromPermissionId(toolCallId);
+      if (sourceId) approvedSourceToolCalls.set(sourceId, { grant });
     }
     pending.resolve({
       granted: Boolean(grant?.granted),

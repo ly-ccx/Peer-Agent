@@ -8,7 +8,8 @@
  *   能力；一切有副作用的能力（写文件、shell、MCP 副作用）被结构化拒绝。
  * - goal 模式「自驱目标模式」：不施加整模式「计划审批门」，改用确定性 hooks·阶段一——
  *   ①pre-act 写盘范围守卫（越出 Goal 绑定写入根或命中 outOfScope 即 DENY）；
- *   ②on-irreversible 不可逆动作（删除/覆盖/git 强制/push/release）逐动作确认。
+ *   ②on-irreversible 不可逆动作（删除/覆盖/git 强制/push/release）逐动作确认；
+ *   ③L5 破坏性动作额外确认。L4 观察/特权能力只走本地 PermissionGrant，不再叠一层 Goal 条。
  * - 计划状态 / 边界是「活事实」，从 goal-plan-store 按 conversationId 实时读取，避免用流开始时的
  *   静态快照（模型可能在回合中途才 goal_create_plan）。
  */
@@ -196,7 +197,8 @@ export function detectIrreversibleAction({ toolName, args } = {}) {
 }
 
 function isHighRiskGoalAction(riskLevel) {
-  return (RISK_ORDER[riskLevel] ?? RISK_ORDER.L2_local_write) >= RISK_ORDER.L4_privileged;
+  // Goal 额外确认只留给破坏性动作。L4（desktop_preview 观察、普通 bash）已有本地授权条。
+  return (RISK_ORDER[riskLevel] ?? 0) >= RISK_ORDER.L5_destructive;
 }
 
 let sharedGoalPlanStore = null;
@@ -313,7 +315,7 @@ export function resolveActiveGoalExecutionBinding(
  * 纯函数：在给定 mode / 工具 / 风险等级 / 计划闸门事实 / 参数与边界下，决定是否放行。
  * 返回：
  * - { allowed: true }
- * - { allowed: true, requiresConfirmation: true, confirmation: { kind, detail } }（goal 模式不可逆动作）
+ * - { allowed: true, requiresConfirmation: true, confirmation: { kind, detail } }（不可逆 / 越界写入 / L5）
  * - { allowed: false, reason }（plan 未获批 或 goal 写盘越界）
  */
 export function evaluateGoalModeGate({
