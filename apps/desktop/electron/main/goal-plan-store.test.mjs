@@ -930,6 +930,56 @@ test('recordTaskEvidence: failed / blocked 分别计数且写入原因', () => {
   assert.equal(rb.progress.blocked, 1);
 });
 
+test('recordTaskEvidence: failed→completed 终态翻转清除残留 failureReason（已完成不再展示旧失败原因）', () => {
+  const plan = approvedPlanWithTasks();
+  // 第一轮流失败：模拟 Goal Runner 流失败把任务标失败并写入原因
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'failed',
+    failureReason: 'Goal Runner turn stream failed',
+  });
+  let task = store.getPlan(plan.planId).tasks[0];
+  assert.equal(task.status, 'failed');
+  assert.equal(task.failureReason, 'Goal Runner turn stream failed');
+
+  // 重试成功：翻转为 completed（须带已登记的 evidenceRefs）
+  registerEvidenceRefs(plan.planId, ['local-shell-artifact://retry/stdout']);
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['local-shell-artifact://retry/stdout'],
+  });
+  task = store.getPlan(plan.planId).tasks[0];
+  assert.equal(task.status, 'completed');
+  assert.equal(task.failureReason, undefined, 'completed 后残留 failureReason 必须被清除');
+});
+
+test('recordTaskEvidence: 离开 waiting_user 清除残留 blockedReason；failed→running 保留 failureReason 审计；显式传入优先', () => {
+  const plan = approvedPlanWithTasks();
+  store.recordTaskEvidence(plan.planId, 't1', {
+    status: 'waiting_user',
+    blockedReason: '等用户确认',
+  });
+  assert.equal(store.getPlan(plan.planId).tasks[0].blockedReason, '等用户确认');
+
+  // 用户答复后恢复 running：旧 blockedReason 不应存活
+  store.recordTaskEvidence(plan.planId, 't1', { status: 'running' });
+  assert.equal(
+    store.getPlan(plan.planId).tasks[0].blockedReason,
+    undefined,
+    '离开 waiting_user 后残留 blockedReason 必须被清除',
+  );
+
+  // 同一次变更显式传入的原因字段仍然生效（不被清除逻辑吞掉）
+  store.recordTaskEvidence(plan.planId, 't1', { status: 'waiting_user', blockedReason: '需要补充凭据' });
+  assert.equal(store.getPlan(plan.planId).tasks[0].blockedReason, '需要补充凭据');
+
+  // failed→running 的重试保留 failureReason 作为失败审计（既有契约）
+  store.recordTaskEvidence(plan.planId, 't1', { status: 'failed', failureReason: '构建失败' });
+  store.recordTaskEvidence(plan.planId, 't1', { status: 'running' });
+  const task = store.getPlan(plan.planId).tasks[0];
+  assert.equal(task.status, 'running');
+  assert.equal(task.failureReason, '构建失败', 'failed→running 重试保留 failureReason（审计契约）');
+});
+
 test('recordTaskEvidence: 未知 taskId 抛错', () => {
   const plan = approvedPlanWithTasks();
   assert.throws(
@@ -2283,6 +2333,45 @@ test('派生子目标会反向关联父任务并联动执行状态', () => {
   sourceTask = store.getPlan(parent.planId).tasks[0];
   assert.equal(sourceTask.status, 'waiting_user');
   assert.match(sourceTask.blockedReason, /派生子目标/);
+});
+
+test('派生子目标重试成功后父任务清除残留 blockedReason', () => {
+  const parent = store.createPlan({
+    conversationId: 'conv-parent-unblock',
+    title: '父目标',
+    goal: '完成父目标',
+    status: 'executing',
+    tasks: [{ taskId: 'delegate-task', title: '委派步骤', status: 'pending', evidenceRefs: [] }],
+  });
+  const child = store.createPlan({
+    conversationId: 'conv-child-unblock',
+    title: '子目标',
+    goal: '完成委派步骤',
+    status: 'executing',
+    parentPlanId: parent.planId,
+    sourceTaskId: 'delegate-task',
+    tasks: [{ taskId: 'child-work', title: '执行子目标', status: 'pending', evidenceRefs: [] }],
+  });
+
+  // 子目标失败 → 父任务挂 blockedReason
+  store.recordTaskEvidence(child.planId, 'child-work', { status: 'running' });
+  store.recordTaskEvidence(child.planId, 'child-work', {
+    status: 'failed',
+    failureReason: '子目标执行失败',
+  });
+  let sourceTask = store.getPlan(parent.planId).tasks[0];
+  assert.match(sourceTask.blockedReason, /派生子目标/);
+
+  // 子目标重试成功 → 残留 blockedReason 必须被清除
+  registerEvidenceRefs(child.planId, ['local-shell-artifact://child-unblock/stdout']);
+  store.recordTaskEvidence(child.planId, 'child-work', {
+    status: 'completed',
+    evidenceRefs: ['local-shell-artifact://child-unblock/stdout'],
+  });
+  sourceTask = store.getPlan(parent.planId).tasks[0];
+  assert.equal(sourceTask.blockedReason, undefined, '子目标完成后父任务残留 blockedReason 必须被清除');
+  // 契约：子目标全部完成 → 父任务进入 waiting_user（待人工验收），不是直接 completed
+  assert.equal(sourceTask.status, 'waiting_user');
 });
 
 
