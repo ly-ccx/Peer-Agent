@@ -8,6 +8,33 @@
   grid-template-columns: 0 minmax(0, 0) minmax(0, 1fr);
 }
 
+/* 会话监控卡片与独立 Workbench 同时打开时，只钳制实际显示宽度，不改用户持久化值。
+   为聊天正文保留 360px、为监控卡片保留 372px（340px 卡片 + 双侧边距）；任一侧关闭后自动恢复。
+   卡片挂载在 .chat-surface 内（chat-workspace > chat-surface > task-monitor-rail）。 */
+:root[data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail) {
+  --za-workbench-current-width: clamp(
+    320px,
+    var(--za-workbench-width, 420px),
+    calc(100vw - var(--za-sidebar-current-width, var(--za-sidebar-width)) - 372px - 360px)
+  );
+}
+
+:root[data-sidebar-collapsed='true'][data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail) {
+  --za-workbench-current-width: clamp(
+    320px,
+    var(--za-workbench-width, 420px),
+    calc(100vw - 372px - 360px)
+  );
+}
+
+:root[data-workbench-open='true']:not([data-workbench-maximized='true'])
+  .app-layout:has(.chat-surface > .task-monitor-rail)
+  > .workbench-panel--open:not(.workbench-panel--maximized) {
+  width: var(--za-workbench-current-width) !important;
+}
+
 :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
   visibility: hidden;
   pointer-events: none;
@@ -2239,20 +2266,97 @@
   }
 }
 
-/* 任务监控栏（Task Monitor Rail）· Qoder 式右侧信息区。
- * 会话作用域合并视图：后台任务（内联详情）+ 产出。
- * 环境信息不在此栏（归中间对话面板的 composer 环境胶囊）。
- * 事实源见 peer-knowledge/design/product/task-context-rail.md。 */
+/* 会话内任务监控卡片：ChatSurface 内的悬浮卡片，不是 Workbench tab，也不是分栏。
+ * 定位：absolute 于 .chat-surface（padding-box），顶起于 40px 会话头部之下；
+ * 正文让位由 .chat-surface--with-monitor 的 padding-right 完成，头部（absolute）不受影响。
+ * 会话作用域合并视图：环境 + 进度 + 后台任务（内联详情）+ 产出。 */
 @layer components {
-  /* 与文件/文档视图一致：贴顶铺满，去掉默认顶部安全区。 */
-  .workbench-view--monitor {
-    inset-block-start: 0;
-  }
-
   .task-monitor-rail {
+    position: absolute;
+    top: calc(40px + var(--space-2));
+    right: var(--space-3);
+    bottom: var(--space-3);
+    z-index: 25;
     display: flex;
     flex-direction: column;
     gap: 0;
+    width: var(--task-monitor-card, clamp(280px, 24%, 340px));
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, 12px);
+    background: var(--za-surface-1);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.2);
+    color: var(--za-text);
+    animation: task-monitor-card-in 220ms var(--za-ease-standard);
+  }
+
+  @keyframes task-monitor-card-in {
+    from {
+      opacity: 0;
+      transform: translateX(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .task-monitor-rail {
+      animation: none;
+    }
+  }
+
+  .task-monitor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex: 0 0 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 10px 0 14px;
+    border-bottom: 1px solid var(--chrome-hairline);
+    font-size: var(--ui-font-label, 13px);
+    font-weight: 600;
+    -webkit-app-region: no-drag;
+  }
+
+  .task-monitor-updated {
+    margin-left: auto;
+    color: var(--za-text-muted);
+    font-size: var(--ui-font-meta, 11px);
+    font-weight: 400;
+  }
+
+  .task-monitor-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-frost-sm);
+    background: transparent;
+    color: var(--za-text-muted);
+    cursor: pointer;
+  }
+  .task-monitor-close:hover {
+    background: var(--chrome-hover);
+    color: var(--za-text);
+  }
+  .task-monitor-close:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+
+  .task-monitor-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
     padding: 12px 2px 20px;
   }
 
@@ -2321,6 +2425,33 @@
     margin: 2px 0 0 6px;
     font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
+  }
+
+  .task-monitor-progress-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 3px 6px 7px;
+    color: var(--za-text-muted);
+    font-size: var(--ui-font-caption, 11px);
+  }
+  .task-monitor-progress-row strong {
+    color: var(--za-text);
+    font-weight: 600;
+  }
+  .task-monitor-progress-track {
+    height: 4px;
+    margin: 0 6px 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--chrome-hover);
+  }
+  .task-monitor-progress-track > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--ui-accent, var(--azure-seal));
   }
 
   /* 内联后台任务详情：嵌在监控栏内，视觉上从属对应行。 */

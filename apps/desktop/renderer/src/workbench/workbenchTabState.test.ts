@@ -9,9 +9,9 @@ test('migrates legacy workbench capability ids', () => {
   assert.equal(normalizeWorkbenchTab('background'), 'plan');
   assert.equal(normalizeWorkbenchTab('shell'), 'plan');
   assert.equal(normalizeWorkbenchTab('threads'), 'plan');
-  // 2026-09-15：任务上下文栏重定位为任务监控栏，旧 'context' 值归一。
-  assert.equal(normalizeWorkbenchTab('context'), 'monitor');
-  assert.equal(normalizeWorkbenchTab('monitor'), 'monitor');
+  // 任务监控栏已归 ChatSurface；旧 Workbench 值回退到 plan，不能恢复空白 tab。
+  assert.equal(normalizeWorkbenchTab('context'), 'plan');
+  assert.equal(normalizeWorkbenchTab('monitor'), 'plan');
 });
 
 test('normalizes a persisted tab map and drops invalid values', () => {

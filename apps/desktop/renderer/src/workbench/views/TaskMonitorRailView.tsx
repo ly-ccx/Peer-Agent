@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   projectTaskMonitorArtifacts,
+  projectTaskMonitorEnvironment,
   projectTaskMonitorRuns,
   selectConversationTaskOverviewItem,
 } from '../taskMonitorRail.ts';
@@ -11,21 +12,21 @@ import {
 import { useTaskOverview } from '../../app/hooks/useTaskOverview';
 import { useBackgroundRunsContext } from '../GlobalBackgroundTasksButton';
 import { BackgroundRunDetails } from '../BackgroundRunDetails';
-import { useWorkbench } from '../WorkbenchContext';
+import { useWorkbenchOptional } from '../WorkbenchContext';
 import { reconcileStopRequest, type StopRequest } from '../backgroundRuntimeState.ts';
 import type { ManagedShellTask } from '@peer-agent/protocol';
 
 /**
  * 任务监控栏（Task Monitor Rail）—— Qoder 式右侧信息区的 Peer 版本。
  *
- * 设计来源：peer-knowledge/design/product/task-context-rail.md（按 2026-09-15
- * 用户修正更新）：本栏是**任务监控栏**，只含 后台任务 + 产出 两个分区。
- * 环境信息（分支/本地/提交推送）归中间对话面板的 composer 环境胶囊，不在此重复。
+ * 设计来源：peer-knowledge/design/product/task-context-rail.md，并按用户截图纠偏：
+ * 本栏归当前 ChatSurface，合并环境信息、当前会话后台任务、计划进度与产出；
+ * composer 环境胶囊继续作为输入区的紧凑入口，两者复用同一环境事实。
  *
  * 治理边界：
  * - 后台任务区复用 Provider 的单一轮询 reader（useBackgroundRunsContext），
  *   停止等写操作复用同一 stops 链路 —— 不新建第二个 poller，也不是第二个全局管理面；
- * - 本栏的会话作用域合并视图与 ChatHeader 全局入口并存（那里跨会话、这里按会话）；
+ * - 本栏由 ChatSurface 挂载并跟随当前会话，不属于独立 Workbench；
  * - 产出区复用任务总览的投影与治理 ref 过滤，禁止放宽。
  */
 
@@ -40,6 +41,34 @@ const ICON_PROPS = {
   strokeLinejoin: 'round' as const,
   'aria-hidden': true,
 };
+
+function BranchIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="6" cy="5" r="2.2" />
+      <circle cx="6" cy="19" r="2.2" />
+      <circle cx="18" cy="9" r="2.2" />
+      <path d="M6 7.2v9.6M8.2 5h5.3A2.5 2.5 0 0 1 16 7.5V9" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M3 7a2 2 0 0 1 2-2h3.6l1.8 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+function DeviceIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="3" y="4" width="18" height="13" rx="1.5" />
+      <path d="M8 21h8M12 17v4" />
+    </svg>
+  );
+}
 
 function TerminalIcon() {
   return (
@@ -107,22 +136,36 @@ function MonitorRow({ icon, value, detail, onClick }: {
   );
 }
 
-export function TaskMonitorRailView({ isZh, workspacePath, conversationId, active }: {
+export function TaskMonitorRailView({
+  isZh,
+  workspacePath,
+  branch,
+  workspaceIsGit,
+  conversationId,
+  active,
+  onClose,
+}: {
   readonly isZh: boolean;
   readonly workspacePath: string | null;
+  readonly branch: string | null;
+  readonly workspaceIsGit: boolean | null;
   readonly conversationId: string | null;
   /**
-   * 本视图是否真正可见（Workbench 展开且停在「监控」tab）。
+   * 本视图是否在当前 ChatSurface 内真正可见。
    *
-   * Workbench 的视图槽是常挂载的（只靠 data-active 显隐，见 WorkbenchPanel），
-   * 所以这里必须显式门控，否则用户从没打开过本 tab 也会多挂一路 taskOverview
+   * 收起时仍保留组件状态，但必须显式门控 taskOverview，避免未打开监控栏时多挂一路
    * 轮询与广播订阅——那正是 useTaskOverview.performance.test.ts 在守的调用点成本。
    */
   readonly active: boolean;
+  readonly onClose: () => void;
 }) {
-  const workbench = useWorkbench();
+  const workbench = useWorkbenchOptional();
   // 复用 Provider 的单一轮询 reader，避免第二套 poller 重复打主进程。
   const runsReader = useBackgroundRunsContext();
+  const environment = useMemo(
+    () => projectTaskMonitorEnvironment(workspacePath, branch, workspaceIsGit, isZh),
+    [branch, isZh, workspaceIsGit, workspacePath],
+  );
 
   // 后台任务详情内联展开：本栏内的选中态（与 ChatHeader 弹层的选中态各自独立）。
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -130,27 +173,27 @@ export function TaskMonitorRailView({ isZh, workspacePath, conversationId, activ
   //（onConfirm 进入 confirm → onStop 校验后走 stops.stop）。
   const [confirmation, setConfirmation] = useState<StopRequest | null>(null);
 
-  // 产出只取本会话那一条任务总览投影（按 tab 可见性门控轮询）。
+  // 进度与产出共用本会话同一条任务总览投影（按可见性门控轮询）。
   const items = useTaskOverview({
     enabled: active && !!conversationId,
     ...(conversationId ? { conversationId } : {}),
   });
+  const overviewItem = useMemo(
+    () => (conversationId ? selectConversationTaskOverviewItem(items, conversationId) : null),
+    [conversationId, items],
+  );
   const artifactProjection = useMemo<TaskArtifactProjection>(() => {
     const empty: TaskArtifactProjection = {
       groups: [], summary: '', total: 0, visibleTotal: 0, hiddenTotal: 0,
     };
-    if (!conversationId) return empty;
-    // 会话作用域查询返回的多是 goal_plan 投影（taskId 为 planId），
-    // 因此按 taskId 或 item.conversationId 命中本会话那一条。
-    const item = selectConversationTaskOverviewItem(items, conversationId);
-    if (!item) return empty;
+    if (!overviewItem) return empty;
     try {
       // 投影函数自身已做治理 ref 过滤与上限截断；此处只兜异常。
-      return projectTaskOverviewArtifacts(item);
+      return projectTaskOverviewArtifacts(overviewItem);
     } catch {
       return empty;
     }
-  }, [conversationId, items]);
+  }, [overviewItem]);
 
   const runs = useMemo(
     () => projectTaskMonitorRuns(runsReader?.snapshot ?? null, conversationId, isZh),
@@ -179,7 +222,49 @@ export function TaskMonitorRailView({ isZh, workspacePath, conversationId, activ
   };
 
   return (
-    <div className="task-monitor-rail">
+    <aside className="task-monitor-rail" aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}>
+      <header className="task-monitor-header">
+        <span>{isZh ? '任务监控' : 'Task monitor'}</span>
+        <span className="task-monitor-updated" aria-live="off">{isZh ? '实时' : 'Live'}</span>
+        <button
+          type="button"
+          className="task-monitor-close"
+          aria-label={isZh ? '收起任务监控卡片' : 'Close task monitor'}
+          onClick={onClose}
+        >
+          <svg {...ICON_PROPS}><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+      </header>
+      <div className="task-monitor-scroll">
+      <MonitorSection title={isZh ? '环境信息' : 'Environment'}>
+        {environment.map((row) => (
+          <MonitorRow
+            key={row.id}
+            icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
+            value={row.value}
+            detail={row.detail ?? `${row.label}: ${row.value}`}
+          />
+        ))}
+      </MonitorSection>
+
+      {overviewItem?.planProgress ? (
+        <MonitorSection title={isZh ? '任务进度' : 'Progress'}>
+          <div className="task-monitor-progress-row">
+            <span>{overviewItem.statusLabel}</span>
+            <strong>{overviewItem.planProgress.completed} / {overviewItem.planProgress.total}</strong>
+          </div>
+          <div
+            className="task-monitor-progress-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={overviewItem.planProgress.total}
+            aria-valuenow={overviewItem.planProgress.completed}
+          >
+            <span style={{ width: `${overviewItem.planProgress.total > 0 ? Math.min(100, Math.max(0, (overviewItem.planProgress.completed / overviewItem.planProgress.total) * 100)) : 0}%` }} />
+          </div>
+        </MonitorSection>
+      ) : null}
+
       {runs.length > 0 ? (
         <MonitorSection title={isZh ? '后台任务' : 'Background tasks'}>
           {runs.map((row) => (
@@ -244,7 +329,8 @@ export function TaskMonitorRailView({ isZh, workspacePath, conversationId, activ
           ) : null}
         </MonitorSection>
       ) : null}
-    </div>
+      </div>
+    </aside>
   );
 }
 

@@ -3457,17 +3457,35 @@
 }
 
 /* ── chat workspace 横向布局 ──
-   原方案 B 在右侧挂常驻 aside；现已迁移到右侧 Workbench Panel。
-   .chat-workspace 仍保留作为 chat-surface 的 flex 容器，主区独占可弹性宽度。 */
+   chat-surface 独占会话列；任务监控卡片是 chat-surface 内部的悬浮卡片
+   （见 .chat-surface--with-monitor 与 task-monitor-rail 卡片样式），
+   App 级 Workbench 位于 chat-workspace 外层，开关与本卡完全独立。 */
 .chat-workspace {
   display: flex;
   flex-direction: row;
+  width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 .chat-workspace > .chat-surface {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* 监控卡片打开：给正文（thread + composer，均为 in-flow）右侧预留「卡片宽度 + 双侧边距」；
+   .chat-header 是 absolute 定位、不受 padding 影响，因此头部保持整行不被挤压。
+   槽位变量单一事实源：padding 与卡片宽度同源，正文右缘恒等于卡片左缘减边距，绝不重叠。 */
+.chat-surface--with-monitor {
+  --task-monitor-card: clamp(280px, 24%, 340px);
+  padding-right: calc(var(--task-monitor-card) + var(--space-3) * 2);
+}
+
+@media (max-width: 860px) {
+  .chat-surface--with-monitor {
+    --task-monitor-card: min(280px, 38vw);
+  }
 }
 
 /* batch_search 分路检索卡（方向甲「极简单行折叠」）。见 docs/design/batch-search-parallel-aggregation.md */

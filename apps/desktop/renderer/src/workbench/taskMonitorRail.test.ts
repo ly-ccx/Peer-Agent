@@ -4,6 +4,7 @@ import type { ManagedShellTask, TaskOverviewItem } from '@peer-agent/protocol';
 import {
   pathTailLabel,
   projectTaskMonitorArtifacts,
+  projectTaskMonitorEnvironment,
   projectTaskMonitorRuns,
   selectConversationTaskOverviewItem,
 } from './taskMonitorRail.ts';
@@ -65,11 +66,21 @@ test('后台任务：命令行优先用 description，状态文案随语言，�
   assert.equal(en.find((row) => row.taskId === 'a')?.statusLabel, 'Running');
 });
 
-// 轴 2：环境信息已移除 —— 投影层不再有任何环境相关导出。
-test('环境信息移除：本模块不再导出环境投影（归 composer 环境胶囊）', async () => {
-  const source = await import('./taskMonitorRail.ts');
-  assert.equal('projectTaskContextEnvironment' in source, false);
-  assert.equal('projectTaskMonitorEnvironment' in source, false);
+// 轴 2：环境信息属于当前会话监控栏，同时 composer 胶囊保留为紧凑入口。
+test('环境信息：Git 工作区投影分支、工作区和本地运行位置', () => {
+  assert.deepEqual(projectTaskMonitorEnvironment('/workspace/peer_agent', 'PeerAgent/monitor', true, true), [
+    { id: 'branch', icon: 'branch', label: '分支', value: 'PeerAgent/monitor' },
+    { id: 'workspace', icon: 'folder', label: '工作区', value: 'peer_agent', detail: '/workspace/peer_agent' },
+    { id: 'location', icon: 'device', label: '运行位置', value: '本地' },
+  ]);
+});
+
+test('环境信息：非 Git 或空工作区不伪造分支与位置', () => {
+  assert.deepEqual(projectTaskMonitorEnvironment('/workspace/plain', 'ignored', false, false), [
+    { id: 'workspace', icon: 'folder', label: 'Workspace', value: 'plain', detail: '/workspace/plain' },
+    { id: 'location', icon: 'device', label: 'Runs on', value: 'Local' },
+  ]);
+  assert.deepEqual(projectTaskMonitorEnvironment(null, null, null, true), []);
 });
 
 // 轴 3：产出治理过滤 —— 治理 ref 与通用文案标签永不进入展示。

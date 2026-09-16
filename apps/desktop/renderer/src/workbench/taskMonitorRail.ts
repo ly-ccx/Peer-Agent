@@ -15,14 +15,59 @@ import {
  * 治理边界（AGENTS.md / peer-knowledge design/product/task-context-rail.md）：
  * - 本模块只做「已有权威事实 → 展示行」的投影，不产生新的事实来源；
  *   所有事实仍来自 main 进程的 Runtime 快照与 taskOverview:list。
- * - **环境信息不在此栏**：分支/本地/提交推送属于中间对话面板的 composer 环境胶囊
- *   （ChatSurface 的 envCapsule / formatComposerEnvCapsule），本栏不得重复展示。
+ * - 环境信息属于会话监控栏：分支、工作区与运行位置都从现有 git / workspace 事实投影；
+ *   composer 环境胶囊仍作为输入区的紧凑入口保留，两者共享事实而非互相替代。
  * - 后台任务区是**会话作用域的合并视图**：把 Runtime 快照里本会话的后台运行
  *   合并进来，行内直接展开既有 BackgroundRunDetails 详情（停止等写操作复用
  *   Provider 的同一 stops 链路），不再跳去 ChatHeader 弹层。
  * - 产出区必须复用 projectTaskOverviewArtifacts 的过滤规则，不得放宽
  *   （tool-result:// / local-shell-artifact:// / goal-plan:// 等治理 ref 永不展示）。
  */
+
+export interface TaskMonitorEnvironmentRow {
+  readonly id: 'branch' | 'workspace' | 'location';
+  readonly icon: 'branch' | 'folder' | 'device';
+  readonly label: string;
+  readonly value: string;
+  readonly detail?: string;
+}
+
+/** 环境信息：复用会话现有 workspace/git 事实，不新增状态源。 */
+export function projectTaskMonitorEnvironment(
+  workspacePath: string | null,
+  branch: string | null,
+  isGit: boolean | null,
+  isZh: boolean,
+): readonly TaskMonitorEnvironmentRow[] {
+  const rows: TaskMonitorEnvironmentRow[] = [];
+  const normalizedBranch = branch?.trim() ?? '';
+  if (isGit === true && normalizedBranch) {
+    rows.push({
+      id: 'branch',
+      icon: 'branch',
+      label: isZh ? '分支' : 'Branch',
+      value: normalizedBranch,
+    });
+  }
+
+  if (workspacePath) {
+    rows.push({
+      id: 'workspace',
+      icon: 'folder',
+      label: isZh ? '工作区' : 'Workspace',
+      value: pathTailLabel(workspacePath),
+      detail: workspacePath,
+    });
+    rows.push({
+      id: 'location',
+      icon: 'device',
+      label: isZh ? '运行位置' : 'Runs on',
+      value: isZh ? '本地' : 'Local',
+    });
+  }
+
+  return rows;
+}
 
 export interface TaskMonitorRunRow {
   readonly taskId: string;

@@ -3,7 +3,6 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DocumentView } from './views/DocumentView';
-import { TaskMonitorRailView } from './views/TaskMonitorRailView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -97,20 +96,6 @@ const TABS: readonly TabDef[] = [
       </svg>
     ),
   },
-  {
-    // 「监控」= 任务监控栏（Task Monitor Rail）：后台任务（内联详情）+ 产出。
-    // 环境信息不在此栏（归中间对话面板的 composer 环境胶囊）。
-    // 后台任务是会话作用域的合并视图：写操作复用 Provider 的同一 stops 链路。
-    id: 'monitor',
-    labelZh: '监控',
-    labelEn: 'Monitor',
-    icon: (
-      <svg width="15" height="15" {...ICON_PROPS}>
-        <path d="M3 12h4l2.5-6 4 12 2.5-6H21" />
-      </svg>
-    ),
-  },
-
 ];
 
 interface WorkbenchPanelProps {
@@ -410,18 +395,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             session={documentSession}
             onSessionChange={setDocumentSession}
             onBrowseFiles={() => setActiveTab('files')}
-          />
-        </div>
-
-        <div
-          className="workbench-view workbench-view--monitor"
-          data-active={activeTab === 'monitor'}
-        >
-          <TaskMonitorRailView
-            isZh={isZh}
-            workspacePath={workspacePath}
-            conversationId={conversationId}
-            active={open && activeTab === 'monitor'}
           />
         </div>
 

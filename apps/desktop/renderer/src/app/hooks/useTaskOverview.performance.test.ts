@@ -58,19 +58,20 @@ test('visibilitychange resumes with one immediate sync', async () => {
   );
 });
 
-test('the monitor rail polls only while its workbench tab is visible', async () => {
-  // Workbench 视图槽常挂载（只靠 data-active 显隐），监控栏因此必须显式门控；
-  // 否则从未打开该 tab 的会话也会多挂一路 taskOverview 轮询与广播订阅。
+test('the conversation monitor polls only while its chat surface is active and open', async () => {
+  // 监控卡片仅在 taskMonitorOpen 时挂进当前 ChatSurface；切到非活动会话后继续由 active 门控，
+  // 避免隐藏会话多挂一路 taskOverview 轮询与广播订阅。
   const rail = await readFile(
     new URL('../../workbench/views/TaskMonitorRailView.tsx', import.meta.url),
     'utf8',
   );
+  const chatSurface = await readFile(new URL('../../chat/components/ChatSurface.tsx', import.meta.url), 'utf8');
   const panel = await readFile(new URL('../../workbench/WorkbenchPanel.tsx', import.meta.url), 'utf8');
 
   assert.match(rail, /enabled:\s*active && !!conversationId/);
-  assert.match(panel, /active=\{open && activeTab === 'monitor'\}/);
+  assert.match(chatSurface, /\{taskMonitorOpen \? \([\s\S]*?<TaskMonitorRailView[\s\S]*?active=\{isPageActive\}/);
+  assert.doesNotMatch(panel, /TaskMonitorRailView|activeTab === 'monitor'/);
 });
-
 
 test('TaskOverview fallback poll is slower than broadcast cadence', async () => {
   const source = await readHook();
