@@ -64,6 +64,51 @@ describe('chat permission gate', () => {
     assert.equal(events.length, 1);
   });
 
+  it('reuses a once-allow for later file writes of the same type', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    const firstPromise = gate.createFilePermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'write-once-1',
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/one.txt', content: 'one' },
+      filePath: '/outside/one.txt',
+      workspacePath: '/workspace',
+    });
+
+    assert.equal(events.length, 1);
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-write-once',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await firstPromise).granted, true);
+
+    const second = await gate.createFilePermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'write-once-2',
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/two.txt', content: 'two' },
+      filePath: '/outside/two.txt',
+      workspacePath: '/workspace',
+    });
+
+    assert.equal(second.granted, true);
+    assert.equal(second.reason, 'local_user_approved_scope');
+    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 1);
+  });
+
   it('scopes shell always-allow by normalized command family', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
@@ -117,6 +162,188 @@ describe('chat permission gate', () => {
     assert.equal(second.granted, true);
     assert.equal(second.reason, 'local_user_approved_scope');
     assert.equal(events.length, 1);
+  });
+
+  it('reuses a once-allow for the same shell command family instead of asking again', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+    const baseContext = {
+      webContents,
+      streamId: 's1',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    };
+
+    const firstPromise = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-1' })({
+      call: { toolCallId: 'local-echo-1' },
+      classification: {
+        command: 'echo one',
+        cwd: '/workspace',
+        category: 'read',
+        riskLevel: 'L1_local_read',
+        dataLevel: 'D0_public',
+        reason: 'echo_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    assert.equal(events.length, 1);
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-echo-once',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await firstPromise).granted, true);
+
+    const second = await gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-2' })({
+      call: { toolCallId: 'local-echo-2' },
+      classification: {
+        command: 'echo two',
+        cwd: '/workspace',
+        category: 'read',
+        riskLevel: 'L1_local_read',
+        dataLevel: 'D0_public',
+        reason: 'echo_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    assert.equal(second.granted, true);
+    assert.equal(second.reason, 'local_user_approved_scope');
+    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 1);
+
+    const other = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'git-1' })({
+      call: { toolCallId: 'local-git-1' },
+      classification: {
+        command: 'git status',
+        cwd: '/workspace',
+        category: 'read',
+        riskLevel: 'L1_local_read',
+        dataLevel: 'D0_public',
+        reason: 'git_status',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 2);
+    gate.settlePermissionRequest(events.at(-1).payload.call.toolCallId, {
+      grantId: 'g-git-once',
+      toolCallId: events.at(-1).payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await other).granted, true);
+  });
+
+  it('settles queued same-type shell asks together after one allow', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+    const baseContext = {
+      webContents,
+      streamId: 's1',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    };
+
+    const firstPromise = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-queue-1' })({
+      call: { toolCallId: 'local-echo-queue-1' },
+      classification: {
+        command: 'echo one',
+        cwd: '/workspace',
+        category: 'read',
+        riskLevel: 'L1_local_read',
+        dataLevel: 'D0_public',
+        reason: 'echo_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+    const secondPromise = gate.createShellApprovalDecider({ ...baseContext, toolCallId: 'echo-queue-2' })({
+      call: { toolCallId: 'local-echo-queue-2' },
+      classification: {
+        command: 'echo two',
+        cwd: '/workspace',
+        category: 'read',
+        riskLevel: 'L1_local_read',
+        dataLevel: 'D0_public',
+        reason: 'echo_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    const requestEvents = events.filter((event) => event.channel === 'chat:stream:permission-request');
+    assert.equal(requestEvents.length, 2);
+    gate.settlePermissionRequest(requestEvents[0].payload.call.toolCallId, {
+      grantId: 'g-echo-queue',
+      toolCallId: requestEvents[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+
+    const first = await firstPromise;
+    const second = await secondPromise;
+    assert.equal(first.granted, true);
+    assert.equal(second.granted, true);
+    assert.equal(second.reason, 'local_user_approved_scope');
+    const settled = events.filter((event) => event.channel === 'chat:stream:permission-settled');
+    assert.equal(settled.length, 1);
+    assert.deepEqual(settled[0].payload.toolCallIds, [requestEvents[1].payload.call.toolCallId]);
+  });
+
+  it('still asks each Goal confirmation even after a same-capability allow', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    const first = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'goal-confirm-1',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'local.goal.confirm',
+      toolName: 'goal_confirm',
+      scope: { kind: 'goal-confirmation', confirmationKind: 'high_risk', tool: 'bash' },
+      riskLevel: 'L4_privileged',
+    });
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-goal-1',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await first).granted, true);
+
+    const second = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'goal-confirm-2',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'local.goal.confirm',
+      toolName: 'goal_confirm',
+      scope: { kind: 'goal-confirmation', confirmationKind: 'high_risk', tool: 'bash' },
+      riskLevel: 'L4_privileged',
+    });
+    assert.equal(events.filter((event) => event.channel === 'chat:stream:permission-request').length, 2);
+    gate.settlePermissionRequest(events.at(-1).payload.call.toolCallId, {
+      grantId: 'g-goal-2',
+      toolCallId: events.at(-1).payload.call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await second).granted, false);
   });
 
   it('uses session local mode to auto-approve low and medium risk shell approvals only', async () => {

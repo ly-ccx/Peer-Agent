@@ -6,7 +6,7 @@ import { buildPermissionGateView } from '../../state/permissionGateView';
 interface PermissionGateStripProps {
   readonly pendingCalls: readonly ClientToolCall[];
   readonly onApprove: (call: ClientToolCall) => void;
-  /** M3·G「一直允许」：请求 main runtime 生成 scope grant，后续同 scope 由 main 自动放行。 */
+  /** 「一直允许」仍显式记 scope；「允许」对 shell/写文件也会按命令类型记住，后续同类不再问。 */
   readonly onApproveAlways: (call: ClientToolCall) => void;
   readonly onReject: (call: ClientToolCall) => void;
   readonly showApproveAlways?: boolean;

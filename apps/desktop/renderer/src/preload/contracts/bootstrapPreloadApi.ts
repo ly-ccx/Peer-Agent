@@ -1301,6 +1301,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string; startedAtMs?: number; endedAtMs?: number; durationMs?: number }) => void) => () => void;
   readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
+  readonly onChatStreamPermissionSettled: (listener: (payload: { streamId: string; toolCallIds: readonly string[] }) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
     streamId: string;
     conversationId?: string;

@@ -223,6 +223,7 @@ const unavailableApi: ClientApi = {
   onChatStreamToolProgress: unavailableMethod('onChatStreamToolProgress'),
   onChatStreamToolResult: unavailableMethod('onChatStreamToolResult'),
   onChatStreamPermissionRequest: unavailableMethod('onChatStreamPermissionRequest'),
+  onChatStreamPermissionSettled: unavailableMethod('onChatStreamPermissionSettled'),
   onChatStreamError: unavailableMethod('onChatStreamError'),
   onChatStreamNotice: unavailableMethod('onChatStreamNotice'),
   onChatStreamProviderRecovery: unavailableMethod('onChatStreamProviderRecovery'),

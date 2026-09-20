@@ -103,6 +103,49 @@ function extractPermissionCommand(args) {
   return candidate.trim();
 }
 
+const LEAF_SHELL_COMMANDS = new Set([
+  'awk',
+  'bun',
+  'cat',
+  'chmod',
+  'chown',
+  'cp',
+  'cut',
+  'date',
+  'echo',
+  'env',
+  'false',
+  'find',
+  'grep',
+  'head',
+  'hostname',
+  'ls',
+  'mkdir',
+  'mv',
+  'node',
+  'perl',
+  'printenv',
+  'pwd',
+  'python',
+  'python3',
+  'rg',
+  'rm',
+  'ruby',
+  'sed',
+  'sleep',
+  'sort',
+  'tail',
+  'tee',
+  'touch',
+  'tr',
+  'true',
+  'uname',
+  'uniq',
+  'wc',
+  'whoami',
+  'xargs',
+]);
+
 function normalizePermissionCommandSignature(command) {
   const tokens = String(command || '').split(/\s+/).filter(Boolean);
   if (!tokens.length) return '';
@@ -114,11 +157,27 @@ function normalizePermissionCommandSignature(command) {
   ) {
     return `${base} call-tool ${tokens[2]}`;
   }
+  if (LEAF_SHELL_COMMANDS.has(base)) return base;
   const sub = tokens.slice(1).find((token) => !token.startsWith('-'));
   return sub ? `${base} ${sub}` : base;
 }
 
+function isReusablePermissionType(call) {
+  const preview = call?.argumentsPreview;
+  if (preview && typeof preview === 'object' && preview.kind === 'goal-confirmation') {
+    return false;
+  }
+  if (call?.confirmation) return false;
+  if (call?.capabilityId === 'local.file.edit' || call?.capabilityId === 'local.file.write') {
+    return true;
+  }
+  return call?.capabilityId === 'local.shell.exec';
+}
+
 function buildPermissionSignature(call) {
+  if (!isReusablePermissionType(call)) {
+    return `${call.capabilityId}::once::${call.toolCallId}`;
+  }
   if (call.capabilityId === 'local.file.edit' || call.capabilityId === 'local.file.write') {
     return call.capabilityId;
   }
@@ -251,12 +310,14 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     return accessLevel;
   }
 
-  function registerPendingPermission({ streamId, call, scopeKey, scope, resolve }) {
+  function registerPendingPermission({ streamId, call, scopeKey, scope, resolve, webContents = null }) {
     pendingPermissionRequests.set(call.toolCallId, {
       streamId,
       scopeKey,
       scope,
       resolve,
+      webContents,
+      reusable: isReusablePermissionType(call),
     });
     const active = activeStreams.get(streamId);
     if (active) {
@@ -299,6 +360,7 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
+        webContents,
       });
       webContents.send('chat:stream:permission-request', { streamId, call });
     });
@@ -341,6 +403,7 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         scopeKey,
         scope: call.capabilityId,
         resolve: resolvePermission,
+        webContents,
       });
       webContents.send('chat:stream:permission-request', { streamId, call });
     });
@@ -403,17 +466,19 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
         scopeKey,
         scope: permissionCall.capabilityId,
         resolve: resolvePermission,
+        webContents,
       });
       webContents.send('chat:stream:permission-request', { streamId, call: permissionCall });
     });
   }
 
-  function settlePermissionRequest(toolCallId, grant) {
+  function settlePermissionRequest(toolCallId, grant, options = {}) {
     const pending = pendingPermissionRequests.get(toolCallId);
     if (!pending) return false;
     pendingPermissionRequests.delete(toolCallId);
     activeStreams.get(pending.streamId)?.permissionIds?.delete(toolCallId);
-    if (grant?.granted && grant?.duration === 'scope' && pending.scopeKey) {
+    const rememberType = Boolean(grant?.granted && pending.reusable && pending.scopeKey);
+    if (rememberType) {
       approvedPermissionScopes.set(pending.scopeKey, {
         ...grant,
         scope: grant.scope || pending.scope,
@@ -427,11 +492,29 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
       granted: Boolean(grant?.granted),
       grant,
       reason: grant?.granted
-        ? grant?.duration === 'scope'
+        ? rememberType
           ? 'local_user_approved_scope'
           : 'local_user_approved_once'
         : 'local_user_denied',
     });
+    if (rememberType && !options.cascaded) {
+      const cascadedIds = [];
+      for (const [pendingId, other] of [...pendingPermissionRequests.entries()]) {
+        if (other.scopeKey !== pending.scopeKey) continue;
+        const cascadedGrant = {
+          ...grant,
+          toolCallId: pendingId,
+        };
+        settlePermissionRequest(pendingId, cascadedGrant, { cascaded: true });
+        cascadedIds.push(pendingId);
+      }
+      if (cascadedIds.length) {
+        pending.webContents?.send?.('chat:stream:permission-settled', {
+          streamId: pending.streamId,
+          toolCallIds: cascadedIds,
+        });
+      }
+    }
     return true;
   }
 

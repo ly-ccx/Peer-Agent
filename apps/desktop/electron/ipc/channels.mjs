@@ -317,6 +317,7 @@ const EVENT_CHANNELS = Object.freeze([
   'chat:stream:done',
   'chat:stream:error',
   'chat:stream:permission-request',
+  'chat:stream:permission-settled',
   'chat:stream:provider-recovery',
   'chat:stream:status',
   'chat:stream:thinking',

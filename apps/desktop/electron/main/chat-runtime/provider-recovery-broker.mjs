@@ -32,6 +32,7 @@ const REPLAY_UNSAFE_CHANNELS = new Set([
   'chat:stream:tool-progress',
   'chat:stream:tool-result',
   'chat:stream:permission-request',
+  'chat:stream:permission-settled',
   'chat:stream:usage',
 ]);
 

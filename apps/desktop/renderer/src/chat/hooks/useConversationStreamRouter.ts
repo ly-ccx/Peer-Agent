@@ -6,7 +6,7 @@
 //   会话身份与会话内容两份状态无法原子绑定，切会话时必然出现「id 已新、内容还旧」的中间态
 //   （即「新会话/切换会话串入其它会话内容」的根因）。
 //
-//   本路由器把流订阅上移为「全应用唯一一份」：在 App 顶层挂载一次，订阅全部 13 个
+//   本路由器把流订阅上移为「全应用唯一一份」：在 App 顶层挂载一次，订阅全部 14 个
 //   chatStream 事件，并按 streamId → conversationId（conversationStore.resolveConversation）
 //   把每个事件路由到对应会话桶。于是：
 //     - 前台会话（cid === activeConversationId）的正文/思考 delta 走打字机平滑吐字；
@@ -571,6 +571,15 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
+    const offPermissionSettled = clientApi.onChatStreamPermissionSettled(({ streamId, toolCallIds }) => {
+      const cid = conversationStore.resolveConversation(streamId);
+      if (!cid || !toolCallIds?.length) return;
+      const settled = new Set(toolCallIds);
+      conversationStore.setState(cid, (prev) => ({
+        pendingPermissionCalls: prev.pendingPermissionCalls.filter((item) => !settled.has(item.toolCallId)),
+      }));
+    });
+
     const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
@@ -861,6 +870,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       offToolCall();
       offToolResult();
       offPermissionRequest();
+      offPermissionSettled();
       offError();
       offProviderRecovery();
       offConnectionRecovery();
