@@ -406,7 +406,7 @@ function normalizeArtifactPreview(kind, preview) {
   return undefined;
 }
 
-export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRoots = {}) {
+export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRoots = {}, scope) {
   const records = new Map(
     (Array.isArray(evidenceIndex) ? evidenceIndex : [])
       .filter((record) => record && typeof record.evidenceRef === 'string')
@@ -428,7 +428,13 @@ export function deriveTaskArtifacts(evidenceRefs, evidenceIndex = [], artifactRo
         && existsSync(userArtifact.path)
         ? userArtifact.path
         : undefined;
-      const openPath = declaredPath ?? resolveArtifactOpenPath(ref, artifactRoots, record?.createdAt);
+      // A registered resolver owns both success and denial. Never bypass it with
+      // a path supplied in persisted presentation data.
+      const resolved = artifactRoots.resolveArtifact?.(ref, record, scope);
+      if (resolved !== undefined && !resolved.openPath) continue;
+      const openPath = resolved !== undefined
+        ? resolved.openPath
+        : declaredPath ?? resolveArtifactOpenPath(ref, artifactRoots, record?.createdAt);
       // 产物行必须能区分对象。存量数据把「代码变更」「新建文件」写成了非空
       // label，不能再把非空当有效名；这类通用文案一律回退到真实文件名。
       const fallbackName = openPath
@@ -491,7 +497,7 @@ export function extractPlanSteps(plan, evidenceIndex = [], artifactRoots = {}) {
       const status = PLAN_STEP_STATUSES.has(rawStatus) ? rawStatus : 'pending';
       const step = { taskId, title, status };
       if (currentTaskId && taskId === currentTaskId) step.current = true;
-      const artifacts = deriveTaskArtifacts(task.evidenceRefs, evidenceIndex, artifactRoots);
+      const artifacts = deriveTaskArtifacts(task.evidenceRefs, evidenceIndex, artifactRoots, plan);
       if (artifacts.length > 0) step.artifacts = artifacts;
       steps.push(step);
     }

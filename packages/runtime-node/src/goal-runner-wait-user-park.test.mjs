@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { canConsumeRequestedUserInput, createGoalPlanStore, goalPlanWaitsOnUser } from './goal-plan-store.mjs';
+import { canConsumeRequestedUserInput, createGoalPlanStore, goalPlanWaitsOnPreviewReview, goalPlanWaitsOnUser } from './goal-plan-store.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
 import {
   isStalledAcceptedGoalRunner,
@@ -92,6 +92,41 @@ test('只剩等用户的叶子：回合结束停在 waiting_user，不再排下�
   assert.equal(final.runner.status, 'waiting_user');
   assert.equal(final.runner.blockedReason, 'requested_user_input');
   assert.ok(final.runTrace.events.some(isLeafPark), '应留下叶子等待停机事件');
+}));
+
+test('preview-review-pending 不停泵，进入独立复核', withTempHome(async () => {
+  const store = createGoalPlanStore();
+  const planId = setupPlan(store, { observe: 'completed', close: 'pending' });
+  store.recordEvidenceRefs({ planId, conversationId: 'wait-user-park', evidenceRefs: ['image'] });
+  store.recordTaskEvidence(planId, 'observe', { status: 'completed', evidenceRefs: ['image'] });
+  store.recordTaskEvidence(planId, 'close', {
+    status: 'waiting_user',
+    blockedReason: 'preview-review-pending',
+    result: 'preview-review-pending',
+  });
+  let visualCalls = 0;
+  const runner = createGoalRunner({
+    goalPlanStore: store,
+    logger: { warn() {} },
+    recoverableRetryLimit: 0,
+    maxTurns: 2,
+    uiDeliveryAuthority: {
+      read() {
+        return { required: true, requirements: [{ id: 'panel' }], observations: [], judgments: [] };
+      },
+    },
+    verifierRunner: {
+      async runVerifier(args) {
+        if (args.stage !== 'visual') return { passed: true, evidenceRefs: ['mechanical'] };
+        visualCalls += 1;
+        return { passed: true, evidenceRefs: ['judgment'] };
+      },
+    },
+    chatRuntime: { async runGoalTurn() { throw new Error('preview-review-pending must not start another chat turn'); } },
+  });
+  await runner.start(planId, { awaitIdle: true });
+  assert.equal(visualCalls, 1);
+  assert.notEqual(store.getPlan(planId).runner.status, 'waiting_user');
 }));
 
 test('还有可自己推进的活：不停机，继续跑', withTempHome(async () => {
@@ -216,4 +251,13 @@ test('叶子判定纯函数：终态不阻塞、非终态非等待即继续、�
   for (const [name, tasks, expected] of cases) {
     assert.equal(goalPlanWaitsOnUser(tasks ? { tasks } : {}), expected, name);
   }
+});
+
+test('preview-review-pending is not a user wait; host review can still run', () => {
+  const pending = { status: 'waiting_user', blockedReason: 'preview-review-pending', result: 'preview-review-pending' };
+  const plan = { tasks: [{ status: 'completed' }, pending] };
+  assert.equal(goalPlanWaitsOnUser(plan), false);
+  assert.equal(goalPlanWaitsOnPreviewReview(plan), true);
+  assert.equal(goalPlanWaitsOnUser({ tasks: [{ status: 'waiting_user' }] }), true);
+  assert.equal(goalPlanWaitsOnPreviewReview({ tasks: [{ status: 'waiting_user' }] }), false);
 });

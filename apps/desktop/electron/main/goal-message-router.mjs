@@ -1,6 +1,6 @@
 import { isRecoverableSystemGoalBlocker } from './goal-blocker-policy.mjs';
 import { isStalledAcceptedGoalRunner } from './goal-intake-convergence.mjs';
-import { canConsumeRequestedUserInput } from './goal-plan-store.mjs';
+import { canConsumeRequestedUserInput, runnerWaitsOnUser } from './goal-plan-store.mjs';
 
 const RESUME_PATTERNS = [
   /^继续$/,
@@ -210,7 +210,7 @@ export function applyGoalMessageRoute({
   const foregroundTakesOverStaleBlocker = continuesCurrentGoal
     && activeGoalPlan?.status === 'executing'
     && ['blocked', 'budget_exhausted'].includes(activeGoalPlan?.runner?.status)
-    && activeGoalPlan?.runner?.blockedReason !== 'requested_user_input';
+    && !runnerWaitsOnUser(activeGoalPlan?.runner);
   const pausedNeedsResume = continuesCurrentGoal
     && route.intent !== 'correction'
     && (

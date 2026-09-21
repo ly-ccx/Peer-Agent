@@ -43,6 +43,21 @@ test('讨论、评估和界面咨询正常答复后不会留下 GoalPlan', () =>
   }
 });
 
+test('已留下截图/任务证据的 intake 不是纯问答，正常结束仍 keep', () => {
+  const observedIntake = {
+    ...intakePlan,
+    tasks: [{ taskId: 'capture', status: 'completed', evidenceRefs: ['local-desktop-preview-artifact://panel'] }],
+  };
+  assert.equal(decideIntakeConvergence(observedIntake, {
+    terminalStatus: 'done',
+    requestedUserInput: false,
+  }), 'keep');
+  assert.equal(decideIntakeConvergence({
+    ...intakePlan,
+    evidenceRefs: ['tool-result://observe'],
+  }, { terminalStatus: 'done' }), 'keep');
+});
+
 test('模糊澄清：模型调用 request_user_input → keep（保留等待）', () => {
   const decision = decideIntakeConvergence(intakePlan, {
     terminalStatus: 'done',
