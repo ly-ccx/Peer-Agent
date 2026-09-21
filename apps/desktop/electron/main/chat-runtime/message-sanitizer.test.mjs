@@ -205,6 +205,20 @@ describe('sanitizeApiMessages tool-call pairing normalization', () => {
   });
 });
 
+describe('explicit Gemini message format', () => {
+  it('preserves native model/tool envelopes only in Gemini mode without cloning images', () => {
+    const image = { inlineData: { mimeType: 'image/png', data: 'fixture' } };
+    const model = { role: 'assistant', content: '', geminiContent: { role: 'model', parts: [{ functionCall: { name: 'observe', args: {} } }] } };
+    const tool = { role: 'tool', content: 'result', geminiContent: { role: 'user', parts: [image] } };
+    assert.deepEqual(sanitizeApiMessages([model, tool]), []);
+    const native = sanitizeApiMessages([model, tool], { toolCallFormat: 'gemini' });
+    assert.deepEqual(native, [model, tool]);
+    assert.equal(native[1].geminiContent.parts[0], image);
+    assert.deepEqual(sanitizeApiMessages([{ role: 'tool', content: 'orphan' }], { toolCallFormat: 'gemini' }), []);
+    assert.deepEqual(sanitizeApiMessages([{ ...tool, geminiContent: { role: 'user', parts: [] } }], { toolCallFormat: 'gemini' }), []);
+  });
+});
+
 function hasReadableContent(value) {
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;

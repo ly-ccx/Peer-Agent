@@ -78,7 +78,7 @@ const TOOL_CALL_UNRESOLVED_PLACEHOLDER =
 //
 // 该逻辑只针对 OpenAI 扁平结构（message.tool_calls / role:'tool' + tool_call_id）。
 // Anthropic 的 tool_use / tool_result 走 content block，不涉及 role:'tool'，天然不受影响。
-function normalizeToolCallPairing(messages) {
+function normalizeToolCallPairing(messages, isNativeMessage = () => false) {
   // 收集所有 assistant 声明过的 tool_call id。
   const declaredIds = new Set();
   for (const message of messages) {
@@ -99,6 +99,7 @@ function normalizeToolCallPairing(messages) {
 
   const result = [];
   for (const message of messages) {
+    if (isNativeMessage(message)) { result.push(message); continue; }
     if (message.role === 'tool') {
       // 丢弃孤儿 tool：没有 tool_call_id，或找不到配对的 assistant 声明。
       if (!message.tool_call_id || !declaredIds.has(message.tool_call_id)) continue;
@@ -126,9 +127,13 @@ function normalizeToolCallPairing(messages) {
   return result;
 }
 
-export function sanitizeApiMessages(messages) {
+export function sanitizeApiMessages(messages, { toolCallFormat = 'openai' } = {}) {
+  const nativeGeminiMessage = message => toolCallFormat === 'gemini'
+    && ['user', 'model'].includes(message?.geminiContent?.role)
+    && Array.isArray(message.geminiContent.parts) && message.geminiContent.parts.length > 0;
   const filtered = messages.filter((message) => {
     if (!message || typeof message !== 'object') return false;
+    if (nativeGeminiMessage(message)) return true;
     if (isEmptyAssistantMessage(message)) return false;
     if (message.role === 'system') return hasContent(message.content);
     if (message.role === 'user') return hasContent(message.content);
@@ -137,5 +142,5 @@ export function sanitizeApiMessages(messages) {
     return false;
   });
 
-  return normalizeToolCallPairing(filtered).map(neutralizeMessageContent);
+  return normalizeToolCallPairing(filtered, nativeGeminiMessage).map(neutralizeMessageContent);
 }

@@ -60,7 +60,7 @@ export async function agentLoopGemini({
   authMethod = resolvedChannel?.authMethod ?? 'api_key',
 }) {
   let effectiveSystemPrompt = systemPrompt;
-  let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
+  let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages], { toolCallFormat: 'gemini' });
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
@@ -122,6 +122,7 @@ export async function agentLoopGemini({
             goalKeepPolicy: runtimeMode === 'goal' ? true : null,
             // Milestone C: Goal 压缩事务串需要 store 做 prepare/commit/persisted。
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
+            visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });
@@ -152,7 +153,7 @@ export async function agentLoopGemini({
           },
           buildCanonicalRequest: ({ messages: projectedMessages }) => ({
             model,
-            messages: sanitizeApiMessages(projectedMessages),
+            messages: sanitizeApiMessages(projectedMessages, { toolCallFormat: 'gemini' }),
             tools,
             effort,
           }),

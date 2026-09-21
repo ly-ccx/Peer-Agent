@@ -60,6 +60,25 @@ test('browser_click and browser_type accept role/name from a roles snapshot', ()
   assert.match(type.prompt(), /hasText/);
 });
 
+test('browser_screenshot takes an optional planId for governed UI delivery', () => {
+  const registry = createRuntimeToolRegistry();
+  const shot = registry.getTool('browser_screenshot');
+  assert.ok(shot);
+  assert.equal(shot.capabilityId, 'local.web.control.screenshot');
+  // 可选：普通浏览截图不带它，仍按今天的行为工作。
+  assert.equal(shot.inputSchema.required, undefined);
+  const planId = shot.inputSchema.properties.planId;
+  assert.ok(planId, 'browser_screenshot must accept an optional planId');
+  assert.equal(planId.type, 'string');
+  assert.match(shot.prompt(), /planId/);
+  // 其它浏览器动作不接受 planId，避免出现第二条隐式归属通道。
+  for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_key', 'browser_drag',
+    'browser_read_dom', 'browser_hover', 'browser_scroll']) {
+    const tool = registry.getTool(name);
+    assert.equal(tool.inputSchema.properties?.planId, undefined, `${name} must not take planId`);
+  }
+});
+
 test('browser_hover and browser_scroll are registered as Desktop-only browser tools', () => {
   assert.equal(BROWSER_TOOL_NAMES.hover, 'browser_hover');
   assert.equal(BROWSER_TOOL_NAMES.scroll, 'browser_scroll');

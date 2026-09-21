@@ -142,6 +142,7 @@ export async function agentLoopOpenAI({
             goalKeepPolicy: runtimeMode === 'goal' ? true : null,
             // Milestone C: Goal 压缩事务串需要 store 做 prepare/commit/persisted。
             goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
+            visualRequestHost: { goalPlanStore, workspacePath },
             runtimeUsageAccounting: loop.usageAccounting,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });

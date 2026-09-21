@@ -137,6 +137,9 @@ describe('tool evidence refs', () => {
       assert.ok(refs.some((ref) => ref.evidenceRef === 'tool-result://call_read_plan'));
       assert.ok(refs.some((ref) => ref.evidenceRef === `goal-plan://${plan.planId}`));
       assert.ok(refs.every((ref) => ref.planId === plan.planId));
+      assert.equal(toolExecution.result.execution.call.toolCallId, 'call_read_plan');
+      assert.ok(refs.every(ref => ref.capabilityId === toolExecution.result.execution.call.capabilityId));
+      assert.equal(typeof refs[0].capabilityId, 'string');
       const toolCallEvent = sent.find((event) => event.channel === 'chat:stream:tool-call');
       const toolResultEvent = sent.find((event) => event.channel === 'chat:stream:tool-result');
       assert.ok(toolCallEvent);
