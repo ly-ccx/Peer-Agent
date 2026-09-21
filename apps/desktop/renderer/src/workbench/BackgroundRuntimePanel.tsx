@@ -68,7 +68,7 @@ export function BackgroundRuntimePanel({ anchor, snapshot, error, reload, source
   return <Overlay anchor={anchor} id={id} ariaLabel={isZh ? '后台运行' : 'Background runs'} panelClassName="background-runtime-panel" onClose={onClose}
     onEscape={() => { if (request?.phase === 'confirm') { setRequest(null); return true; } return false; }}>
     {({ requestClose }) => <>
-      <header className="background-runtime-header">
+      <header className="background-runtime-header" data-testid="background-runtime-state" data-read-state={readState}>
         {selected ? <button type="button" onClick={() => { setRequest(null); setSelected(null); }}>‹ {isZh ? '后台运行' : 'Background runs'}</button> : <h2>{isZh ? '后台运行' : 'Background runs'}</h2>}
         <span className="background-run-meta">{isZh ? '本机' : 'This device'}</span>
         <button type="button" aria-label={isZh ? '关闭' : 'Close'} onClick={requestClose}>×</button>
