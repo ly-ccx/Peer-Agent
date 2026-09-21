@@ -25,44 +25,54 @@ import {
  */
 
 export interface TaskMonitorEnvironmentRow {
-  readonly id: 'branch' | 'workspace' | 'location';
+  readonly id: 'current-head' | 'source' | 'workspace' | 'location';
   readonly icon: 'branch' | 'folder' | 'device';
   readonly label: string;
   readonly value: string;
   readonly detail?: string;
 }
 
-/** 环境信息：复用会话现有 workspace/git 事实，不新增状态源。 */
-export function projectTaskMonitorEnvironment(
-  workspacePath: string | null,
-  branch: string | null,
-  isGit: boolean | null,
-  isZh: boolean,
-): readonly TaskMonitorEnvironmentRow[] {
+/** 环境信息：当前工作区 HEAD 与任务源头分行，不把两者拼成一条。 */
+export function projectTaskMonitorEnvironment(input: {
+  readonly workspacePath: string | null;
+  readonly currentHead?: string | null;
+  readonly sourceBranch?: string | null;
+  readonly isGit: boolean | null;
+  readonly isZh: boolean;
+}): readonly TaskMonitorEnvironmentRow[] {
   const rows: TaskMonitorEnvironmentRow[] = [];
-  const normalizedBranch = branch?.trim() ?? '';
-  if (isGit === true && normalizedBranch) {
+  const currentHead = input.currentHead?.trim() ?? '';
+  const sourceBranch = input.sourceBranch?.trim() ?? '';
+  if (input.isGit === true && currentHead) {
     rows.push({
-      id: 'branch',
+      id: 'current-head',
       icon: 'branch',
-      label: isZh ? '分支' : 'Branch',
-      value: normalizedBranch,
+      label: input.isZh ? '当前工作区' : 'Current workspace',
+      value: currentHead,
+    });
+  }
+  if (input.isGit === true && sourceBranch) {
+    rows.push({
+      id: 'source',
+      icon: 'branch',
+      label: input.isZh ? '任务源头' : 'Task source',
+      value: sourceBranch,
     });
   }
 
-  if (workspacePath) {
+  if (input.workspacePath) {
     rows.push({
       id: 'workspace',
       icon: 'folder',
-      label: isZh ? '工作区' : 'Workspace',
-      value: pathTailLabel(workspacePath),
-      detail: workspacePath,
+      label: input.isZh ? '工作区' : 'Workspace',
+      value: pathTailLabel(input.workspacePath),
+      detail: input.workspacePath,
     });
     rows.push({
       id: 'location',
       icon: 'device',
-      label: isZh ? '运行位置' : 'Runs on',
-      value: isZh ? '本地' : 'Local',
+      label: input.isZh ? '运行位置' : 'Runs on',
+      value: input.isZh ? '本地' : 'Local',
     });
   }
 

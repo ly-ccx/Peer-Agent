@@ -16,6 +16,8 @@ import { useWorkbenchOptional } from '../WorkbenchContext';
 import { reconcileStopRequest, type StopRequest } from '../backgroundRuntimeState.ts';
 import type { ManagedShellTask, CapabilityManifest, SkillSummary } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { Dropdown } from '../../app/components/Dropdown';
+import type { DropdownOption } from '../../app/components/dropdownMenu';
 
 /**
  * 任务监控卡片 —— 单张圆角卡片 + 内部分区标签（用户 2026-09-16 截图定稿）。
@@ -133,18 +135,26 @@ function MonitorSection({ title, children }: { readonly title: string; readonly 
   );
 }
 
-function MonitorRow({ icon, value, detail, onClick }: {
+function MonitorRow({ icon, label, value, detail, onClick, control }: {
   readonly icon: React.ReactNode;
+  readonly label?: string;
   readonly value: string;
   readonly detail?: string;
   readonly onClick?: () => void;
+  readonly control?: React.ReactNode;
 }) {
   const content = (
     <>
       <span className="task-monitor-row-icon">{icon}</span>
-      <span className="task-monitor-row-value" title={detail ?? value}>{value}</span>
+      {label ? <span className="task-monitor-row-label">{label}</span> : null}
+      {control ?? (
+        <span className="task-monitor-row-value" title={detail ?? value}>{value}</span>
+      )}
     </>
   );
+  if (control) {
+    return <div className="task-monitor-row task-monitor-row--control">{content}</div>;
+  }
   if (!onClick) {
     return <div className="task-monitor-row">{content}</div>;
   }
@@ -169,20 +179,42 @@ function urlLabel(url: string): string {
   }
 }
 
+function environmentRowLabel(id: string, isZh: boolean): string | undefined {
+  if (id === 'current-head') return isZh ? '当前工作区' : 'Current workspace';
+  if (id === 'source') return isZh ? '任务源头' : 'Task source';
+  return undefined;
+}
+
 export function TaskMonitorRailView({
   isZh,
   workspacePath,
-  branch,
+  currentHead,
+  sourceBranch,
   workspaceIsGit,
   conversationId,
   active,
+  canSelectSource = false,
+  sourceOptions = [],
+  isolationValue,
+  isolationOptions = [],
+  canChangeIsolation = false,
+  onSelectEnv,
+  onCreateBranch,
   onClose,
 }: {
   readonly isZh: boolean;
   readonly workspacePath: string | null;
-  readonly branch: string | null;
+  readonly currentHead: string | null;
+  readonly sourceBranch: string | null;
   readonly workspaceIsGit: boolean | null;
   readonly conversationId: string | null;
+  readonly canSelectSource?: boolean;
+  readonly sourceOptions?: readonly DropdownOption[];
+  readonly isolationValue?: string;
+  readonly isolationOptions?: readonly DropdownOption[];
+  readonly canChangeIsolation?: boolean;
+  readonly onSelectEnv?: (next: string) => void;
+  readonly onCreateBranch?: () => void;
   /**
    * 本视图是否在当前 ChatSurface 内真正可见。
    *
@@ -196,8 +228,14 @@ export function TaskMonitorRailView({
   // 复用 Provider 的单一轮询 reader，避免第二套 poller 重复打主进程。
   const runsReader = useBackgroundRunsContext();
   const environment = useMemo(
-    () => projectTaskMonitorEnvironment(workspacePath, branch, workspaceIsGit, isZh),
-    [branch, isZh, workspaceIsGit, workspacePath],
+    () => projectTaskMonitorEnvironment({
+      workspacePath,
+      currentHead,
+      sourceBranch,
+      isGit: workspaceIsGit,
+      isZh,
+    }),
+    [currentHead, isZh, sourceBranch, workspaceIsGit, workspacePath],
   );
 
   // 技能与 MCP：与 ChatHeaderCapabilities 同一 IPC 链路；失败静默为空。
@@ -315,15 +353,65 @@ export function TaskMonitorRailView({
         </header>
         <div className="task-monitor-scroll">
           <MonitorSection title={isZh ? '环境信息' : 'Environment'}>
-            {environment.map((row) => (
+            {environment.map((row) => {
+              const rowLabel = environmentRowLabel(row.id, isZh);
+              const sourceControl = row.id === 'source' && onSelectEnv && sourceBranch ? (
+                <Dropdown
+                  className="task-monitor-env-dropdown"
+                  value={sourceBranch}
+                  options={sourceOptions}
+                  onChange={onSelectEnv}
+                  disabled={!canSelectSource}
+                  triggerLabel={row.value}
+                  ariaLabel={isZh ? '任务源头' : 'Task source'}
+                  title={canSelectSource
+                    ? (isZh ? `新任务将从 ${row.value} 分叉。选这里不会切换当前工作区。` : `The next task forks from ${row.value}. This does not switch the current workspace.`)
+                    : (isZh ? `任务源头 ${row.value}` : `Task source ${row.value}`)}
+                  searchable={canSelectSource}
+                  searchPlaceholder={isZh ? '搜索源头…' : 'Search source…'}
+                  tabs={canSelectSource ? [
+                    { id: 'local', label: isZh ? '本地' : 'Local' },
+                    { id: 'remote', label: isZh ? '远程' : 'Remote' },
+                  ] : undefined}
+                  tabsAriaLabel={isZh ? '源头范围' : 'Source scope'}
+                  emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
+                  footerAction={canSelectSource && onCreateBranch ? {
+                    label: isZh ? '创建分支' : 'Create branch',
+                    onSelect: onCreateBranch,
+                  } : undefined}
+                />
+              ) : undefined;
+              return (
+                <MonitorRow
+                  key={row.id}
+                  icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
+                  label={rowLabel}
+                  value={row.value}
+                  detail={row.detail ?? row.value}
+                  control={sourceControl}
+                />
+              );
+            })}
+            {workspaceIsGit && isolationValue && isolationOptions.length > 0 && onSelectEnv ? (
               <MonitorRow
-                key={row.id}
-                icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
-                value={row.value}
-                detail={row.detail ?? row.value}
+                icon={<CheckIcon />}
+                label={isZh ? 'Worktree' : 'Worktree'}
+                value={isolationValue}
+                control={(
+                  <Dropdown
+                    className="task-monitor-env-dropdown"
+                    value={isolationValue}
+                    options={isolationOptions}
+                    onChange={onSelectEnv}
+                    disabled={!canChangeIsolation}
+                    ariaLabel={isZh ? 'Worktree 隔离' : 'Worktree isolation'}
+                    title={canChangeIsolation
+                      ? (isZh ? '下次任务是否写入独立 Worktree' : 'Whether the next task writes in an isolated worktree')
+                      : (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')}
+                  />
+                )}
               />
-            ))}
-            {workspaceIsGit ? (
+            ) : workspaceIsGit ? (
               <MonitorRow icon={<CheckIcon />} value={isZh ? '提交或推送' : 'Commit or push'} />
             ) : null}
           </MonitorSection>

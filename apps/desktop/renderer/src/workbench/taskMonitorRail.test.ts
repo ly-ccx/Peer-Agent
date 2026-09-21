@@ -66,26 +66,50 @@ test('后台任务：命令行优先用 description，状态文案随语言，�
   assert.equal(en.find((row) => row.taskId === 'a')?.statusLabel, 'Running');
 });
 
-// 轴 2：环境信息属于当前会话监控栏，同时 composer 胶囊保留为紧凑入口。
-test('环境信息：Git 工作区投影分支、工作区和本地运行位置', () => {
-  assert.deepEqual(projectTaskMonitorEnvironment('/workspace/peer_agent', 'PeerAgent/monitor', true, true), [
-    { id: 'branch', icon: 'branch', label: '分支', value: 'PeerAgent/monitor' },
+// 轴 2：环境信息属于当前会话监控栏；当前工作区 HEAD 与任务源头必须拆行。
+test('环境信息：Git 工作区投影当前 HEAD、任务源头、工作区和本地运行位置', () => {
+  assert.deepEqual(projectTaskMonitorEnvironment({
+    workspacePath: '/workspace/peer_agent',
+    currentHead: 'dev/0.0.14',
+    sourceBranch: '0.0.15',
+    isGit: true,
+    isZh: true,
+  }), [
+    { id: 'current-head', icon: 'branch', label: '当前工作区', value: 'dev/0.0.14' },
+    { id: 'source', icon: 'branch', label: '任务源头', value: '0.0.15' },
     { id: 'workspace', icon: 'folder', label: '工作区', value: 'peer_agent', detail: '/workspace/peer_agent' },
     { id: 'location', icon: 'device', label: '运行位置', value: '本地' },
   ]);
 });
 
 test('环境信息：非 Git 或空工作区不伪造分支与位置', () => {
-  assert.deepEqual(projectTaskMonitorEnvironment('/workspace/plain', 'ignored', false, false), [
+  assert.deepEqual(projectTaskMonitorEnvironment({
+    workspacePath: '/workspace/plain',
+    currentHead: 'ignored',
+    sourceBranch: 'also-ignored',
+    isGit: false,
+    isZh: false,
+  }), [
     { id: 'workspace', icon: 'folder', label: 'Workspace', value: 'plain', detail: '/workspace/plain' },
     { id: 'location', icon: 'device', label: 'Runs on', value: 'Local' },
   ]);
-  assert.deepEqual(projectTaskMonitorEnvironment(null, null, null, true), []);
-  // 监控栏只投影调用方传入的任务分支；不要在投影层自己去吃工作区 HEAD。
-  assert.equal(
-    projectTaskMonitorEnvironment('/workspace/peer', '0.0.15', true, true).find((row) => row.id === 'branch')?.value,
-    '0.0.15',
-  );
+  assert.deepEqual(projectTaskMonitorEnvironment({
+    workspacePath: null,
+    currentHead: null,
+    sourceBranch: null,
+    isGit: null,
+    isZh: true,
+  }), []);
+  const rows = projectTaskMonitorEnvironment({
+    workspacePath: '/workspace/peer',
+    currentHead: 'dev/0.0.14',
+    sourceBranch: '0.0.15',
+    isGit: true,
+    isZh: true,
+  });
+  assert.equal(rows.find((row) => row.id === 'current-head')?.value, 'dev/0.0.14');
+  assert.equal(rows.find((row) => row.id === 'source')?.value, '0.0.15');
+  assert.equal(rows.some((row) => row.id === 'branch'), false);
 });
 
 // 轴 3：产出治理过滤 —— 治理 ref 与通用文案标签永不进入展示。

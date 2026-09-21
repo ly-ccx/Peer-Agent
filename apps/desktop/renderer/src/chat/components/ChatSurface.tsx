@@ -2668,25 +2668,6 @@ export function ChatSurface({
         : (isZh ? '本地' : 'local'),
     }));
   }, [gitChrome.taskLine?.value, isZh, workspaceGit]);
-  const boundBranchOptions = useMemo<readonly DropdownOption[]>(() => {
-    const isolationGroup = isZh ? '下次任务' : 'Next task';
-    const isolationOptions: DropdownOption[] = [
-      {
-        value: COMPOSER_ENV_ISOLATION_ON,
-        label: isZh ? 'Worktree' : 'Worktree',
-        group: isolationGroup,
-        hint: isZh ? '下次' : 'next',
-      },
-      {
-        value: COMPOSER_ENV_ISOLATION_OFF,
-        label: isZh ? '当前工作区' : 'Current workspace',
-        group: isolationGroup,
-        hint: isZh ? '下次' : 'next',
-      },
-    ];
-    if (!gitChrome.taskLine?.selectable) return isolationOptions;
-    return [...isolationOptions, ...composerBranchOptions];
-  }, [composerBranchOptions, gitChrome.taskLine?.selectable, isZh]);
   const handleSelectBoundBranch = useCallback((nextBranch: string) => {
     const next = nextBranch.trim();
     if (next === COMPOSER_ENV_ISOLATION_ON) {
@@ -3179,42 +3160,15 @@ export function ChatSurface({
         {workspaceIsGit === true ? (
         <div className="composer-chrome-right">
         {/* 没有 Git 时不渲染执行环境；收起态只说这次写在哪。 */}
-        <div className="composer-env-capsule">
-              <Dropdown
-                className={`composer-dropdown composer-env-capsule-dropdown${envCapsule.isolated ? ' is-isolated' : ''}${envCapsule.kind === 'mismatch' ? ' is-mismatch' : ''}`}
-                value={
-                  canSelectBoundBranch && gitChrome.taskLine?.value
-                    ? gitChrome.taskLine.value
-                    : (preferredWorktree ? COMPOSER_ENV_ISOLATION_ON : COMPOSER_ENV_ISOLATION_OFF)
-                }
-                options={boundBranchOptions}
-                onChange={handleSelectBoundBranch}
-                triggerLabel={envCapsule.label}
-                ariaLabel={envCapsule.title}
-                title={
-                  isStreaming
-                    ? (isZh
-                      ? `${envCapsule.title} 当前任务正在执行，无法更改隔离环境`
-                      : `${envCapsule.title} Cannot change isolation while the current task is running`)
-                    : envCapsule.title
-                }
-                prefix={envCapsule.isolated ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
-                menuPlacement="down"
-                searchable={canSelectBoundBranch}
-                searchPlaceholder={isZh ? '搜索源头…' : 'Search source…'}
-                tabs={canSelectBoundBranch ? [
-                  { id: 'local', label: isZh ? '本地' : 'Local' },
-                  { id: 'remote', label: isZh ? '远程' : 'Remote' },
-                ] : undefined}
-                tabsAriaLabel={isZh ? '源头范围' : 'Source scope'}
-                emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
-                footerAction={canSelectBoundBranch ? {
-                  label: isZh ? '创建分支' : 'Create branch',
-                  onSelect: () => {
-                    handleOpenCreateBranchDialog();
-                  },
-                } : undefined}
-              />
+        <div
+          className={`composer-env-status${envCapsule.isolated ? ' is-isolated' : ''}${envCapsule.kind === 'mismatch' ? ' is-mismatch' : ''}`}
+          title={envCapsule.title}
+          aria-label={envCapsule.title}
+        >
+          <span className="composer-env-status-prefix" aria-hidden="true">
+            {envCapsule.isolated ? <GitWorktreeGlyph /> : <GitBranchGlyph />}
+          </span>
+          <span className="composer-env-status-label">{envCapsule.label}</span>
         </div>
         </div>
         ) : null}
@@ -3322,10 +3276,29 @@ export function ChatSurface({
         <TaskMonitorRailView
           isZh={isZh}
           workspacePath={workspacePath ?? null}
-          branch={gitChrome.taskLine?.value ?? (workspaceGit?.ok ? workspaceGit.current : null)}
+          currentHead={workspaceGit?.ok ? workspaceGit.current : null}
+          sourceBranch={gitChrome.taskLine?.value ?? null}
           workspaceIsGit={workspaceIsGit}
           conversationId={conversationId}
           active={isPageActive}
+          canSelectSource={canSelectBoundBranch && !isStreaming}
+          sourceOptions={composerBranchOptions}
+          isolationValue={preferredWorktree ? COMPOSER_ENV_ISOLATION_ON : COMPOSER_ENV_ISOLATION_OFF}
+          isolationOptions={[
+            {
+              value: COMPOSER_ENV_ISOLATION_ON,
+              label: isZh ? 'Worktree' : 'Worktree',
+              hint: isZh ? '下次' : 'next',
+            },
+            {
+              value: COMPOSER_ENV_ISOLATION_OFF,
+              label: isZh ? '当前工作区' : 'Current workspace',
+              hint: isZh ? '下次' : 'next',
+            },
+          ]}
+          canChangeIsolation={!isStreaming}
+          onSelectEnv={handleSelectBoundBranch}
+          onCreateBranch={handleOpenCreateBranchDialog}
           onClose={() => setTaskMonitorOpen(false)}
         />
       ) : null}

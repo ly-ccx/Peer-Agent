@@ -87,11 +87,11 @@ test('env capsule pins to the right chrome column', () => {
   );
   assert.match(
     styles,
-    /\.composer-chrome-right \.composer-env-capsule \{\n  flex-shrink:\s*1;\n\}/,
+    /\.composer-chrome-right \.composer-env-capsule,\n\.composer-chrome-right \.composer-env-status \{\n  flex-shrink:\s*1;\n\}/,
   );
   assert.match(
     styles,
-    /\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-env-capsule \{\n  flex-shrink:\s*1;\n\}/,
+    /\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-env-capsule,\n\.chat-composer-wrap--empty-home \.composer-chrome-right \.composer-env-status \{\n  flex-shrink:\s*1;\n\}/,
   );
 });
 

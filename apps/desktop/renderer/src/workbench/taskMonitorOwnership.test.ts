@@ -23,7 +23,7 @@ function assertIndependentControls(): void {
 // 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；单卡+内部分区形态。
 test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头部不被挤压', () => {
   assert.match(chatSurface, /className=\{`chat-surface\$\{showEmptyHome[^}]*\}\$\{taskMonitorOpen \? ' chat-surface--with-monitor' : ''\}`\}/);
-  assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,420}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
+  assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,1600}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
   // 卡片渲染在 .chat-surface 的 JSX 子树内（同层还有 ChatFindBar/overlays，但不在 chat-workspace 直挂）。
   assert.doesNotMatch(chatSurface, /chat-workspace">\s*<TaskMonitorRailView/);
   // 头部是 absolute 且整行（left:0;right:0），padding-right 只作用于 in-flow 正文列。
@@ -71,10 +71,14 @@ test('并存宽度钳制按卡片宿主选择且不改持久化宽度', () => {
   assert.match(workbenchStyles, /calc\(100vw[\s\S]{0,140}- 372px - 360px\)/);
 });
 
-test('环境胶囊继续留在 composer，详细环境进入监控卡分区', () => {
-  assert.match(chatSurface, /composer-env-capsule-dropdown/);
+test('输入框只留环境状态，源头和 Worktree 控制集中在监控栏', () => {
+  assert.match(chatSurface, /composer-env-status/);
+  assert.doesNotMatch(chatSurface, /composer-env-capsule-dropdown/);
   assert.match(monitorView, /projectTaskMonitorEnvironment/);
   assert.match(monitorView, /环境信息/);
+  assert.match(monitorView, /当前工作区/);
+  assert.match(monitorView, /任务源头/);
+  assert.match(monitorView, /task-monitor-env-dropdown/);
 });
 
 test('切会话或新建任务时收起任务监控，避免把上一会话的开栏带到空草稿', () => {
@@ -84,13 +88,11 @@ test('切会话或新建任务时收起任务监控，避免把上一会话的�
   );
 });
 
-test('监控栏分支与输入框共用 gitChrome.taskLine，不单独吃工作区 HEAD', () => {
-  assert.match(
-    chatSurface,
-    /branch=\{gitChrome\.taskLine\?\.value \?\? \(workspaceGit\?\.ok \? workspaceGit\.current : null\)\}/,
-  );
+test('监控栏分行投影当前工作区 HEAD 与任务源头', () => {
+  assert.match(chatSurface, /currentHead=\{workspaceGit\?\.ok \? workspaceGit\.current : null\}/);
+  assert.match(chatSurface, /sourceBranch=\{gitChrome\.taskLine\?\.value \?\? null\}/);
   assert.doesNotMatch(
     chatSurface,
-    /<TaskMonitorRailView[\s\S]{0,220}branch=\{workspaceGit\?\.ok \? workspaceGit\.current : null\}/,
+    /branch=\{gitChrome\.taskLine\?\.value \?\? \(workspaceGit\?\.ok \? workspaceGit\.current : null\)\}/,
   );
 });

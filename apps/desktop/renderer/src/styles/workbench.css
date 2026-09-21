@@ -2431,6 +2431,43 @@
     text-overflow: ellipsis;
   }
 
+  .task-monitor-row-label {
+    flex: 0 0 auto;
+    color: var(--za-text-faint);
+    font-size: var(--ui-font-meta, 11px);
+    white-space: nowrap;
+  }
+
+  .task-monitor-row--control {
+    align-items: center;
+  }
+
+  .task-monitor-env-dropdown {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .task-monitor-env-dropdown .pa-dropdown-trigger {
+    width: 100%;
+    min-height: 22px;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: var(--za-text);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+  }
+
+  .task-monitor-env-dropdown .pa-dropdown-trigger:disabled {
+    opacity: 1;
+    cursor: default;
+  }
+
+  .task-monitor-env-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
+    display: none;
+  }
+
   /* 底部「查看更多 (N)」：居中弱化的文字按钮，对齐截图形态。 */
   .task-monitor-more {
     margin: 6px auto 2px;
