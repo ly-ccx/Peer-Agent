@@ -81,6 +81,11 @@ test('环境信息：非 Git 或空工作区不伪造分支与位置', () => {
     { id: 'location', icon: 'device', label: 'Runs on', value: 'Local' },
   ]);
   assert.deepEqual(projectTaskMonitorEnvironment(null, null, null, true), []);
+  // 监控栏只投影调用方传入的任务分支；不要在投影层自己去吃工作区 HEAD。
+  assert.equal(
+    projectTaskMonitorEnvironment('/workspace/peer', '0.0.15', true, true).find((row) => row.id === 'branch')?.value,
+    '0.0.15',
+  );
 });
 
 // 轴 3：产出治理过滤 —— 治理 ref 与通用文案标签永不进入展示。

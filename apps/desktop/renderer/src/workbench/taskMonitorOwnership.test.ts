@@ -76,3 +76,21 @@ test('环境胶囊继续留在 composer，详细环境进入监控卡分区', ()
   assert.match(monitorView, /projectTaskMonitorEnvironment/);
   assert.match(monitorView, /环境信息/);
 });
+
+test('切会话或新建任务时收起任务监控，避免把上一会话的开栏带到空草稿', () => {
+  assert.match(
+    chatSurface,
+    /useEffect\(\(\) => \{\s*setTaskMonitorOpen\(false\);\s*\}, \[conversationId\]\);/,
+  );
+});
+
+test('监控栏分支与输入框共用 gitChrome.taskLine，不单独吃工作区 HEAD', () => {
+  assert.match(
+    chatSurface,
+    /branch=\{gitChrome\.taskLine\?\.value \?\? \(workspaceGit\?\.ok \? workspaceGit\.current : null\)\}/,
+  );
+  assert.doesNotMatch(
+    chatSurface,
+    /<TaskMonitorRailView[\s\S]{0,220}branch=\{workspaceGit\?\.ok \? workspaceGit\.current : null\}/,
+  );
+});
