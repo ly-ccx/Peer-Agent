@@ -24,6 +24,7 @@ import { Dropdown } from './Dropdown';
 import { ModelCatalogDialog } from './ModelCatalogDialog';
 import { ModelSettingsDialog } from './ModelSettingsDialog';
 import { Overlay } from './Overlay';
+import { aggregateGroupConnectionState } from './llmConnectionStatus';
 import {
   buildModelImportPatches,
   calculateModelSelectionChanges,
@@ -1654,7 +1655,11 @@ export function LlmSettingsPanel({
               ) : (
                 <small className="llm-provider-key">
                   {(() => {
-                    const status = connectionStatusLabel(head, i18n.locale === 'zh-CN');
+                    const groupState = aggregateGroupConnectionState(g.models);
+                    const status = connectionStatusLabel(
+                      groupState ? { ...head, connectionState: groupState } : head,
+                      i18n.locale === 'zh-CN',
+                    );
                     return (
                       <span className={`llm-connection-status tone-${status.tone}`} title={head.connectionStateReason || head.lastErrorCategory || ''}>
                         {status.text}

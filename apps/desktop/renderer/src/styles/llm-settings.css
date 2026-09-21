@@ -1644,6 +1644,7 @@
 
 .llm-badge-default,
 .llm-metadata-state,
+.llm-model-connection-badge,
 .llm-catalog-status {
   display: inline-flex;
   align-items: center;
@@ -1680,6 +1681,18 @@
 .llm-metadata-state.is-missing {
   border-color: rgba(133, 133, 133, 0.34);
   color: var(--graphite-mute);
+}
+
+.llm-model-connection-badge.tone-bad {
+  border-color: rgba(224, 36, 36, 0.34);
+  background: rgba(224, 36, 36, 0.08);
+  color: #e02424;
+}
+
+.llm-model-connection-badge.tone-warn {
+  border-color: rgba(194, 120, 3, 0.4);
+  background: rgba(194, 120, 3, 0.09);
+  color: #c27803;
 }
 
 .llm-configured-model-actions {

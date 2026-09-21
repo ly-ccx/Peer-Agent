@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
 import { LlmBrandIcon } from './LlmBrandIcon';
+import { modelConnectionBadge } from './llmConnectionStatus';
 import { modelMetadataCompletion, selectedModelContextWindow } from './llmModelConfiguration';
 
 function compactTokens(value: number | undefined): string | null {
@@ -36,6 +37,7 @@ export function ConfiguredModelRow({
 }) {
   const zh = i18n.locale === 'zh-CN';
   const completion = modelMetadataCompletion(model);
+  const connectionBadge = modelConnectionBadge(model.connectionState, zh);
   const context = compactTokens(selectedModelContextWindow(model));
   const output = compactTokens(model.maxOutputTokens);
   const summary = [
@@ -79,6 +81,11 @@ export function ConfiguredModelRow({
           <code title={model.model}>{model.model}</code>
         </div>
         <div className="llm-configured-model-status">
+          {connectionBadge ? (
+            <span className={`llm-model-connection-badge tone-${connectionBadge.tone}`}>
+              {connectionBadge.text}
+            </span>
+          ) : null}
           <span className={`llm-metadata-state is-${completion}`}>
             {completion === 'complete' ? (zh ? '已完善' : 'Complete') : completion === 'partial' ? (zh ? '部分待完善' : 'Partial') : (zh ? '元数据待完善' : 'Needs metadata')}
           </span>
