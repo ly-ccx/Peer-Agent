@@ -1,6 +1,7 @@
 import type {
   CapabilityManifest,
   ClientSessionState,
+  LlmProviderConfigView,
   LocaleCode,
   WorkspaceProject,
 } from '@peer-agent/protocol';
@@ -34,6 +35,9 @@ export interface DesktopBootstrapState {
   readonly capabilities: readonly CapabilityManifest[];
   readonly initError: string | null;
   readonly projects: readonly WorkspaceProject[];
+  /** Authoritative provider list from the same bootstrap the window starts from.
+   * The composer must not depend on a single best-effort llm:list IPC succeeding. */
+  readonly llmProviders: readonly LlmProviderConfigView[];
   readonly refreshBootstrap: () => Promise<void>;
   readonly session: ClientSessionState | null;
   readonly startupSnapshot: DesktopStartupSnapshot | null;
@@ -45,6 +49,7 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
   const [availableLocales, setAvailableLocales] = useState<readonly LocaleCode[]>([]);
   const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
   const [projects, setProjects] = useState<readonly WorkspaceProject[]>([]);
+  const [llmProviders, setLlmProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [initError, setInitError] = useState<string | null>(null);
 
   const loadBootstrap = useCallback(async () => {
@@ -55,6 +60,7 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
       setAvailableLocales(bootstrap.availableLocales);
       setCapabilities(bootstrap.capabilities);
       setProjects(bootstrap.projects);
+      setLlmProviders(bootstrap.llmProviders ?? []);
       setSession(bootstrap.session);
       setInitError(null);
 
@@ -100,6 +106,7 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
     availableLocales,
     capabilities,
     initError,
+    llmProviders,
     projects,
     refreshBootstrap: loadBootstrap,
     session,

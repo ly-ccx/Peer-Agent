@@ -135,7 +135,7 @@ export function App() {
 }
 
 function MainApp() {
-  const { availableLocales, initError, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
+  const { availableLocales, initError, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
   const brandStartupHoldDone = useBrandStartupMinHold(!initError);
   const showMainShell = Boolean(session) && brandStartupHoldDone;
@@ -274,7 +274,7 @@ function MainApp() {
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>(bootstrapProviders);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
@@ -358,6 +358,13 @@ function MainApp() {
       // Keep previous providers on transient list failures.
     }
   }, []);
+
+  // 启动快照已带权威通道列表，llm:list 只是增量刷新；一次瞬时 IPC 失败不应把
+  // 已登录通道永久显示为“未连接 AI 服务”，也不应让输入框一直禁用。
+  useEffect(() => {
+    if (bootstrapProviders.length === 0) return;
+    setProviders((current) => (current.length > 0 ? current : bootstrapProviders));
+  }, [bootstrapProviders]);
 
   const refreshSeqRef = useRef(0);
   const conversationRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
