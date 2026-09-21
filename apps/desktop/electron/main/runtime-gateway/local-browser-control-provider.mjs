@@ -43,6 +43,8 @@ const KEY = 'local.web.control.key';
 const DRAG = 'local.web.control.drag';
 
 const CONTROL_CAPABILITIES = Object.freeze([OPEN_PANEL, NAVIGATE, CLICK, TYPE, SCREENSHOT, READ_DOM, HOVER, SCROLL, KEY, DRAG]);
+// 会改动页面的动作：受治理截图之后发生这些动作，先前截图不再代表当前交付物。
+const PAGE_CHANGE_ACTIONS = Object.freeze({ [NAVIGATE]: 'navigate', [CLICK]: 'click', [TYPE]: 'type', [KEY]: 'key', [DRAG]: 'drag' });
 
 const SUMMARY_MAX_CHARS = 2_000;
 const MAX_ARTIFACT_CHARS = 2_000_000;
@@ -859,6 +861,8 @@ function permissionReason(capabilityId, { host, locale }) {
 export function createLocalBrowserControlProvider({
   userDataPath,
   artifactStore = null,
+  // 受治理的网页 UI 交付（可选注入；缺省时行为与今天完全一致，普通截图不受影响）。
+  webUiCapture = null,
   // 便于测试注入：默认用 electron 的 webContents.fromId(注册的 id)。
   resolveWebContents = (id) => electronWebContents.fromId(id),
   ensureBrowserReady = null,
@@ -1104,13 +1108,15 @@ export function createLocalBrowserControlProvider({
         duration: decision?.duration,
       });
       if (decision?.granted === false) {
+        // 回执必须带 permission-denied 字面量，并保留 capabilityId（local.web.*），
+        // 否则 lab-matrix-audit 无法把无账本的拒绝识别为 WEB-BLOCK。
         return {
           call,
           permissionGrant,
           result: createFailedClientToolResult({
             call,
             locale,
-            reason: zh ? '操控内嵌浏览器未获授权，已拒绝。' : 'Browser control was not authorized; request denied.',
+            reason: 'browser-permission-denied',
             dataLevel: 'D2_sensitive',
             status: 'denied',
           }),
@@ -1514,18 +1520,52 @@ export function createLocalBrowserControlProvider({
         const actionId = randomUUID();
         const finalUrl = typeof wc.getURL === 'function' ? wc.getURL() : (activeEntry?.url ?? '');
         const title = typeof wc.getTitle === 'function' ? wc.getTitle() : (activeEntry?.title ?? '');
-        const artifact = await store.writeImageArtifact({
-          actionId,
-          toolCallId: call.toolCallId,
-          pngBuffer,
-          metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, ...targetIdentity, startedAt, completedAt: nowIso() },
-        });
+        // 声明了 planId 的截图是受治理的 UI 交付物：写入同一套受治理产物仓、登记观察，
+        // 并由宿主调度独立复核。没有 planId 时保持今天的普通截图行为不变。
+        const governedPlanId = typeof args?.planId === 'string' && args.planId ? args.planId : null;
+        let governed = null;
+        if (governedPlanId) {
+          if (!webUiCapture) {
+            return { call, permissionGrant,
+              result: createFailedClientToolResult({ call, locale, reason: 'web-ui-delivery-unavailable',
+                dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+          let renderedText = '';
+          try { renderedText = await executeJsWithTimeout(wc.executeJavaScript('document.body ? document.body.innerText : ""')); }
+          catch { renderedText = ''; }
+          try {
+            governed = webUiCapture.capture({
+              planId: governedPlanId,
+              // 与权限/归属校验同源：从 toolContext 取，避免依赖外层作用域。
+              conversationId: context?.toolContext?.conversationId ?? null,
+              toolCallId: call.toolCallId,
+              png: pngBuffer,
+              width: size.width,
+              height: size.height,
+              finalUrl,
+              renderedText,
+              instanceId: targetIdentity?.browserTabId ?? context?.toolContext?.conversationId ?? null,
+            });
+          } catch (error) {
+            return { call, permissionGrant,
+              result: createFailedClientToolResult({ call, locale, reason: error?.message || 'web-ui-capture-failed',
+                dataLevel: 'D2_sensitive', status: 'failed' }) };
+          }
+        }
+        const artifact = governed
+          ? { artifactRef: governed.artifactRef, artifactRefs: [governed.artifactRef], bytes: pngBuffer.length, screenshotPath: null }
+          : await store.writeImageArtifact({
+            actionId,
+            toolCallId: call.toolCallId,
+            pngBuffer,
+            metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, ...targetIdentity, startedAt, completedAt: nowIso() },
+          });
         evidenceArtifactRefs = artifact.artifactRefs;
         const preview = buildImagePreview(image);
         userArtifacts = [{
           kind: 'image',
-          ref: `${artifact.artifactRef}/screenshot`,
-          path: artifact.screenshotPath,
+          ref: governed ? governed.artifactRef : `${artifact.artifactRef}/screenshot`,
+          ...(governed ? {} : { path: artifact.screenshotPath }),
           label: '界面截图',
           ...(preview ? { preview } : {}),
         }];
@@ -1548,6 +1588,7 @@ export function createLocalBrowserControlProvider({
             mediaType: 'image/png',
             artifactRef: artifact.artifactRef,
           },
+          ...(governed ? { governedPlanId } : {}),
           ...targetIdentity,
         };
         evidenceSummary = zh
@@ -1613,6 +1654,14 @@ export function createLocalBrowserControlProvider({
             : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`);
       }
 
+      // 网页交付的完整性守卫：改动页面的动作让先前的受治理截图不再成立。
+      // conversationId 在上面的 try 块里，出了作用域，这里从 context 取同一来源。
+      if (webUiCapture) {
+        webUiCapture.invalidateAfterAction({
+          conversationId: context?.toolContext?.conversationId ?? null,
+          action: PAGE_CHANGE_ACTIONS[capabilityId],
+        });
+      }
       const completedAt = nowIso();
       return {
         call,

@@ -55,3 +55,56 @@ export function buildGoalRunnerStreamStartedPayload({
     startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
   };
 }
+
+/**
+ * Map sendMessage's agent-run outcome onto the Goal Runner turn result.
+ *
+ * sendMessage already carries the real failureReason plus interrupted/recoverable
+ * when it knows them. Rewriting those into a fixed unrecoverable string would make
+ * the runner treat a mid-turn stream drop as a permanent failure.
+ */
+export function mapGoalTurnOutcome(outcome) {
+  if (!outcome || typeof outcome !== 'object') {
+    return {
+      failed: true,
+      failureReason: 'Goal Runner turn stream failed',
+      terminalStatus: 'error',
+      toolCallCount: 0,
+    };
+  }
+  if (outcome.requestedUserInput) {
+    return {
+      requestedUserInput: true,
+      blockedReason: 'requested_user_input',
+      terminalStatus: outcome.terminalStatus,
+      toolCallCount: outcome.toolCallCount ?? 0,
+    };
+  }
+  if (outcome.terminalStatus === 'error') {
+    const reason = typeof outcome.failureReason === 'string' && outcome.failureReason.trim()
+      ? outcome.failureReason.trim()
+      : 'Goal Runner turn stream failed';
+    return {
+      failed: true,
+      failureReason: reason,
+      terminalStatus: outcome.terminalStatus,
+      toolCallCount: outcome.toolCallCount ?? 0,
+      ...(outcome.interrupted === true ? { interrupted: true } : {}),
+      ...(typeof outcome.recoverable === 'boolean' ? { recoverable: outcome.recoverable } : {}),
+    };
+  }
+  if (outcome.terminalStatus === 'aborted') {
+    return {
+      blocked: true,
+      blockedReason: 'Goal Runner turn aborted',
+      terminalStatus: outcome.terminalStatus,
+      toolCallCount: outcome.toolCallCount ?? 0,
+    };
+  }
+  return {
+    terminalStatus: outcome.terminalStatus ?? null,
+    toolCallCount: outcome.toolCallCount ?? 0,
+    usage: outcome.usage,
+    continue: (outcome.toolCallCount ?? 0) > 0,
+  };
+}

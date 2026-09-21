@@ -18,7 +18,7 @@
  *     还原普通聊天体验）。
  */
 
-import { goalPlanWaitsOnUser } from './goal-plan-store.mjs';
+import { goalPlanWaitsOnPreviewReview, goalPlanWaitsOnUser } from './goal-plan-store.mjs';
 
 /** intake 判别契约识别：activation.kind==='intake' 表示尚未确认是否为真实目标。 */
 export function isIntakeContract(plan) {
@@ -46,8 +46,17 @@ export function decideIntakeConvergence(activePlan, outcome) {
   // 模糊澄清：模型已调用 request_user_input，保留契约等待用户回复。
   if (outcome?.requestedUserInput) return 'keep';
 
+  // 已留下受校验证据的 intake 不是纯问答：删除会让完成门/视觉复核失去计划身份。
+  if (hasIndexedEvidence(activePlan)) return 'keep';
+
   // 纯问答/咨询：既未升级、也未提问、回合正常结束 → 静默移除。
   return 'remove';
+}
+
+function hasIndexedEvidence(plan) {
+  const tasks = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  if (tasks.some((task) => Array.isArray(task?.evidenceRefs) && task.evidenceRefs.length > 0)) return true;
+  return Array.isArray(plan?.evidenceRefs) && plan.evidenceRefs.length > 0;
 }
 
 /**
@@ -67,6 +76,7 @@ export function shouldAutoStartAcceptedGoalRunner(plan) {
   if (plan.status !== 'accepted' && plan.status !== 'executing') return false;
   const runnerStatus = plan.runner?.status;
   if (['paused', 'blocked', 'waiting_user', 'budget_exhausted', 'completed', 'failed'].includes(runnerStatus)) {
+    if (runnerStatus === 'waiting_user' && goalPlanWaitsOnPreviewReview(plan)) return true;
     return false;
   }
   return true;

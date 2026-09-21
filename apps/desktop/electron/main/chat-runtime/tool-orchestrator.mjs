@@ -1,5 +1,6 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
 import { materializeToolResultContent } from '@peer-agent/runtime-node';
+import { isDesktopPreviewObservation } from '../runtime-gateway/desktop-preview-service.mjs';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 import {
@@ -592,10 +593,13 @@ export async function executeModelToolCall({
   const controlSignal = extractToolControlSignal(result);
   const visualObservations = Array.isArray(result.execution?.result?.modelContext?.visualObservations)
     ? result.execution.result.modelContext.visualObservations.filter((observation) => (
-        observation?.kind === 'browser_screenshot'
+        ((observation?.kind === 'browser_screenshot'
+          && typeof observation?.artifactRef === 'string'
+          && observation.artifactRef.startsWith('local-browser-artifact://'))
+          || (observation?.kind === 'desktop_preview'
+            && result.execution?.result?.status === 'success'
+            && isDesktopPreviewObservation(observation, toolCallId)))
         && observation?.mediaType === 'image/png'
-        && typeof observation?.artifactRef === 'string'
-        && observation.artifactRef.startsWith('local-browser-artifact://')
         && typeof observation?.dataUrl === 'string'
         && observation.dataUrl.startsWith('data:image/png;base64,')
       ))

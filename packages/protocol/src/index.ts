@@ -1,6 +1,10 @@
 export type { SelectionRange, SelectionReference, SelectionDraft, SelectionOrigin, SelectionChildSession, SelectionChildSummary, SelectionChildrenPage, SelectionChildRead } from './selection-reference.ts';
 
 export { buildModelMenuGroups, modelMenuChannelName, type ModelMenuRow } from './model-menu.ts';
+export { evaluateUiDelivery } from './ui-delivery-verification.ts';
+export { DESKTOP_PREVIEW_PROTOCOL, DESKTOP_PREVIEW_CAPABILITY, DESKTOP_PREVIEW_TOOL } from './desktop-preview.ts';
+export type { DesktopPreviewRequest, DesktopPreviewReply } from './desktop-preview.ts';
+export type { UiDeliveryIdentity, UiDeliveryRequirement, UiDeliveryObservation, UiDeliveryJudgment, UiDeliveryGap } from './ui-delivery-verification.ts';
 
 export type LocalAccessLevel =
   | 'ask_before_local'

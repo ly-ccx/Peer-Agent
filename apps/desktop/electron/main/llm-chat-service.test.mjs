@@ -469,6 +469,13 @@ describe('llm chat service tool materialization', () => {
       assert.equal(outcome.requestedUserInput, false);
       assert.equal(outcome.toolCallCount, 0);
       assert.equal(outcome.usage, undefined);
+      // 这条流没做过「能否重试」的判断，就不得被伪造成显式 false——否则 goal-runner 会在
+      // 「显式否决」分支短路，重试预算永远够不到，一次瞬时断流就能永久打死自驱回合。
+      assert.equal(Object.hasOwn(outcome, 'recoverable'), false,
+        '没有判断时 outcome 不应携带 recoverable');
+      assert.equal(outcome.interrupted, true, '被中断的流必须让下游可识别为瞬时中断');
+      assert.match(outcome.failureReason, /empty_model_response/,
+        'stream:error 必须把真实错误写进 failureReason，不能让 Goal Runner 只看到固定文案');
     } finally {
       globalThis.fetch = previousFetch;
     }

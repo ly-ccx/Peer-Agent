@@ -1,9 +1,18 @@
-function observationsFromExecutions(executions) {
+import { bindPreviewImage } from '../runtime-gateway/desktop-preview-service.mjs';
+
+export const INDEPENDENT_VISUAL_REVIEW_PURPOSE = 'independent-review';
+
+export function isIndependentVisualReviewPurpose(purpose) {
+  return purpose === INDEPENDENT_VISUAL_REVIEW_PURPOSE;
+}
+
+function observationsFromExecutions(executions, purpose) {
+  const allowDesktop = isIndependentVisualReviewPurpose(purpose);
   return executions.flatMap((execution) => (
     Array.isArray(execution?.result?.visualObservations)
       ? execution.result.visualObservations
       : []
-  ));
+  )).filter((observation) => observation?.kind !== 'desktop_preview' || allowDesktop);
 }
 
 function parseImageDataUrl(dataUrl) {
@@ -13,61 +22,47 @@ function parseImageDataUrl(dataUrl) {
 }
 
 function observationText(observation) {
-  return `Current browser screenshot. The artifact remains the factual source: ${observation.artifactRef}`;
+  const surface = observation.kind === 'desktop_preview' ? 'managed Desktop preview' : 'browser';
+  return `Current ${surface} screenshot. The artifact remains the factual source: ${observation.artifactRef}`;
 }
 
-/**
- * Project ephemeral browser observations into an OpenAI-compatible user message.
- * Tool-call/result pairing must be appended before this message.
- */
-export function createOpenAIVisualObservationMessage(executions) {
-  const observations = observationsFromExecutions(executions)
-    .filter((observation) => parseImageDataUrl(observation.dataUrl));
-  if (observations.length === 0) return null;
-  return {
-    role: 'user',
-    content: observations.flatMap((observation) => ([
-      { type: 'text', text: observationText(observation) },
-      { type: 'image_url', image_url: { url: observation.dataUrl } },
-    ])),
-  };
+export function createOpenAIVisualObservationMessage(executions, purpose) {
+  const content = [];
+  for (const observation of observationsFromExecutions(executions, purpose)) {
+    if (!parseImageDataUrl(observation.dataUrl)) continue;
+    content.push({ type: 'text', text: observationText(observation) });
+    content.push(bindPreviewImage({ type: 'image_url', image_url: { url: observation.dataUrl } }, observation));
+  }
+  return content.length ? { role: 'user', content } : null;
 }
 
-/**
- * Anthropic permits image blocks inside tool_result.content, preserving the exact
- * tool_use/tool_result pairing while making the screenshot visible to the model.
- */
-export function createAnthropicToolResultContent(toolExecution) {
+export function createAnthropicToolResultContent(toolExecution, purpose) {
   const observations = Array.isArray(toolExecution?.visualObservations)
-    ? toolExecution.visualObservations
+    ? toolExecution.visualObservations.filter((observation) => (
+      observation?.kind !== 'desktop_preview' || isIndependentVisualReviewPurpose(purpose)
+    ))
     : [];
-  if (observations.length === 0) return toolExecution.output;
   const imageBlocks = [];
   for (const observation of observations) {
     const parsed = parseImageDataUrl(observation.dataUrl);
     if (!parsed) continue;
     imageBlocks.push({ type: 'text', text: observationText(observation) });
-    imageBlocks.push({
+    imageBlocks.push(bindPreviewImage({
       type: 'image',
-      source: {
-        type: 'base64',
-        media_type: parsed.mediaType,
-        data: parsed.data,
-      },
-    });
+      source: { type: 'base64', media_type: parsed.mediaType, data: parsed.data },
+    }, observation));
   }
-  if (imageBlocks.length === 0) return toolExecution.output;
+  if (!imageBlocks.length) return toolExecution.output;
   return [{ type: 'text', text: toolExecution.output }, ...imageBlocks];
 }
 
-/** Gemini function responses and inline image data share the same user turn. */
-export function createGeminiVisualObservationParts(executions) {
+export function createGeminiVisualObservationParts(executions, purpose) {
   const parts = [];
-  for (const observation of observationsFromExecutions(executions)) {
+  for (const observation of observationsFromExecutions(executions, purpose)) {
     const parsed = parseImageDataUrl(observation.dataUrl);
     if (!parsed) continue;
     parts.push({ text: observationText(observation) });
-    parts.push({ inlineData: { mimeType: parsed.mediaType, data: parsed.data } });
+    parts.push(bindPreviewImage({ inlineData: { mimeType: parsed.mediaType, data: parsed.data } }, observation));
   }
   return parts;
 }

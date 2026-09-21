@@ -1,5 +1,6 @@
 import { sendGeminiStream as sendSharedGeminiStream } from '@peer-agent/runtime-node';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
 
 /**
  * Desktop host adapter for the shared Gemini stream algorithm.
@@ -7,8 +8,8 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
  * encoding, SSE parsing, tracing, and stream result behavior.
  */
 export async function sendGeminiStream(input = {}) {
-  return sendSharedGeminiStream({
+  return trackVisualAdapterResponse('gemini', input, () => sendSharedGeminiStream({
     ...input,
     fetchImpl: input.fetchImpl ?? fetchWithConnectionRecovery,
-  });
+  }));
 }

@@ -7,14 +7,18 @@
  * - 工具执行、权限、Evidence 仍由注入的 chatRuntime 及既有能力链路负责。
  */
 
-import { derivePlanStatus, goalPlanIsSelfDriven, goalPlanWaitsOnUser } from './goal-plan-store.mjs';
-import { planRequiresQualityReview } from '@peer-agent/protocol';
+import { derivePlanStatus, goalPlanIsSelfDriven, goalPlanWaitsOnPreviewReview, goalPlanWaitsOnUser, listPreviewReviewPendingLeaves } from './goal-plan-store.mjs';
+import { createGoalVisualVerification } from './goal-visual-verification.mjs';
+import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
+import { scheduleVisualRepair } from './goal-visual-repair.mjs';
+import { planRequiresQualityReview, evaluateUiDelivery } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
 const DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES = 2;
 const RECOVERABLE_INTERRUPTION_PATTERN = /(?:network|fetch failed|socket|connection|disconnect|econnreset|econnrefused|etimedout|timeout|timed out|stream.*(?:interrupt|closed|reset|error)|terminated|unexpected eof|http2|goaway|temporar(?:y|ily)|rate limit|\b429\b|\b502\b|\b503\b|\b504\b)/i;
+const HOST_VISUAL_REVIEW_FAILURE = /(?:preview-source-stale|preview-observation-mismatch|visual-review-(?:service-unavailable|current-image-missing|no-report|scope)|visual-request-(?:service-unavailable|review-pending))/i;
 /** @deprecated 语义已弃用（不再作为每计划累计 Explorer 总数上限）；保留仅为兼容旧状态。 */
 const DEFAULT_MAX_EXPLORERS = 3;
 /** 每个 turn 内 Explorer 的并发上限（并发池大小）。 */
@@ -23,6 +27,8 @@ const DEFAULT_EXPLORER_CONCURRENCY = 5;
 const EXPLORER_CONCURRENCY_HARD_CAP = 8;
 /** 连续多少轮双信号（已完成数 + 叶子 Evidence 数）都不增长即判定 no-progress 阻塞。 */
 const DEFAULT_NO_PROGRESS_LIMIT = 3;
+/** Independent visual-repair budget. Not maxTurns. */
+const DEFAULT_VISUAL_REPAIR_ATTEMPTS = 2;
 /** 同一可恢复 blocker 连续出现多少次才真正交还用户。 */
 const DEFAULT_BLOCKER_AUDIT_LIMIT = 3;
 /** 连续多少轮「纯文本且无推进」才判定真口头停；前两轮视为纠偏宽限。 */
@@ -47,9 +53,18 @@ function errorMessage(error) {
   return String(error);
 }
 
+function isHostVisualReviewFailure(value) {
+  return HOST_VISUAL_REVIEW_FAILURE.test(errorMessage(value));
+}
+
 function isRecoverableInterruption(value) {
+  if (isHostVisualReviewFailure(value)) return false;
   if (value?.recoverable === true || value?.retryable === true) return true;
+  // 显式否决优先：调用方明确说过不可恢复时，即使流被中断也不要重试。
   if (value?.recoverable === false || value?.retryable === false) return false;
+  // 流被中断且没有任何一方做过判断：这正是重试预算要覆盖的瞬时中断。
+  // 只认「这一回合确实以错误收场」，不认纯文本过渡回合（它有自己的一套宽限语义）。
+  if (value?.interrupted === true && value?.terminalStatus === 'error') return true;
   const code = typeof value?.code === 'string' ? value.code : '';
   return RECOVERABLE_INTERRUPTION_PATTERN.test(`${code} ${errorMessage(value)}`);
 }
@@ -290,6 +305,9 @@ export function createDeterministicExplorePlan(plan, { generatedAt = new Date().
 }
 
 function shouldStopForPlan(plan) {
+  if (plan?.runner?.visualRepair && plan.runner.status === 'running' && plan.runner.phase === 'repair') {
+    return false;
+  }
   return !plan || TERMINAL_PLAN_STATUSES.has(plan.status) || plan.status === 'paused';
 }
 
@@ -353,7 +371,8 @@ function planNeedsQualityReview(plan) {
 
 function shouldRerunCompletedPlan(plan) {
   if (!plan || plan.status !== 'completed') return false;
-  return plan.runner?.status === 'blocked' && plan.runner?.intent === 'verify';
+  if (plan.runner?.status === 'blocked' && plan.runner?.intent === 'verify') return true;
+  return Boolean(plan.runner?.visualRepair) && plan.runner?.status === 'running' && plan.runner?.phase === 'repair';
 }
 
 /**
@@ -583,9 +602,25 @@ function latestManualDodConfirmation(plan, manualCriterionIds) {
 export function evaluateVerificationGate(plan, options = {}) {
   const indexedEvidenceRefs = normalizeEvidenceRefSet(options.indexedEvidenceRefs);
   const requireManualConfirmation = options.requireManualConfirmation === true;
+  // Host-resolved state only: never consume observations/judgments from a plan
+  // patch or model arguments. Missing authority for a required review fails closed.
+  const uiDeliveryRequired = options.uiDeliveryRequired === true;
+  const uiDelivery = options.uiDelivery;
   const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
   const unmet = [];
   const warnings = [];
+  if (uiDeliveryRequired) {
+    if (!uiDelivery || !Array.isArray(uiDelivery.requirements) || uiDelivery.requirements.length === 0
+      || !Array.isArray(uiDelivery.observations) || !Array.isArray(uiDelivery.judgments)) {
+      unmet.push({ kind: 'ui_delivery', reason: 'ui_delivery_authority_missing' });
+    } else {
+      const review = evaluateUiDelivery(uiDelivery.requirements, uiDelivery.observations,
+        uiDelivery.judgments, indexedEvidenceRefs ?? new Set());
+      for (const gap of review.gaps) {
+        unmet.push({ kind: 'ui_delivery', criterionId: gap.requirementId, reason: gap.reason });
+      }
+    }
+  }
   let leaves = 0;
   const stack = [...roots];
   while (stack.length > 0) {
@@ -600,16 +635,24 @@ export function evaluateVerificationGate(plan, options = {}) {
     const done = task.status === 'completed';
     const hasEvidence = Array.isArray(task.evidenceRefs) && task.evidenceRefs.length > 0;
     const hasIndexedEvidence = hasEvidence && taskHasIndexedEvidence(task, indexedEvidenceRefs);
-    if (!done || !hasEvidence || !hasIndexedEvidence) {
+    // 条件叶子（例如“复核不通过才返工”）在前提不成立时会被取消。带已入索引证据的取消是
+    // “有据可查的跳过”，不是未完成；无证据或证据未入索引的取消仍然拦截，避免用取消逃避工作。
+    const documentedSkip = task.status === 'cancelled' && hasIndexedEvidence;
+    if (!done && !documentedSkip) {
       unmet.push({
+        kind: 'task',
         taskId: task.taskId ?? null,
         status: task.status ?? null,
-        reason: !done
+        reason: task.status !== 'cancelled'
           ? 'not_completed'
-          : !hasEvidence
-            ? 'missing_evidence'
-            : 'unindexed_evidence',
+          : hasEvidence
+            ? 'unindexed_evidence'
+            : 'cancelled_without_evidence',
       });
+    } else if (!hasEvidence) {
+      unmet.push({ kind: 'task', taskId: task.taskId ?? null, status: task.status ?? null, reason: 'missing_evidence' });
+    } else if (!hasIndexedEvidence) {
+      unmet.push({ kind: 'task', taskId: task.taskId ?? null, status: task.status ?? null, reason: 'unindexed_evidence' });
     }
   }
   // 无叶子任务(空计划)不视为通过——完成需要有可验证的证据基础。
@@ -730,6 +773,7 @@ function summarizeVerificationGate(gate) {
  *   chatRuntime?: { runGoalTurn: Function },
  *   explorerRunner?: { runExplorer: Function } | null,
  *   verifierRunner?: { runVerifier: Function } | null,
+ *   uiDeliveryAuthority?: { read: (planId: string) => any } | null,
  *   emitEvent?: Function | null,
  *   canRunPlan?: Function | null,
  *   prepareIsolation?: Function | null,
@@ -742,6 +786,7 @@ export function createGoalRunner({
   chatRuntime,
   explorerRunner = null,
   verifierRunner = null,
+  uiDeliveryAuthority = null,
   emitEvent = null,
   canRunPlan = null,
   prepareIsolation = null,
@@ -1019,10 +1064,88 @@ export function createGoalRunner({
   }
 
   function evaluatePlanVerificationGate(plan) {
-    return evaluateVerificationGate(plan, {
+    // A registered authority must explicitly identify non-UI plans. Invalid,
+    // unavailable or asynchronous reads cannot silently turn off verification.
+    let uiOptions = {};
+    if (uiDeliveryAuthority !== null) {
+      uiOptions = { uiDeliveryRequired: true };
+      try {
+        const snapshot = uiDeliveryAuthority.read(plan.planId);
+        if (snapshot?.required === false) uiOptions = {};
+        else if (snapshot?.required === true) {
+          uiOptions = { uiDeliveryRequired: true, uiDelivery: snapshot };
+        }
+      } catch {
+        // The completion gate records the missing authority as a structured gap.
+      }
+    }
+    return { ...evaluateVerificationGate(plan, {
       indexedEvidenceRefs: collectIndexedEvidenceRefsForPlan(plan),
       requireManualConfirmation: goalPlanIsSelfDriven(plan),
+      ...uiOptions,
+    }), uiDeliveryRequired: uiOptions.uiDeliveryRequired === true };
+  }
+
+  function continueVisualRepair(plan, visualCheck, { continuePump = false } = {}) {
+    // A missing image/service or transport exception is not a visual finding.
+    if (!visualCheck?.attempted || !visualCheck.report) return null;
+    const current = goalPlanStore.getPlan(plan.planId) ?? plan;
+    const scheduled = scheduleVisualRepair(current, visualCheck?.report ?? { passed: false }, visualCheck?.gate, {
+      maxAttempts: DEFAULT_VISUAL_REPAIR_ATTEMPTS,
     });
+    if (scheduled.kind === 'ineligible') return null;
+    if (scheduled.kind === 'exhausted') {
+      goalPlanStore.setRunnerState(plan.planId, {
+        enabled: true,
+        status: 'blocked',
+        intent: 'verify',
+        phase: 'blocked',
+        visualRepair: scheduled.visualRepair,
+        blockedReason: 'visual_repair_exhausted',
+        ...blockerPatch(plan, 'visual_repair_exhausted', { phase: 'blocked' }),
+        updatedAt: now(),
+      });
+      appendRunEvent(plan.planId, {
+        type: 'problem_found',
+        summary: 'Visual repair budget exhausted; completion remains blocked',
+        payload: {
+          summaryCode: 'visual_repair_exhausted',
+          attempts: scheduled.visualRepair.attempts,
+          maxAttempts: scheduled.visualRepair.maxAttempts,
+          scene: scheduled.visualRepair.feedback.scene,
+          artifactRef: scheduled.visualRepair.feedback.artifactRef || null,
+        },
+      });
+      emit('goalRunner:blocked', { planId: plan.planId, reason: 'visual_repair_exhausted' });
+      return { kind: 'exhausted' };
+    }
+    goalPlanStore.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'repair',
+      visualRepair: scheduled.visualRepair,
+      blockedReason: undefined,
+      updatedAt: now(),
+    });
+    if (goalPlanStore.getPlan(plan.planId)?.status === 'completed') {
+      goalPlanStore.setPlanStatus(plan.planId, 'executing');
+    }
+    appendRunEvent(plan.planId, {
+      type: 'self_correction',
+      summary: `Visual repair ${scheduled.visualRepair.attempts}/${scheduled.visualRepair.maxAttempts}; re-observe after the fix`,
+      payload: {
+        summaryCode: 'visual_repair_scheduled',
+        attempts: scheduled.visualRepair.attempts,
+        maxAttempts: scheduled.visualRepair.maxAttempts,
+        scene: scheduled.visualRepair.feedback.scene,
+        artifactRef: scheduled.visualRepair.feedback.artifactRef || null,
+        verdict: scheduled.visualRepair.feedback.verdict,
+      },
+    });
+    const session = getSession(plan.planId);
+    if (session) session.skipCompletionOnce = true;
+    return { kind: 'repair', continuePump };
   }
 
   function recordPassedQualityReview(plan) {
@@ -1036,21 +1159,19 @@ export function createGoalRunner({
       status: 'passed',
       reviewedAt: nowIso,
       checks: [
-        { id: 'intent', label: '对照你的目标', status: 'passed', note: '主结果有了' },
+        { id: 'intent', label: '对照你的目标', status: 'skipped', note: '机械检查未提供独立目标判定' },
         {
           id: 'mechanical',
           label: '测试',
           status: gate?.passed ? 'passed' : 'skipped',
           note: gate?.passed ? '相关检查已通过' : '完成门已通过',
         },
-        { id: 'artifact', label: '改动复查', status: 'passed', note: '已复查本次改动' },
+        { id: 'artifact', label: '改动复查', status: 'skipped', note: '尚无独立产物观察与判定' },
         {
           id: 'integration',
           label: '合入后复验',
-          status: plan.deliveryBinding || plan.targetBranch ? 'passed' : 'skipped',
-          note: plan.deliveryBinding?.executionIsolation === 'worktree'
-            ? '已按独立执行环境复查'
-            : (plan.deliveryBinding || plan.targetBranch ? '已按目标仓复查' : '本轮未隔离执行，未做合入后复验'),
+          status: 'skipped',
+          note: '分支绑定或执行隔离不代表已完成合入后复验',
         },
       ],
     }) || plan;
@@ -1150,6 +1271,9 @@ export function createGoalRunner({
     }
   }
 
+  const visualVerification = createGoalVisualVerification({ goalPlanStore, verifierRunner,
+    evaluateGate: evaluatePlanVerificationGate });
+
   async function runVerifierIfAvailable(plan, gate) {
     if (!gate?.passed) {
       recordVerificationRun(plan, gate);
@@ -1201,10 +1325,12 @@ export function createGoalRunner({
     const evidenceRefs = Array.isArray(report?.evidenceRefs)
       ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
       : [];
+    const currentPlan = goalPlanStore.getPlan(plan.planId);
     const passed = report?.passed === true
       && failedCriteria.length === 0
       && missingEvidence.length === 0
-      && evidenceRefs.length > 0;
+      && evidenceRefs.length > 0
+      && !!currentPlan && evaluatePlanVerificationGate(currentPlan).passed;
     const summary = typeof report?.summary === 'string' && report.summary.trim()
       ? report.summary.trim()
       : passed
@@ -1260,7 +1386,7 @@ export function createGoalRunner({
     const existing = getSession(planId);
     if (existing) return existing.promise;
 
-    const session = { cancelled: false, promise: null };
+    const session = { cancelled: false, promise: null, skipCompletionOnce: false };
     const promise = pump(planId, session)
       .catch((error) => {
         const message = errorMessage(error);
@@ -1343,6 +1469,12 @@ export function createGoalRunner({
     // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
     // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
     if (canRunPlan && !canRunPlan(plan)) return getState(planId);
+    // Automatic kicks cannot consume a persisted user question or a real waiting leaf.
+    if (plan.runner?.status === 'waiting_user' && !goalPlanWaitsOnPreviewReview(plan)) return getState(planId);
+    if (goalPlanWaitsOnUser(plan)) {
+      goalPlanStore.markRequestedUserInput(planId, { reason: 'requested_user_input' });
+      return getState(planId);
+    }
     // 在 await 之前占住 starting 锁，避免 plan-change / sendDone 并发 kick
     // 在 prepareIsolation 让出后各自 initializeRunner，留下 running 但 0 回合。
     // 不能占用 sessions：schedulePump 看到已有 session 会直接复用其 promise。
@@ -1360,6 +1492,33 @@ export function createGoalRunner({
       // 已完成且无需再跑的计划不能再开泵：否则 pump 开头会把 runner 写回 running，
       // 首页就会继续显示「正在执行 / Peer 正在自检」。
       if (plan.status === 'completed' && !shouldRerunCompletedPlan(plan)) {
+        // Completion is reusable only while the registered authority still
+        // supports it. Rechecking must not launch another editing turn.
+        if (uiDeliveryAuthority !== null) {
+          const visualCheck = await visualVerification.review(plan, evaluatePlanVerificationGate(plan));
+          if (visualCheck.cancelled) return getState(planId);
+          const gate = visualCheck.gate;
+          if (!gate.passed) {
+            const repair = continueVisualRepair(plan, visualCheck);
+            if (repair?.kind === 'repair') {
+              const promise = schedulePump(planId);
+              const session = getSession(planId);
+              if (session) session.skipCompletionOnce = true;
+              if (options.awaitIdle) await promise;
+              return getState(planId);
+            }
+            if (repair?.kind === 'exhausted') return getState(planId);
+            goalPlanStore.setRunnerState(planId, {
+              enabled: true,
+              status: 'blocked',
+              intent: 'verify',
+              phase: 'blocked',
+              blockedReason: summarizeVerificationGate(gate),
+              updatedAt: now(),
+            });
+            return getState(planId);
+          }
+        }
         if (planNeedsQualityReview(plan)) recordPassedQualityReview(plan);
         const latest = goalPlanStore.getPlan(planId) ?? plan;
         if (latest.runner?.status === 'running' || latest.runner?.status === 'exploring') {
@@ -1451,6 +1610,7 @@ export function createGoalRunner({
   }
 
   function pause(planId, reason = 'paused') {
+    visualVerification.cancel(planId);
     const session = getSession(planId);
     if (session) session.cancelled = true;
     const plan = goalPlanStore.getPlan(planId);
@@ -1474,6 +1634,7 @@ export function createGoalRunner({
   }
 
   function clear(planId, reason = 'cleared') {
+    visualVerification.cancel(planId);
     const session = getSession(planId);
     if (session) session.cancelled = true;
     const plan = goalPlanStore.getPlan(planId);
@@ -1661,12 +1822,30 @@ export function createGoalRunner({
         // tick returns to ordinary scheduling.
       }
 
-      if (plan.status === 'completed' || hasCompletedProgress(plan)) {
-        const gate = evaluatePlanVerificationGate(plan);
+      if (session.skipCompletionOnce || plan.runner?.visualRepair?.pendingTurn) {
+        session.skipCompletionOnce = false;
+        if (plan.runner?.visualRepair) {
+          goalPlanStore.setRunnerState(planId, {
+            visualRepair: { ...plan.runner.visualRepair, pendingTurn: false },
+            status: 'running',
+            intent: 'execute',
+            phase: 'repair',
+            updatedAt: now(),
+          });
+        }
+      } else if (plan.status === 'completed' || hasCompletedProgress(plan) || goalPlanWaitsOnPreviewReview(plan)
+        || listPreviewReviewPendingLeaves(plan).length > 0) {
+        const visualCheck = await visualVerification.review(plan, evaluatePlanVerificationGate(plan));
+        if (visualCheck.cancelled) return getState(planId);
+        if (visualCheck.resumeRemainingTasks) continue;
+        const gate = visualCheck.gate;
         if (!gate.passed) {
           if (gateNeedsManualDodConfirmation(gate)) {
             return blockForManualDodConfirmation(planId, plan, gate);
           }
+          const repair = continueVisualRepair(plan, visualCheck, { continuePump: true });
+          if (repair?.kind === 'repair') continue;
+          if (repair?.kind === 'exhausted') return getState(planId);
           await runVerifierIfAvailable(plan, gate);
           const summary = gate.reason === 'no_leaf_tasks'
             ? 'no verifiable leaf tasks'
@@ -1699,6 +1878,7 @@ export function createGoalRunner({
         }
         recordPassedQualityReview(plan);
         const verifier = await runVerifierIfAvailable(plan, gate);
+        if (session.cancelled) return getState(planId);
         if (!verifier.passed) {
           if (plan.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
           goalPlanStore.setRunnerState(planId, {
@@ -1805,7 +1985,8 @@ export function createGoalRunner({
         noProgressStreak += 1;
       }
       lastSignal = signal;
-      if (noProgressStreak >= DEFAULT_NO_PROGRESS_LIMIT) {
+      if (noProgressStreak >= DEFAULT_NO_PROGRESS_LIMIT
+        && !(plan.runner?.visualRepair && plan.runner.status === 'running' && plan.runner.phase === 'repair')) {
         goalPlanStore.setRunnerState(planId, {
           enabled: true,
           status: 'blocked',
@@ -1920,6 +2101,16 @@ export function createGoalRunner({
           explorerRunner,
         });
       } catch (error) {
+        if (isHostVisualReviewFailure(error)) {
+          failPlanRun(goalPlanStore, planId, errorMessage(error), {
+            appendRunEvent,
+            emit,
+            summaryCode: 'visual_review_failed',
+            source: 'visual_review',
+            turnNumber,
+          });
+          return getState(planId);
+        }
         const message = errorMessage(error);
         const latest = goalPlanStore.getPlan(planId);
         const previousAttempts = toPositiveInteger(
@@ -2026,7 +2217,7 @@ export function createGoalRunner({
       // request_user_input is the final action-owner fact of this turn. Process
       // it before terminal progress because the model may complete the current
       // leaf and then ask the user to choose the next direction in one response.
-      if (result?.requestedUserInput && (latest.status === 'completed' || hasCompletedProgress(latest))) {
+      if (result?.requestedUserInput) {
         const reason = result.blockedReason || 'requested_user_input';
         appendRunEvent(planId, {
           type: 'problem_found',
@@ -2053,7 +2244,9 @@ export function createGoalRunner({
         return getState(planId);
       }
 
-      if (latest.status === 'completed' || hasCompletedProgress(latest)) continue;
+      if ((session.skipCompletionOnce || latest.runner?.visualRepair?.pendingTurn) && latest.runner.status === 'running') {
+        session.skipCompletionOnce = false;
+      } else if (latest.status === 'completed' || hasCompletedProgress(latest) || goalPlanWaitsOnPreviewReview(latest)) continue;
       if (latest.status === 'failed' || latest.status === 'cancelled') continue;
 
       const exploreRequests = normalizeExploreRequests(result);
@@ -2132,7 +2325,10 @@ export function createGoalRunner({
           || result?.blocked
           || result?.terminalStatus === 'error'
           || result?.terminalStatus === 'aborted';
-        if (!result?.requestedUserInput && !intakeTurnFailed) {
+        const intakeHasUiGap = evaluatePlanVerificationGate(latest).unmet
+          .some(item => item.kind === 'ui_delivery');
+        if (!intakeTurnFailed && !latest.runner?.visualRepair && !intakeHasUiGap
+          && decideIntakeConvergence(latest, result) === 'remove') {
           appendRunEvent(planId, {
             type: 'intake_resolved',
             summary: 'Intake resolved as inquiry; goal contract removed',
@@ -2206,6 +2402,16 @@ export function createGoalRunner({
       }
 
       if (result?.terminalStatus === 'error') {
+        if (isHostVisualReviewFailure(result)) {
+          failPlanRun(goalPlanStore, planId, result.failureReason || 'Host visual review failed', {
+            appendRunEvent,
+            emit,
+            summaryCode: 'visual_review_failed',
+            source: 'visual_review',
+            turnNumber,
+          });
+          return getState(planId);
+        }
         const message = result.failureReason || 'Goal Runner turn stream failed';
         const previousAttempts = toPositiveInteger(
           latest?.runner?.recoverableInterruptionCount,
@@ -2359,12 +2565,19 @@ export function createGoalRunner({
           phase: 'verify',
           updatedAt: now(),
         });
-        const gate = evaluatePlanVerificationGate(latest);
+        const visualCheck = await visualVerification.review(latest, evaluatePlanVerificationGate(latest));
+        if (visualCheck.cancelled || session.cancelled) return getState(planId);
+        if (visualCheck.resumeRemainingTasks) continue;
+        const gate = visualCheck.gate;
         if (!gate.passed) {
           if (gateNeedsManualDodConfirmation(gate)) {
             return blockForManualDodConfirmation(planId, latest, gate);
           }
+          const repair = continueVisualRepair(latest, visualCheck, { continuePump: true });
+          if (repair?.kind === 'repair') continue;
+          if (repair?.kind === 'exhausted') return getState(planId);
           await runVerifierIfAvailable(latest, gate);
+          if (latest.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
           const summary = gate.reason === 'no_leaf_tasks'
             ? 'no verifiable leaf tasks'
             // 兼容两类未达标项：叶子任务（taskId）与成功标准（criterionId）。
@@ -2396,6 +2609,7 @@ export function createGoalRunner({
         }
         recordPassedQualityReview(latest);
         const verifier = await runVerifierIfAvailable(latest, gate);
+        if (session.cancelled) return getState(planId);
         if (!verifier.passed) {
           if (latest.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
           goalPlanStore.setRunnerState(planId, {
@@ -2429,13 +2643,15 @@ export function createGoalRunner({
       // If this turn resumed from a committed checkpoint, consume it after progress was attempted.
       consumeContextCheckpointIfNeeded(planId);
 
+      const nextPhase = nextPhaseAfterTurn(latestRunner?.phase ?? runner.phase ?? 'orient');
       goalPlanStore.setRunnerState(planId, {
         enabled: true,
         status: 'running',
         intent: latestRunner?.intent ?? 'execute',
-        phase: nextPhaseAfterTurn(latestRunner?.phase ?? runner.phase ?? 'orient'),
+        phase: nextPhase,
         updatedAt: now(),
       });
+      if (latestRunner?.visualRepair && nextPhase !== 'repair') continue;
     }
     return getState(planId);
   }

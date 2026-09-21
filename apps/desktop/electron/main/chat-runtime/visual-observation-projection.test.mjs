@@ -5,6 +5,7 @@ import {
   createAnthropicToolResultContent,
   createGeminiVisualObservationParts,
   createOpenAIVisualObservationMessage,
+  INDEPENDENT_VISUAL_REVIEW_PURPOSE,
 } from './visual-observation-projection.mjs';
 import { encodeOpenAIResponsesRequest } from '../provider-encoders/responses-encoder.mjs';
 
@@ -75,5 +76,66 @@ describe('browser visual observation projection', () => {
     assert.equal(createOpenAIVisualObservationMessage(executions), null);
     assert.deepEqual(createGeminiVisualObservationParts(executions), []);
     assert.equal(createAnthropicToolResultContent(executions[0].result), executions[0].result.output);
+  });
+});
+
+const DESKTOP = {
+  kind: 'desktop_preview',
+  mediaType: 'image/png',
+  artifactRef: 'local-desktop-preview-artifact://shot-2',
+  dataUrl: PNG_DATA_URL,
+};
+
+function projected(observations, purpose) {
+  const executions = executionsWith(observations);
+  return {
+    openai: createOpenAIVisualObservationMessage(executions, purpose),
+    gemini: createGeminiVisualObservationParts(executions, purpose),
+    anthropic: createAnthropicToolResultContent(executions[0].result, purpose),
+  };
+}
+
+describe('desktop preview projection purpose gate', () => {
+  it('chat/browser still projects screenshots', () => {
+    const got = projected([OBSERVATION]);
+    assert.equal(got.openai.content[1].type, 'image_url');
+    assert.equal(got.gemini.at(-1).inlineData.mimeType, 'image/png');
+    assert.equal(got.anthropic.at(-1).type, 'image');
+  });
+
+  it('chat/desktop omits preview images by default', () => {
+    const got = projected([DESKTOP]);
+    assert.equal(got.openai, null);
+    assert.deepEqual(got.gemini, []);
+    assert.equal(got.anthropic, executionsWith([DESKTOP])[0].result.output);
+  });
+
+  it('chat/unknown-purpose also omits desktop images', () => {
+    const got = projected([DESKTOP], 'chat-with-tools');
+    assert.equal(got.openai, null);
+    assert.deepEqual(got.gemini, []);
+    assert.equal(got.anthropic, executionsWith([DESKTOP])[0].result.output);
+  });
+
+  it('independent-review/desktop projects preview images', () => {
+    const got = projected([DESKTOP], INDEPENDENT_VISUAL_REVIEW_PURPOSE);
+    assert.equal(got.openai.content[1].type, 'image_url');
+    assert.equal(got.gemini.at(-1).inlineData.data, 'iVBORw0KGgo=');
+    assert.equal(got.anthropic.at(-1).type, 'image');
+  });
+
+  it('chat/mixed keeps browser and drops desktop', () => {
+    const got = projected([OBSERVATION, DESKTOP]);
+    assert.equal(got.openai.content.length, 2);
+    assert.equal(got.openai.content[1].type, 'image_url');
+    assert.equal(got.gemini.length, 2);
+    assert.equal(got.anthropic.filter((block) => block.type === 'image').length, 1);
+  });
+
+  it('malformed desktop data is omitted even during independent review', () => {
+    const got = projected([{ ...DESKTOP, dataUrl: 'file:///tmp/preview.png' }], INDEPENDENT_VISUAL_REVIEW_PURPOSE);
+    assert.equal(got.openai, null);
+    assert.deepEqual(got.gemini, []);
+    assert.equal(got.anthropic, executionsWith([{ ...DESKTOP, dataUrl: 'file:///tmp/preview.png' }])[0].result.output);
   });
 });

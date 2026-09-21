@@ -15,6 +15,13 @@ const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
+import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
+import { createWebUiCapture } from './runtime-gateway/web-ui-capture.mjs';
+import { runPlanVisualVerifier } from './runtime-gateway/desktop-visual-review.mjs';
+import { createDesktopHostVisualReview } from './runtime-gateway/desktop-host-visual-review.mjs';
+import { createGoalVisualCompletionHandoff } from './goal-visual-completion-handoff.mjs';
+import { createDesktopPreviewArtifactStore } from './runtime-gateway/desktop-preview-artifacts.mjs';
+import { registerDesktopPreviewService, unregisterDesktopPreviewService } from './runtime-gateway/desktop-preview-service.mjs';
 import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
@@ -86,6 +93,8 @@ import {
   createAutomationStore,
   createGoalPlanStore,
   createGoalRunner,
+  buildGoalRunnerTickMessage,
+  describeVisualRepair,
   resolveWorkspaceHead,
   decideIntakeConvergence,
   exportBundle,
@@ -135,6 +144,7 @@ import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
+  mapGoalTurnOutcome,
 } from './goal-runner-message-persistence.mjs';
 import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
@@ -236,13 +246,16 @@ function findWorkspaceRoot(startDir) {
 }
 
 const isPackaged = app.isPackaged;
+// Only the private managed child entry opts out of daily-host integrations.
+const isManagedPreview = !isPackaged && Boolean(process.send && process.env.PEER_PREVIEW_INSTANCE)
+  && process.argv.some((arg) => arg.endsWith('/desktop-preview-entry.mjs'));
 // Keep development launches independent while ensuring an installed desktop app
 // has exactly one process owning local stores, runtime services, and windows.
 const hasSingleInstanceLock = !isPackaged || app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 const workspaceRoot = isPackaged ? null : findWorkspaceRoot(__dirname);
 const resourcesRoot = isPackaged ? process.resourcesPath : workspaceRoot;
-const loadedEnvKeys = isPackaged ? [] : loadLocalEnv({ workspaceRoot });
+const loadedEnvKeys = isPackaged || isManagedPreview ? [] : loadLocalEnv({ workspaceRoot });
 console.log('[env-diag] workspaceRoot=', workspaceRoot ?? '(packaged)');
 console.log('[env-diag] resourcesRoot=', resourcesRoot);
 console.log('[env-diag] loadedEnvKeys=', loadedEnvKeys);
@@ -291,7 +304,7 @@ const dataHome = getDataHome();
   } catch {
     /* app ready 前取不到 userData */
   }
-  migrateFromLegacy(legacyUserData);
+  if (!isManagedPreview) migrateFromLegacy(legacyUserData);
 }
 
 const settingsStore = createSettingsStore();
@@ -452,8 +465,12 @@ function readDesktopWorkspaceHead(workspaceRoot) {
   });
 }
 
+let desktopPreviewProvider = null;
 const goalPlanStore = createGoalPlanStore({
   readWorkspaceHead: readDesktopWorkspaceHead,
+  ...(!isPackaged && !isManagedPreview ? {
+    readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
+  } : {}),
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
@@ -529,6 +546,9 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   artifactRoots: {
     shell: path.join(dataHome, 'shell-artifacts'),
     browser: path.join(dataHome, 'browser-artifacts'),
+    ...(!isPackaged ? { resolveArtifact: createDesktopPreviewArtifactStore({
+      userDataPath: dataHome, workspaceRoot, goalPlanStore,
+    }).resolveArtifact } : {}),
   },
 });
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
@@ -866,8 +886,7 @@ function toDesktopProviderMessages(messages = []) {
 }
 
 function buildGoalRunnerMessage(plan, turnNumber) {
-  const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
-  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.`;
+  return buildGoalRunnerTickMessage(plan, turnNumber);
 }
 
 function buildGoalRunnerReminder(plan, turnNumber) {
@@ -883,7 +902,8 @@ function buildGoalRunnerReminder(plan, turnNumber) {
       'Open tasks are not finished by narrating the next read/search/edit. In this same turn emit a real tool call (read_file, bash, edit_file, or write_file).',
       'Do not send a planning-only reply such as "现在读" / "先读取" / "Let me read" and then stop.',
       'If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
-    ].join(' '),
+      describeVisualRepair(plan),
+    ].filter(Boolean).join(' '),
   };
 }
 
@@ -1198,8 +1218,39 @@ const chatStreamApplicationService = createChatStreamApplicationService({
   listActiveStreams: () => llmChatService.listActiveStreams(),
 });
 
+desktopPreviewProvider = !isPackaged && !isManagedPreview
+  ? createLocalDesktopPreviewProvider({
+    workspaceRoot, userDataPath: dataHome, goalPlanStore, nativeImage,
+    hostVisualReview: createDesktopHostVisualReview({
+      runVerifier: (input) => runPlanVisualVerifier({
+        ...input, llmChatService, modelProviderId: resolveConversationModelProviderId({
+          conversationStore, conversationId: input.plan?.conversationId,
+        }),
+      }),
+    }),
+  })
+  : null;
+if (desktopPreviewProvider) registerDesktopPreviewService(goalPlanStore, workspaceRoot, desktopPreviewProvider);
+// 网页侧复用同一套账本、产物仓与宿主复核调度器：只有显式声明计划归属的截图才会走它。
+// 复用（而不是新建调度器）保证每个计划仍只有一条在飞复核。
+const webUiCapture = createWebUiCapture({
+  goalPlanStore,
+  authority: desktopPreviewProvider?.authority,
+  artifacts: desktopPreviewProvider?.artifacts,
+  hostVisualReview: desktopPreviewProvider?.hostVisualReview,
+  workspaceRoot,
+});
+const visualCompletionHandoff = createGoalVisualCompletionHandoff({
+  goalPlanStore,
+  authority: desktopPreviewProvider?.authority,
+  forceComplete: (conversationId) => llmChatService.forceCompleteConversationStreams(conversationId, {
+    reason: 'goal-visual-completion-handoff',
+  }),
+  startRunner: (planId) => goalRunner.start(planId),
+});
 goalRunner = createGoalRunner({
   goalPlanStore,
+  uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
   prepareIsolation: async (plan) => {
     if (!plan) return plan;
     const conversation = plan.conversationId
@@ -1308,36 +1359,7 @@ goalRunner = createGoalRunner({
           toolCallCount: outcome?.toolCallCount ?? 0,
         };
       }
-      if (outcome?.requestedUserInput) {
-        return {
-          requestedUserInput: true,
-          blockedReason: 'requested_user_input',
-          terminalStatus: outcome.terminalStatus,
-          toolCallCount: outcome.toolCallCount ?? 0,
-        };
-      }
-      if (outcome?.terminalStatus === 'error') {
-        return {
-          failed: true,
-          failureReason: 'Goal Runner turn stream failed',
-          terminalStatus: outcome.terminalStatus,
-          toolCallCount: outcome.toolCallCount ?? 0,
-        };
-      }
-      if (outcome?.terminalStatus === 'aborted') {
-        return {
-          blocked: true,
-          blockedReason: 'Goal Runner turn aborted',
-          terminalStatus: outcome.terminalStatus,
-          toolCallCount: outcome.toolCallCount ?? 0,
-        };
-      }
-      return {
-        terminalStatus: outcome?.terminalStatus ?? null,
-        toolCallCount: outcome?.toolCallCount ?? 0,
-        usage: outcome?.usage,
-        continue: (outcome?.toolCallCount ?? 0) > 0,
-      };
+      return mapGoalTurnOutcome(outcome);
     },
   },
   explorerRunner: {
@@ -1386,7 +1408,12 @@ goalRunner = createGoalRunner({
     },
   },
   verifierRunner: {
-    async runVerifier({ plan, verifierRunId }) {
+    async runVerifier({ plan, verifierRunId, stage, signal }) {
+      if (stage === 'visual') return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
+        workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
+          || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
+        llmChatService, modelProviderId: resolveConversationModelProviderId({
+          conversationId: plan.conversationId, conversationStore }) });
       const streamId = randomUUID();
       const webContents = createCollectingWebContents();
       broadcastToAllWindows('goalRunner:changed', {
@@ -3011,7 +3038,8 @@ function convergeIntakeAfterGoalTurn(conversationId, outcome) {
     // request_user_input is the final action-owner fact of the turn. It must
     // override a goal_update_task(completed) that happened earlier in the same
     // turn, otherwise Task Overview sees only completed → result_ready.
-    if (decision === 'keep' && typeof goalPlanStore.markRequestedUserInput === 'function') {
+    if (decision === 'keep' && typeof goalPlanStore.markRequestedUserInput === 'function'
+      && (outcome?.requestedUserInput || outcome?.terminalStatus === 'error' || outcome?.terminalStatus === 'aborted')) {
       // 回合被打断（用户停止 / 流错误）：把 intake 契约升级为"待用户确认"——
       // 写 runner.interruption 标记，任务页显示"执行中断"，后续正常回合也不会被
       // 收敛器当纯问答静默删除，直到用户明确放弃（goalPlans:delete）。
@@ -3281,6 +3309,8 @@ function handleChatSend({
         },
       ]
     : runtimeReminders;
+  // Bind the foreground contract before it can complete or be superseded.
+  const visualCompletionPlanId = goalPlanStore.getActivePlanByConversation(conversationId)?.planId;
   const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: sender,
@@ -3307,6 +3337,11 @@ function handleChatSend({
   if (!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId) {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
+      // Keep the foreground outcome unchanged; this service waits for Runtime release
+      // and rechecks the same completed plan before invoking the existing UI gate.
+      void visualCompletionHandoff.handoff(conversationId, outcome, visualCompletionPlanId).catch((error) => {
+        console.error('[main] visual completion handoff failed:', error?.message || error);
+      });
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
       if (answeredRequestedUserInputPlanId) {
         // The user's answer ran in the foreground chat turn. Hand ownership back
@@ -3878,7 +3913,11 @@ function startLocalRuntime() {
     // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
     goalProvider: createLocalGoalProvider({ goalPlanStore }),
     ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
-    extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
+    webUiCapture,
+    extraProviders: [
+      ...(skillStore ? [createLocalSkillProvider({ skillStore })] : []),
+      ...(desktopPreviewProvider ? [desktopPreviewProvider] : []),
+    ],
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
@@ -3887,10 +3926,12 @@ function startLocalRuntime() {
     dispose: async () => {
       try {
         await Promise.all([
+          desktopPreviewProvider?.dispose(),
           disposeApplicationShellTasks(userDataPath),
           disposeApplicationShellSessions(userDataPath),
         ]);
       } finally {
+        unregisterDesktopPreviewService(goalPlanStore);
         localToolHost?.unsubscribeRuntimeEvents?.();
         localToolHost = null;
       }
@@ -4097,9 +4138,11 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
         };
       },
     },
-    { name: 'desktop-affordances', optional: true, start: startDesktopAffordances },
-    { name: 'automation-runtime', optional: true, start: startAutomationRuntime },
-    { name: 'background-work', optional: true, start: startBackgroundWork },
+    ...(!isManagedPreview ? [
+      { name: 'desktop-affordances', optional: true, start: startDesktopAffordances },
+      { name: 'automation-runtime', optional: true, start: startAutomationRuntime },
+      { name: 'background-work', optional: true, start: startBackgroundWork },
+    ] : []),
   ],
 }) : null;
 

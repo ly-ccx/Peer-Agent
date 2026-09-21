@@ -218,6 +218,13 @@ const TERMINAL_FAIL = 'failed';
 const TERMINAL_CANCEL = 'cancelled';
 const BLOCKED = 'waiting_user';
 const LEAF_TERMINAL_STATUSES = new Set([TERMINAL_OK, TERMINAL_FAIL, TERMINAL_CANCEL]);
+const PREVIEW_REVIEW_PENDING = /preview-review-pending/i;
+
+/** Close denied until independent review is not a user question. */
+export function isPreviewReviewPendingLeaf(task) {
+  if (!task || typeof task !== 'object' || task.status !== BLOCKED) return false;
+  return PREVIEW_REVIEW_PENDING.test(`${task.blockedReason ?? ''} ${task.result ?? ''} ${task.failureReason ?? ''}`);
+}
 
 /** Plan 终态：关闭 active segment 并落盘 duration。 */
 const PLAN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -1651,6 +1658,11 @@ function normalizeRunnerState(runner, planId) {
   if (typeof runner.blockedReason === 'string' && runner.blockedReason.trim()) {
     next.blockedReason = runner.blockedReason.trim();
   }
+  // 「在等真人」是独立事实，不能靠 blockedReason 的某个字面量来代表：
+  // 具体原因（例如宽限后请求澄清）必须原样保留，同时消费者仍要能识别「是在等人」。
+  if (runner.waitingOnUser === true) {
+    next.waitingOnUser = true;
+  }
   if (Array.isArray(runner.explorers)) {
     const explorers = runner.explorers
       .map((run) => normalizeExplorerRun(run, { planId }))
@@ -1726,16 +1738,23 @@ function normalizePlan(plan) {
     qualityReview: normalizeQualityReview(plan.qualityReview),
     deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
-  // 读路径只恢复「叶子已全部成功，但计划仍钉在 interrupted/failed」的过期记录。
+  const runner = normalizeRunnerState(plan.runner, plan.planId);
+  // 读路径只恢复「叶子已全部成功，但计划仍钉在 failed、且没有未消费中断」的过期记录。
+  // 仍有 runner.interruption 时保持挂起：最后一片叶子 completed 不得把可恢复中断洗成 completed。
   // 不能对所有状态全量派生，否则 completed intake 被 markRequestedUserInput
   // 重新打开后，读盘会立刻打回 completed。
   if (normalized.status === 'interrupted' || normalized.status === 'failed') {
     const derivedStatus = derivePlanStatus(normalized.status, plan.tasks);
     if (derivedStatus === TERMINAL_OK) {
-      normalized.status = derivedStatus;
+      const hasUnconsumedInterruption = Boolean(
+        runner?.interruption &&
+        !(runner.interruption.recoverable === true && runner.status === 'running'),
+      );
+      if (!hasUnconsumedInterruption) {
+        normalized.status = derivedStatus;
+      }
     }
   }
-  const runner = normalizeRunnerState(plan.runner, plan.planId);
   const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
   const timing = normalizeGoalTiming(plan.timing);
   const withTiming = timing ? { ...normalized, timing } : normalized;
@@ -1811,6 +1830,7 @@ export function goalPlanWaitsOnUser(plan) {
       continue;
     }
     leafCount += 1;
+    if (isPreviewReviewPendingLeaf(task)) continue;
     if (task.status === BLOCKED) {
       waitingLeafCount += 1;
     } else if (!LEAF_TERMINAL_STATUSES.has(task.status)) {
@@ -1818,6 +1838,50 @@ export function goalPlanWaitsOnUser(plan) {
     }
   }
   return leafCount > 0 && waitingLeafCount > 0;
+}
+
+/** Remaining unfinished leaves are only close-denied-until-review. Host review can run. */
+export function listPreviewReviewPendingLeaves(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  const pending = [];
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    if (isPreviewReviewPendingLeaf(task) && typeof task.taskId === 'string' && task.taskId) pending.push(task.taskId);
+  }
+  return pending;
+}
+
+// 「是否在等真人」是独立事实：新计划读显式标志位，旧计划回退到历史字面量。
+// 这样具体原因（宽限后请求澄清等）可以原样保留，而消费者不必再猜字符串。
+export function runnerWaitsOnUser(runner) {
+  if (!runner || typeof runner !== 'object') return false;
+  return runner.waitingOnUser === true || runner.blockedReason === 'requested_user_input';
+}
+
+export function goalPlanWaitsOnPreviewReview(plan) {
+  if (plan?.runner?.status === BLOCKED && runnerWaitsOnUser(plan.runner)) return false;
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  let pending = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    if (isPreviewReviewPendingLeaf(task)) pending += 1;
+    else if (!LEAF_TERMINAL_STATUSES.has(task.status)) return false;
+  }
+  return pending > 0;
 }
 
 /**
@@ -1829,7 +1893,7 @@ export function canConsumeRequestedUserInput(plan) {
   if (!plan) return false;
   if (plan.status !== 'executing' && plan.status !== 'accepted') return false;
   return ['waiting_user', 'blocked'].includes(plan.runner?.status)
-    && plan.runner?.blockedReason === 'requested_user_input';
+    && runnerWaitsOnUser(plan.runner);
 }
 
 /**
@@ -1840,7 +1904,7 @@ function runnerPatchForAcceptedGoalUpgrade(runner) {
   if (!runner || typeof runner !== 'object') return undefined;
   const hasInterruption = runner.interruption != null;
   const leftoverUserWait = runner.status === 'waiting_user'
-    && runner.blockedReason === 'requested_user_input';
+    && runnerWaitsOnUser(runner);
   const leftoverFailedRun = runner.status === 'failed' || runner.status === 'blocked';
   if (!hasInterruption && !leftoverUserWait) return undefined;
   const next = {
@@ -1852,6 +1916,7 @@ function runnerPatchForAcceptedGoalUpgrade(runner) {
     next.intent = 'execute';
     next.phase = 'orient';
     next.blockedReason = undefined;
+    next.waitingOnUser = undefined;
   }
   // 陈旧流中断把 runner 钉在 failed/blocked。升级是新的接受决策，必须重新武装，
   // 否则 auto-start 闸门看到 failed 会拒绝，出现 turnCount=0 停摆。
@@ -1871,7 +1936,19 @@ export function createGoalPlanStore({
   readWorkspaceHead,
   readUiDelivery,
 } = {}) {
-  const guardUiCompletion = plan => projectUiCompletion(plan, readUiDelivery, readEvidenceIndex);
+  // UI projection may call a host port that still reads getPlan (artifact identity).
+  // Re-enter with the candidate already in hand; never recurse through authority.
+  const uiCompletionGuarding = new Set();
+  const guardUiCompletion = (plan) => {
+    if (!plan?.planId) return projectUiCompletion(plan, readUiDelivery, readEvidenceIndex);
+    if (uiCompletionGuarding.has(plan.planId)) return plan;
+    uiCompletionGuarding.add(plan.planId);
+    try {
+      return projectUiCompletion(plan, readUiDelivery, readEvidenceIndex);
+    } finally {
+      uiCompletionGuarding.delete(plan.planId);
+    }
+  };
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
   const changeFile = path.join(storeDir, '.changes.jsonl');
@@ -2315,23 +2392,37 @@ export function createGoalPlanStore({
     );
     const runnerWorkContinues = RUNNER_ACTIVE_STATUSES.has(normalized.runner?.status);
     const workContinues = runnerWorkContinues || hasRunningLeaf(normalized.tasks);
-    // 未消费中断只拦住「还没做完、也没在跑」的计划。叶子已全部成功时，不能再用过期
-    // interruption 把 completed 钉回 interrupted。 pending 未开工不算继续执行。
-    // Completed leaves do not override a failed completion check. Keep this
-    // independent of interrupted-run recovery: a verification block is current
-    // evidence, not an obsolete interruption attached to successful work.
+    // 未消费中断只拦住「还没做完、也没在跑」的计划。已经 completed 之后再写过期
+    // interruption，不能把计划钉回 interrupted。但计划当时已经是 interrupted 时，
+    // 最后一片叶子 completed 也不得把可恢复挂起洗成 completed（ADR 73 / 38.17）。
+    // pending 未开工不算继续执行。
     const verificationBlocked = normalized.runner?.status === 'blocked'
       && normalized.runner?.intent === 'verify';
     const visualRepairOpen = Boolean(normalized.runner?.visualRepair)
       && normalized.runner?.status === 'running'
       && normalized.runner?.phase === 'repair';
+    const keepLiveInterruption = hasUnconsumedInterruption
+      && (derivedStatus !== TERMINAL_OK || prevStatus === 'interrupted');
     const candidateStatus = (verificationBlocked || visualRepairOpen) && derivedStatus === TERMINAL_OK
       ? 'executing'
-      : hasUnconsumedInterruption && derivedStatus !== TERMINAL_OK
+      : keepLiveInterruption
         ? (workContinues ? 'executing' : 'interrupted')
         : derivedStatus;
     const nextStatus = guardUiCompletion({ ...normalized, status: candidateStatus }).status;
     const nowIso = normalized.updatedAt || new Date().toISOString();
+    // 叶子已全部成功时，活跃 runner 不得继续显示 running（38.17：计划 completed、磁盘 runner 仍 running）。
+    // 可恢复中断仍由 interruption 持有，不在这里清掉。
+    const nextRunner = PLAN_TERMINAL_STATUSES.has(nextStatus)
+      && RUNNER_ACTIVE_STATUSES.has(normalized.runner?.status)
+      && !normalized.runner?.interruption
+      ? {
+        ...normalized.runner,
+        status: nextStatus === TERMINAL_FAIL ? 'failed' : 'idle',
+        intent: nextStatus === TERMINAL_FAIL ? 'block' : (normalized.runner.intent || 'verify'),
+        phase: nextStatus === TERMINAL_FAIL ? 'blocked' : 'verify',
+        updatedAt: nowIso,
+      }
+      : normalized.runner;
     const planTiming = applyGoalTimingTransition(
       prevTiming,
       prevStatus,
@@ -2341,7 +2432,7 @@ export function createGoalPlanStore({
     const timing = reconcileGoalTimingWithRunner(
       planTiming,
       nextStatus,
-      normalized.runner?.status,
+      nextRunner?.status,
       nowIso,
     );
     const next = {
@@ -2349,6 +2440,7 @@ export function createGoalPlanStore({
       // 默认按叶子事实派生；preserveStatus 用于显式 setPlanStatus（如 stream_error → failed），
       // 避免瞬时失败态在同一次写入中被立刻恢复。后续 recordTaskEvidence 会重新派生。
       status: nextStatus,
+      ...(nextRunner ? { runner: nextRunner } : {}),
       progress: aggregateProgress(normalized.tasks),
       ...(timing ? { timing } : {}),
     };
@@ -3157,6 +3249,7 @@ export function createGoalPlanStore({
       status: 'running',
       blockerAudit: null,
       blockedReason: undefined,
+      waitingOnUser: undefined,
       lastError: undefined,
       // 中断标记是「待用户确认的中断事实」，resume（继续执行）不应把它清掉，
       // 否则中断→继续链路会被 decideIntakeConvergence 误判为 pure_qa 并静默删除
@@ -3264,6 +3357,14 @@ export function createGoalPlanStore({
       explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
       updatedAt: now,
     };
+    // 调用方用 blockerAudit.reason 传递「为什么在等」；旧式调用可能直接给 blockedReason。
+    // 只有两者都没有时才回落到泛化的「请求用户输入」。
+    const patchReason = typeof runnerPatch?.blockedReason === 'string' && runnerPatch.blockedReason.trim()
+      ? runnerPatch.blockedReason.trim()
+      : (typeof runnerPatch?.blockerAudit?.reason === 'string' && runnerPatch.blockerAudit.reason.trim()
+        ? runnerPatch.blockerAudit.reason.trim()
+        : null);
+    const explicitBlockReason = patchReason ?? 'requested_user_input';
     const nextRunner = normalizeRunnerState({
       ...currentRunner,
       ...runnerPatch,
@@ -3271,7 +3372,10 @@ export function createGoalPlanStore({
       status: 'waiting_user',
       intent: 'block',
       phase: 'waiting_user',
-      blockedReason: 'requested_user_input',
+      // 保留调用方给出的具体原因（例如宽限后请求澄清）；缺省才是泛化的「请求用户输入」。
+      // 写死泛化原因会让「在等真人」与「为什么在等」两件事互相覆盖。
+      blockedReason: explicitBlockReason,
+      waitingOnUser: true,
       lastError: undefined,
       updatedAt: now,
     }, planId);
@@ -3333,6 +3437,7 @@ export function createGoalPlanStore({
       phase: ['waiting_user', 'blocked'].includes(currentRunner.phase) ? 'orient' : (currentRunner.phase || 'orient'),
       blockerAudit: null,
       blockedReason: undefined,
+      waitingOnUser: undefined,
       lastError: undefined,
       updatedAt: now,
     }, planId);

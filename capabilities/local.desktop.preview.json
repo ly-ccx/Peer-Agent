@@ -1,0 +1,22 @@
+{
+  "capabilityId": "local.desktop.preview",
+  "name": "Managed Desktop preview",
+  "description": "Build and launch, observe, or close an isolated Peer development instance. Never controls the current host or an arbitrary window. A screenshot is not a product judgment.",
+  "localizedName": { "zh-CN": "受控 Desktop 预览", "en-US": "Managed Desktop preview" },
+  "source": "native",
+  "dataLevel": "D2_sensitive",
+  "riskLevel": "L4_privileged",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "planId": { "type": "string" },
+      "action": { "type": "string", "enum": ["open", "observe", "close"] },
+      "scene": { "type": "string", "enum": ["application", "background-runtime"], "description": "Observe only: optionally open the real background runs panel in the owned preview. Never starts or stops tasks." }
+    },
+    "required": ["planId", "action"],
+    "additionalProperties": false
+  },
+  "evidencePolicy": { "returnMode": "artifact_ref", "maxChars": 4000, "redactSensitive": true },
+  "projectionPolicy": { "cwdScope": "workspace", "defaultBehavior": "ask", "readOnlyAutoAllow": false, "backgroundTasks": false, "sandboxAvailable": false }
+}

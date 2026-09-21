@@ -81,6 +81,7 @@ export function isParallelSafeLocalToolBatch(
  * these contracts instead of ignoring arbitrary browser-prefixed additions.
  */
 export const DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS = Object.freeze({
+  desktopPreview: defineToolContract('desktop_preview', 'local.desktop.preview'),
   browserOpenPanel: defineToolContract('browser_open_panel', 'local.web.control.openPanel'),
   browserNavigate: defineToolContract('browser_navigate', 'local.web.control.navigate'),
   browserClick: defineToolContract('browser_click', 'local.web.control.click'),

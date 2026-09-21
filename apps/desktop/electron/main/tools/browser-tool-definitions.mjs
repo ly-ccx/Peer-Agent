@@ -80,6 +80,10 @@ const SCREENSHOT_PROMPT = [
   'Capture a screenshot of the visible in-app browser page. The PNG is stored as a local',
   'artifact and only a summary plus an artifact reference is returned (the image is not',
   'inlined into the model context). Use this to see what the page currently looks like.',
+  'Pass "planId" (an existing plan of this conversation) only when this screenshot is the',
+  'deliverable of a UI task: that makes it a governed artifact that needs an independent',
+  'review and is invalidated by any later action that changes the page. Omit it for ordinary',
+  'browsing.',
 ].join(' ');
 
 const READ_DOM_PROMPT = [
@@ -285,6 +289,12 @@ function screenshotTool() {
         fullPage: {
           type: 'boolean',
           description: 'Reserved; currently captures the visible viewport. Defaults to false.',
+        },
+        planId: {
+          type: 'string',
+          description: 'Optional. Existing plan of this conversation when this screenshot is a UI '
+            + 'deliverable: it then becomes a governed artifact that needs an independent review and '
+            + 'is invalidated by any later action that changes the page. Omit for ordinary browsing.',
         },
       },
       additionalProperties: false,

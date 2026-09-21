@@ -16,6 +16,7 @@ import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
 import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
@@ -505,10 +506,10 @@ export async function sendOpenAIResponsesStream(options = {}) {
     waitImpl = sleepMs,
     ...sendOptions
   } = options;
-  return sendOpenAIResponsesStreamWithResilience(
+  return trackVisualAdapterResponse('openai-responses', options, () => sendOpenAIResponsesStreamWithResilience(
     () => sendOpenAIResponsesStreamOnce({ ...sendOptions, signal }),
     { signal, transientRetryDelaysMs, waitImpl }
-  );
+  ));
 }
 
 // 测试入口：挂死连接 + completed 事件场景。

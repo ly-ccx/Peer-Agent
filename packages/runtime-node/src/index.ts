@@ -214,8 +214,12 @@ export {
   derivePlanStatus,
   goalPlanIsSelfDriven,
   goalPlanRequiresApproval,
+  goalPlanWaitsOnPreviewReview,
   goalPlanWaitsOnUser,
+  isPreviewReviewPendingLeaf,
+  listPreviewReviewPendingLeaves,
   normalizeGoalTiming,
+  runnerWaitsOnUser,
 } from './goal-plan-store.mjs';
 export {
   attachWorkspaceHeadBinding,
@@ -248,6 +252,13 @@ export {
   evaluateVerificationGate,
   shouldReanchor,
 } from './goal-runner.mjs';
+export {
+  buildGoalRunnerTickMessage,
+  describeVisualRepair,
+  normalizeVisualRepair,
+  projectVisualRepairFeedback,
+  scheduleVisualRepair,
+} from './goal-visual-repair.mjs';
 export {
   decideIntakeConvergence,
   isIntakeContract,

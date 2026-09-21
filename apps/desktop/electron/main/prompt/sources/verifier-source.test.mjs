@@ -59,3 +59,23 @@ test('explorer mode renders verifier brief + readonly contract', () => {
   assert.match(contract.content, /do not update the goal plan/);
   assert.match(contract.content, /passed, failedCriteria/);
 });
+
+test('visual explorer contract fails clipped or unreadable titles', () => {
+  const source = createVerifierPromptSource();
+  const observation = source.observe({
+    mode: 'explorer',
+    verifierContext: {
+      stage: 'visual',
+      verifierRunId: 'visual-1',
+      planId: 'plan-visual',
+      plan: { planId: 'plan-visual', title: 'Inspect panel', goal: 'Confirm the background runtime title is fully visible' },
+    },
+  });
+  const contract = source.render(observation).find((section) => section.id === 'runtime.verifier.contract');
+  assert.ok(contract, 'visual contract present');
+  assert.match(contract.content, /ui_visual_judgment/);
+  assert.match(contract.content, /clipped|truncated|overflow-hidden|unreadable/i);
+  assert.match(contract.content, /failed/);
+  assert.match(contract.content, /large screenshot|full-window|does not excuse/i);
+  assert.doesNotMatch(contract.content, /failedCriteria/);
+});

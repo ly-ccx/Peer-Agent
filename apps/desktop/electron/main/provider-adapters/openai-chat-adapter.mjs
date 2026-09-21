@@ -6,11 +6,13 @@ import {
 
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 
+import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
+
 export function sendOpenAIChatStream(options = {}) {
-  return sendOpenAIChatStreamShared({
+  return trackVisualAdapterResponse('openai', options, () => sendOpenAIChatStreamShared({
     ...options,
     fetchWithRecovery: options.fetchWithRecovery ?? fetchWithConnectionRecovery,
-  });
+  }));
 }
 
 export {

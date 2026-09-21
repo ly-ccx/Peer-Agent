@@ -8,6 +8,8 @@ import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
 import { EXTERNAL_BROWSER_TOOL_DEFINITIONS } from './external-browser-tool-definitions.mjs';
+import { DESKTOP_PREVIEW_TOOL_DEFINITIONS } from './desktop-preview-tool-definitions.mjs';
+import { isDesktopPreviewAvailable } from '../runtime-gateway/desktop-preview-service.mjs';
 import {
   buildAnthropicToolsFromModelProjection,
   buildAnthropicToolsFromRegistry,
@@ -59,6 +61,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
       ...WEB_TOOL_DEFINITIONS,
       ...BROWSER_TOOL_DEFINITIONS,
       ...EXTERNAL_BROWSER_TOOL_DEFINITIONS,
+      ...(isDesktopPreviewAvailable() ? DESKTOP_PREVIEW_TOOL_DEFINITIONS : []),
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
       ...createSkillToolDefinitionsFromStore(skillStore),
     ],

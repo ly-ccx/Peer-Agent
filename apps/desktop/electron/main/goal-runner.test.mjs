@@ -377,6 +377,52 @@ test('resume: restores a stream-failed plan immediately and preserves the failur
   await runner.waitForIdle(plan.planId);
 });
 
+test('stream failure: an interrupted stream without a decision is retried, then reports exhaustion', async () => {
+  const plan = createApprovedPlan();
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      // 上游断流：流被中断，但没有任何一方做过「能否重试」的判断。
+      return { terminalStatus: 'error', interrupted: true };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const failed = store.getPlan(plan.planId);
+  assert.equal(calls, 3, '瞬时断流应使用重试预算（首回合 + 2 次重试），而不是第一次就判死');
+  assert.ok(
+    failed.runTrace.events.some((event) => event.type === 'problem_found'
+      && event.payload?.summaryCode === 'stream_retry_exhausted'),
+    '只有预算耗尽后才应记为终态失败',
+  );
+  assert.equal(failed.runner.status, 'failed');
+});
+
+test('stream failure: an explicit non-recoverable result is not retried', async () => {
+  const plan = createApprovedPlan();
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      return { terminalStatus: 'error', interrupted: true, recoverable: false };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const failed = store.getPlan(plan.planId);
+  assert.equal(calls, 1, '显式否决必须优先于「被中断」');
+  assert.ok(
+    failed.runTrace.events.some((event) => event.type === 'problem_found'
+      && event.payload?.summaryCode === 'stream_failed'),
+    '显式不可恢复仍应走 stream_failed',
+  );
+});
+
 test('aborted turn writes network interruption and checkpoint events', async () => {
   const plan = createApprovedPlan();
   const runtime = {
@@ -707,7 +753,7 @@ test('recoverable network exception automatically continues with the next turn',
   assert.ok(events.some((event) => event.type === 'goalRunner:retrying'));
 });
 
-test('recoverable stream interruption fails the plan after retry budget is exhausted', async () => {
+test('recoverable stream interruption suspends the plan after retry budget is exhausted', async () => {
   const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
@@ -728,10 +774,13 @@ test('recoverable stream interruption fails the plan after retry budget is exhau
   const result = await runner.start(plan.planId, { awaitIdle: true });
 
   assert.equal(calls, 2);
-  assert.equal(result.planStatus, 'failed');
+  // ADR 73: exhausted execution retries suspend the goal, not fail its deliverable.
+  assert.equal(result.planStatus, 'interrupted');
   assert.equal(result.runner.status, 'failed');
   assert.equal(result.runner.recoverableInterruptionCount, 1);
   assert.equal(result.runner.lastError, 'network connection reset');
+  assert.equal(result.runner.interruption.source, 'stream_error');
+  assert.equal(result.runner.interruption.reason, 'network connection reset');
 });
 
 test('runtime failed: 失败会进入 failed 状态', async () => {
@@ -1085,7 +1134,8 @@ test('verifier: Verifier failed 时进入 repair/block，不完成计划', async
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(got.status, 'completed');
+  // Finished leaves cannot certify a delivery rejected by the verifier.
+  assert.equal(got.status, 'executing');
   assert.equal(got.runner.status, 'blocked');
   assert.equal(got.runner.phase, 'repair');
   assert.match(got.runner.blockedReason, /Verifier failed/);

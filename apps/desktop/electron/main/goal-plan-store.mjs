@@ -9,4 +9,5 @@ export {
   goalPlanIsSelfDriven,
   goalPlanRequiresApproval,
   normalizeGoalTiming,
+  runnerWaitsOnUser,
 } from '@peer-agent/runtime-node';

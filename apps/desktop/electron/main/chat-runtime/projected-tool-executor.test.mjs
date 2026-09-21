@@ -365,4 +365,21 @@ describe('projected model tool executor', () => {
     assert.equal(revealRequests[0].conversationId, 'conversation-browser');
     assert.equal(revealRequests[0].focus, true);
   });
+
+  it('passes webUiCapture into the per-call host so planId screenshots stay governed', () => {
+    // 回归护栏：main 的全局 localToolHost 一直会传 webUiCapture；这条 Agent 工具路径漏传时，
+    // 声明 planId 的 browser_screenshot 会以 web-ui-delivery-unavailable 硬失败（知识第 33 节）。
+    const source = readFileSync(new URL('./projected-tool-executor.mjs', import.meta.url), 'utf8');
+    const hostStart = source.indexOf('createLocalToolHost({');
+    assert.notEqual(hostStart, -1, 'per-call local tool host must be built');
+    const hostEnd = source.indexOf('\n  });', hostStart);
+    assert.notEqual(hostEnd, -1, 'per-call local tool host call must be closed');
+    assert.match(source.slice(hostStart, hostEnd), /webUiCapture/);
+    // 捕获器必须借用已注册预览 provider 的 authority / 产物仓 / 复核调度器，
+    // 才能保证每个计划仍只有一条在飞复核，而不是另起一套账本。
+    assert.match(
+      source.slice(0, hostStart),
+      /const webUiCapture = desktopPreviewProvider\s*\?\s*createWebUiCapture\(\{[\s\S]*?authority: desktopPreviewProvider\.authority[\s\S]*?artifacts: desktopPreviewProvider\.artifacts[\s\S]*?hostVisualReview: desktopPreviewProvider\.hostVisualReview/,
+    );
+  });
 });

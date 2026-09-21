@@ -145,6 +145,8 @@ function emitConnectionRecovery(webContents, payload) {
   webContents?.send?.('chat:stream:connection-recovery', payload);
 }
 
+import { observeVisualTransportAttempt } from './visual-request-context.mjs';
+
 export async function fetchWithConnectionRecovery(url, init = {}, {
   webContents = null,
   streamId = null,
@@ -227,7 +229,8 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     const attemptInit = await resolveAttemptInit(round);
 
     try {
-      const response = await callWithConnectTimeout(transport.fetch, attemptInit);
+      const response = await observeVisualTransportAttempt(attemptInit, { provider, model, streamId },
+        () => callWithConnectTimeout(transport.fetch, attemptInit));
       if (round > 0) {
         emitConnectionRecovery(webContents, {
           streamId,

@@ -11,6 +11,8 @@ import {
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
+import { getDesktopPreviewService } from '../runtime-gateway/desktop-preview-service.mjs';
+import { createWebUiCapture } from '../runtime-gateway/web-ui-capture.mjs';
 import { createConfiguredHookRunner } from '../runtime-gateway/hook-config.mjs';
 import { createLocalGoalProvider } from '../runtime-gateway/local-goal-provider.mjs';
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
@@ -280,6 +282,20 @@ export async function executeProjectedModelTool({
 
   const userDataPath = getDataHome();
   const hookRunner = createConfiguredHookRunner({ userDataPath, workspaceRoot: cwd });
+  const desktopPreviewProvider = getDesktopPreviewService(goalPlanStore, cwd);
+  // 与 main 全局 localToolHost 一致：声明了 planId 的截图是受治理的网页交付物，
+  // 这条 Agent 工具路径也必须持有同一个受治理捕获器，否则 browser_screenshot 会以
+  // web-ui-delivery-unavailable 硬失败（知识第 33 节）。捕获器只从已注册的预览
+  // provider 借用 authority / 产物仓 / 宿主复核调度器，因此每个计划仍只有一条在飞复核。
+  const webUiCapture = desktopPreviewProvider
+    ? createWebUiCapture({
+      goalPlanStore,
+      authority: desktopPreviewProvider.authority,
+      artifacts: desktopPreviewProvider.artifacts,
+      hostVisualReview: desktopPreviewProvider.hostVisualReview,
+      workspaceRoot: cwd,
+    })
+    : null;
   const host = createLocalToolHost({
     workspaceRoot: cwd,
     userDataPath,
@@ -291,11 +307,15 @@ export async function executeProjectedModelTool({
     // 计划变更不会推送到渲染端，浮条只能靠切会话重挂载才更新。
     ...(goalPlanStore ? { goalProvider: createLocalGoalProvider({ goalPlanStore }) } : {}),
     // 与 skill 工具投影一致：模型可见的 skill__* 必须在执行路径路由到 LocalSkillProvider。
-    extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
+    extraProviders: [
+      ...(skillStore ? [createLocalSkillProvider({ skillStore })] : []),
+      ...(desktopPreviewProvider ? [desktopPreviewProvider] : []),
+    ],
     automationProposalService,
     // 与 main 全局 localToolHost 一致：Agent 工具路径也必须持有 reveal 桥，
     // 否则 browser_open_panel / browser_navigate 在 ensureBrowserReady 入口被硬拒绝。
     ...(typeof ensureBrowserReady === 'function' ? { ensureBrowserReady } : {}),
+    ...(webUiCapture ? { webUiCapture } : {}),
     shellProvider: createLocalShellProvider({
       workspaceRoot: cwd,
       userDataPath,
@@ -319,7 +339,9 @@ export async function executeProjectedModelTool({
       workspacePath: cwd,
       execution,
     }),
-    execution,
+    // SDK returns provider result/grant; retain the validated call for Evidence
+    // registration rather than expecting each provider to echo execution.call.
+    execution: { ...execution, call: projection.call },
     projectionCapability: projection.capability,
   };
 }

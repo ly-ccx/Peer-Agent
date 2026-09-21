@@ -1045,6 +1045,24 @@ export interface GoalRunnerState {
     readonly reason: string;
     readonly interruptedAt: string;
   };
+  /**
+   * Independent visual-repair budget. Not maxTurns. Host-normalized findings only;
+   * never raw model text or image bytes.
+   */
+  readonly visualRepair?: {
+    readonly attempts: number;
+    readonly maxAttempts: number;
+    readonly lastFingerprint?: string;
+    readonly pendingTurn?: boolean;
+    readonly feedback: {
+      readonly verdict: 'failed' | 'inconclusive';
+      readonly scene: string;
+      readonly artifactRef?: string;
+      readonly evidenceRef?: string;
+      readonly findings: readonly string[];
+      readonly repairSuggestions: readonly string[];
+    };
+  };
   readonly updatedAt: string;
 }
 

@@ -1,5 +1,6 @@
 import { sendAnthropicMessagesStream as sendSharedAnthropicMessagesStream } from '@peer-agent/runtime-node';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
 
 /**
  * Desktop host adapter for the shared Anthropic Messages stream algorithm.
@@ -7,8 +8,8 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
  * encoding, SSE parsing, tracing, and stream result behavior.
  */
 export async function sendAnthropicMessagesStream(input = {}) {
-  return sendSharedAnthropicMessagesStream({
+  return trackVisualAdapterResponse('anthropic', input, () => sendSharedAnthropicMessagesStream({
     ...input,
     fetchImpl: input.fetchImpl ?? fetchWithConnectionRecovery,
-  });
+  }));
 }

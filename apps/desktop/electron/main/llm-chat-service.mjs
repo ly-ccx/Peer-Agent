@@ -41,6 +41,8 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
+import { requireDesktopVisualReview, requireVisualReviewProvider, runDesktopVisualReview,
+  cancelDesktopVisualReview } from './runtime-gateway/desktop-visual-review.mjs';
 import {
   processTrailingUserImages,
   readFallbackVisionProviderId,
@@ -245,7 +247,12 @@ function buildAgentRunOutcome(streamRecord = {}) {
     failureReason: typeof streamRecord.failureReason === 'string'
       ? streamRecord.failureReason
       : null,
-    recoverable: streamRecord.recoverable === true,
+    // 「未知」和「明确不可恢复」是两件事。只透出真正做过的判断；缺失时交给下游按可恢复模式
+    // 分类。此前这里写 `=== true`，把没有判断的流伪造成显式 false，于是 goal-runner 在
+    // 「显式否决」分支就短路返回，重试预算永远够不到，一次瞬时断流就能永久打死自驱回合。
+    ...(typeof streamRecord.recoverable === 'boolean' ? { recoverable: streamRecord.recoverable } : {}),
+    // 流被中断（error/aborted）且没有显式判断时，带上 interrupted 让下游识别为瞬时中断。
+    ...(streamRecord.interrupted === true ? { interrupted: true } : {}),
   };
 }
 
@@ -723,6 +730,10 @@ function wrapWebContentsForRuntimeEvents(
           ? 'error'
           : (goalHandoffTerminal ? 'goal_handoff' : 'done');
         streamRecord.interrupted = erroredTerminal;
+        if (erroredTerminal && typeof payload?.error === 'string' && payload.error.trim()
+          && typeof streamRecord.failureReason !== 'string') {
+          streamRecord.failureReason = payload.error.trim();
+        }
         if (payload?.usage) streamRecord.finalUsage = payload.usage;
         if (payload?.lifetimeUsage) streamRecord.lifetimeUsage = payload.lifetimeUsage;
         if (erroredTerminal) {
@@ -1071,6 +1082,7 @@ export function createLlmChatService({
     contextExtensions = [],
     explorerContext = null,
     verifierContext = null,
+    visualReviewHandle = null,
     // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
@@ -1093,6 +1105,24 @@ export function createLlmChatService({
       conversationStore,
     });
     const providerCandidates = getProviderCandidates(effectiveModelProviderId);
+    if (visualReviewHandle !== null) {
+      let visualReview = null;
+      try {
+        visualReview = requireDesktopVisualReview(visualReviewHandle, { goalPlanStore, mode, ephemeral, conversationId });
+        const provider = providerCandidates[0];
+        if (effectiveModelProviderId && provider?.id !== effectiveModelProviderId) throw new Error('visual-review-selected-provider-missing');
+        requireVisualReviewProvider(provider);
+        providerCandidates.splice(1); // Independent review never silently changes model.
+        incomingWorkspacePath = visualReview.workspacePath;
+        verifierContext = visualReview.verifierContext;
+        rawMessages = [];
+      } catch (error) {
+        if (typeof error?.message === 'string' && error.message.startsWith('visual-review-')) {
+          try { visualReview?.recordFailure?.(error.message); } catch { /* best-effort */ }
+        }
+        cancelDesktopVisualReview(visualReviewHandle); throw error;
+      }
+    }
     if (!providerCandidates.length) {
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
       return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };
@@ -1196,6 +1226,7 @@ export function createLlmChatService({
     };
     streamRecord.released = new Promise((resolve) => { streamRecord.resolveReleased = resolve; });
     let accumulatingWebContents = webContents;
+    let visualReviewReport = null; // Host-only return value, never a stream/persistence field.
     try {
       activeStreams.set(streamId, streamRecord);
       emitActiveStreamsChanged();
@@ -1430,6 +1461,12 @@ export function createLlmChatService({
         });
         const systemPrompt = renderSystemContext(systemContext);
         const stableSystemPrompt = renderStableSystemContext(systemContext);
+        if (visualReviewHandle !== null) {
+          visualReviewReport = await runDesktopVisualReview({ handle: visualReviewHandle, provider,
+            resolvedChannel, apiKey: credential.apiKey, systemPrompt, streamId, signal: runtimeTurn.signal });
+          accumulatingWebContents.send('chat:stream:done', { streamId });
+          return { terminalStatus: 'done', requestedUserInput: false, toolCallCount: 0, visualReviewReport };
+        }
         recordPromptSnapshot(promptSnapshotStore, systemContext, {
           streamId,
           conversationId,
@@ -1777,6 +1814,7 @@ export function createLlmChatService({
         });
       }
     } finally {
+      if (visualReviewHandle !== null) cancelDesktopVisualReview(visualReviewHandle);
       permissionGate.settleStreamPermissionRequests(streamId, {
         granted: false,
         reason: 'stream_finished',
@@ -1804,7 +1842,7 @@ export function createLlmChatService({
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
-      return buildAgentRunOutcome(streamRecord);
+      return { ...buildAgentRunOutcome(streamRecord), ...(visualReviewReport ? { visualReviewReport } : {}) };
     }
   }
 

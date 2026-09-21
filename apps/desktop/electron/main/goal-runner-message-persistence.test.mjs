@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
+  mapGoalTurnOutcome,
 } from './goal-runner-message-persistence.mjs';
 
 describe('createGoalRunnerAssistantPlaceholder', () => {
@@ -87,5 +88,81 @@ describe('Goal Runner persistence contract (with assistantMessageId)', () => {
       sendMessageArgs.assistantMessageId,
       'runGoalTurn 在 sendMessage 前必须创建并传入 assistantMessageId，否则主进程不会落盘',
     );
+  });
+});
+
+describe('mapGoalTurnOutcome', () => {
+  // Independent outcome fields must survive together, not just in isolation.
+  // Matrix: interrupted absent/true × recoverable unknown/true/false.
+  for (const interrupted of [undefined, true]) {
+    for (const recoverable of [undefined, true, false]) {
+      it(`preserves interrupted=${interrupted ?? 'absent'} × recoverable=${recoverable ?? 'unknown'}`, () => {
+        const mapped = mapGoalTurnOutcome({
+          terminalStatus: 'error',
+          failureReason: '  provider response dropped after tool completion  ',
+          toolCallCount: 2,
+          ...(interrupted === undefined ? {} : { interrupted }),
+          ...(recoverable === undefined ? {} : { recoverable }),
+        });
+        assert.equal(mapped.failureReason, 'provider response dropped after tool completion');
+        assert.equal(mapped.failed, true);
+        assert.equal(mapped.terminalStatus, 'error');
+        assert.equal(mapped.toolCallCount, 2);
+        assert.equal(mapped.interrupted, interrupted);
+        assert.equal(Object.hasOwn(mapped, 'interrupted'), interrupted === true);
+        assert.equal(mapped.recoverable, recoverable);
+        assert.equal(Object.hasOwn(mapped, 'recoverable'), recoverable !== undefined);
+      });
+    }
+  }
+
+  it('keeps a mid-turn stream drop recoverable instead of rewriting it as a permanent failure', () => {
+    const mapped = mapGoalTurnOutcome({
+      terminalStatus: 'error',
+      failureReason: 'empty_model_response: the model returned no text and no tool call',
+      interrupted: true,
+      toolCallCount: 2,
+    });
+    assert.equal(mapped.failed, true);
+    assert.match(mapped.failureReason, /empty_model_response/);
+    assert.equal(mapped.interrupted, true);
+    assert.equal(Object.hasOwn(mapped, 'recoverable'), false);
+    assert.equal(mapped.toolCallCount, 2);
+    assert.notEqual(mapped.failureReason, 'Goal Runner turn stream failed');
+  });
+
+  it('preserves an explicit unrecoverable decision', () => {
+    const mapped = mapGoalTurnOutcome({
+      terminalStatus: 'error',
+      failureReason: 'Host visual review failed',
+      recoverable: false,
+      toolCallCount: 1,
+    });
+    assert.equal(mapped.failed, true);
+    assert.equal(mapped.recoverable, false);
+    assert.equal(mapped.failureReason, 'Host visual review failed');
+    assert.equal(Object.hasOwn(mapped, 'interrupted'), false);
+  });
+
+  it('maps requested user input and aborted turns without marking them failed', () => {
+    assert.deepEqual(mapGoalTurnOutcome({
+      requestedUserInput: true,
+      terminalStatus: 'done',
+      toolCallCount: 1,
+    }), {
+      requestedUserInput: true,
+      blockedReason: 'requested_user_input',
+      terminalStatus: 'done',
+      toolCallCount: 1,
+    });
+    assert.deepEqual(mapGoalTurnOutcome({
+      terminalStatus: 'aborted',
+      toolCallCount: 0,
+    }), {
+      blocked: true,
+      blockedReason: 'Goal Runner turn aborted',
+      terminalStatus: 'aborted',
+      toolCallCount: 0,
+    });
   });
 });

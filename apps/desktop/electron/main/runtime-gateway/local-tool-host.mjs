@@ -29,7 +29,9 @@ export function createLocalToolHost({
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
-  browserControlProvider = createLocalBrowserControlProvider({ userDataPath, ensureBrowserReady }),
+  // 受治理的网页 UI 交付（可选）：只有显式声明计划归属的截图才会走它。
+  webUiCapture = null,
+  browserControlProvider = createLocalBrowserControlProvider({ userDataPath, ensureBrowserReady, webUiCapture }),
   externalBrowserProvider = createLocalExternalBrowserProvider({ userDataPath }),
   searchAggregateProvider = createLocalSearchAggregateProvider({ workspaceRoot }),
   automationProposalService = null,

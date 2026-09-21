@@ -438,6 +438,72 @@ test('recordTaskEvidence: 最后一个子任务完成后，executing 计划自�
   assert.equal(after.progress.percent, 100);
 });
 
+test('completed plan settles a leftover running runner to idle', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  store.setRunnerState(created.planId, {
+    enabled: true,
+    status: 'running',
+    intent: 'execute',
+    phase: 'act',
+  });
+  assert.equal(store.getPlan(created.planId).runner.status, 'running');
+
+  registerEvidenceRefs(created.planId, ['artifact://runner-idle-1', 'artifact://runner-idle-2', 'artifact://runner-idle-3']);
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://runner-idle-1'],
+  });
+  store.recordTaskEvidence(created.planId, 't2a', {
+    status: 'completed',
+    evidenceRefs: ['artifact://runner-idle-2'],
+  });
+  store.recordTaskEvidence(created.planId, 't2b', {
+    status: 'completed',
+    evidenceRefs: ['artifact://runner-idle-3'],
+  });
+  const after = store.getPlan(created.planId);
+  assert.equal(after.status, 'completed');
+  assert.equal(after.runner.status, 'idle', '计划 completed 时 runner 不得仍是 running');
+  assert.equal(after.runner.interruption, undefined);
+});
+
+test('interrupted plan is not washed completed by the last leaf', () => {
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  registerEvidenceRefs(created.planId, [
+    'artifact://keep-interrupted-1',
+    'artifact://keep-interrupted-2',
+    'artifact://keep-interrupted-3',
+  ]);
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://keep-interrupted-1'],
+  });
+  store.recordTaskEvidence(created.planId, 't2a', {
+    status: 'completed',
+    evidenceRefs: ['artifact://keep-interrupted-2'],
+  });
+  store.setRunnerState(created.planId, {
+    status: 'failed',
+    phase: 'blocked',
+    interruption: {
+      source: 'stream_error',
+      reason: 'socket disconnected',
+      interruptedAt: new Date().toISOString(),
+    },
+  });
+  assert.equal(store.getPlan(created.planId).status, 'interrupted');
+
+  store.recordTaskEvidence(created.planId, 't2b', {
+    status: 'completed',
+    evidenceRefs: ['artifact://keep-interrupted-3'],
+  });
+  const after = store.getPlan(created.planId);
+  assert.equal(after.status, 'interrupted', '最后一片叶子 completed 不得洗掉可恢复中断');
+  assert.equal(after.runner.interruption.source, 'stream_error');
+});
+
 test('recordTaskEvidence: 未批准计划把子任务标 running 被护栏拒绝（批准闸门守在源头）', () => {
   // 模拟 AI 路径：goal_create_plan 落盘后处于 awaiting_approval
   const created = store.createPlan(draftWithTasks());

@@ -49,6 +49,29 @@ function openPanelCall(focus = true) {
 
 test.beforeEach(() => resetBrowserControlRegistryForTests());
 
+test('denied browser navigation writes a permission-denied receipt with local.web capability', async () => {
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {},
+  });
+
+  const execution = await provider.executeCapability(
+    navigateCall('https://example.com/block'),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-block' },
+      requestPermission: async () => ({ granted: false }),
+    },
+  );
+
+  assert.equal(execution.result.status, 'denied');
+  assert.equal(execution.result.outputPreview.reason, 'browser-permission-denied');
+  assert.equal(execution.result.outputPreview.capabilityId, 'local.web.control.navigate');
+  const serialized = JSON.stringify(execution.result.outputPreview);
+  assert.match(serialized, /permission-denied/);
+  assert.match(serialized, /local\.web\.control\.navigate/);
+});
+
 test('browser_open_panel returns the reveal state without requesting network permission', async () => {
   const revealRequests = [];
   let permissionRequests = 0;

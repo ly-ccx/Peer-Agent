@@ -21,6 +21,7 @@ function createActionWebContents() {
     textMatchCount: 1,
     isDestroyed: () => false,
     getURL: () => 'https://example.com/page',
+    loadURL: async () => {},
     getTitle: () => 'Example',
     sendInputEvent: (event) => {
       inputEvents.push(event);
@@ -1071,4 +1072,143 @@ test('read_dom 超时：executeJavaScript 永不 resolve 时不永久挂起而�
   const serialized = JSON.stringify(execution.result);
   assert.match(serialized, /timed out|超时/i);
   assert.ok(elapsed < 2_000, `read_dom 应在 1s 内返回而非永久挂起，实际 ${elapsed}ms`);
+});
+
+// ---- 网页受治理交付的接线（知识第 33 节）----
+function createGovernedBrowser(overrides = {}) {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VvYAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const base = createActionWebContents();
+  return {
+    ...base,
+    ...overrides,
+    capturePage: async () => ({
+      toPNG: () => png,
+      getSize: () => ({ width: 1, height: 1 }),
+      toDataURL: () => 'data:image/png;base64,iVBORw0KGgo=',
+    }),
+    executeJavaScript: async (expr) => (expr.includes('innerText') ? 'panel body' : base.executeJavaScript(expr)),
+  };
+}
+
+function governedProvider(browser, webUiCapture, artifactStore = {}) {
+  return createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-actions-test',
+    artifactStore,
+    resolveWebContents: () => browser,
+    ensureBrowserReady: async () => {},
+    webUiCapture,
+  });
+}
+
+test('screenshot/with-planId/goes-through-the-governed-capture', async () => {
+  const browser = createGovernedBrowser();
+  registerBrowserWebContents({ webContentsId: 71, conversationId: 'conversation-g', browserTabId: 'g-1',
+    active: true, url: browser.getURL() });
+  const captured = [];
+  const ephemeralWrites = [];
+  const provider = governedProvider(browser, {
+    capture: (input) => {
+      captured.push(input);
+      return { artifactRef: 'local-web-ui-artifact://11111111-1111-1111-1111-111111111111' };
+    },
+    invalidateAfterAction: () => ({ invalidated: [] }),
+  }, { writeImageArtifact: async (entry) => { ephemeralWrites.push(entry); throw new Error('must not write'); } });
+
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.screenshot', 'browser_screenshot', { planId: 'plan-1' }),
+    { locale: 'en-US', toolContext: { conversationId: 'conversation-g' },
+      requestPermission: async () => ({ granted: true }) });
+
+  assert.equal(execution.result.status, 'success');
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].planId, 'plan-1');
+  assert.equal(captured[0].conversationId, 'conversation-g');
+  assert.equal(captured[0].finalUrl, browser.getURL());
+  assert.equal(captured[0].instanceId, 'g-1');
+  assert.equal(captured[0].renderedText, 'panel body');
+  assert.equal(captured[0].width, 1);
+  assert.equal(ephemeralWrites.length, 0, '受治理截图不得再写一份临时产物');
+  assert.equal(execution.result.outputPreview.artifactRef,
+    'local-web-ui-artifact://11111111-1111-1111-1111-111111111111');
+});
+
+test('screenshot/without-planId/stays-an-ordinary-capture', async () => {
+  const browser = createGovernedBrowser();
+  registerBrowserWebContents({ webContentsId: 72, conversationId: 'conversation-g', browserTabId: 'g-2',
+    active: true, url: browser.getURL() });
+  const captured = [];
+  const ephemeralWrites = [];
+  const provider = governedProvider(browser, {
+    capture: (input) => { captured.push(input); throw new Error('must not be called'); },
+    invalidateAfterAction: () => ({ invalidated: [] }),
+  }, { writeImageArtifact: async (entry) => {
+    ephemeralWrites.push(entry);
+    return { artifactRef: `local-browser-artifact://${entry.actionId}`,
+      artifactRefs: [`local-browser-artifact://${entry.actionId}/screenshot`],
+      bytes: entry.pngBuffer.length, screenshotPath: `/tmp/${entry.actionId}/screenshot.png` };
+  } });
+
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.screenshot', 'browser_screenshot', {}),
+    { locale: 'en-US', toolContext: { conversationId: 'conversation-g' },
+      requestPermission: async () => ({ granted: true }) });
+
+  assert.equal(execution.result.status, 'success');
+  assert.equal(captured.length, 0, '普通浏览截图不得进入受治理链');
+  assert.equal(ephemeralWrites.length, 1);
+  assert.match(execution.result.outputPreview.artifactRef, /^local-browser-artifact:\/\//);
+});
+
+test('screenshot/with-planId-but-no-governed-route/fails-loudly', async () => {
+  const browser = createGovernedBrowser();
+  registerBrowserWebContents({ webContentsId: 73, conversationId: 'conversation-g', browserTabId: 'g-3',
+    active: true, url: browser.getURL() });
+  const provider = governedProvider(browser, null);
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.screenshot', 'browser_screenshot', { planId: 'plan-1' }),
+    { locale: 'en-US', toolContext: { conversationId: 'conversation-g' },
+      requestPermission: async () => ({ granted: true }) });
+  assert.equal(execution.result.status, 'failed');
+  assert.match(execution.result.evidence.summary, /web-ui-delivery-unavailable/);
+});
+
+test('page-change/after-a-governed-shot/invalidates-by-action-name', async () => {
+  const browser = createGovernedBrowser();
+  registerBrowserWebContents({ webContentsId: 74, conversationId: 'conversation-g', browserTabId: 'g-4',
+    active: true, url: browser.getURL() });
+  const calls = [];
+  const provider = governedProvider(browser, {
+    capture: () => { throw new Error('unexpected'); },
+    invalidateAfterAction: (input) => { calls.push(input); return { invalidated: [] }; },
+  }, createArtifactStore());
+  const context = { locale: 'en-US', toolContext: { conversationId: 'conversation-g' },
+    requestPermission: async () => ({ granted: true }) };
+
+  await provider.executeCapability(actionCall('local.web.control.click', 'browser_click', { selector: '#go' }), context);
+  await provider.executeCapability(actionCall('local.web.control.readDom', 'browser_read_dom', {}), context);
+
+  assert.deepEqual(calls.map(call => call.action), ['click', undefined]);
+  assert.ok(calls.every(call => call.conversationId === 'conversation-g'));
+});
+
+test('page-change/navigate-after-a-governed-shot/invalidates', async () => {
+  const browser = createGovernedBrowser();
+  registerBrowserWebContents({ webContentsId: 75, conversationId: 'conversation-g', browserTabId: 'g-5',
+    active: true, url: browser.getURL() });
+  const calls = [];
+  const provider = governedProvider(browser, {
+    capture: () => { throw new Error('unexpected'); },
+    invalidateAfterAction: (input) => { calls.push(input); return { invalidated: [] }; },
+  }, createArtifactStore());
+  const context = { locale: 'en-US', toolContext: { conversationId: 'conversation-g' },
+    requestPermission: async () => ({ granted: true }) };
+  const execution = await provider.executeCapability(
+    actionCall('local.web.control.navigate', 'browser_navigate', { url: 'https://example.org/next' }), context);
+  assert.equal(execution.result.status, 'success');
+  // WEB-STALE 全靠这条映射：navigate 必须让先前的受治理截图失效。
+  assert.deepEqual(calls.map(call => call.action), ['navigate']);
+  assert.equal(calls[0].conversationId, 'conversation-g');
 });

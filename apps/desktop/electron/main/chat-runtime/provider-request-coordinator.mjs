@@ -81,6 +81,7 @@ export async function coordinateDesktopProviderRequest({
  * compactor 与 provider transport。
  */
 import { projectSelectionRequestMessages } from '../selection-background-context.mjs';
+import { createVisualRequestScope } from '../provider-transports/visual-request-context.mjs';
 
 export async function executeDesktopProviderRequest({
   request,
@@ -98,6 +99,9 @@ export async function executeDesktopProviderRequest({
   const sourceSystemPrompt = typeof request?.systemPrompt === 'string'
     ? request.systemPrompt
     : '';
+  const visualScope = createVisualRequestScope({ messages: sourceMessages,
+    ...request?.visualRequestHost, conversationId: request?.conversationId, streamId: request?.streamId,
+    model: request?.providerConfig?.model, signal: request?.signal });
   const pipeline = createContextAccountingCompactionPipeline({
     identity: request?.accountingIdentity ?? {
       conversationId: request?.conversationId || request?.streamId || 'desktop',
@@ -142,7 +146,7 @@ export async function executeDesktopProviderRequest({
         },
       };
     },
-    send,
+    send: (...args) => visualScope.send(() => send(...args)),
     getUsage,
     onProviderRequest: request?.onProviderRequest,
     getOverflow(response) {
