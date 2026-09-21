@@ -1,7 +1,11 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
-import { useConversationToolProgress } from '../../hooks/useConversationState';
+import {
+  useConversationCompactionState,
+  useConversationToolProgress,
+} from '../../hooks/useConversationState';
+import { shouldHideStreamingCursorDuringCompaction } from '../../state/compactionStateView';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { buildProcessingSummary } from '../../state/processingSummary';
@@ -81,7 +85,10 @@ function LiveToolProgress({
   readonly isZh: boolean;
 }) {
   const progress = useConversationToolProgress(conversationId, true);
+  const compactionState = useConversationCompactionState(conversationId);
   if (progress) return <ToolProgressInline progress={progress} isZh={isZh} />;
+  // 压缩进行中由顶部压缩进度条表达「正在工作」，消息内的 ▍ 会误导为仍在输出正文。
+  if (shouldHideStreamingCursorDuringCompaction(compactionState)) return null;
   return showCursor ? <span className="streaming-cursor">▍</span> : null;
 }
 

@@ -18,7 +18,7 @@ import {
   createConversationSurfaceSnapshotReader,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
-import type { QueuedMessage, ToolProgress } from '../state/types';
+import type { CompactionState, QueuedMessage, ToolProgress } from '../state/types';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 
 /** 绑定到具体 conversationId 的运行态写入句柄。 */
@@ -72,6 +72,25 @@ export function useConversationDraft(conversationId: string | null): string {
   );
   const getSnapshot = useCallback(
     () => conversationStore.getSnapshot(conversationId).draft,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** 只让流式光标叶子响应低频压缩状态变化：压缩进行中需隐藏消息内的 ▍。 */
+export function useConversationCompactionState(
+  conversationId: string | null,
+): CompactionState {
+  const subscribe = useCallback(
+    (listener: () => void) => conversationStore.subscribeSelector(
+      conversationId,
+      snapshot => snapshot.compactionState,
+      listener,
+    ),
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => conversationStore.getSnapshot(conversationId).compactionState,
     [conversationId],
   );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
