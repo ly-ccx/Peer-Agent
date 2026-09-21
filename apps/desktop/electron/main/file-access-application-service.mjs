@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { searchWorkspaceFiles } from './workspace-file-search.mjs';
+import { isSkippedFileTreeDirName, isSkippedFileTreePath, searchWorkspaceFiles } from './workspace-file-search.mjs';
 
 const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
 /** Chat image preview: same ceiling as renderer attachment intake (8 MiB). */
@@ -487,6 +487,7 @@ export function createFileAccessApplicationService(options = {}) {
         };
       }
       const entries = readDirectoryEntries(target)
+        .filter((entry) => !isSkippedFileTreeDirName(entry.name))
         .map((entry) => ({
           name: entry.name,
           isDir: entry.isDirectory(),
@@ -543,7 +544,7 @@ export function createFileAccessApplicationService(options = {}) {
     const desired = new Map();
     for (const rawPath of requested) {
       const resolvedPath = resolveWatchDirectory(rawPath, workspaceRoot);
-      if (resolvedPath) desired.set(resolvedPath, true);
+      if (resolvedPath && !isSkippedFileTreePath(resolvedPath)) desired.set(resolvedPath, true);
     }
 
     for (const [dirPath, watcher] of current.entries()) {
@@ -556,7 +557,7 @@ export function createFileAccessApplicationService(options = {}) {
     for (const dirPath of desired.keys()) {
       if (current.has(dirPath)) continue;
       try {
-        const watcher = watchDirectory(dirPath, { persistent: false }, () => {
+        const watcher = watchDirectory(dirPath, { persistent: false, recursive: false }, () => {
           if (sender.isDestroyed()) return;
           sender.send('fs:dir-changed', { dirPath });
         });

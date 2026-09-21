@@ -29,6 +29,16 @@ export function shouldSkipDirName(name) {
   return name.startsWith('.');
 }
 
+/** 文件树列出/监视要跳过的目录名。不含「所有点文件」，以免藏掉 .env / .gitignore。 */
+export function isSkippedFileTreeDirName(name) {
+  return Boolean(name) && SKIP_DIR_NAMES.has(name);
+}
+
+export function isSkippedFileTreePath(absPath) {
+  const parts = String(absPath ?? '').split(/[/\\]/);
+  return parts.some((part) => isSkippedFileTreeDirName(part));
+}
+
 export function shouldSkipFileName(name) {
   if (!name) return true;
   if (name === '.' || name === '..') return true;

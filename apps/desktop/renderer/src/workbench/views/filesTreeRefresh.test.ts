@@ -35,11 +35,22 @@ describe('collectDirPathsToRefresh', () => {
     assert.deepEqual(paths, ['/tmp/ws', '/tmp/ws/src']);
   });
 
-  it('watch paths match refresh paths', () => {
+  it('watch paths exclude the workspace root so macOS FSEvents cannot recurse it', () => {
     const expanded = new Set(['/tmp/ws/src']);
+    assert.deepEqual(collectWatchDirPaths('/tmp/ws', expanded), ['/tmp/ws/src']);
+    assert.deepEqual(collectWatchDirPaths('/tmp/ws', []), []);
+  });
+
+  it('does not watch or refresh node_modules, including symlink children', () => {
+    const expanded = new Set([
+      '/tmp/ws/src',
+      '/tmp/ws/node_modules',
+      '/tmp/ws/node_modules/.pnpm',
+    ]);
+    assert.deepEqual(collectWatchDirPaths('/tmp/ws', expanded), ['/tmp/ws/src']);
     assert.deepEqual(
-      collectWatchDirPaths('/tmp/ws', expanded),
-      collectDirPathsToRefresh('/tmp/ws', expanded),
+      collectDirPathsToRefresh('/isolated/apps/desktop', ['/isolated/apps/desktop/node_modules']),
+      ['/isolated/apps/desktop'],
     );
   });
 });

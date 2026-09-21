@@ -111,6 +111,49 @@ function createHarness(overrides = {}) {
   return { service, nodes, gitCalls, watchers, written, created };
 }
 
+test('read-directory hides node_modules so file-tree watch cannot follow isolate symlinks', () => {
+  const harness = createHarness({
+    nodes: [
+      ['/ws', directory([
+        { name: 'src', isDir: true },
+        { name: 'node_modules', isDir: true },
+        { name: 'package.json', isDir: false },
+      ])],
+    ],
+  });
+  assert.deepEqual(harness.service.readDirectory({ absPath: '/ws' }), {
+    ok: true,
+    status: 'ok',
+    entries: [
+      { name: 'src', isDir: true, absPath: '/ws/src' },
+      { name: 'package.json', isDir: false, absPath: '/ws/package.json' },
+    ],
+    resolvedFrom: undefined,
+  });
+});
+
+test('watchDirectories ignores node_modules paths', () => {
+  const harness = createHarness({
+    nodes: [
+      ['/ws', directory()],
+      ['/ws/src', directory()],
+      ['/ws/node_modules', directory()],
+    ],
+  });
+  const sender = new FakeSender(11);
+  assert.deepEqual(
+    harness.service.watchDirectories(sender, {
+      paths: ['/ws', '/ws/src', '/ws/node_modules', '/ws/node_modules/.pnpm'],
+    }),
+    {
+      ok: true,
+      watching: ['/ws', '/ws/src'],
+    },
+  );
+  assert.equal(harness.watchers.every((watcher) => watcher.options?.recursive === false), true);
+  sender.destroy();
+});
+
 test('exists and read-directory recover by relative path across known workspaces', () => {
   const harness = createHarness({
     nodes: [
@@ -570,7 +613,7 @@ test('watchers are diffed per sender and closed on error, destruction, and servi
     watching: ['/a', '/b'],
   });
   const [watchA, watchB] = harness.watchers;
-  assert.deepEqual(watchA.options, { persistent: false });
+  assert.deepEqual(watchA.options, { persistent: false, recursive: false });
 
   watchB.onChange();
   assert.deepEqual(sender.messages, [['fs:dir-changed', { dirPath: '/b' }]]);

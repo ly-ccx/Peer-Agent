@@ -7,6 +7,34 @@
  * 不触碰 IPC / React；便于单测。
  */
 
+/** 文件树监视/刷新不要跟进这些目录（含隔离副本里指向日常仓库的 node_modules 符号链接）。 */
+const SKIP_FILE_TREE_DIR_NAMES = new Set([
+  '.git',
+  '.hg',
+  '.svn',
+  '.peer-agent',
+  '.next',
+  '.turbo',
+  '.cache',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  'target',
+  'vendor',
+  '__pycache__',
+]);
+
+export function isSkippedFileTreeDirName(name: string | null | undefined): boolean {
+  return Boolean(name) && SKIP_FILE_TREE_DIR_NAMES.has(name);
+}
+
+export function isSkippedFileTreePath(absPath: string | null | undefined): boolean {
+  const parts = String(absPath ?? '').split(/[/\\]/);
+  return parts.some((part) => isSkippedFileTreeDirName(part));
+}
+
 /** 去掉路径末尾分隔符。 */
 export function stripTrailingSep(p: string): string {
   return p.replace(/[/\\]+$/, '');
@@ -45,6 +73,7 @@ export function collectDirPathsToRefresh(
   const push = (raw: string) => {
     const abs = stripTrailingSep(raw);
     if (!abs) return;
+    if (isSkippedFileTreePath(abs)) return;
     const key = pathKey(abs);
     if (seen.has(key)) return;
     seen.add(key);
@@ -55,12 +84,17 @@ export function collectDirPathsToRefresh(
   return out;
 }
 
-/** 轻量 watch 的目录集合：与刷新集合一致（只盯根 + 已展开）。 */
+/**
+ * 轻量 watch 的目录：只盯已展开目录，不盯工作区根。
+ * macOS 上 fs.watch(目录) 会递归子树；盯根会跟进 node_modules 符号链接并把 CPU 打满。
+ */
 export function collectWatchDirPaths(
   rootPath: string | null | undefined,
   expanded: Iterable<string>,
 ): string[] {
-  return collectDirPathsToRefresh(rootPath, expanded);
+  if (!rootPath) return [];
+  const rootKey = pathKey(stripTrailingSep(rootPath));
+  return collectDirPathsToRefresh(rootPath, expanded).filter((abs) => pathKey(abs) !== rootKey);
 }
 
 /**
