@@ -24,31 +24,28 @@ test('log URLs never become confirmed listeners, terminal tasks hide previous po
   assert.deepEqual(backgroundTaskAddresses(listening), ['127.0.0.1:12345']);
   assert.deepEqual(backgroundTaskAddresses({ ...listening, status: 'cancelled' }), []);
 });
-test('single icon entry belongs to ChatHeader with application-owned shared state', () => {
+test('background runs share one App reader and render only in the current conversation monitor', () => {
   const entry = readFileSync(new URL('./GlobalBackgroundTasksButton.tsx', import.meta.url), 'utf8');
   const sidebar = readFileSync(new URL('../chat/components/Sidebar.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(sidebar, /GlobalBackgroundTasksButton/);
   const header = readFileSync(new URL('../chat/components/thread/ChatHeader.tsx', import.meta.url), 'utf8');
-  assert.equal((header.match(/<GlobalBackgroundTasksButton /g) ?? []).length, 1);
-  assert.ok(header.indexOf('<GlobalBackgroundTasksButton ') < header.indexOf('{onFind ?'));
+  assert.doesNotMatch(header, /GlobalBackgroundTasksButton|BackgroundRuntimePanel/);
+  assert.match(header, /chat-task-monitor-toggle/);
+  assert.match(header, /onToggleTaskMonitor/);
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
   assert.equal((app.match(/<BackgroundRunsProvider /g) ?? []).length, 1);
-  assert.match(entry, /chat-header-action-btn background-runtime-trigger/);
-  const styles = readFileSync(new URL('../styles/workbench.css', import.meta.url), 'utf8');
-  const sidebarStyles = readFileSync(new URL('../styles/sidebar.css', import.meta.url), 'utf8');
-  assert.doesNotMatch(styles + sidebarStyles, /sidebar-background-runtime/);
-  assert.match(styles, /\.background-runtime-trigger:focus-visible/);
-  assert.doesNotMatch(entry, /<span>/);
+  assert.match(entry, /useBackgroundRuns\(\)/);
   assert.match(entry, /useBackgroundRunStops\(reader.snapshot, reader.reload, isZh\)/);
-  assert.match(entry, /<BackgroundRuntimePanel/);
-  const panel = readFileSync(new URL('./BackgroundRuntimePanel.tsx', import.meta.url), 'utf8');
-  assert.match(panel, /<Overlay anchor=/);
+  assert.match(entry, /useBackgroundRunsContext/);
+  assert.doesNotMatch(entry, /BackgroundRuntimePanel|background-runtime-trigger|focusRunTaskId/);
+  const chatSurface = readFileSync(new URL('../chat/components/ChatSurface.tsx', import.meta.url), 'utf8');
   const workbench = readFileSync(new URL('./WorkbenchPanel.tsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(workbench, /BackgroundThreadsView|id: 'threads'|workbench-view--threads/);
+  assert.match(chatSurface, /<div className="chat-workspace">[\s\S]*<TaskMonitorRailView/);
+  assert.match(chatSurface, /chat-surface--with-monitor/);
+  assert.doesNotMatch(workbench, /TaskMonitorRailView|workbench-view--monitor|id:\s*'monitor'/);
   for (const page of ['HomePage', 'GlobalWorkbenchPage']) {
     const source = readFileSync(new URL(`../app/pages/${page}.tsx`, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /openBackgroundThread/);
     assert.match(source, /(?:item|i)\.source !== 'shell_background'/);
   }
-  assert.doesNotMatch(entry, /useWorkbench|conversationId|activeConversation/);
 });

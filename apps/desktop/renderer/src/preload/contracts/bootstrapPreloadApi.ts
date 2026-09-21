@@ -75,6 +75,47 @@ import type {
  * 旧的 v1 形状(顶层 `prompt`、无 sessionId)已废弃;store 通过版本号丢弃旧记录。
  */
 
+// ADR 75 M1 — remote access IPC types
+export type RemoteAccessSettings = {
+  enabled: boolean;
+  gatewayOrigin: string;
+  workspaceId: string;
+};
+export type RemoteAccessFailure = {
+  /** Supervisor category: transport_failure, local_failure, network_unavailable, … */
+  reason: string;
+  /** Raw transport code when the dialer had one, e.g. SELF_SIGNED_CERT_IN_CHAIN. */
+  code?: string;
+  message?: string;
+};
+/** What the user carries to the gateway page to bind this device. Issued by the
+ * server, present only while the connection is parked in 'pairing'. */
+export type RemoteAccessPairing = {
+  challengeId: string;
+  pairingKey: string;
+  deviceId: string;
+  expiresAt: number;
+};
+export type RemoteAccessIpcResult = {
+  ok: boolean;
+  status?: {
+    settings: RemoteAccessSettings;
+    active: boolean;
+    online: boolean;
+    deviceId: string | null;
+    connectionEpoch: number;
+    /** Set once dialing has given up, so a failed connect is not shown as pending. */
+    lastFailure?: RemoteAccessFailure | null;
+    /** Set while the server waits for this device to be claimed. */
+    pairing?: RemoteAccessPairing | null;
+  };
+  error?: string;
+};
+export type RemoteAccessPatch = {
+  enabled?: boolean;
+  gatewayOrigin?: string;
+  workspaceId?: string;
+};
 export type BrowserSessionImportPreflightCheck = {
   readonly id: string;
   readonly status: 'ok' | 'missing' | 'blocked' | 'warn' | 'unsupported' | 'info';
@@ -1450,6 +1491,10 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly initialSettings: Record<string, unknown>;
   readonly getSettings: () => Promise<Record<string, unknown>>;
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** ADR 75 M1 远程访问：状态查询、设置更新、按已保存设置重连。 */
+  readonly getRemoteAccess: () => Promise<RemoteAccessIpcResult>;
+  readonly updateRemoteAccess: (patch: RemoteAccessPatch) => Promise<RemoteAccessIpcResult>;
+  readonly applyRemoteAccess: () => Promise<RemoteAccessIpcResult>;
   readonly onAppearanceChanged: (listener: (appearance: unknown) => void) => () => void;
   readonly getShortcutStatus: () => Promise<{
     quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };

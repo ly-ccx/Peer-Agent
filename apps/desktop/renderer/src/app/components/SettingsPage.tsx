@@ -9,9 +9,10 @@ import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
+import { RemoteAccessPanel } from './RemoteAccessPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-export type SettingsSection = 'general' | 'providers' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
+export type SettingsSection = 'general' | 'providers' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
 // 注：skills/插件已提升为主侧栏一级页面，不再作为设置分区。
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
@@ -28,6 +29,7 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'updates',
   'archived',
   'usage',
+  'remote',
 ]);
 
 function resolveSettingsSection(value: string | null | undefined): SettingsSection {
@@ -99,6 +101,10 @@ export function SettingsPage({
       ],
     },
     { label: isZh ? '开发' : 'Development', items: [{ key: 'git', label: i18n.t('settings.git') }] },
+    {
+      label: isZh ? '连接' : 'Connectivity',
+      items: [{ key: 'remote', label: isZh ? '远程访问' : 'Remote access' }],
+    },
     { label: isZh ? '应用' : 'Application', items: [{ key: 'updates', label: isZh ? '更新与关于' : 'Updates & about' }] },
     {
       label: isZh ? '归档' : 'Archived',
@@ -196,6 +202,8 @@ export function SettingsPage({
           />
         ) : section === 'usage' ? (
           <UsageStatsPanel i18n={i18n} />
+        ) : section === 'remote' ? (
+          <RemoteAccessPanel />
         ) : (
           <AppearancePanel i18n={i18n} />
         )}

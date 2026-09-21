@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 import { SidebarToggle } from '../../../workbench/SidebarToggle';
-import { GlobalBackgroundTasksButton } from '../../../workbench/GlobalBackgroundTasksButton';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
 import { GitBranchGlyph, GitWorktreeGlyph } from '../gitGlyphs';
 
@@ -41,6 +40,8 @@ export function ChatHeader({
   onOpenTools,
   onOpenAutomationRun,
   onClose,
+  taskMonitorOpen = false,
+  onToggleTaskMonitor,
   taskLine = null,
 }: {
   readonly title: string;
@@ -67,6 +68,9 @@ export function ChatHeader({
   readonly onOpenAutomationRun?: (target: { automationId: string; runId: string }) => void;
   /** When set (e.g. conversation Drawer), render a close control in the main header row. */
   readonly onClose?: () => void;
+  /** 当前会话内部的任务监控栏；与独立 Workbench 开关互不覆盖。 */
+  readonly taskMonitorOpen?: boolean;
+  readonly onToggleTaskMonitor?: () => void;
   readonly taskLine?: { readonly label: string; readonly title: string; readonly kind?: string } | null;
 }) {
   const workbench = useWorkbenchOptional();
@@ -251,7 +255,21 @@ export function ChatHeader({
           localAccessLevel={localAccessLevel}
           onOpenTools={onOpenTools}
         />
-        <GlobalBackgroundTasksButton />
+        {onToggleTaskMonitor ? (
+          <button
+            type="button"
+            className={`chat-header-action-btn chat-task-monitor-toggle${taskMonitorOpen ? ' is-active' : ''}`}
+            aria-label={isZh ? (taskMonitorOpen ? '收起任务监控栏' : '打开任务监控栏') : (taskMonitorOpen ? 'Close task monitor' : 'Open task monitor')}
+            title={isZh ? '任务监控栏' : 'Task monitor'}
+            aria-expanded={taskMonitorOpen}
+            onClick={onToggleTaskMonitor}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 6h11M9 12h11M9 18h11" />
+              <path d="m4 6 1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" />
+            </svg>
+          </button>
+        ) : null}
         {onFind ? (
           <button
             type="button"

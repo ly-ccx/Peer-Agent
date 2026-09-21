@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('peerAgent', {
   initialSettings: readInitialSettings(),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
+  // Remote access (ADR 75 M1). Each returns { ok, status } or { ok:false, error }.
+  getRemoteAccess: () => ipcRenderer.invoke('remote-access:status'),
+  updateRemoteAccess: (patch) => ipcRenderer.invoke('remote-access:update', patch),
+  applyRemoteAccess: () => ipcRenderer.invoke('remote-access:apply'),
   onAppearanceChanged: (listener) => {
     const handler = (_event, appearance) => listener(appearance);
     ipcRenderer.on('appearance:changed', handler);

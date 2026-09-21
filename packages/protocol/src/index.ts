@@ -6,6 +6,9 @@ export { DESKTOP_PREVIEW_PROTOCOL, DESKTOP_PREVIEW_CAPABILITY, DESKTOP_PREVIEW_T
 export type { DesktopPreviewRequest, DesktopPreviewReply } from './desktop-preview.ts';
 export type { UiDeliveryIdentity, UiDeliveryRequirement, UiDeliveryObservation, UiDeliveryJudgment, UiDeliveryGap } from './ui-delivery-verification.ts';
 
+export { REMOTE_PROTOCOL_VERSION, parseRemoteReadRequest, admitRemoteRead } from './remote-access.ts';
+export type { RemoteReadRequest, RemoteReadContext, RemoteReadRejection, RemoteReadAdmission } from './remote-access.ts';
+
 export type LocalAccessLevel =
   | 'ask_before_local'
   | 'session_local'

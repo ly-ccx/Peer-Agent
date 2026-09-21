@@ -155,6 +155,7 @@ import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionActionsContext, InteractionStreamingContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
+import { TaskMonitorRailView } from '../../workbench/views/TaskMonitorRailView';
 import {
   VirtualChatTurnList,
   type VirtualChatTurnListHandle,
@@ -738,6 +739,8 @@ export function ChatSurface({
   const setToolProgress = useMemo(() => makeSetter('toolProgress'), [makeSetter]);
   // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
   const [findOpen, setFindOpen] = useState(false);
+  // 任务监控栏归当前会话所有，与 App 级 Workbench 的开关/activeTab 完全独立。
+  const [taskMonitorOpen, setTaskMonitorOpen] = useState(false);
   // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
   const [threadScrolled, setThreadScrolled] = useState(false);
   // 当前问题条：只记录滚动位置对应的会话回合，不改变消息真值。
@@ -2859,7 +2862,7 @@ export function ChatSurface({
     <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
     <div
-      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}`}
+      className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}${taskMonitorOpen ? ' chat-surface--with-monitor' : ''}`}
       onDragEnter={handleSurfaceDragEnter}
       onDragOver={handleSurfaceDragOver}
       onDragLeave={handleSurfaceDragLeave}
@@ -2895,6 +2898,8 @@ export function ChatSurface({
         onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
         onFind={() => setFindOpen(true)}
         onClose={onClose}
+        taskMonitorOpen={taskMonitorOpen}
+        onToggleTaskMonitor={() => setTaskMonitorOpen((open) => !open)}
       />
       {findOpen ? (
         <ChatFindBar
@@ -3307,6 +3312,17 @@ export function ChatSurface({
       ) : null}
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
+      ) : null}
+      {taskMonitorOpen ? (
+        <TaskMonitorRailView
+          isZh={isZh}
+          workspacePath={workspacePath ?? null}
+          branch={workspaceGit?.ok ? workspaceGit.current : null}
+          workspaceIsGit={workspaceIsGit}
+          conversationId={conversationId}
+          active={isPageActive}
+          onClose={() => setTaskMonitorOpen(false)}
+        />
       ) : null}
     </div>
     </div>

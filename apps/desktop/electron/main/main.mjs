@@ -26,6 +26,8 @@ import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createTaskOverviewBroadcastScheduler } from './task-overview-broadcast.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
+import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
+import { createRemoteAccessController } from './runtime-gateway/remote-access-controller.mjs';
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
@@ -194,6 +196,7 @@ import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
 import { validateSkillInstallTarget } from './skill-install-target.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
+import { createRemoteAccessIpcRegistrations } from './ipc/register-remote-access-ipc.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
 import {
   createPermissionGrantService,
@@ -530,6 +533,7 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let localToolHost = null;
+let remoteAccess = null;
 // TaskOverview 聚合器：组装 goal-plan-store 与 automation-store 的投影快照，
 // 供 taskOverview:list IPC 使用（阶段 1，见 peer-2-0-gap-analysis §11）。
 const taskOverviewAggregator = createTaskOverviewAggregator({
@@ -2397,6 +2401,11 @@ function registerDesktopIpcHost() {
       fdaDrag: browserFdaDragApplicationService,
       panelReveal: browserPanelRevealCoordinator,
     }),
+    // Resolved lazily: this host is registered before startLocalRuntime creates
+    // the controller, so the concrete controller must be looked up per call.
+    ...createRemoteAccessIpcRegistrations({
+      getRemoteAccess: () => remoteAccess,
+    }),
     ...createChatIpcRegistrations({
       chat: {
         send: handleChatSend,
@@ -3921,10 +3930,52 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
+  // 远程只读接入（ADR 75 M1）。连接的唯一所有者是 remoteAccessController：
+  // 设置页、用户开关、常驻服务都经由它，避免多处以不同理由启停同一个连接。
+  // 环境变量只在首次引导时作为种子写入设置（不直接启动连接），随后一切以设置页为准。
+  try {
+    const current = settingsStore.getAll()?.remoteAccess;
+    const seeded = current && typeof current === 'object' && typeof current.gatewayOrigin === 'string'
+      ? current
+      : null;
+    if (!seeded?.gatewayOrigin && process.env.PEER_GATEWAY_ORIGIN) {
+      settingsStore.merge({
+        remoteAccess: {
+          enabled: true,
+          gatewayOrigin: process.env.PEER_GATEWAY_ORIGIN,
+          workspaceId: process.env.PEER_REMOTE_WORKSPACE || 'default',
+        },
+      });
+      console.log('[remote] seeded settings from environment');
+    }
+    remoteAccess = createRemoteAccessController({
+      settingsStore,
+      deviceName: os.hostname(),
+      createSession: ({ gatewayOrigin, workspaceId }) => setupRemoteAccess({
+        userDataPath,
+        gatewayOrigin,
+        deviceName: os.hostname(),
+        workspaceId,
+        goalPlanStore,
+        sessionStore,
+        buildProjection: buildRuntimeProjection,
+        host: localToolHost,
+      }),
+    });
+    // 启动时按已保存的意图恢复连接；未配置或已关闭则什么都不做。
+    void remoteAccess.apply().catch(error => {
+      console.warn('[remote] restore failed: %s', error?.message || error);
+    });
+  } catch (error) {
+    console.warn('[remote] setup failed: %s', error?.message || error);
+    remoteAccess = null;
+  }
   return {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
+        await remoteAccess?.stop().catch(() => {});
+        remoteAccess = null;
         await Promise.all([
           desktopPreviewProvider?.dispose(),
           disposeApplicationShellTasks(userDataPath),

@@ -96,7 +96,6 @@ const TABS: readonly TabDef[] = [
       </svg>
     ),
   },
-
 ];
 
 interface WorkbenchPanelProps {
