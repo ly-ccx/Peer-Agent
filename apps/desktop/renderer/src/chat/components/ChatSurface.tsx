@@ -135,7 +135,7 @@ import type {
 } from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
-import { ImagePreviewOverlay } from './thread/AttachmentStrip';
+import { ImageLightbox, imageLightboxSourceFromAttachment } from './thread/ImageLightbox';
 import {
   applyAutomationProposalActionResult,
   buildAutomationProposalActionRequest,
@@ -3269,8 +3269,12 @@ export function ChatSurface({
           onConfirm={handleCreateBoundBranch}
         />
       ) : null}
-      {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
-        <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
+      {imagePreview?.kind === 'image' && (imagePreview.dataUrl || imagePreview.filePath) ? (
+        <ImageLightbox
+          source={imageLightboxSourceFromAttachment(imagePreview)}
+          isZh={isZh}
+          onClose={() => setImagePreview(null)}
+        />
       ) : null}
       {taskMonitorOpen ? (
         <TaskMonitorRailView

@@ -2737,74 +2737,6 @@
   padding: 0;
 }
 
-/* 图片预览的重遮罩修饰类：仅加深背景观感，布局与入场动效继承 .pa-overlay-backdrop 基座。 */
-.image-preview-backdrop {
-  background: rgba(8, 12, 18, 0.76);
-  backdrop-filter: blur(14px);
-}
-.image-preview-card {
-  max-width: min(88vw, 1120px);
-  max-height: 88vh;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--glass-modal-border);
-  border-radius: var(--radius-xl);
-  /* 图片预览也是 role="dialog"：复用主题化弹窗磨砂配方。 */
-  background: var(--glass-modal-background);
-  backdrop-filter: var(--glass-modal-filter);
-  -webkit-backdrop-filter: var(--glass-modal-filter);
-  box-shadow: var(--glass-modal-shadow);
-}
-.image-preview-img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(88vh - 52px);
-  object-fit: contain;
-  background: var(--chrome-canvas);
-}
-.image-preview-caption {
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-4);
-  border-top: 1px solid var(--chrome-hairline);
-  color: var(--graphite-soft);
-}
-.image-preview-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--graphite-base);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-.image-preview-size {
-  flex-shrink: 0;
-  color: var(--graphite-mute);
-  font-size: 0.72rem;
-}
-.image-preview-close {
-  margin-left: auto;
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--graphite-mute);
-  cursor: pointer;
-  font-size: 1.25rem;
-  line-height: 1;
-}
-.image-preview-close:hover,
-.image-preview-close:focus-visible {
-  background: var(--chrome-sunken);
-  color: var(--graphite-base);
-  outline: none;
-}
 .chat-file-input {
   display: none;
 }
@@ -4393,13 +4325,6 @@ button.chat-header-cap-item:focus-visible {
     -webkit-backdrop-filter: none;
     box-shadow: var(--shadow-popover);
   }
-
-  .image-preview-card {
-    background: var(--chrome-raised, var(--paper-sheet));
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: var(--shadow-popover);
-  }
 }
 
 .pa-cascading-submenu-panel.can-scroll-up.can-scroll-down {
@@ -5387,15 +5312,4 @@ button.chat-header-cap-item:focus-visible {
     animation: none;
     transition-duration: 1ms;
   }
-}
-
-.image-preview-pending {
-  min-width: min(60vw, 480px);
-  min-height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--graphite-soft, #9aa0a6);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
 }

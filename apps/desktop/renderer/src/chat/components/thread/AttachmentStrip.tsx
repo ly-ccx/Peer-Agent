@@ -1,5 +1,4 @@
 import { memo, useEffect, useState } from 'react';
-import { Overlay } from '../../../app/components/Overlay';
 import { formatBytes } from '../../state/format';
 import { loadLocalImageDataUrl } from '../../state/localImagePreview';
 import type { ChatAttachment } from '../../state/types';
@@ -344,54 +343,3 @@ const AttachmentThumb = memo(function AttachmentThumb({
   );
 });
 
-export function ImagePreviewOverlay({
-  attachment,
-  isZh,
-  onClose,
-}: {
-  readonly attachment: ChatAttachment;
-  readonly isZh: boolean;
-  readonly onClose: () => void;
-}) {
-  const [src, setSrc] = useState<string>(() =>
-    typeof attachment.dataUrl === 'string' && attachment.dataUrl ? attachment.dataUrl : '',
-  );
-
-  useEffect(() => {
-    if (typeof attachment.dataUrl === 'string' && attachment.dataUrl) {
-      setSrc(attachment.dataUrl);
-      return;
-    }
-    const filePath = typeof attachment.filePath === 'string' ? attachment.filePath.trim() : '';
-    if (!filePath) {
-      setSrc('');
-      return;
-    }
-    let cancelled = false;
-    void loadLocalImageDataUrl(filePath).then((dataUrl) => {
-      if (!cancelled && dataUrl) setSrc(dataUrl);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [attachment.dataUrl, attachment.filePath]);
-
-  return (
-    <Overlay onClose={onClose} backdropClassName="image-preview-overlay" ariaLabel={isZh ? '图片预览' : 'Image preview'}>
-      <figure className="image-preview-dialog" role="dialog" aria-modal="true" aria-label={isZh ? '图片预览' : 'Image preview'}>
-        {src ? (
-          <img src={src} alt={attachment.name} className="image-preview-img" />
-        ) : (
-          <div className="image-preview-pending">{isZh ? '加载中…' : 'Loading…'}</div>
-        )}
-        <figcaption className="image-preview-meta">
-          <span className="image-preview-name">{attachment.name}</span>
-          <span className="image-preview-size">{formatBytes(attachment.size)}</span>
-          <button type="button" className="image-preview-close" onClick={onClose} aria-label={isZh ? '关闭预览' : 'Close preview'}>
-            ×
-          </button>
-        </figcaption>
-      </figure>
-    </Overlay>
-  );
-}

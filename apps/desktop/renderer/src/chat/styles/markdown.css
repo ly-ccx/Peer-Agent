@@ -395,6 +395,18 @@
   filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
 }
 
+/* 共享灯箱的按需加载态：dataUrl 缺失时按路径回源主进程读取期间的占位（ADR 59）。 */
+.markdown-local-image-lightbox-pending {
+  min-width: min(60vw, 480px);
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--graphite-soft, #9aa0a6);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
 .markdown-local-image-lightbox-panel.is-zoomed .markdown-local-image-lightbox-stage {
   overflow: auto;
   width: 100%;
