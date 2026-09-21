@@ -8,6 +8,35 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.0.14] - 2026-09-21
+
+### Notes
+
+- Workbench Browser and Goal preview review, more honest channel status, and chat / files-tree reliability.
+- Read-only remote task routing (remote sessions, task monitor, remote media) is included. Remote control, device binding, and remote writes remain for a later release.
+
+### Features
+
+- Workbench Browser sessions stay alive across Goal / Files tab switches instead of reloading from scratch.
+- Image lightbox with zoom, Reveal in Finder, and copy path.
+- Goal visual preview review can close cleanly; a pending preview is not treated as waiting on the user.
+- Read-only remote task routing: remote sessions, task monitor, and remote media viewing.
+
+### Improvements
+
+- Channel cards aggregate connection status across every model in the group; unavailable is marked on the collapsed model row.
+- The files tree shows hidden files and only skips known junk directories.
+- The model picker uses the bootstrap channel list instead of waiting on a later fetch.
+- macOS fullscreen leaves room for traffic-light buttons; sidebar, chat paper, and Workbench stay aligned.
+
+### Fixes
+
+- A single failed model no longer paints the whole channel unavailable.
+- Chat tool calls persist to disk so history survives a restart.
+- Streaming thinking no longer freezes the UI; Anthropic `max_tokens` is clamped to the channel output ceiling.
+- Gemini native tool pairing is preserved, and Goal visual captures reach the agent loop.
+- Goal intake that already captured screenshots or task evidence is no longer dropped as plain Q&A.
+
 ## [0.0.13] - 2026-09-14
 
 ### Notes
