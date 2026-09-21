@@ -1888,10 +1888,13 @@ export function goalPlanWaitsOnPreviewReview(plan) {
  * 用户回复可以消费 request_user_input 的计划态。
  * accepted + waiting_user 会出现在 intake 流错误残留、再被 goal_create_plan
  * 升成 accepted_goal 之后；只认 executing 会让「继续」永远吃不到回复。
+ * interrupted + waiting_user 是流错误打断（可恢复重试耗尽）后 runner 停在
+ * 等验收的残留态：不认 interrupted 的话，用户在输入框的每条回复都只被
+ * message_routed 归档，runner 永远等不到验收答复（死锁，PeerAgent 空回复排查）。
  */
 export function canConsumeRequestedUserInput(plan) {
   if (!plan) return false;
-  if (plan.status !== 'executing' && plan.status !== 'accepted') return false;
+  if (plan.status !== 'executing' && plan.status !== 'accepted' && plan.status !== 'interrupted') return false;
   return ['waiting_user', 'blocked'].includes(plan.runner?.status)
     && runnerWaitsOnUser(plan.runner);
 }
@@ -3434,6 +3437,9 @@ export function createGoalPlanStore({
       enabled: true,
       status: 'running',
       intent: 'execute',
+      // 用户接话即接管等待：消费残留中断，避免 keep-live 判定
+      // （prevStatus === 'interrupted' 且中断未消费）把已收尾的计划拉回 executing。
+      interruption: null,
       phase: ['waiting_user', 'blocked'].includes(currentRunner.phase) ? 'orient' : (currentRunner.phase || 'orient'),
       blockerAudit: null,
       blockedReason: undefined,
@@ -3456,8 +3462,18 @@ export function createGoalPlanStore({
     const activeNodeId = normalizeOptionalString(event.activeNodeId) || normalizedEvent.nodeId;
     if (activeNodeId) nextTrace.activeNodeId = activeNodeId;
 
+    // 注意：这里不代答 waiting_user 叶子。等待叶子（验收/确认动作）必须由
+    // runner 续跑后的轮次带着用户答复去完成并落 Evidence；
+    // 消费只负责解除 runner 停等与消费残留中断。
+
+    // interrupted 残留态随消费一起解除：runner 已回到 running，计划应恢复
+    // 可运行态，否则主进程消费分支的 shouldResumeGoalRunnerAfterUserDecision
+    // （要求 accepted/executing）不会把执行权交还 runner，计划永远停在 interrupted。
+    const nextStatus = plan.status === 'interrupted' ? 'executing' : plan.status;
+
     return persist({
       ...plan,
+      status: nextStatus,
       runner: nextRunner,
       runTrace: nextTrace,
       updatedAt: now,
