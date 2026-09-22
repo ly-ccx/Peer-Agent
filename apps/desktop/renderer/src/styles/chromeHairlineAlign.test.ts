@@ -29,8 +29,16 @@ test('chat header and workbench tab rail share a locked 40px chrome hairline', (
   }
 
   assert.match(rail, /border-bottom:\s*1px solid var\(--chrome-hairline\);/);
-  assert.match(
-    ruleBody(chatSurfaceCss, ":root[data-workbench-open='true'] .chat-header"),
-    /border-bottom-color:\s*var\(--chrome-hairline\);/,
+  const openHeader = ruleBody(
+    chatSurfaceCss,
+    ":root[data-workbench-open='true'] .chat-header",
   );
+  assert.match(openHeader, /border-bottom-color:\s*var\(--chrome-hairline\);/);
+  assert.match(
+    openHeader,
+    /background:\s*var\(--chrome-canvas,\s*var\(--za-app-bg\)\);/,
+  );
+  assert.match(openHeader, /-webkit-backdrop-filter:\s*none;/);
+  assert.match(openHeader, /backdrop-filter:\s*none;/);
+  assert.match(header, /backdrop-filter:\s*blur\(var\(--blur-chrome,\s*24px\)\)/);
 });
