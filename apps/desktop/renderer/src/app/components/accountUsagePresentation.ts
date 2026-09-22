@@ -80,6 +80,17 @@ export function usageWindows(quota: LlmSubscriptionQuota | undefined): readonly 
   if (!windows.length && (quota.usedPercent !== undefined || quota.remainingPercent !== undefined)) windows.push({ id: 'subscription', label: quota.planLabel, usedPercent: quota.usedPercent, remainingPercent: quota.remainingPercent, resetsAt: quota.resetsAt, scope: 'subscription' });
   return windows;
 }
+
+/** Read-only one-line summary for the provider card header; undefined until a query succeeds. */
+export function usageSummaryChip(quota: LlmSubscriptionQuota | undefined, zh: boolean): string | undefined {
+  if (!quota || !quota.success) return undefined;
+  const balance = quota.balances?.[0];
+  if (balance) return usageMoney(balance.total, balance.currency, zh);
+  const windows = usageWindows(quota);
+  if (windows.length) return `${windows.length} ${zh ? '个额度窗口' : 'usage windows'}`;
+  if (quota.localUsage) return zh ? '仅本地统计' : 'Local usage only';
+  return undefined;
+}
 export function usageLegacyMetrics(quota: LlmSubscriptionQuota | undefined, zh: boolean) {
   if (!quota) return [];
   const metrics: { label: string; value: string }[] = [];

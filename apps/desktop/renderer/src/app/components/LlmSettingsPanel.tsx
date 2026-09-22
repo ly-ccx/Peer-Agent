@@ -43,6 +43,8 @@ import {
   supportsSubscriptionQuotaMethod,
 } from './llmSubscriptionQuota';
 import { AccountUsageDetails } from './AccountUsageDetails';
+import { OverflowMenu } from './OverflowMenu';
+import { usageSummaryChip } from './accountUsagePresentation';
 import { accountUsageRefreshFailed } from './accountUsageRefresh';
 import { observeAccountUsageRequest } from './accountUsageRequest';
 import { createAccountUsageRequestOrder } from './accountUsageRequestOrder';
@@ -1609,6 +1611,8 @@ export function LlmSettingsPanel({
           const head = g.head;
           const collapsed = !expandedGroups.has(g.groupId);
           const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
+          const zh = i18n.locale === 'zh-CN';
+          const quotaSummary = usageSummaryChip(currentAccountUsage(quotaResults[head.id], head), zh);
           return (
           <div key={g.groupId} data-llm-group-id={g.groupId} className={`llm-provider-group${highlightGroupId === g.groupId ? ' is-highlight' : ''}`}>
             <div className="llm-group-header">
@@ -1639,6 +1643,9 @@ export function LlmSettingsPanel({
               <span className="llm-provider-meta">
                 <span className="llm-provider-chip">{groupChannel.label}</span>
                 <span className="llm-provider-chip">{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
+                {quotaSummary ? (
+                  <span className="llm-provider-chip llm-quota-chip" title={zh ? '最近一次查询的余额' : 'Balance from the last query'}>{quotaSummary}</span>
+                ) : null}
               </span>
               {isLocalCliMethod(head.authMethod) ? (
                 <small className="llm-provider-key">
@@ -1671,14 +1678,6 @@ export function LlmSettingsPanel({
                 </small>
               )}
               <div className="llm-group-actions">
-                <button type="button" className="primary" onClick={() => openCatalog(head.id)}>
-                  {i18n.locale === 'zh-CN' ? '获取模型列表' : 'Get models'}
-                </button>
-                {!isOAuthMethod(head.authMethod) ? (
-                  <button type="button" onClick={() => openAddModel(head)}>
-                    {i18n.locale === 'zh-CN' ? '手动新增' : 'Add manually'}
-                  </button>
-                ) : null}
                 <button type="button" onClick={() => openEdit(head)}>
                   {i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit connection'}
                 </button>
@@ -1687,41 +1686,62 @@ export function LlmSettingsPanel({
                     {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => void handleRemoveGroup(g.groupId, head.name || head.provider)}
-                  disabled={removingGroupId === g.groupId}
-                >
-                  {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider')}
-                </button>
+                <OverflowMenu
+                  zh={zh}
+                  items={[
+                    {
+                      key: 'remove-group',
+                      label: i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider',
+                      danger: true,
+                      disabled: removingGroupId === g.groupId,
+                      onSelect: () => void handleRemoveGroup(g.groupId, head.name || head.provider),
+                    },
+                  ]}
+                />
               </div>
             
               </div>
-              <AccountUsageDetails
-                quota={currentAccountUsage(quotaResults[head.id], head)}
-                loading={quotaLoadingId === head.id}
-                zh={i18n.locale === 'zh-CN'}
-                onRefresh={() => void handleRefreshQuota(head.id)}
-              />
             </div>
             {!collapsed ? (
-              <div className="llm-group-models">
-                {g.models.map((p) => (
-                  <ConfiguredModelRow
-                    key={p.id}
-                    i18n={i18n}
-                    model={p}
-                    result={testResults[p.id]}
-                    testing={testingId === p.id}
-                    duplicating={duplicatingId === p.id}
-                    onSetDefault={() => void handleSetDefault(p.id)}
-                    onTest={() => void handleTest(p.id)}
-                    onDuplicate={() => void handleDuplicateModel(p.id)}
-                    onEdit={() => setModelSettingsId(p.id)}
-                    onDelete={() => void handleDelete(p.id)}
-                  />
-                ))}
+              <div className="llm-group-body">
+                <div className="llm-group-section">
+                  <div className="llm-group-section-head">
+                    <span className="llm-group-section-title">{i18n.locale === 'zh-CN' ? '模型' : 'Models'}</span>
+                    <div className="llm-group-section-actions">
+                      <button type="button" onClick={() => openCatalog(head.id)}>
+                        {i18n.locale === 'zh-CN' ? '获取模型列表' : 'Get models'}
+                      </button>
+                      {!isOAuthMethod(head.authMethod) ? (
+                        <button type="button" onClick={() => openAddModel(head)}>
+                          {i18n.locale === 'zh-CN' ? '手动新增' : 'Add manually'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="llm-group-models">
+                    {g.models.map((p) => (
+                      <ConfiguredModelRow
+                        key={p.id}
+                        i18n={i18n}
+                        model={p}
+                        result={testResults[p.id]}
+                        testing={testingId === p.id}
+                        duplicating={duplicatingId === p.id}
+                        onSetDefault={() => void handleSetDefault(p.id)}
+                        onTest={() => void handleTest(p.id)}
+                        onDuplicate={() => void handleDuplicateModel(p.id)}
+                        onEdit={() => setModelSettingsId(p.id)}
+                        onDelete={() => void handleDelete(p.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <AccountUsageDetails
+                  quota={currentAccountUsage(quotaResults[head.id], head)}
+                  loading={quotaLoadingId === head.id}
+                  zh={i18n.locale === 'zh-CN'}
+                  onRefresh={() => void handleRefreshQuota(head.id)}
+                />
               </div>
             ) : null}
           </div>

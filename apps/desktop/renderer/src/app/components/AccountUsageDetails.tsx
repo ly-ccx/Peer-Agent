@@ -1,12 +1,8 @@
-import { useId, useState } from 'react';
 import type { LlmSubscriptionQuota } from '@peer-agent/protocol';
-import { PeerIcon } from '../../ui/icons';
 import { usageAuth, usageDimension, usageFailure, usageLegacyMetrics, usageMoney, usageNumber, usagePeriod, usageScope, usageSource, usageTime, usageWindow, usageWindows } from './accountUsagePresentation';
 import '../../styles/account-usage.css';
 
 export function AccountUsageDetails({ quota, loading, zh, onRefresh }: { quota?: LlmSubscriptionQuota; loading: boolean; zh: boolean; onRefresh: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const panelId = useId();
   const windows = usageWindows(quota);
   const legacy = usageLegacyMetrics(quota, zh);
   const local = quota?.localUsage;
@@ -23,18 +19,16 @@ export function AccountUsageDetails({ quota, loading, zh, onRefresh }: { quota?:
   ] : [];
   return <section className="account-usage" data-stale={quota?.stale || undefined} onClick={(event) => event.stopPropagation()}>
     <div className="account-usage-toolbar">
-      <button type="button" className="account-usage-toggle" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded((value) => !value)}>
-        <PeerIcon name="chevronRight" size={14} className="account-usage-chevron" />
+      <div className="account-usage-heading">
         <span className="account-usage-title">{zh ? '余额与用量' : 'Balance & usage'}</span>
         {badge && <span className="account-usage-badge">{badge}</span>}
-        {!expanded && compact && <span className="account-usage-preview" title={compact}>{compact}</span>}
-      </button>
+      </div>
       <button type="button" className="account-usage-refresh" disabled={loading} onClick={onRefresh} aria-label={loading ? (zh ? '正在查询余额与用量' : 'Querying balance and usage') : (zh ? '刷新余额与用量' : 'Refresh balance and usage')}>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 11.9-1" /></svg>
         <span>{loading ? (zh ? '查询中…' : 'Loading…') : quota ? (zh ? '刷新' : 'Refresh') : (zh ? '查询' : 'Query')}</span>
       </button>
     </div>
-    <div id={panelId} className="account-usage-body" hidden={!expanded}>
+    <div className="account-usage-body">
       <div className="account-usage-status" role="status" aria-live="polite" aria-busy={loading}>
         {loading && <p>{zh ? '正在获取最新数据…' : 'Fetching the latest data…'}</p>}
         {quota?.stale && <p>{zh ? '以下为上次查询结果，数据已过期，请刷新。' : 'Showing the previous observation. Data is stale; refresh to update.'}</p>}

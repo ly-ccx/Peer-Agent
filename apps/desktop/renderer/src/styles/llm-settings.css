@@ -1411,6 +1411,118 @@
   cursor: not-allowed;
 }
 
+.llm-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid var(--chrome-hairline);
+  padding-top: var(--space-3);
+}
+
+.llm-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.llm-group-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.llm-group-section-title {
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.llm-group-section-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.llm-group-section-actions button {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: opacity var(--za-motion-fast), background var(--za-motion-fast);
+}
+.llm-group-section-actions button:hover:not(:disabled) {
+  background: var(--chrome-hairline);
+}
+
+.llm-quota-chip {
+  color: var(--state-success);
+}
+
+.pa-overflow {
+  position: relative;
+  display: inline-flex;
+}
+.pa-overflow-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pa-overflow-trigger:hover {
+  background: var(--chrome-hairline);
+}
+.pa-overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+.pa-overflow-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--graphite-base);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pa-overflow-menu button:hover:not(:disabled) {
+  background: var(--chrome-hairline);
+}
+.pa-overflow-menu button.danger {
+  color: var(--state-danger);
+}
+.pa-overflow-menu button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .llm-group-models {
   display: flex;
   flex-direction: column;
