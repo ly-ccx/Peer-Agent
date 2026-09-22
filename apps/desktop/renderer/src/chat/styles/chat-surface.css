@@ -120,10 +120,14 @@
   position: absolute;
   top: 40px;
   left: 0;
+  /* 监控卡片打开时停在卡片左缘，避免「当前问题」置顶条和右侧任务监控顶栏叠在一起。
+     卡片未打开时 --task-monitor-card 不存在，整段 calc 失效，right 回落到 0。 */
   right: 0;
+  right: calc(var(--task-monitor-card, unset) + var(--space-3) * 2);
   z-index: 24;
   box-sizing: border-box;
-  width: 100%;
+  /* 宽度跟 left/right 走。写死 100% 会把上面为监控卡片让出的右边距重新撑满。 */
+  width: auto;
   max-width: none;
   display: flex;
   align-items: center;
