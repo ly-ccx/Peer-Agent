@@ -1571,7 +1571,7 @@ export function createGoalRunner({
     const canResumeFailedRun = plan.status === 'failed';
     if (TERMINAL_PLAN_STATUSES.has(plan.status) && !canResumeVerificationBlock && !canResumeFailedRun) return null;
     const runnerPatch = {
-      intent: options.intent ?? (canResumeFailedRun ? 'execute' : plan.runner?.intent) ?? 'execute',
+      intent: options.intent ?? ((canResumeFailedRun || plan.status === 'interrupted') ? 'execute' : plan.runner?.intent) ?? 'execute',
       phase: options.phase ?? (plan.runner?.phase === 'blocked' ? 'repair' : plan.runner?.phase) ?? 'orient',
       updatedAt: now(),
     };

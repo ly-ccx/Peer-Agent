@@ -25,7 +25,10 @@ function fixture(t) {
     observe: async (conversationId, signal, scene) => {
       calls++;
       assert.equal(conversationId, plan.conversationId);
-      assert.deepEqual(provider.authority.read(plan.planId).observations, [], 'revoke old image before UI work');
+      // Recapture preserves history, but must not admit a prior review while UI work is in flight.
+      const pending = provider.authority.read(plan.planId);
+      assert.deepEqual(pending.judgments, []);
+      assert.ok(pending.observations.every(item => item.admittedToRunId === ''));
       if (behavior === 'cancelled') controller.abort();
       if (behavior === 'failure') throw new Error('preview-scene-not-ready');
       return { ...identity, width: 1, height: 1, pngBase64: png.toString('base64'),
@@ -36,6 +39,7 @@ function fixture(t) {
   let hostContext = null;
   const hostVisualReview = { schedule(plan, stored, context) {
     reviews.push({ planId: plan.planId, artifactHash: stored.artifactHash }); hostContext = context;
+    return { scheduled: true, verifierRunId: `fixture-review-${reviews.length}` };
   } };
   const provider = createLocalDesktopPreviewProvider({ workspaceRoot: home, userDataPath: home, goalPlanStore: store, adapter, hostVisualReview,
     nativeImage: { createFromBuffer: () => ({ isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }) }) } });
@@ -95,8 +99,10 @@ for (const scene of ['application', 'background-runtime']) {
       } else if (outcome === 'granted') {
         assert.equal(reply.result.status, 'success');
         assert.equal(reply.result.outputPreview.scene, scene);
-        assert.equal(f.snapshot().observations.length, 1);
-        assert.notEqual(f.snapshot().observations[0].artifactRef, previous.artifactRef);
+        assert.equal(f.snapshot().observations.length, 2);
+        assert.equal(f.snapshot().observations[0].artifactRef, previous.artifactRef, 'retain indexed history');
+        assert.notEqual(f.snapshot().observations.at(-1).artifactRef, previous.artifactRef);
+        assert.deepEqual(f.snapshot().judgments, [], 'a new image cannot inherit a pass');
         const visual = reply.result.modelContext.visualObservations[0];
         assert.equal(visual.scene, scene);
         const source = desktopPreviewObservationSource(visual);
@@ -107,7 +113,10 @@ for (const scene of ['application', 'background-runtime']) {
       } else {
         assert.equal(reply.result.status, outcome === 'cancelled' ? 'cancelled' : 'failed');
         assert.equal(reply.result.modelContext, undefined);
-        assert.deepEqual(f.snapshot().observations, []);
+        assert.equal(f.snapshot().observations.length, 1, 'failed recapture retains history');
+        assert.equal(f.snapshot().observations[0].artifactRef, previous.artifactRef);
+        assert.equal(f.snapshot().observations[0].admittedToRunId, '');
+        assert.deepEqual(f.snapshot().judgments, [], 'failed recapture cannot reuse a prior verdict');
         assert.equal(f.counts().calls, 2);
         assert.equal(f.counts().closes, outcome === 'cancelled' ? 1 : 0);
       }

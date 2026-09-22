@@ -77,8 +77,9 @@ test('legacy names and capability IDs normalize without entering the canonical s
   assert.equal(canonicalizeLocalModelToolName('read_file'), 'read_file');
 });
 
-test('Desktop-only browser contracts are explicit and excluded from shared parity', () => {
+test('Desktop-only preview and browser contracts are explicit and excluded from shared parity', () => {
   assert.deepEqual(DESKTOP_ONLY_LOCAL_TOOL_CONTRACT_LIST, [
+    { toolName: 'desktop_preview', capabilityId: 'local.desktop.preview' },
     { toolName: 'browser_open_panel', capabilityId: 'local.web.control.openPanel' },
     { toolName: 'browser_navigate', capabilityId: 'local.web.control.navigate' },
     { toolName: 'browser_click', capabilityId: 'local.web.control.click' },

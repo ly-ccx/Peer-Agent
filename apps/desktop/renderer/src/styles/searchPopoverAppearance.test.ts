@@ -14,7 +14,7 @@ const composerControlsSource = readFileSync(
 
 function ruleBody(css: string, selector: string) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  const match = css.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`));
   assert.ok(match, `Expected CSS rule for ${selector}`);
   return match[1];
 }
@@ -63,7 +63,8 @@ test('session mention presents the session id as secondary text below the title'
   assert.match(idRule, /opacity:\s*0\.72/);
   assert.match(composerControlsSource, /className="session-mention-main"/);
   assert.match(composerControlsSource, /className="session-mention-title"/);
-  assert.match(composerControlsSource, /className="session-mention-id">\{hit\.id\}/);
+  assert.match(composerControlsSource, /hit\.type === 'session'\s*\? hit\.id/);
+  assert.match(composerControlsSource, /className="session-mention-id">\{subtitle\}/);
   assert.doesNotMatch(
     composerControlsSource,
     /className="slash-command-description">\{hit\.id\}/,

@@ -106,7 +106,10 @@ test('代码和图片产物使用受控 preview 渲染 hover 内容，而不是�
   assert.match(styles, /\n\.task-artifact-preview-portal--image\s*\{[^}]*width:\s*24rem/s);
   assert.match(styles, /\.task-artifact-preview\s*\{[^}]*width:\s*100%/s);
   assert.match(source, /availablePreviewSize\(/);
-  assert.doesNotMatch(styles, /100vw/);
+  const taskPreviewRules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selector]) => selector.includes('.task-artifact-preview'));
+  assert.ok(taskPreviewRules.length > 0);
+  for (const [, , body] of taskPreviewRules) assert.doesNotMatch(body, /100vw/);
   assert.doesNotMatch(styles, /task-artifact-shell:(?:hover|focus-within)\s+\.task-artifact-preview/);
   assert.doesNotMatch(source, /src=\{artifact\.(?:openPath|ref)\}/);
   assert.doesNotMatch(source, /from ['"]node:fs/);

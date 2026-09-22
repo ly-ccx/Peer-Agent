@@ -342,4 +342,3 @@ const AttachmentThumb = memo(function AttachmentThumb({
     />
   );
 });
-

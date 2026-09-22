@@ -8,6 +8,28 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.0.15] - 2026-09-22
+
+### Improvements
+
+- Reorganize the task information card around outputs, exact sources, active background tasks, and on-demand environment settings.
+- Refine background run details with consistent SVG icons, compact typography, separate command and log sections, and safe stop confirmation.
+- Unify channel expansion, separate balance and usage, and share the image lightbox across preview entries.
+- Improve narrow-window and Workbench layouts, pinned-question spacing, and plan-name display.
+
+### Fixes
+
+- Clear stale task details on conversation switches and distinguish current from starting branches.
+- Preserve syntax highlighting for long TS / TSX source previews.
+- Hide the streaming cursor during context compaction.
+- Consume user replies on interrupted waiting plans and resume interrupted execution without retaining the stale blocked intent.
+- Align release regression fixtures with current screenshot history, system context, UI, and isolated Qoder authentication behavior.
+- Fix directory-name type checking during file-tree refresh and the open-Workbench chat header background.
+
+### Distribution
+
+- Desktop: macOS, Windows, and Linux. CLI archives: macOS ARM64 and Linux x64; keep `peer` and `peer-credential-helper` together.
+
 ## [0.0.14] - 2026-09-21
 
 ### Notes

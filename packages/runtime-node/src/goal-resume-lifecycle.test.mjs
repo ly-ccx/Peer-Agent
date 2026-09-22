@@ -66,6 +66,50 @@ for (const source of ['explicit_resume', 'goal_accepted_rearm']) {
   }
 }
 
+// Recovery status × caller intent: defaults execute; an explicit verify intent wins.
+for (const status of ['interrupted', 'failed']) {
+  for (const intent of [undefined, 'verify']) {
+    test(`resume intent: ${status} × ${intent ?? 'default'}`, async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), 'goal-resume-intent-'));
+      const previous = process.env.PEER_AGENT_HOME;
+      process.env.PEER_AGENT_HOME = home;
+      try {
+        const store = createGoalPlanStore();
+        const plan = store.createPlan({
+          conversationId: 'resume-intent', title: 'Resume work', goal: 'Resume work',
+          tasks: [{ taskId: 'work', title: 'Continue work', status: 'pending', evidenceRefs: [] }],
+        });
+        store.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'test' });
+        store.setRunnerState(plan.planId, {
+          enabled: true, status: 'failed', phase: 'blocked', intent: 'block', lastError: 'old error',
+          ...(status === 'interrupted' ? {
+            interruption: { source: 'stream_error', reason: 'old error', interruptedAt: '2026-09-05T10:00:00.000Z', recoverable: false },
+          } : {}),
+        });
+        store.appendRunEvent(plan.planId, { type: 'network_interrupted', summary: 'old error' });
+        store.setPlanStatus(plan.planId, status);
+        assert.equal(store.getPlan(plan.planId).status, status);
+        let observed;
+        const runner = createGoalRunner({
+          goalPlanStore: store, logger: { warn() {} },
+          chatRuntime: { async runGoalTurn() {
+            const current = store.getPlan(plan.planId);
+            observed = { status: current.status, intent: current.runner.intent, interruption: current.runner.interruption, lastError: current.runner.lastError };
+            return { terminalStatus: 'done', continue: false };
+          } },
+        });
+        await runner.resume(plan.planId, { awaitIdle: true, ...(intent ? { intent } : {}) });
+        assert.deepEqual(observed, { status: 'executing', intent: intent ?? 'execute', interruption: undefined, lastError: undefined });
+        assert.ok(store.getPlan(plan.planId).runTrace.events.some(event => event.summary === 'old error'));
+      } finally {
+        if (previous === undefined) delete process.env.PEER_AGENT_HOME;
+        else process.env.PEER_AGENT_HOME = previous;
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
 test('Desktop accepted-goal handoff uses the shared recovery predicate, not a failed-only branch', () => {
   const main = readFileSync(new URL('../../../apps/desktop/electron/main/main.mjs', import.meta.url), 'utf8');
   const handoff = main.slice(main.indexOf('function maybeAutoStartAcceptedGoalFromPlanChange'), main.indexOf('function convergeIntakeAfterGoalTurn'));

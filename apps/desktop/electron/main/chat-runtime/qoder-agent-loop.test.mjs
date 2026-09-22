@@ -205,7 +205,7 @@ describe('agentLoopQoder', () => {
       attempts.push(args);
       return {
         ok: true,
-        content: 'I ran git status and checked the files.',
+        content: 'I can explain how to check git status without running it.',
         thinkingContent: '',
         toolCalls: [],
         streamUsage: null,
@@ -228,6 +228,25 @@ describe('agentLoopQoder', () => {
     assert.equal(attempts.length, 1);
     assert.equal(sent.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(sent.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('retries and rejects unsupported Qoder execution claims without tool evidence', async () => {
+    const sent = [];
+    const attempts = [];
+    await agentLoopQoder({
+      baseUrl: 'https://example.test/model/v1', apiKey: 'token', model: 'ultimate',
+      systemPrompt: 'system', messages: [{ role: 'user', content: 'continue' }], tools: [],
+      webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
+      streamId: 'qoder-loop-unsupported-execution',
+      sendStream: async (args) => {
+        attempts.push(structuredClone(args.messages));
+        return { ok: true, content: 'I ran git status and checked the files.', thinkingContent: '', toolCalls: [], streamUsage: null };
+      },
+    });
+    assert.equal(attempts.length, 2);
+    assert.ok(attempts[1].length > attempts[0].length, 'retry must include the corrective instruction');
+    assert.equal(sent.some(event => event.channel === 'chat:stream:done'), false);
+    assert.equal(sent.filter(event => event.channel === 'chat:stream:error').length, 1);
   });
 
   it('reports Qoder thinking-only planning text after native tool turns', async () => {

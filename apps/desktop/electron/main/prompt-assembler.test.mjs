@@ -62,6 +62,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.provider',
+      'runtime.web-entry',
       'automation.intent-policy',
       'runtime.mode',
     ]);
@@ -79,7 +80,8 @@ describe('System Context assembly', () => {
     assert.equal(context.snapshot.provider, 'openai');
     assert.equal(context.snapshot.model, 'test-model');
     assert.equal(context.snapshot.sectionRefs.length, context.sections.length);
-    assert.equal(context.snapshot.sectionRefs.length, 10);
+    assert.equal(context.snapshot.sectionRefs.length, 11);
+    assert.equal(context.sections.find(section => section.id === 'runtime.web-entry').layer, 'L5_TOOL_RULES');
     assert.match(renderSystemContext(context), /Evidence discipline/);
     assert.match(renderSystemContext(context), /Never narrate "writing" \/ "正在写入"/);
     assert.match(renderSystemContext(context), /prefer chunked writes/);
@@ -134,6 +136,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.attachments',
+      'runtime.web-entry',
       'automation.intent-policy',
       'runtime.mode',
     ]);
@@ -312,6 +315,7 @@ describe('System Context assembly', () => {
       'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
+      'runtime.web-entry',
       'automation.intent-policy',
       'runtime.mode',
       'runtime.continuity',
@@ -463,6 +467,7 @@ describe('System Context assembly', () => {
       'agent.mcp-host',
       'runtime.workspace',
       'project.instructions.agents.md',
+      'runtime.web-entry',
       'automation.intent-policy',
       'runtime.mode',
     ]);

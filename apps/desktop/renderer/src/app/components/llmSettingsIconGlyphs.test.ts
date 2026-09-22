@@ -52,7 +52,12 @@ test('settings dialogs and remaining decorative icon buttons do not use characte
   for (const [index, source] of sources.entries()) {
     const path = index < settingsFiles.length ? settingsFiles[index] : remainingFiles[index - settingsFiles.length];
     assert.equal(decorativeGlyph.test(source), false, `${path} still contains a decorative character icon`);
-    assert.match(source, /<PeerIcon /, `${path} should use PeerIcon`);
+    if (path === '../pages/TaskOverviewPage.tsx') {
+      // The section-link control owns a bespoke SVG; it still must not use a glyph.
+      assert.match(source, /className="task-overview-section-link__arrow"[\s\S]*?<svg[\s\S]*?stroke="currentColor"[\s\S]*?<path d="m9 18 6-6-6-6"/);
+    } else {
+      assert.match(source, /<PeerIcon /, `${path} should use PeerIcon`);
+    }
   }
 });
 
