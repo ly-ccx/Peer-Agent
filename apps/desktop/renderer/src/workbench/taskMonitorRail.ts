@@ -47,7 +47,7 @@ export function projectTaskMonitorEnvironment(input: {
     rows.push({
       id: 'current-head',
       icon: 'branch',
-      label: input.isZh ? '当前工作区' : 'Current workspace',
+      label: input.isZh ? '当前分支' : 'Current branch',
       value: currentHead,
     });
   }
@@ -55,7 +55,7 @@ export function projectTaskMonitorEnvironment(input: {
     rows.push({
       id: 'source',
       icon: 'branch',
-      label: input.isZh ? '任务源头' : 'Task source',
+      label: input.isZh ? '起始分支' : 'Starting branch',
       value: sourceBranch,
     });
   }

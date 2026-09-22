@@ -18,7 +18,7 @@ import { useWorkbenchOptional } from '../WorkbenchContext';
 import { reconcileStopRequest, type StopRequest } from '../backgroundRuntimeState.ts';
 import type { ManagedShellTask } from '@peer-agent/protocol';
 import type { ChatMsg } from '../../chat/state/types.ts';
-import { projectUsedMonitorCapabilities } from '../taskMonitorCapabilities.ts';
+import { projectMonitorSources, type MonitorSource } from '../taskMonitorSources.ts';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/dropdownMenu';
@@ -195,6 +195,7 @@ export function TaskMonitorRailView({
   currentHead,
   sourceBranch,
   workspaceIsGit,
+  currentIsolation = null,
   conversationId,
   messages,
   active,
@@ -212,6 +213,8 @@ export function TaskMonitorRailView({
   readonly currentHead: string | null;
   readonly sourceBranch: string | null;
   readonly workspaceIsGit: boolean | null;
+  /** Current task fact, not the preference for the next task. null means unknown. */
+  readonly currentIsolation?: boolean | null;
   readonly conversationId: string | null;
   readonly messages: readonly ChatMsg[];
   readonly canSelectSource?: boolean;
@@ -254,16 +257,28 @@ export function TaskMonitorRailView({
     </button>
   ) : null;
 
-  // Usage comes from this conversation's structured calls, never the installation inventory.
-  const skillNames = useMemo(() => projectUsedMonitorCapabilities(messages), [messages]);
-
-  // 网页查阅：当前会话的 browserSession tabs（url + title）。
-  const webVisits = useMemo(() => {
-    const tabs = workbench?.browserSession?.tabs ?? [];
-    return tabs
-      .filter((tab) => tab.url && !tab.url.startsWith('about:blank'))
-      .map((tab) => ({ key: tab.id, label: urlLabel(tab.url), url: tab.url, title: tab.title }));
-  }, [workbench?.browserSession?.tabs]);
+  const sources = useMemo(() => projectMonitorSources(messages,
+    workbench?.conversationId === conversationId ? workbench.browserSession.tabs : []),
+  [messages, conversationId, workbench?.conversationId, workbench?.browserSession.tabs]);
+  const [selectedSource, setSelectedSource] = useState<MonitorSource | null>(null);
+  useEffect(() => setSelectedSource(null), [conversationId]);
+  const openSource = (source: MonitorSource) => {
+    if (source.kind === 'file') {
+      workbench?.openFile(source.path, workspacePath ?? undefined);
+    } else if (source.kind === 'web') {
+      workbench?.setBrowserSession((session) => ({ ...session, activeTabId: source.tabId }));
+      workbench?.setActiveTab('browser');
+      workbench?.setOpen(true);
+    } else {
+      setSelectedSource((current) => current?.id === source.id ? null : source);
+    }
+  };
+  const sourceMessage = selectedSource && 'messageId' in selectedSource
+    ? messages.find((message) => message.id === selectedSource.messageId) : undefined;
+  const selectedCall = selectedSource?.kind === 'tool' ? sourceMessage?.segments?.find(
+    (segment) => segment.type === 'tool-call' && segment.toolCallId === selectedSource.toolCallId) : undefined;
+  const selectedAttachment = selectedSource?.kind === 'attachment' ? sourceMessage?.attachments?.find(
+    (attachment) => attachment.id === selectedSource.attachmentId) : undefined;
 
   // 后台任务详情内联展开：本栏内的选中态。
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -327,10 +342,7 @@ export function TaskMonitorRailView({
     <aside className="task-monitor-rail" aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}>
       <div className="task-monitor-card">
         <header className="task-monitor-header">
-          <span>{isZh ? '任务监控' : 'Task monitor'}</span>
-          <span className="task-monitor-updated" aria-live="off">
-            {isZh ? '实时' : 'Live'}
-          </span>
+          <span>{isZh ? '任务信息' : 'Task information'}</span>
           <button
             type="button"
             className="task-monitor-close"
@@ -341,97 +353,44 @@ export function TaskMonitorRailView({
           </button>
         </header>
         <div className="task-monitor-scroll">
-          <MonitorSection title={isZh ? '环境信息' : 'Environment'}>
-            {environment.map((row) => {
-              const rowLabel = environmentRowLabel(row.id, isZh);
-              const sourceControl = row.id === 'source' && onSelectEnv && sourceBranch ? (
-                <Dropdown
-                  className="task-monitor-env-dropdown"
-                  value={sourceBranch}
-                  options={sourceOptions}
-                  onChange={onSelectEnv}
-                  disabled={!canSelectSource}
-                  triggerLabel={row.value}
-                  ariaLabel={isZh ? '任务源头' : 'Task source'}
-                  title={canSelectSource
-                    ? (isZh ? `新任务将从 ${row.value} 分叉。选这里不会切换当前工作区。` : `The next task forks from ${row.value}. This does not switch the current workspace.`)
-                    : (isZh ? `任务源头 ${row.value}` : `Task source ${row.value}`)}
-                  searchable={canSelectSource}
-                  searchPlaceholder={isZh ? '搜索源头…' : 'Search source…'}
-                  tabs={canSelectSource ? [
-                    { id: 'local', label: isZh ? '本地' : 'Local' },
-                    { id: 'remote', label: isZh ? '远程' : 'Remote' },
-                  ] : undefined}
-                  tabsAriaLabel={isZh ? '源头范围' : 'Source scope'}
-                  emptyLabel={isZh ? '没有匹配的源头' : 'No matching source'}
-                  footerAction={canSelectSource && onCreateBranch ? {
-                    label: isZh ? '创建分支' : 'Create branch',
-                    onSelect: onCreateBranch,
-                  } : undefined}
-                />
-              ) : undefined;
-              return (
-                <MonitorRow
-                  key={row.id}
-                  icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
-                  label={rowLabel}
-                  value={row.value}
-                  detail={row.detail ?? row.value}
-                  control={sourceControl}
-                />
-              );
-            })}
-            {workspaceIsGit && isolationValue && isolationOptions.length > 0 && onSelectEnv ? (
-              <MonitorRow
-                icon={<CheckIcon />}
-                label={isZh ? 'Worktree' : 'Worktree'}
-                value={isolationValue}
-                control={(
-                  <Dropdown
-                    className="task-monitor-env-dropdown"
-                    value={isolationValue}
-                    options={isolationOptions}
-                    onChange={onSelectEnv}
-                    disabled={!canChangeIsolation}
-                    ariaLabel={isZh ? 'Worktree 隔离' : 'Worktree isolation'}
-                    title={canChangeIsolation
-                      ? (isZh ? '下次任务是否写入独立 Worktree' : 'Whether the next task writes in an isolated worktree')
-                      : (isZh ? '当前任务正在执行，无法更改隔离环境' : 'Cannot change isolation while the current task is running')}
-                  />
-                )}
-              />
-            ) : workspaceIsGit ? (
-              <MonitorRow icon={<CheckIcon />} value={isZh ? '提交或推送' : 'Commit or push'} />
-            ) : null}
+          <MonitorSection title={isZh ? '产出' : 'Outputs'}>
+            {artifactProjection.total ? artifactProjection.groups.map((group) => group.artifacts.map((artifact) => (
+              <MonitorRow key={`${group.kind}:${artifact.ref}`} icon={<ArtifactIcon kind={group.kind} />}
+                value={artifact.label} detail={artifact.openPath ?? artifact.label}
+                onClick={artifact.openPath ? () => workbench?.openFile(artifact.openPath!) : undefined} />
+            ))) : <p className="task-monitor-empty">{isZh ? '暂无产出' : 'No outputs yet'}</p>}
+            {moreButton('artifacts', artifactProjection.total,
+              artifactProjection.groups.reduce((sum, group) => sum + Math.min(MAX_VISIBLE_ARTIFACTS_PER_KIND, group.total), 0))}
           </MonitorSection>
 
-          {skillNames.length > 0 ? (
-            <MonitorSection title={isZh ? '技能与 MCP' : 'Skills & MCP'}>
-              {skillNames.slice(0, expanded.skills ? undefined : 6).map((name) => (
-                <MonitorRow key={name} icon={<HammerIcon />} value={name} />
-              ))}
-              {moreButton('skills', skillNames.length, 6)}
-            </MonitorSection>
-          ) : null}
+          <MonitorSection title={isZh ? '来源与工具' : 'Sources & tools'}>
+            {sources.length ? sources.slice(0, expanded.sources ? undefined : 4).map((source) => (
+              <MonitorRow key={source.id} value={source.label}
+                icon={source.kind === 'web' ? <GlobeIcon /> : source.kind === 'tool' ? <HammerIcon /> : <FolderIcon />}
+                detail={source.kind === 'web' ? source.url : source.kind === 'file' ? source.path : source.label}
+                onClick={() => openSource(source)} />
+            )) : <p className="task-monitor-empty">{isZh ? '暂无来源或工具记录' : 'No sources or tool records yet'}</p>}
+            {moreButton('sources', sources.length, 4)}
+            {selectedSource && sourceMessage ? <div className="task-monitor-source-detail">
+              <strong>{selectedSource.label}</strong>
+              {selectedCall?.type === 'tool-call' ? <>
+                <pre>{JSON.stringify(selectedCall.args ?? {}, null, 2)}</pre>
+                <pre>{selectedCall.result || (isZh ? '暂无返回结果' : 'No result yet')}</pre>
+              </> : selectedAttachment ? <>
+                <p>{selectedAttachment.name} · {selectedAttachment.mimeType} · {selectedAttachment.size} B</p>
+                {selectedAttachment.text ? <pre>{selectedAttachment.text}</pre>
+                  : selectedAttachment.kind === 'image' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(selectedAttachment.dataUrl ?? '')
+                    ? <img src={selectedAttachment.dataUrl} alt={selectedAttachment.name} style={{ maxWidth: '100%' }} />
+                    : <p>{isZh ? '此附件没有可直接预览的内容，请在原消息中查看。' : 'No inline preview is available; see the original message.'}</p>}
+              </> : null}
+            </div> : null}
+          </MonitorSection>
 
           {overviewItem?.planProgress ? (
-            <MonitorSection title={isZh ? '任务进度' : 'Progress'}>
-              <div className="task-monitor-progress-row">
-                <span title={taskMonitorProgressHeadline(overviewItem)}>
-                  {taskMonitorProgressHeadline(overviewItem)}
-                </span>
-                <strong>{overviewItem.planProgress.completed} / {overviewItem.planProgress.total}</strong>
-              </div>
-              <div
-                className="task-monitor-progress-track"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={overviewItem.planProgress.total}
-                aria-valuenow={overviewItem.planProgress.completed}
-              >
-                <span style={{ width: `${overviewItem.planProgress.total > 0 ? Math.min(100, Math.max(0, (overviewItem.planProgress.completed / overviewItem.planProgress.total) * 100)) : 0}%` }} />
-              </div>
-            </MonitorSection>
+            <button type="button" className="task-monitor-more" title={taskMonitorProgressHeadline(overviewItem)}
+              onClick={() => { workbench?.setActiveTab('plan'); workbench?.setOpen(true); }}>
+              {isZh ? '查看计划' : 'View plan'} · {overviewItem.planProgress.completed} / {overviewItem.planProgress.total}
+            </button>
           ) : null}
 
           {runs.length > 0 ? (
@@ -466,53 +425,47 @@ export function TaskMonitorRailView({
             </MonitorSection>
           ) : null}
 
-          {artifactProjection.total > 0 ? (
-            <MonitorSection title={isZh ? '产出' : 'Outputs'}>
-              {artifactProjection.groups.map((group) => (
-                group.artifacts.map((artifact) => (
-                  <MonitorRow
-                    key={`${group.kind}:${artifact.ref}`}
-                    icon={<ArtifactIcon kind={group.kind} />}
-                    value={artifact.label}
-                    detail={artifact.label}
-                    {...(artifact.openPath
-                      ? {
-                          onClick: () => {
-                            if (artifact.openPath?.startsWith('http')) {
-                              void workbench?.openFile(artifact.openPath ?? '');
-                            } else {
-                              void workbench?.openFile(artifact.openPath ?? '');
-                            }
-                          },
-                        }
-                      : {})}
-                  />
-                ))
-              ))}
-              {moreButton('artifacts', artifactProjection.total,
-                artifactProjection.groups.reduce((sum, group) => sum + Math.min(MAX_VISIBLE_ARTIFACTS_PER_KIND, group.total), 0))}
-            </MonitorSection>
-          ) : null}
-
-          {webVisits.length > 0 ? (
-            <MonitorSection title={isZh ? '网页查阅' : 'Web access'}>
-              {webVisits.slice(0, expanded.web ? undefined : 4).map((visit) => (
-                <MonitorRow
-                  key={visit.key}
-                  icon={<GlobeIcon />}
-                  value={visit.label}
-                  detail={visit.title || visit.url}
-                  onClick={() => {
-                    if (workbench) {
-                      workbench.setActiveTab('browser');
-                      workbench.setOpen(true);
-                    }
-                  }}
-                />
-              ))}
-              {moreButton('web', webVisits.length, 4)}
-            </MonitorSection>
-          ) : null}
+          <MonitorSection title={isZh ? '环境' : 'Environment'}>
+            <button type="button" className="task-monitor-environment-summary" aria-expanded={!!expanded.environment}
+              onClick={() => setExpanded((current) => ({ ...current, environment: !current.environment }))}>
+              {environment.find((row) => row.id === 'workspace')?.value || (isZh ? '未选择工作目录' : 'No workspace')}
+              {currentHead ? ` · ${currentHead}` : ''}
+            </button>
+            {expanded.environment ? <>
+              {environment.map((row) => <MonitorRow key={row.id}
+                icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
+                label={row.label} value={row.value} detail={row.detail ?? row.value} />)}
+              {workspaceIsGit ? <MonitorRow icon={<CheckIcon />} label={isZh ? '当前任务隔离' : 'Current task isolation'}
+                value={currentIsolation === null ? (isZh ? '尚未确认' : 'Not confirmed')
+                  : currentIsolation ? 'Worktree' : (isZh ? '当前目录' : 'Current directory')} /> : null}
+              {workspaceIsGit && onSelectEnv ? <button type="button" className="task-monitor-more" aria-expanded={!!expanded.settings}
+                onClick={() => setExpanded((current) => ({ ...current, settings: !current.settings }))}>
+                {isZh ? '环境设置' : 'Environment settings'}
+              </button> : null}
+              {workspaceIsGit && expanded.settings && onSelectEnv ? <div className="task-monitor-environment-settings">
+                {sourceBranch ? <div className="task-monitor-setting">
+                  <span>{isZh ? '起始分支' : 'Starting branch'}</span>
+                  <Dropdown className="task-monitor-env-dropdown" value={sourceBranch} options={sourceOptions}
+                    onChange={onSelectEnv} disabled={!canSelectSource} triggerLabel={sourceBranch}
+                    ariaLabel={isZh ? '起始分支' : 'Starting branch'}
+                    title={isZh ? '选择下次任务的起始分支，不切换当前工作目录' : 'Starting branch for the next task; does not switch the current directory'}
+                    searchable={canSelectSource} searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                    tabs={canSelectSource ? [{ id: 'local', label: isZh ? '本地' : 'Local' }, { id: 'remote', label: isZh ? '远程' : 'Remote' }] : undefined}
+                    tabsAriaLabel={isZh ? '分支范围' : 'Branch scope'}
+                    emptyLabel={isZh ? '没有匹配的分支' : 'No matching branch'}
+                    footerAction={canSelectSource && onCreateBranch ? { label: isZh ? '创建分支' : 'Create branch', onSelect: onCreateBranch } : undefined} />
+                </div> : null}
+                {isolationValue && isolationOptions.length ? <div className="task-monitor-setting">
+                  <span>{isZh ? '下次任务隔离' : 'Next task isolation'}</span>
+                  <Dropdown className="task-monitor-env-dropdown" value={isolationValue} options={isolationOptions}
+                    onChange={onSelectEnv} disabled={!canChangeIsolation}
+                    ariaLabel={isZh ? 'Worktree 隔离' : 'Worktree isolation'}
+                    title={canChangeIsolation ? (isZh ? '下次任务是否写入独立 Worktree' : 'Use an isolated worktree for the next task')
+                      : (isZh ? '任务执行期间不可更改' : 'Unavailable while a task is running')} />
+                </div> : null}
+              </div> : null}
+            </> : null}
+          </MonitorSection>
         </div>
       </div>
     </aside>

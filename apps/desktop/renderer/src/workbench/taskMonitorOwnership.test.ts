@@ -34,20 +34,22 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?top: calc\(40px \+ var\(--space-2\)\);/);
   // .task-monitor-card 不得再携带面样式（背景/边框/圆角/阴影全部移除）。
   const cardBlock = workbenchStyles.match(/\.task-monitor-card \{[\s\S]*?\}/)?.[0] ?? '';
-  assert.equal(/background(?!-)/.test(cardBlock), false);
-  assert.equal(/border(?!-radius)/.test(cardBlock), false);
-  assert.equal(/box-shadow/.test(cardBlock), false);
+  assert.match(cardBlock, /background:/);
+  assert.match(cardBlock, /border: 1px solid/);
+  assert.match(cardBlock, /box-shadow:/);
+  assert.match(cardBlock, /flex: 0 1 auto/);
+  assert.match(chatStyles, /\.chat-surface--with-monitor > \.message-rail\s*\{\s*right: calc\(var\(--task-monitor-card\)/);
   // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
   assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
   assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
   assert.doesNotMatch(workbenchStyles, /\.task-monitor-section \{[\s\S]{0,320}backdrop-filter/);
   assert.doesNotMatch(workbenchStyles, /task-monitor-tiles|task-monitor-section--tile/);
   // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。
-  assert.match(monitorView, /技能与 MCP/);
-  assert.match(monitorView, /网页查阅/);
-  assert.match(monitorView, /projectUsedMonitorCapabilities\(messages\)/);
+  assert.match(monitorView, /来源与工具/);
+  assert.match(monitorView, /projectMonitorSources\(messages/);
+  assert.match(monitorView, /workbench\?\.conversationId === conversationId/);
   assert.doesNotMatch(monitorView, /listSkills\(|listCapabilities\(|mcpListCapabilities\(/);
-  assert.match(monitorView, /browserSession\?\.tabs/);
+  assert.match(monitorView, /browserSession\.tabs/);
   assert.match(monitorView, /查看更多 \(\$\{total - limit\}\)/);
   assert.doesNotMatch(monitorView, /setActiveTab\('documents'\)/);
   assert.match(monitorView, /className="task-monitor-rail" aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);

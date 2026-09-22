@@ -3,6 +3,9 @@
 // permission and evidence pipeline. Never attaches to the user's app or webview.
 import { _electron as electron } from 'playwright-core';
 import { build } from 'vite';
+import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { verifyCardMatrix } from './task-monitor-electron-matrix.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -26,9 +29,44 @@ store.appendMessage(other.id, { id: 'other-history', role: 'assistant', content:
   segments: Array.from({ length: 8 }, (_, i) => ({ type: 'tool-call', tool: i === 0 ? 'skill__release-process' : `mcp__fixture__lookup${i}`,
     toolCallId: `fixture-call-${i}`, args: {}, result: 'Fixture result; not a live MCP execution.' })),
 });
+const sourceFile = path.join(workspace, '来源资料.txt');
+await writeFile(sourceFile, 'EXACT_SOURCE_CONTENT_2026\n');
+store.appendMessage(other.id, { id: 'source-attachment-message', role: 'user', content: 'Source fixture', timestamp: Date.now(),
+  attachments: [{ id: 'source-file', name: '来源资料.txt', kind: 'text', mimeType: 'text/plain', size: 26, filePath: sourceFile }],
+});
 await mkdir(path.join(home, 'skills/release-process'), { recursive: true });
 await writeFile(path.join(home, 'skills/release-process/SKILL.md'), '---\nname: release-process\ndescription: Isolated test skill, never executed.\n---\nFixture only.\n');
-await writeFile(path.join(home, 'settings.json'), JSON.stringify({ locale: 'en', theme: 'light', workspacePaths: [workspace] }));
+const server = createServer((request, response) => {
+  response.setHeader('Content-Type', 'text/html');
+  response.end(`<title>Source ${request.url}</title><p>Local source fixture ${request.url}</p>`);
+});
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+server.unref();
+const sourceUrl = `http://127.0.0.1:${server.address().port}/target`;
+await writeFile(path.join(home, 'settings.json'), JSON.stringify({ locale: 'en', theme: 'light', workspacePaths: [workspace],
+  workbench: { browserSessions: { [other.id]: { activeTabId: 'wrong-tab', tabs: [
+    { id: 'wrong-tab', url: sourceUrl.replace('/target', '/other'), title: 'Other source' },
+    { id: 'target-tab', url: sourceUrl, title: 'Exact web source' },
+  ] } } },
+}));
+// Real temporary repositories; fixture-only commits never touch the user repository.
+const gitWorkspace = path.join(root, '中文项目');
+const worktreeWorkspace = path.join(root, '独立工作树');
+await mkdir(gitWorkspace);
+const git = (...args) => execFileSync('git', ['-C', gitWorkspace, ...args], { encoding: 'utf8' });
+git('init', '-b', 'main');
+await writeFile(path.join(gitWorkspace, 'README.txt'), 'isolated UI acceptance fixture\n');
+git('add', 'README.txt');
+git('-c', 'user.name=UI Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture');
+git('worktree', 'add', '-b', 'ui-worktree', worktreeWorkspace);
+const matrixConversations = [{ kind: 'non-git', id: current.id }];
+for (const [kind, directory] of [['git', gitWorkspace], ['worktree', worktreeWorkspace]]) {
+  const conversation = store.createConversation({ title: `Card matrix ${kind}`, workspacePath: directory });
+  for (let i = 0; i < 12; i++) store.appendMessage(conversation.id, {
+    id: `${kind}-${i}`, role: 'user', content: `Fixture message ${i}`, timestamp: Date.now() + i,
+  });
+  matrixConversations.push({ kind, id: conversation.id });
+}
 console.log('SMOKE_ROOT', root);
 await build({ root: desktop, logLevel: 'warn', build: { outDir: path.join(root, 'renderer'), emptyOutDir: false } });
 const mainUrl = (file) => pathToFileURL(path.join(desktop, 'electron/main', file)).href;
@@ -89,19 +127,37 @@ try {
   assert.ok(installed.some((skill) => skill.name === 'release-process'), 'fixture skill is really installed');
   await page.locator(`[data-conversation-id="${other.id}"]`).click();
   await openMonitor();
-  const skills = rail.locator('section[aria-label="Skills & MCP"]');
+  const skills = rail.locator('section[aria-label="Sources & tools"]');
   await skills.waitFor();
-  assert.equal(await skills.locator('.task-monitor-row').count(), 6);
+  assert.equal(await skills.locator('.task-monitor-row').count(), 4);
   assert.ok((await skills.innerText()).includes('release-process'));
-  await skills.getByRole('button', { name: 'View more (2)' }).click();
-  assert.equal(await skills.locator('.task-monitor-row').count(), 8);
+  await skills.getByRole('button', { name: 'View more (7)' }).click();
+  assert.equal(await skills.locator('.task-monitor-row').count(), 11);
+  await skills.getByRole('button', { name: 'release-process', exact: true }).click();
+  await skills.locator('.task-monitor-source-detail').getByText('Fixture result; not a live MCP execution.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.workbench-panel--open').count(), 0);
+  await skills.getByRole('button', { name: '来源资料.txt', exact: true }).click();
+  await page.locator('.workbench-panel--open').getByText('EXACT_SOURCE_CONTENT_2026', { exact: true }).waitFor();
+  await page.screenshot({ path: path.join(root, 'source-exact-file.png') });
+  await page.keyboard.press('Meta+Backslash');
+  await page.locator('.workbench-panel--open').waitFor({ state: 'detached' });
+  check('source file opens its exact content; tool call opens its exact result without unrelated navigation');
+  await skills.locator('.task-monitor-row').filter({ has: page.locator(`[title="${sourceUrl}"]`) }).click();
+  await page.waitForFunction((url) => [...document.querySelectorAll('.workbench-panel--open .browser-address-input')]
+    .some((input) => input.getBoundingClientRect().width > 0 && input.value === url), sourceUrl);
+  assert.ok(await page.locator('.workbench-panel--open').count());
+  await page.screenshot({ path: path.join(root, 'source-exact-browser-tab.png') });
+  await page.keyboard.press('Meta+Backslash');
+  await page.locator('.workbench-panel--open').waitFor({ state: 'detached' });
+  check('web source selects target URL instead of previously active other tab');
   assert.equal(await page.locator('.workbench-panel--open').count(), 0);
   await page.screenshot({ path: path.join(root, '02-used-capabilities-expanded.png') });
   await skills.getByRole('button', { name: 'Show less' }).click();
-  assert.equal(await skills.locator('.task-monitor-row').count(), 6);
+  assert.equal(await skills.locator('.task-monitor-row').count(), 4);
   await currentRow.click();
   await openMonitor();
-  await skills.waitFor({ state: 'detached' });
+  await skills.getByText('No sources or tool records yet', { exact: true }).waitFor();
+  assert.equal(await skills.locator('.task-monitor-row').count(), 0);
   check('real conversation switch isolates seeded Skill/MCP calls; expand/collapse stays in section');
 
   const exec = (command, id, background = true) => app.evaluate(async (_, input) =>
@@ -181,6 +237,12 @@ try {
   await writeFile(path.join(root, 'history-after-completion.json'), JSON.stringify(history, null, 2));
   await page.screenshot({ path: path.join(root, '04-completed-removed.png') });
   check('completed commands leave live UI after polling, but runtime history and on-disk stdout remain');
+  await verifyCardMatrix(page, root, matrixConversations);
+  check('48-cell language/environment/width/card/Workbench matrix');
+  if (process.env.PEER_CAPTURE_ACCEPTANCE === '1') {
+    const { captureAcceptance } = await import('./task-monitor-acceptance-capture.mjs');
+    await captureAcceptance({ page, app, root, workspace, other, matrixConversations });
+  }
   assert.deepEqual(errors, []);
   await writeFile(path.join(root, 'report.json'), JSON.stringify({ status: 'passed', root, checks, errors }, null, 2));
   console.log(JSON.stringify({ status: 'passed', root, checks }));

@@ -3283,6 +3283,7 @@ export function ChatSurface({
           currentHead={workspaceGit?.ok ? workspaceGit.current : null}
           sourceBranch={gitChrome.taskLine?.value ?? null}
           workspaceIsGit={workspaceIsGit}
+          currentIsolation={deliveryLineKnown ? !!(deliveryLine?.isolated && !deliveryLine.delivered) : null}
           conversationId={conversationId}
           messages={messages}
           active={isPageActive}

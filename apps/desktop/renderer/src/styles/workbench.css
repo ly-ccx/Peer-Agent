@@ -35,6 +35,17 @@
   width: var(--za-workbench-current-width) !important;
 }
 
+/* Narrow windows must preserve a readable conversation even with the card
+ * closed. This only clamps presentation; the user's saved width is unchanged. */
+@media (max-width: 1100px) {
+  :root[data-workbench-open='true']:not([data-workbench-maximized='true']) .app-layout {
+    --za-workbench-current-width: 320px;
+  }
+  :root[data-workbench-open='true']:not([data-workbench-maximized='true']) .app-layout > .workbench-panel--open {
+    width: var(--za-workbench-current-width) !important;
+  }
+}
+
 :root[data-workbench-maximized='true'] .app-layout > :not(.workbench-panel) {
   visibility: hidden;
   pointer-events: none;
@@ -2122,7 +2133,28 @@
   .background-run-detail h3 { margin: 8px 0; font-size: var(--ui-font-heading-sm); }
   .background-run-detail p { margin: 8px 0; }
   .background-run-detail details { border-top: 1px solid var(--ui-border-subtle); padding: 8px 0; }
-  .background-run-detail summary { cursor: pointer; min-height: 32px; padding: 5px 0; }
+  .background-run-detail summary { display: flex; align-items: center; gap: 8px; cursor: pointer; min-height: 36px; padding: 6px 0; list-style: none; font-weight: 500; }
+  .background-run-detail summary::-webkit-details-marker { display: none; }
+  .background-run-detail summary::marker { content: ''; }
+  .background-run-detail summary svg, .background-run-stop svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .background-run-chevron { margin-left: auto; color: var(--za-text-faint); }
+  .background-run-disclosure[open] > summary .background-run-chevron { transform: rotate(90deg); }
+  .background-run-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .background-run-heading h3 { flex: 1; min-width: 0; }
+  .background-run-status { font-size: var(--ui-font-meta); padding: 3px 8px; border-radius: 6px; background: var(--za-surface-2); }
+  .background-run-command { margin: 12px 0; padding: 10px; border: 1px solid var(--ui-border-subtle); border-radius: 8px; background: var(--za-surface-2); }
+  .background-run-command pre { margin: 6px 0 0; max-height: 120px; overflow: auto; }
+  .background-run-detail .background-run-output { padding: 10px; border-radius: 8px; background: var(--za-surface-2); }
+  .background-run-detail dt { color: var(--za-text-faint); font-size: var(--ui-font-meta); }
+  .background-run-detail dd pre { margin: 0; }
+  .background-run-actions { border-top: 1px solid var(--ui-border-subtle); padding-top: 10px; margin-top: 4px; }
+  .background-run-actions:empty { display: none; }
+  .background-run-detail .background-run-stop { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 10px; border: 1px solid var(--ui-border-subtle); border-radius: 7px; }
+  .background-run-detail .background-run-stop:disabled { opacity: .5; cursor: not-allowed; }
+  .background-run-detail .background-run-destructive { color: var(--za-danger, #b94040); }
+  .background-run-detail .background-run-confirm { border: 0; margin: 0; padding: 0; }
+  .background-run-confirm > button + button { margin-left: 8px; }
+  .background-run-detail summary:focus-visible, .background-run-detail button:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 2px; }
   .background-run-detail dd { margin: 4px 0 12px; }
   .background-run-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--ui-font-meta); }
   .background-run-output { max-height: 180px; overflow: auto; }
@@ -2267,10 +2299,9 @@
   }
 }
 
-/* 会话内任务监控：无背景裸内容（用户截图定稿，2026-09-16 终版）。
- * 没有卡片面板——无背景色、无边框、无圆角、无阴影；
- * 右侧就是分区标签 + 图标行直接浮在会话区域上，只靠留白和一条极细分隔线组织。
- * 正文让位仍由 .chat-surface--with-monitor 的 padding-right 完成，头部不受影响。 */
+/* Conversation information card. The rail reserves available height; the card
+ * itself hugs content and scrolls only after reaching that available height.
+ * Product rules live in peer-knowledge/design/product/task-context-rail.md. */
 @layer components {
   .task-monitor-rail {
     position: absolute;
@@ -2288,9 +2319,15 @@
   .task-monitor-card {
     display: flex;
     flex-direction: column;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 0;
-    overflow: visible;
+    max-height: 100%;
+    padding: var(--space-3);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: 20px;
+    background: var(--za-surface-1);
+    box-shadow: 0 4px 18px rgb(0 0 0 / 6%);
+    overflow: hidden;
     color: var(--za-text);
   }
 
@@ -2442,30 +2479,39 @@
     align-items: center;
   }
 
-  .task-monitor-env-dropdown {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .task-monitor-env-dropdown .pa-dropdown-trigger {
+  .task-monitor-environment-summary {
     width: 100%;
-    min-height: 22px;
-    padding: 0 4px;
-    border: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    border: 0;
     background: transparent;
-    color: var(--za-text);
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
+    color: var(--za-text-muted);
+    padding: var(--space-2) 0;
+    cursor: pointer;
   }
-
-  .task-monitor-env-dropdown .pa-dropdown-trigger:disabled {
-    opacity: 1;
-    cursor: default;
+  .task-monitor-setting {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+    margin-top: var(--space-2);
+    color: var(--za-text-muted);
+    font-size: var(--ui-font-caption, 11px);
   }
-
-  .task-monitor-env-dropdown .pa-dropdown-trigger:disabled .pa-dropdown-caret {
-    display: none;
+  .task-monitor-empty {
+    color: var(--za-text-faint);
+    margin: var(--space-2) 0;
+    font-size: var(--ui-font-meta, 12px);
+  }
+  .task-monitor-source-detail {
+    max-height: 240px;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    font-size: var(--ui-font-caption, 11px);
+  }
+  .task-monitor-source-detail pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   /* 底部「查看更多 (N)」：居中弱化的文字按钮，对齐截图形态。 */
@@ -2518,10 +2564,39 @@
 
   /* 内联后台任务详情：嵌在对应小卡内的圆角子块。 */
   /* 内联后台任务详情：展开时才出现的极轻块（唯一有底色的地方，因为含日志文本需要可读底）。 */
+  .task-monitor-run-details .background-run-detail {
+    font-size: var(--ui-font-control);
+    line-height: var(--ui-line-control);
+  }
+  .task-monitor-run-details .background-run-detail h3,
+  .task-monitor-run-details .background-run-detail button {
+    font-size: var(--ui-font-control);
+    line-height: inherit;
+  }
   .task-monitor-run-details {
     margin: 6px 0 4px;
     padding: 10px 10px 12px;
     border-radius: 10px;
     background: color-mix(in srgb, var(--za-surface-1, #1b1f28) 55%, transparent);
   }
+}
+
+/* The shared Dropdown styles are unlayered. Keep this scoped override at the
+ * same cascade level so its 200px minimum cannot clip inside the card. */
+.task-monitor-environment-settings .pa-dropdown.task-monitor-env-dropdown {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.task-monitor-environment-settings .task-monitor-env-dropdown .pa-dropdown-trigger {
+  min-width: 0;
+  width: 100%;
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--ui-font-meta, 12px);
+}
+.task-monitor-environment-settings .pa-dropdown-value {
+  min-width: 0;
+  flex: 1 1 auto;
 }

@@ -3442,6 +3442,10 @@
   min-height: 0;
   overflow: hidden;
 }
+.chat-workspace {
+  container-type: inline-size;
+  container-name: conversation-space;
+}
 .chat-workspace > .chat-surface {
   flex: 1 1 auto;
   min-width: 0;
@@ -3455,9 +3459,35 @@
   padding-right: calc(var(--task-monitor-card) + var(--space-3) * 2);
 }
 
+.chat-surface--with-monitor > .message-rail {
+  right: calc(var(--task-monitor-card) + var(--space-3) * 2);
+}
+
 @media (max-width: 860px) {
   .chat-surface--with-monitor {
     --task-monitor-card: min(280px, 38vw);
+  }
+}
+
+/* Respond to the remaining conversation width, not the whole app window.
+ * With Workbench open, stack the information card above the thread instead of
+ * shrinking the conversation to a narrow strip. */
+@container conversation-space (max-width: 640px) {
+  .chat-surface--with-monitor {
+    padding-right: 0;
+    padding-top: min(38vh, 340px);
+  }
+  .chat-surface--with-monitor > .task-monitor-rail {
+    top: 48px;
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: auto;
+    width: auto;
+    height: calc(min(38vh, 340px) - 56px);
+  }
+  .chat-surface--with-monitor > .message-rail {
+    right: var(--space-2);
+    top: min(38vh, 340px);
   }
 }
 

@@ -74,8 +74,8 @@ test('环境信息：Git 工作区投影当前 HEAD、任务源头、工作区�
     isGit: true,
     isZh: true,
   }), [
-    { id: 'current-head', icon: 'branch', label: '当前工作区', value: 'dev/0.0.14' },
-    { id: 'source', icon: 'branch', label: '任务源头', value: '0.0.15' },
+    { id: 'current-head', icon: 'branch', label: '当前分支', value: 'dev/0.0.14' },
+    { id: 'source', icon: 'branch', label: '起始分支', value: '0.0.15' },
     { id: 'workspace', icon: 'folder', label: '工作区', value: 'peer_agent', detail: '/workspace/peer_agent' },
     { id: 'location', icon: 'device', label: '运行位置', value: '本地' },
   ]);
