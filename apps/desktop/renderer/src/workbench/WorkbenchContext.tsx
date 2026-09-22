@@ -149,6 +149,17 @@ interface WorkbenchActions {
     relPath?: string,
     options?: { readonly preferredMode?: WorkbenchFileMode },
   ) => void;
+  /**
+   * 在「文件」区内原地打开预览（master-detail）：只更新文档会话，
+   * 不改 activeTab、不强制展开面板。供 FilesPane 树点击等已处于
+   * files 视图的入口使用，避免「点文件 = 切换区域」的乒乓跳转。
+   */
+  openFileInPlace: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    options?: { readonly preferredMode?: WorkbenchFileMode },
+  ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
 
@@ -425,7 +436,7 @@ export function WorkbenchProvider({
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
-  const openFile = useCallback((
+  const openFileInPlace = useCallback((
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
@@ -440,13 +451,22 @@ export function WorkbenchProvider({
     setDocumentSession((current) => openDocumentTab(current, tab, {
       replaceMode: preferredMode != null,
     }));
+    schedulePersist();
+  }, [schedulePersist, setDocumentSession]);
+
+  const openFile = useCallback((
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    options?: { readonly preferredMode?: WorkbenchFileMode },
+  ) => {
+    openFileInPlace(absPath, workspaceRoot, relPath, options);
     const key = workbenchSessionKey(conversationId);
     setActiveTabMap((prev) => (
-      prev[key] === 'documents' ? prev : { ...prev, [key]: 'documents' }
+      prev[key] === 'files' ? prev : { ...prev, [key]: 'files' }
     ));
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
-    schedulePersist();
-  }, [conversationId, schedulePersist, setDocumentSession]);
+  }, [conversationId, openFileInPlace]);
 
   const openDiff = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
     openFile(absPath, workspaceRoot, relPath, { preferredMode: 'diff' });
@@ -639,6 +659,7 @@ export function WorkbenchProvider({
     toggleSidebar,
     setSidebarWidth,
     openFile,
+    openFileInPlace,
     openDiff,
     revealInFiles,
     setBrowserSession,

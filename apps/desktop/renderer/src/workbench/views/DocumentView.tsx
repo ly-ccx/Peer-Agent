@@ -32,7 +32,11 @@ interface DocumentViewProps {
   readonly onSessionChange: (
     next: DocumentSessionState | ((current: DocumentSessionState) => DocumentSessionState),
   ) => void;
-  readonly onBrowseFiles: () => void;
+  /**
+   * 窄覆盖态返回文件树（FilesPane 传入；宽屏分栏态不传，树常驻在旁）。
+   * 宿主迁移到 FilesPane 后不再有「浏览文件」跨 tab 跳转。
+   */
+  readonly onBack?: () => void;
 }
 
 interface DocumentPageProps {
@@ -160,15 +164,11 @@ function DocumentIcon() {
   );
 }
 
-function AddIcon() {
-  return <svg {...RESOURCE_ICON_PROPS}><path d="M12 5v14M5 12h14" /></svg>;
-}
-
 export function DocumentView({
   isZh,
   session,
   onSessionChange,
-  onBrowseFiles,
+  onBack,
 }: DocumentViewProps) {
   const selectTab = useCallback((tabId: string) => {
     onSessionChange((current) => activateDocumentTab(current, tabId));
@@ -190,31 +190,38 @@ export function DocumentView({
 
   return (
     <div className="document-view">
-      <ResourceTabStrip
-        ariaLabel={isZh ? '文档标签' : 'Document tabs'}
-        items={items}
-        activeId={session.activeTabId}
-        closeLabel={isZh ? '关闭文档' : 'Close document'}
-        onActivate={selectTab}
-        onClose={removeTab}
-        action={{
-          label: isZh ? '打开文件' : 'Open file',
-          icon: <AddIcon />,
-          onClick: onBrowseFiles,
-        }}
-      />
+      <div className="document-tabbar-row">
+        {onBack ? (
+          <button
+            type="button"
+            className="document-back-btn"
+            aria-label={isZh ? '返回文件树' : 'Back to file tree'}
+            title={isZh ? '返回文件树 (Esc)' : 'Back to file tree (Esc)'}
+            onClick={onBack}
+          >
+            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12.5 4.5 7 10l5.5 5.5" />
+            </svg>
+          </button>
+        ) : null}
+        <ResourceTabStrip
+          ariaLabel={isZh ? '文档标签' : 'Document tabs'}
+          items={items}
+          activeId={session.activeTabId}
+          closeLabel={isZh ? '关闭文档' : 'Close document'}
+          onActivate={selectTab}
+          onClose={removeTab}
+        />
+      </div>
       <div className="document-stage">
         {session.tabs.length === 0 ? (
           <div className="workbench-empty">
-            <div className="workbench-empty-title">{isZh ? '文档' : 'Documents'}</div>
+            <div className="workbench-empty-title">{isZh ? '预览' : 'Preview'}</div>
             <p className="workbench-empty-hint">
               {isZh
-                ? '从文件树选择文件，或点击聊天消息中的文件路径。'
-                : 'Select a file from the tree, or click a file path in chat.'}
+                ? '从左侧文件树选择文件，或点击聊天消息中的文件路径。'
+                : 'Pick a file from the tree, or click a file path in chat.'}
             </p>
-            <button type="button" className="workbench-diff-btn" onClick={onBrowseFiles}>
-              {isZh ? '浏览文件' : 'Browse files'}
-            </button>
           </div>
         ) : session.tabs.map((tab) => (
           <DocumentPage

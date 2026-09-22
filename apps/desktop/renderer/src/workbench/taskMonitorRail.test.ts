@@ -109,7 +109,7 @@ test('环境信息：非 Git 或空工作区不伪造分支与位置', () => {
   });
   assert.equal(rows.find((row) => row.id === 'current-head')?.value, 'dev/0.0.14');
   assert.equal(rows.find((row) => row.id === 'source')?.value, '0.0.15');
-  assert.equal(rows.some((row) => row.id === 'branch'), false);
+  assert.equal(rows.some((row) => (row.id as string) === 'branch'), false);
 });
 
 // 轴 3：产出治理过滤 —— 治理 ref 与通用文案标签永不进入展示。

@@ -307,7 +307,8 @@ function TreeNode({
 }
 
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
-  const { openFile: openWorkbenchFile, filesTarget } = useWorkbench();
+  // master-detail：树点击原地更新右侧预览，不切一级 tab（见 right-workbench-panel.md Q10）。
+  const { openFileInPlace: openWorkbenchFile, filesTarget } = useWorkbench();
   const rootPath = workspacePath ? stripTrailingSep(workspacePath) : null;
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());

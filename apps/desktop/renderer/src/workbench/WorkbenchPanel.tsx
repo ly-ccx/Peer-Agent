@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
-import { FilesView } from './views/FilesView';
-import { DocumentView } from './views/DocumentView';
+import { FilesPane } from './views/FilesPane';
+import { SessionArtifactsView } from './views/SessionArtifactsView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -86,8 +86,8 @@ const TABS: readonly TabDef[] = [
   },
   {
     id: 'documents',
-    labelZh: '文档',
-    labelEn: 'Documents',
+    labelZh: '产物',
+    labelEn: 'Artifacts',
     icon: (
       <svg width="15" height="15" {...ICON_PROPS}>
         <path d="M6 3h8l4 4v14H6z" />
@@ -122,8 +122,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setBrowserSession,
     setBrowserSessionFor,
     resolveBrowserSession,
-    documentSession,
-    setDocumentSession,
     layoutHost,
     preparedBrowserConversations,
   } = useWorkbench();
@@ -384,17 +382,17 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           className="workbench-view workbench-view--files"
           data-active={activeTab === 'files'}
         >
-          <FilesView isZh={isZh} workspacePath={workspacePath} />
+          <FilesPane isZh={isZh} workspacePath={workspacePath} />
         </div>
         <div
           className="workbench-view workbench-view--documents"
           data-active={activeTab === 'documents'}
+          aria-label={isZh ? '会话产物' : 'Session artifacts'}
         >
-          <DocumentView
+          <SessionArtifactsView
             isZh={isZh}
-            session={documentSession}
-            onSessionChange={setDocumentSession}
-            onBrowseFiles={() => setActiveTab('files')}
+            active={activeTab === 'documents'}
+            conversationId={conversationId}
           />
         </div>
 
