@@ -3694,8 +3694,12 @@
   border-bottom-color: var(--chrome-hairline);
 }
 
-/* 工作台打开时左右顶栏共用一条 40px 底边，不依赖滚动才显色。 */
+/* 工作台打开时左右顶栏共用一条 40px 底边，并铺同一块实色纸面。
+   左侧默认磨砂会把下面的消息采进去，和右侧不透明画布对不齐。 */
 :root[data-workbench-open='true'] .chat-header {
+  background: var(--chrome-canvas, var(--za-app-bg));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   border-bottom-color: var(--chrome-hairline);
 }
 
