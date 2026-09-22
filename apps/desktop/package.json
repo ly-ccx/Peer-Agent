@@ -9,7 +9,13 @@
   "type": "module",
   "main": "electron/main/main.mjs",
   "scripts": {
-    "dev": "pnpm ipc:generate && pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && pnpm --filter @peer-agent/conversation-store build && node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "dev": "pnpm ipc:generate && pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && pnpm --filter @peer-agent/conversation-store build && node ../../scripts/build-credential-helper.mjs --profile debug && pnpm dev:serve",
+    "dev:serve": "concurrently -k -n vite,electron pnpm:dev:vite pnpm:dev:electron",
+    "dev:vite": "vite --host 127.0.0.1",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "dev:lab": "node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k -n vite,electron pnpm:dev:lab:vite pnpm:dev:lab:electron",
+    "dev:lab:vite": "cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1 --port 5273 --strictPort",
+    "dev:lab:electron": "wait-on http://127.0.0.1:5273 && mkdir -p $HOME/.peer-agent-lab/electron-user-data && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent-lab electron --user-data-dir=$HOME/.peer-agent-lab/electron-user-data .",
     "build": "pnpm ipc:check && pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && pnpm --filter @peer-agent/conversation-store build && vite build && node scripts/verify-overlay-backdrop-filter.mjs",
     "test": "pnpm ipc:check && node --test \"electron/main/**/*.test.mjs\" \"renderer/src/**/*.test.ts\" \"scripts/webview-keepalive-probe.test.mjs\" \"scripts/lab-process-identity.test.mjs\" \"scripts/lab-workspace-isolate.test.mjs\" \"scripts/lab-experiment-idle.test.mjs\"",
     "test:webview-probe": "node --test scripts/webview-keepalive-probe.test.mjs",
@@ -26,8 +32,7 @@
     "dist:linux": "pnpm --dir ../.. marketplace:build && node ../../scripts/build-credential-helper.mjs --profile release && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux --x64 && pnpm verify:packaged",
     "verify:packaged": "node scripts/verify-packaged-runtime.cjs",
     "publish:stable": "bash scripts/publish.sh stable",
-    "publish:beta": "bash scripts/publish.sh beta",
-    "dev:lab": "node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k \"cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5273 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent-lab electron .\""
+    "publish:beta": "bash scripts/publish.sh beta"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
