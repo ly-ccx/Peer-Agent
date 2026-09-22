@@ -3284,6 +3284,7 @@ export function ChatSurface({
           sourceBranch={gitChrome.taskLine?.value ?? null}
           workspaceIsGit={workspaceIsGit}
           conversationId={conversationId}
+          messages={messages}
           active={isPageActive}
           canSelectSource={canSelectBoundBranch && !isStreaming}
           sourceOptions={composerBranchOptions}

@@ -8,6 +8,7 @@ import {
 } from '../taskMonitorRail.ts';
 import {
   projectTaskOverviewArtifacts,
+  MAX_VISIBLE_ARTIFACTS_PER_KIND,
   type TaskArtifactProjection,
 } from '../../app/pages/taskOverviewArtifacts.ts';
 import { useTaskOverview } from '../../app/hooks/useTaskOverview';
@@ -15,7 +16,9 @@ import { useBackgroundRunsContext } from '../GlobalBackgroundTasksButton';
 import { BackgroundRunDetails } from '../BackgroundRunDetails';
 import { useWorkbenchOptional } from '../WorkbenchContext';
 import { reconcileStopRequest, type StopRequest } from '../backgroundRuntimeState.ts';
-import type { ManagedShellTask, CapabilityManifest, SkillSummary } from '@peer-agent/protocol';
+import type { ManagedShellTask } from '@peer-agent/protocol';
+import type { ChatMsg } from '../../chat/state/types.ts';
+import { projectUsedMonitorCapabilities } from '../taskMonitorCapabilities.ts';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
 import type { DropdownOption } from '../../app/components/dropdownMenu';
@@ -28,7 +31,7 @@ import type { DropdownOption } from '../../app/components/dropdownMenu';
  *
  * 治理边界：
  * - 挂载与让位：由 ChatSurface 挂在 .chat-surface 内（见 chat-surface.css），本组件不管布局；
- * - 技能与 MCP 复用 listSkills + listCapabilities + mcpListCapabilities 同一 IPC 链路；
+ * - 技能与 MCP 来自当前会话结构化调用，不读取安装清单；
  * - 网页查阅取 WorkbenchContext 的会话 browserSession.tabs（url + title）；
  * - 产出复用任务总览投影（含治理 ref 过滤与上限截断），禁止放宽。
  */
@@ -193,6 +196,7 @@ export function TaskMonitorRailView({
   sourceBranch,
   workspaceIsGit,
   conversationId,
+  messages,
   active,
   canSelectSource = false,
   sourceOptions = [],
@@ -209,6 +213,7 @@ export function TaskMonitorRailView({
   readonly sourceBranch: string | null;
   readonly workspaceIsGit: boolean | null;
   readonly conversationId: string | null;
+  readonly messages: readonly ChatMsg[];
   readonly canSelectSource?: boolean;
   readonly sourceOptions?: readonly DropdownOption[];
   readonly isolationValue?: string;
@@ -239,42 +244,24 @@ export function TaskMonitorRailView({
     [currentHead, isZh, sourceBranch, workspaceIsGit, workspacePath],
   );
 
-  // 技能与 MCP：与 ChatHeaderCapabilities 同一 IPC 链路；失败静默为空。
-  const [skillNames, setSkillNames] = useState<readonly string[]>([]);
-  useEffect(() => {
-    if (!active) return undefined;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [caps, mcpCaps, sks] = await Promise.all([
-          clientApi.listCapabilities(),
-          clientApi.mcpListCapabilities().catch(() => [] as readonly CapabilityManifest[]),
-          clientApi.listSkills(),
-        ]);
-        if (cancelled) return;
-        const mcpNames = [...caps, ...mcpCaps]
-          .filter((cap) => cap.source === 'mcp')
-          .map((cap) => cap.capabilityId.split(/[./]/).pop() ?? cap.capabilityId);
-        const names = new Set<string>([
-          ...(sks as readonly SkillSummary[]).map((skill) => skill.name),
-          ...mcpNames,
-        ]);
-        setSkillNames([...names].slice(0, 6));
-      } catch {
-        if (!cancelled) setSkillNames([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  useEffect(() => setExpanded({}), [conversationId]);
+  const moreButton = (section: string, total: number, limit: number) => total > limit ? (
+    <button type="button" className="task-monitor-more" aria-expanded={!!expanded[section]}
+      onClick={() => setExpanded((current) => ({ ...current, [section]: !current[section] }))}>
+      {expanded[section] ? (isZh ? '收起' : 'Show less')
+        : (isZh ? `查看更多 (${total - limit})` : `View more (${total - limit})`)}
+    </button>
+  ) : null;
+
+  // Usage comes from this conversation's structured calls, never the installation inventory.
+  const skillNames = useMemo(() => projectUsedMonitorCapabilities(messages), [messages]);
 
   // 网页查阅：当前会话的 browserSession tabs（url + title）。
   const webVisits = useMemo(() => {
     const tabs = workbench?.browserSession?.tabs ?? [];
     return tabs
       .filter((tab) => tab.url && !tab.url.startsWith('about:blank'))
-      .slice(0, 4)
       .map((tab) => ({ key: tab.id, label: urlLabel(tab.url), url: tab.url, title: tab.title }));
   }, [workbench?.browserSession?.tabs]);
 
@@ -299,11 +286,11 @@ export function TaskMonitorRailView({
     };
     if (!overviewItem) return empty;
     try {
-      return projectTaskOverviewArtifacts(overviewItem);
+      return projectTaskOverviewArtifacts(overviewItem, expanded.artifacts ? Infinity : undefined);
     } catch {
       return empty;
     }
-  }, [overviewItem]);
+  }, [overviewItem, expanded.artifacts]);
 
   const runs = useMemo(
     () => projectTaskMonitorRuns(runsReader?.snapshot ?? null, conversationId, isZh),
@@ -311,9 +298,14 @@ export function TaskMonitorRailView({
   );
 
   const selectedRun: ManagedShellTask | null = useMemo(() => {
-    if (!selectedRunId || !runsReader?.snapshot) return null;
+    if (!selectedRunId || !runsReader?.snapshot || !runs.some((row) => row.taskId === selectedRunId)) return null;
     return runsReader.snapshot.find((task) => task.taskId === selectedRunId) ?? null;
-  }, [selectedRunId, runsReader?.snapshot]);
+  }, [selectedRunId, runsReader?.snapshot, runs]);
+
+  useEffect(() => {
+    setSelectedRunId(null);
+    setConfirmation(null);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!selectedRun) return;
@@ -330,10 +322,6 @@ export function TaskMonitorRailView({
     void stops?.stop(selectedRun.taskId);
   };
 
-  // 各分区条目数（含被截断的隐藏项），用于底部「查看更多 (N)」。
-  const hiddenTotal = artifactProjection.hiddenTotal
-    + Math.max(0, runs.length - 2)
-    + Math.max(0, (workbench?.browserSession?.tabs?.length ?? 0) - webVisits.length);
 
   return (
     <aside className="task-monitor-rail" aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}>
@@ -419,9 +407,10 @@ export function TaskMonitorRailView({
 
           {skillNames.length > 0 ? (
             <MonitorSection title={isZh ? '技能与 MCP' : 'Skills & MCP'}>
-              {skillNames.map((name) => (
+              {skillNames.slice(0, expanded.skills ? undefined : 6).map((name) => (
                 <MonitorRow key={name} icon={<HammerIcon />} value={name} />
               ))}
+              {moreButton('skills', skillNames.length, 6)}
             </MonitorSection>
           ) : null}
 
@@ -447,17 +436,19 @@ export function TaskMonitorRailView({
 
           {runs.length > 0 ? (
             <MonitorSection title={isZh ? '后台任务' : 'Background tasks'}>
-              {runs.map((row) => (
+              {runs.slice(0, expanded.runs ? undefined : 2).map((row) => (
                 <MonitorRow
                   key={row.taskId}
                   icon={<TerminalIcon />}
+                  label={row.statusLabel}
                   value={row.cwdLabel ? `${row.command} · ${row.cwdLabel}` : row.command}
-                  detail={row.command}
+                  detail={`${row.command} · ${row.statusLabel}`}
                   onClick={() => {
                     setSelectedRunId((current) => (current === row.taskId ? null : row.taskId));
                   }}
                 />
               ))}
+              {moreButton('runs', runs.length, 2)}
               {selectedRun ? (
                 <div className="task-monitor-run-details">
                   <BackgroundRunDetails
@@ -498,12 +489,14 @@ export function TaskMonitorRailView({
                   />
                 ))
               ))}
+              {moreButton('artifacts', artifactProjection.total,
+                artifactProjection.groups.reduce((sum, group) => sum + Math.min(MAX_VISIBLE_ARTIFACTS_PER_KIND, group.total), 0))}
             </MonitorSection>
           ) : null}
 
           {webVisits.length > 0 ? (
             <MonitorSection title={isZh ? '网页查阅' : 'Web access'}>
-              {webVisits.map((visit) => (
+              {webVisits.slice(0, expanded.web ? undefined : 4).map((visit) => (
                 <MonitorRow
                   key={visit.key}
                   icon={<GlobeIcon />}
@@ -517,22 +510,8 @@ export function TaskMonitorRailView({
                   }}
                 />
               ))}
+              {moreButton('web', webVisits.length, 4)}
             </MonitorSection>
-          ) : null}
-
-          {hiddenTotal > 0 ? (
-            <button
-              type="button"
-              className="task-monitor-more"
-              onClick={() => {
-                if (workbench) {
-                  workbench.setActiveTab('documents');
-                  workbench.setOpen(true);
-                }
-              }}
-            >
-              {isZh ? `查看更多 (${hiddenTotal})` : `View more (${hiddenTotal})`}
-            </button>
           ) : null}
         </div>
       </div>

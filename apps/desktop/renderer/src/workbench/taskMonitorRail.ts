@@ -121,9 +121,9 @@ export function projectTaskMonitorRuns(
 ): readonly TaskMonitorRunRow[] {
   if (!conversationId || !tasks) return [];
   const scoped = backgroundTaskList(tasks, { sourceConversation: conversationId });
-  return orderBackgroundRuns(scoped).map((task) => ({
+  return orderBackgroundRuns(scoped.filter(isActiveRun)).map((task) => ({
     taskId: task.taskId,
-    command: task.description?.trim() || task.command || task.taskId,
+    command: task.command?.trim() || task.description?.trim() || task.taskId,
     cwdLabel: pathTailLabel(task.cwd),
     statusLabel: backgroundTaskStatus(task, isZh),
     active: isActiveRun(task),

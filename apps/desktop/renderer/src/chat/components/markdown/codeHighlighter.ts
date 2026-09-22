@@ -176,9 +176,22 @@ function absorbTrailingNewlineIntoBlockTokens(html: string): string {
  * 调用方需回退到纯文本渲染，保证内容永不丢失。
  */
 export function highlightCode(code: string, rawLanguage: string | undefined): HighlightedCode {
+  return highlightWithinBudget(code, rawLanguage, MAX_HIGHLIGHT_CHARS, true);
+}
+
+/** Source documents are memoized by SourceViewer, not retained in the chat LRU.
+ * Keep a separate finite budget while parsing the whole document so multiline
+ * comments, strings and JSX retain their lexical context.
+ */
+export const MAX_SOURCE_HIGHLIGHT_CHARS = 500_000;
+export function highlightSourceCode(code: string, rawLanguage: string | undefined): HighlightedCode {
+  return highlightWithinBudget(code, rawLanguage, MAX_SOURCE_HIGHLIGHT_CHARS, false);
+}
+
+function highlightWithinBudget(code: string, rawLanguage: string | undefined, maxChars: number, cache: boolean): HighlightedCode {
   const requested = normalizeLanguage(rawLanguage);
   if (!requested) return FALLBACK;
-  if (code.length > MAX_HIGHLIGHT_CHARS) return FALLBACK;
+  if (code.length > maxChars) return FALLBACK;
 
   ensureRegistered();
   // getLanguage 接受别名，但返回定义里的规范名；统一收敛为规范 id，
@@ -188,7 +201,7 @@ export function highlightCode(code: string, rawLanguage: string | undefined): Hi
   const language = definition.name?.toLowerCase() ?? requested;
 
   const cacheKey = `${language}\u0000${code}`;
-  const cached = readCache(cacheKey);
+  const cached = cache ? readCache(cacheKey) : undefined;
   if (cached) return cached;
 
   try {
@@ -197,11 +210,11 @@ export function highlightCode(code: string, rawLanguage: string | undefined): Hi
       ? absorbTrailingNewlineIntoBlockTokens(result.value)
       : result.value;
     const value: HighlightedCode = { html, language };
-    writeCache(cacheKey, value);
+    if (cache) writeCache(cacheKey, value);
     return value;
   } catch {
     // 高亮失败不能影响消息可读性，直接退回纯文本。
-    writeCache(cacheKey, FALLBACK);
+    if (cache) writeCache(cacheKey, FALLBACK);
     return FALLBACK;
   }
 }

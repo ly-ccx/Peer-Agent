@@ -47,21 +47,19 @@ test('后台任务：无会话时不投影（避免跨会话泄漏）', () => {
   assert.deepEqual(projectTaskMonitorRuns(null, 'conv-1', true), []);
 });
 
-test('后台任务：命令行优先用 description，状态文案随语言，失败态可判', () => {
+test('后台任务：优先显示真实命令，状态文案随语言，终态退出实时列表', () => {
   const tasks = [
     run({ taskId: 'a', conversationId: 'conv-1', description: '启动开发服务器', status: 'running' }),
     run({ taskId: 'b', conversationId: 'conv-1', command: 'pnpm test', status: 'failed' }),
     run({ taskId: 'c', conversationId: 'conv-1', status: 'success', timedOut: true }),
   ];
   const zh = projectTaskMonitorRuns(tasks, 'conv-1', true);
-  assert.equal(zh.find((row) => row.taskId === 'a')?.command, '启动开发服务器');
+  assert.equal(zh.find((row) => row.taskId === 'a')?.command, 'pnpm dev');
   assert.equal(zh.find((row) => row.taskId === 'a')?.active, true);
   assert.equal(zh.find((row) => row.taskId === 'a')?.failed, false);
   assert.equal(zh.find((row) => row.taskId === 'a')?.statusLabel, '运行中');
-  assert.equal(zh.find((row) => row.taskId === 'b')?.command, 'pnpm test');
-  assert.equal(zh.find((row) => row.taskId === 'b')?.statusLabel, '失败');
-  assert.equal(zh.find((row) => row.taskId === 'b')?.failed, true);
-  assert.equal(zh.find((row) => row.taskId === 'c')?.failed, true, 'timedOut 也算失败（监控语义：异常优先）');
+  assert.deepEqual(zh.map((row) => row.taskId), ['a']);
+  assert.equal(tasks.length, 3, '实时投影不得删除历史快照');
 
   const en = projectTaskMonitorRuns(tasks, 'conv-1', false);
   assert.equal(en.find((row) => row.taskId === 'a')?.statusLabel, 'Running');
@@ -110,7 +108,7 @@ test('环境信息：非 Git 或空工作区不伪造分支与位置', () => {
   });
   assert.equal(rows.find((row) => row.id === 'current-head')?.value, 'dev/0.0.14');
   assert.equal(rows.find((row) => row.id === 'source')?.value, '0.0.15');
-  assert.equal(rows.some((row) => row.id === 'branch'), false);
+  assert.equal(rows.map((row): string => row.id).includes('branch'), false);
 });
 
 // 轴 3：产出治理过滤 —— 治理 ref 与通用文案标签永不进入展示。
@@ -211,6 +209,30 @@ test('选条：多条命中时优先有产物的一条，避免产出区空转',
   assert.equal(selectConversationTaskOverviewItem([bare, withArtifacts], 'conv-1'), withArtifacts);
   // 顺序反转也应稳定选到同一条。
   assert.equal(selectConversationTaskOverviewItem([withArtifacts, bare], 'conv-1'), withArtifacts);
+});
+
+// Cross-product: each lifecycle state × conversation scope × execution mode.
+for (const status of ['running', 'stopping', 'success', 'failed', 'stopped'] as const) {
+  for (const conversationId of ['conv-1', 'conv-other']) {
+    for (const runInBackground of [true, false]) {
+      test(`实时命令矩阵: ${status}/${conversationId}/${runInBackground ? 'background' : 'foreground'}`, () => {
+        const task = run({ taskId: 'matrix-run', status, conversationId, runInBackground });
+        const snapshot = [task];
+        const expected = conversationId === 'conv-1' && runInBackground
+          && (status === 'running' || status === 'stopping');
+        assert.equal(projectTaskMonitorRuns(snapshot, 'conv-1', true).length, expected ? 1 : 0);
+        assert.equal(snapshot[0], task, '展示过滤不修改历史运行记录');
+      });
+    }
+  }
+}
+
+test('实时命令状态切换：完成后立即移除，历史快照仍保留', () => {
+  const task = run({ taskId: 'transition-run', status: 'running', conversationId: 'conv-1' });
+  assert.equal(projectTaskMonitorRuns([task], 'conv-1', true).length, 1);
+  const ended = { ...task, status: 'success' as const };
+  assert.equal(projectTaskMonitorRuns([ended], 'conv-1', true).length, 0);
+  assert.equal(ended.command, task.command);
 });
 
 test('选条：无会话、空列表、无匹配都返回 null', () => {

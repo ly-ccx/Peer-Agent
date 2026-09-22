@@ -45,9 +45,11 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。
   assert.match(monitorView, /技能与 MCP/);
   assert.match(monitorView, /网页查阅/);
-  assert.match(monitorView, /listSkills\(\)/);
+  assert.match(monitorView, /projectUsedMonitorCapabilities\(messages\)/);
+  assert.doesNotMatch(monitorView, /listSkills\(|listCapabilities\(|mcpListCapabilities\(/);
   assert.match(monitorView, /browserSession\?\.tabs/);
-  assert.match(monitorView, /查看更多 \(\$\{hiddenTotal\}\)/);
+  assert.match(monitorView, /查看更多 \(\$\{total - limit\}\)/);
+  assert.doesNotMatch(monitorView, /setActiveTab\('documents'\)/);
   assert.match(monitorView, /className="task-monitor-rail" aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);
 });
 

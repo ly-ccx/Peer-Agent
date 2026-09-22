@@ -1,4 +1,4 @@
-import { highlightCode } from '../../chat/components/markdown/codeHighlighter.ts';
+import { highlightSourceCode } from '../../chat/components/markdown/codeHighlighter.ts';
 
 export interface HighlightedSourceLines {
   readonly language: string | null;
@@ -56,7 +56,7 @@ export function highlightSourceLines(content: string, language: string | null | 
     return { language: null, lines: plainLines };
   }
 
-  const highlighted = highlightCode(content, language);
+  const highlighted = highlightSourceCode(content, language);
   if (!highlighted.html) {
     return { language: null, lines: plainLines };
   }
