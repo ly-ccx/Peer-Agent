@@ -2210,10 +2210,35 @@ export function createGoalPlanStore({
     return readJsonlCached(indexFile);
   }
 
+  // Cache only raw disk records, never a completion/authority decision. Keep one
+  // bounded snapshot per store, with nanosecond ctime + file identity so same-size
+  // overwrites (even with restored mtime) and atomic replacements invalidate it.
+  let evidenceIndexSnapshot = null;
+  function evidenceIndexVersion() {
+    const stat = statSync(evidenceIndexFile, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  }
   function readEvidenceIndex() {
-    return readJsonl(evidenceIndexFile)
-      .map(normalizeEvidenceIndexRecord)
-      .filter(Boolean);
+    let version;
+    try {
+      version = evidenceIndexVersion();
+    } catch (error) {
+      evidenceIndexSnapshot = null;
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return [];
+      throw error;
+    }
+    let records = evidenceIndexSnapshot?.version === version ? evidenceIndexSnapshot.records : null;
+    if (!records) {
+      evidenceIndexSnapshot = null;
+      records = readJsonl(evidenceIndexFile);
+      // Don't retain a racing read or an unbounded history in memory.
+      if (statSync(evidenceIndexFile).size <= 16 * 1024 * 1024 && evidenceIndexVersion() === version) {
+        evidenceIndexSnapshot = { version, records };
+      }
+    }
+    // Normalization reconstructs nested arrays/previews, preserving the public
+    // API's fresh mutable results without exposing cached objects to callers.
+    return records.map(normalizeEvidenceIndexRecord).filter(Boolean);
   }
 
   function findEvidenceIndexRecords(refs) {
@@ -2268,6 +2293,7 @@ export function createGoalPlanStore({
     for (const record of records) {
       const merged = mergeEvidenceIndexRecords(evidenceRecordCache.get(record.evidenceRef), record);
       appendJsonl(evidenceIndexFile, merged);
+      evidenceIndexSnapshot = null;
       missingEvidenceRefCache.delete(record.evidenceRef);
       evidenceRecordCache.set(record.evidenceRef, merged);
       mergedRecords.push(merged);
@@ -2470,7 +2496,9 @@ export function createGoalPlanStore({
     return plan ? { ...meta, status: plan.status } : { ...meta, status: 'executing' };
   }
 
-  function listPlans() {
+  // Cache index metadata only. UI authority must stay live, but scoped callers
+  // must select their conversation before doing any authority/Evidence I/O.
+  function listPlanMetas() {
     let stat = null;
     try {
       stat = statSync(indexFile);
@@ -2483,7 +2511,7 @@ export function createGoalPlanStore({
       listPlansCache.mtimeMs === stat.mtimeMs &&
       listPlansCache.size === stat.size
     ) {
-      return listPlansCache.plans.map(projectUiMeta);
+      return listPlansCache.plans;
     }
     const plans = readIndex()
       .map(normalizePlan)
@@ -2496,13 +2524,21 @@ export function createGoalPlanStore({
       size: stat.size,
       plans,
     };
-    return plans.map(projectUiMeta);
+    return plans;
+  }
+
+  function listPlans() {
+    return listPlanMetas().map(projectUiMeta);
+  }
+
+  function listPlanMetasByConversation(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return [];
+    return listPlanMetas().filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId);
   }
 
   function listPlansByConversation(conversationId) {
-    const normalizedConversationId = normalizeConversationId(conversationId);
-    if (normalizedConversationId === null) return [];
-    return listPlans().filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId);
+    return listPlanMetasByConversation(conversationId).map(projectUiMeta);
   }
 
   /**
@@ -2638,7 +2674,8 @@ export function createGoalPlanStore({
   function listPlanDetailsByConversation(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId);
     if (normalizedConversationId === null) return [];
-    return listPlansByConversation(normalizedConversationId).map(hydratePlanMeta).filter(Boolean);
+    // getPlan in hydratePlanMeta already performs the live UI projection.
+    return listPlanMetasByConversation(normalizedConversationId).map(hydratePlanMeta).filter(Boolean);
   }
 
   function getActivePlanByConversation(conversationId) {
