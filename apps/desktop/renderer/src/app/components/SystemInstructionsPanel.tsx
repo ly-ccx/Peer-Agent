@@ -9,7 +9,7 @@ function readSystemInstructions(settings: Record<string, unknown> | null | undef
 /**
  * SystemInstructionsPanel 是「系统指令」这一 System Context 输入的独立表达层。
  *
- * 系统指令属于 System Context 装配(云端认知的上下文输入),与模型 Provider
+ * 系统指令属于 System Context 装配(模型认知的上下文输入),与模型 Provider
  * 连接配置(LlmSettingsPanel)是不同职责,因此从模型配置面板拆出为独立分区。
  * 本面板只负责该项的本地编辑与读写,数据仍走既有的 clientApi.updateSettings 契约,
  * 不新增任何能力执行路径。
