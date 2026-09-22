@@ -4,9 +4,11 @@ import {
   projectTaskMonitorEnvironment,
   projectTaskMonitorRuns,
   selectConversationTaskOverviewItem,
+  taskMonitorProgressHeadline,
 } from '../taskMonitorRail.ts';
 import {
   projectTaskOverviewArtifacts,
+  MAX_VISIBLE_ARTIFACTS_PER_KIND,
   type TaskArtifactProjection,
 } from '../../app/pages/taskOverviewArtifacts.ts';
 import { useTaskOverview } from '../../app/hooks/useTaskOverview';
@@ -14,8 +16,12 @@ import { useBackgroundRunsContext } from '../GlobalBackgroundTasksButton';
 import { BackgroundRunDetails } from '../BackgroundRunDetails';
 import { useWorkbenchOptional } from '../WorkbenchContext';
 import { reconcileStopRequest, type StopRequest } from '../backgroundRuntimeState.ts';
-import type { ManagedShellTask, CapabilityManifest, SkillSummary } from '@peer-agent/protocol';
+import type { ManagedShellTask } from '@peer-agent/protocol';
+import type { ChatMsg } from '../../chat/state/types.ts';
+import { projectMonitorSources, type MonitorSource } from '../taskMonitorSources.ts';
 import { clientApi } from '../../clientApi';
+import { Dropdown } from '../../app/components/Dropdown';
+import type { DropdownOption } from '../../app/components/dropdownMenu';
 
 /**
  * 任务监控卡片 —— 单张圆角卡片 + 内部分区标签（用户 2026-09-16 截图定稿）。
@@ -25,7 +31,7 @@ import { clientApi } from '../../clientApi';
  *
  * 治理边界：
  * - 挂载与让位：由 ChatSurface 挂在 .chat-surface 内（见 chat-surface.css），本组件不管布局；
- * - 技能与 MCP 复用 listSkills + listCapabilities + mcpListCapabilities 同一 IPC 链路；
+ * - 技能与 MCP 来自当前会话结构化调用，不读取安装清单；
  * - 网页查阅取 WorkbenchContext 的会话 browserSession.tabs（url + title）；
  * - 产出复用任务总览投影（含治理 ref 过滤与上限截断），禁止放宽。
  */
@@ -133,18 +139,26 @@ function MonitorSection({ title, children }: { readonly title: string; readonly 
   );
 }
 
-function MonitorRow({ icon, value, detail, onClick }: {
+function MonitorRow({ icon, label, value, detail, onClick, control }: {
   readonly icon: React.ReactNode;
+  readonly label?: string;
   readonly value: string;
   readonly detail?: string;
   readonly onClick?: () => void;
+  readonly control?: React.ReactNode;
 }) {
   const content = (
     <>
       <span className="task-monitor-row-icon">{icon}</span>
-      <span className="task-monitor-row-value" title={detail ?? value}>{value}</span>
+      {label ? <span className="task-monitor-row-label">{label}</span> : null}
+      {control ?? (
+        <span className="task-monitor-row-value" title={detail ?? value}>{value}</span>
+      )}
     </>
   );
+  if (control) {
+    return <div className="task-monitor-row task-monitor-row--control">{content}</div>;
+  }
   if (!onClick) {
     return <div className="task-monitor-row">{content}</div>;
   }
@@ -169,20 +183,47 @@ function urlLabel(url: string): string {
   }
 }
 
+function environmentRowLabel(id: string, isZh: boolean): string | undefined {
+  if (id === 'current-head') return isZh ? '当前工作区' : 'Current workspace';
+  if (id === 'source') return isZh ? '任务源头' : 'Task source';
+  return undefined;
+}
+
 export function TaskMonitorRailView({
   isZh,
   workspacePath,
-  branch,
+  currentHead,
+  sourceBranch,
   workspaceIsGit,
+  currentIsolation = null,
   conversationId,
+  messages,
   active,
+  canSelectSource = false,
+  sourceOptions = [],
+  isolationValue,
+  isolationOptions = [],
+  canChangeIsolation = false,
+  onSelectEnv,
+  onCreateBranch,
   onClose,
 }: {
   readonly isZh: boolean;
   readonly workspacePath: string | null;
-  readonly branch: string | null;
+  readonly currentHead: string | null;
+  readonly sourceBranch: string | null;
   readonly workspaceIsGit: boolean | null;
+  /** Current task fact, not the preference for the next task. null means unknown. */
+  readonly currentIsolation?: boolean | null;
   readonly conversationId: string | null;
+  readonly messages: readonly ChatMsg[];
+  readonly canSelectSource?: boolean;
+  readonly sourceOptions?: readonly DropdownOption[];
+  readonly isolationValue?: string;
+  readonly isolationOptions?: readonly DropdownOption[];
+  readonly canChangeIsolation?: boolean;
+  readonly onSelectEnv?: (next: string) => void;
+  readonly onCreateBranch?: () => void;
   /**
    * 本视图是否在当前 ChatSurface 内真正可见。
    *
@@ -196,48 +237,48 @@ export function TaskMonitorRailView({
   // 复用 Provider 的单一轮询 reader，避免第二套 poller 重复打主进程。
   const runsReader = useBackgroundRunsContext();
   const environment = useMemo(
-    () => projectTaskMonitorEnvironment(workspacePath, branch, workspaceIsGit, isZh),
-    [branch, isZh, workspaceIsGit, workspacePath],
+    () => projectTaskMonitorEnvironment({
+      workspacePath,
+      currentHead,
+      sourceBranch,
+      isGit: workspaceIsGit,
+      isZh,
+    }),
+    [currentHead, isZh, sourceBranch, workspaceIsGit, workspacePath],
   );
 
-  // 技能与 MCP：与 ChatHeaderCapabilities 同一 IPC 链路；失败静默为空。
-  const [skillNames, setSkillNames] = useState<readonly string[]>([]);
-  useEffect(() => {
-    if (!active) return undefined;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [caps, mcpCaps, sks] = await Promise.all([
-          clientApi.listCapabilities(),
-          clientApi.mcpListCapabilities().catch(() => [] as readonly CapabilityManifest[]),
-          clientApi.listSkills(),
-        ]);
-        if (cancelled) return;
-        const mcpNames = [...caps, ...mcpCaps]
-          .filter((cap) => cap.source === 'mcp')
-          .map((cap) => cap.capabilityId.split(/[./]/).pop() ?? cap.capabilityId);
-        const names = new Set<string>([
-          ...(sks as readonly SkillSummary[]).map((skill) => skill.name),
-          ...mcpNames,
-        ]);
-        setSkillNames([...names].slice(0, 6));
-      } catch {
-        if (!cancelled) setSkillNames([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  useEffect(() => setExpanded({}), [conversationId]);
+  const moreButton = (section: string, total: number, limit: number) => total > limit ? (
+    <button type="button" className="task-monitor-more" aria-expanded={!!expanded[section]}
+      onClick={() => setExpanded((current) => ({ ...current, [section]: !current[section] }))}>
+      {expanded[section] ? (isZh ? '收起' : 'Show less')
+        : (isZh ? `查看更多 (${total - limit})` : `View more (${total - limit})`)}
+    </button>
+  ) : null;
 
-  // 网页查阅：当前会话的 browserSession tabs（url + title）。
-  const webVisits = useMemo(() => {
-    const tabs = workbench?.browserSession?.tabs ?? [];
-    return tabs
-      .filter((tab) => tab.url && !tab.url.startsWith('about:blank'))
-      .slice(0, 4)
-      .map((tab) => ({ key: tab.id, label: urlLabel(tab.url), url: tab.url, title: tab.title }));
-  }, [workbench?.browserSession?.tabs]);
+  const sources = useMemo(() => projectMonitorSources(messages,
+    workbench?.conversationId === conversationId ? workbench.browserSession.tabs : []),
+  [messages, conversationId, workbench?.conversationId, workbench?.browserSession.tabs]);
+  const [selectedSource, setSelectedSource] = useState<MonitorSource | null>(null);
+  useEffect(() => setSelectedSource(null), [conversationId]);
+  const openSource = (source: MonitorSource) => {
+    if (source.kind === 'file') {
+      workbench?.openFile(source.path, workspacePath ?? undefined);
+    } else if (source.kind === 'web') {
+      workbench?.setBrowserSession((session) => ({ ...session, activeTabId: source.tabId }));
+      workbench?.setActiveTab('browser');
+      workbench?.setOpen(true);
+    } else {
+      setSelectedSource((current) => current?.id === source.id ? null : source);
+    }
+  };
+  const sourceMessage = selectedSource && 'messageId' in selectedSource
+    ? messages.find((message) => message.id === selectedSource.messageId) : undefined;
+  const selectedCall = selectedSource?.kind === 'tool' ? sourceMessage?.segments?.find(
+    (segment) => segment.type === 'tool-call' && segment.toolCallId === selectedSource.toolCallId) : undefined;
+  const selectedAttachment = selectedSource?.kind === 'attachment' ? sourceMessage?.attachments?.find(
+    (attachment) => attachment.id === selectedSource.attachmentId) : undefined;
 
   // 后台任务详情内联展开：本栏内的选中态。
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -260,11 +301,11 @@ export function TaskMonitorRailView({
     };
     if (!overviewItem) return empty;
     try {
-      return projectTaskOverviewArtifacts(overviewItem);
+      return projectTaskOverviewArtifacts(overviewItem, expanded.artifacts ? Infinity : undefined);
     } catch {
       return empty;
     }
-  }, [overviewItem]);
+  }, [overviewItem, expanded.artifacts]);
 
   const runs = useMemo(
     () => projectTaskMonitorRuns(runsReader?.snapshot ?? null, conversationId, isZh),
@@ -272,9 +313,14 @@ export function TaskMonitorRailView({
   );
 
   const selectedRun: ManagedShellTask | null = useMemo(() => {
-    if (!selectedRunId || !runsReader?.snapshot) return null;
+    if (!selectedRunId || !runsReader?.snapshot || !runs.some((row) => row.taskId === selectedRunId)) return null;
     return runsReader.snapshot.find((task) => task.taskId === selectedRunId) ?? null;
-  }, [selectedRunId, runsReader?.snapshot]);
+  }, [selectedRunId, runsReader?.snapshot, runs]);
+
+  useEffect(() => {
+    setSelectedRunId(null);
+    setConfirmation(null);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!selectedRun) return;
@@ -291,19 +337,12 @@ export function TaskMonitorRailView({
     void stops?.stop(selectedRun.taskId);
   };
 
-  // 各分区条目数（含被截断的隐藏项），用于底部「查看更多 (N)」。
-  const hiddenTotal = artifactProjection.hiddenTotal
-    + Math.max(0, runs.length - 2)
-    + Math.max(0, (workbench?.browserSession?.tabs?.length ?? 0) - webVisits.length);
 
   return (
     <aside className="task-monitor-rail" aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}>
       <div className="task-monitor-card">
         <header className="task-monitor-header">
-          <span>{isZh ? '任务监控' : 'Task monitor'}</span>
-          <span className="task-monitor-updated" aria-live="off">
-            {isZh ? '实时' : 'Live'}
-          </span>
+          <span>{isZh ? '任务信息' : 'Task information'}</span>
           <button
             type="button"
             className="task-monitor-close"
@@ -314,59 +353,61 @@ export function TaskMonitorRailView({
           </button>
         </header>
         <div className="task-monitor-scroll">
-          <MonitorSection title={isZh ? '环境信息' : 'Environment'}>
-            {environment.map((row) => (
-              <MonitorRow
-                key={row.id}
-                icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
-                value={row.value}
-                detail={row.detail ?? row.value}
-              />
-            ))}
-            {workspaceIsGit ? (
-              <MonitorRow icon={<CheckIcon />} value={isZh ? '提交或推送' : 'Commit or push'} />
-            ) : null}
+          <MonitorSection title={isZh ? '产出' : 'Outputs'}>
+            {artifactProjection.total ? artifactProjection.groups.map((group) => group.artifacts.map((artifact) => (
+              <MonitorRow key={`${group.kind}:${artifact.ref}`} icon={<ArtifactIcon kind={group.kind} />}
+                value={artifact.label} detail={artifact.openPath ?? artifact.label}
+                onClick={artifact.openPath ? () => workbench?.openFile(artifact.openPath!) : undefined} />
+            ))) : <p className="task-monitor-empty">{isZh ? '暂无产出' : 'No outputs yet'}</p>}
+            {moreButton('artifacts', artifactProjection.total,
+              artifactProjection.groups.reduce((sum, group) => sum + Math.min(MAX_VISIBLE_ARTIFACTS_PER_KIND, group.total), 0))}
           </MonitorSection>
 
-          {skillNames.length > 0 ? (
-            <MonitorSection title={isZh ? '技能与 MCP' : 'Skills & MCP'}>
-              {skillNames.map((name) => (
-                <MonitorRow key={name} icon={<HammerIcon />} value={name} />
-              ))}
-            </MonitorSection>
-          ) : null}
+          <MonitorSection title={isZh ? '来源与工具' : 'Sources & tools'}>
+            {sources.length ? sources.slice(0, expanded.sources ? undefined : 4).map((source) => (
+              <MonitorRow key={source.id} value={source.label}
+                icon={source.kind === 'web' ? <GlobeIcon /> : source.kind === 'tool' ? <HammerIcon /> : <FolderIcon />}
+                detail={source.kind === 'web' ? source.url : source.kind === 'file' ? source.path : source.label}
+                onClick={() => openSource(source)} />
+            )) : <p className="task-monitor-empty">{isZh ? '暂无来源或工具记录' : 'No sources or tool records yet'}</p>}
+            {moreButton('sources', sources.length, 4)}
+            {selectedSource && sourceMessage ? <div className="task-monitor-source-detail">
+              <strong>{selectedSource.label}</strong>
+              {selectedCall?.type === 'tool-call' ? <>
+                <pre>{JSON.stringify(selectedCall.args ?? {}, null, 2)}</pre>
+                <pre>{selectedCall.result || (isZh ? '暂无返回结果' : 'No result yet')}</pre>
+              </> : selectedAttachment ? <>
+                <p>{selectedAttachment.name} · {selectedAttachment.mimeType} · {selectedAttachment.size} B</p>
+                {selectedAttachment.text ? <pre>{selectedAttachment.text}</pre>
+                  : selectedAttachment.kind === 'image' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(selectedAttachment.dataUrl ?? '')
+                    ? <img src={selectedAttachment.dataUrl} alt={selectedAttachment.name} style={{ maxWidth: '100%' }} />
+                    : <p>{isZh ? '此附件没有可直接预览的内容，请在原消息中查看。' : 'No inline preview is available; see the original message.'}</p>}
+              </> : null}
+            </div> : null}
+          </MonitorSection>
 
           {overviewItem?.planProgress ? (
-            <MonitorSection title={isZh ? '任务进度' : 'Progress'}>
-              <div className="task-monitor-progress-row">
-                <span>{overviewItem.statusLabel}</span>
-                <strong>{overviewItem.planProgress.completed} / {overviewItem.planProgress.total}</strong>
-              </div>
-              <div
-                className="task-monitor-progress-track"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={overviewItem.planProgress.total}
-                aria-valuenow={overviewItem.planProgress.completed}
-              >
-                <span style={{ width: `${overviewItem.planProgress.total > 0 ? Math.min(100, Math.max(0, (overviewItem.planProgress.completed / overviewItem.planProgress.total) * 100)) : 0}%` }} />
-              </div>
-            </MonitorSection>
+            <button type="button" className="task-monitor-more" title={taskMonitorProgressHeadline(overviewItem)}
+              onClick={() => { workbench?.setActiveTab('plan'); workbench?.setOpen(true); }}>
+              {isZh ? '查看计划' : 'View plan'} · {overviewItem.planProgress.completed} / {overviewItem.planProgress.total}
+            </button>
           ) : null}
 
           {runs.length > 0 ? (
             <MonitorSection title={isZh ? '后台任务' : 'Background tasks'}>
-              {runs.map((row) => (
+              {runs.slice(0, expanded.runs ? undefined : 2).map((row) => (
                 <MonitorRow
                   key={row.taskId}
                   icon={<TerminalIcon />}
+                  label={row.statusLabel}
                   value={row.cwdLabel ? `${row.command} · ${row.cwdLabel}` : row.command}
-                  detail={row.command}
+                  detail={`${row.command} · ${row.statusLabel}`}
                   onClick={() => {
                     setSelectedRunId((current) => (current === row.taskId ? null : row.taskId));
                   }}
                 />
               ))}
+              {moreButton('runs', runs.length, 2)}
               {selectedRun ? (
                 <div className="task-monitor-run-details">
                   <BackgroundRunDetails
@@ -384,65 +425,47 @@ export function TaskMonitorRailView({
             </MonitorSection>
           ) : null}
 
-          {artifactProjection.total > 0 ? (
-            <MonitorSection title={isZh ? '产出' : 'Outputs'}>
-              {artifactProjection.groups.map((group) => (
-                group.artifacts.map((artifact) => (
-                  <MonitorRow
-                    key={`${group.kind}:${artifact.ref}`}
-                    icon={<ArtifactIcon kind={group.kind} />}
-                    value={artifact.label}
-                    detail={artifact.label}
-                    {...(artifact.openPath
-                      ? {
-                          onClick: () => {
-                            if (artifact.openPath?.startsWith('http')) {
-                              void workbench?.openFile(artifact.openPath ?? '');
-                            } else {
-                              void workbench?.openFile(artifact.openPath ?? '');
-                            }
-                          },
-                        }
-                      : {})}
-                  />
-                ))
-              ))}
-            </MonitorSection>
-          ) : null}
-
-          {webVisits.length > 0 ? (
-            <MonitorSection title={isZh ? '网页查阅' : 'Web access'}>
-              {webVisits.map((visit) => (
-                <MonitorRow
-                  key={visit.key}
-                  icon={<GlobeIcon />}
-                  value={visit.label}
-                  detail={visit.title || visit.url}
-                  onClick={() => {
-                    if (workbench) {
-                      workbench.setActiveTab('browser');
-                      workbench.setOpen(true);
-                    }
-                  }}
-                />
-              ))}
-            </MonitorSection>
-          ) : null}
-
-          {hiddenTotal > 0 ? (
-            <button
-              type="button"
-              className="task-monitor-more"
-              onClick={() => {
-                if (workbench) {
-                  workbench.setActiveTab('documents');
-                  workbench.setOpen(true);
-                }
-              }}
-            >
-              {isZh ? `查看更多 (${hiddenTotal})` : `View more (${hiddenTotal})`}
+          <MonitorSection title={isZh ? '环境' : 'Environment'}>
+            <button type="button" className="task-monitor-environment-summary" aria-expanded={!!expanded.environment}
+              onClick={() => setExpanded((current) => ({ ...current, environment: !current.environment }))}>
+              {environment.find((row) => row.id === 'workspace')?.value || (isZh ? '未选择工作目录' : 'No workspace')}
+              {currentHead ? ` · ${currentHead}` : ''}
             </button>
-          ) : null}
+            {expanded.environment ? <>
+              {environment.map((row) => <MonitorRow key={row.id}
+                icon={row.icon === 'branch' ? <BranchIcon /> : row.icon === 'folder' ? <FolderIcon /> : <DeviceIcon />}
+                label={row.label} value={row.value} detail={row.detail ?? row.value} />)}
+              {workspaceIsGit ? <MonitorRow icon={<CheckIcon />} label={isZh ? '当前任务隔离' : 'Current task isolation'}
+                value={currentIsolation === null ? (isZh ? '尚未确认' : 'Not confirmed')
+                  : currentIsolation ? 'Worktree' : (isZh ? '当前目录' : 'Current directory')} /> : null}
+              {workspaceIsGit && onSelectEnv ? <button type="button" className="task-monitor-more" aria-expanded={!!expanded.settings}
+                onClick={() => setExpanded((current) => ({ ...current, settings: !current.settings }))}>
+                {isZh ? '环境设置' : 'Environment settings'}
+              </button> : null}
+              {workspaceIsGit && expanded.settings && onSelectEnv ? <div className="task-monitor-environment-settings">
+                {sourceBranch ? <div className="task-monitor-setting">
+                  <span>{isZh ? '起始分支' : 'Starting branch'}</span>
+                  <Dropdown className="task-monitor-env-dropdown" value={sourceBranch} options={sourceOptions}
+                    onChange={onSelectEnv} disabled={!canSelectSource} triggerLabel={sourceBranch}
+                    ariaLabel={isZh ? '起始分支' : 'Starting branch'}
+                    title={isZh ? '选择下次任务的起始分支，不切换当前工作目录' : 'Starting branch for the next task; does not switch the current directory'}
+                    searchable={canSelectSource} searchPlaceholder={isZh ? '搜索分支…' : 'Search branches…'}
+                    tabs={canSelectSource ? [{ id: 'local', label: isZh ? '本地' : 'Local' }, { id: 'remote', label: isZh ? '远程' : 'Remote' }] : undefined}
+                    tabsAriaLabel={isZh ? '分支范围' : 'Branch scope'}
+                    emptyLabel={isZh ? '没有匹配的分支' : 'No matching branch'}
+                    footerAction={canSelectSource && onCreateBranch ? { label: isZh ? '创建分支' : 'Create branch', onSelect: onCreateBranch } : undefined} />
+                </div> : null}
+                {isolationValue && isolationOptions.length ? <div className="task-monitor-setting">
+                  <span>{isZh ? '下次任务隔离' : 'Next task isolation'}</span>
+                  <Dropdown className="task-monitor-env-dropdown" value={isolationValue} options={isolationOptions}
+                    onChange={onSelectEnv} disabled={!canChangeIsolation}
+                    ariaLabel={isZh ? 'Worktree 隔离' : 'Worktree isolation'}
+                    title={canChangeIsolation ? (isZh ? '下次任务是否写入独立 Worktree' : 'Use an isolated worktree for the next task')
+                      : (isZh ? '任务执行期间不可更改' : 'Unavailable while a task is running')} />
+                </div> : null}
+              </div> : null}
+            </> : null}
+          </MonitorSection>
         </div>
       </div>
     </aside>

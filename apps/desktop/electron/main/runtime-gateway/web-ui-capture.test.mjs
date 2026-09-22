@@ -105,10 +105,12 @@ test('identity/url-change/invalidates-the-old-shot', t => {
   const second = f.shot({ finalUrl: 'https://example.test/other', toolCallId: 'web-shot-2' });
   const snapshot = f.authority.read(f.plan.planId);
   assert.notEqual(second.sourceFingerprint, first.sourceFingerprint);
-  // 只有最新观察成立；旧截图不再构成证据（观察只剩一条，且指向新图）。
-  assert.equal(snapshot.observations.length, 1);
-  assert.equal(snapshot.observations[0].artifactRef, second.artifactRef);
-  assert.equal(snapshot.observations[0].sourceFingerprint, hash('https://example.test/other'));
+  // 历史截图仍可追溯，但新页面不能复用旧判定。
+  assert.equal(snapshot.observations.length, 2);
+  assert.equal(snapshot.observations[0].artifactRef, first.artifactRef);
+  assert.equal(snapshot.observations.at(-1).artifactRef, second.artifactRef);
+  assert.equal(snapshot.observations.at(-1).sourceFingerprint, hash('https://example.test/other'));
+  assert.deepEqual(snapshot.judgments, []);
 });
 
 test('identity/rendered-text-change/invalidates-the-old-shot', t => {
@@ -117,8 +119,10 @@ test('identity/rendered-text-change/invalidates-the-old-shot', t => {
   const second = f.shot({ renderedText: 'panel body v2', toolCallId: 'web-shot-2' });
   const snapshot = f.authority.read(f.plan.planId);
   assert.notEqual(second.buildFingerprint, first.buildFingerprint);
-  assert.equal(snapshot.observations.length, 1);
-  assert.equal(snapshot.observations[0].buildFingerprint, hash('panel body v2'));
+  assert.equal(snapshot.observations.length, 2);
+  assert.equal(snapshot.observations[0].artifactRef, first.artifactRef, 'keep the indexed historical shot');
+  assert.equal(snapshot.observations.at(-1).buildFingerprint, hash('panel body v2'));
+  assert.deepEqual(snapshot.judgments, [], 'new content must receive its own review');
 });
 
 test('no-close-obligation/invalidation-after-page-change-blocks-prior-capture', t => {

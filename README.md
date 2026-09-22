@@ -47,12 +47,12 @@ Three first-class shells share one unified core runtime:
 
 | Surface | What it is |
 | --- | --- |
-| **Desktop** | Task threads, composer, review cards, Workbench, tray |
+| **Desktop** | Task threads, composer, task information card (outputs, sources, active runs, environment), review cards, Workbench, tray |
 | **TUI** | Full terminal agent (`peer`) with the same runtime |
 | **CLI** | Installable `@peer-agent/cli` — scriptable entry to the same machine |
 
 > [!NOTE]
-> Current stable release: **`0.0.14`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
+> Current stable release: **`0.0.15`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 
 ---
 

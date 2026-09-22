@@ -23,7 +23,7 @@ function assertIndependentControls(): void {
 // 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；单卡+内部分区形态。
 test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头部不被挤压', () => {
   assert.match(chatSurface, /className=\{`chat-surface\$\{showEmptyHome[^}]*\}\$\{taskMonitorOpen \? ' chat-surface--with-monitor' : ''\}`\}/);
-  assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,420}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
+  assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,1600}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
   // 卡片渲染在 .chat-surface 的 JSX 子树内（同层还有 ChatFindBar/overlays，但不在 chat-workspace 直挂）。
   assert.doesNotMatch(chatSurface, /chat-workspace">\s*<TaskMonitorRailView/);
   // 头部是 absolute 且整行（left:0;right:0），padding-right 只作用于 in-flow 正文列。
@@ -34,20 +34,24 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(workbenchStyles, /\.task-monitor-rail \{[\s\S]*?top: calc\(40px \+ var\(--space-2\)\);/);
   // .task-monitor-card 不得再携带面样式（背景/边框/圆角/阴影全部移除）。
   const cardBlock = workbenchStyles.match(/\.task-monitor-card \{[\s\S]*?\}/)?.[0] ?? '';
-  assert.equal(/background(?!-)/.test(cardBlock), false);
-  assert.equal(/border(?!-radius)/.test(cardBlock), false);
-  assert.equal(/box-shadow/.test(cardBlock), false);
+  assert.match(cardBlock, /background:/);
+  assert.match(cardBlock, /border: 1px solid/);
+  assert.match(cardBlock, /box-shadow:/);
+  assert.match(cardBlock, /flex: 0 1 auto/);
+  assert.match(chatStyles, /\.chat-surface--with-monitor > \.message-rail\s*\{\s*right: calc\(var\(--task-monitor-card\)/);
   // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
   assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
   assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
   assert.doesNotMatch(workbenchStyles, /\.task-monitor-section \{[\s\S]{0,320}backdrop-filter/);
   assert.doesNotMatch(workbenchStyles, /task-monitor-tiles|task-monitor-section--tile/);
   // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。
-  assert.match(monitorView, /技能与 MCP/);
-  assert.match(monitorView, /网页查阅/);
-  assert.match(monitorView, /listSkills\(\)/);
-  assert.match(monitorView, /browserSession\?\.tabs/);
-  assert.match(monitorView, /查看更多 \(\$\{hiddenTotal\}\)/);
+  assert.match(monitorView, /来源与工具/);
+  assert.match(monitorView, /projectMonitorSources\(messages/);
+  assert.match(monitorView, /workbench\?\.conversationId === conversationId/);
+  assert.doesNotMatch(monitorView, /listSkills\(|listCapabilities\(|mcpListCapabilities\(/);
+  assert.match(monitorView, /browserSession\.tabs/);
+  assert.match(monitorView, /查看更多 \(\$\{total - limit\}\)/);
+  assert.doesNotMatch(monitorView, /setActiveTab\('documents'\)/);
   assert.match(monitorView, /className="task-monitor-rail" aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);
 });
 
@@ -71,8 +75,28 @@ test('并存宽度钳制按卡片宿主选择且不改持久化宽度', () => {
   assert.match(workbenchStyles, /calc\(100vw[\s\S]{0,140}- 372px - 360px\)/);
 });
 
-test('环境胶囊继续留在 composer，详细环境进入监控卡分区', () => {
-  assert.match(chatSurface, /composer-env-capsule-dropdown/);
+test('输入框只留环境状态，源头和 Worktree 控制集中在监控栏', () => {
+  assert.match(chatSurface, /composer-env-status/);
+  assert.doesNotMatch(chatSurface, /composer-env-capsule-dropdown/);
   assert.match(monitorView, /projectTaskMonitorEnvironment/);
   assert.match(monitorView, /环境信息/);
+  assert.match(monitorView, /当前工作区/);
+  assert.match(monitorView, /任务源头/);
+  assert.match(monitorView, /task-monitor-env-dropdown/);
+});
+
+test('切会话或新建任务时收起任务监控，避免把上一会话的开栏带到空草稿', () => {
+  assert.match(
+    chatSurface,
+    /useEffect\(\(\) => \{\s*setTaskMonitorOpen\(false\);\s*\}, \[conversationId\]\);/,
+  );
+});
+
+test('监控栏分行投影当前工作区 HEAD 与任务源头', () => {
+  assert.match(chatSurface, /currentHead=\{workspaceGit\?\.ok \? workspaceGit\.current : null\}/);
+  assert.match(chatSurface, /sourceBranch=\{gitChrome\.taskLine\?\.value \?\? null\}/);
+  assert.doesNotMatch(
+    chatSurface,
+    /branch=\{gitChrome\.taskLine\?\.value \?\? \(workspaceGit\?\.ok \? workspaceGit\.current : null\)\}/,
+  );
 });

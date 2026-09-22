@@ -61,7 +61,7 @@ function isActionableUserArtifact(value: unknown): value is ActionableUserArtifa
   return true;
 }
 
-export function projectTaskOverviewArtifacts(item: TaskOverviewItem): TaskArtifactProjection {
+export function projectTaskOverviewArtifacts(item: TaskOverviewItem, visiblePerKind = MAX_VISIBLE_ARTIFACTS_PER_KIND): TaskArtifactProjection {
   const unique = new Map<string, ActionableUserArtifact>();
   for (const step of item.planSteps ?? []) {
     for (const candidate of step.artifacts ?? []) {
@@ -84,7 +84,7 @@ export function projectTaskOverviewArtifacts(item: TaskOverviewItem): TaskArtifa
   for (const kind of ['code', 'file', 'image'] as const) {
     const artifacts = [...unique.values()].filter((artifact) => artifact.kind === kind);
     if (artifacts.length === 0) continue;
-    const visible = artifacts.slice(0, MAX_VISIBLE_ARTIFACTS_PER_KIND);
+    const visible = artifacts.slice(0, visiblePerKind);
     visibleTotal += visible.length;
     summaryParts.push(KIND_META[kind].countLabel(artifacts.length));
     groups.push({

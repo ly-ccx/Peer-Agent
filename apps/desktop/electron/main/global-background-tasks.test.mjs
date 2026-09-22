@@ -199,5 +199,5 @@ test('main composition shares task table and separates delete-source cleanup fro
   const source = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
   assert.match(source, /taskManager: getApplicationShellTasks\(userDataPath\)/);
   assert.match(source, /disposeApplicationShellConversation\(dataHome, id\)/);
-  assert.match(source, /await Promise\.all\(\[\s*disposeApplicationShellTasks\(userDataPath\),\s*disposeApplicationShellSessions\(userDataPath\)/);
+  assert.match(source, /await Promise\.all\(\[\s*desktopPreviewProvider\?\.dispose\(\),\s*disposeApplicationShellTasks\(userDataPath\),\s*disposeApplicationShellSessions\(userDataPath\)/);
 });

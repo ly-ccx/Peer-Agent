@@ -7,6 +7,7 @@ import {
   compactionStateLabel,
   sidebarCompactionStateLabel,
   sidebarConversationActivity,
+  shouldHideStreamingCursorDuringCompaction,
 } from './compactionStateView.ts';
 
 const running: CompactionState = { phase: 'running', percent: 51, streamId: 's1', startedAt: 1 };
@@ -47,5 +48,25 @@ describe('compactionStateView', () => {
     assert.equal(compactionStateLabel(finalizing, true), '刷新上下文中');
     assert.equal(compactionStateLabel(failed, false), 'Compaction failed');
     assert.equal(sidebarCompactionStateLabel(finalizing, true), '刷新上下文');
+  });
+});
+
+describe('streaming cursor visibility during compaction', () => {
+  it('hides the cursor while compaction is running', () => {
+    assert.equal(shouldHideStreamingCursorDuringCompaction(running), true);
+  });
+
+  it('hides the cursor while compaction is finalizing', () => {
+    assert.equal(shouldHideStreamingCursorDuringCompaction(finalizing), true);
+  });
+
+  it('keeps the cursor when there is no compaction (idle / null / undefined)', () => {
+    assert.equal(shouldHideStreamingCursorDuringCompaction({ phase: 'idle' }), false);
+    assert.equal(shouldHideStreamingCursorDuringCompaction(null), false);
+    assert.equal(shouldHideStreamingCursorDuringCompaction(undefined), false);
+  });
+
+  it('keeps the cursor when compaction failed', () => {
+    assert.equal(shouldHideStreamingCursorDuringCompaction(failed), false);
   });
 });

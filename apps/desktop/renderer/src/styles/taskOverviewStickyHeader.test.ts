@@ -14,7 +14,9 @@ test('workbench compact header is driven by a stable intersection sentinel', asy
   assert.match(source, /closest<HTMLElement>\('\.task-overview-scroll-region'\)/);
   assert.match(source, /root: scrollContainer/);
   assert.match(source, /ref=\{headerSentinelRef\}/);
-  assert.doesNotMatch(source, /scrollTop >|addEventListener\('scroll'/);
+  const headerEffect = source.slice(source.indexOf('const sentinel = headerSentinelRef.current;'), source.indexOf('observer.disconnect()'));
+  assert.match(headerEffect, /observer\.observe\(sentinel\)/);
+  assert.doesNotMatch(headerEffect, /scrollTop >|addEventListener\('scroll'/);
 });
 
 test('compact header is an overlay that cannot change document flow height', async () => {

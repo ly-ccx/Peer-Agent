@@ -70,6 +70,6 @@ test('home subtitle describes the three live buckets', async () => {
 test('workbench cards open the main task; completed goals no longer inspect evidence first', async () => {
   const app = await readApp();
 
-  assert.match(app, /handleSelectConversation\(String\(conversationId\)\)/);
+  assert.match(app, /handleSelectConversation\(String\(item\.conversationId\)\)/);
   assert.doesNotMatch(app, /\? '确认归档'/);
 });

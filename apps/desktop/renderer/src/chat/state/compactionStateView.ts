@@ -11,6 +11,18 @@ export function isVisibleCompactionState(
   return Boolean(state && state.phase !== 'idle');
 }
 
+/**
+ * 压缩进行中（running / finalizing）时应隐藏消息内的流式光标 ▍：
+ * 压缩进度条已表达「正在工作」，光标会误导为仍在输出正文。
+ * idle 无压缩、failed 已停止，均维持正常流式光标行为。
+ */
+export function shouldHideStreamingCursorDuringCompaction(
+  state: CompactionState | null | undefined,
+): boolean {
+  if (!isVisibleCompactionState(state)) return false;
+  return state.phase === 'running' || state.phase === 'finalizing';
+}
+
 export function compactionProgressPercent(state: CompactionState | null | undefined): number | null {
   return isVisibleCompactionState(state) ? state.percent : null;
 }

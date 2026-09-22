@@ -9,21 +9,22 @@ test('home inbox no longer packs paused or result cards in WorkStream', async ()
   const source = await readPageSource();
   assert.doesNotMatch(source, /<WorkStream items=\{paused\}>/);
   assert.doesNotMatch(source, /<WorkStream items=\{advancing\}>/);
-  assert.match(source, /className="task-overview-work-stream goal-thread-stream"/);
+  assert.match(source, /needsYouCards\.map\(\(card\) => \([\s\S]*?<HandoffRow/);
+  assert.match(source, /pausedCards\.map\(\(card\) => \([\s\S]*?<WorkItem/);
+  assert.match(source, /advancing\.map\(\(item\) => \([\s\S]*?<WorkItem/);
   assert.match(source, /groupInboxByConversation/);
-  assert.match(source, /groupResultCardsByGoalThread/);
 });
 
-test('discussions return to the main column after action sections', async () => {
+test('unread conversations follow action sections without resurfacing read discussions', async () => {
   const source = await readPageSource();
 
   assert.match(source, /task-overview-discussion-grid/);
-  assert.match(source, /visibleDiscussions/);
-  assert.match(source, /DISCUSSION_PREVIEW_LIMIT/);
+  assert.match(source, /const unread = items\.filter\(\(i\) => i\.source === 'conversation' && i\.isUnread === true\)/);
+  assert.match(source, /const visibleUnread = unread\.slice\(0, DISCUSSION_PREVIEW_LIMIT\)/);
   assert.match(source, /<section className="task-overview-section task-overview-section--discuss">/);
-  assert.match(source, /<h2>正在讨论<\/h2>/);
-  const needsYouAt = source.indexOf('<h2>需要你处理</h2>');
-  const discussAt = source.indexOf('<h2>正在讨论</h2>');
+  assert.match(source, /<h2>未读<\/h2>/);
+  const needsYouAt = source.indexOf('<h2>需要你</h2>');
+  const discussAt = source.indexOf('<h2>未读</h2>');
   assert.ok(needsYouAt >= 0 && discussAt > needsYouAt);
 });
 
@@ -38,7 +39,8 @@ test('interrupted execution still excludes ordinary conversations', async () => 
 test('inbox cards reuse original card surfaces', async () => {
   const [source, styles] = await Promise.all([readPageSource(), readStyles()]);
 
-  assert.match(source, /<ResultCard/);
+  assert.match(source, /<DiscussionCard/);
+  assert.match(source, /<WorkItem/);
   assert.match(source, /<HandoffRow/);
   assert.doesNotMatch(source, /task-overview-session-card/);
   assert.match(styles, /\.task-overview-inbox-cards\s*\{/);
@@ -53,16 +55,14 @@ test('background bar only mounts when something is advancing', async () => {
   assert.doesNotMatch(source, /discussions\.length === 0 \? ' is-quiet'/);
 });
 
-test('home result-ready items fold into the conversation card', async () => {
+test('home groups live handoffs by conversation without restoring the removed acceptance bucket', async () => {
   const source = await readPageSource();
 
   assert.match(source, /const needsYouCards = groupInboxByConversation\(needsYou\)/);
   assert.match(source, /const pausedCards = groupInboxByConversation\(paused\)/);
-  assert.match(
-    source,
-    /const resultCards = groupInboxByConversation\(displayedResults\.map\(\(entry\) => entry\.item\)\)/,
-  );
-  assert.match(source, /groupResultCardsByGoalThread\(entries, allItems \?\? items\)/);
+  assert.match(source, /const resultReady: TaskOverviewItem\[\] = \[\]/);
+  assert.doesNotMatch(source, /<ResultCard/);
+  assert.doesNotMatch(source, /const resultCards = groupInboxByConversation/);
   assert.doesNotMatch(source, /RESULT_PREVIEW_LIMIT/);
   assert.doesNotMatch(source, /previewedResults/);
 });

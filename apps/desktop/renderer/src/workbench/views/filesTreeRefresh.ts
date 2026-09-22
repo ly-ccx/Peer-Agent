@@ -27,7 +27,7 @@ const SKIP_FILE_TREE_DIR_NAMES = new Set([
 ]);
 
 export function isSkippedFileTreeDirName(name: string | null | undefined): boolean {
-  return Boolean(name) && SKIP_FILE_TREE_DIR_NAMES.has(name);
+  return typeof name === 'string' && SKIP_FILE_TREE_DIR_NAMES.has(name);
 }
 
 export function isSkippedFileTreePath(absPath: string | null | undefined): boolean {

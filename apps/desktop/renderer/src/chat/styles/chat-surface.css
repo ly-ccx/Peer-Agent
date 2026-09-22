@@ -120,10 +120,14 @@
   position: absolute;
   top: 40px;
   left: 0;
+  /* 监控卡片打开时停在卡片左缘，避免「当前问题」置顶条和右侧任务监控顶栏叠在一起。
+     卡片未打开时 --task-monitor-card 不存在，整段 calc 失效，right 回落到 0。 */
   right: 0;
+  right: calc(var(--task-monitor-card, unset) + var(--space-3) * 2);
   z-index: 24;
   box-sizing: border-box;
-  width: 100%;
+  /* 宽度跟 left/right 走。写死 100% 会把上面为监控卡片让出的右边距重新撑满。 */
+  width: auto;
   max-width: none;
   display: flex;
   align-items: center;
@@ -1085,7 +1089,7 @@
   grid-template-columns: 1fr auto 1fr;
 }
 
-.composer-chrome-row:not(:has(.goal-panel--docked)):not(:has(.composer-env-capsule)) {
+.composer-chrome-row:not(:has(.goal-panel--docked)):not(:has(.composer-env-capsule)):not(:has(.composer-env-status)) {
   display: none;
 }
 
@@ -1120,6 +1124,7 @@
 }
 
 .composer-chrome-row .composer-env-capsule,
+.composer-chrome-row .composer-env-status,
 .composer-chrome-row .composer-env-capsule-dropdown,
 .composer-chrome-row .pa-dropdown-trigger {
   max-width: min(16rem, 100%);
@@ -1281,14 +1286,50 @@
   color: var(--graphite-soft);
 }
 
-.composer-env-capsule {
+.composer-env-capsule,
+.composer-env-status {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 16rem;
 }
 
-.composer-chrome-right .composer-env-capsule {
+.composer-chrome-right .composer-env-capsule,
+.composer-chrome-right .composer-env-status {
   flex-shrink: 1;
+}
+
+.composer-env-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  padding: 0 6px;
+  color: var(--graphite-soft);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.composer-env-status.is-isolated {
+  color: var(--graphite-soft);
+}
+
+.composer-env-status.is-mismatch {
+  color: var(--graphite-mute);
+}
+
+.composer-env-status-prefix,
+.composer-env-status-prefix svg {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.composer-env-status-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .composer-env-capsule-dropdown {
@@ -2700,74 +2741,6 @@
   padding: 0;
 }
 
-/* 图片预览的重遮罩修饰类：仅加深背景观感，布局与入场动效继承 .pa-overlay-backdrop 基座。 */
-.image-preview-backdrop {
-  background: rgba(8, 12, 18, 0.76);
-  backdrop-filter: blur(14px);
-}
-.image-preview-card {
-  max-width: min(88vw, 1120px);
-  max-height: 88vh;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--glass-modal-border);
-  border-radius: var(--radius-xl);
-  /* 图片预览也是 role="dialog"：复用主题化弹窗磨砂配方。 */
-  background: var(--glass-modal-background);
-  backdrop-filter: var(--glass-modal-filter);
-  -webkit-backdrop-filter: var(--glass-modal-filter);
-  box-shadow: var(--glass-modal-shadow);
-}
-.image-preview-img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(88vh - 52px);
-  object-fit: contain;
-  background: var(--chrome-canvas);
-}
-.image-preview-caption {
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-4);
-  border-top: 1px solid var(--chrome-hairline);
-  color: var(--graphite-soft);
-}
-.image-preview-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--graphite-base);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-.image-preview-size {
-  flex-shrink: 0;
-  color: var(--graphite-mute);
-  font-size: 0.72rem;
-}
-.image-preview-close {
-  margin-left: auto;
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--graphite-mute);
-  cursor: pointer;
-  font-size: 1.25rem;
-  line-height: 1;
-}
-.image-preview-close:hover,
-.image-preview-close:focus-visible {
-  background: var(--chrome-sunken);
-  color: var(--graphite-base);
-  outline: none;
-}
 .chat-file-input {
   display: none;
 }
@@ -3469,6 +3442,10 @@
   min-height: 0;
   overflow: hidden;
 }
+.chat-workspace {
+  container-type: inline-size;
+  container-name: conversation-space;
+}
 .chat-workspace > .chat-surface {
   flex: 1 1 auto;
   min-width: 0;
@@ -3482,9 +3459,35 @@
   padding-right: calc(var(--task-monitor-card) + var(--space-3) * 2);
 }
 
+.chat-surface--with-monitor > .message-rail {
+  right: calc(var(--task-monitor-card) + var(--space-3) * 2);
+}
+
 @media (max-width: 860px) {
   .chat-surface--with-monitor {
     --task-monitor-card: min(280px, 38vw);
+  }
+}
+
+/* Respond to the remaining conversation width, not the whole app window.
+ * With Workbench open, stack the information card above the thread instead of
+ * shrinking the conversation to a narrow strip. */
+@container conversation-space (max-width: 640px) {
+  .chat-surface--with-monitor {
+    padding-right: 0;
+    padding-top: min(38vh, 340px);
+  }
+  .chat-surface--with-monitor > .task-monitor-rail {
+    top: 48px;
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: auto;
+    width: auto;
+    height: calc(min(38vh, 340px) - 56px);
+  }
+  .chat-surface--with-monitor > .message-rail {
+    right: var(--space-2);
+    top: min(38vh, 340px);
   }
 }
 
@@ -3725,8 +3728,12 @@
   border-bottom-color: var(--chrome-hairline);
 }
 
-/* 工作台打开时左右顶栏共用一条 40px 底边，不依赖滚动才显色。 */
+/* 工作台打开时左右顶栏共用一条 40px 底边，并铺同一块实色纸面。
+   左侧默认磨砂会把下面的消息采进去，和右侧不透明画布对不齐。 */
 :root[data-workbench-open='true'] .chat-header {
+  background: var(--chrome-canvas, var(--za-app-bg));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   border-bottom-color: var(--chrome-hairline);
 }
 
@@ -4351,13 +4358,6 @@ button.chat-header-cap-item:focus-visible {
 @media (prefers-reduced-transparency: reduce) {
   .pa-cascading-menu-panel,
   .pa-cascading-submenu-panel {
-    background: var(--chrome-raised, var(--paper-sheet));
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: var(--shadow-popover);
-  }
-
-  .image-preview-card {
     background: var(--chrome-raised, var(--paper-sheet));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -5234,7 +5234,8 @@ button.chat-header-cap-item:focus-visible {
   padding: 0;
 }
 
-.chat-composer-wrap--empty-home .composer-chrome-right .composer-env-capsule {
+.chat-composer-wrap--empty-home .composer-chrome-right .composer-env-capsule,
+.chat-composer-wrap--empty-home .composer-chrome-right .composer-env-status {
   flex-shrink: 1;
 }
 
@@ -5349,15 +5350,4 @@ button.chat-header-cap-item:focus-visible {
     animation: none;
     transition-duration: 1ms;
   }
-}
-
-.image-preview-pending {
-  min-width: min(60vw, 480px);
-  min-height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--graphite-soft, #9aa0a6);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
 }

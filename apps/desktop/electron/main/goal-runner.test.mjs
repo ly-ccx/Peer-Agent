@@ -357,8 +357,10 @@ test('resume: restores a stream-failed plan immediately and preserves the failur
   const failureEvent = failed.runTrace.events.find(
     (event) => event.type === 'problem_found' && event.payload?.summaryCode === 'stream_failed',
   );
-  assert.equal(failed.status, 'failed');
+  // ADR 73: interruption is resumable; the runner failure and its audit event remain.
+  assert.equal(failed.status, 'interrupted');
   assert.equal(failed.runner.status, 'failed');
+  assert.equal(failed.runner.interruption.reason, 'provider stream disconnected');
   assert.ok(failureEvent, '流式失败事件应被记录');
 
   const resumePromise = runner.resume(plan.planId);
@@ -800,8 +802,9 @@ test('runtime failed: 失败会进入 failed 状态', async () => {
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(got.status, 'failed');
+  assert.equal(got.status, 'interrupted');
   assert.equal(got.runner.status, 'failed');
+  assert.equal(got.runner.interruption.source, 'runGoalTurn');
   assert.equal(got.runner.lastError, 'runtime exploded');
   assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
   assert.equal(got.tasks.find((task) => task.taskId === 't1')?.failureReason, 'runtime exploded');
@@ -829,8 +832,9 @@ test('stream failed: 会把 running 叶子任务同步标 failed', async () => {
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(got.status, 'failed');
+  assert.equal(got.status, 'interrupted');
   assert.equal(got.runner.status, 'failed');
+  assert.equal(got.runner.interruption.source, 'stream_error');
   assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
   assert.equal(got.tasks.find((task) => task.taskId === 't1')?.failureReason, 'provider stream disconnected');
   assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
@@ -855,7 +859,8 @@ test('stream failed: 若无 running 叶子，会把首个 pending 标 failed 避
   await runner.start(plan.planId, { awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(got.status, 'failed');
+  assert.equal(got.status, 'interrupted');
+  assert.equal(got.runner.interruption.reason, 'provider stream disconnected');
   assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
   assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
 });
@@ -1783,7 +1788,8 @@ test('start: 已完成计划不再被拉回 running，并补写 qualityReview', 
   assert.equal(turnCalls, 0);
   assert.equal(got.status, 'completed');
   assert.equal(got.qualityReview?.status, 'passed');
-  assert.equal(got.runner.status, 'completed');
+  // The store settles a leftover active runner to idle once all leaves are complete.
+  assert.equal(got.runner.status, 'idle');
 });
 
 test('start: 有交付绑定的 Goal 启动时会准备隔离环境', async () => {

@@ -40,7 +40,7 @@ test('the dialog never renders an isolation sentinel as a branch name', () => {
 test('ChatSurface opens the dialog without passing any list-row value', () => {
   // The entry point takes no arguments at all, so the hovered row cannot reach the source.
   assert.match(surface, /const handleOpenCreateBranchDialog = useCallback\(\(\) => \{/);
-  assert.match(surface, /onSelect: \(\) => \{\s*handleOpenCreateBranchDialog\(\);\s*\},/);
+  assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);
   assert.doesNotMatch(surface, /handleOpenCreateBranchDialog\(highlightedValue\)/);
   // And the dialog is rendered from the extracted module with the branch-only option list.
   assert.match(surface, /<CreateBranchDialog/);
@@ -52,10 +52,9 @@ test('the create-branch entry is independent of the capsule branch-switch afford
   // Branch options for the dialog must not be gated on the capsule's own selectable flag,
   // otherwise the picker would come up empty exactly when the user wants to fork.
   assert.match(surface, /const composerBranchOptions = useMemo<readonly DropdownOption\[\]>/);
-  assert.match(surface, /return \[\.\.\.isolationOptions, \.\.\.composerBranchOptions\];/);
-  const gateIndex = surface.indexOf('if (!gitChrome.taskLine?.selectable) return isolationOptions;');
-  const memoIndex = surface.indexOf('const composerBranchOptions = useMemo<readonly DropdownOption[]>');
-  assert.ok(memoIndex > -1 && gateIndex > memoIndex, 'composerBranchOptions must be built before the selectable gate');
+  assert.match(surface, /sourceOptions=\{composerBranchOptions\}/);
+  assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);
+  assert.doesNotMatch(surface, /\[\.\.\.isolationOptions, \.\.\.composerBranchOptions\]/);
 });
 
 test('creating a branch cannot reach git with a sentinel or an empty start point', () => {

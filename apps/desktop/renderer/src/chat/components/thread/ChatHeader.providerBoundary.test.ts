@@ -25,7 +25,8 @@ test('bound branch chrome lives in chat-surface styles as truncated metadata', a
   assert.match(css, /\.composer-bound-branch\b/);
   assert.match(css, /\.composer-bound-branch-text\b/);
   assert.match(css, /\.chat-header-branch \{[\s\S]*?flex:\s*0 1 auto;/);
-  assert.match(css, /\.composer-bound-branch \{[\s\S]*?flex:\s*0 1 auto;/);
+  assert.match(css, /\.composer-env-status\s*\{[^}]*flex:\s*0 1 auto;/);
+  assert.match(css, /\.composer-bound-branch-text\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/);
   assert.match(css, /\.composer-workspace-head\b/);
   assert.match(css, /\.composer-task-line\b/);
   assert.match(css, /\.composer-write-mismatch\b/);

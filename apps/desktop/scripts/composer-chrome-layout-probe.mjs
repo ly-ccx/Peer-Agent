@@ -11,10 +11,10 @@ try {
   await page.setContent(`<style>*{box-sizing:border-box}:root{font-size:${16*scale}px;--ui-font-control:.8125rem;--ui-font-caption:.75rem;--space-1:4px;--space-2:8px;--space-5:20px;--space-6:24px;}body{font-family:Arial}${css}</style>
   <section class="chat-composer-wrap" style="width:${width+48}px"><div class="composer-chrome-row">
   <div class="composer-chrome-left"><div id="goal" class="goal-panel goal-panel--docked"><button class="goal-panel-toggle"><span class="goal-panel-toggle-active"><span class="goal-panel-toggle-active-dot"></span><span class="goal-panel-toggle-summary"><span id="title" class="goal-panel-toggle-active-title">修复任务浮条与 Worktree 重叠</span><span id="activity" class="goal-panel-current-activity">${status==='executing'?'执行：验证布局':'已完成'}</span></span><span id="progress" class="goal-panel-toggle-active-${status==='executing'?'progress':'handoff'}">${status==='executing'?'1/4':'已归档到 0.0.13'}</span></span><span id="goalCaret">⌄</span></button></div></div>
-  <div class="composer-chrome-right"><div class="composer-env-capsule"><div class="composer-dropdown composer-env-capsule-dropdown is-isolated"><button id="env" class="pa-dropdown-trigger"><span>⑂</span><span id="branch" class="pa-dropdown-value">Worktree · ${long?'feature/'+ 'long-branch-name-'.repeat(12):'main'}</span><span id="envCaret" class="pa-dropdown-caret">⌄</span></button></div></div></div></div></section>`);
+  <div class="composer-chrome-right"><div id="env" class="composer-env-status is-isolated"><span>⑂</span><span id="branch" class="composer-env-status-label">Worktree · ${long?'feature/'+ 'long-branch-name-'.repeat(12):'main'}</span></div></div></div></section>`);
   const b=await page.evaluate(()=>{
    const rect=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}};
-   return Object.fromEntries(['goal','title','activity','progress','goalCaret','env','branch','envCaret'].map(id=>[id,rect(document.getElementById(id))]).concat([['row',rect(document.querySelector('.composer-chrome-row'))]]));
+   return Object.fromEntries(['goal','title','activity','progress','goalCaret','env','branch'].map(id=>[id,rect(document.getElementById(id))]).concat([['row',rect(document.querySelector('.composer-chrome-row'))]]));
   });
   if(width<400) {
    assert.ok(b.env.top>=b.goal.bottom-1,`${name}: Worktree must wrap below goal`);
@@ -33,8 +33,8 @@ try {
    // 宽容器保持 hugging：浮条不铺满整行。
    assert.ok(b.goal.width<=b.row.width-24,`${name}: wide goal chip still hugs its content (${b.goal.width.toFixed(1)} of ${b.row.width.toFixed(1)})`);
   }
-  for(const id of ['goal','title','activity','progress','goalCaret','env','branch','envCaret']) assert.ok(b[id].width>0 && b[id].left>=b.row.left-1 && b[id].right<=b.row.right+1,`${name}: ${id} visible and contained`);
-  for(const group of [['title','activity','progress','goalCaret','env'],['branch','envCaret']]) for(let i=0;i<group.length;i++) for(let j=i+1;j<group.length;j++) {
+  for(const id of ['goal','title','activity','progress','goalCaret','env','branch']) assert.ok(b[id].width>0 && b[id].left>=b.row.left-1 && b[id].right<=b.row.right+1,`${name}: ${id} visible and contained`);
+  for(const group of [['title','activity','progress','goalCaret','env','branch']]) for(let i=0;i<group.length;i++) for(let j=i+1;j<group.length;j++) {
    const a=b[group[i]],c=b[group[j]];
    assert.ok(a.right<=c.left+1||c.right<=a.left+1||a.bottom<=c.top+1||c.bottom<=a.top+1,`${name}: ${group[i]} overlaps ${group[j]}`);
   }

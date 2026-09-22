@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import {
   buildQoderPrivateHeaders,
@@ -570,43 +573,13 @@ describe('qoder private adapter', () => {
   });
 
   it('routes catalog-missing models with modelOptions through agent_chat_generation', async () => {
-    const previousFetch = globalThis.fetch;
-    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
-    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
-    let capturedUrl = null;
-    globalThis.fetch = async (url) => {
-      capturedUrl = String(url);
-      return new Response([
-        'data: {"choices":[{"delta":{"content":"ok"}}]}',
-        'data: [DONE]',
-        '',
-      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
-    };
-
-    try {
-      const result = await sendQoderPrivateStream({
-        baseUrl: 'https://api2-v2.qoder.sh/model/v1',
-        apiKey: 'token',
-        model: 'kmodel_latest',
-        messages: [{ role: 'user', content: '测试2' }],
-        modelOptions: [{
-          id: 'contextTier',
-          kind: 'select',
-          choices: [{ value: '1M', contextWindow: 1_000_000, inputTokenLimit: 980_000 }],
-        }],
-        modelOptionValues: { contextTier: '1M' },
-        webContents: { send: () => {} },
-        streamId: 's-qoder-kmodel-route',
-      });
-
-      assert.equal(result.ok, true);
-      assert.match(capturedUrl, /agent_chat_generation/);
-      assert.doesNotMatch(capturedUrl, /\/model\/v1\/chat\/completions/);
-    } finally {
-      globalThis.fetch = previousFetch;
-      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
-      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
-    }
+    // Module mocks live in a child process so no real local login is required and
+    // other adapter tests still use the production auth/catalog implementations.
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      '--experimental-test-module-mocks',
+      fileURLToPath(new URL('./qoder-prepared-route.fixture.mjs', import.meta.url)),
+    ], { env: { ...process.env, PEER_AGENT_PROVIDER_TRACE: '0' }, timeout: 30_000 });
+    assert.match(stdout, /isolated prepared route passed/);
   });
 
   it('does not stream literal tool_call text from Qoder into the UI', async () => {

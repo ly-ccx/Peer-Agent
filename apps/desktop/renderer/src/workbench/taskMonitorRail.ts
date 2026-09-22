@@ -25,44 +25,54 @@ import {
  */
 
 export interface TaskMonitorEnvironmentRow {
-  readonly id: 'branch' | 'workspace' | 'location';
+  readonly id: 'current-head' | 'source' | 'workspace' | 'location';
   readonly icon: 'branch' | 'folder' | 'device';
   readonly label: string;
   readonly value: string;
   readonly detail?: string;
 }
 
-/** 环境信息：复用会话现有 workspace/git 事实，不新增状态源。 */
-export function projectTaskMonitorEnvironment(
-  workspacePath: string | null,
-  branch: string | null,
-  isGit: boolean | null,
-  isZh: boolean,
-): readonly TaskMonitorEnvironmentRow[] {
+/** 环境信息：当前工作区 HEAD 与任务源头分行，不把两者拼成一条。 */
+export function projectTaskMonitorEnvironment(input: {
+  readonly workspacePath: string | null;
+  readonly currentHead?: string | null;
+  readonly sourceBranch?: string | null;
+  readonly isGit: boolean | null;
+  readonly isZh: boolean;
+}): readonly TaskMonitorEnvironmentRow[] {
   const rows: TaskMonitorEnvironmentRow[] = [];
-  const normalizedBranch = branch?.trim() ?? '';
-  if (isGit === true && normalizedBranch) {
+  const currentHead = input.currentHead?.trim() ?? '';
+  const sourceBranch = input.sourceBranch?.trim() ?? '';
+  if (input.isGit === true && currentHead) {
     rows.push({
-      id: 'branch',
+      id: 'current-head',
       icon: 'branch',
-      label: isZh ? '分支' : 'Branch',
-      value: normalizedBranch,
+      label: input.isZh ? '当前分支' : 'Current branch',
+      value: currentHead,
+    });
+  }
+  if (input.isGit === true && sourceBranch) {
+    rows.push({
+      id: 'source',
+      icon: 'branch',
+      label: input.isZh ? '起始分支' : 'Starting branch',
+      value: sourceBranch,
     });
   }
 
-  if (workspacePath) {
+  if (input.workspacePath) {
     rows.push({
       id: 'workspace',
       icon: 'folder',
-      label: isZh ? '工作区' : 'Workspace',
-      value: pathTailLabel(workspacePath),
-      detail: workspacePath,
+      label: input.isZh ? '工作区' : 'Workspace',
+      value: pathTailLabel(input.workspacePath),
+      detail: input.workspacePath,
     });
     rows.push({
       id: 'location',
       icon: 'device',
-      label: isZh ? '运行位置' : 'Runs on',
-      value: isZh ? '本地' : 'Local',
+      label: input.isZh ? '运行位置' : 'Runs on',
+      value: input.isZh ? '本地' : 'Local',
     });
   }
 
@@ -111,9 +121,9 @@ export function projectTaskMonitorRuns(
 ): readonly TaskMonitorRunRow[] {
   if (!conversationId || !tasks) return [];
   const scoped = backgroundTaskList(tasks, { sourceConversation: conversationId });
-  return orderBackgroundRuns(scoped).map((task) => ({
+  return orderBackgroundRuns(scoped.filter(isActiveRun)).map((task) => ({
     taskId: task.taskId,
-    command: task.description?.trim() || task.command || task.taskId,
+    command: task.command?.trim() || task.description?.trim() || task.taskId,
     cwdLabel: pathTailLabel(task.cwd),
     statusLabel: backgroundTaskStatus(task, isZh),
     active: isActiveRun(task),
@@ -150,6 +160,26 @@ export function projectTaskMonitorArtifacts(
  * `item.conversationId === conversationId`（goal_plan / automation 投影的深链字段）。
  * 多条命中时优先有产物的一条，让产出区尽量非空。
  */
+
+/**
+ * 右栏「任务进度」卡的主文案，与底部浮条对齐：
+ * 计划名 + 当前步骤。overview 投影没有 runner 相位，所以活动句里
+ * 只有底部浮条能算出的「正在验证 / 正在恢复上下文」这里不重复编造，
+ * 只展示投影里已经有的计划名和当前步骤。
+ * 没有计划名时回落到粗粒度 statusLabel（会话、自动化等非计划条目）。
+ */
+export function taskMonitorProgressHeadline(
+  item: Pick<TaskOverviewItem, 'title' | 'currentGoalTitle' | 'statusLabel'>,
+): string {
+  const title = typeof item.title === 'string' ? item.title.trim() : '';
+  const step = typeof item.currentGoalTitle === 'string' ? item.currentGoalTitle.trim() : '';
+  const named = title !== '' && title !== '未命名任务' && title !== 'Untitled plan';
+  if (named && step && step !== title) return `${title} · ${step}`;
+  if (named) return title;
+  if (step) return step;
+  return item.statusLabel;
+}
+
 export function selectConversationTaskOverviewItem(
   items: readonly TaskOverviewItem[] | null | undefined,
   conversationId: string | null,

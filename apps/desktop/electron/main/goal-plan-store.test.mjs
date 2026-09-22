@@ -882,12 +882,15 @@ test('listPlanDetailsByWorkspace 先按索引工作区筛选再返回完整计�
   assert.equal(details[0].tasks.length, 2);
 });
 
-test('listPlanDetails / listPlanDetailsByWorkspace 在 hydrate 前按索引截断', () => {
+test('listPlanDetails / listPlanDetailsByWorkspace 在 hydrate 前按索引截断', (t) => {
+  const startedAt = Date.parse('2026-01-01T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: startedAt });
   const older = store.createPlan({
     ...draftWithTasks(),
     title: '较旧',
     originWorkspacePath: '/tmp/workspaces/alpha',
   });
+  t.mock.timers.setTime(startedAt + 1_000);
   const newer = store.createPlan({
     ...draftWithTasks(),
     title: '较新',
