@@ -160,6 +160,26 @@ export function projectTaskMonitorArtifacts(
  * `item.conversationId === conversationId`（goal_plan / automation 投影的深链字段）。
  * 多条命中时优先有产物的一条，让产出区尽量非空。
  */
+
+/**
+ * 右栏「任务进度」卡的主文案，与底部浮条对齐：
+ * 计划名 + 当前步骤。overview 投影没有 runner 相位，所以活动句里
+ * 只有底部浮条能算出的「正在验证 / 正在恢复上下文」这里不重复编造，
+ * 只展示投影里已经有的计划名和当前步骤。
+ * 没有计划名时回落到粗粒度 statusLabel（会话、自动化等非计划条目）。
+ */
+export function taskMonitorProgressHeadline(
+  item: Pick<TaskOverviewItem, 'title' | 'currentGoalTitle' | 'statusLabel'>,
+): string {
+  const title = typeof item.title === 'string' ? item.title.trim() : '';
+  const step = typeof item.currentGoalTitle === 'string' ? item.currentGoalTitle.trim() : '';
+  const named = title !== '' && title !== '未命名任务' && title !== 'Untitled plan';
+  if (named && step && step !== title) return `${title} · ${step}`;
+  if (named) return title;
+  if (step) return step;
+  return item.statusLabel;
+}
+
 export function selectConversationTaskOverviewItem(
   items: readonly TaskOverviewItem[] | null | undefined,
   conversationId: string | null,

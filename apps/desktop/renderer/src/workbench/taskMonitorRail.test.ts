@@ -7,6 +7,7 @@ import {
   projectTaskMonitorEnvironment,
   projectTaskMonitorRuns,
   selectConversationTaskOverviewItem,
+  taskMonitorProgressHeadline,
 } from './taskMonitorRail.ts';
 
 function run(overrides: Partial<ManagedShellTask> & { taskId: string }): ManagedShellTask {
@@ -143,6 +144,42 @@ test('产出：无 item 或投影抛错时降级为空投影，不抛异常', ()
 });
 
 // 轴 4：本会话那一条的选取 —— taskId 并不总等于 conversationId。
+test('进度文案：有计划名和当前步骤时与底部浮条一样具体', () => {
+  const headline = taskMonitorProgressHeadline({
+    title: '启动应用并截图验收',
+    currentGoalTitle: '启动应用并截图验收',
+    statusLabel: 'Peer 正在推进',
+  });
+  assert.equal(headline, '启动应用并截图验收');
+  assert.equal(
+    taskMonitorProgressHeadline({
+      title: '启动应用并截图验收',
+      currentGoalTitle: '核对窗口标题',
+      statusLabel: 'Peer 正在推进',
+    }),
+    '启动应用并截图验收 · 核对窗口标题',
+  );
+});
+
+test('进度文案：没有计划名时不编造，回落到状态标签', () => {
+  assert.equal(
+    taskMonitorProgressHeadline({
+      title: '未命名任务',
+      currentGoalTitle: '  ',
+      statusLabel: 'Peer 正在推进',
+    }),
+    'Peer 正在推进',
+  );
+  assert.equal(
+    taskMonitorProgressHeadline({
+      title: '',
+      currentGoalTitle: '核对窗口标题',
+      statusLabel: 'Peer 正在推进',
+    }),
+    '核对窗口标题',
+  );
+});
+
 test('选条：taskId 为 planId 的 goal_plan 投影靠 conversationId 命中', () => {
   const planItem = {
     taskId: 'plan-abc',

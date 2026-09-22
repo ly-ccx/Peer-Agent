@@ -2486,14 +2486,19 @@
 
   .task-monitor-progress-row {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     gap: var(--space-2);
     padding: 3px 6px 7px;
     color: var(--za-text-muted);
     font-size: var(--ui-font-caption, 11px);
   }
+  .task-monitor-progress-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   .task-monitor-progress-row strong {
+    flex: none;
     color: var(--za-text);
     font-weight: 600;
   }

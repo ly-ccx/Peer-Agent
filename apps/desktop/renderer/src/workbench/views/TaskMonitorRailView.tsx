@@ -4,6 +4,7 @@ import {
   projectTaskMonitorEnvironment,
   projectTaskMonitorRuns,
   selectConversationTaskOverviewItem,
+  taskMonitorProgressHeadline,
 } from '../taskMonitorRail.ts';
 import {
   projectTaskOverviewArtifacts,
@@ -427,7 +428,9 @@ export function TaskMonitorRailView({
           {overviewItem?.planProgress ? (
             <MonitorSection title={isZh ? '任务进度' : 'Progress'}>
               <div className="task-monitor-progress-row">
-                <span>{overviewItem.statusLabel}</span>
+                <span title={taskMonitorProgressHeadline(overviewItem)}>
+                  {taskMonitorProgressHeadline(overviewItem)}
+                </span>
                 <strong>{overviewItem.planProgress.completed} / {overviewItem.planProgress.total}</strong>
               </div>
               <div
