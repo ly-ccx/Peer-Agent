@@ -359,7 +359,10 @@ export function TaskMonitorRailView({
         if (event.target === event.currentTarget && event.animationName === 'motion-exit-slide-inline') onAnimationEnd();
       }}
     >
-      <div className="task-monitor-card">
+      <div className="task-monitor-card" onAnimationEnd={(event) => {
+        // Narrow overlay animates the glass itself so its parent cannot clip backdrop sampling.
+        if (event.target === event.currentTarget && event.animationName === 'motion-exit-slide-inline') onAnimationEnd();
+      }}>
         <header className="task-monitor-header">
           <span>{isZh ? '任务信息' : 'Task information'}</span>
           <button

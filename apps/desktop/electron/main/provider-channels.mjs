@@ -1219,8 +1219,9 @@ const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
     reasoning: {
       supported: true,
       paramStyle: 'openai-effort',
-      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      effortLevels: ['default'],
       defaultEffort: 'default',
+      effortMap: {},
     },
     promptCache: true,
     vision: true,
@@ -1231,8 +1232,11 @@ const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
     reasoning: {
       supported: true,
       paramStyle: 'openai-effort',
-      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      // A shared wire does not establish model-specific effort support.
+      // Empty mapping means server defaults; profiles/config may opt in.
+      effortLevels: ['default'],
       defaultEffort: 'default',
+      effortMap: {},
     },
     promptCache: true,
     vision: true,
@@ -1243,8 +1247,9 @@ const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
     reasoning: {
       supported: true,
       paramStyle: 'anthropic-enabled-budget',
-      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+      effortLevels: ['off', 'default'],
       defaultEffort: 'default',
+      effortMap: {},
     },
     promptCache: true,
     vision: true,
@@ -1253,40 +1258,81 @@ const OPENCODE_GO_CAPABILITIES_BY_WIRE = {
   },
 };
 
-// OpenCode Go 按模型族的思考档位契约（在 wire 级能力之上做模型级覆盖）。
-// GLM-5.3 系（如 glm-5.3-flash）是常开思考模型，上游 400 [1210] 明确：
-// 思考不可关闭，reasoning_effort 仅接受 low / high / max。
-// UI 五档（off/low/default/high/xhigh）全部显式映射，编码层不再把
-// default→medium、xhigh→xhigh 等非法档位发给上游；off 降为 low（最省思考）。
-const OPENCODE_GO_MODEL_REASONING_PROFILES = [
-  {
-    match: /glm[-_.]?5\.3/i,
-    reasoning: {
-      supported: true,
-      paramStyle: 'openai-effort',
-      effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
-      defaultEffort: 'low',
-      effortMap: {
-        off: 'low',
-        low: 'low',
-        default: 'low',
-        medium: 'high',
-        high: 'high',
-        max: 'max',
-        xhigh: 'max',
-      },
-    },
-  },
+// OpenCode Go 模型思考声明，来源 models.dev provider `opencode-go`（2026-09-23，39 个模型）。
+// 有 effort values 才生成档位；只有 toggle/budget 保持协议开关；空声明不发明档位。
+// 同一模型在其他渠道的声明不能混用。全局 UI 档位只映射到声明里存在的值。
+const OPENCODE_GO_MODEL_REASONING = {
+  'deepseek-v4-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'deepseek-v4-flash-vision-exp': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'deepseek-v4-pro': { style: 'openai-effort', values: ['high', 'max'] },
+  'deepseek-v4.1-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'glm-5.2': { style: 'openai-effort', values: ['high', 'max'] },
+  'glm-5.3': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'glm-5.3-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'gpt-5.6-luna': { style: 'openai-effort', values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  'grok-4.5': { style: 'openai-effort', values: ['low', 'medium', 'high'] },
+  'grok-4.6': { style: 'openai-effort', values: ['low', 'medium', 'high', 'xhigh'] },
+  'grok-4.7': { style: 'openai-effort', values: ['low', 'medium', 'high', 'xhigh'] },
+  hy3: { style: 'openai-effort', values: ['none', 'low', 'high'] },
+  'hy4-preview': { style: 'openai-effort', values: ['none', 'high'] },
+  'kimi-k3': { style: 'openai-effort', values: ['max'] },
+  'muse-spark-1.2-contributor': { style: 'openai-effort', values: ['minimal', 'low', 'medium', 'high', 'xhigh'] },
+  'muse-spark-1.3-contributor': { style: 'openai-effort', values: ['minimal', 'low', 'medium', 'high', 'xhigh'] },
+  'omen-alpha': { style: 'openai-effort', values: ['low', 'high'] },
+  'ox-alpha-free': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'qwen3.8-flash': { style: 'openai-effort', values: ['low', 'medium', 'xhigh'] },
+  'qwen3.8-max': { style: 'openai-effort', values: ['low', 'medium', 'xhigh'] },
+};
+
+const OPENCODE_GO_UI_TO_DECLARED = [
+  ['off', 'none'],
+  ['off', 'minimal'],
+  ['low', 'low'],
+  ['default', 'medium'],
+  ['default', 'high'],
+  ['high', 'high'],
+  ['high', 'xhigh'],
+  ['high', 'max'],
+  ['xhigh', 'xhigh'],
+  ['xhigh', 'max'],
+  ['max', 'max'],
+  ['medium', 'medium'],
 ];
 
+function openCodeGoReasoningFromDeclaration(declaration) {
+  const allowed = new Set(declaration.values);
+  const effortMap = {};
+  const levels = [];
+  const remember = (level, wire) => {
+    if (!allowed.has(wire) || effortMap[level]) return;
+    effortMap[level] = wire;
+    levels.push(level);
+  };
+  if (allowed.has('none') || allowed.has('minimal')) remember('off', allowed.has('none') ? 'none' : 'minimal');
+  for (const [level, wire] of OPENCODE_GO_UI_TO_DECLARED) {
+    if (level === 'off') continue;
+    remember(level, wire);
+  }
+  for (const wire of declaration.values) {
+    if (!Object.values(effortMap).includes(wire)) remember(wire, wire);
+  }
+  return {
+    supported: true,
+    paramStyle: declaration.style,
+    effortLevels: levels.length ? levels : ['default'],
+    defaultEffort: effortMap.default ? 'default' : (levels[0] || 'default'),
+    effortMap,
+  };
+}
+
 function applyOpenCodeGoModelReasoningProfile(capabilities, model) {
-  const name = String(model || '').trim();
-  if (!name) return;
-  const profile = OPENCODE_GO_MODEL_REASONING_PROFILES.find((entry) => entry.match.test(name));
-  if (!profile) return;
+  const name = String(model || '').trim().toLowerCase();
+  const declaration = OPENCODE_GO_MODEL_REASONING[name];
+  if (!declaration) return;
+  const reasoning = openCodeGoReasoningFromDeclaration(declaration);
   capabilities.reasoning = {
-    ...profile.reasoning,
-    effortMap: { ...profile.reasoning.effortMap },
+    ...reasoning,
+    effortMap: { ...reasoning.effortMap },
   };
 }
 
@@ -1520,19 +1566,19 @@ export function resolveChannel(config = {}) {
       || descriptor.capabilities
       || {},
   );
-  // OpenCode Go: 常开思考模型（GLM-5.3 系等）在 wire 级能力之上追加按模型档位契约，
-  // 先于用户覆盖应用，config.reasoningEffortMap 仍可显式改写。
+  // OpenCode Go 的模型声明优先于已保存的旧五档。
+  // 未声明档位的模型保持协议默认（空映射 = 不发送思考强度）。
   if (isOpenCodeGo) {
     applyOpenCodeGoModelReasoningProfile(capabilities, config.model);
   }
-  if (config.supportsReasoning !== undefined) {
+  if (!isOpenCodeGo && config.supportsReasoning !== undefined) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
       supported: Boolean(config.supportsReasoning),
     };
     if (!capabilities.reasoning.supported) capabilities.reasoning.paramStyle = 'none';
   }
-  if (config.reasoningParamStyle) {
+  if (!isOpenCodeGo && config.reasoningParamStyle) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
       paramStyle: config.reasoningParamStyle,
@@ -1540,7 +1586,7 @@ export function resolveChannel(config = {}) {
     };
   }
   const reasoningEffortMap = normalizeReasoningEffortMap(config.reasoningEffortMap);
-  if (reasoningEffortMap) {
+  if (!isOpenCodeGo && reasoningEffortMap) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
       effortMap: reasoningEffortMap,

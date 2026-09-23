@@ -559,8 +559,7 @@ describe('service templates', () => {
     assert.equal(resolvedGlm.headers.Authorization, 'Bearer go-key');
     assert.equal(resolvedGlm.capabilities.reasoning.paramStyle, 'openai-effort');
 
-    // GLM-5.3 系是常开思考模型（上游 400 [1210]：仅接受 low/high/max）：
-    // 按模型档位契约覆盖 wire 级默认，off/default 收敛为 low，xhigh 收敛为 max。
+    // GLM-5.3 目录声明 low/high/max。界面高档映射到 high，极高映射到 max。
     const resolvedGlmFlash = resolveChannel({
       channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
@@ -569,21 +568,24 @@ describe('service templates', () => {
     });
     assert.equal(resolvedGlmFlash.wire, 'openai-chat');
     assert.deepEqual(resolvedGlmFlash.reasoningEffortMap, {
-      off: 'low',
       low: 'low',
-      default: 'low',
-      medium: 'high',
+      default: 'high',
       high: 'high',
       max: 'max',
       xhigh: 'max',
     });
-    assert.deepEqual(resolvedGlmFlash.reasoningEffortLevels, ['off', 'low', 'default', 'high', 'xhigh']);
-    assert.equal(resolvedGlmFlash.reasoningDefaultEffort, 'low');
+    assert.deepEqual(resolvedGlmFlash.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
+    assert.equal(resolvedGlmFlash.reasoningDefaultEffort, 'default');
 
-    // glm-5.2 不在常开思考模型名单内，保持 wire 级默认（无按模型 effortMap）。
-    assert.equal(resolvedGlm.reasoningEffortMap, undefined);
+    // glm-5.2 只有 high/max，不发明 low 或 medium。
+    assert.deepEqual(resolvedGlm.reasoningEffortMap, {
+      default: 'high',
+      high: 'high',
+      max: 'max',
+      xhigh: 'max',
+    });
 
-    // Wire 隔离：默认模型 gpt-5.6-luna（openai-responses）不受 GLM 档位契约影响。
+    // Luna 使用自己的 Responses 档位，包含关闭和极高。
     const resolvedLuna = resolveChannel({
       channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
@@ -592,21 +594,24 @@ describe('service templates', () => {
     });
     assert.equal(resolvedLuna.wire, 'openai-responses');
     assert.equal(resolvedLuna.endpoint, 'https://opencode.ai/zen/go/v1/responses');
-    assert.equal(resolvedLuna.reasoningEffortMap, undefined);
+    assert.equal(resolvedLuna.reasoningEffortMap.off, 'none');
+    assert.equal(resolvedLuna.reasoningEffortMap.xhigh, 'xhigh');
     assert.equal(resolvedLuna.reasoningDefaultEffort, 'default');
 
-    // Anthropic wire（claude 系）同样不受 GLM profile 影响。
-    assert.equal(resolvedClaude.reasoningEffortMap, undefined);
+    // Claude 在 OpenCode Go 目录没有档位，只保留开关。
+    assert.deepEqual(resolvedClaude.reasoningEffortMap, {});
+    assert.deepEqual(resolvedClaude.reasoningEffortLevels, ['off', 'default']);
 
-    // 用户手工配置的 reasoningEffortMap 优先于按模型 profile。
+    // 已保存的旧映射不能盖住模型声明。
     const resolvedGlmCustom = resolveChannel({
       channelId: CHANNEL_IDS.OPENCODE_GO,
       authMethod: 'api_key',
       apiKey: 'go-key',
       model: 'glm-5.3-flash',
-      reasoningEffortMap: { default: 'max' },
+      reasoningEffortMap: { default: 'xhigh', xhigh: 'xhigh' },
     });
-    assert.deepEqual(resolvedGlmCustom.reasoningEffortMap, { default: 'max' });
+    assert.equal(resolvedGlmCustom.reasoningEffortMap.default, 'high');
+    assert.equal(resolvedGlmCustom.reasoningEffortMap.xhigh, 'max');
 
     for (const model of ['kimi-k3', 'deepseek-v4-flash', 'grok-4.5', 'mimo-v2.5', 'hy3-preview']) {
       const resolved = resolveChannel({
