@@ -136,11 +136,19 @@ export function createUiDeliveryAuthority({ userDataPath, goalPlanStore, current
       requirementRevision: state.requirementRevision, admittedToRunId: '' });
     save(plan.planId, state);
   }
+  function indexedDesktopPreview(planId) {
+    // 列表会对每个已完成计划走到「不需要验收」分支。证据索引是追加式大文件，
+    // 这里只问 planId 是否出现过桌面预览产物，不能每次 listEvidenceIndex() 全量解析。
+    if (typeof goalPlanStore.hasDesktopPreviewEvidence === 'function') {
+      return goalPlanStore.hasDesktopPreviewEvidence(planId);
+    }
+    return goalPlanStore.listEvidenceIndex().some(record =>
+      record.planId === planId && record.capabilityId === 'local.desktop.preview'
+      && record.artifactRefs?.some(ref => ref.startsWith('local-desktop-preview-artifact://')));
+  }
   function read(planId, hostPlan) {
     if (!present(markerFor(planId))) {
-      if (present(fileFor(planId)) || goalPlanStore.listEvidenceIndex().some(record =>
-        record.planId === planId && record.capabilityId === 'local.desktop.preview'
-        && record.artifactRefs?.some(ref => ref.startsWith('local-desktop-preview-artifact://')))) {
+      if (present(fileFor(planId)) || indexedDesktopPreview(planId)) {
         throw new Error('preview-requirement-marker-missing');
       }
       return { required: false };
