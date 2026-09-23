@@ -31,6 +31,25 @@ function canonicalizeModelId(value) {
   return normalized.replace(/[^a-z0-9]+/g, '');
 }
 
+/**
+ * models.dev `reasoning_options` → Peer 思考档位声明。
+ *
+ * 上游形状: [{ type: 'effort', values: ['low','high','max'] }, { type: 'toggle' }, ...]
+ * 返回 undefined 表示「上游未声明 effort 档位」——空声明不发明档位，
+ * 由静态兜底表决定是否启用（协议开关 toggle/budget 不生成档位）。
+ */
+function reasoningEffortValuesFromOptions(options) {
+  if (!Array.isArray(options)) return undefined;
+  for (const option of options) {
+    if (!option || typeof option !== 'object' || option.type !== 'effort') continue;
+    const values = Array.isArray(option.values)
+      ? option.values.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+      : [];
+    if (values.length) return values;
+  }
+  return undefined;
+}
+
 function normalizeModelsDevEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const id = normalizeModelId(entry.id);
@@ -47,6 +66,7 @@ function normalizeModelsDevEntry(entry) {
     maxOutputTokens: finiteNumber(entry.limit?.output),
     supportsVision: inputModalities.includes('image'),
     supportsReasoning: typeof entry.reasoning === 'boolean' ? entry.reasoning : undefined,
+    reasoningEffortValues: reasoningEffortValuesFromOptions(entry.reasoning_options),
     inputPrice: finiteNumber(entry.cost?.input),
     outputPrice: finiteNumber(entry.cost?.output),
     cacheReadPrice: finiteNumber(entry.cost?.cache_read),
@@ -152,17 +172,28 @@ function enrichModelsWithRegistry(models, registry) {
     const providerHasMetadata = model.metadataSource === 'provider';
     const providerHasPricing = model.pricingSource === 'provider';
     const merged = mergeDefinedFallback(model, metadata);
-    return {
+    // 思考档位声明是渠道/注册表二选一，不允许逐字段混合：
+    // 渠道(provider)已声明时保持原值；否则整体采用注册表声明（含「空声明」语义）。
+    // 未声明（两侧都无）时不写该字段，保持目录条目形状稳定。
+    const effortSource = providerHasMetadata
+      ? model
+      : metadata;
+    const effortValues = effortSource.reasoningEffortValues;
+    const next = {
       ...merged,
       metadataSource: providerHasMetadata ? 'provider' : 'models.dev',
       pricingSource: resolvePricingSource(merged, metadata, providerHasPricing),
     };
+    if (effortValues !== undefined) next.reasoningEffortValues = effortValues;
+    return next;
   });
 }
 
 /**
  * Fill missing price fields on a saved provider/model record from models.dev.
  * Never overwrites existing finite prices (user-written or previously filled).
+ * Also backfills missing reasoning effort values (reasoningEffortValues) from the
+ * reference registry — never overwrites an explicit per-model declaration.
  * Returns { item, changed }.
  */
 function fillMissingPricingFromRegistry(item, registry) {
@@ -190,6 +221,11 @@ function fillMissingPricingFromRegistry(item, registry) {
       changed = true;
     }
   }
+  // 思考档位声明回填：仅补缺失，不覆盖显式声明（与价格回填同口径）。
+  if (next.reasoningEffortValues === undefined && metadata.reasoningEffortValues !== undefined) {
+    next.reasoningEffortValues = metadata.reasoningEffortValues;
+    changed = true;
+  }
 
   if (!changed) return { item, changed: false };
 
@@ -216,5 +252,6 @@ export {
   fillMissingPricingFromRegistry,
   lookupModelsDevMetadata,
   normalizeModelsDevEntry,
+  reasoningEffortValuesFromOptions,
   resetModelsDevRegistryCacheForTests,
 };

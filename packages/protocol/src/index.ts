@@ -788,6 +788,9 @@ export interface LlmModelInfo {
   readonly modelOptionValues?: LlmModelOptionValues;
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
+  // 思考档位声明（models.dev reasoning_options 或渠道直返）。undefined 表示上游
+  // 未声明 effort 档位（不发明档位）；空数组/非空数组都是有效声明。
+  readonly reasoningEffortValues?: readonly string[];
   // 元数据可由渠道直返或 models.dev 精确模型 ID 补全；渠道字段始终优先。
   readonly metadataSource?: 'provider' | 'models.dev';
   // models.dev 价格是模型参考价，不代表当前代理渠道的实际结算价格。

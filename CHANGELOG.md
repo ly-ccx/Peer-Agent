@@ -4,9 +4,13 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
+### Improvements
+
+- Thread models.dev `reasoning_options` through the model sync pipeline: fetched model catalogs now carry per-model reasoning effort values, saved model records persist them, and runtime effort levels prefer the synced declaration over the static OpenCode Go declaration table (which remains as fallback). Models without declared levels still get a single default level, so MiMo keeps one level while `deepseek-flash` (DeepSeek V4.1 Flash, missing from the models.dev snapshot) gains low/high/max levels via its static fallback entry alongside `hy3` (none/low/high).
+
 ### Notes
 
-- Nothing yet.
+- Nothing else yet.
 
 ## [0.0.17] - 2026-09-23
 

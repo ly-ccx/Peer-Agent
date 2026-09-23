@@ -1,4 +1,8 @@
-import { enrichModelsWithRegistry, fetchModelsDevRegistry } from './models-dev-registry.mjs';
+import {
+  enrichModelsWithRegistry,
+  fetchModelsDevRegistry,
+  reasoningEffortValuesFromOptions,
+} from './models-dev-registry.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import {
   DEEPSEEK_ANTHROPIC_BASE_URL,
@@ -325,6 +329,9 @@ function normalizeApiModelList(data, wire) {
         id,
         label: m?.display_name || m?.name || id,
       };
+      // 部分兼容网关(opencode-go 等)会在 /models 条目上带 reasoning 声明;
+      // 原样提取 effort values,供拉取→落库→运行时档位链路使用。
+      const declaredEffortValues = reasoningEffortValuesFromOptions(m?.reasoning_options);
       const optionalFields = {
         created: Number.isFinite(createdRaw) ? createdRaw : undefined,
         contextWindow,
@@ -335,6 +342,7 @@ function normalizeApiModelList(data, wire) {
         supportsReasoning: typeof m?.supportsReasoning === 'boolean'
           ? m.supportsReasoning
           : (typeof m?.reasoning === 'boolean' ? m.reasoning : undefined),
+        reasoningEffortValues: declaredEffortValues,
         inputPrice,
         outputPrice,
         cacheReadPrice,
