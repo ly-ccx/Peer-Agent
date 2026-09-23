@@ -119,16 +119,18 @@
 .current-turn-context {
   position: absolute;
   top: 40px;
-  left: 0;
-  /* 监控卡片打开时停在卡片左缘，避免「当前问题」置顶条和右侧任务监控顶栏叠在一起。
-     卡片未打开时 --task-monitor-card 不存在，整段 calc 失效，right 回落到 0。 */
-  right: 0;
-  right: calc(var(--task-monitor-card, unset) + var(--space-3) * 2);
+  /* 跟消息列同一条宽度合同：最多 --chat-content-max，在可用宽度里居中。
+     绝对定位不吃父级 padding，所以监控打开时的右侧让位写在下面的
+     .chat-surface--with-monitor > .current-turn-context。 */
+  /* 左右跟 .chat-thread 的 var(--space-6) 内边距对齐，条边才落在消息列边上。 */
+  left: var(--space-6);
+  right: var(--space-6);
+  /* max-width 而不是 width：监控打开后 right 会内收，固定 width 会把这次让位挤掉。 */
+  width: auto;
+  max-width: min(100%, var(--chat-content-max));
+  margin-inline: auto;
   z-index: 24;
   box-sizing: border-box;
-  /* 宽度跟 left/right 走。写死 100% 会把上面为监控卡片让出的右边距重新撑满。 */
-  width: auto;
-  max-width: none;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -3463,6 +3465,12 @@
   right: calc(var(--task-monitor-card) + var(--space-3) * 2);
 }
 
+/* 置顶条是绝对定位，不吃上面的 padding-right。把右边缘停在卡片左缘，
+   再在剩余宽度里按消息列上限居中。 */
+.chat-surface--with-monitor > .current-turn-context {
+  right: calc(var(--task-monitor-card) + var(--space-3) * 2 + var(--space-6));
+}
+
 @media (max-width: 860px) {
   .chat-surface--with-monitor {
     --task-monitor-card: min(280px, 38vw);
@@ -3470,24 +3478,39 @@
 }
 
 /* Respond to the remaining conversation width, not the whole app window.
- * With Workbench open, stack the information card above the thread instead of
- * shrinking the conversation to a narrow strip. */
+ * Without room for a side card, show an overlay: opening it must not move
+ * the thread, composer, message rail, or pinned question. */
 @container conversation-space (max-width: 640px) {
   .chat-surface--with-monitor {
     padding-right: 0;
-    padding-top: min(38vh, 340px);
   }
   .chat-surface--with-monitor > .task-monitor-rail {
     top: 48px;
     left: var(--space-3);
     right: var(--space-3);
-    bottom: auto;
     width: auto;
-    height: calc(min(38vh, 340px) - 56px);
+    /* 浮层盖在置顶条之上，不能通过下推正文来避免覆盖。 */
+    z-index: 31;
+    /* Ancestor opacity animation cuts off the child's backdrop sampling. */
+    animation: none;
+  }
+  .chat-surface--with-monitor > .task-monitor-rail.motion-enter-slide-inline > .task-monitor-card {
+    animation: motion-enter-slide-inline var(--za-motion-medium) var(--za-ease-out) backwards;
+  }
+  .chat-surface--with-monitor > .task-monitor-rail.motion-exit-slide-inline > .task-monitor-card {
+    animation: motion-exit-slide-inline var(--za-motion-fast) var(--za-ease-out) both;
+  }
+  .chat-surface--with-monitor > .task-monitor-rail .task-monitor-card {
+    background: var(--glass-popover);
+    -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
+    backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
+    box-shadow: var(--glass-edge-highlight), 0 8px 28px rgb(0 0 0 / 12%);
   }
   .chat-surface--with-monitor > .message-rail {
     right: var(--space-2);
-    top: min(38vh, 340px);
+  }
+  .chat-surface--with-monitor > .current-turn-context {
+    right: var(--space-6);
   }
 }
 

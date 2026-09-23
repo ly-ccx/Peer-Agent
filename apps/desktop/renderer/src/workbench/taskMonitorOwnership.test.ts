@@ -39,11 +39,33 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(cardBlock, /box-shadow:/);
   assert.match(cardBlock, /flex: 0 1 auto/);
   assert.match(chatStyles, /\.chat-surface--with-monitor > \.message-rail\s*\{\s*right: calc\(var\(--task-monitor-card\)/);
-  // 置顶条跟消息列同宽居中；监控打开时右边缘停在卡片左缘，窄窗叠放时不再按右侧让位。
-  assert.match(chatStyles, /\.current-turn-context \{[\s\S]*?max-width: min\(100%, var\(--chat-content-max\)\);/);
-  assert.match(chatStyles, /\.current-turn-context \{[\s\S]*?margin-inline: auto;/);
+  // 置顶条跟消息列同宽居中；宽窗给侧栏让位，窄窗浮层不改变消息列。
+  // 只检查独立规则，禁止跨越后续选择器误匹配，也不能匹配 selection-child-banner 的后代规则。
+  const pinnedRule = chatStyles.match(/^\.current-turn-context \{([^}]*)\}/m)?.[1] ?? '';
+  assert.match(pinnedRule, /max-width: min\(100%, var\(--chat-content-max\)\);/);
+  assert.match(pinnedRule, /margin-inline: auto;/);
+  assert.match(pinnedRule, /left: var\(--space-6\);/);
+  assert.match(pinnedRule, /right: var\(--space-6\);/);
+  assert.match(pinnedRule, /width: auto;/);
   assert.match(chatStyles, /\.chat-surface--with-monitor > \.current-turn-context \{\s*right: calc\(var\(--task-monitor-card\) \+ var\(--space-3\) \* 2 \+ var\(--space-6\)\);/);
   assert.match(chatStyles, /@container conversation-space \(max-width: 640px\) \{[\s\S]*?\.chat-surface--with-monitor > \.current-turn-context \{\s*right: var\(--space-6\);/);
+  const narrowRules = chatStyles.slice(chatStyles.indexOf('@container conversation-space (max-width: 640px)')).split('/* batch_search')[0];
+  const narrowSurface = narrowRules.match(/\.chat-surface--with-monitor \{([^}]*)\}/)?.[1] ?? '';
+  const narrowPinned = narrowRules.match(/\.chat-surface--with-monitor > \.current-turn-context \{([^}]*)\}/)?.[1] ?? '';
+  const narrowRail = narrowRules.match(/\.chat-surface--with-monitor > \.message-rail \{([^}]*)\}/)?.[1] ?? '';
+  assert.match(narrowSurface, /padding-right: 0;/);
+  assert.doesNotMatch(narrowRules, /padding-top:|\.chat-thread|\.chat-composer/);
+  assert.doesNotMatch(narrowPinned, /top:|margin/);
+  assert.doesNotMatch(narrowRail, /top:/);
+  assert.match(narrowRail, /right: var\(--space-2\);/);
+  const floatingCard = narrowRules.match(/\.chat-surface--with-monitor > \.task-monitor-rail \{([^}]*)\}/)?.[1] ?? '';
+  assert.match(floatingCard, /z-index: 31;/); // 高于置顶条，而不是把置顶条下推。
+  assert.match(floatingCard, /width: auto;/);
+  assert.match(floatingCard, /animation: none;/); // Ancestor must not isolate backdrop sampling.
+  assert.match(narrowRules, /\.motion-enter-slide-inline > \.task-monitor-card \{\s*animation: motion-enter-slide-inline[^;]*backwards;/);
+  assert.match(narrowRules, /\.motion-exit-slide-inline > \.task-monitor-card \{\s*animation: motion-exit-slide-inline/);
+  assert.match(narrowRules, /backdrop-filter: blur\(var\(--blur-popover\)\) saturate\(var\(--blur-saturate\)\)/);
+  assert.match(monitorView, /className="task-monitor-card" onAnimationEnd=/);
   // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
   assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
   assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
