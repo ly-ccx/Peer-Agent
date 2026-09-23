@@ -54,6 +54,32 @@ const SUBSCRIPTION_CATALOG = [
     supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
+  {
+    id: 'gpt-6-sol',
+    label: 'GPT-6 Sol',
+    contextWindow: 272_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.2,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
+    id: 'gpt-6-luna',
+    label: 'GPT-6 Luna',
+    contextWindow: 272_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 0.1,
+    outputPrice: 0.5,
+    cacheReadPrice: 0.01,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
   // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
   // Codex 原生强度包含 xhigh/max 等值；GPT-5.6 完整暴露五档，避免将 xhigh 与 max 压缩为同一产品档位。
   // ChatGPT OAuth 订阅可用上下文窗口为 272k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。

@@ -39,6 +39,7 @@ demo/
 _eval_gate.mjs
 
 # QA 工件（截图/验收记录，仅在本地产生）
+.peer-preview/
 .peer-agent-qa/
 .peer-agent-real-file-artifact.md
 .peer-agent-artifact-acceptance.md

@@ -12,7 +12,7 @@ const workbenchStyles = readFileSync(new URL('../styles/workbench.css', import.m
 
 function assertIndependentControls(): void {
   assert.match(chatSurface, /const \[taskMonitorOpen, setTaskMonitorOpen\] = useState\(false\)/);
-  assert.match(chatSurface, /\{taskMonitorOpen \? \([\s\S]*?<TaskMonitorRailView/);
+  assert.match(chatSurface, /\{taskMonitorPresent \? \([\s\S]*?<TaskMonitorRailView/);
   assert.match(chatHeader, /onToggleTaskMonitor/);
   assert.match(chatHeader, /<WorkbenchToggle isZh=\{isZh\}/);
   assert.doesNotMatch(chatHeader, /onToggleTaskMonitor[\s\S]{0,220}setOpen|setActiveTab/);
@@ -39,6 +39,11 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(cardBlock, /box-shadow:/);
   assert.match(cardBlock, /flex: 0 1 auto/);
   assert.match(chatStyles, /\.chat-surface--with-monitor > \.message-rail\s*\{\s*right: calc\(var\(--task-monitor-card\)/);
+  // 置顶条跟消息列同宽居中；监控打开时右边缘停在卡片左缘，窄窗叠放时不再按右侧让位。
+  assert.match(chatStyles, /\.current-turn-context \{[\s\S]*?max-width: min\(100%, var\(--chat-content-max\)\);/);
+  assert.match(chatStyles, /\.current-turn-context \{[\s\S]*?margin-inline: auto;/);
+  assert.match(chatStyles, /\.chat-surface--with-monitor > \.current-turn-context \{\s*right: calc\(var\(--task-monitor-card\) \+ var\(--space-3\) \* 2 \+ var\(--space-6\)\);/);
+  assert.match(chatStyles, /@container conversation-space \(max-width: 640px\) \{[\s\S]*?\.chat-surface--with-monitor > \.current-turn-context \{\s*right: var\(--space-6\);/);
   // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
   assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
   assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
@@ -52,7 +57,7 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(monitorView, /browserSession\.tabs/);
   assert.match(monitorView, /查看更多 \(\$\{total - limit\}\)/);
   assert.doesNotMatch(monitorView, /setActiveTab\('documents'\)/);
-  assert.match(monitorView, /className="task-monitor-rail" aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);
+  assert.match(monitorView, /aria-label=\{isZh \? '任务监控卡片' : 'Task monitor card'\}/);
 });
 
 // 轴：监控卡片开关 × 独立 Workbench 开关（四格共用同一结构证据，真机逐格点击验证 DOM）。
@@ -88,8 +93,28 @@ test('输入框只留环境状态，源头和 Worktree 控制集中在监控栏'
 test('切会话或新建任务时收起任务监控，避免把上一会话的开栏带到空草稿', () => {
   assert.match(
     chatSurface,
-    /useEffect\(\(\) => \{\s*setTaskMonitorOpen\(false\);\s*\}, \[conversationId\]\);/,
+    /useEffect\(\(\) => \{\s*setTaskMonitorOpen\(false\);\s*setTaskMonitorPresent\(false\);\s*\}, \[conversationId\]\);/,
   );
+});
+
+test('卡片开关与挂载分离，关闭后播退场再卸载，快速重开换新节点', () => {
+  assert.match(chatSurface, /const \[taskMonitorPresent, setTaskMonitorPresent\] = useState\(false\)/);
+  assert.match(chatSurface, /setTaskMonitorEpoch\(\(epoch\) => epoch \+ 1\);\s*setTaskMonitorPresent\(true\);\s*setTaskMonitorOpen\(true\)/);
+  assert.match(chatSurface, /key=\{taskMonitorEpoch\}/);
+  assert.match(chatSurface, /visible=\{taskMonitorOpen\}/);
+  assert.match(chatSurface, /onExitComplete=\{\(\) => setTaskMonitorPresent\(false\)\}/);
+  assert.match(monitorView, /if \(!visible\) \{\s*if \(prefersReducedMotion\(\)\) onExitComplete\(\);\s*else startExit\(\)/);
+  assert.match(monitorView, /event\.target === event\.currentTarget && event\.animationName === 'motion-exit-slide-inline'/);
+});
+
+test('横向进入/退出动效复用通用基元，减少动态效果时立即完成退场', () => {
+  const motionStyles = readFileSync(new URL('../styles/motion.css', import.meta.url), 'utf8');
+  assert.match(monitorView, /exiting \? 'motion-exit-slide-inline' : 'motion-enter-slide-inline'/);
+  assert.match(workbenchStyles, /\.task-monitor-rail\.motion-exit-slide-inline \{\s*pointer-events: none;/);
+  assert.doesNotMatch(workbenchStyles, /task-monitor-card-in/);
+  assert.match(motionStyles, /\.motion-enter-slide-inline \{\s*animation: motion-enter-slide-inline/);
+  assert.match(motionStyles, /\.motion-exit-slide-inline \{\s*animation: motion-exit-slide-inline/);
+  assert.match(monitorView, /if \(prefersReducedMotion\(\)\) onExitComplete\(\)/);
 });
 
 test('监控栏分行投影当前工作区 HEAD 与任务源头', () => {

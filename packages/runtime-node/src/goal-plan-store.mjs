@@ -21,6 +21,7 @@ import { normalizeGoalCheckpoint, validateGoalCheckpoint } from '@peer-agent/run
 import {
   assertAcceptanceCloseGate,
   collectHeldEvidenceRefs,
+  DESKTOP_PREVIEW_CAPABILITY,
   isAcceptanceClosePatch,
 } from '@peer-agent/protocol';
 import { normalizeVisualRepair } from './goal-visual-repair.mjs';
@@ -1957,6 +1958,10 @@ export function createGoalPlanStore({
   const changeFile = path.join(storeDir, '.changes.jsonl');
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
+  // 桌面预览产物只占证据索引里的少数 planId。listPlans 会对每个 completed
+  // 计划问一次「有没有预览产物」；索引可达数十 MB，不能为此反复全量解析。
+  // 缓存按 mtime+size 失效，本进程 append 时按写入字节数增量更新。
+  let desktopPreviewPlanCache = null; // { mtimeMs, size, planIds: Set<string> }
   /** listPlans 归一化结果缓存：index mtime+size 未变时复用，避免反复 normalize×N。 */
   let listPlansCache = null; // { mtimeMs, size, plans }
   function invalidateListPlansCache() {
@@ -2219,6 +2224,71 @@ export function createGoalPlanStore({
       .filter(Boolean);
   }
 
+  function recordHasDesktopPreviewArtifact(record) {
+    return Boolean(
+      record?.planId
+      && record.capabilityId === DESKTOP_PREVIEW_CAPABILITY
+      && record.artifactRefs?.some((ref) => ref.startsWith('local-desktop-preview-artifact://')),
+    );
+  }
+
+  function readDesktopPreviewPlanIds() {
+    let stat = null;
+    try {
+      stat = statSync(evidenceIndexFile);
+    } catch {
+      desktopPreviewPlanCache = null;
+      return new Set();
+    }
+    if (
+      desktopPreviewPlanCache
+      && desktopPreviewPlanCache.mtimeMs === stat.mtimeMs
+      && desktopPreviewPlanCache.size === stat.size
+    ) {
+      return desktopPreviewPlanCache.planIds;
+    }
+    const planIds = new Set();
+    for (const record of readJsonl(evidenceIndexFile)) {
+      const normalized = normalizeEvidenceIndexRecord(record);
+      if (recordHasDesktopPreviewArtifact(normalized)) planIds.add(normalized.planId);
+    }
+    desktopPreviewPlanCache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      planIds,
+    };
+    return planIds;
+  }
+
+  function hasDesktopPreviewEvidence(planId) {
+    const normalizedPlanId = normalizeOptionalString(planId);
+    if (!normalizedPlanId) return false;
+    return readDesktopPreviewPlanIds().has(normalizedPlanId);
+  }
+
+  function noteDesktopPreviewEvidenceAppend(record, sizeBefore) {
+    if (!desktopPreviewPlanCache) return;
+    if (desktopPreviewPlanCache.size !== sizeBefore) {
+      desktopPreviewPlanCache = null;
+      return;
+    }
+    let stat = null;
+    try {
+      stat = statSync(evidenceIndexFile);
+    } catch {
+      desktopPreviewPlanCache = null;
+      return;
+    }
+    const written = Buffer.byteLength(`${JSON.stringify(record)}\n`);
+    if (stat.size !== sizeBefore + written) {
+      desktopPreviewPlanCache = null;
+      return;
+    }
+    if (recordHasDesktopPreviewArtifact(record)) desktopPreviewPlanCache.planIds.add(record.planId);
+    desktopPreviewPlanCache.mtimeMs = stat.mtimeMs;
+    desktopPreviewPlanCache.size = stat.size;
+  }
+
   function findEvidenceIndexRecords(refs) {
     const normalizedRefs = normalizeEvidenceRefList(refs);
     const missing = normalizedRefs.filter(
@@ -2270,7 +2340,14 @@ export function createGoalPlanStore({
     const mergedRecords = [];
     for (const record of records) {
       const merged = mergeEvidenceIndexRecords(evidenceRecordCache.get(record.evidenceRef), record);
+      let sizeBefore = 0;
+      try {
+        sizeBefore = statSync(evidenceIndexFile).size;
+      } catch {
+        sizeBefore = 0;
+      }
       appendJsonl(evidenceIndexFile, merged);
+      noteDesktopPreviewEvidenceAppend(merged, sizeBefore);
       missingEvidenceRefCache.delete(record.evidenceRef);
       evidenceRecordCache.set(record.evidenceRef, merged);
       mergedRecords.push(merged);
@@ -4534,6 +4611,7 @@ export function createGoalPlanStore({
     recordVerifierRun,
     recordEvidenceRefs,
     listEvidenceIndex: readEvidenceIndex,
+    hasDesktopPreviewEvidence,
     findEvidenceIndexRecords,
     recordTaskEvidence,
     cancelOpenTasks,

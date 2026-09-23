@@ -66,6 +66,27 @@ test('GPT-6 Astra uses subscription context with official capability and pricing
   assert.deepEqual(model.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
 });
 
+test('GPT-6 Sol and Luna use subscription context with official pricing', () => {
+  const expected = new Map([
+    ['gpt-6-sol', { label: 'GPT-6 Sol', inputPrice: 2, cacheReadPrice: 0.2, outputPrice: 10 }],
+    ['gpt-6-luna', { label: 'GPT-6 Luna', inputPrice: 0.1, cacheReadPrice: 0.01, outputPrice: 0.5 }],
+  ]);
+  for (const [id, pricing] of expected) {
+    const model = getSubscriptionModelMetadata(id);
+    assert.ok(model);
+    assert.equal(model.label, pricing.label);
+    assert.equal(model.contextWindow, 400_000);
+    assert.equal(model.maxOutputTokens, 128_000);
+    assert.equal(model.inputPrice, pricing.inputPrice);
+    assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
+    assert.equal(model.outputPrice, pricing.outputPrice);
+    assert.equal(model.supportsVision, true);
+    assert.equal(model.supportsReasoning, true);
+    assert.equal(model.supportsPromptCaching, true);
+    assert.deepEqual(model.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  }
+});
+
 test('GPT-5.6 subscription models expose cache pricing and max reasoning', () => {
   const expected = new Map([
     ['gpt-5.6-sol', { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 }],
@@ -106,6 +127,8 @@ test('subscription models expose 400K and 1M context tiers', () => {
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-astra'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-sol'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-luna'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-terra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-luna'), true);
@@ -129,6 +152,8 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
     res.models.map((m) => m.id),
     [
       'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -142,12 +167,14 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 7);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 9);
 });
 
 test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {
   assert.equal(isSubscriptionUsableModel('gpt-5.5'), false);
   assert.equal(isSubscriptionUsableModel('gpt-6-astra'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-6-sol'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-6-luna'), true);
   assert.equal(isSubscriptionUsableModel('gpt-5.4-mini'), true);
   assert.equal(isSubscriptionUsableModel('gpt-4o'), false);
   assert.equal(isSubscriptionUsableModel('o3'), false);

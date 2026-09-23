@@ -63,7 +63,7 @@ export interface WorkbenchFilesTarget {
   readonly nonce: number;
 }
 
-export const WORKBENCH_DEFAULT_WIDTH = 600;
+export const WORKBENCH_DEFAULT_WIDTH = 420;
 export const WORKBENCH_MIN_WIDTH = 320;
 /** 键盘 Home / 旧调用仍可用；拖拽上限改走窗口宽度，不再被 900px 卡住。 */
 export const WORKBENCH_MAX_WIDTH = 900;
