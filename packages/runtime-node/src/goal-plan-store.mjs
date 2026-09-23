@@ -1941,6 +1941,7 @@ export function createGoalPlanStore({
   readWorkspaceHead,
   readUiDelivery,
   onUiDeliveryRequired,
+  onPlanCompleted,
 } = {}) {
   // Intake 期 UI 交付判定（B-level seam）：goal 契约建立/修订/intake 升级时对
   // 契约文本跑纯函数分类（goal-intake-ui-delivery），命中则回调宿主。Desktop 把
@@ -2567,6 +2568,13 @@ export function createGoalPlanStore({
       changeKind: options.changeKind ?? 'persist',
       ...(options.runner ? { runner: options.runner } : {}),
     });
+    // 完成迁移（非 completed → completed）一次性通知宿主：desktop 据此落盘
+    // 验收报告（goal-reports）。回调异常绝不影响已写盘的完成态。
+    if (nextStatus === TERMINAL_OK && prevStatus !== TERMINAL_OK && typeof onPlanCompleted === 'function') {
+      try {
+        onPlanCompleted(next, { prevStatus });
+      } catch { /* 报告失败不影响完成态 */ }
+    }
     return next;
   }
 

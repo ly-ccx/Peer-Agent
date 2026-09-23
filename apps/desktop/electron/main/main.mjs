@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
+import { createGoalAcceptanceReportWriter } from './goal-acceptance-report-writer.mjs';
 import { createWebUiCapture } from './runtime-gateway/web-ui-capture.mjs';
 import { runPlanVisualVerifier } from './runtime-gateway/desktop-visual-review.mjs';
 import { createDesktopHostVisualReview } from './runtime-gateway/desktop-host-visual-review.mjs';
@@ -469,8 +470,12 @@ function readDesktopWorkspaceHead(workspaceRoot) {
 }
 
 let desktopPreviewProvider = null;
+let goalAcceptanceReportWriter = null;
 const goalPlanStore = createGoalPlanStore({
   readWorkspaceHead: readDesktopWorkspaceHead,
+  // 完成迁移 → 自动生成验收报告（含截图工件引用）到 ~/.peer-agent/goal-reports/。
+  // 写入器在下方构造；此前触发的完成迁移由 optional chaining 兜底跳过。
+  onPlanCompleted: (plan) => goalAcceptanceReportWriter?.writeForPlan(plan),
   ...(!isPackaged && !isManagedPreview ? {
     readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
     // Intake 期 UI 交付判定命中 → 前置武装视觉验证门（B-level seam）：复用
@@ -1252,6 +1257,9 @@ desktopPreviewProvider = !isPackaged && !isManagedPreview
   })
   : null;
 if (desktopPreviewProvider) registerDesktopPreviewService(goalPlanStore, workspaceRoot, desktopPreviewProvider);
+// 验收报告写入器：completed 迁移时把证据索引与视觉判定汇总成 markdown
+// 落盘 ~/.peer-agent/goal-reports/<planId>.md（见 goal-acceptance-report-writer.mjs）。
+goalAcceptanceReportWriter = createGoalAcceptanceReportWriter({ goalPlanStore });
 // 网页侧复用同一套账本、产物仓与宿主复核调度器：只有显式声明计划归属的截图才会走它。
 // 复用（而不是新建调度器）保证每个计划仍只有一条在飞复核。
 const webUiCapture = createWebUiCapture({
