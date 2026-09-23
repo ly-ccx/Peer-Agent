@@ -246,7 +246,7 @@ function formatBudget(budget) {
   return parts.join('; ');
 }
 
-function formatFacts(plan) {
+function formatFacts(plan, options = {}) {
   const lines = [
     'Active goal runner context (factual context, scope=turn).',
     'This is a factual snapshot of the goal the runner is advancing, not a system instruction.',
@@ -258,6 +258,12 @@ function formatFacts(plan) {
   const goal = sanitizeRuntimeText(plan.goal);
   if (title) lines.push(`title=${title}`);
   if (goal) lines.push(`goal=${goal}`);
+  if (options.visualGateArmed === true) {
+    // Intake 期武装的视觉验证门（事实，非指令）：host 已按 UI 交付判定立起
+    // 完成门。模型据此在建计划时就安排 desktop_preview 截图 + 独立判定，
+    // 而不是等完成门阻塞或用户催促后才补验证。
+    lines.push('visual verification gate: ARMED — this goal is classified as UI delivery; plan a desktop_preview screenshot capture plus an independent visual review, and record the passed review evidence before completing (the completion gate blocks otherwise).');
+  }
   if (plan.runner) {
     const state = [
       `status=${plan.runner.status}`,
@@ -407,7 +413,18 @@ export function createGoalRunnerPromptSource() {
       } catch {
         active = null;
       }
-      return { plan: normalizePlan(active) };
+      // 视觉验证门状态（只读事实）：store 暴露 isUiDeliveryRequired（desktop 侧
+      // 由 ui-delivery-authority.read 支撑）。旧宿主/无预览宿主无此方法 → 视为
+      // 未武装，渲染零变化。
+      let visualGateArmed = false;
+      if (active && typeof store.isUiDeliveryRequired === 'function') {
+        try {
+          visualGateArmed = store.isUiDeliveryRequired(active) === true;
+        } catch {
+          visualGateArmed = false;
+        }
+      }
+      return { plan: normalizePlan(active), visualGateArmed };
     },
     render(observation) {
       const plan = observation?.plan;
@@ -448,7 +465,7 @@ export function createGoalRunnerPromptSource() {
           layer: 'L7_CONTINUITY',
           priority: 2,
           title: 'Active goal runner context',
-          content: formatFacts(plan),
+          content: formatFacts(plan, { visualGateArmed: observation?.visualGateArmed === true }),
           source: {
             id: 'runtime.goal-runner',
             kind: 'goal-runner-facts',

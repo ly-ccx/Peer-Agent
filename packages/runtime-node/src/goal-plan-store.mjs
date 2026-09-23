@@ -26,6 +26,7 @@ import {
 } from '@peer-agent/protocol';
 import { normalizeVisualRepair } from './goal-visual-repair.mjs';
 import { projectUiCompletion } from './goal-ui-completion.mjs';
+import { classifyUiDeliveryIntake } from './goal-intake-ui-delivery.mjs';
 
 /**
  * Goal 计划持久化 store —— 见 Goal 模式设计。
@@ -1939,7 +1940,36 @@ export function createGoalPlanStore({
   onChange,
   readWorkspaceHead,
   readUiDelivery,
+  onUiDeliveryRequired,
 } = {}) {
+  // Intake 期 UI 交付判定（B-level seam）：goal 契约建立/修订/intake 升级时对
+  // 契约文本跑纯函数分类（goal-intake-ui-delivery），命中则回调宿主。Desktop 把
+  // 回调接到 ui-delivery-authority.requirePreview，视觉验证完成门因此在开工前
+  // 即武装（而不是等模型自己开预览后才被动立起）。无回调宿主（TUI/无预览）
+  // 时为 no-op；分类异常绝不阻塞契约写入。
+  function armUiDeliveryVerification(plan, meta = {}) {
+    if (typeof onUiDeliveryRequired !== 'function' || !plan) return;
+    if (plan.activation?.kind === 'intake') return;
+    try {
+      const verdict = classifyUiDeliveryIntake({
+        title: plan.title,
+        goal: plan.goal,
+        tasks: plan.tasks,
+        successCriteria: plan.successCriteria,
+      });
+      if (verdict?.required === true) onUiDeliveryRequired(plan, verdict, meta);
+    } catch { /* 判定失败不影响契约本身 */ }
+  }
+  // 只读暴露武装状态：供 System Context source 渲染「视觉验证门已武装」事实，
+  // 也供测试断言。读取失败一律视为未武装（fail-open 只影响提示，不影响完成门）。
+  function isUiDeliveryRequired(plan) {
+    if (typeof readUiDelivery !== 'function' || !plan) return false;
+    try {
+      return readUiDelivery(plan)?.required === true;
+    } catch {
+      return false;
+    }
+  }
   // UI projection may call a host port that still reads getPlan (artifact identity).
   // Re-enter with the candidate already in hand; never recurse through authority.
   const uiCompletionGuarding = new Set();
@@ -3029,7 +3059,7 @@ export function createGoalPlanStore({
     const acceptedAt = typeof draft.activation?.acceptedAt === 'string' && draft.activation.acceptedAt.trim()
       ? draft.activation.acceptedAt.trim()
       : new Date().toISOString();
-    return createPlan({
+    const created = createPlan({
       ...draft,
       tasks,
       status: draft.status || 'accepted',
@@ -3049,6 +3079,8 @@ export function createGoalPlanStore({
       },
       createdBy: draft.createdBy || 'user',
     }, { changeKind: 'goal-accepted' });
+    armUiDeliveryVerification(created, { phase: 'goal-created' });
+    return created;
   }
 
   /**
@@ -3090,7 +3122,7 @@ export function createGoalPlanStore({
     if (!plan) return null;
     const acceptedAt = new Date().toISOString();
     const upgradeRunner = runnerPatchForAcceptedGoalUpgrade(plan.runner);
-    return revisePlan(planId, {
+    const revised = revisePlan(planId, {
       ...patch,
       ...(!plan.targetWorkspacePath && plan.originWorkspacePath
         ? { targetWorkspacePath: plan.originWorkspacePath }
@@ -3108,6 +3140,8 @@ export function createGoalPlanStore({
       revisionReason: patch.revisionReason || 'intake:goal_confirmed',
       changedBy: patch.changedBy || 'goal-runner:intake',
     });
+    armUiDeliveryVerification(revised, { phase: 'intake-promoted' });
+    return revised;
   }
 
   function upsertGoalContract(conversationId, draft = {}) {
@@ -3148,7 +3182,7 @@ export function createGoalPlanStore({
     const upgradeRunner = shouldEmitGoalAccepted
       ? runnerPatchForAcceptedGoalUpgrade(activeGoal.runner)
       : undefined;
-    return revisePlan(activeGoal.planId, {
+    const revised = revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
@@ -3181,6 +3215,8 @@ export function createGoalPlanStore({
       changedBy: changedBy || createdBy || 'agent',
       changeKind: shouldEmitGoalAccepted ? 'goal-accepted' : 'persist',
     });
+    armUiDeliveryVerification(revised, { phase: upgradingFromIntake ? 'intake-promoted' : 'contract-revised' });
+    return revised;
   }
 
   /**
@@ -4612,6 +4648,7 @@ export function createGoalPlanStore({
     recordEvidenceRefs,
     listEvidenceIndex: readEvidenceIndex,
     hasDesktopPreviewEvidence,
+    isUiDeliveryRequired,
     findEvidenceIndexRecords,
     recordTaskEvidence,
     cancelOpenTasks,

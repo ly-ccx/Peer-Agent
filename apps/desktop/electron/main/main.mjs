@@ -473,6 +473,23 @@ const goalPlanStore = createGoalPlanStore({
   readWorkspaceHead: readDesktopWorkspaceHead,
   ...(!isPackaged && !isManagedPreview ? {
     readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
+    // Intake 期 UI 交付判定命中 → 前置武装视觉验证门（B-level seam）：复用
+    // ui-delivery-authority.requirePreview 落盘 required 标记，完成门/预览阻塞/
+    // 视觉修复链路随之生效。identity 为占位指纹，真实预览打开时指纹变化会按
+    // 既有 identityChanged 语义重拍。截图执行仍走 desktop_preview 工具 + 授权链，
+    // 这里只立"需要验收"的事实，不绕过权限、不改工具投影。失败只记日志。
+    onUiDeliveryRequired: (plan, verdict, meta) => {
+      try {
+        desktopPreviewProvider?.authority.requirePreview(plan, {
+          sourceFingerprint: 'intake-pending',
+          buildFingerprint: 'intake-pending',
+          instanceId: `intake-${plan.planId}`,
+        }, 'desktop');
+        console.warn(`[ui-delivery] intake armed: ${plan.planId} phase=${meta?.phase} score=${verdict?.score} reasons=${(verdict?.reasons ?? []).join(';')}`);
+      } catch (error) {
+        console.warn(`[ui-delivery] intake arm failed for ${plan.planId}: ${error?.message || error}`);
+      }
+    },
   } : {}),
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
