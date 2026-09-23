@@ -1972,3 +1972,32 @@ test('getApiKeyRequestConfig leaves catalog config untouched for channels withou
   assert.equal(config.headers.Authorization, 'Bearer gateway-test-key');
   assert.equal(config.modelCatalog, undefined);
 }));
+
+test('reasoningEffortValues stays model-scoped across readAll/writeAll round trips', async () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const created = store.addProvider({
+    provider: 'OpenCode Go',
+    channelId: 'opencode-go',
+    name: 'OpenCode Go',
+    model: 'deepseek-flash',
+    apiKey: 'key-test',
+    reasoningEffortValues: ['low', 'high', 'max'],
+  });
+  assert.deepEqual(created.reasoningEffortValues, ['low', 'high', 'max']);
+
+  // 写盘后：值在模型条目上，不在渠道条目上。
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  const channel = persisted.channels.find((c) => c.id === created.groupId);
+  const model = persisted.models.find((m) => m.id === created.id);
+  assert.equal(channel.reasoningEffortValues, undefined);
+  assert.deepEqual(model.reasoningEffortValues, ['low', 'high', 'max']);
+
+  // 渠道级脏值（历史版本写入）不应覆盖模型级声明，且会被清洗。
+  channel.reasoningEffortValues = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+  writeFileSync(configFile, JSON.stringify(persisted));
+  const reloaded = store.listProviders().find((p) => p.id === created.id);
+  assert.deepEqual(reloaded.reasoningEffortValues, ['low', 'high', 'max']);
+  const cleaned = JSON.parse(readFileSync(configFile, 'utf8'));
+  const cleanedChannel = cleaned.channels.find((c) => c.id === created.groupId);
+  assert.equal(cleanedChannel.reasoningEffortValues, undefined);
+}));
