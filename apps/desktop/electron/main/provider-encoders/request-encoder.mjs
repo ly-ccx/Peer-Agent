@@ -129,7 +129,14 @@ export function encodeOpenAIChatRequest({
   // 思考档位: off(关闭) / low / default / high / xhigh。
   // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
   if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort) {
-    if (effort === 'off') {
+    if (reasoningEffortMap && typeof reasoningEffortMap === 'object') {
+      // Explicit mappings are closed: an unknown selection must not regain
+      // generic OpenAI support. An empty map delegates to server defaults.
+      const key = Object.hasOwn(reasoningEffortMap, effort) ? effort
+        : effort === 'default' && Object.hasOwn(reasoningEffortMap, 'medium') ? 'medium' : undefined;
+      const mapped = key === undefined ? undefined : reasoningEffortMap[key];
+      if (typeof mapped === 'string' && mapped.trim()) body.reasoning_effort = mapped.trim();
+    } else if (effort === 'off') {
       // 默认省略；渠道 effortMap 显式给出 off 时（如 Kimi → none）才下发。
       const offMapped = mappedEffortValue(effort, reasoningEffortMap, null);
       if (offMapped !== undefined && offMapped !== null && offMapped !== '') {
@@ -383,7 +390,8 @@ export function encodeAnthropicMessagesRequest({
       // 可见的摘要思考；type:'adaptive' 是这一代际的推荐用法，与 effort 配套不冲突。
       body.thinking = { type: 'adaptive', display: 'summarized' };
       body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
-    } else if (paramStyle === 'anthropic-enabled-budget') {
+    } else if (paramStyle === 'anthropic-enabled-budget'
+      && !(reasoningEffortMap && typeof reasoningEffortMap === 'object' && !Object.keys(reasoningEffortMap).length)) {
       const budgetTokens = mappedNumericEffort(effort, reasoningEffortMap, ANTHROPIC_THINKING_BUDGET) ?? ANTHROPIC_THINKING_BUDGET.default;
       // max_tokens 必须严格大于 budget_tokens, 并额外预留回复 token;
       // 但整体不得越过渠道声明的输出上限(maxOutputTokens), 否则上游 400。

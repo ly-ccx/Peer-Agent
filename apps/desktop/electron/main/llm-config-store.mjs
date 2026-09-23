@@ -967,14 +967,14 @@ export function createLlmConfigStore({
       // 但渠道明确不支持缓存(如 Qoder promptCache: false)或不可解析时保持 undefined，
       // 避免把「无缓存语义」误判成「禁用缓存」。
       supportsPromptCaching: item.supportsPromptCaching ?? (resolved?.supportsPromptCaching === true ? true : undefined),
-      // DeepSeek / Kimi / Grok：渠道级思考契约优先于模型历史缓存。
-      // 避免旧档位（DeepSeek off/default、Grok 三档）盖住渠道新声明。
-      // 其他渠道保持原语义：模型字段优先，缺失时再回落渠道档位；paramStyle 不静默回落渠道。
+      // DeepSeek / Kimi / Grok / OpenCode Go：渠道级思考契约优先于模型历史缓存。
+      // 避免旧五档盖住模型自己的声明。其他渠道仍是模型字段优先。
       reasoningParamStyle: (
         item.channelId === 'deepseek'
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
         || item.channelId === 'grok'
+        || item.channelId === 'opencode-go'
       )
         ? (resolved?.reasoningParamStyle ?? item.reasoningParamStyle ?? undefined)
         : (item.reasoningParamStyle ?? undefined),
@@ -983,6 +983,7 @@ export function createLlmConfigStore({
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
         || item.channelId === 'grok'
+        || item.channelId === 'opencode-go'
       )
         ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
         : (item.reasoningEffortMap ?? undefined),
@@ -991,6 +992,7 @@ export function createLlmConfigStore({
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
         || item.channelId === 'grok'
+        || item.channelId === 'opencode-go'
           ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
           : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
       ) ?? undefined,
@@ -999,6 +1001,7 @@ export function createLlmConfigStore({
         || item.channelId === 'kimi-coding-plan'
         || item.channelId === 'moonshot'
         || item.channelId === 'grok'
+        || item.channelId === 'opencode-go'
           ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
           : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
       ) ?? undefined,

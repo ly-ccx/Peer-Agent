@@ -200,6 +200,6 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
       high: 'high',
     };
     assert.equal(make('default', grokMap).reasoning.effort, 'high');
-    assert.equal(make('off', grokMap).reasoning, undefined);
+    assert.equal(make('off', grokMap).reasoning.effort, 'high');
   });
 });

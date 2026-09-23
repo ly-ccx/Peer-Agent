@@ -160,10 +160,11 @@ export function encodeOpenAIResponsesRequest({
   // OpenAI docs say summary is optional and off unless explicitly set.
   // Forcing summary:'auto' produced sticky GPT status phrases and
   // mislabeled long Grok/OpenAI summary streams as "thinking".
-  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
-    body.reasoning = {
-      effort: mappedEffortValue(effort, reasoningEffortMap) ?? REASONING_EFFORT[effort] ?? 'medium',
-    };
+  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort) {
+    const mapped = reasoningEffortMap && typeof reasoningEffortMap === 'object'
+      ? (effort === 'off' ? reasoningEffortMap.off : mappedEffortValue(effort, reasoningEffortMap))
+      : (effort === 'off' ? undefined : (REASONING_EFFORT[effort] ?? 'medium'));
+    if (mapped) body.reasoning = { effort: mapped };
   }
   return body;
 }
