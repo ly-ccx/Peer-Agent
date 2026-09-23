@@ -3301,7 +3301,7 @@ export function ChatSurface({
           currentIsolation={deliveryLineKnown ? !!(deliveryLine?.isolated && !deliveryLine.delivered) : null}
           conversationId={conversationId}
           messages={messages}
-          active={isPageActive}
+          active={isPageActive && taskMonitorOpen}
           canSelectSource={canSelectBoundBranch && !isStreaming}
           sourceOptions={composerBranchOptions}
           isolationValue={preferredWorktree ? COMPOSER_ENV_ISOLATION_ON : COMPOSER_ENV_ISOLATION_OFF}
