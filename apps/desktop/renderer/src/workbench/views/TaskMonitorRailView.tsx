@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { prefersReducedMotion, useMotionPresence } from '../../app/hooks/useMotionPresence.ts';
 import {
   projectTaskMonitorArtifacts,
   projectTaskMonitorEnvironment,
@@ -199,6 +200,8 @@ export function TaskMonitorRailView({
   conversationId,
   messages,
   active,
+  visible,
+  onExitComplete,
   canSelectSource = false,
   sourceOptions = [],
   isolationValue,
@@ -231,8 +234,17 @@ export function TaskMonitorRailView({
    * 轮询与广播订阅——那正是 useTaskOverview.performance.test.ts 在守的调用点成本。
    */
   readonly active: boolean;
+  readonly visible: boolean;
+  readonly onExitComplete: () => void;
   readonly onClose: () => void;
 }) {
+  const { exiting, startExit, onAnimationEnd } = useMotionPresence({ onExitComplete, exitDurationMs: 240 });
+  useEffect(() => {
+    if (!visible) {
+      if (prefersReducedMotion()) onExitComplete();
+      else startExit();
+    }
+  }, [visible, startExit, onExitComplete]);
   const workbench = useWorkbenchOptional();
   // 复用 Provider 的单一轮询 reader，避免第二套 poller 重复打主进程。
   const runsReader = useBackgroundRunsContext();
@@ -339,7 +351,14 @@ export function TaskMonitorRailView({
 
 
   return (
-    <aside className="task-monitor-rail" aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}>
+    <aside
+      className={`task-monitor-rail ${exiting ? 'motion-exit-slide-inline' : 'motion-enter-slide-inline'}`}
+      aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}
+      aria-hidden={exiting}
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget && event.animationName === 'motion-exit-slide-inline') onAnimationEnd();
+      }}
+    >
       <div className="task-monitor-card">
         <header className="task-monitor-header">
           <span>{isZh ? '任务信息' : 'Task information'}</span>

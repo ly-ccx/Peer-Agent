@@ -741,10 +741,22 @@ export function ChatSurface({
   const [findOpen, setFindOpen] = useState(false);
   // 任务监控栏归当前会话所有，与 App 级 Workbench 的开关/activeTab 完全独立。
   const [taskMonitorOpen, setTaskMonitorOpen] = useState(false);
-  // ChatSurface 不随 conversationId 卸载；新建任务或切会话时必须收起监控栏，
-  // 否则会把上一会话的开关状态和环境投影带到空草稿。
+  const [taskMonitorPresent, setTaskMonitorPresent] = useState(false);
+  const [taskMonitorEpoch, setTaskMonitorEpoch] = useState(0);
+  // 保留退场中的节点；再次打开时换新节点，旧节点的定时器由卸载清理。
+  const toggleTaskMonitor = () => {
+    if (taskMonitorOpen) {
+      setTaskMonitorOpen(false);
+    } else {
+      setTaskMonitorEpoch((epoch) => epoch + 1);
+      setTaskMonitorPresent(true);
+      setTaskMonitorOpen(true);
+    }
+  };
+  // ChatSurface 不随 conversationId 卸载；切换会话时立即移除旧会话卡片。
   useEffect(() => {
     setTaskMonitorOpen(false);
+    setTaskMonitorPresent(false);
   }, [conversationId]);
   // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
   const [threadScrolled, setThreadScrolled] = useState(false);
@@ -2885,7 +2897,7 @@ export function ChatSurface({
         onFind={() => setFindOpen(true)}
         onClose={onClose}
         taskMonitorOpen={taskMonitorOpen}
-        onToggleTaskMonitor={() => setTaskMonitorOpen((open) => !open)}
+        onToggleTaskMonitor={toggleTaskMonitor}
       />
       {findOpen ? (
         <ChatFindBar
@@ -3276,8 +3288,11 @@ export function ChatSurface({
           onClose={() => setImagePreview(null)}
         />
       ) : null}
-      {taskMonitorOpen ? (
+      {taskMonitorPresent ? (
         <TaskMonitorRailView
+          key={taskMonitorEpoch}
+          visible={taskMonitorOpen}
+          onExitComplete={() => setTaskMonitorPresent(false)}
           isZh={isZh}
           workspacePath={workspacePath ?? null}
           currentHead={workspaceGit?.ok ? workspaceGit.current : null}

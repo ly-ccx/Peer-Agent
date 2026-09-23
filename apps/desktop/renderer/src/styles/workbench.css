@@ -2313,7 +2313,12 @@
     flex-direction: column;
     width: var(--task-monitor-card, clamp(280px, 24%, 340px));
     min-height: 0;
-    animation: task-monitor-card-in 220ms var(--za-ease-standard);
+    --motion-enter-inline-from: 18px;
+    --motion-exit-inline-to: 18px;
+  }
+
+  .task-monitor-rail.motion-exit-slide-inline {
+    pointer-events: none;
   }
 
   .task-monitor-card {
@@ -2329,23 +2334,6 @@
     box-shadow: 0 4px 18px rgb(0 0 0 / 6%);
     overflow: hidden;
     color: var(--za-text);
-  }
-
-  @keyframes task-monitor-card-in {
-    from {
-      opacity: 0;
-      transform: translateX(18px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .task-monitor-rail {
-      animation: none;
-    }
   }
 
   .task-monitor-header {
@@ -2482,6 +2470,7 @@
   .task-monitor-environment-summary {
     width: 100%;
     text-align: left;
+    font-size: var(--ui-font-meta, 12px);
     white-space: normal;
     overflow-wrap: anywhere;
     border: 0;
