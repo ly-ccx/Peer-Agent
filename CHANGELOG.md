@@ -8,6 +8,13 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.0.17] - 2026-09-23
+
+### Fixes
+
+- Send only the reasoning levels declared for each OpenCode Go model. Models without declared levels, including MiMo-V2.6-Flash, no longer receive the global xhigh setting and avoid the HTTP 400 chat failure.
+- Align the desktop pinned bar and restore the frosted task-monitor overlay.
+
 ## [0.0.16] - 2026-09-23
 
 ### Improvements
