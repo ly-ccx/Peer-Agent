@@ -336,7 +336,7 @@ function MainApp() {
       startupSnapshot?.workspaces ?? [],
     ),
   );
-  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string; baseBranch?: string }[]>(
+  const [workspaces, setWorkspaces] = useState<readonly { path: string; name: string }[]>(
     () => startupSnapshot?.workspaces ?? [],
   );
   // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
@@ -1169,7 +1169,6 @@ function MainApp() {
                       setWorkspaces(listed.workspaces.map((item) => ({
                         path: item.path,
                         name: item.name,
-                        baseBranch: item.baseBranch,
                       })));
                     }
                   }}
@@ -1425,7 +1424,6 @@ function MainApp() {
                       setWorkspaces(listed.workspaces.map((item) => ({
                         path: item.path,
                         name: item.name,
-                        baseBranch: item.baseBranch,
                       })));
                     }
                   }}

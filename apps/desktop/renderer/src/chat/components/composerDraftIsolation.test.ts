@@ -184,10 +184,10 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(surface, /planComposerGitChrome/);
   assert.match(surface, /GitWorktreeGlyph/);
   assert.match(surface, /envCapsule\.isolated/);
-  assert.match(surface, /canSelectComposerSourceBranch/);
-  assert.match(surface, /buildComposerBranchOptions/);
-  assert.match(surface, /formatComposerBranchOptionLabel\(option\.value\)/);
-  assert.match(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch: next \}\)/);
+  assert.match(surface, /canSelectBoundBranch = false/);
+  assert.match(surface, /ADR 79：预配置源头（workspace baseBranch）已移除/);
+  assert.doesNotMatch(surface, /workspaceUpdate\(\{ path: workspacePath, baseBranch/);
+  assert.match(surface, /workspaceBaseBranch: null/);
   assert.match(surface, /sourceOptions=\{composerBranchOptions\}/);
   assert.match(surface, /onSelectEnv=\{handleSelectBoundBranch\}/);
   assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);

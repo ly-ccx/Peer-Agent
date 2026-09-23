@@ -456,17 +456,9 @@ let goalWorktreeAdapter = null;
 let goalTaskBranchAdapter = null;
 let goalDeliveryHandoff = null;
 
-function readWorkspaceBaseBranch(workspacePath) {
-  const match = (settingsStore.getAll().workspaces || []).find((item) => item?.path === workspacePath);
-  return typeof match?.baseBranch === 'string' && match.baseBranch.trim()
-    ? match.baseBranch.trim()
-    : null;
-}
-
+// ADR 79：交付绑定跟随工作区实时 HEAD（状态栏环境信息同源），不再读预配置基准分支。
 function readDesktopWorkspaceHead(workspaceRoot) {
-  return resolveWorkspaceHead(workspaceRoot, {
-    preferredBranch: readWorkspaceBaseBranch(workspaceRoot) || undefined,
-  });
+  return resolveWorkspaceHead(workspaceRoot);
 }
 
 let desktopPreviewProvider = null;
@@ -1205,13 +1197,12 @@ goalTaskBranchAdapter = createGoalTaskBranchAdapter({
 });
 goalDeliveryHandoff = createGoalDeliveryHandoff({
   goalPlanStore,
-  resolveMergeTarget: (plan) => {
-    const root = plan?.deliveryBinding?.targetWorkspacePath || plan?.targetWorkspacePath;
-    return readWorkspaceBaseBranch(root)
-      || plan?.deliveryBinding?.targetBranch
-      || plan?.targetBranch
-      || null;
-  },
+  // ADR 79：合回目标以 plan 自身绑定为唯一来源（创建时冻结的实时 HEAD），
+  // 不再回读工作区设置的基准分支。
+  resolveMergeTarget: (plan) =>
+    plan?.deliveryBinding?.targetBranch
+    || plan?.targetBranch
+    || null,
 });
 
 const llmChatService = createLlmChatService({

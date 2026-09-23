@@ -985,7 +985,6 @@ export interface BootstrapPreloadApi {
       name: string;
       addedAt: string;
       linkedFolders?: readonly { path: string; name: string }[];
-      baseBranch?: string;
     }[];
     activeWorkspace: string | null;
   }>;
@@ -1009,7 +1008,6 @@ export interface BootstrapPreloadApi {
     path: string;
     name?: string;
     linkedFolders?: readonly { path: string; name?: string }[];
-    baseBranch?: string | null;
   }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceAddLinkedFolder: (params: { path: string }) => Promise<{
     ok: boolean;

@@ -172,27 +172,10 @@ export function ConversationResultView({
     };
   }, [fromRef, toRef, workspaceRoot]);
 
+  // ADR 79：建议合回目标直接跟随计划快照分支，不再回读工作区设置的基准分支。
   useEffect(() => {
-    let cancelled = false;
-    if (!workspaceRoot) {
-      setSuggestedTarget(snapshotBranch);
-      return;
-    }
-    void clientApi.workspaceList().then(
-      (directory) => {
-        if (cancelled) return;
-        const workspace = directory.workspaces.find((item) => item.path === workspaceRoot);
-        setSuggestedTarget(workspace?.baseBranch?.trim() || snapshotBranch);
-      },
-      () => {
-        if (cancelled) return;
-        setSuggestedTarget(snapshotBranch);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [snapshotBranch, workspaceRoot]);
+    setSuggestedTarget(snapshotBranch);
+  }, [snapshotBranch]);
   const evidenceSources = useMemo(
     () => (item.planSteps ?? []).flatMap((step) => step.artifacts ?? []),
     [item.planSteps],
