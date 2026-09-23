@@ -8,6 +8,19 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.0.16] - 2026-09-23
+
+### Improvements
+
+- Add GPT-6 Sol and Luna to the subscription model catalog.
+- Animate the task information card on entry and exit and narrow the default Workbench width to 420px.
+- Ignore local desktop preview screenshots so acceptance artifacts are not accidentally committed.
+
+### Fixes
+
+- Align the busy composer's English placeholder with the Chinese free-input prompt without changing send behavior.
+- Cache desktop preview evidence membership and refresh it when the evidence index changes externally.
+
 ## [0.0.15] - 2026-09-22
 
 ### Improvements
