@@ -128,3 +128,43 @@ for (const reason of ['http-426', 'current-image-missing']) {
     assert.match(run?.summary || '', new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 }
+
+test('gate-block/失败verifierRun进入tick消息并给出criterionResults收敛指令', () => {
+  const plan = {
+    planId: 'p-gate',
+    title: 'Goal 自动识别 UI 任务并开启截图验证',
+    runner: {
+      verifierRuns: [
+        { verifierRunId: 'visual-verifier:1', status: 'passed' },
+        { verifierRunId: 'vr-9', status: 'failed', failureReason: 'Verification gate failed: c1:criterion_unverified' },
+      ],
+    },
+  };
+  const tick = buildGoalRunnerTickMessage(plan, 9);
+  assert.match(tick, /Last verification gate blocked: Verification gate failed: c1:criterion_unverified/);
+  assert.match(tick, /goal_update_task with criterionResults/);
+  assert.match(tick, /Do not just re-run tests without recording results/);
+});
+
+test('gate-block/ui_delivery类失败不误报criterion指令', () => {
+  const plan = {
+    planId: 'p-ui',
+    title: 'UI 目标',
+    runner: {
+      verifierRuns: [
+        { verifierRunId: 'vr-2', status: 'failed', failureReason: 'Verification gate failed: c1:criterion_unverified; ui_delivery:visual_review_failed' },
+      ],
+    },
+  };
+  const tick = buildGoalRunnerTickMessage(plan, 3);
+  assert.match(tick, /Last verification gate blocked/);
+  assert.doesNotMatch(tick, /goal_update_task with criterionResults/);
+  assert.match(tick, /Resolve the unmet items/);
+});
+
+test('gate-block/无失败verifierRun时tick消息零变化', () => {
+  const plan = { planId: 'p-clean', title: '干净目标', runner: { verifierRuns: [{ status: 'passed' }] } };
+  const tick = buildGoalRunnerTickMessage(plan, 1);
+  assert.doesNotMatch(tick, /Last verification gate blocked/);
+  assert.match(tick, /Continue from the active GoalPlan state/);
+});

@@ -93,10 +93,27 @@ export function describeVisualRepair(plan) {
   ].filter(Boolean).join(' ');
 }
 
+/** Last terminal verification-gate failure, so the next tick can act on it
+ * instead of blindly retrying (fixes the endless "continue → gate failed" loop). */
+export function describeGateBlock(plan) {
+  const runs = Array.isArray(plan?.runner?.verifierRuns) ? plan.runner.verifierRuns : [];
+  const lastFailed = [...runs].reverse().find((run) => run?.status === 'failed' && clip(run?.failureReason));
+  if (!lastFailed) return '';
+  const reason = clip(lastFailed.failureReason);
+  const criterionOnly = /criterion_unverified/.test(reason) && !/ui_delivery/.test(reason);
+  return [
+    `Last verification gate blocked: ${reason}.`,
+    criterionOnly
+      ? 'The mechanical work is done but acceptance results were never recorded. After actually running the acceptance commands, call goal_update_task with criterionResults (criterionId + passed) for every successCriterion, then attempt completion again. Do not just re-run tests without recording results.'
+      : 'Resolve the unmet items above before attempting completion again.',
+  ].join(' ');
+}
+
 export function buildGoalRunnerTickMessage(plan, turnNumber) {
   const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
   const repair = describeVisualRepair(plan);
-  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.${repair ? ` ${repair}` : ''}`;
+  const gateBlock = describeGateBlock(plan);
+  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.${gateBlock ? ` ${gateBlock}` : ''}${repair ? ` ${repair}` : ''}`;
 }
 
 export function scheduleVisualRepair(plan, report, gate, { maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
