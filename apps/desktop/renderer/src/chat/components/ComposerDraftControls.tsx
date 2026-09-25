@@ -248,6 +248,7 @@ const ComposerDraftField = memo(function ComposerDraftField({
       // 覆盖层的包含块就是 .chat-composer 的 padding edge。
       // 视口差 tr-hr 已经是 CSS top/left，不能再扣 host 的 padding/border，否则引用会整体上移一圈内边距。
       const host = textarea.closest('.chat-composer') ?? textarea.parentElement;
+      if (!host) return;
       const hr = host.getBoundingClientRect();
       const tr = textarea.getBoundingClientRect();
       setQuoteFlow({
