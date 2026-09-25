@@ -276,7 +276,6 @@ const INVOKE_CHANNELS = Object.freeze([
   'updater:download',
   'updater:get-status',
   'updater:install',
-  'updater:open-installer',
   'updater:open-release-page',
   'updater:set-channel',
   'usage:cache-hit-rate',

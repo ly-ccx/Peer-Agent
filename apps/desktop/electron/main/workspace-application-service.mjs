@@ -28,14 +28,11 @@ function normalizeLinkedFolders(folders, primaryPath, basename) {
   return result;
 }
 
-function normalizeBaseBranch(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
 function projectWorkspace(workspace, basename) {
   const path = normalizePath(workspace?.path);
   if (!path) return null;
-  const projected = {
+  // ADR 79：不再投影 baseBranch（预配置基准分支已移除，交付绑定跟随实时 HEAD）。
+  return {
     path,
     name: typeof workspace?.name === 'string' && workspace.name.trim()
       ? workspace.name.trim()
@@ -43,9 +40,6 @@ function projectWorkspace(workspace, basename) {
     addedAt: typeof workspace?.addedAt === 'string' ? workspace.addedAt : new Date(0).toISOString(),
     linkedFolders: normalizeLinkedFolders(workspace?.linkedFolders, path, basename),
   };
-  const baseBranch = normalizeBaseBranch(workspace?.baseBranch);
-  if (baseBranch) projected.baseBranch = baseBranch;
-  return projected;
 }
 
 export function createWorkspaceApplicationService(options = {}) {
@@ -177,7 +171,7 @@ export function createWorkspaceApplicationService(options = {}) {
     return { workspaces, activeWorkspace };
   }
 
-  function updateWorkspace({ path, name, linkedFolders, baseBranch } = {}) {
+  function updateWorkspace({ path, name, linkedFolders } = {}) {
     const target = normalizePath(path);
     if (!target) return { ok: false, reason: 'missing-path' };
     const workspaces = configuredWorkspaces();
@@ -188,12 +182,9 @@ export function createWorkspaceApplicationService(options = {}) {
     const nextLinked = linkedFolders === undefined
       ? current.linkedFolders
       : normalizeLinkedFolders(linkedFolders, current.path, basename);
-    const nextBase = baseBranch === undefined
-      ? normalizeBaseBranch(current.baseBranch)
-      : normalizeBaseBranch(baseBranch);
+    // ADR 79：baseBranch 不再是可更新字段；历史设置里残留的值在下次保存时清除。
     const next = { ...current, name: nextName, linkedFolders: nextLinked };
-    if (nextBase) next.baseBranch = nextBase;
-    else delete next.baseBranch;
+    delete next.baseBranch;
     workspaces[index] = next;
     mergeSettings({ workspaces });
     return { ok: true, workspace: workspaces[index] };

@@ -120,10 +120,6 @@ export type TranslationKey =
   | 'settings.git'
   | 'settings.git.branchPrefix'
   | 'settings.git.branchPrefix.description'
-  | 'settings.git.baseBranch'
-  | 'settings.git.baseBranch.description'
-  | 'settings.git.baseBranch.empty'
-  | 'settings.git.baseBranch.unset'
   | 'settings.fallbackVision'
   | 'settings.fallbackVision.description'
   | 'settings.fallbackVision.none'
@@ -565,7 +561,6 @@ export type TranslationKey =
   | 'updater.badge.downloading'
   | 'updater.badge.newVersion'
   | 'updater.badge.install'
-  | 'updater.badge.openInstaller'
   | 'updater.badge.ready'
   | 'updater.modal.title'
   | 'updater.modal.checking'
@@ -583,9 +578,6 @@ export type TranslationKey =
   | 'updater.modal.installHint'
   | 'updater.modal.downloading'
   | 'updater.modal.restartNow'
-  | 'updater.modal.readyToOpen'
-  | 'updater.modal.openInstaller'
-  | 'updater.modal.openInstallerHint'
   | 'updater.modal.openReleasePage'
   | 'updater.modal.upToDate'
   | 'updater.modal.checkAgain'
@@ -721,10 +713,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': '分支前缀',
     'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
-    'settings.git.baseBranch': '源头分支',
-    'settings.git.baseBranch.description': '这个工作区之后新建的任务线从哪分叉；切换只影响新线，不改已有任务。',
-    'settings.git.baseBranch.empty': '先打开一个工作区',
-    'settings.git.baseBranch.unset': '尚未固定（用当前 HEAD）',
     'settings.fallbackVision': '兜底多模态模型',
     'settings.fallbackVision.description': '当主模型不支持图像时，先用此模型识别本轮新图，再把文字结果静默交给主模型。未配置则剥离图片并给出弱提示。',
     'settings.fallbackVision.none': '不使用（仅剥离图片）',
@@ -1187,7 +1175,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.downloading': '正在后台下载更新…{percent}%',
     'updater.badge.newVersion': '新版本',
     'updater.badge.install': '安装',
-    'updater.badge.openInstaller': '安装',
     'updater.badge.ready': '新版本 v{version} 已就绪',
     'updater.modal.title': '发现新版本',
     'updater.modal.checking': '正在检查更新…',
@@ -1205,10 +1192,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.modal.installHint': '当前工作已保存。安装完成后将自动重启，通常需要 10–30 秒。',
     'updater.modal.downloading': '正在下载更新…',
     'updater.modal.restartNow': '立即重启安装',
-    'updater.modal.readyToOpen': '{version} 已下载完成。',
-    'updater.modal.openInstaller': '安装',
-    'updater.modal.openInstallerHint':
-      '点击「安装」后，在弹出的窗口中将 Peer Agent 拖入「应用程序」完成覆盖安装。',
     'updater.modal.openReleasePage': '打开下载页面',
     'updater.modal.upToDate': '当前已是最新版本。',
     'updater.modal.checkAgain': '重新检查',
@@ -1341,10 +1324,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.git': 'Git',
     'settings.git.branchPrefix': 'Branch prefix',
     'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
-    'settings.git.baseBranch': 'Base branch',
-    'settings.git.baseBranch.description': 'New task lines fork from this workspace branch. Changing it only affects lines created after the switch.',
-    'settings.git.baseBranch.empty': 'Open a workspace first',
-    'settings.git.baseBranch.unset': 'Not set (use current HEAD)',
     'settings.fallbackVision': 'Fallback vision model',
     'settings.fallbackVision.description': 'When the main model cannot read images, use this model to recognize new images in the current turn and silently pass text to the main model. If unset, images are stripped with a light notice.',
     'settings.fallbackVision.none': 'None (strip images only)',
@@ -1807,7 +1786,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.downloading': 'Downloading update… {percent}%',
     'updater.badge.newVersion': 'New',
     'updater.badge.install': 'Install',
-    'updater.badge.openInstaller': 'Install',
     'updater.badge.ready': 'Version v{version} is ready',
     'updater.modal.title': 'Update available',
     'updater.modal.checking': 'Checking for updates…',
@@ -1826,10 +1804,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
       'Your work is saved. The app will restart automatically after install, usually 10–30 seconds.',
     'updater.modal.downloading': 'Downloading update…',
     'updater.modal.restartNow': 'Restart & install',
-    'updater.modal.readyToOpen': '{version} has been downloaded.',
-    'updater.modal.openInstaller': 'Install',
-    'updater.modal.openInstallerHint':
-      'After clicking “Install”, drag Peer Agent into “Applications” to overwrite the current version.',
     'updater.modal.openReleasePage': 'Open download page',
     'updater.modal.upToDate': 'You are on the latest version.',
     'updater.modal.checkAgain': 'Check again',

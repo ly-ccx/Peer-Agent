@@ -20,9 +20,7 @@ export interface UseUpdaterResult {
   readonly check: () => Promise<void>;
   readonly download: () => Promise<void>;
   readonly install: () => Promise<void>;
-  /** mac 自管下载完成后打开 dmg 安装包（phase='ready-to-open' 时调用）。 */
-  readonly openInstaller: () => Promise<void>;
-  /** 兜底：打开当前版本的 GitHub Release 页面（mac 下载失败时调用）。 */
+  /** 兜底：打开当前版本的 GitHub Release 页面（下载或安装失败时调用）。 */
   readonly openReleasePage: () => Promise<void>;
   readonly setChannel: (preference: UpdaterStatus['preference']) => Promise<void>;
 }
@@ -83,7 +81,12 @@ export function useUpdater(): UseUpdaterResult {
               releaseNotes: event.releaseNotes ?? base.releaseNotes,
             };
           case 'error':
-            return { ...base, phase: 'error', error: event.message };
+            return {
+              ...base,
+              phase: 'error',
+              error: event.message,
+              releaseUrl: event.releaseUrl ?? base.releaseUrl,
+            };
           default:
             return base;
         }
@@ -118,15 +121,6 @@ export function useUpdater(): UseUpdaterResult {
     }
   }, []);
 
-  const openInstaller = useCallback(async () => {
-    try {
-      const next = await clientApi.updaterOpenInstaller();
-      if (next) setStatus(next);
-    } catch {
-      /* 打开失败由主进程兜底（回退打开 Release 页面） */
-    }
-  }, []);
-
   const openReleasePage = useCallback(async () => {
     try {
       const next = await clientApi.updaterOpenReleasePage();
@@ -149,8 +143,7 @@ export function useUpdater(): UseUpdaterResult {
   const hasUpdate =
     phase === 'available' ||
     phase === 'downloading' ||
-    phase === 'downloaded' ||
-    phase === 'ready-to-open';
+    phase === 'downloaded';
 
   return {
     status,
@@ -158,7 +151,6 @@ export function useUpdater(): UseUpdaterResult {
     check,
     download,
     install,
-    openInstaller,
     openReleasePage,
     setChannel,
   };

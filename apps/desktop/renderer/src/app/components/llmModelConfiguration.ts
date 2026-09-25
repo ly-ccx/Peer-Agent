@@ -98,6 +98,9 @@ export function modelMetadataPatch(
   if (typeof model.cacheWritePrice === 'number') patch.cacheWritePrice = model.cacheWritePrice;
   if (typeof model.supportsVision === 'boolean') patch.supportsVision = model.supportsVision;
   if (typeof model.supportsReasoning === 'boolean') patch.supportsReasoning = model.supportsReasoning;
+  // 思考档位声明：undefined（上游未声明）不落字段，避免发明空档位；
+  // 数组（含空）是有效声明，原样落库供运行时消费。
+  if (model.reasoningEffortValues !== undefined) patch.reasoningEffortValues = [...model.reasoningEffortValues];
   if (model.modelOptions) patch.modelOptions = model.modelOptions;
   return patch;
 }
@@ -188,6 +191,8 @@ export function modelCatalogMetadataDiffers(
   if (typeof model.cacheWritePrice === 'number') comparable.cacheWritePrice = model.cacheWritePrice;
   if (typeof model.supportsVision === 'boolean') comparable.supportsVision = model.supportsVision;
   if (typeof model.supportsReasoning === 'boolean') comparable.supportsReasoning = model.supportsReasoning;
+  // 思考档位声明变化也算元数据差异：同步声明可更新已落库模型的档位。
+  if (model.reasoningEffortValues !== undefined) comparable.reasoningEffortValues = [...model.reasoningEffortValues];
   if (model.modelOptions) comparable.modelOptions = model.modelOptions;
   return Object.entries(comparable).some(([key, value]) => (
     !metadataValueEqual(configured[key as keyof LlmProviderConfigView], value)

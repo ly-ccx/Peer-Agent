@@ -14,6 +14,7 @@ for (const sourceRole of ['user', 'assistant'] as const) for (const existing of 
     const attachments = appendSelectionQuote(previous, reference);
     assert.deepEqual(previous, before);
     assert.equal(appendSelectionQuote(attachments, reference), attachments);
+    assert.notEqual(attachments.at(-1)?.name, '引用选区.txt');
     assert.deepEqual(attachments.at(-1)?.selectionReference, reference);
     const restored = JSON.parse(JSON.stringify(attachments)) as ChatAttachment[];
     const message: ChatMsg = { id: 'new', role: 'user', content: '我的原草稿', attachments: restored };

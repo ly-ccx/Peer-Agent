@@ -295,45 +295,39 @@ test('stores, updates, and promotes linked folders without merging two projects'
   assert.equal(harness.state.activeWorkspace, '/code');
 });
 
-test('stores workspace baseBranch without inventing main, and switching it does not rewrite other fields', () => {
+test('ADR 79/baseBranch 字段被移除：更新时忽略传入值并清除历史残留', () => {
   const harness = createHarness({
     workspaces: [
-      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
+      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', baseBranch: '0.0.15' },
     ],
   });
 
+  // 历史残留不再投影给 renderer。
   assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, undefined);
-  assert.deepEqual(harness.service.updateWorkspace({
+  // 传入 baseBranch 被忽略，且顺手清除历史残留；其他字段保持不变。
+  const updated = harness.service.updateWorkspace({
     path: '/configured',
     baseBranch: 'develop',
-  }), {
-    ok: true,
-    workspace: {
-      path: '/configured',
-      name: 'Configured',
-      addedAt: '2026-01-01T00:00:00.000Z',
-      linkedFolders: [],
-      baseBranch: 'develop',
-    },
   });
-  assert.equal(harness.service.listWorkspaces().workspaces[0].baseBranch, 'develop');
+  assert.equal(updated.ok, true);
+  assert.equal(updated.workspace.baseBranch, undefined);
+  assert.equal(updated.workspace.name, 'Configured');
+  assert.deepEqual(harness.service.listWorkspaces().workspaces[0], {
+    path: '/configured',
+    name: 'Configured',
+    addedAt: '2026-01-01T00:00:00.000Z',
+    linkedFolders: [],
+  });
+  // 不传 baseBranch 的常规改名照常工作。
   assert.deepEqual(harness.service.updateWorkspace({
     path: '/configured',
     name: 'Knowledge',
-  }), {
-    ok: true,
-    workspace: {
-      path: '/configured',
-      name: 'Knowledge',
-      addedAt: '2026-01-01T00:00:00.000Z',
-      linkedFolders: [],
-      baseBranch: 'develop',
-    },
-  });
-  assert.equal(harness.service.updateWorkspace({
+  }).workspace, {
     path: '/configured',
-    baseBranch: '   ',
-  }).workspace.baseBranch, undefined);
+    name: 'Knowledge',
+    addedAt: '2026-01-01T00:00:00.000Z',
+    linkedFolders: [],
+  });
 });
 
 test('returns project metadata with basename fallback', () => {

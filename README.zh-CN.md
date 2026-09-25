@@ -52,7 +52,7 @@
 | **CLI** | 可安装的 `@peer-agent/cli` —— 脚本化进入同一台机器 |
 
 > [!NOTE]
-> 当前正式版：**`0.0.17`**（npm `latest`）。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
+> 当前正式版：**`0.0.18`**（npm `latest`）。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
 
 ---
 
@@ -192,7 +192,7 @@ Capability Provider → Manifest → Runtime Projection → Tool Call → Permis
 
    | 平台 | 一等产物 | 说明 |
    | --- | --- | --- |
-   | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | 阶段一 ad-hoc 签名 |
+   | macOS arm64 | `Peer-Agent-<ver>-arm64.dmg` | Developer ID 签名并已公证。从 0.0.18 起应用内自动更新（`latest-mac.yml` + zip）；0.0.17 及更早版本需手动安装一次 0.0.18。 |
    | Windows x64 / arm64 | `Peer-Agent-Setup-<ver>.exe` | |
    | Linux x64 | `Peer-Agent-<ver>-x64.AppImage`（推荐便携）或 `.deb` | 阶段一未签名。应用内自动更新只支持 AppImage（`latest-linux.yml`）。Ubuntu 22+/24+ 跑 AppImage 可能需要 `libfuse2`。linux-arm64 Desktop 尚未作为 Release 资产。 |
 

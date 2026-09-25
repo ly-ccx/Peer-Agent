@@ -985,7 +985,6 @@ export interface BootstrapPreloadApi {
       name: string;
       addedAt: string;
       linkedFolders?: readonly { path: string; name: string }[];
-      baseBranch?: string;
     }[];
     activeWorkspace: string | null;
   }>;
@@ -1009,7 +1008,6 @@ export interface BootstrapPreloadApi {
     path: string;
     name?: string;
     linkedFolders?: readonly { path: string; name?: string }[];
-    baseBranch?: string | null;
   }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceAddLinkedFolder: (params: { path: string }) => Promise<{
     ok: boolean;
@@ -1545,9 +1543,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly updaterCheck: () => Promise<UpdaterStatus>;
   readonly updaterDownload: () => Promise<UpdaterStatus>;
   readonly updaterInstall: () => Promise<void>;
-  /** mac 自管下载完成后打开 dmg 安装包（phase='ready-to-open' 时调用）。 */
-  readonly updaterOpenInstaller: () => Promise<UpdaterStatus>;
-  /** 兜底：打开当前版本的 GitHub Release 页面（mac 下载失败时调用）。 */
+  /** 兜底：打开当前版本的 GitHub Release 页面（下载或安装失败时调用）。 */
   readonly updaterOpenReleasePage: () => Promise<UpdaterStatus>;
   readonly updaterSetChannel: (preference: UpdateChannelPreference) => Promise<UpdaterStatus>;
   readonly onUpdaterEvent: (listener: (payload: UpdaterEvent) => void) => () => void;

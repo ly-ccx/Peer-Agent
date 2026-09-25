@@ -2281,8 +2281,93 @@
 .chat-composer > .slash-command-menu {
   order: 0;
 }
-.chat-composer > textarea {
-  order: 2;
+/* 引用文字流覆盖层：锚定 .chat-composer(position:relative)，原点/字号/行高运行时取自 textarea 计算样式 */
+.composer-quote-flow {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: calc(100% - 48px);
+  pointer-events: none;
+  color: var(--azure-seal, #1f6f78);
+  white-space: nowrap;
+}
+.composer-quote-flow-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.composer-quote-flow-item + .composer-quote-flow-item {
+  margin-left: 8px;
+}
+.composer-quote-flow-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.composer-quote-flow-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-quote-flow-remove {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  line-height: 1;
+}
+.chat-composer:hover .composer-quote-flow-remove,
+.composer-quote-flow-remove:focus-visible {
+  opacity: 0.6;
+}
+.chat-composer .composer-quote-flow-remove:hover {
+  opacity: 1;
+}
+.composer-quote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(100%, 42rem);
+  margin: 6px 0 0;
+  color: var(--azure-seal, #1f6f78);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.composer-quote-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.composer-quote-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-msg-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.chat-msg-user .chat-msg-quotes .composer-quote {
+  margin: 0;
 }
 .chat-composer > .chat-file-input,
 .chat-composer > .composer-attach-btn,
@@ -5080,8 +5165,9 @@ button.chat-header-cap-item:focus-visible {
   width: 100%;
   box-sizing: border-box;
   align-self: stretch;
-  /* 左 padding 对齐 + 图标左缘：附件按钮 28px, 图标 14px → (28-14)/2 = 7px。 */
-  padding: 0 7px;
+  /* 外框 .chat-composer--home/--compact 已有 padding:10px。
+     textarea 再加内边距会和引用覆盖层一起被顶出第二圈空白。 */
+  padding: 0;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.45;
   max-height: 20lh;

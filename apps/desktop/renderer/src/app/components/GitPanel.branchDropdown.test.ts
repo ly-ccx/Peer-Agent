@@ -5,18 +5,17 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 /**
- * 「Git」设置分区 · 源头分支下拉的布局契约。
+ * 「Git」设置分区 · 右侧控件槽位的布局契约。
  *
  * 背景：该行曾用原生 <select>，而 flex 项的 min-width:auto 会把它的
  * min-content（= 最宽 option）当成下限，于是 98～105 字符的 automation
  * 分支名把整行顶开，左侧说明文字被挤成一字一行。
  *
- * 现在改用共享 Dropdown（触发器有 text-overflow:ellipsis），并要求槽位
- * 自身可以被收缩。本测试钉住这两点不被回退。
+ * 源头分支下拉已随 ADR 79 移除，但槽位样式仍被分支前缀等设置行共用，
+ * 本测试钉住槽位可收缩这一点不被回退。
  */
 
 const componentsDir = dirname(fileURLToPath(import.meta.url));
-const gitPanel = readFileSync(join(componentsDir, './GitPanel.tsx'), 'utf8');
 const settingsCss = readFileSync(
   join(componentsDir, '../../styles/settings-page.css'),
   'utf8',
@@ -29,24 +28,6 @@ function ruleBody(css: string, selector: string) {
   assert.ok(match, `Expected CSS rule for ${selector}`);
   return match[1];
 }
-
-test('source branch picker uses the shared Dropdown, not a native select', () => {
-  // 面板内不得出现原生 select / optgroup（长分支名会重新撑破布局）。
-  assert.doesNotMatch(gitPanel, /<select\b/, 'GitPanel must not render a native <select>');
-  assert.doesNotMatch(gitPanel, /<optgroup\b/, 'GitPanel must not render a native <optgroup>');
-  assert.match(gitPanel, /<Dropdown\b/, 'GitPanel must render the shared Dropdown');
-});
-
-test('source branch Dropdown exposes local/remote tabs and stays searchable', () => {
-  assert.match(gitPanel, /searchable=\{true\}/, 'branch list must stay searchable');
-  assert.match(gitPanel, /tabs=\{\[/, 'branch list must render tabs');
-
-  // 本地/远程两个标签页，选项按 tab 归属，未标记 tab 的 unset 项两页都可见。
-  for (const tab of ['local', 'remote']) {
-    assert.match(gitPanel, new RegExp(`id: '${tab}'`), `missing ${tab} tab`);
-    assert.match(gitPanel, new RegExp(`tab: '${tab}'`), `missing ${tab} option tag`);
-  }
-});
 
 test('branch slot can shrink so long branch names ellipsize instead of widening the row', () => {
   const slot = ruleBody(settingsCss, '.general-language-select');

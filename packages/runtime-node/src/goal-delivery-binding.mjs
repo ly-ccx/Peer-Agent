@@ -42,28 +42,17 @@ export function readWorkspaceHead(workspaceRoot, run = runGit) {
   return { branch, commit, source: 'workspace_head' };
 }
 
-function resolveNamedTip(workspaceRoot, branch, run) {
-  const name = trimName(branch);
-  if (!name) return null;
-  const commit = trimName(run(workspaceRoot, ['rev-parse', name]))
-    || trimName(run(workspaceRoot, ['rev-parse', `refs/heads/${name}`]));
-  return commit || null;
-}
-
 /**
- * Prefer a configured Workspace `baseBranch` when that ref still resolves.
- * Unresolvable config falls back to current HEAD. Never invents `main`.
+ * Resolve the workspace's live HEAD (ADR 79: no preconfigured base branch —
+ * the binding always follows the branch the user actually sees in the status bar).
+ * Never invents `main`. Unknown/invalid options (including a legacy
+ * `preferredBranch`) are ignored.
  */
 export function resolveWorkspaceHead(workspaceRoot, options = {}) {
   const run = typeof options.run === 'function' ? options.run : runGit;
   const root = trimName(workspaceRoot);
   if (!root) return null;
   if (run === runGit && !existsSync(path.join(root, '.git'))) return null;
-  const preferred = trimName(options.preferredBranch);
-  if (preferred) {
-    const commit = resolveNamedTip(root, preferred, run);
-    if (commit) return { branch: preferred, commit, source: 'preconfigured' };
-  }
   return readWorkspaceHead(root, run);
 }
 

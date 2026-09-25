@@ -26,7 +26,7 @@ function ExternalLinkIcon() {
  * 能力真相在主进程，通过 useUpdater 共享同一份状态（与侧边栏徽标一致）。
  */
 export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
-  const { status, check, download, install, openInstaller, setChannel } = useUpdater();
+  const { status, check, download, install, setChannel } = useUpdater();
 
   const channelOptions = [
     { value: 'auto', label: i18n.t('updater.settings.channel.auto') },
@@ -39,16 +39,8 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const phase = status?.phase;
   const isAvailable = phase === 'available';
   const isDownloading = phase === 'downloading';
-  const isReady = phase === 'downloaded' || phase === 'ready-to-open';
+  const isReady = phase === 'downloaded';
   const percent = Math.max(0, Math.min(100, Math.round(status?.percent ?? 0)));
-
-  const handleInstall = () => {
-    if (phase === 'ready-to-open') {
-      void openInstaller();
-    } else {
-      void install();
-    }
-  };
 
   return (
     <div className="general-panel">
@@ -70,11 +62,9 @@ export function UpdatesPanel({ i18n }: { readonly i18n: I18nRuntime }) {
               <button
                 type="button"
                 className="updater-btn primary"
-                onClick={handleInstall}
+                onClick={() => void install()}
               >
-                {phase === 'ready-to-open'
-                  ? i18n.t('updater.badge.openInstaller')
-                  : i18n.t('updater.badge.install')}
+                {i18n.t('updater.badge.install')}
               </button>
             ) : isDownloading ? (
               <span className="updater-inline-progress">

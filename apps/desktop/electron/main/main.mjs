@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
+import { createGoalAcceptanceReportWriter } from './goal-acceptance-report-writer.mjs';
 import { createWebUiCapture } from './runtime-gateway/web-ui-capture.mjs';
 import { runPlanVisualVerifier } from './runtime-gateway/desktop-visual-review.mjs';
 import { createDesktopHostVisualReview } from './runtime-gateway/desktop-host-visual-review.mjs';
@@ -224,7 +225,6 @@ import {
   checkForUpdates,
   downloadUpdate,
   quitAndInstall,
-  openInstaller,
   openReleasePage,
 } from './auto-updater.mjs';
 
@@ -455,24 +455,37 @@ let goalWorktreeAdapter = null;
 let goalTaskBranchAdapter = null;
 let goalDeliveryHandoff = null;
 
-function readWorkspaceBaseBranch(workspacePath) {
-  const match = (settingsStore.getAll().workspaces || []).find((item) => item?.path === workspacePath);
-  return typeof match?.baseBranch === 'string' && match.baseBranch.trim()
-    ? match.baseBranch.trim()
-    : null;
-}
-
+// ADR 79：交付绑定跟随工作区实时 HEAD（状态栏环境信息同源），不再读预配置基准分支。
 function readDesktopWorkspaceHead(workspaceRoot) {
-  return resolveWorkspaceHead(workspaceRoot, {
-    preferredBranch: readWorkspaceBaseBranch(workspaceRoot) || undefined,
-  });
+  return resolveWorkspaceHead(workspaceRoot);
 }
 
 let desktopPreviewProvider = null;
+let goalAcceptanceReportWriter = null;
 const goalPlanStore = createGoalPlanStore({
   readWorkspaceHead: readDesktopWorkspaceHead,
+  // 完成迁移 → 自动生成验收报告（含截图工件引用）到 ~/.peer-agent/goal-reports/。
+  // 写入器在下方构造；此前触发的完成迁移由 optional chaining 兜底跳过。
+  onPlanCompleted: (plan) => goalAcceptanceReportWriter?.writeForPlan(plan),
   ...(!isPackaged && !isManagedPreview ? {
     readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
+    // Intake 期 UI 交付判定命中 → 前置武装视觉验证门（B-level seam）：复用
+    // ui-delivery-authority.requirePreview 落盘 required 标记，完成门/预览阻塞/
+    // 视觉修复链路随之生效。identity 为占位指纹，真实预览打开时指纹变化会按
+    // 既有 identityChanged 语义重拍。截图执行仍走 desktop_preview 工具 + 授权链，
+    // 这里只立"需要验收"的事实，不绕过权限、不改工具投影。失败只记日志。
+    onUiDeliveryRequired: (plan, verdict, meta) => {
+      try {
+        desktopPreviewProvider?.authority.requirePreview(plan, {
+          sourceFingerprint: 'intake-pending',
+          buildFingerprint: 'intake-pending',
+          instanceId: `intake-${plan.planId}`,
+        }, 'desktop');
+        console.warn(`[ui-delivery] intake armed: ${plan.planId} phase=${meta?.phase} score=${verdict?.score} reasons=${(verdict?.reasons ?? []).join(';')}`);
+      } catch (error) {
+        console.warn(`[ui-delivery] intake arm failed for ${plan.planId}: ${error?.message || error}`);
+      }
+    },
   } : {}),
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
@@ -1183,13 +1196,12 @@ goalTaskBranchAdapter = createGoalTaskBranchAdapter({
 });
 goalDeliveryHandoff = createGoalDeliveryHandoff({
   goalPlanStore,
-  resolveMergeTarget: (plan) => {
-    const root = plan?.deliveryBinding?.targetWorkspacePath || plan?.targetWorkspacePath;
-    return readWorkspaceBaseBranch(root)
-      || plan?.deliveryBinding?.targetBranch
-      || plan?.targetBranch
-      || null;
-  },
+  // ADR 79：合回目标以 plan 自身绑定为唯一来源（创建时冻结的实时 HEAD），
+  // 不再回读工作区设置的基准分支。
+  resolveMergeTarget: (plan) =>
+    plan?.deliveryBinding?.targetBranch
+    || plan?.targetBranch
+    || null,
 });
 
 const llmChatService = createLlmChatService({
@@ -1235,6 +1247,9 @@ desktopPreviewProvider = !isPackaged && !isManagedPreview
   })
   : null;
 if (desktopPreviewProvider) registerDesktopPreviewService(goalPlanStore, workspaceRoot, desktopPreviewProvider);
+// 验收报告写入器：completed 迁移时把证据索引与视觉判定汇总成 markdown
+// 落盘 ~/.peer-agent/goal-reports/<planId>.md（见 goal-acceptance-report-writer.mjs）。
+goalAcceptanceReportWriter = createGoalAcceptanceReportWriter({ goalPlanStore });
 // 网页侧复用同一套账本、产物仓与宿主复核调度器：只有显式声明计划归属的截图才会走它。
 // 复用（而不是新建调度器）保证每个计划仍只有一条在飞复核。
 const webUiCapture = createWebUiCapture({
@@ -2348,7 +2363,7 @@ function registerDesktopIpcHost() {
       install: () => {
         const updaterStatus = getUpdaterStatus();
         if (
-          process.platform === 'win32'
+          (process.platform === 'win32' || process.platform === 'darwin')
           && updaterStatus?.enabled === true
           && updaterStatus?.phase === 'downloaded'
           && desktopLifecycleBinding
@@ -2357,7 +2372,6 @@ function registerDesktopIpcHost() {
         }
         return quitAndInstall();
       },
-      openInstaller: () => openInstaller(),
       openReleasePage: () => openReleasePage(),
       setChannel: (preference) => {
         // settings 是通道偏好的权限真相，先写回再切换运行时配置。

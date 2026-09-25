@@ -1,5 +1,6 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { formatBytes } from '../../state/format';
+import { isSelectionQuoteAttachment } from '../../state/composerQuote';
 import { loadLocalImageDataUrl } from '../../state/localImagePreview';
 import type { ChatAttachment } from '../../state/types';
 
@@ -96,13 +97,18 @@ export const AttachmentStrip = memo(function AttachmentStrip({
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
-  const canReorder = !readOnly && typeof onReorder === 'function' && attachments.length > 1;
+  // 选区引用不是文件芯片：调用点可整表传入，这里统一跳过（引用行由输入框/消息正文渲染）。
+  const visibleAttachments = useMemo(
+    () => attachments.filter((attachment) => !isSelectionQuoteAttachment(attachment)),
+    [attachments],
+  );
+  const canReorder = !readOnly && typeof onReorder === 'function' && visibleAttachments.length > 1;
 
-  if (!attachments.length) return null;
+  if (!visibleAttachments.length) return null;
 
   return (
     <div className={`attachment-strip ${readOnly ? 'readonly' : ''}${canReorder ? ' reorderable' : ''}`}>
-      {attachments.map((attachment, index) => {
+      {visibleAttachments.map((attachment, index) => {
         const isDragging = draggingId === attachment.id;
         const isDropTarget = dropTargetId === attachment.id && draggingId !== attachment.id;
         return (

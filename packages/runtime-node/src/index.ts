@@ -227,6 +227,9 @@ export {
   resolveWorkspaceHead,
 } from './goal-delivery-binding.mjs';
 export {
+  buildGoalAcceptanceReport,
+} from './goal-acceptance-report.mjs';
+export {
   automationRunIsTerminal,
   createAutomationStore,
 } from './automation-store.mjs';

@@ -1266,6 +1266,10 @@ const OPENCODE_GO_MODEL_REASONING = {
   'deepseek-v4-flash-vision-exp': { style: 'openai-effort', values: ['low', 'high', 'max'] },
   'deepseek-v4-pro': { style: 'openai-effort', values: ['high', 'max'] },
   'deepseek-v4.1-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  // DeepSeek 官方 API 的 V4.1 Flash 短 ID；models.dev opencode-go 快照漏收（2026-09-23），
+  // 档位对齐 DeepSeek 官方 provider 同名模型（toggle + effort low/high/max）。
+  'deepseek-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
+  'hy3': { style: 'openai-effort', values: ['none', 'low', 'high'] },
   'glm-5.2': { style: 'openai-effort', values: ['high', 'max'] },
   'glm-5.3': { style: 'openai-effort', values: ['low', 'high', 'max'] },
   'glm-5.3-flash': { style: 'openai-effort', values: ['low', 'high', 'max'] },
@@ -1325,8 +1329,37 @@ function openCodeGoReasoningFromDeclaration(declaration) {
   };
 }
 
-function applyOpenCodeGoModelReasoningProfile(capabilities, model) {
+/**
+ * 运行时档位三选一（优先级从高到低）：
+ * 1. 同步落库声明（config.reasoningEffortValues，来自 models.dev / 渠道目录）；
+ * 2. 渠道静态声明表（OPENCODE_GO_MODEL_REASONING，快照兜底）；
+ * 3. wire 级默认（不命中任何声明时，保持 ['default'] 单档）。
+ */
+function applyOpenCodeGoModelReasoningProfile(capabilities, model, config) {
   const name = String(model || '').trim().toLowerCase();
+  const syncedValues = Array.isArray(config?.reasoningEffortValues)
+    ? config.reasoningEffortValues.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (syncedValues.length) {
+    // 同步声明即 wire 值本身（models.dev effort values），不经静态表别名投影，
+    // 原样透传给 wire 层；仅 none/minimal 显示为 off 档（与静态表口径一致）。
+    const effortMap = {};
+    const levels = [];
+    for (const value of syncedValues) {
+      const level = value === 'none' || value === 'minimal' ? 'off' : value;
+      if (effortMap[level]) continue;
+      effortMap[level] = value;
+      levels.push(level);
+    }
+    capabilities.reasoning = {
+      supported: true,
+      paramStyle: 'openai-effort',
+      effortLevels: levels,
+      defaultEffort: levels.includes('default') ? 'default' : levels[0],
+      effortMap,
+    };
+    return;
+  }
   const declaration = OPENCODE_GO_MODEL_REASONING[name];
   if (!declaration) return;
   const reasoning = openCodeGoReasoningFromDeclaration(declaration);
@@ -1569,7 +1602,7 @@ export function resolveChannel(config = {}) {
   // OpenCode Go 的模型声明优先于已保存的旧五档。
   // 未声明档位的模型保持协议默认（空映射 = 不发送思考强度）。
   if (isOpenCodeGo) {
-    applyOpenCodeGoModelReasoningProfile(capabilities, config.model);
+    applyOpenCodeGoModelReasoningProfile(capabilities, config.model, config);
   }
   if (!isOpenCodeGo && config.supportsReasoning !== undefined) {
     capabilities.reasoning = {

@@ -15,7 +15,9 @@
  * 行为边界（按确认的产品设计）：
  *   - autoDownload=false：检查到新版本仅广播 update-available（渲染层显示红点 + 摘要），
  *     由用户在弹窗点击「更新」后才调用 downloadUpdate() 下载，进度经事件回传，
- *     下载完成后调用 quitAndInstall() 重启安装。
+ *     下载完成后调用 quitAndInstall() 重启安装。mac / Windows / Linux AppImage
+ *     共用 electron-updater 链路；mac 由 Squirrel 校验新包与当前包的 Developer ID
+ *     签名一致后原地替换，因此发布包必须持续使用同一 Team ID 签名。
  *   - 开发环境（!app.isPackaged）默认跳过，避免本地 dev 误触；可用
  *     PEER_AGENT_FORCE_UPDATER=1 强制联调。
  *   - auto 通道毕业（ADR-61）：preference='auto' 且当前版本含预发布后缀时，
@@ -25,13 +27,9 @@
  *     升到 stable 后版本号不再含预发布后缀，auto 解析自动留在 stable。
  */
 
-import { createWriteStream } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { app, shell } from 'electron';
 import electronUpdater from 'electron-updater';
-import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+import { buildReleaseUrl } from './release-page-url.mjs';
 import { createDownloadStallWatchdog } from './update-download-stall.mjs';
 import {
   createUpdateCheckSchedule,
@@ -44,7 +42,7 @@ import {
   shouldSkipStaleUpdateEvent,
 } from './updater-phase.mjs';
 
-export { buildDmgUrl, buildReleaseUrl, mapArch };
+export { buildReleaseUrl };
 
 const { autoUpdater } = electronUpdater;
 
@@ -54,18 +52,8 @@ const PRERELEASE_PATTERN = /-(beta|alpha|rc)\b/i;
 const GITHUB_OWNER = 'ly-ccx';
 const GITHUB_REPO = 'Peer-Agent';
 
-/** mac 自管下载的 dmg 存放子目录（位于系统临时目录下）。 */
-const MAC_UPDATE_DIR = 'peer-agent-updates';
-
 /** 周期检测间隔：每 1 小时静默检查一次（不下载），让长期开着的应用也能发现新版本。 */
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
-
-/**
- * 打开 dmg 成功后到主动退出本程序之间的延迟（毫秒）。
- * 给 Finder 一点时间弹出 dmg 挂载窗口，再退出自身——这样用户能直接把新版本
- * 拖入「应用程序」覆盖安装（旧版仍在运行时 macOS 无法覆盖）。
- */
-const QUIT_AFTER_OPEN_DELAY_MS = 1000;
 
 const checkSchedule = createUpdateCheckSchedule();
 
@@ -83,9 +71,7 @@ const state = {
   percent: undefined,
   error: undefined,
   releaseNotes: undefined,
-  /** mac 自管下载完成的 dmg 本地路径（phase='ready-to-open' 时有值） */
-  installerPath: undefined,
-  /** 兜底用 GitHub Release 页面 URL（mac 下载失败时有值） */
+  /** 兜底用 GitHub Release 页面 URL（已知可用版本且下载/安装出错时有值） */
   releaseUrl: undefined,
   /** 事件回调（main 注入，转发到渲染窗口） */
   onEvent: undefined,
@@ -103,8 +89,8 @@ const state = {
   /** 应用激活/窗口聚焦监听清理器。 */
   disposeActivationChecks: undefined,
   /**
-   * 下载停滞看门狗句柄（update-download-stall.mjs）。mac 自管下载期间
-   * 存活，正常结束/失败/停滞触发后清理。睡眠中 socket 静默死亡导致
+   * 下载停滞看门狗句柄（update-download-stall.mjs）。下载期间存活，
+   * 正常结束/失败/停滞触发后清理。睡眠中 socket 静默死亡导致
    * read() 永久挂起时，由它把状态机置 error 并提供 Release 页面兜底。
    */
   stallWatchdog: undefined,
@@ -221,7 +207,6 @@ export function getUpdaterStatus() {
     percent: state.percent,
     error: state.error,
     releaseNotes: state.releaseNotes,
-    installerPath: state.installerPath,
     releaseUrl: state.releaseUrl,
   };
 }
@@ -284,7 +269,7 @@ export async function checkForUpdates() {
     log('checkForUpdates skipped (disabled).');
     return getUpdaterStatus();
   }
-  // 相位锁定：downloading/downloaded/ready-to-open 期间（定时/激活/手动
+  // 相位锁定：downloading/downloaded 期间（定时/激活/手动
   // recheck），直接返回当前快照。既不打断下载，也不制造迟到事件链——
   // 否则「离开一会回来」触发的激活重查会把相位打回 available，安装
   // 按钮随之消失（本次修复的主根因）。
@@ -335,26 +320,24 @@ export async function downloadUpdate() {
     log('downloadUpdate skipped (disabled).');
     return getUpdaterStatus();
   }
-  // 防重入：downloading 进行中 / downloaded / ready-to-open（安装包已就绪）
-  // 时，重复点击「更新」不再发起第二次下载，直接返回当前快照。
+  // 防重入：downloading 进行中 / downloaded（安装包已就绪）时，
+  // 重复点击「更新」不再发起第二次下载，直接返回当前快照。
   if (isLockedPhase(state.phase)) {
     log(`downloadUpdate skipped (phase locked: ${state.phase}).`);
     return getUpdaterStatus();
   }
-  // mac 走自管下载链路：应用为 ad-hoc 签名，Squirrel 的「下载→签名校验→原子替换」
-  // 会在校验步骤失败（code requirement 不满足）。改为自管下载 dmg + 手动打开。
-  // Windows NSIS 与 Linux AppImage 走 electron-updater 默认链路
-  // （latest.yml / latest-linux.yml）。.deb 安装不走应用内自动更新。
-  if (process.platform === 'darwin') {
-    return downloadUpdateMacManual();
-  }
+  // mac（zip + latest-mac.yml）、Windows NSIS（latest.yml）与 Linux AppImage
+  // （latest-linux.yml）共用 electron-updater 默认链路。.deb 安装不走应用内自动更新。
   try {
     setPhase('downloading');
     state.percent = 0;
+    state.error = undefined;
+    state.releaseUrl = undefined;
     startDownloadStallWatchdog();
     await autoUpdater.downloadUpdate();
   } catch (err) {
     state.error = err?.message ?? String(err);
+    state.releaseUrl = currentReleaseUrl();
     setPhase('error');
     log(`downloadUpdate failed: ${state.error}`);
   } finally {
@@ -363,187 +346,21 @@ export async function downloadUpdate() {
   return getUpdaterStatus();
 }
 
-/**
- * mac 自管下载：拼 dmg URL → HEAD 校验 → 流式下载到 temp → 完成置 ready-to-open。
- * 任一步失败则置 error 并带上 Release 页面 URL，由渲染层提供「打开 Release 页面」兜底。
- */
-async function downloadUpdateMacManual() {
-  const version = state.availableVersion;
-  const releaseUrl = buildReleaseUrl({
+/** 可用版本的 Release 页面（下载/安装失败时的手动下载兜底）；无可用版本时为 undefined。 */
+function currentReleaseUrl() {
+  if (!state.availableVersion) return undefined;
+  return buildReleaseUrl({
     owner: GITHUB_OWNER,
     repo: GITHUB_REPO,
-    version,
-  });
-  if (!version) {
-    state.error = 'No available version to download.';
-    state.releaseUrl = releaseUrl;
-    setPhase('error');
-    return getUpdaterStatus();
-  }
-
-  const arch = mapArch(process.arch);
-  const dmgUrl = buildDmgUrl({
-    owner: GITHUB_OWNER,
-    repo: GITHUB_REPO,
-    version,
-    arch,
-  });
-
-  try {
-    setPhase('downloading');
-    state.percent = 0;
-    state.error = undefined;
-    state.releaseUrl = undefined;
-    state.installerPath = undefined;
-    emit('download-progress', { percent: 0 });
-    startDownloadStallWatchdog();
-
-    // 1) HEAD 校验：资产缺失/命名漂移时尽早暴露并兜底。
-    const head = await fetchWithProxyFallback(dmgUrl, { method: 'HEAD', redirect: 'follow' });
-    if (!head.ok) {
-      throw new Error(`dmg not found (HTTP ${head.status})`);
-    }
-
-    // 2) 准备落盘目录（清空旧 dmg，避免堆积）。
-    const dir = path.join(tmpdir(), MAC_UPDATE_DIR);
-    await rm(dir, { recursive: true, force: true });
-    await mkdir(dir, { recursive: true });
-    const dest = path.join(dir, `Peer-Agent-${version}-${arch}.dmg`);
-
-    // 3) 流式下载并按 Content-Length 上报进度。
-    await downloadToFile(dmgUrl, dest, (percent) => {
-      state.percent = percent;
-      state.stallWatchdog?.notifyProgress();
-      emit('download-progress', { percent });
-    });
-
-    // 4) 完成 → ready-to-open，由用户点击「打开安装包」。
-    //    注意：不广播 update-downloaded 事件——渲染层该事件处理器会把 phase 置为
-    //    'downloaded'（Windows 语义），与 mac 的 'ready-to-open' 冲突。mac 的终态
-    //    由 downloadUpdate() 的 await 返回快照承载（含 installerPath）。
-    //    进度事件均在 await 解析前触发，故不会反向覆盖终态。
-    state.installerPath = dest;
-    state.percent = 100;
-    setPhase('ready-to-open');
-  } catch (err) {
-    state.error = err?.message ?? String(err);
-    state.releaseUrl = releaseUrl;
-    setPhase('error');
-    log(`downloadUpdateMacManual failed: ${state.error}`);
-  } finally {
-    stopStallWatchdog();
-  }
-  return getUpdaterStatus();
-}
-
-/**
- * 解析 Electron 的 net.fetch（基于 Chromium 网络栈，自动遵循系统/环境代理）。
- * 取不到时返回 null，由调用方回退到 Node 全局 fetch。
- */
-async function getElectronNetFetch() {
-  try {
-    const electron = await import('electron');
-    const net = electron?.net || electron?.default?.net;
-    return typeof net?.fetch === 'function' ? net.fetch.bind(net) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 带代理回退的 fetch：优先用 Electron net.fetch（走系统/环境代理，国内代理下更快），
- * 失败再回退到 Node 全局 fetch 重试一次（undici 不读代理，作为直连兜底）。
- * net.fetch 不可用时直接用 Node fetch。
- */
-async function fetchWithProxyFallback(url, init = {}) {
-  const netFetch = await getElectronNetFetch();
-  if (!netFetch) return fetch(url, init);
-  try {
-    return await netFetch(url, init);
-  } catch (err) {
-    log(`net.fetch failed, falling back to node fetch: ${err?.message ?? err}`);
-    return fetch(url, init);
-  }
-}
-
-/**
- * 流式下载 url 到 dest，按 Content-Length 回报 0–100 整数进度。
- * 无 Content-Length 时进度停留在已知上一值，完成时由调用方置 100。
- */
-async function downloadToFile(url, dest, onProgress) {
-  const res = await fetchWithProxyFallback(url, { redirect: 'follow' });
-  if (!res.ok || !res.body) {
-    throw new Error(`download failed (HTTP ${res.status})`);
-  }
-  const total = Number(res.headers.get('content-length')) || 0;
-  let received = 0;
-  const fileStream = createWriteStream(dest);
-  // 用 getReader() 而非 for-await：Electron net.fetch 返回的 Web ReadableStream
-  // 在当前版本不支持异步迭代，全库流式读取（provider adapters）均用此范式，
-  // 对 net.fetch 与 Node fetch 两种 body 都兼容。
-  const reader = res.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.length;
-      fileStream.write(value);
-      if (total > 0 && typeof onProgress === 'function') {
-        onProgress(Math.min(99, Math.floor((received / total) * 100)));
-      }
-    }
-  } finally {
-    fileStream.end();
-  }
-  await new Promise((resolve, reject) => {
-    fileStream.on('finish', resolve);
-    fileStream.on('error', reject);
+    version: state.availableVersion,
   });
 }
 
 /**
- * 打开已下载的 mac 安装包（dmg）。渲染层在 phase='ready-to-open' 时调用。
- * 打开失败回退到打开 Release 页面。
- */
-export async function openInstaller() {
-  const target = state.installerPath;
-  if (!target) {
-    log('openInstaller skipped (no installerPath).');
-    return getUpdaterStatus();
-  }
-  const result = await shell.openPath(target);
-  if (result) {
-    // openPath 返回非空字符串表示错误信息。回退打开 Release 页面，且不退出本程序
-    // （没有可覆盖的本地包，退出只会打断用户）。
-    log(`openInstaller failed: ${result}`);
-    if (state.releaseUrl) {
-      await shell.openExternal(state.releaseUrl);
-    }
-    return getUpdaterStatus();
-  }
-  // 成功打开 dmg：稍候让 Finder 弹出挂载窗口，再主动退出本程序，
-  // 使用户可直接把新版本拖入「应用程序」覆盖安装。退出复用既有
-  // before-quit → stopAutoUpdater() 清理链路。
-  log('openInstaller succeeded; quitting app to allow overwrite install.');
-  setTimeout(() => {
-    app.quit();
-  }, QUIT_AFTER_OPEN_DELAY_MS);
-  return getUpdaterStatus();
-}
-
-/**
- * 兜底：打开当前版本的 GitHub Release 页面（mac 下载失败时由渲染层调用）。
+ * 兜底：打开当前版本的 GitHub Release 页面（下载或安装失败时由渲染层调用）。
  */
 export async function openReleasePage() {
-  const url =
-    state.releaseUrl ||
-    (state.availableVersion
-      ? buildReleaseUrl({
-          owner: GITHUB_OWNER,
-          repo: GITHUB_REPO,
-          version: state.availableVersion,
-        })
-      : undefined);
+  const url = state.releaseUrl || currentReleaseUrl();
   if (!url) {
     log('openReleasePage skipped (no releaseUrl).');
     return getUpdaterStatus();
@@ -573,13 +390,9 @@ function startDownloadStallWatchdog() {
     onStall: () => {
       log('download stalled (no progress within window); surfacing error.');
       state.error = '下载长时间无进度，可能因休眠中断。请重试，或打开 Release 页面手动下载。';
-      state.releaseUrl = buildReleaseUrl({
-        owner: GITHUB_OWNER,
-        repo: GITHUB_REPO,
-        version: state.availableVersion,
-      });
+      state.releaseUrl = currentReleaseUrl();
       setPhase('error');
-      emit('error', { message: state.error });
+      emit('error', { message: state.error, releaseUrl: state.releaseUrl });
     },
   });
 }
@@ -595,7 +408,7 @@ function setPhase(phase) {
 }
 
 /**
- * 向渲染层广播更新事件。模块级函数，供 wireEvents 的监听器与 mac 自管下载链路共用。
+ * 向渲染层广播更新事件。模块级函数，供 wireEvents 的监听器与下载停滞看门狗共用。
  */
 function emit(type, payload = {}) {
   log(`event=${type}${payload && Object.keys(payload).length ? ' ' + safeJson(payload) : ''}`);
@@ -616,7 +429,7 @@ function wireEvents() {
   // 与事件广播——探查只是静默探测 stable 清单，中间态与结果都不能经由事件
   // 通道泄漏给渲染层；探查结论由 checkForUpdates 统一表达。
   //
-  // 相位锁定（updater-phase.mjs）：downloading/downloaded/ready-to-open 期间
+  // 相位锁定（updater-phase.mjs）：downloading/downloaded 期间
   // 到来的 check 类事件（checking-for-update / update-available /
   // update-not-available）属于迟到事件——来源是并发重查（激活聚焦、定时、
   // 手动）产生的旧检查流程。必须丢弃，否则会把相位打回 available，
@@ -658,11 +471,13 @@ function wireEvents() {
     emit('download-progress', { percent: state.percent });
   });
 
+  // mac Squirrel 的签名校验 / 替换失败只经由此事件上报，需一并带上手动下载兜底。
   autoUpdater.on('error', (err) => {
     if (state.probing) return;
     state.error = err?.message ?? String(err);
+    state.releaseUrl = currentReleaseUrl();
     setPhase('error');
-    emit('error', { message: state.error });
+    emit('error', { message: state.error, releaseUrl: state.releaseUrl });
   });
 
   autoUpdater.on('update-downloaded', (info) => {

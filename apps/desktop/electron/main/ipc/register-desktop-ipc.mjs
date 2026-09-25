@@ -54,7 +54,6 @@ export function createDesktopIpcRegistrations({
   const checkForUpdates = assertFunction(updater?.check, 'updater.check');
   const downloadUpdate = assertFunction(updater?.download, 'updater.download');
   const installUpdate = assertFunction(updater?.install, 'updater.install');
-  const openInstaller = assertFunction(updater?.openInstaller, 'updater.openInstaller');
   const openReleasePage = assertFunction(updater?.openReleasePage, 'updater.openReleasePage');
   const setUpdaterChannel = assertFunction(updater?.setChannel, 'updater.setChannel');
 
@@ -123,7 +122,6 @@ export function createDesktopIpcRegistrations({
       ipc.handle('updater:check', () => checkForUpdates());
       ipc.handle('updater:download', () => downloadUpdate());
       ipc.handle('updater:install', () => installUpdate());
-      ipc.handle('updater:open-installer', () => openInstaller());
       ipc.handle('updater:open-release-page', () => openReleasePage());
       ipc.handle('updater:set-channel', (_event, preference) => setUpdaterChannel(preference));
     }),

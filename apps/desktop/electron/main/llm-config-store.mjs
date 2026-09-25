@@ -251,6 +251,19 @@ function applyExplicitModelMetadataPatch(item, patch) {
     if (syncedAt) item.metadataSyncedAt = syncedAt;
     else delete item.metadataSyncedAt;
   }
+  // 思考档位声明（同步落库）：undefined 不动现有值；空数组/非数组清除；
+  // 非空数组归一化后落库，供运行时档位链路消费（同步声明优先于静态兜底表）。
+  if (patch.reasoningEffortValues !== undefined) {
+    if (Array.isArray(patch.reasoningEffortValues)) {
+      const values = patch.reasoningEffortValues
+        .map((value) => String(value).trim().toLowerCase())
+        .filter(Boolean);
+      if (values.length) item.reasoningEffortValues = values;
+      else delete item.reasoningEffortValues;
+    } else {
+      delete item.reasoningEffortValues;
+    }
+  }
   const optionalFields = [
     'contextWindow',
     'maxOutputTokens',
@@ -797,7 +810,7 @@ export function createLlmConfigStore({
       'longContextInputThreshold', 'longContextInputPrice', 'longContextCacheReadPrice',
       'longContextOutputPrice', 'supportsVision', 'supportsReasoning',
       'supportsPromptCaching', 'reasoningParamStyle', 'reasoningEffortMap',
-      'reasoningEffortLevels', 'enabled', 'isDefault',
+      'reasoningEffortLevels', 'reasoningEffortValues', 'enabled', 'isDefault',
     ]) delete channel[field];
     for (const field of [
       'apiKey', 'oauthTokens', 'oauthClientId', 'oauthClientSecret',
@@ -827,11 +840,29 @@ export function createLlmConfigStore({
   function readAll() {
     const state = readStoredState();
     const channels = new Map(state.channels.map((channel) => [channel.id || channel.groupId, channel]));
+    let legacyChannelValuesCleaned = false;
     const parsed = state.models.map((model) => {
       const channel = channels.get(groupKey(model));
-      return channel ? { ...channel, ...model, groupId: channel.id || channel.groupId } : model;
+      if (!channel) return model;
+      // 模型条目值优先于渠道级残留值（thinking 档位等模型级字段是按模型声明的；
+      // 渠道层若曾因 writeAll 白名单缺口沾上模型值，以模型值为准并忽略渠道残留）。
+      const merged = { ...channel, ...model, groupId: channel.id || channel.groupId };
+      // 清洗历史脏数据：渠道层残留的 reasoningEffortValues 不参与合并后的模型值，
+      // 仅当模型自身无声明时交由 backfill/静态表链路重新判定；模型有值时渠道残留
+      // 已被合并值覆盖，同样视为需要清洗（写盘时 channelFromItem 白名单会拦截，
+      // 这里通过触发 migrated 让 writeAll 重建无残留的 channel）。
+      if (merged.reasoningEffortValues !== undefined
+        && channel.reasoningEffortValues !== undefined) {
+        legacyChannelValuesCleaned = true;
+      }
+      if (merged.reasoningEffortValues !== undefined
+        && model.reasoningEffortValues === undefined) {
+        delete merged.reasoningEffortValues;
+        legacyChannelValuesCleaned = true;
+      }
+      return merged;
     });
-    let migrated = state.legacy;
+    let migrated = state.legacy || legacyChannelValuesCleaned;
     for (const item of parsed) {
       if (migrateChannelItem(item)) migrated = true;
       if (migrateSubscriptionItem(item)) migrated = true;
@@ -877,6 +908,18 @@ export function createLlmConfigStore({
       const channel = channels.get(groupKey(item));
       for (const field of Object.keys(channel || {})) {
         if (!['id', 'groupId'].includes(field)) delete model[field];
+      }
+      // 渠道级残留清洗：模型级思考档位声明不属于渠道。磁盘上历史遗留的
+      // channel.reasoningEffortValues（writeAll 白名单修复前沾上的脏值）
+      // 会在上面把 model.reasoningEffortValues 剥掉，这里恢复模型条目值，
+      // 并顺带清掉渠道残留，防止下一次 readAll 再污染。
+      if (item.reasoningEffortValues !== undefined) {
+        model.reasoningEffortValues = item.reasoningEffortValues;
+        if (channel && channel.reasoningEffortValues !== undefined) {
+          delete channel.reasoningEffortValues;
+        }
+      } else if (channel?.reasoningEffortValues !== undefined) {
+        delete channel.reasoningEffortValues;
       }
       model.id = item.id;
       model.groupId = groupKey(item);
@@ -967,6 +1010,10 @@ export function createLlmConfigStore({
       // 但渠道明确不支持缓存(如 Qoder promptCache: false)或不可解析时保持 undefined，
       // 避免把「无缓存语义」误判成「禁用缓存」。
       supportsPromptCaching: item.supportsPromptCaching ?? (resolved?.supportsPromptCaching === true ? true : undefined),
+      // 同步落库的模型级思考档位声明（wire 原值），供渲染层与运行时共同消费。
+      reasoningEffortValues: Array.isArray(item.reasoningEffortValues) && item.reasoningEffortValues.length
+        ? item.reasoningEffortValues
+        : undefined,
       // DeepSeek / Kimi / Grok / OpenCode Go：渠道级思考契约优先于模型历史缓存。
       // 避免旧五档盖住模型自己的声明。其他渠道仍是模型字段优先。
       reasoningParamStyle: (
@@ -987,14 +1034,21 @@ export function createLlmConfigStore({
       )
         ? (resolved?.reasoningEffortMap ?? item.reasoningEffortMap ?? undefined)
         : (item.reasoningEffortMap ?? undefined),
+      // 思考档位声明（模型级）：同步落库值优先，其次渠道运行时解析值，最后历史缓存。
+      // opencode-go 等按模型声明的渠道，同步声明（如 models.dev effort values）覆盖
+      // 静态兜底表；未声明时保持渠道级兜底（空声明不发明档位）。
       reasoningEffortLevels: (
-        item.channelId === 'deepseek'
-        || item.channelId === 'kimi-coding-plan'
-        || item.channelId === 'moonshot'
-        || item.channelId === 'grok'
-        || item.channelId === 'opencode-go'
-          ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
-          : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
+        Array.isArray(item.reasoningEffortValues) && item.reasoningEffortValues.length
+          ? item.reasoningEffortValues
+          : (
+              item.channelId === 'deepseek'
+              || item.channelId === 'kimi-coding-plan'
+              || item.channelId === 'moonshot'
+              || item.channelId === 'grok'
+              || item.channelId === 'opencode-go'
+                ? (resolved?.reasoningEffortLevels ?? item.reasoningEffortLevels)
+                : (item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels)
+            )
       ) ?? undefined,
       reasoningDefaultEffort: (
         item.channelId === 'deepseek'
@@ -1071,7 +1125,7 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders, serviceTemplateId }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, reasoningEffortValues, oauthProjectId, customHeaders, serviceTemplateId }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -1105,6 +1159,8 @@ export function createLlmConfigStore({
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
+      // 思考档位声明：数组（含空）原样落库；undefined 交由运行时静态表/回填链路。
+      reasoningEffortValues: Array.isArray(reasoningEffortValues) ? [...reasoningEffortValues] : undefined,
       oauthProjectId,
       customHeaders,
     });
@@ -1164,6 +1220,8 @@ export function createLlmConfigStore({
         : (isLocalQoderAuth ? undefined : supportsPromptCaching),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
+      // 拉取/导入链路带来的模型级思考档位声明（同步声明优先于渠道静态表）。
+      reasoningEffortValues: Array.isArray(reasoningEffortValues) ? [...reasoningEffortValues] : undefined,
       reasoningEffortLevels: subscriptionMetadata?.reasoningEffortLevels
         ? [...subscriptionMetadata.reasoningEffortLevels]
         : resolved.reasoningEffortLevels || undefined,

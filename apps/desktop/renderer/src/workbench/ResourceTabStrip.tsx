@@ -45,6 +45,9 @@ export function ResourceTabStrip({
   onClose,
   action,
 }: ResourceTabStripProps) {
+  if (items.length === 0) {
+    return null;
+  }
   return (
     <div className="resource-tab-strip">
       <div className="resource-tabs" role="tablist" aria-label={ariaLabel}>

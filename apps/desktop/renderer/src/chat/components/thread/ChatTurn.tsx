@@ -5,6 +5,7 @@ import type { ChatAttachment } from '../../state/types';
 import type { ChatTurn as ChatTurnModel } from '../../state/chatTurns';
 import { areChatTurnRenderPropsEqual } from '../../state/chatTurnRenderEquality';
 import { AssistantContent, CompactionSummaryCard } from './AssistantContent';
+import { quotePreviewText, splitSelectionQuotes } from '../../state/composerQuote';
 import { AttachmentStrip } from './AttachmentStrip';
 import { InteractionAnsweredContext } from './interactionContext';
 import { MessageActionBar, type MessageActionId } from './MessageActionBar';
@@ -120,15 +121,31 @@ function ChatTurnImpl({
               <div className="chat-msg-body">
                 {msg.role === 'user' ? (
                   <>
-                    {msg.content ? <div className="chat-msg-text">{msg.content}</div> : null}
-                    {msg.attachments && msg.attachments.length > 0 ? (
-                      <AttachmentStrip
-                        attachments={msg.attachments}
-                        readOnly
-                        isZh={isZh}
-                        onPreviewImage={onPreviewImage}
-                      />
-                    ) : null}
+                    {(() => {
+                      const split = msg.attachments?.length ? splitSelectionQuotes(msg.attachments) : null;
+                      return (
+                        <>
+                          {split && split.quotes.length > 0 ? (
+                            <div className="chat-msg-quotes">
+                              {split.quotes.map((quote) => (
+                                <span key={quote.id} className="composer-quote" title={quote.selectionReference?.exactText}>
+                                  <span className="composer-quote-text">"{quotePreviewText(quote.selectionReference?.exactText || quote.text || '')}"</span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {msg.content ? <div className="chat-msg-text">{msg.content}</div> : null}
+                          {msg.attachments && msg.attachments.length > 0 ? (
+                            <AttachmentStrip
+                              attachments={msg.attachments}
+                              readOnly
+                              isZh={isZh}
+                              onPreviewImage={onPreviewImage}
+                            />
+                          ) : null}
+                        </>
+                      );
+                    })()}
                   </>
                 ) : (
                   <InteractionAnsweredContext.Provider value={answeredText}>

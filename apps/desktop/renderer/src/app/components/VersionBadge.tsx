@@ -11,7 +11,7 @@ import { UpdateModal } from './UpdateModal';
  *   - 始终展示当前版本号（vX.Y.Z）。
  *   - 有可用更新时（available）：版本号旁显示更新图标，与版本号共享点击入口。
  *   - 下载中（downloading）：更新图标原地升级为 mini 环形进度 + 百分比文字。
- *   - 下载完成（downloaded / ready-to-open）：版本号旁持久挂「安装」按钮
+ *   - 下载完成（downloaded）：版本号旁持久挂「安装」按钮
  *     （Codex 模式），不再弹出右下角 toast。
  *   - 点击版本号：打开更新摘要弹窗（无更新时顺带触发一次检查）。
  *   - 点击「安装」按钮：直接触发安装，不打开弹窗。
@@ -19,8 +19,7 @@ import { UpdateModal } from './UpdateModal';
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
 export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
-  const { status, hasUpdate, check, download, install, openInstaller, openReleasePage } =
-    useUpdater();
+  const { status, hasUpdate, check, download, install, openReleasePage } = useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
   // 跨组件连续性（C1 时序衔接）：点「更新」后 download() 是异步转调主进程，
   // phase 要等主进程首个 download-progress 事件才变 downloading。若不处理，
@@ -33,12 +32,7 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
   // 一旦进入下载中或任一终态，pending 使命完成，清除以交还真相给主进程状态。
   useEffect(() => {
     if (!pendingDownload) return;
-    if (
-      phase === 'downloading' ||
-      phase === 'downloaded' ||
-      phase === 'ready-to-open' ||
-      phase === 'error'
-    ) {
+    if (phase === 'downloading' || phase === 'downloaded' || phase === 'error') {
       setPendingDownload(false);
     }
   }, [phase, pendingDownload]);
@@ -46,7 +40,7 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
   if (!status) return null;
 
   const isDownloading = phase === 'downloading';
-  const isReady = phase === 'downloaded' || phase === 'ready-to-open';
+  const isReady = phase === 'downloaded';
   const isAvailable = hasUpdate && !isDownloading && !isReady;
   const readyVersion = status.availableVersion ?? '';
   // 展示进度：真实 downloading 或「刚点更新、进度环已就位但主进程事件还没到」的过渡态。
@@ -64,21 +58,6 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
     setModalOpen(true);
     if (!hasUpdate) {
       void check();
-    }
-  };
-
-  // 完成态安装按钮的 label：ready-to-open（mac 自管 dmg）= 打开安装包；
-  // downloaded（Windows NSIS / Linux AppImage）= 重启安装。
-  const installLabel =
-    phase === 'ready-to-open'
-      ? i18n.t('updater.badge.openInstaller')
-      : i18n.t('updater.badge.install');
-
-  const handleInstall = () => {
-    if (phase === 'ready-to-open') {
-      void openInstaller();
-    } else {
-      void install();
     }
   };
 
@@ -145,10 +124,10 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           <button
             type="button"
             className="sidebar-version-install-btn"
-            onClick={handleInstall}
+            onClick={() => void install()}
             title={title}
           >
-            {installLabel}
+            {i18n.t('updater.badge.install')}
           </button>
         ) : null}
       </div>

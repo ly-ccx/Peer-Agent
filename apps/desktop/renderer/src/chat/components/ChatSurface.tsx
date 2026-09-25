@@ -59,7 +59,6 @@ import {
   COMPOSER_ENV_ISOLATION_OFF,
   COMPOSER_ENV_ISOLATION_ON,
   buildComposerBranchOptions,
-  canSelectComposerSourceBranch,
   formatComposerBranchOptionLabel,
   formatComposerEnvCapsule,
   isComposerEnvSentinel,
@@ -531,7 +530,7 @@ export function ChatSurface({
   readonly onClose?: () => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
-  readonly workspaces?: readonly { path: string; name: string; baseBranch?: string }[];
+  readonly workspaces?: readonly { path: string; name: string }[];
   readonly onWorkspaceChange?: (workspacePath: string) => Promise<void> | void;
   readonly onWorkspaceUpdated?: () => Promise<void> | void;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
@@ -633,7 +632,6 @@ export function ChatSurface({
   const { workspaceGit, workspaceIsGit, refreshWorkspaceGit } = useWorkspaceGit(workspacePath, {
     refreshWhenIdle: !isStreaming,
   });
-  const [pendingBaseBranch, setPendingBaseBranch] = useState<string | null>(null);
   const [createBranchDialog, setCreateBranchDialog] = useState<{
     readonly source: string;
   } | null>(null);
@@ -1622,10 +1620,6 @@ export function ChatSurface({
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, setTurnStartedAt]);
-
-  useEffect(() => {
-    setPendingBaseBranch(null);
-  }, [workspacePath]);
 
   useEffect(() => {
     if (workspaceIsGit === false) setPreferredWorktree(false);
@@ -2629,27 +2623,21 @@ export function ChatSurface({
   const handleActiveGoalRunnerStatusChange = useCallback((status: GoalRunnerStatus | null) => {
     setGoalRunnerStatus(status);
   }, []);
-  const workspaceBaseBranch = useMemo(() => {
-    const pending = pendingBaseBranch?.trim();
-    if (pending) return pending;
-    const match = workspaces.find((workspace) => workspace.path === workspacePath);
-    const configured = match?.baseBranch?.trim();
-    return configured ? configured : null;
-  }, [pendingBaseBranch, workspacePath, workspaces]);
+  // ADR 79：预配置源头（workspace baseBranch）已移除。draft 的「源头」芯片直接
+  // 跟随工作区实时 HEAD（planComposerGitChrome 内部回退 currentHead）。
   const gitChrome = useMemo(
     () => planComposerGitChrome({
       delivery: deliveryLine,
-      workspaceBaseBranch: workspaceBaseBranch,
+      workspaceBaseBranch: null,
       currentHead: workspaceGit?.ok ? workspaceGit.current : null,
       isDraft: isDraftConversation,
       deliveryKnown: isDraftConversation || deliveryLineKnown,
     }, { locale: isZh ? 'zh' : 'en' }),
-    [deliveryLine, deliveryLineKnown, isDraftConversation, isZh, workspaceBaseBranch, workspaceGit],
+    [deliveryLine, deliveryLineKnown, isDraftConversation, isZh, workspaceGit],
   );
-  const canSelectBoundBranch = canSelectComposerSourceBranch({
-    isDraft: isDraftConversation,
-    delivery: deliveryLine,
-  }) && gitChrome.taskLine?.selectable === true;
+  // ADR 79：composer 不再提供「固定源头分支」选择（无设置可写）；
+  // 隔离偏好（Worktree on/off）不受影响。
+  const canSelectBoundBranch = false;
   const envCapsule = useMemo(
     () => formatComposerEnvCapsule(gitChrome, {
       locale: isZh ? 'zh' : 'en',
@@ -2690,23 +2678,8 @@ export function ChatSurface({
       if (!isStreaming) changePreferredWorktree(false);
       return;
     }
-    if (!next || !workspacePath || !canSelectBoundBranch) return;
-    if (next === gitChrome.taskLine?.value) return;
-    const previous = gitChrome.taskLine?.value ?? null;
-    setPendingBaseBranch(next);
-    void clientApi.workspaceUpdate({ path: workspacePath, baseBranch: next })
-      .then(async (result) => {
-        if (result?.ok === false) {
-          setPendingBaseBranch(previous);
-          return;
-        }
-        await onWorkspaceUpdated?.();
-        setPendingBaseBranch(null);
-      })
-      .catch(() => {
-        setPendingBaseBranch(previous);
-      });
-  }, [canSelectBoundBranch, changePreferredWorktree, gitChrome.taskLine?.value, isStreaming, onWorkspaceUpdated, workspacePath]);
+    // ADR 79：分支选择不再写工作区设置（预配置源头已移除），此路径不生效。
+  }, [changePreferredWorktree, isStreaming]);
   const handleCreateBoundBranch = useCallback((request: CreateBranchRequest) => {
     const name = request.name.trim();
     if (!name || !workspacePath || !canSelectBoundBranch) return;
