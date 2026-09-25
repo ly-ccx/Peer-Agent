@@ -4,13 +4,31 @@ All notable changes to Peer Agent are tracked here.
 
 ## Unreleased
 
-### Improvements
+### Notes
 
-- Thread models.dev `reasoning_options` through the model sync pipeline: fetched model catalogs now carry per-model reasoning effort values, saved model records persist them, and runtime effort levels prefer the synced declaration over the static OpenCode Go declaration table (which remains as fallback). Models without declared levels still get a single default level, so MiMo keeps one level while `deepseek-flash` (DeepSeek V4.1 Flash, missing from the models.dev snapshot) gains low/high/max levels via its static fallback entry alongside `hy3` (none/low/high).
+- Nothing yet.
+
+## [0.0.18] - 2026-09-26
 
 ### Notes
 
-- Nothing else yet.
+- macOS builds are now Developer ID signed (Team ID `82672N97RP`) and notarized with a stapled ticket; Release CI fails if the certificate or notarization credentials are missing, and verifies the `.app` and the update zip against the Team ID, stapler, and Gatekeeper.
+- 0.0.18 is the first build whose updater replaces the app in place. Clients on 0.0.17 or earlier still download the dmg and must install 0.0.18 manually once.
+
+### Improvements
+
+- macOS in-app updates use the same electron-updater / Squirrel path as Windows: download the zip, verify the signing identity, quit, replace, and relaunch. The self-managed dmg download, `ready-to-open` phase, and open-installer IPC are removed; download or install failures surface the Release page as a manual fallback.
+- Selection quotes are inserted into the composer body instead of rendering as file attachments; Backspace at the start of the text removes a quote.
+- Goals auto-generate an acceptance report with tasks, criterion results, visual verdict, and screenshots, saved to `~/.peer-agent/goal-reports/<planId>.md`.
+- UI delivery Goals arm the visual verification gate at intake, so completion requires desktop preview evidence.
+- Thread models.dev `reasoning_options` through the model sync pipeline: fetched model catalogs now carry per-model reasoning effort values, saved model records persist them, and runtime effort levels prefer the synced declaration over the static OpenCode Go declaration table (which remains as fallback). Models without declared levels still get a single default level, so MiMo keeps one level while `deepseek-flash` (DeepSeek V4.1 Flash, missing from the models.dev snapshot) gains low/high/max levels via its static fallback entry alongside `hy3` (none/low/high).
+- Goal delivery bindings follow the live workspace HEAD; the "Git base branch" setting and composer source pinning are removed (ADR 79).
+- Hide the document tab strip when no file is open.
+
+### Fixes
+
+- Keep `reasoningEffortValues` model-scoped so synced levels no longer leak into the channel record.
+- Surface the last failed verification-gate reason in the Goal runner continue prompt, ending the endless auto-continue loop when criteria were never recorded.
 
 ## [0.0.17] - 2026-09-23
 
