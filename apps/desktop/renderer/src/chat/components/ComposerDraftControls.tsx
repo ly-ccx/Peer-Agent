@@ -1,5 +1,5 @@
 import type React from 'react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
 import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
@@ -18,6 +18,7 @@ import {
   type WorkspaceFileHit,
 } from '../state/contextMention';
 import { clientApi } from '../../clientApi';
+import { splitSelectionQuotes, quotePreviewText } from '../state/composerQuote';
 import { AttachmentStrip } from './thread/AttachmentStrip';
 
 interface SlashCommand {
@@ -100,8 +101,9 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   // 必须是单个包裹节点：composer 是 grid，多个裸兄弟节点会被塞进同一网格单元
   // 并与 textarea 叠放（缩略图压住文字）。包一层后附件条恒为一个 grid item，
   // 占据独立的 home-attachments 行；无附件且无错误时整行不渲染，不占高度。
+  const { quotes, files } = useMemo(() => splitSelectionQuotes(attachments), [attachments]);
   const attachmentSlot = useMemo(() => {
-    if (!attachments.length && !attachmentError) return null;
+    if (!files.length && !attachmentError) return null;
     return (
       <div className="composer-attachment-row">
         <AttachmentStrip
@@ -163,6 +165,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         onPrimaryAction={onPrimaryAction}
         editingMessage={editingMessage}
         onCancelEdit={onCancelEdit}
+        quotes={quotes}
+        onRemoveQuote={onRemoveAttachment}
       />
     </form>
   );
@@ -192,6 +196,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   onPrimaryAction,
   editingMessage = null,
   onCancelEdit,
+  quotes = [],
+  onRemoveQuote,
 }: {
   readonly conversationId: string | null;
   readonly hasProvider: boolean;
@@ -212,6 +218,8 @@ const ComposerDraftField = memo(function ComposerDraftField({
   readonly onPrimaryAction: () => void;
   readonly editingMessage?: { messageId: string; preview: string } | null;
   readonly onCancelEdit?: () => void;
+  readonly quotes?: readonly ChatAttachment[];
+  readonly onRemoveQuote?: (id: string) => void;
 }) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -223,6 +231,40 @@ const ComposerDraftField = memo(function ComposerDraftField({
   const mentionQueryRef = useRef<string | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const quoteFlowRef = useRef<HTMLDivElement>(null);
+  // 引用文字流：覆盖层原点/字号/行高运行时取自 textarea 计算样式（兼容 home/compact 变体），
+  // textarea 首行按覆盖层实测宽度做 text-indent，引用因此成为输入文字流的一部分。
+  const [quoteFlow, setQuoteFlow] = useState<{ indent: number; top: number; left: number; fontSize: string; lineHeight: string } | null>(null);
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!quotes.length || !textarea) { setQuoteFlow(null); return; }
+    const update = () => {
+      const style = getComputedStyle(textarea);
+      let width = 0;
+      quoteFlowRef.current?.querySelectorAll('.composer-quote-flow-text').forEach((el) => { width += el.getBoundingClientRect().width; });
+      const items = quoteFlowRef.current?.querySelectorAll('.composer-quote-flow-item').length ?? 0;
+      width += items * (15 + 4); // 每项：图标 15px + 图标与文字间距 4px
+      if (items > 1) width += (items - 1) * 8; // 多引用项间距
+      // 覆盖层的包含块就是 .chat-composer 的 padding edge。
+      // 视口差 tr-hr 已经是 CSS top/left，不能再扣 host 的 padding/border，否则引用会整体上移一圈内边距。
+      const host = textarea.closest('.chat-composer') ?? textarea.parentElement;
+      const hr = host.getBoundingClientRect();
+      const tr = textarea.getBoundingClientRect();
+      setQuoteFlow({
+        indent: Math.round(width) + 6,
+        top: (tr.top - hr.top) + (parseFloat(style.paddingTop) || 0),
+        left: (tr.left - hr.left) + (parseFloat(style.paddingLeft) || 0),
+        fontSize: style.fontSize,
+        lineHeight: style.lineHeight,
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(textarea);
+    if (quoteFlowRef.current) observer.observe(quoteFlowRef.current);
+    window.addEventListener('resize', update);
+    return () => { observer.disconnect(); window.removeEventListener('resize', update); };
+  }, [quotes]);
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
   const hydrationReadyConversationRef = useRef<string | null>(null);
 
@@ -552,6 +594,31 @@ const ComposerDraftField = memo(function ComposerDraftField({
           ) : null}
         </div>
       ) : null}
+      {quotes.length > 0 ? (
+        <div className="composer-quote-flow" ref={quoteFlowRef} style={quoteFlow ? { top: quoteFlow.top, left: quoteFlow.left, fontSize: quoteFlow.fontSize, lineHeight: quoteFlow.lineHeight } : undefined}>
+          {quotes.map((quote) => (
+            <span key={quote.id} className="composer-quote-flow-item" title={quote.selectionReference?.exactText}>
+              <svg className="composer-quote-flow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <path d="M10 7.5 8 9.5l2 2" />
+                <path d="m14 7.5-2 2 2 2" />
+              </svg>
+              <span className="composer-quote-flow-text">"{quotePreviewText(quote.selectionReference?.exactText || quote.text || '')}"</span>
+              {onRemoveQuote ? (
+                <button
+                  type="button"
+                  className="composer-quote-flow-remove"
+                  aria-label={isZh ? '移除引用' : 'Remove quote'}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onRemoveQuote(quote.id)}
+                >
+                  ×
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <textarea
         ref={textareaRef}
         value={draft}
@@ -564,9 +631,27 @@ const ComposerDraftField = memo(function ComposerDraftField({
               : (isZh ? '输入消息，@ 引用文件或会话' : 'Type a message, @ to mention a file or session')
           : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
         rows={1}
+        style={quotes.length && quoteFlow ? { textIndent: `${quoteFlow.indent}px` } : undefined}
         onPaste={onPaste}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {
+          // 引用是覆盖层，不在 textarea 文本里。光标在正文最开头时，退格应像删掉前面那个字一样删掉引用。
+          if (
+            event.key === 'Backspace'
+            && !event.nativeEvent.isComposing
+            && event.keyCode !== 229
+            && !event.metaKey
+            && !event.ctrlKey
+            && !event.altKey
+            && quotes.length > 0
+            && onRemoveQuote
+            && event.currentTarget.selectionStart === 0
+            && event.currentTarget.selectionEnd === 0
+          ) {
+            event.preventDefault();
+            onRemoveQuote(quotes[quotes.length - 1].id);
+            return;
+          }
           if (showSlashCommands) {
             if (event.key === 'ArrowDown') {
               event.preventDefault();

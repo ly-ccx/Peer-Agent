@@ -79,6 +79,7 @@ for (const sourceRole of ['user', 'assistant']) for (const existing of [false, t
     store.appendMessage(parent.id, { id: 'sent', role: 'user', content: '原草稿问题', attachments });
     const reopened = createConversationStore({ storeDir: root });
     const sent = reopened.getConversation(parent.id).messages.find((message) => message.id === 'sent');
+    assert.notEqual(sent.attachments.at(-1).name, '引用选区.txt');
     assert.deepEqual(sent.attachments.at(-1).selectionReference, reference);
     const api = toApiMessages([sent]);
     assert.equal(api.length, 1);
