@@ -276,7 +276,6 @@ const unavailableApi: ClientApi = {
   updaterCheck: unavailableMethod('updaterCheck'),
   updaterDownload: unavailableMethod('updaterDownload'),
   updaterInstall: unavailableMethod('updaterInstall'),
-  updaterOpenInstaller: unavailableMethod('updaterOpenInstaller'),
   updaterOpenReleasePage: unavailableMethod('updaterOpenReleasePage'),
   updaterSetChannel: unavailableMethod('updaterSetChannel'),
   onUpdaterEvent: unavailableMethod('onUpdaterEvent'),

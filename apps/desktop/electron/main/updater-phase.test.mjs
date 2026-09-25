@@ -10,18 +10,17 @@ import {
 
 /**
  * 相位锁定契约（修复「离开一会回来后安装按钮消失」的决策核心）：
- *   downloading / downloaded / ready-to-open 是不可被打断的相位——
+ *   downloading / downloaded 是不可被打断的相位——
  *   任何来源的迟到 check 类事件都必须丢弃，否则重查会把相位打回
  *   available，渲染层 isReady 失效、安装按钮消失。
  */
 
 describe('updater phase locking', () => {
   describe('LOCKED_PHASES', () => {
-    it('contains exactly downloading / downloaded / ready-to-open', () => {
+    it('contains exactly downloading / downloaded', () => {
       assert.deepEqual([...LOCKED_PHASES].sort(), [
         'downloaded',
         'downloading',
-        'ready-to-open',
       ]);
     });
 

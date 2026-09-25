@@ -18,8 +18,12 @@
 #   抢建 Release，导致同一 tag 出现多个 Release、产物被劈开（electron-builder
 #   + Actions matrix 的已知竞态）。集中到单个 release job 发布可彻底消除。
 #
-# 阶段一：关闭强制代码签名 / 公证（electron-builder.yml notarize=false，
-#         CSC_IDENTITY_AUTO_DISCOVERY=false）。阶段二补齐证书后在此注入 secrets。
+# 签名：mac 必须使用 Developer ID Application 证书（secrets MAC_CSC_LINK /
+#       MAC_CSC_KEY_PASSWORD，Team ID 82672N97RP）签名，缺失即失败——应用内更新
+#       由 Squirrel 校验新旧包签名身份一致，一旦发出 ad-hoc 包会切断后续热更新链。
+#       Windows / Linux 仍未签名（CSC_IDENTITY_AUTO_DISCOVERY=false）。
+# 公证：mac 构建以 secrets APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD 提交公证并 staple，
+#       缺失即失败，避免发出未公证的首装 dmg。
 name: Release
 
 on:
@@ -161,16 +165,87 @@ jobs:
       # 只构建、不发布（--publish never）。electron-builder 仍会按通道语义生成
       # 更新清单（beta-mac.yml / beta.yml / beta-linux.yml 或
       # latest-mac.yml / latest.yml / latest-linux.yml）。
+      # 证书只注入 mac：全局 CSC_LINK 会被 Windows 构建拿去跑 signtool。
       - name: Build (electron-builder, no publish)
         working-directory: apps/desktop
         shell: bash
         env:
-          # 阶段一：禁用 mac 自动证书发现，走 ad-hoc 签名（after-sign.cjs）。
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: >-
-          pnpm exec electron-builder ${{ matrix.ebflags }} --publish never
-          --config.publish.channel=${{ needs.meta.outputs.channel }}
-          --config.publish.releaseType=${{ needs.meta.outputs.releaseType }}
+          PLATFORM: ${{ matrix.platform }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+          MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "$PLATFORM" = "mac" ]; then
+            if [ -z "$MAC_CSC_LINK" ] || [ -z "$MAC_CSC_KEY_PASSWORD" ]; then
+              echo "::error::MAC_CSC_LINK / MAC_CSC_KEY_PASSWORD secrets are required: an ad-hoc signed mac build breaks in-app updates."
+              exit 1
+            fi
+            if [ -z "$MAC_APPLE_ID" ] || [ -z "$MAC_APPLE_APP_SPECIFIC_PASSWORD" ]; then
+              echo "::error::APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD secrets are required to notarize the mac build."
+              exit 1
+            fi
+            export CSC_LINK="$MAC_CSC_LINK"
+            export CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+            export APPLE_ID="$MAC_APPLE_ID"
+            export APPLE_APP_SPECIFIC_PASSWORD="$MAC_APPLE_APP_SPECIFIC_PASSWORD"
+            export APPLE_TEAM_ID=82672N97RP
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          pnpm exec electron-builder ${{ matrix.ebflags }} --publish never \
+            --config.publish.channel=${{ needs.meta.outputs.channel }} \
+            --config.publish.releaseType=${{ needs.meta.outputs.releaseType }}
+
+      # Squirrel 安装的是 zip 里的 .app，因此 .app 与 zip 解压结果都要核对 Team ID、
+      # 公证票据（stapler）与 Gatekeeper 评估。
+      - name: Verify macOS Developer ID signature and notarization
+        if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          MAC_TEAM_ID: 82672N97RP
+        run: |
+          set -euo pipefail
+          verify_app() {
+            local app="$1"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            local details
+            details="$(codesign -dv --verbose=4 "$app" 2>&1)"
+            echo "$details" | grep -E '^(Authority|TeamIdentifier)=' || true
+            if ! echo "$details" | grep -qx "TeamIdentifier=$MAC_TEAM_ID"; then
+              echo "::error::$app is not signed by Team ID $MAC_TEAM_ID"
+              exit 1
+            fi
+            if ! echo "$details" | grep -q '^Authority=Developer ID Application:'; then
+              echo "::error::$app is not signed with a Developer ID Application certificate"
+              exit 1
+            fi
+            if ! xcrun stapler validate "$app"; then
+              echo "::error::$app has no stapled notarization ticket"
+              exit 1
+            fi
+            local assessment
+            assessment="$(spctl -a -vvv -t exec "$app" 2>&1 || true)"
+            echo "$assessment"
+            if ! echo "$assessment" | grep -q 'source=Notarized Developer ID'; then
+              echo "::error::$app is not accepted by Gatekeeper as Notarized Developer ID"
+              exit 1
+            fi
+          }
+          shopt -s nullglob
+          apps=(dist-electron/mac*/"Peer Agent.app")
+          zips=(dist-electron/Peer-Agent-*-arm64.zip)
+          if [ ${#apps[@]} -eq 0 ] || [ ${#zips[@]} -eq 0 ]; then
+            echo "::error::mac .app or update zip not found in dist-electron"
+            exit 1
+          fi
+          for app in "${apps[@]}"; do verify_app "$app"; done
+          for zip in "${zips[@]}"; do
+            out="$(mktemp -d)"
+            ditto -x -k "$zip" "$out"
+            verify_app "$out/Peer Agent.app"
+          done
 
       - name: Verify packaged runtime entries
         run: pnpm --filter @peer-agent/desktop verify:packaged
@@ -326,6 +401,12 @@ jobs:
           test "${#linux_appimages[@]}" -ge 1
           test "${#linux_debs[@]}" -ge 1
           test -f release-assets/latest-linux.yml -o -f release-assets/beta-linux.yml
+          # Desktop mac：zip + 更新清单供 0.0.18 起的应用内更新；dmg 供更早版本手动安装。
+          mac_dmgs=(release-assets/Peer-Agent-*-arm64.dmg)
+          mac_zips=(release-assets/Peer-Agent-*-arm64.zip)
+          test "${#mac_dmgs[@]}" -ge 1
+          test "${#mac_zips[@]}" -ge 1
+          test -f release-assets/latest-mac.yml -o -f release-assets/beta-mac.yml
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

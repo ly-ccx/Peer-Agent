@@ -225,7 +225,6 @@ import {
   checkForUpdates,
   downloadUpdate,
   quitAndInstall,
-  openInstaller,
   openReleasePage,
 } from './auto-updater.mjs';
 
@@ -2364,7 +2363,7 @@ function registerDesktopIpcHost() {
       install: () => {
         const updaterStatus = getUpdaterStatus();
         if (
-          process.platform === 'win32'
+          (process.platform === 'win32' || process.platform === 'darwin')
           && updaterStatus?.enabled === true
           && updaterStatus?.phase === 'downloaded'
           && desktopLifecycleBinding
@@ -2373,7 +2372,6 @@ function registerDesktopIpcHost() {
         }
         return quitAndInstall();
       },
-      openInstaller: () => openInstaller(),
       openReleasePage: () => openReleasePage(),
       setChannel: (preference) => {
         // settings 是通道偏好的权限真相，先写回再切换运行时配置。

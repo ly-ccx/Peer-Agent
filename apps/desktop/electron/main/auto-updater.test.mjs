@@ -2,51 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
-import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+import { buildReleaseUrl } from './release-page-url.mjs';
 import { isNewerVersion, isPrerelease } from './update-version.mjs';
 
-describe('auto-updater mac manual download helpers', () => {
-  describe('mapArch', () => {
-    it('maps x64 to x64', () => {
-      assert.equal(mapArch('x64'), 'x64');
-    });
-
-    it('maps arm64 to arm64', () => {
-      assert.equal(mapArch('arm64'), 'arm64');
-    });
-
-    it('falls back to arm64 for unknown arch', () => {
-      assert.equal(mapArch('mips'), 'arm64');
-      assert.equal(mapArch(undefined), 'arm64');
-    });
-  });
-
-  describe('buildDmgUrl', () => {
-    it('builds the dmg URL following the artifactName convention', () => {
-      const url = buildDmgUrl({
-        owner: 'ly-ccx',
-        repo: 'Peer-Agent',
-        version: '0.0.1-beta.7',
-        arch: 'arm64',
-      });
-      // 文件名片段需 URL 编码（点号等保持原样，连字符约定不变）。
-      assert.equal(
-        url,
-        'https://github.com/ly-ccx/Peer-Agent/releases/download/v0.0.1-beta.7/Peer-Agent-0.0.1-beta.7-arm64.dmg',
-      );
-    });
-
-    it('uses the provided arch segment', () => {
-      const url = buildDmgUrl({
-        owner: 'ly-ccx',
-        repo: 'Peer-Agent',
-        version: '1.2.3',
-        arch: 'x64',
-      });
-      assert.ok(url.endsWith('/v1.2.3/Peer-Agent-1.2.3-x64.dmg'));
-    });
-  });
-
+describe('auto-updater release page fallback', () => {
   describe('buildReleaseUrl', () => {
     it('builds the release tag page URL', () => {
       const url = buildReleaseUrl({
@@ -117,7 +76,7 @@ describe('auto-updater activation integration contract', () => {
 
 describe('auto-updater phase-locking integration contract', () => {
   // 修复「离开一会回来后安装按钮消失」的三处源码契约：
-  //   1) checkForUpdates 入口有相位锁定守卫（重查不打断 downloading/ready-to-open）；
+  //   1) checkForUpdates 入口有相位锁定守卫（重查不打断 downloading/downloaded）；
   //   2) wireEvents 的 check 类事件处理器引用 shouldSkipStaleUpdateEvent（迟到事件丢弃）；
   //   3) downloadUpdate 有防重入守卫（锁定相位不发起第二次下载）。
   // 既有 auto-updater.mjs 无法在 node:test 下直接 import（依赖 electron 模块），
@@ -178,26 +137,22 @@ describe('auto-updater phase-locking integration contract', () => {
     );
   });
 
-  it('mac manual download runs under the stall watchdog and cleans it up', async () => {
+  it('every platform downloads through electron-updater under the stall watchdog', async () => {
     const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
 
-    // 下载开始即启动看门狗；进度回调喂狗；finally 里清理。
-    const macIdx = source.indexOf('async function downloadUpdateMacManual()');
-    assert.ok(macIdx > -1, 'downloadUpdateMacManual not found');
-    const macBlock = source.slice(macIdx, source.indexOf('function downloadToFile'));
-    assert.match(macBlock, /startDownloadStallWatchdog\(\);/);
-    assert.match(macBlock, /state\.stallWatchdog\?\.notifyProgress\(\);/);
-    assert.match(macBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
+    // mac（Squirrel + Developer ID）、Windows、Linux AppImage 共用同一条下载链路：
+    // 不允许再按平台分叉出自管下载（dmg 手动安装已退役）。
+    const downloadIdx = source.indexOf('export async function downloadUpdate()');
+    assert.ok(downloadIdx > -1, 'downloadUpdate not found');
+    const downloadBlock = source.slice(downloadIdx, source.indexOf('function currentReleaseUrl()'));
+    assert.match(downloadBlock, /startDownloadStallWatchdog\(\);/);
+    assert.match(downloadBlock, /autoUpdater\.downloadUpdate\(\)/);
+    assert.match(downloadBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
+    assert.doesNotMatch(downloadBlock, /process\.platform/);
+    assert.doesNotMatch(source, /downloadUpdateMacManual|ready-to-open|installerPath|openInstaller/);
 
-    // Windows / Linux AppImage 共用 electron-updater 默认下载路径，同样受看门狗保护。
-    const winIdx = source.indexOf('export async function downloadUpdate()');
-    const winBlock = source.slice(winIdx, macIdx);
-    assert.match(winBlock, /startDownloadStallWatchdog\(\);/);
-    assert.match(winBlock, /\} finally \{\s*\n\s*stopStallWatchdog\(\);/);
-    assert.match(winBlock, /if \(process\.platform === 'darwin'\)/);
-    assert.match(winBlock, /autoUpdater\.downloadUpdate\(\)/);
-    assert.doesNotMatch(winBlock, /process\.platform === 'win32'/);
-    assert.doesNotMatch(winBlock, /process\.platform === 'linux'/);
+    // 下载失败时带上 Release 页面兜底。
+    assert.match(downloadBlock, /state\.releaseUrl = currentReleaseUrl\(\);/);
 
     // 看门狗触发时置 error 并提供 Release 页面兜底（睡眠断流的恢复路径）。
     const stallFnIdx = source.indexOf('function startDownloadStallWatchdog()');
@@ -207,7 +162,17 @@ describe('auto-updater phase-locking integration contract', () => {
       source.indexOf('function stopStallWatchdog()'),
     );
     assert.match(stallBlock, /setPhase\('error'\);/);
-    assert.match(stallBlock, /emit\('error', \{ message: state\.error \}\);/);
-    assert.match(stallBlock, /buildReleaseUrl\(/);
+    assert.match(stallBlock, /state\.releaseUrl = currentReleaseUrl\(\);/);
+    assert.match(stallBlock, /emit\('error', \{ message: state\.error, releaseUrl: state\.releaseUrl \}\);/);
+  });
+
+  it('updater error events carry the release page fallback', async () => {
+    const source = await readFile(new URL('./auto-updater.mjs', import.meta.url), 'utf8');
+
+    // mac Squirrel 签名校验 / 替换失败只经由 error 事件上报，渲染层需拿到兜底链接。
+    assert.match(
+      source,
+      /autoUpdater\.on\('error', \(err\) => \{[\s\S]*?state\.releaseUrl = currentReleaseUrl\(\);[\s\S]*?emit\('error', \{ message: state\.error, releaseUrl: state\.releaseUrl \}\);/,
+    );
   });
 });

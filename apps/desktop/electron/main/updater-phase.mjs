@@ -7,7 +7,7 @@
  *   electron-updater 内部事件回调。它们都会写 state.phase：
  *   checkForUpdates() 无条件 setPhase('checking')，wireEvents 的
  *   update-available 处理器无条件 setPhase('available')。于是在
- *   downloading / downloaded / ready-to-open 期间发生的任何一次重查，
+ *   downloading / downloaded 期间发生的任何一次重查，
  *   都会把相位打回 available——渲染层 isReady 失效，安装按钮消失。
  *
  * 契约（本模块是「哪些相位不可被打断」的唯一决策点）：
@@ -27,11 +27,10 @@
  * 纯函数、无 IO、无依赖，方便对「相位 × 事件」交叉矩阵做穷举测试。
  */
 
-/** 受保护相位：下载中 / 已下载 / 等待用户打开安装包。 */
+/** 受保护相位：下载中 / 已下载等待重启安装。 */
 export const LOCKED_PHASES = [
   'downloading',
   'downloaded',
-  'ready-to-open',
 ];
 
 /**
@@ -61,7 +60,7 @@ export function isLockedPhase(phase) {
  * 规则：
  *   - 相位未锁定（idle / checking / available / not-available / error）：
  *     一切事件正常处理，返回 false。
- *   - 相位锁定（downloading / downloaded / ready-to-open）：
+ *   - 相位锁定（downloading / downloaded）：
  *     check 类事件（checking-for-update / update-available /
  *     update-not-available）返回 true（迟到事件，丢弃）；
  *     其余事件（download-progress / update-downloaded / error）返回
