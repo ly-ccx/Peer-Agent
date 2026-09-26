@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { loadMigratedSettings } from '@peer-agent/runtime-node';
 import { pathOf } from './data-store.mjs';
 
 /**
@@ -16,13 +17,7 @@ import { pathOf } from './data-store.mjs';
  */
 export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) {
   function readAll() {
-    if (!existsSync(settingsFile)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return loadMigratedSettings(settingsFile);
   }
 
   function writeAll(obj) {

@@ -206,6 +206,7 @@ export {
   migrateFromLegacy,
   pathOf,
 } from './data-store.mjs';
+export { loadMigratedSettings, runSettingsMigrations, SETTINGS_MIGRATIONS } from './settings-migrations.mjs';
 export {
   aggregateProgress,
   applyGoalTimingTransition,

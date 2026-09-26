@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { loadMigratedSettings } from '@peer-agent/runtime-node';
 import path from 'node:path';
 import {
   assembleSystemContext,
@@ -52,10 +53,6 @@ export const TUI_LANGUAGE_OPTIONS: readonly TuiLanguageOption[] = Object.freeze(
     shortcut: '2',
   },
 ]);
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function normalizeTuiLocale(value: unknown, fallback: TuiLocale = 'zh-CN'): TuiLocale {
   if (typeof value !== 'string') return fallback;
@@ -112,15 +109,7 @@ export function createTuiLanguageStore({
 }): TuiLanguageStore {
   const settingsFile = path.join(userDataPath, 'settings.json');
 
-  const readSettings = (): Record<string, unknown> => {
-    if (!existsSync(settingsFile)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(settingsFile, 'utf8')) as unknown;
-      return isObjectRecord(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  };
+  const readSettings = (): Record<string, unknown> => loadMigratedSettings(settingsFile);
 
   const writeSettings = (next: Record<string, unknown>): void => {
     mkdirSync(userDataPath, { recursive: true });

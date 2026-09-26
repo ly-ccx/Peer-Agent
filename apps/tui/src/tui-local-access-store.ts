@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { loadMigratedSettings } from '@peer-agent/runtime-node';
 import path from 'node:path';
 
 import type { LocalAccessLevel } from '@peer-agent/protocol';
@@ -17,17 +18,7 @@ export function createTuiLocalAccessStore({
 }): TuiLocalAccessStore {
   const settingsFile = path.join(userDataPath, 'settings.json');
 
-  const readSettings = (): Record<string, unknown> => {
-    if (!existsSync(settingsFile)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
-  };
+  const readSettings = (): Record<string, unknown> => loadMigratedSettings(settingsFile);
 
   return {
     getAccessLevel() {
