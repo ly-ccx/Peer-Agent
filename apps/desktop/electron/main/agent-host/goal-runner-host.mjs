@@ -12,6 +12,7 @@ import {
   mapGoalTurnOutcome,
 } from '../goal-runner-message-persistence.mjs';
 import { createBroadcastSink, createCollectingSink } from './turn-sinks.mjs';
+import { resolveDelegatedWorkTurn } from './work-session-profile.mjs';
 
 export function buildGoalRunnerMessage(plan, turnNumber) {
   return buildGoalRunnerTickMessage(plan, turnNumber);
@@ -332,6 +333,24 @@ export function createDesktopGoalRunnerHost({
     };
   }
 
+  function conversationModelId(plan) {
+    return resolveConversationModelProviderId({
+      conversationId: plan?.conversationId,
+      conversationStore,
+    });
+  }
+
+  /**
+   * 任务回合用冻结快照。快照缺这一角色时退回 B1-09。
+   * 普通 Goal 返回 null，调用方保持原来的画像和模型。
+   */
+  function resolveDelegatedTurn(plan, kind) {
+    return resolveDelegatedWorkTurn(plan, kind, {
+      conversationModelProviderId: conversationModelId(plan),
+      routeRole: (role) => routeRole(role, plan),
+    });
+  }
+
   const goalRunnerOptions = {
     goalPlanStore,
     uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
@@ -411,8 +430,9 @@ export function createDesktopGoalRunnerHost({
             }
           },
         };
+        const delegated = resolveDelegatedTurn(plan, 'worker');
         const outcome = await agentTurnExecutor.runTurn({
-          turnProfile: { role: 'goal_runner' },
+          turnProfile: delegated?.turnProfile ?? { role: 'goal_runner' },
           sink: createBroadcastSink({ getWindows: getMainWindows }),
           messages,
           streamId,
@@ -421,10 +441,7 @@ export function createDesktopGoalRunnerHost({
           // 注入续推上下文、goal-mode-gate 放行自驱。plan 为纯审批门,不再托管续推。
           mode: 'goal',
           conversationId: plan.conversationId,
-          modelProviderId: resolveConversationModelProviderId({
-            conversationId: plan.conversationId,
-            conversationStore,
-          }),
+          modelProviderId: delegated?.modelProviderId || conversationModelId(plan),
           assistantMessageId,
           continuityContext: goalContinuityContext,
           runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
@@ -447,8 +464,10 @@ export function createDesktopGoalRunnerHost({
       async runExplorer({ plan, explorer }) {
         const streamId = randomUUID();
         const webContents = createCollectingSink();
-        const routed = routeRole('explorer', plan);
-        if (!routed.ok) throw new Error(routed.missing || '没有可用的模型');
+        const delegated = resolveDelegatedTurn(plan, 'explorer');
+        const routed = delegated ? null : routeRole('explorer', plan);
+        if (delegated?.error) throw new Error(delegated.error.missing || '没有可用的模型');
+        if (!delegated && !routed.ok) throw new Error(routed.missing || '没有可用的模型');
         broadcast('goalRunner:changed', {
           type: 'goalRunner:explorerStreamStarted',
           planId: plan.planId,
@@ -459,7 +478,7 @@ export function createDesktopGoalRunnerHost({
           startedAt: Date.now(),
         });
         await agentTurnExecutor.runTurn({
-          turnProfile: roleTurnProfile('explorer', routed),
+          turnProfile: delegated?.turnProfile ?? roleTurnProfile('explorer', routed),
           sink: webContents,
           messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
           streamId,
@@ -467,7 +486,7 @@ export function createDesktopGoalRunnerHost({
           mode: 'explorer',
           // 旁路只读调查：不写会话正文，避免内部过程进聊天。
           conversationId: null,
-          modelProviderId: routed.selection.modelProviderId,
+          modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
           ephemeral: true,
           explorerContext: buildExplorerContext({ plan, explorer }),
           runtimeReminders: [buildExplorerReminder(explorer)],
@@ -491,13 +510,15 @@ export function createDesktopGoalRunnerHost({
     verifierRunner: {
       async runVerifier({ plan, verifierRunId, stage, signal }) {
         if (stage === 'visual') {
-          const routed = routeRole('visual_verifier', plan);
-          if (!routed.ok) {
+          const delegated = resolveDelegatedTurn(plan, 'visual_verifier');
+          const routed = delegated ? null : routeRole('visual_verifier', plan);
+          const routeError = delegated?.error || (!delegated && !routed?.ok ? routed : null);
+          if (routeError) {
             return {
               passed: false,
-              summary: routed.missing || '没有能看图的模型',
-              missing: routed.missing || '没有能看图的模型',
-              reason: routed.reason || 'capability',
+              summary: routeError.missing || '没有能看图的模型',
+              missing: routeError.missing || '没有能看图的模型',
+              reason: routeError.reason || 'capability',
               evidenceRefs: [],
               findings: [],
               repairSuggestions: [],
@@ -506,10 +527,12 @@ export function createDesktopGoalRunnerHost({
           return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
             workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
               || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
-            llmChatService, modelProviderId: routed.selection.modelProviderId });
+            llmChatService, modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId });
         }
-        const routed = routeRole('verifier', plan);
-        if (!routed.ok) throw new Error(routed.missing || '没有可用的模型');
+        const delegated = resolveDelegatedTurn(plan, 'verifier');
+        const routed = delegated ? null : routeRole('verifier', plan);
+        if (delegated?.error) throw new Error(delegated.error.missing || '没有可用的模型');
+        if (!delegated && !routed.ok) throw new Error(routed.missing || '没有可用的模型');
         const streamId = randomUUID();
         const webContents = createCollectingSink();
         broadcast('goalRunner:changed', {
@@ -522,7 +545,7 @@ export function createDesktopGoalRunnerHost({
           startedAt: Date.now(),
         });
         await agentTurnExecutor.runTurn({
-          turnProfile: roleTurnProfile('verifier', routed),
+          turnProfile: delegated?.turnProfile ?? roleTurnProfile('verifier', routed),
           sink: webContents,
           messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
           streamId,
@@ -531,7 +554,7 @@ export function createDesktopGoalRunnerHost({
           mode: 'explorer',
           // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
           conversationId: null,
-          modelProviderId: routed.selection.modelProviderId,
+          modelProviderId: delegated ? delegated.modelProviderId : routed.selection.modelProviderId,
           ephemeral: true,
           verifierContext: buildVerifierContext({ plan, verifierRunId }),
           runtimeReminders: [buildVerifierReminder(verifierRunId)],

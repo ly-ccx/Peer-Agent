@@ -91,6 +91,7 @@ const TURN_ROLES = new Set([
   'visual_verifier',
   'automation',
   'project_agent',
+  'work_session',
 ]);
 
 function normalizeTurnProfile(value) {
@@ -101,6 +102,12 @@ function normalizeTurnProfile(value) {
     ? value.modelSelection.modelProviderId.trim()
     : '';
   const workspaceId = typeof value.workspaceId === 'string' ? value.workspaceId.trim() : '';
+  const sessionId = typeof value.sessionId === 'string' ? value.sessionId.trim() : '';
+  const planId = typeof value.planId === 'string' ? value.planId.trim() : '';
+  const memorySnapshotId = typeof value.memorySnapshotId === 'string' ? value.memorySnapshotId.trim() : '';
+  const excludeCapabilityPrefixes = Array.isArray(value.excludeCapabilityPrefixes)
+    ? value.excludeCapabilityPrefixes.filter((prefix) => typeof prefix === 'string' && prefix.trim()).map((prefix) => prefix.trim())
+    : [];
   const recoveryCandidateIds = Array.isArray(value.recoveryCandidateIds)
     ? value.recoveryCandidateIds
       .filter((id) => typeof id === 'string' && id.trim())
@@ -129,6 +136,10 @@ function normalizeTurnProfile(value) {
   return {
     role,
     ...(workspaceId ? { workspaceId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(planId ? { planId } : {}),
+    ...(memorySnapshotId ? { memorySnapshotId } : {}),
+    ...(excludeCapabilityPrefixes.length ? { excludeCapabilityPrefixes } : {}),
     ...(modelSelection ? { modelSelection } : {}),
     ...(recoveryCandidateIds.length ? { recoveryCandidateIds } : {}),
   };
@@ -153,12 +164,22 @@ function sleepWithSignal(ms, signal) {
   });
 }
 
-function buildRuntimeTools({ mcpRegistry, skillStore, providerType, mode }) {
+function buildRuntimeTools({
+  mcpRegistry,
+  skillStore,
+  providerType,
+  mode,
+  excludeCapabilityPrefixes = null,
+}) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
   // project_agent 回合把投影上的 accessLevel 标成 restricted_local。共享 permission-gate 不在这里改。
-  const projectionOptions = mode === 'project_agent'
-    ? { mode, accessLevel: 'restricted_local' }
-    : { mode };
+  const projectionOptions = {
+    mode,
+    ...(mode === 'project_agent' ? { accessLevel: 'restricted_local' } : {}),
+    ...(Array.isArray(excludeCapabilityPrefixes) && excludeCapabilityPrefixes.length
+      ? { excludeCapabilityPrefixes }
+      : {}),
+  };
   const { registry, projection, modelProjection } = createRuntimeToolProjection({
     mcpRegistry,
     skillStore,
@@ -1664,6 +1685,7 @@ export function createLlmChatService({
           skillStore,
           providerType: resolvedChannel.legacyProvider,
           mode: runtimeMode,
+          excludeCapabilityPrefixes: profile?.excludeCapabilityPrefixes,
         });
 
         try {
