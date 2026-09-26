@@ -294,6 +294,44 @@ export function createDesktopGoalRunnerHost({
   workspaceRoot,
   getMainWindows,
 } = {}) {
+  function routeRole(role, plan) {
+    const workerModelProviderId = resolveConversationModelProviderId({
+      conversationId: plan?.conversationId,
+      conversationStore,
+    });
+    if (typeof llmChatService?.resolveGoalRole !== 'function') {
+      return {
+        ok: true,
+        selection: {
+          modelProviderId: workerModelProviderId,
+          providerId: workerModelProviderId || '',
+          modelId: '',
+          family: '',
+        },
+        source: 'global',
+        candidateIds: workerModelProviderId ? [workerModelProviderId] : [],
+      };
+    }
+    return llmChatService.resolveGoalRole({ role, workerModelProviderId });
+  }
+
+  function roleTurnProfile(role, routed) {
+    if (!routed?.ok) return { role };
+    return {
+      role,
+      modelSelection: {
+        ...routed.selection,
+        ...(routed.source ? { source: routed.source } : {}),
+        ...(typeof routed.sameFamilyAsWorker === 'boolean'
+          ? { sameFamilyAsWorker: routed.sameFamilyAsWorker }
+          : {}),
+      },
+      ...(Array.isArray(routed.candidateIds) && routed.candidateIds.length
+        ? { recoveryCandidateIds: routed.candidateIds }
+        : {}),
+    };
+  }
+
   const goalRunnerOptions = {
     goalPlanStore,
     uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
@@ -409,6 +447,8 @@ export function createDesktopGoalRunnerHost({
       async runExplorer({ plan, explorer }) {
         const streamId = randomUUID();
         const webContents = createCollectingSink();
+        const routed = routeRole('explorer', plan);
+        if (!routed.ok) throw new Error(routed.missing || '没有可用的模型');
         broadcast('goalRunner:changed', {
           type: 'goalRunner:explorerStreamStarted',
           planId: plan.planId,
@@ -419,7 +459,7 @@ export function createDesktopGoalRunnerHost({
           startedAt: Date.now(),
         });
         await agentTurnExecutor.runTurn({
-          turnProfile: { role: 'explorer' },
+          turnProfile: roleTurnProfile('explorer', routed),
           sink: webContents,
           messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
           streamId,
@@ -427,10 +467,7 @@ export function createDesktopGoalRunnerHost({
           mode: 'explorer',
           // 旁路只读调查：不写会话正文，避免内部过程进聊天。
           conversationId: null,
-          modelProviderId: resolveConversationModelProviderId({
-            conversationId: plan.conversationId,
-            conversationStore,
-          }),
+          modelProviderId: routed.selection.modelProviderId,
           ephemeral: true,
           explorerContext: buildExplorerContext({ plan, explorer }),
           runtimeReminders: [buildExplorerReminder(explorer)],
@@ -453,11 +490,26 @@ export function createDesktopGoalRunnerHost({
     },
     verifierRunner: {
       async runVerifier({ plan, verifierRunId, stage, signal }) {
-        if (stage === 'visual') return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
-          workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
-            || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
-          llmChatService, modelProviderId: resolveConversationModelProviderId({
-            conversationId: plan.conversationId, conversationStore }) });
+        if (stage === 'visual') {
+          const routed = routeRole('visual_verifier', plan);
+          if (!routed.ok) {
+            return {
+              passed: false,
+              summary: routed.missing || '没有能看图的模型',
+              missing: routed.missing || '没有能看图的模型',
+              reason: routed.reason || 'capability',
+              evidenceRefs: [],
+              findings: [],
+              repairSuggestions: [],
+            };
+          }
+          return runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore,
+            workspacePath: (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
+              || plan?.targetWorkspacePath || conversationStore?.getConversation?.(plan.conversationId)?.workspacePath || workspaceRoot,
+            llmChatService, modelProviderId: routed.selection.modelProviderId });
+        }
+        const routed = routeRole('verifier', plan);
+        if (!routed.ok) throw new Error(routed.missing || '没有可用的模型');
         const streamId = randomUUID();
         const webContents = createCollectingSink();
         broadcast('goalRunner:changed', {
@@ -470,7 +522,7 @@ export function createDesktopGoalRunnerHost({
           startedAt: Date.now(),
         });
         await agentTurnExecutor.runTurn({
-          turnProfile: { role: 'verifier' },
+          turnProfile: roleTurnProfile('verifier', routed),
           sink: webContents,
           messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
           streamId,
@@ -479,10 +531,7 @@ export function createDesktopGoalRunnerHost({
           mode: 'explorer',
           // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
           conversationId: null,
-          modelProviderId: resolveConversationModelProviderId({
-            conversationId: plan.conversationId,
-            conversationStore,
-          }),
+          modelProviderId: routed.selection.modelProviderId,
           ephemeral: true,
           verifierContext: buildVerifierContext({ plan, verifierRunId }),
           runtimeReminders: [buildVerifierReminder(verifierRunId)],
