@@ -451,6 +451,16 @@ export interface QuickChatPopoverAnchorRect {
   readonly height: number;
 }
 
+/** `settings.json` 的 `developer` 对象。缺省的 projectAgentMode 视为关闭。 */
+export interface DeveloperSettingsView {
+  readonly projectAgentMode?: boolean;
+}
+
+export interface DeveloperDiagnosticsView {
+  readonly dataHome?: string;
+  readonly isDev?: boolean;
+}
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -458,6 +468,10 @@ export interface BootstrapPreloadApi {
   readonly listProjects: () => Promise<readonly WorkspaceProject[]>;
   readonly getRuntimeProjection: () => Promise<RuntimeProjection>;
   readonly setLocale: (locale: LocaleCode) => Promise<ClientSessionState>;
+  readonly getDeveloperSettings: () => Promise<DeveloperSettingsView>;
+  readonly updateDeveloperSettings: (partial: DeveloperSettingsView) => Promise<DeveloperSettingsView>;
+  readonly resetDeveloperSettings: () => Promise<DeveloperSettingsView>;
+  readonly getDeveloperDiagnostics: () => Promise<DeveloperDiagnosticsView>;
   readonly approveLocalAction: (
     toolCallId: string,
     options?: { duration?: PermissionGrant['duration']; scope?: string }

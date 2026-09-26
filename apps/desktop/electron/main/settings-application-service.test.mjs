@@ -140,6 +140,15 @@ test('permission decisions preserve grant fields and resolve through the injecte
   ]);
 });
 
+test('projectAgentMode round-trips in developer settings and reset clears it', () => {
+  const { service } = createHarness();
+  assert.equal(service.getDeveloperSettings().projectAgentMode, undefined);
+  assert.equal(service.updateDeveloperSettings({ projectAgentMode: true }).projectAgentMode, true);
+  assert.equal(service.getDeveloperSettings().trace, false);
+  assert.deepEqual(service.resetDeveloperSettings(), {});
+  assert.equal(service.getDeveloperSettings().projectAgentMode, undefined);
+});
+
 test('model routing defaults are computed on read and are not written back', () => {
   const { service, calls, getSettings } = createHarness();
   const providers = [{
