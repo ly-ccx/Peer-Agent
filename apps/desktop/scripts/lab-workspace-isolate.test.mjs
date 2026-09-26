@@ -55,7 +55,8 @@ test('prepareLabIsolation wires the daily credential helper into the isolated re
   const labHome = makeLabHome();
   const prepared = prepareLabIsolation({ sourceRoot: REPO_ROOT, labHome });
   const filename = path.basename(dailyHelper);
-  const isolatedHelper = path.join(prepared.isolated.workspaceRoot, 'target', 'debug', filename);
+  const profile = dailyHelper.includes(`${path.sep}release${path.sep}`) ? 'release' : 'debug';
+  const isolatedHelper = path.join(prepared.isolated.workspaceRoot, 'target', profile, filename);
   assert.equal(fs.lstatSync(isolatedHelper).isSymbolicLink(), true);
   assert.equal(fs.realpathSync(isolatedHelper), fs.realpathSync(dailyHelper));
   assert.ok(prepared.isolated.linkedHelpers.some((link) => link.to === isolatedHelper));

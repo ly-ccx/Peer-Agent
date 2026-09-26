@@ -88,13 +88,15 @@ jobs:
             echo "::error::Could not identify a failed test file to retry."
             exit "$code"
           fi
+          retry_failed=0
           for file in "${files[@]}"; do
             [ -f "$file" ] || continue
             echo "::group::retry $file"
             if [[ "$file" == apps/tui/* ]]; then
-              bun test "$file"
+              bun test "$file" || retry_failed=1
             else
-              node --test --test-reporter=tap "$file"
+              node --test --test-reporter=tap "$file" || retry_failed=1
             fi
             echo "::endgroup::"
           done
+          exit "$retry_failed"
