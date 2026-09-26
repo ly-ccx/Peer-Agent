@@ -1,3 +1,5 @@
+import { resolveStoredModelRouting } from '@peer-agent/runtime-node';
+
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
   return value;
@@ -111,6 +113,29 @@ export function createSettingsApplicationService({
     return readSession();
   }
 
+  function getModelRouting(providers = []) {
+    return resolveStoredModelRouting(read().modelRouting, Array.isArray(providers) ? providers : []);
+  }
+
+  function updateModelRouting(partial) {
+    const current = isRecord(read().modelRouting) ? read().modelRouting : {};
+    const nextPartial = isRecord(partial) ? partial : {};
+    const next = { ...current };
+    if (isRecord(nextPartial.tiers)) next.tiers = { ...(isRecord(current.tiers) ? current.tiers : {}), ...nextPartial.tiers };
+    if (isRecord(nextPartial.roles)) next.roles = { ...(isRecord(current.roles) ? current.roles : {}), ...nextPartial.roles };
+    if (typeof nextPartial.verifierPreferDifferentFamily === 'boolean') {
+      next.verifierPreferDifferentFamily = nextPartial.verifierPreferDifferentFamily;
+    }
+    if (Number.isFinite(Number(nextPartial.dailySpendCapUsd)) && Number(nextPartial.dailySpendCapUsd) >= 0) {
+      next.dailySpendCapUsd = Number(nextPartial.dailySpendCapUsd);
+    }
+    if (isRecord(nextPartial.roleSpendCaps)) {
+      next.roleSpendCaps = { ...(isRecord(current.roleSpendCaps) ? current.roleSpendCaps : {}), ...nextPartial.roleSpendCaps };
+    }
+    merge({ modelRouting: next });
+    return next;
+  }
+
   return Object.freeze({
     get,
     update,
@@ -121,6 +146,8 @@ export function createSettingsApplicationService({
     exportSettings,
     importSettings,
     updateLocale,
+    getModelRouting,
+    updateModelRouting,
   });
 }
 

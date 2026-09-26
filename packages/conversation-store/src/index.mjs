@@ -1446,6 +1446,8 @@ export function createConversationStore(options = {}) {
           + tokens.cacheWriteTokens,
         estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
         pricingSource: optionalText(attribution.pricingSource),
+        ...(optionalText(attribution.role) ? { role: optionalText(attribution.role) } : {}),
+        ...(optionalText(attribution.workspaceId) ? { workspaceId: optionalText(attribution.workspaceId) } : {}),
       };
       appendJsonl(usageLogFile, ledgerRow);
       return {

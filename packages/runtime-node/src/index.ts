@@ -268,6 +268,15 @@ export {
   shouldReanchor,
 } from './goal-runner.mjs';
 export {
+  buildDefaultModelRouting,
+  catalogFromProviders,
+  evaluateRoleSpendCap,
+  isRoutableProvider,
+  providerFamily,
+  resolveRoleRoute,
+  resolveStoredModelRouting,
+} from './model-router.mjs';
+export {
   buildGoalRunnerTickMessage,
   describeVisualRepair,
   normalizeVisualRepair,

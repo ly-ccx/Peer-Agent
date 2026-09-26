@@ -54,10 +54,10 @@ import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './prov
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createStreamProfiler, isStreamProfilingEnabled } from './stream-profiler.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
-import { estimateUsageCostUsd } from './usage-stats.mjs';
+import { estimateUsageCostUsd, startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
-import { createApprovalStore, createProjectRegistry } from '@peer-agent/runtime-node';
+import { createApprovalStore, createProjectRegistry, resolveRoleRoute } from '@peer-agent/runtime-node';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -88,7 +88,42 @@ const TURN_ROLES = new Set(['user_chat', 'goal_runner', 'explorer', 'verifier', 
 function normalizeTurnProfile(value) {
   if (!value || typeof value !== 'object') return null;
   const role = TURN_ROLES.has(value.role) ? value.role : null;
-  return role ? { role } : null;
+  if (!role) return null;
+  const modelProviderId = typeof value.modelSelection?.modelProviderId === 'string'
+    ? value.modelSelection.modelProviderId.trim()
+    : '';
+  const workspaceId = typeof value.workspaceId === 'string' ? value.workspaceId.trim() : '';
+  const recoveryCandidateIds = Array.isArray(value.recoveryCandidateIds)
+    ? value.recoveryCandidateIds
+      .filter((id) => typeof id === 'string' && id.trim())
+      .map((id) => id.trim())
+    : [];
+  const modelSelection = modelProviderId
+    ? {
+        modelProviderId,
+        ...(typeof value.modelSelection.providerId === 'string' && value.modelSelection.providerId.trim()
+          ? { providerId: value.modelSelection.providerId.trim() }
+          : {}),
+        ...(typeof value.modelSelection.modelId === 'string' && value.modelSelection.modelId.trim()
+          ? { modelId: value.modelSelection.modelId.trim() }
+          : {}),
+        ...(typeof value.modelSelection.family === 'string' && value.modelSelection.family.trim()
+          ? { family: value.modelSelection.family.trim() }
+          : {}),
+        ...(typeof value.modelSelection.source === 'string' && value.modelSelection.source.trim()
+          ? { source: value.modelSelection.source.trim() }
+          : {}),
+        ...(typeof value.modelSelection.sameFamilyAsWorker === 'boolean'
+          ? { sameFamilyAsWorker: value.modelSelection.sameFamilyAsWorker }
+          : {}),
+      }
+    : null;
+  return {
+    role,
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(modelSelection ? { modelSelection } : {}),
+    ...(recoveryCandidateIds.length ? { recoveryCandidateIds } : {}),
+  };
 }
 
 // 可被用户 abort 打断的退避等待：abort 时以 AbortError 拒绝，沿用既有
@@ -266,6 +301,15 @@ function buildAgentRunOutcome(streamRecord = {}) {
   };
 }
 
+function usageAttributionExtras(streamRecord) {
+  const role = streamRecord?.turnProfile?.role;
+  const workspaceId = streamRecord?.turnProfile?.workspaceId;
+  return {
+    ...(typeof role === 'string' && role.trim() ? { role: role.trim() } : {}),
+    ...(typeof workspaceId === 'string' && workspaceId.trim() ? { workspaceId: workspaceId.trim() } : {}),
+  };
+}
+
 function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog, llmConfigStore }) {
   if (
     (!conversationStore?.recordRuntimeTurnUsage && !conversationStore?.addUsage)
@@ -335,6 +379,7 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
             providerName: streamRecord.actualProviderName || null,
             estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
             pricingSource: streamRecord.actualPricingSource || null,
+            ...usageAttributionExtras(streamRecord),
           },
         },
       );
@@ -357,6 +402,7 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
           providerRequestCount: usage?.providerRequestCount,
           pricing: streamRecord.actualPricing || {},
           pricingSource: streamRecord.actualPricingSource || null,
+          ...usageAttributionExtras(streamRecord),
         });
         } catch (error) {
           console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
@@ -992,12 +1038,12 @@ export function createLlmChatService({
     } catch {}
   }
 
-  function getProviderCandidates(preferredProviderId = null) {
+  function getProviderCandidates(preferredProviderId = null, allowedProviderIds = null) {
     // 路由真值必须与设置页/聊天选择器一致：只使用用户明确保存的 provider×model 记录。
     // 目录展开只是“可导入候选”，不能替换真实记录，否则 renderer 回传的真实 id 会在
     // main 进程消失，并错误回退到目录里的另一模型。
     const providers = llmConfigStore.listProviders();
-    return orderProviderCandidates(providers, preferredProviderId);
+    return orderProviderCandidates(providers, preferredProviderId, allowedProviderIds);
   }
 
   /**
@@ -1141,12 +1187,18 @@ export function createLlmChatService({
     // 托管回合（Goal Runner 等）没有 renderer 再次透传 modelProviderId，但只要绑定了
     // conversationId，就必须继承该会话的模型选择。否则会静默落到全局默认 provider，
     // 造成 UI 显示 ChatGPT、后台实际改跑 Grok 的跨模型漂移。
-    const effectiveModelProviderId = resolveConversationModelProviderId({
-      modelProviderId,
-      conversationId,
-      conversationStore,
-    });
-    const providerCandidates = getProviderCandidates(effectiveModelProviderId);
+    // 角色回合把已解析的模型放在 turnProfile.modelSelection，优先于会话绑定。
+    const profile = normalizeTurnProfile(turnProfile);
+    const effectiveModelProviderId = profile?.modelSelection?.modelProviderId
+      || resolveConversationModelProviderId({
+        modelProviderId,
+        conversationId,
+        conversationStore,
+      });
+    const providerCandidates = getProviderCandidates(
+      effectiveModelProviderId,
+      profile?.recoveryCandidateIds ?? null,
+    );
     if (visualReviewHandle !== null) {
       let visualReview = null;
       try {
@@ -1244,7 +1296,7 @@ export function createLlmChatService({
       startedAt: resumeSeed?.timestamp ?? Date.now(),
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
-      turnProfile: normalizeTurnProfile(turnProfile),
+      turnProfile: profile,
       // CollectingSink 没有审批人。包裹后的 send 代理不再带这个标记，询问前从流记录读取。
       ...(webContents?.approver === 'none' ? { approver: 'none' } : {}),
       // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
@@ -2060,6 +2112,40 @@ export function createLlmChatService({
     };
   }
 
+  function resolveGoalRole({
+    role,
+    workerModelProviderId = null,
+    projectPolicy = null,
+    taskOverride = null,
+    requestPreference = null,
+    taskRequiresVision = false,
+    requiredContextTokens = 0,
+    spentUsd = null,
+  } = {}) {
+    const providers = typeof llmConfigStore?.listProviders === 'function'
+      ? llmConfigStore.listProviders()
+      : [];
+    const settings = typeof getSettings === 'function' ? getSettings() : null;
+    const spent = Number.isFinite(Number(spentUsd))
+      ? Number(spentUsd)
+      : sumRoleSpendUsd(usageRequestLog.readAll({ limit: 20_000 }), {
+          role,
+          sinceMs: startOfLocalDayMs(),
+        });
+    return resolveRoleRoute({
+      role,
+      providers,
+      routing: settings?.modelRouting,
+      projectPolicy,
+      taskOverride,
+      requestPreference,
+      workerModelProviderId,
+      taskRequiresVision,
+      requiredContextTokens,
+      spentUsd: spent,
+    });
+  }
+
   return {
     sendMessage: (params) => withSelectionRequestContext(conversationStore, params?.conversationId, () => sendMessage(params)),
     abort,
@@ -2071,5 +2157,6 @@ export function createLlmChatService({
     listActiveConversationIds,
     listActiveStreams,
     getSelectionRuntimeState,
+    resolveGoalRole,
   };
 }

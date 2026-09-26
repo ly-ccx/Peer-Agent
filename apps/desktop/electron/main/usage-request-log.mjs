@@ -80,6 +80,8 @@ export function createUsageRequestLog({
       cacheWriteTokens: finiteNumber(usage.cacheWriteTokens),
       estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
       pricingSource: optionalText(entry.pricingSource),
+      ...(optionalText(entry.role) ? { role: optionalText(entry.role) } : {}),
+      ...(optionalText(entry.workspaceId) ? { workspaceId: optionalText(entry.workspaceId) } : {}),
     };
 
     ensureParent();

@@ -8,6 +8,8 @@ import {
   emptyTokenBucket,
   estimateUsageCostUsd,
   readLifetimeUsage,
+  sumRoleSpendUsd,
+  usageRole,
 } from './usage-stats.mjs';
 
 test('readLifetimeUsage normalizes missing fields', () => {
@@ -522,4 +524,46 @@ test('aggregateRequestUsage falls back to recorded model id when no label matche
     providerIndex: buildProviderIndex([]),
   });
   assert.equal(byModel.get('gone-uuid').label, 'cmodel');
+});
+
+test('aggregateRequestUsage groups by role and counts a missing role as unknown', () => {
+  const { byRole } = aggregateRequestUsage([
+    { modelProviderId: 'a', model: 'm', inputTokens: 10, role: 'explorer', estimatedCostUsd: 1.25 },
+    { modelProviderId: 'a', model: 'm', inputTokens: 4 },
+    { modelProviderId: 'a', model: 'm', inputTokens: 2, role: '   ' },
+    { modelProviderId: 'a', model: 'm', inputTokens: 7, role: 'verifier' },
+  ]);
+  assert.equal(byRole.get('explorer').inputTokens, 10);
+  assert.equal(byRole.get('explorer').estimatedCostUsd, 1.25);
+  assert.equal(byRole.get('unknown').inputTokens, 6);
+  assert.equal(byRole.get('verifier').inputTokens, 7);
+  assert.equal(usageRole({}), 'unknown');
+  assert.equal(usageRole({ role: ' verifier ' }), 'verifier');
+});
+
+test('sumRoleSpendUsd keeps one role and ignores rows before sinceMs', () => {
+  const sinceMs = Date.parse('2026-09-26T00:00:00.000Z');
+  const total = sumRoleSpendUsd([
+    { role: 'explorer', at: '2026-09-26T01:00:00.000Z', estimatedCostUsd: 1.5 },
+    { role: 'verifier', at: '2026-09-26T01:00:00.000Z', estimatedCostUsd: 9 },
+    { role: 'explorer', at: '2026-09-25T01:00:00.000Z', estimatedCostUsd: 4 },
+    { role: 'explorer', at: 'not-a-date', estimatedCostUsd: 8 },
+    { role: 'explorer', at: '2026-09-26T02:00:00.000Z', estimatedCostUsd: Number.NaN },
+  ], { role: 'explorer', sinceMs });
+  assert.equal(total, 1.5);
+});
+
+test('request snapshots expose byRole and lifetime snapshots leave it empty', () => {
+  const requestSnapshot = buildUsageStatsSnapshot({
+    requests: [
+      { modelProviderId: 'a', model: 'm', inputTokens: 3, role: 'explorer' },
+      { modelProviderId: 'a', model: 'm', inputTokens: 1 },
+    ],
+  });
+  assert.deepEqual(requestSnapshot.byRole.map((row) => row.key).sort(), ['explorer', 'unknown']);
+  const lifetimeSnapshot = buildUsageStatsSnapshot({
+    conversations: [],
+    requests: [],
+  });
+  assert.deepEqual(lifetimeSnapshot.byRole, []);
 });

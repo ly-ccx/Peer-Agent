@@ -182,6 +182,8 @@ export interface ConversationStore {
         providerName?: string | null;
         estimatedCostUsd?: number | null;
         pricingSource?: string | null;
+        role?: string | null;
+        workspaceId?: string | null;
       };
     },
   ): {

@@ -46,6 +46,21 @@ describe('provider recovery broker', () => {
     assert.deepEqual(ordered.map((provider) => provider.id), ['default', 'same-model-fallback']);
   });
 
+  it('keeps failover inside an explicit candidate set', () => {
+    const providers = [
+      { id: 'preferred', apiKeyConfigured: true, model: 'gpt-5.5', groupId: 'openai' },
+      { id: 'same-name-outside', apiKeyConfigured: true, model: 'gpt-5.5' },
+      { id: 'different-inside', apiKeyConfigured: true, model: 'claude-opus' },
+    ];
+    const ordered = orderProviderCandidates(providers, 'preferred', ['preferred', 'different-inside']);
+    assert.deepEqual(ordered.map((provider) => provider.id), ['preferred', 'different-inside']);
+    assert.deepEqual(
+      orderProviderCandidates(providers, 'not-in-set', ['different-inside']).map((provider) => provider.id),
+      [],
+    );
+    assert.deepEqual(orderProviderCandidates(providers, 'preferred', []), []);
+  });
+
   it('buffers a mid-stream transport error and marks it replayable when nothing was emitted', () => {
     const sent = [];
     const attempt = createProviderAttemptStream({

@@ -139,3 +139,45 @@ test('permission decisions preserve grant fields and resolve through the injecte
     ['call-2', denied],
   ]);
 });
+
+test('model routing defaults are computed on read and are not written back', () => {
+  const { service, calls, getSettings } = createHarness();
+  const providers = [{
+    id: 'only-model',
+    enabled: true,
+    apiKeyConfigured: true,
+    supportsVision: true,
+    isDefault: true,
+    provider: 'openai',
+  }];
+  const mergesBefore = calls.filter((call) => call[0] === 'merge').length;
+  const routing = service.getModelRouting(providers);
+  assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
+  assert.equal(routing.tiers.strong.primary, 'only-model');
+  assert.equal(routing.tiers.fast.primary, 'only-model');
+  assert.equal(routing.tiers.economy.primary, 'only-model');
+  assert.equal(routing.tiers.vision.primary, 'only-model');
+  assert.equal(routing.roles.explorer.tier, 'economy');
+  assert.equal(routing.verifierPreferDifferentFamily, true);
+  assert.equal(getSettings().modelRouting, undefined);
+
+  const stored = service.updateModelRouting({
+    tiers: { strong: { primary: 'only-model', fallbacks: ['spare'] } },
+    verifierPreferDifferentFamily: false,
+    dailySpendCapUsd: 3,
+  });
+  assert.equal(stored.tiers.strong.primary, 'only-model');
+  assert.deepEqual(stored.tiers.strong.fallbacks, ['spare']);
+  assert.equal(stored.verifierPreferDifferentFamily, false);
+  assert.equal(stored.dailySpendCapUsd, 3);
+  assert.equal(stored.roles, undefined);
+
+  const again = service.getModelRouting(providers);
+  assert.equal(again.tiers.strong.primary, 'only-model');
+  assert.deepEqual(again.tiers.strong.fallbacks, ['spare']);
+  assert.equal(again.tiers.economy.primary, 'only-model');
+  assert.equal(again.roles.verifier.tier, 'strong');
+  assert.equal(again.verifierPreferDifferentFamily, false);
+  assert.equal(getSettings().modelRouting.roles, undefined);
+  assert.equal(getSettings().modelRouting.tiers.economy, undefined);
+});

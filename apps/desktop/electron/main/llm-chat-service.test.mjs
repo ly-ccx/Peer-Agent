@@ -2485,6 +2485,235 @@ describe('llm chat service tool materialization', () => {
       globalThis.fetch = previousFetch;
     }
   });
+
+  it('uses turnProfile.modelSelection instead of the default provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'selected' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [
+            {
+              id: 'p-default',
+              provider: 'openai',
+              baseUrl: 'https://default.example/v1',
+              model: 'default-model',
+              isDefault: true,
+              apiKeyConfigured: true,
+            },
+            {
+              id: 'p-selected',
+              provider: 'openai',
+              baseUrl: 'https://selected.example/v1',
+              model: 'selected-model',
+              isDefault: false,
+              apiKeyConfigured: true,
+            },
+          ],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-select',
+        conversationId: 'c-select',
+        webContents: { send: () => {} },
+        turnProfile: {
+          role: 'explorer',
+          modelSelection: { modelProviderId: 'p-selected' },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(urls.some((url) => url.startsWith('https://selected.example/')), true);
+    assert.equal(urls.some((url) => url.includes('default.example')), false);
+  });
+
+  it('does not fail over outside turnProfile.recoveryCandidateIds', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const urls = [];
+    const providers = [
+      {
+        id: 'p-chatgpt',
+        provider: 'openai',
+        authMethod: 'oauth_chatgpt',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        model: 'gpt-5.5',
+        name: 'ChatGPT 订阅',
+        isDefault: true,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-compatible',
+        provider: 'openai',
+        baseUrl: 'https://compatible.example/v1',
+        model: 'gpt-5.5',
+        name: 'Compatible GPT-5.5',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://anthropic.example',
+        model: 'claude-test',
+        name: 'Anthropic',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+    ];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      if (String(url).includes('anthropic.example')) {
+        return new Response(sse([
+          {
+            type: 'message_start',
+            message: { usage: { input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+          },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'in set' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+        ]), { status: 200 });
+      }
+      return new Response('HTTP 403: Domain Blocking.', { status: 403, statusText: 'Forbidden' });
+    };
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: (id) => `key-${id}`,
+          getCredential: () => ({
+            tokens: {
+              access: 'oauth-access',
+              refresh: 'oauth-refresh',
+              expires: Date.now() + 3_600_000,
+              accountId: 'acct-1',
+            },
+          }),
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-closed',
+        conversationId: 'c-closed',
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        turnProfile: {
+          role: 'verifier',
+          modelSelection: { modelProviderId: 'p-chatgpt' },
+          recoveryCandidateIds: ['p-chatgpt', 'p-anthropic'],
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(urls.some((url) => url.includes('compatible.example')), false);
+    assert.equal(urls.some((url) => url.includes('anthropic.example')), true);
+    const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
+    assert.equal(recovery?.payload?.toProviderId, 'p-anthropic');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('writes role and workspaceId onto the usage ledger when the turn profile has them', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const usageWrites = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      {
+        choices: [{ delta: {} }],
+        usage: { prompt_tokens: 12, completion_tokens: 3 },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          recordRuntimeTurnUsage: (id, input) => {
+            usageWrites.push({ id, ...input });
+            return { lifetimeUsage: { usageScope: 'conversation_lifetime', totalTokens: 1 }, ledgerRow: { id: 's-role-usage' } };
+          },
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-role-usage',
+        conversationId: 'c-role-usage',
+        webContents: { send: () => {} },
+        turnProfile: { role: 'explorer', workspaceId: 'ws-1' },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.equal(usageWrites.length, 1);
+    assert.equal(usageWrites[0].attribution.role, 'explorer');
+    assert.equal(usageWrites[0].attribution.workspaceId, 'ws-1');
+  });
+
+  it('resolveGoalRole picks a vision model and blocks a capped explorer', async () => {
+    const { createLlmChatService } = await loadService();
+    let settings = {};
+    const service = createLlmChatService({
+      llmConfigStore: {
+        listProviders: () => [
+          {
+            id: 'text-default',
+            provider: 'openai',
+            groupId: 'openai-group',
+            model: 'text',
+            isDefault: true,
+            enabled: true,
+            apiKeyConfigured: true,
+            supportsVision: false,
+            contextWindow: 32_000,
+          },
+          {
+            id: 'vision-model',
+            provider: 'anthropic',
+            groupId: 'anthropic-group',
+            model: 'vision',
+            isDefault: false,
+            enabled: true,
+            apiKeyConfigured: true,
+            supportsVision: true,
+            contextWindow: 32_000,
+          },
+        ],
+        getDecryptedApiKey: () => 'test-key',
+      },
+      getSettings: () => settings,
+    });
+    const visual = service.resolveGoalRole({ role: 'visual_verifier', spentUsd: 0 });
+    assert.equal(visual.ok, true);
+    assert.equal(visual.selection.modelProviderId, 'vision-model');
+    const explorer = service.resolveGoalRole({ role: 'explorer', spentUsd: 0 });
+    assert.equal(explorer.selection.modelProviderId, 'text-default');
+    settings = { modelRouting: { dailySpendCapUsd: 1 } };
+    const blocked = service.resolveGoalRole({ role: 'explorer', spentUsd: 1 });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.reason, 'spend_cap_reached');
+    assert.equal(blocked.missing, '该角色已达到今日花费上限');
+  });
 });
 
 // 方案 3：助手正文持久化真值下沉主进程 + 流终结后保留 streamRecord 供回放。

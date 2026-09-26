@@ -85,6 +85,30 @@ export function estimateUsageCostUsd(usage, pricing = {}) {
   return { estimatedCostUsd: cost, hasPricing: true };
 }
 
+export function startOfLocalDayMs(now = Date.now()) {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+export function usageRole(row) {
+  return typeof row?.role === 'string' && row.role.trim() ? row.role.trim() : 'unknown';
+}
+
+export function sumRoleSpendUsd(rows, { role, sinceMs } = {}) {
+  let total = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (role && usageRole(row) !== role) continue;
+    if (Number.isFinite(sinceMs)) {
+      const at = Date.parse(row?.at);
+      if (!Number.isFinite(at) || at < sinceMs) continue;
+    }
+    const cost = Number(row?.estimatedCostUsd);
+    if (Number.isFinite(cost)) total += cost;
+  }
+  return total;
+}
+
 const UNBOUND_PROVIDER_KEY = 'unbound';
 const UNBOUND_PROVIDER_LABEL = '未绑定 Provider';
 const UNBOUND_MODEL_LABEL = '未绑定模型';
@@ -301,6 +325,8 @@ export function aggregateRequestUsage(requests = [], { providerIndex = null } = 
   const byProvider = new Map();
   /** @type {Map<string, any>} */
   const byModel = new Map();
+  /** @type {Map<string, any>} */
+  const byRole = new Map();
   let estimatedCostUsd = 0;
   let hasAnyPricing = false;
   let requestCount = 0;
@@ -423,13 +449,32 @@ export function aggregateRequestUsage(requests = [], { providerIndex = null } = 
     }
     byModel.set(mKey, modelRow);
 
+    const rKey = usageRole(row);
+    const roleRow = byRole.get(rKey) || {
+      key: rKey,
+      label: rKey,
+      conversationCount: 0,
+      requestCount: 0,
+      ...emptyTokenBucket(),
+      estimatedCostUsd: 0,
+      hasPricing: false,
+    };
+    roleRow.conversationCount += 1;
+    roleRow.requestCount += 1;
+    Object.assign(roleRow, { ...roleRow, ...addTokenBuckets(roleRow, bucket) });
+    if (priced) {
+      roleRow.hasPricing = true;
+      roleRow.estimatedCostUsd += cost;
+    }
+    byRole.set(rKey, roleRow);
+
     if (priced) {
       hasAnyPricing = true;
       estimatedCostUsd += cost;
     }
   }
 
-  return { totals, byProvider, byModel, estimatedCostUsd, hasAnyPricing, requestCount };
+  return { totals, byProvider, byModel, byRole, estimatedCostUsd, hasAnyPricing, requestCount };
 }
 
 /**
@@ -461,6 +506,7 @@ export function buildUsageStatsSnapshot({
       },
       byProvider: sortGroupRows([...aggregated.byProvider.values()].map(finalizeRow)),
       byModel: sortGroupRows([...aggregated.byModel.values()].map(finalizeRow)),
+      byRole: sortGroupRows([...aggregated.byRole.values()].map(finalizeRow)),
       notes: {
         unpricedConversationCount: 0,
         missingProviderCount: 0,
@@ -581,6 +627,7 @@ export function buildUsageStatsSnapshot({
     },
     byProvider: sortGroupRows([...byProvider.values()].map(finalizeRow)),
     byModel: sortGroupRows([...byModel.values()].map(finalizeRow)),
+    byRole: [],
     notes: {
       unpricedConversationCount,
       missingProviderCount,

@@ -156,9 +156,34 @@ export function resolveConversationModelBindingPatch({
   return patch;
 }
 
-export function orderProviderCandidates(providers = [], preferredProviderId = null) {
-  const runnable = providers.filter(providerCanRun);
+export function orderProviderCandidates(providers = [], preferredProviderId = null, allowedProviderIds = null) {
+  const allowList = Array.isArray(allowedProviderIds)
+    ? allowedProviderIds
+      .filter((id) => typeof id === 'string' && id.trim())
+      .map((id) => id.trim())
+    : null;
+  const allow = allowList ? new Set(allowList) : null;
+  const runnable = providers.filter(providerCanRun).filter((provider) => {
+    if (!allow) return true;
+    const id = typeof provider?.id === 'string' ? provider.id.trim() : '';
+    const groupId = typeof provider?.groupId === 'string' ? provider.groupId.trim() : '';
+    return (id && allow.has(id)) || (groupId && allow.has(groupId));
+  });
   if (!runnable.length) return [];
+  // A role recovery list is a closed set. Do not fall through to the global default
+  // or to a same-name model that the role filter already rejected.
+  if (allow) {
+    const preferred = resolvePreferredProvider(runnable, preferredProviderId);
+    if (!preferred) return [];
+    const rest = [];
+    for (const id of allowList) {
+      const match = runnable.find((provider) => provider.id === id || provider.groupId === id);
+      if (match && match.id !== preferred.id && !rest.some((provider) => provider.id === match.id)) {
+        rest.push(match);
+      }
+    }
+    return [preferred, ...rest];
+  }
   // 会话级首选 provider（会话 meta 里的 modelProviderId）优先：若指定且该 provider 仍可运行，
   // 就把它排首位作为本轮主 provider。兼容历史 groupId::model / groupId 绑定。
   //
