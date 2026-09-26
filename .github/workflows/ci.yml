@@ -89,6 +89,7 @@ jobs:
             exit "$code"
           fi
           retry_failed=0
+          printf '%s\n' "$files" > "$RUNNER_TEMP/retry-files.txt"
           # macOS runners ship Bash 3.2, which has no mapfile.
           while IFS= read -r file; do
             [ -n "$file" ] && [ -f "$file" ] || continue
@@ -99,7 +100,5 @@ jobs:
               node --test --test-reporter=tap "$file" || retry_failed=1
             fi
             echo "::endgroup::"
-          done <<EOF
-$files
-EOF
+          done < "$RUNNER_TEMP/retry-files.txt"
           exit "$retry_failed"
