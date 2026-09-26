@@ -7,8 +7,9 @@ import test from 'node:test';
 import { createFullDiskAccessDragFloatController } from './full-disk-access-drag-float.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const macOnly = process.platform === 'darwin' ? false : 'drag float is macOS-only';
 
-test('drag float html uses native startAppDrag + preventDefault', () => {
+test('drag float html uses native startAppDrag + preventDefault', { skip: macOnly }, () => {
   const loads = [];
   const bounds = [];
   const lifecycle = [];
@@ -100,7 +101,7 @@ test('drag float html uses native startAppDrag + preventDefault', () => {
   assert.equal(lifecycle.filter((entry) => entry === `dispose:${loads[1]}`).length, 1);
 });
 
-test('float should glue to settings bottom inside with 4px padding', () => {
+test('float should glue to settings bottom inside with 4px padding', { skip: macOnly }, () => {
   const settings = { x: 260, y: 80, width: 920, height: 720 };
   const floatH = 88;
   const y = Math.round(settings.y + settings.height - floatH - 4);

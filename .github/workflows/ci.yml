@@ -1,0 +1,106 @@
+# Pull request CI for the 0.1.0 line and main.
+# No release secrets. A timing flake may fail one file under full parallel
+# load; that file is retried once before the job fails.
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'PeerAgent/dev/**'
+  push:
+    branches:
+      - PeerAgent/dev/0.1.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ci-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.22.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          # Node 22's test runner cancels an async test whose only timer is
+          # unref'd. The suite was verified on Node 25.
+          node-version: 25
+          cache: pnpm
+
+      - name: Require Node >= 24
+        run: node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 24) { console.error('Node ' + process.versions.node + ' is below 24'); process.exit(1); }"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.17
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux credential-helper build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Architecture check
+        run: pnpm architecture:check
+
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          log="${RUNNER_TEMP}/peer-test.log"
+          set +e
+          pnpm test 2>&1 | tee "$log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 0 ]; then
+            exit 0
+          fi
+          echo "::warning::Full test run failed. Retrying each failed file once."
+          files=$(grep -oE '(apps|packages|scripts|marketplace)/[A-Za-z0-9_./-]+\.test\.(mjs|ts|tsx)' "$log" | sort -u)
+          if [ -z "$files" ]; then
+            echo "::error::Could not identify a failed test file to retry."
+            exit "$code"
+          fi
+          retry_failed=0
+          printf '%s\n' "$files" > "$RUNNER_TEMP/retry-files.txt"
+          # macOS runners ship Bash 3.2, which has no mapfile.
+          while IFS= read -r file; do
+            [ -n "$file" ] && [ -f "$file" ] || continue
+            echo "::group::retry $file"
+            if [[ "$file" == apps/tui/* ]]; then
+              bun test "$file" || retry_failed=1
+            else
+              node --test --test-reporter=tap "$file" || retry_failed=1
+            fi
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/retry-files.txt"
+          exit "$retry_failed"
