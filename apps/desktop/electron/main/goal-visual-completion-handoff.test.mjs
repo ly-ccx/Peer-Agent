@@ -198,7 +198,7 @@ test('actual Desktop composition uses the exported release port', async () => {
   const f = fixture();
   const calls = [];
   const start = main.indexOf('const visualCompletionHandoff = createGoalVisualCompletionHandoff(');
-  const finish = main.indexOf('\ngoalRunner = createGoalRunner(', start);
+  const finish = main.indexOf('\ngoalRunner = createDesktopGoalRunnerHost(', start);
   assert.ok(start >= 0 && finish > start);
   const context = vm.createContext({ createGoalVisualCompletionHandoff,
     goalPlanStore: f.store, desktopPreviewProvider: { authority: { read: () => ({ required: true }) } },
