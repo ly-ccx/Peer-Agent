@@ -55,6 +55,7 @@ export const DATA_STORE_ENTRIES = {
   taskNotificationReceipts: { rel: 'task-notification-receipts.json', kind: 'file', scope: 'device' },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
   promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
+  memoryIndex:       { rel: 'cache/memory-index',     kind: 'dir',  scope: 'cache'    },
   // 稳定项目身份。注册表文件是 projects/registry.json，随设置一起迁移。
   projects:          { rel: 'projects',                kind: 'dir',  scope: 'portable' },
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。

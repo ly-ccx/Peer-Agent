@@ -206,6 +206,8 @@ export {
   migrateFromLegacy,
   pathOf,
 } from './data-store.mjs';
+export { openSqlite } from './sqlite/open-sqlite.mjs';
+export { createFtsIndex } from './sqlite/fts-index.mjs';
 export { loadMigratedSettings, runSettingsMigrations, SETTINGS_MIGRATIONS } from './settings-migrations.mjs';
 export {
   createProjectRegistry,
