@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { createCollectingSink } from './agent-host/turn-sinks.mjs';
 import { executeProjectedModelTool } from './chat-runtime/projected-tool-executor.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { resetCircuitBreaker } from './context-compactor.mjs';
@@ -1933,6 +1934,141 @@ describe('llm chat service tool materialization', () => {
       String(event.payload.result).includes('"stdoutPreview": "ok"')
     )), true);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('reattach snapshot includes open permissions and drops them after settle', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const settled = [];
+    let during = null;
+
+    function toolStream() {
+      const frame = JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tool-shell',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command }) },
+            }],
+          },
+        }],
+      });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    function textStream(content) {
+      const frame = JSON.stringify({ choices: [{ delta: { content } }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    const responses = [() => toolStream(), () => textStream('done')];
+    globalThis.fetch = async () => responses.shift()();
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast(channel, payload) {
+          if (channel === 'chat:stream:permission-settled') settled.push(payload);
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'run command' }],
+        streamId: 's-reattach',
+        conversationId: 'c-reattach',
+        webContents: {
+          send(channel, payload) {
+            if (channel !== 'chat:stream:permission-request') return;
+            during = service.reattach({ streamId: 's-reattach' });
+            service.resolvePermissionGrant(payload.call.toolCallId, {
+              grantId: 'grant-reattach',
+              toolCallId: payload.call.toolCallId,
+              granted: true,
+              duration: 'once',
+              scope: payload.call.capabilityId,
+              decidedAt: new Date().toISOString(),
+            });
+          },
+        },
+      });
+      assert.equal(during?.pendingPermissions?.length, 1);
+      assert.equal(during.pendingPermissions[0].call.capabilityId, 'local.shell.exec');
+      assert.equal(during.pendingPermissions[0].streamId, 's-reattach');
+      const after = service.reattach({ conversationId: 'c-reattach' });
+      assert.deepEqual(after.pendingPermissions, []);
+      assert.equal(settled.some((payload) => payload.toolCallIds.includes(during.pendingPermissions[0].toolCallId)), true);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('collecting sink denies an ask immediately so the turn does not hang', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const sink = createCollectingSink();
+    const responses = [
+      () => new Response(`data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tool-shell',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command }) },
+            }],
+          },
+        }],
+      })}\n\ndata: [DONE]\n\n`, { status: 200 }),
+      () => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'denied' } }] })}\n\ndata: [DONE]\n\n`, { status: 200 }),
+    ];
+    globalThis.fetch = async () => responses.shift()();
+    let timer;
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      const outcome = await Promise.race([
+        service.sendMessage({
+          messages: [{ role: 'user', content: 'run command' }],
+          streamId: 's-collect',
+          conversationId: 'c-collect',
+          webContents: sink,
+        }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('permission ask hung')), 2000);
+        }),
+      ]);
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(sink.getEvents().some((event) => event.channel === 'chat:stream:permission-request'), false);
+      assert.equal(JSON.stringify(sink.getEvents()).includes('ephemeral_no_approver'), true);
+      assert.equal(service.reattach({ conversationId: 'c-collect' }).pendingPermissions.length, 0);
+    } finally {
+      clearTimeout(timer);
+      globalThis.fetch = previousFetch;
+    }
   });
 
   it('returns requestedUserInput in AgentRunOutcome when request_user_input ends the turn', async () => {

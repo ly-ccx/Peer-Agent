@@ -214,6 +214,11 @@ export {
   readRemoteAliases,
 } from './project-registry.mjs';
 export {
+  applyStartupApprovalRecovery,
+  createApprovalStore,
+  digestApprovalArgs,
+} from './project-agent/approval-store.mjs';
+export {
   aggregateProgress,
   applyGoalTimingTransition,
   canConsumeRequestedUserInput,

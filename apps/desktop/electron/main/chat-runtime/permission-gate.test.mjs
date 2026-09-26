@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import { createApprovalStore } from '@peer-agent/runtime-node';
 
 import { createChatPermissionGate } from './permission-gate.mjs';
 
@@ -665,5 +669,141 @@ describe('chat permission gate', () => {
     assert.equal(writer.reason, 'automation_grant_allowed');
     assert.equal(privileged.granted, false);
     assert.equal(privileged.reason, 'automation_high_risk_blocked');
+  });
+
+  it('denies a sink with no approver immediately and does not register a pending ask', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const sink = {
+      approver: 'none',
+      send(channel, payload) {
+        events.push({ channel, payload });
+      },
+    };
+    let timer;
+    const decision = await Promise.race([
+      gate.createFilePermissionRequester({
+        webContents: sink,
+        streamId: 's1',
+        toolCallId: 'tool-ephemeral',
+        conversationId: 'c1',
+      })({
+        tool: 'write_file',
+        args: { path: '/outside/secret.txt', content: 'UNIQUE_ARG_SENTINEL' },
+        filePath: '/outside/secret.txt',
+        workspacePath: '/workspace',
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('permission ask hung')), 500);
+      }),
+    ]);
+    clearTimeout(timer);
+    assert.equal(decision.granted, false);
+    assert.equal(decision.reason, 'ephemeral_no_approver');
+    assert.equal(decision.grant.granted, false);
+    assert.equal(events.length, 0);
+    assert.deepEqual(gate.listPendingPermissions(), []);
+    assert.equal(activeStreams.get('s1').permissionIds.size, 0);
+  });
+
+  it('broadcasts permission-settled to every window, including an approval from the other window', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const windowA = [];
+    const windowB = [];
+    const gate = createChatPermissionGate({
+      activeStreams,
+      settleNotifier(streamId, toolCallIds) {
+        const event = { channel: 'chat:stream:permission-settled', payload: { streamId, toolCallIds } };
+        windowA.push(event);
+        windowB.push(event);
+      },
+    });
+    const sink = {
+      send(channel, payload) {
+        windowA.push({ channel, payload });
+      },
+    };
+    const pending = gate.createFilePermissionRequester({
+      webContents: sink,
+      streamId: 's1',
+      toolCallId: 'tool-other-window',
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/a.txt', content: 'one' },
+      filePath: '/outside/a.txt',
+      workspacePath: '/workspace',
+    });
+    const request = windowA.find((event) => event.channel === 'chat:stream:permission-request');
+    assert.ok(request);
+    const toolCallId = request.payload.call.toolCallId;
+    assert.equal(gate.settlePermissionRequest(toolCallId, {
+      grantId: 'g-other',
+      toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    }), true);
+    const decision = await pending;
+    assert.equal(decision.granted, true);
+    const settledA = windowA.filter((event) => event.channel === 'chat:stream:permission-settled');
+    const settledB = windowB.filter((event) => event.channel === 'chat:stream:permission-settled');
+    assert.equal(settledA.length, 1);
+    assert.equal(settledB.length, 1);
+    assert.deepEqual(settledA[0].payload.toolCallIds, [toolCallId]);
+    assert.deepEqual(settledB[0].payload, settledA[0].payload);
+    assert.deepEqual(gate.listPendingPermissions({ streamId: 's1' }), []);
+  });
+
+  it('persists an open approval in the workspace file and folds it after settle', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'peer-gate-approvals-'));
+    try {
+      const workspaceId = '00000000-0000-4000-8000-000000000009';
+      const store = createApprovalStore({ rootDir: root });
+      const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+      const events = [];
+      const gate = createChatPermissionGate({
+        activeStreams,
+        approvalStore: store,
+        resolveApprovalScope: () => ({ workspaceId, planId: 'plan-9', conversationId: 'c1' }),
+      });
+      const pending = gate.createFilePermissionRequester({
+        webContents: createWebContents(events),
+        streamId: 's1',
+        toolCallId: 'tool-durable',
+        conversationId: 'c1',
+      })({
+        tool: 'write_file',
+        args: { path: '/outside/secret.txt', content: 'UNIQUE_ARG_SENTINEL' },
+        filePath: '/outside/secret.txt',
+        workspacePath: '/workspace',
+      });
+      const open = store.list({ state: 'open' });
+      assert.equal(open.length, 1);
+      assert.equal(open[0].workspaceId, workspaceId);
+      assert.equal(open[0].planId, 'plan-9');
+      assert.equal(open[0].conversationId, 'c1');
+      const file = readFileSync(store.fileFor(workspaceId), 'utf8');
+      assert.equal(file.includes('UNIQUE_ARG_SENTINEL'), false);
+      assert.equal(gate.listPendingPermissions({ conversationId: 'c1' }).length, 1);
+      const toolCallId = events[0].payload.call.toolCallId;
+      gate.settlePermissionRequest(toolCallId, {
+        grantId: 'g-durable',
+        toolCallId,
+        granted: true,
+        duration: 'once',
+        decidedAt: new Date().toISOString(),
+      });
+      assert.equal((await pending).granted, true);
+      assert.deepEqual(gate.listPendingPermissions(), []);
+      const folded = store.list();
+      assert.equal(folded.length, 1);
+      assert.equal(folded[0].state, 'approved');
+      assert.equal(folded[0].decidedBy, 'local_ui');
+      assert.equal(folded[0].workspaceId, workspaceId);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

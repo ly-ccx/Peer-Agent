@@ -198,6 +198,12 @@ export type StreamReattachResult =
         readonly cacheWriteTokens?: number;
         readonly cacheReadTokens?: number;
       } | null;
+      /** 仍开放的权限请求。窗口重开后用它恢复权限卡；进程重启后这里为空。 */
+      readonly pendingPermissions?: readonly {
+        readonly toolCallId: string;
+        readonly streamId: string;
+        readonly call: ClientToolCall;
+      }[];
     };
 
 export interface GoalRunnerStateView {

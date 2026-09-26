@@ -1540,6 +1540,7 @@ export function ChatSurface({
         const live = await clientApi.chatStreamReattach({ conversationId });
         if (cancelled) return;
         if (live && live.streamId) {
+          conversationStore.restorePendingPermissions(conversationId, live.pendingPermissions);
           // 方案 3：reattach 既可能返回「运行中的流」，也可能返回「已终结但保留的终态快照」。
           // - running：接回 streamIdRef + isStreaming，使 delta 监听续上（既有无缝续接）。
           // - terminal：不重新武装流式，只用终态快照补齐完整正文/工具段，并标注 interrupted，

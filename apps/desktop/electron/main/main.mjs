@@ -115,6 +115,7 @@ import {
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
+  applyStartupApprovalRecovery, createApprovalStore,
 } from '@peer-agent/runtime-node';
 import {
   createContextAccountingCompactionPipeline,
@@ -3837,8 +3838,7 @@ function flushPendingRuntimeEvents() {
 }
 
 async function startRecoveryAndAppearance() {
-  // Milestone C: 进程重启后扫描 interrupted Goal compaction/resume 状态。
-  // 必须在 UI/IPC 就绪前尽早 kick，避免用户打开会话前 runner 一直挂着。
+  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore });
   try {
     if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
       const recovery = goalRunner.recoverContextCheckpoints();

@@ -9,13 +9,15 @@
 
 /**
  * In-memory sink for Explorer and Verifier. It does not forward to a window.
- * @returns {TurnSink & { getText: () => string, getEvents: () => Array<{channel: string, payload: unknown}>, getTerminal: () => {channel: string, payload: unknown} | null }}
+ * Explorer and Verifier have no approver: permission asks must be denied, not parked.
+ * @returns {TurnSink & { approver: 'none', getText: () => string, getEvents: () => Array<{channel: string, payload: unknown}>, getTerminal: () => {channel: string, payload: unknown} | null }}
  */
 export function createCollectingSink() {
   const events = [];
   let text = '';
   let terminal = null;
   return {
+    approver: 'none',
     send(channel, payload) {
       events.push({ channel, payload });
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
