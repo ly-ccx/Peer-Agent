@@ -40,11 +40,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          # Node 22's test runner cancels an async test whose only timer is
+          # unref'd. The suite was verified on Node 25.
+          node-version: 25
           cache: pnpm
 
-      - name: Require Node >= 22.18
-        run: node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 18)) { console.error('Node ' + process.versions.node + ' is below 22.18'); process.exit(1); }"
+      - name: Require Node >= 24
+        run: node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 24) { console.error('Node ' + process.versions.node + ' is below 24'); process.exit(1); }"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
