@@ -1,0 +1,1 @@
+Open one work session for this project. Anchor it to at least one user_input message in the current conversation. Give a short title, a brief, one to eight success criteria, a kind, and whether the session is read-only. The runtime freezes models and starts the session; do not claim the work is finished from this call.

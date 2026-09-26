@@ -9,12 +9,18 @@ import {
   isProjectAgentTurn,
 } from './mode-policy.mjs';
 
-test('project agent whitelist is the four read capabilities', () => {
+test('project agent whitelist is the read capabilities plus delegation', () => {
   assert.deepEqual(PROJECT_AGENT_ALLOWED_CAPABILITIES, [
     'local.file.list',
     'local.file.read',
     'local.file.search',
     'local.search.aggregate',
+    'local.delegation.spawn_session',
+    'local.delegation.list_sessions',
+    'local.delegation.get_session',
+    'local.delegation.cancel_session',
+    'local.delegation.message_session',
+    'local.delegation.post_reply',
   ]);
   for (const capabilityId of PROJECT_AGENT_ALLOWED_CAPABILITIES) {
     assert.equal(isProjectAgentCapabilityAllowed(capabilityId), true);

@@ -1,0 +1,1 @@
+Post the visible reply in the project-agent conversation. replyTo lists the user messages this reply addresses. An unsolicited reply must set proactive to true. text is at most 2000 characters. Optional sources name the sessions the reply is based on. Optional question.options asks the user to choose.

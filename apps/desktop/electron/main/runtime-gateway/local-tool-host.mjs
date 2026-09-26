@@ -3,6 +3,7 @@ import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
+import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
@@ -26,6 +27,7 @@ export function createLocalToolHost({
   fileProvider = createLocalFileProvider({ workspaceRoot }),
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
+  delegationProvider = createLocalDelegationProvider(),
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
@@ -59,6 +61,7 @@ export function createLocalToolHost({
       fileProvider,
       activeShellProvider,
       goalProvider,
+      delegationProvider,
       interactionProvider,
       automationProposalProvider,
       webProvider,

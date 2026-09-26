@@ -227,6 +227,13 @@ export {
   isProjectAgentDeniedPermissionKind,
   isProjectAgentTurn,
 } from './project-agent/mode-policy.mjs';
+export { createDelegationProvider } from './project-agent/delegation-provider.mjs';
+export {
+  DELEGATION_CAPABILITY_IDS,
+  DELEGATION_TOOL_SPECS,
+  delegationSpecByCapability,
+  validateDelegationInput,
+} from './project-agent/tool-specs.mjs';
 export {
   aggregateProgress,
   applyGoalTimingTransition,
