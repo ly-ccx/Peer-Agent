@@ -1073,3 +1073,7 @@ export * from './appshot.ts';
 export * from './automation.ts';
 export * from './task-overview.ts';
 export * from './skill-marketplace.ts';
+export * from './delegation.ts';
+export * from './model-routing.ts';
+export * from './project.ts';
+export * from './objectives.ts';
