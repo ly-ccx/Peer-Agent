@@ -1,13 +1,16 @@
+import { DELEGATION_CAPABILITY_IDS } from './tool-specs.mjs';
+
 /**
  * project_agent 回合能看见、能执行的能力。
  * 这是白名单的唯一定义。后续卡片只往这个数组追加 capabilityId。
- * 桌面执行闸与以后的 TUI 都调用这里，不各自维护一份。
+ * 调度 id 来自 tool-specs，桌面执行闸与以后的 TUI 都调用这里。
  */
 export const PROJECT_AGENT_ALLOWED_CAPABILITIES = Object.freeze([
   'local.file.list',
   'local.file.read',
   'local.file.search',
   'local.search.aggregate',
+  ...DELEGATION_CAPABILITY_IDS,
 ]);
 
 const ALLOWED = new Set(PROJECT_AGENT_ALLOWED_CAPABILITIES);

@@ -162,7 +162,10 @@ describe('project agent mode gate', () => {
     assert.equal(agent.runtimeProjection.accessLevel, 'restricted_local');
     assert.equal(chat.runtimeProjection.accessLevel, 'ask_before_local');
     const agentNames = agent.tools.map((tool) => tool.function?.name ?? tool.name);
-    assert.deepEqual(agentNames, ['list_files', 'read_file', 'search_files', 'batch_search']);
+    assert.deepEqual(agentNames, [
+      'list_files', 'read_file', 'search_files', 'batch_search',
+      'spawn_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'post_reply',
+    ]);
     const chatNames = chat.tools.map((tool) => tool.function?.name ?? tool.name);
     assert.ok(chatNames.includes('bash'));
     assert.ok(chatNames.includes('write_file'));

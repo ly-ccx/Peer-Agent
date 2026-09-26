@@ -320,9 +320,12 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.equal(byName.get('goal_update_task')?.health, 'mode_excluded');
   });
 
-  it('projects only the read whitelist in project_agent mode', () => {
+  it('projects the read and delegation whitelist in project_agent mode', () => {
     const names = materializedNames('project_agent');
-    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'batch_search']);
+    assert.deepEqual(names, [
+      'list_files', 'read_file', 'search_files', 'batch_search',
+      'spawn_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'post_reply',
+    ]);
   });
 
   it('keeps classic projections unchanged when the turn is not project_agent', () => {
@@ -341,7 +344,10 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     const scoped = registry.listTools().filter((tool) => tool.availableInModes?.includes('project_agent'));
     assert.deepEqual(
       scoped.map((tool) => tool.name),
-      ['list_files', 'read_file', 'search_files', 'batch_search'],
+      [
+        'list_files', 'read_file', 'search_files', 'batch_search',
+        'spawn_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'post_reply',
+      ],
     );
   });
 
@@ -367,7 +373,10 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     const names = buildOpenAIToolsFromRuntimeProjection(projection, registry).map(
       (tool) => tool.function.name,
     );
-    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'batch_search']);
+    assert.deepEqual(names, [
+      'list_files', 'read_file', 'search_files', 'batch_search',
+      'spawn_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'post_reply',
+    ]);
     const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
     for (const hidden of ['bash', 'edit_file', 'write_file', 'web_fetch', 'mcp__demo', 'skill__weather-plus']) {
       assert.equal(byName.get(hidden)?.health, 'mode_excluded', hidden);
