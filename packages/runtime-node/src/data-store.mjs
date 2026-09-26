@@ -55,6 +55,8 @@ export const DATA_STORE_ENTRIES = {
   taskNotificationReceipts: { rel: 'task-notification-receipts.json', kind: 'file', scope: 'device' },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
   promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
+  // 稳定项目身份。注册表文件是 projects/registry.json，随设置一起迁移。
+  projects:          { rel: 'projects',                kind: 'dir',  scope: 'portable' },
 };
 
 /** 返回数据根并确保其存在。mkdir recursive 对已存在目录是 no-op，可安全多次调用。 */

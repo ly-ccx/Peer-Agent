@@ -981,6 +981,7 @@ export interface BootstrapPreloadApi {
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
   readonly workspaceList: () => Promise<{
     workspaces: readonly {
+      id: string;
       path: string;
       name: string;
       addedAt: string;
@@ -999,9 +1000,9 @@ export interface BootstrapPreloadApi {
   readonly onQuickChatPopoverState: (listener: (payload: QuickChatPopoverState) => void) => () => void;
   readonly onQuickChatPopoverSelected: (listener: (payload: { kind: QuickChatPopoverKind; value: string }) => void) => () => void;
   readonly onQuickChatPopoverClosed: (listener: () => void) => () => void;
-  readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
+  readonly workspaceEnsureDefault: () => Promise<{ id: string; path: string; name: string; created: boolean }>;
   readonly workspacePreviewDefault: () => Promise<{ path: string; name: string; exists: boolean }>;
-  readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
+  readonly workspaceAdd: () => Promise<{ id: string; path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceUpdate: (params: {

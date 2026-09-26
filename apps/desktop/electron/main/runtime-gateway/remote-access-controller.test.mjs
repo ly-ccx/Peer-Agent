@@ -197,6 +197,31 @@ test('status 在校验失败时也不抛错', () => {
   assert.deepEqual(status.settings, { enabled: false, gatewayOrigin: '', workspaceId: '' });
 });
 
+test('开启远程但没填 workspaceId 时用当前项目 id', async () => {
+  const projectId = '11111111-1111-4111-8111-111111111111';
+  const log = [];
+  const store = memorySettings({
+    activeWorkspace: '/repo',
+    workspaces: [{ id: projectId, path: '/repo', name: 'Repo' }],
+  });
+  const controller = createRemoteAccessController({
+    settingsStore: store, deviceName: 'mac', createSession: sessionFactory(log),
+  });
+  await controller.update({ enabled: true, gatewayOrigin: 'https://peer.example' });
+  assert.equal(log[0].workspaceId, projectId);
+  assert.equal(store.raw().remoteAccess.workspaceId, projectId);
+});
+
+test('没有项目 id 时，缺 workspaceId 仍然不能开启远程', async () => {
+  const controller = createRemoteAccessController({
+    settingsStore: memorySettings(), deviceName: 'mac', createSession: sessionFactory([]),
+  });
+  await assert.rejects(
+    controller.update({ enabled: true, gatewayOrigin: 'https://peer.example' }),
+    /INCOMPLETE_REMOTE_SETTINGS/,
+  );
+});
+
 test('构造期拒绝缺失依赖', () => {
   assert.throws(() => createRemoteAccessController({ deviceName: 'm', createSession: () => {} }), /INVALID_SETTINGS_STORE/);
   assert.throws(() => createRemoteAccessController({ settingsStore: memorySettings(), deviceName: 'm' }), /INVALID_CREATE_SESSION/);

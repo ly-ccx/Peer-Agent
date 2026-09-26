@@ -26,11 +26,33 @@
  *     expiry fails closed (remote reads are refused) until the next reconnect.
  */
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as nodeSign } from 'node:crypto';
-import { createRemoteBindingStore, startRemoteDeviceConnector } from '@peer-agent/runtime-node';
+import {
+  createRemoteBindingStore,
+  defaultProjectRegistryFile,
+  isRemoteWorkspaceId,
+  readRemoteAliases,
+  startRemoteDeviceConnector,
+} from '@peer-agent/runtime-node';
 import { createRemoteGoalReader } from './remote-goal-read.mjs';
 import { createRemoteIdentityStore } from './remote-identity-keychain.mjs';
 
 const DELEGATION_MS = 24 * 60 * 60 * 1000;
+
+/** 委托名单：稳定 id，再加上注册表里的旧远程别名。两者都准入。 */
+function resolveAcceptedWorkspaceIds(workspaceId, { registryFile, remoteAliases } = {}) {
+  const extras = Array.isArray(remoteAliases)
+    ? remoteAliases
+    : readRemoteAliases(
+      workspaceId,
+      registryFile === undefined ? defaultProjectRegistryFile() : registryFile,
+    );
+  const ids = [];
+  for (const value of [workspaceId, ...extras]) {
+    if (isRemoteWorkspaceId(value) && !ids.includes(value)) ids.push(value);
+  }
+  if (ids.length === 0 && typeof workspaceId === 'string' && workspaceId) ids.push(workspaceId);
+  return ids;
+}
 
 /** Ed25519 PKCS#8 DER header; the 32-byte seed follows it. Node's
  * generateKeyPairSync expects a full PKCS#8 structure, not a bare seed, so the
@@ -95,7 +117,9 @@ export function setupRemoteAccess({
   logger = { info() {}, warn() {}, error() {} },
   connectorFactory = startRemoteDeviceConnector,
   identityStore = createRemoteIdentityStore(),
-}) {
+  registryFile,
+  remoteAliases,
+} = {}) {
   for (const [name, value] of Object.entries({
     userDataPath, gatewayOrigin, deviceName, workspaceId,
   })) {
@@ -103,6 +127,7 @@ export function setupRemoteAccess({
   }
   if (!goalPlanStore || !sessionStore || !buildProjection || !host) throw new Error('MISSING_DEPENDENCY');
 
+  const acceptedWorkspaceIds = resolveAcceptedWorkspaceIds(workspaceId, { registryFile, remoteAliases });
   const bindingStore = createRemoteBindingStore(`${userDataPath}/remote-binding.sqlite`);
   // Resolved on first start: reading the keychain is async, and a machine that
   // never connects should not touch the keychain at all.
@@ -122,7 +147,7 @@ export function setupRemoteAccess({
 
   const delegationOf = () => ({
     version: 1,
-    workspaceIds: [workspaceId],
+    workspaceIds: acceptedWorkspaceIds,
     allowTaskRead: true,
     allowResultExport: true,
     expiresAt: Date.now() + DELEGATION_MS,

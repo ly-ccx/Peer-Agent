@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { createProjectRegistry, pathOf } from '@peer-agent/runtime-node';
+
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
   return value;
@@ -60,11 +63,21 @@ export function createWorkspaceApplicationService(options = {}) {
   const setSkillWorkspacePath = optionalFunction(options.setSkillWorkspacePath);
   const readProjectIndex = assertFunction(options.readProjectIndex, 'readProjectIndex');
   const nowIso = options.nowIso ?? (() => new Date().toISOString());
+  const projectRegistry = options.projectRegistry ?? createProjectRegistry({
+    filePath: path.join(pathOf('projects'), 'registry.json'),
+  });
 
   function configuredWorkspaces() {
-    return (getSettings().workspaces || [])
-      .map((workspace) => projectWorkspace(workspace, basename))
-      .filter(Boolean);
+    const raw = Array.isArray(getSettings().workspaces) ? getSettings().workspaces : [];
+    const entries = projectRegistry.sync(raw);
+    const projected = [];
+    for (let index = 0; index < raw.length; index += 1) {
+      const view = projectWorkspace(raw[index], basename);
+      const entry = entries[index];
+      if (!view || !entry) continue;
+      projected.push({ id: entry.workspaceId, ...view });
+    }
+    return projected;
   }
 
   function findWorkspace(workspaces, workspacePath) {
@@ -88,7 +101,10 @@ export function createWorkspaceApplicationService(options = {}) {
     const all = getSettings();
     const workspaces = [...configuredWorkspaces()];
     if (all.activeWorkspace && pathExists(all.activeWorkspace)) {
+      const existing = workspaces.find((workspace) => workspace.path === all.activeWorkspace);
+      const id = existing?.id ?? projectRegistry.ensureForPath(all.activeWorkspace)?.workspaceId;
       return {
+        id,
         path: all.activeWorkspace,
         name: basename(all.activeWorkspace),
         created: false,
@@ -103,12 +119,24 @@ export function createWorkspaceApplicationService(options = {}) {
     }
     const name = basename(defaultDir);
     if (!workspaces.some((workspace) => workspace.path === defaultDir)) {
-      workspaces.push({ path: defaultDir, name, addedAt: nowIso(), linkedFolders: [] });
+      const entry = projectRegistry.ensureForPath(defaultDir);
+      workspaces.push({
+        id: entry.workspaceId,
+        path: defaultDir,
+        name,
+        addedAt: nowIso(),
+        linkedFolders: [],
+      });
     }
     mergeSettings({ workspaces, activeWorkspace: defaultDir });
     setChatWorkspacePath(defaultDir);
     setSkillWorkspacePath(defaultDir);
-    return { path: defaultDir, name, created };
+    return {
+      id: workspaces.find((workspace) => workspace.path === defaultDir)?.id,
+      path: defaultDir,
+      name,
+      created,
+    };
   }
 
   function previewDefaultWorkspace() {
@@ -134,18 +162,20 @@ export function createWorkspaceApplicationService(options = {}) {
 
     const name = basename(dir);
     const workspaces = [...configuredWorkspaces()];
-    if (workspaces.some((workspace) => workspace.path === dir)) {
+    const existing = workspaces.find((workspace) => workspace.path === dir);
+    if (existing) {
       mergeSettings({ activeWorkspace: dir });
       setChatWorkspacePath(dir);
       setSkillWorkspacePath(dir);
-      return { path: dir, name, existing: true };
+      return { id: existing.id, path: dir, name, existing: true };
     }
 
-    workspaces.push({ path: dir, name, addedAt: nowIso(), linkedFolders: [] });
+    const entry = projectRegistry.ensureForPath(dir);
+    workspaces.push({ id: entry.workspaceId, path: dir, name, addedAt: nowIso(), linkedFolders: [] });
     mergeSettings({ workspaces, activeWorkspace: dir });
     setChatWorkspacePath(dir);
     setSkillWorkspacePath(dir);
-    return { path: dir, name, existing: false };
+    return { id: entry.workspaceId, path: dir, name, existing: false };
   }
 
   function setActiveWorkspace(workspacePath) {
@@ -165,7 +195,7 @@ export function createWorkspaceApplicationService(options = {}) {
       ? null
       : all.activeWorkspace;
     mergeSettings({ workspaces, activeWorkspace });
-    // 只从侧栏拿掉工作区，不删除会话；磁盘文件也不动。
+    // 只从侧栏拿掉工作区，不删除会话，也不删注册表。记忆和任务仍挂在原来的 id 上。
     // Preserve the existing Desktop behavior: removal updates the Skill fallback only.
     setSkillWorkspacePath(activeWorkspace || null);
     return { workspaces, activeWorkspace };
@@ -240,6 +270,8 @@ export function createWorkspaceApplicationService(options = {}) {
     if (workspaces.some((workspace) => workspace.path === nextPrimary && workspace !== current)) {
       return { ok: false, reason: 'other-project-primary', path: nextPrimary };
     }
+    const moved = projectRegistry.recordMove(current.id, nextPrimary);
+    if (!moved.ok) return { ok: false, reason: moved.reason, path: nextPrimary };
     current.linkedFolders = [
       { path: current.path, name: basename(current.path) },
       ...current.linkedFolders.filter((folder) => folder.path !== nextPrimary),

@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createProjectRegistry } from '@peer-agent/runtime-node';
 import { createWorkspaceApplicationService } from './workspace-application-service.mjs';
+
+function idFor(n) {
+  return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
 
 function createHarness(overrides = {}) {
   const calls = [];
+  let minted = 0;
+  const registry = overrides.projectRegistry ?? createProjectRegistry({
+    createId: () => idFor(++minted),
+  });
   const existingPaths = new Set(overrides.existingPaths ?? ['/configured', '/discovered']);
   const state = {
     workspaces: overrides.workspaces ?? [
@@ -43,12 +55,14 @@ function createHarness(overrides = {}) {
       return overrides.projectIndex?.[options.workspaceRoot] ?? null;
     },
     nowIso: () => '2026-08-01T12:00:00.000Z',
+    projectRegistry: registry,
   });
 
   return {
     service,
     calls,
     state,
+    registry,
     conversations,
     existingPaths,
     setSelection(value) {
@@ -62,7 +76,7 @@ test('lists only manually configured workspaces without conversation auto-discov
 
   assert.deepEqual(service.listWorkspaces(), {
     workspaces: [
-      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+      { id: idFor(1), path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
     ],
     activeWorkspace: '/configured',
   });
@@ -102,6 +116,7 @@ test('reuses an existing active workspace without persistence or synchronization
   const { service, calls } = createHarness();
 
   assert.deepEqual(service.ensureDefaultWorkspace(), {
+    id: idFor(1),
     path: '/configured',
     name: 'configured',
     created: false,
@@ -122,6 +137,7 @@ test('creates and persists the default workspace when no active path exists', ()
   });
 
   assert.deepEqual(service.ensureDefaultWorkspace(), {
+    id: idFor(1),
     path: '/home/user/PeerAgent',
     name: 'PeerAgent',
     created: true,
@@ -129,6 +145,7 @@ test('creates and persists the default workspace when no active path exists', ()
   assert.deepEqual(state, {
     workspaces: [
       {
+        id: idFor(1),
         path: '/home/user/PeerAgent',
         name: 'PeerAgent',
         addedAt: '2026-08-01T12:00:00.000Z',
@@ -153,6 +170,7 @@ test('directory selection preserves cancellation, existing, and new workspace be
 
   harness.setSelection('/configured');
   assert.deepEqual(await harness.service.addWorkspace(sender), {
+    id: idFor(1),
     path: '/configured',
     name: 'configured',
     existing: true,
@@ -160,14 +178,15 @@ test('directory selection preserves cancellation, existing, and new workspace be
 
   harness.setSelection('/new-project');
   assert.deepEqual(await harness.service.addWorkspace(sender), {
+    id: idFor(2),
     path: '/new-project',
     name: 'new-project',
     existing: false,
   });
   assert.deepEqual(harness.state, {
     workspaces: [
-      { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
-      { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
+      { id: idFor(1), path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+      { id: idFor(2), path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
     ],
     activeWorkspace: '/new-project',
   });
@@ -180,8 +199,8 @@ test('directory selection preserves cancellation, existing, and new workspace be
     ['choose-directory', sender],
     ['merge', {
       workspaces: [
-        { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
-        { path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
+        { id: idFor(1), path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z', linkedFolders: [] },
+        { id: idFor(2), path: '/new-project', name: 'new-project', addedAt: '2026-08-01T12:00:00.000Z', linkedFolders: [] },
       ],
       activeWorkspace: '/new-project',
     }],
@@ -202,7 +221,7 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
     activeWorkspace: '/other',
   });
   assert.deepEqual(harness.service.removeWorkspace('/other'), {
-    workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
+    workspaces: [{ id: idFor(1), path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
     activeWorkspace: null,
   });
   assert.deepEqual(harness.calls, [
@@ -210,7 +229,7 @@ test('set-active synchronizes both fallbacks while removal preserves the legacy 
     ['chat-workspace', '/other'],
     ['skill-workspace', '/other'],
     ['merge', {
-      workspaces: [{ path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
+      workspaces: [{ id: idFor(1), path: '/configured', name: 'Configured', addedAt: '1970-01-01T00:00:00.000Z', linkedFolders: [] }],
       activeWorkspace: null,
     }],
     ['skill-workspace', null],
@@ -237,6 +256,7 @@ test('stores, updates, and promotes linked folders without merging two projects'
   }), {
     ok: true,
     workspace: {
+      id: idFor(1),
       path: '/configured',
       name: 'Knowledge',
       addedAt: '2026-01-01T00:00:00.000Z',
@@ -257,6 +277,7 @@ test('stores, updates, and promotes linked folders without merging two projects'
     ok: true,
     existing: false,
     workspace: {
+      id: idFor(1),
       path: '/configured',
       name: 'Knowledge',
       addedAt: '2026-01-01T00:00:00.000Z',
@@ -273,6 +294,7 @@ test('stores, updates, and promotes linked folders without merging two projects'
   }), {
     ok: true,
     workspace: {
+      id: idFor(1),
       path: '/configured',
       name: 'Knowledge',
       addedAt: '2026-01-01T00:00:00.000Z',
@@ -286,6 +308,7 @@ test('stores, updates, and promotes linked folders without merging two projects'
   }), {
     ok: true,
     workspace: {
+      id: idFor(1),
       path: '/code',
       name: 'Knowledge',
       addedAt: '2026-01-01T00:00:00.000Z',
@@ -313,6 +336,7 @@ test('ADR 79/baseBranch 字段被移除：更新时忽略传入值并清除历�
   assert.equal(updated.workspace.baseBranch, undefined);
   assert.equal(updated.workspace.name, 'Configured');
   assert.deepEqual(harness.service.listWorkspaces().workspaces[0], {
+    id: idFor(1),
     path: '/configured',
     name: 'Configured',
     addedAt: '2026-01-01T00:00:00.000Z',
@@ -323,11 +347,97 @@ test('ADR 79/baseBranch 字段被移除：更新时忽略传入值并清除历�
     path: '/configured',
     name: 'Knowledge',
   }).workspace, {
+    id: idFor(1),
     path: '/configured',
     name: 'Knowledge',
     addedAt: '2026-01-01T00:00:00.000Z',
     linkedFolders: [],
   });
+});
+
+test('renaming a workspace keeps its id', () => {
+  const harness = createHarness();
+  const before = harness.service.listWorkspaces().workspaces[0].id;
+  const renamed = harness.service.updateWorkspace({ path: '/configured', name: 'Renamed' });
+  assert.equal(renamed.workspace.id, before);
+  assert.equal(renamed.workspace.name, 'Renamed');
+  assert.equal(harness.service.listWorkspaces().workspaces[0].id, before);
+});
+
+test('setPrimaryFolder keeps the id and records the previous path', () => {
+  const harness = createHarness();
+  harness.service.updateWorkspace({
+    path: '/configured',
+    linkedFolders: [{ path: '/code' }],
+  });
+  const id = harness.service.listWorkspaces().workspaces[0].id;
+  const moved = harness.service.setPrimaryFolder({ path: '/configured', folderPath: '/code' });
+  assert.equal(moved.ok, true);
+  assert.equal(moved.workspace.id, id);
+  assert.equal(moved.workspace.path, '/code');
+  assert.equal(harness.registry.get(id).path, '/code');
+  assert.deepEqual(harness.registry.get(id).previousPaths, ['/configured']);
+});
+
+test('removeWorkspace leaves the registry row in place', () => {
+  const harness = createHarness();
+  const id = harness.service.listWorkspaces().workspaces[0].id;
+  harness.service.removeWorkspace('/configured');
+  assert.equal(harness.service.listWorkspaces().workspaces.length, 0);
+  assert.equal(harness.registry.get(id).workspaceId, id);
+  assert.equal(harness.registry.get(id).path, '/configured');
+});
+
+test('reloading after an old write-back returns the same id', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-workspace-id-'));
+  const file = path.join(dir, 'registry.json');
+  let minted = 0;
+  const registry = createProjectRegistry({
+    filePath: file,
+    createId: () => idFor(++minted),
+  });
+  const first = createHarness({
+    projectRegistry: registry,
+    workspaces: [{ path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' }],
+  });
+  const id = first.service.listWorkspaces().workspaces[0].id;
+  assert.equal(minted, 1);
+  const reloaded = createHarness({
+    projectRegistry: createProjectRegistry({
+      filePath: file,
+      createId: () => { throw new Error('minted'); },
+    }),
+    workspaces: [{ path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' }],
+  });
+  assert.equal(reloaded.service.listWorkspaces().workspaces[0].id, id);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a corrupt registry is rebuilt from the cached workspace id', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-workspace-id-'));
+  const file = path.join(dir, 'registry.json');
+  const id = idFor(4);
+  writeFileSync(file, '{');
+  const harness = createHarness({
+    projectRegistry: createProjectRegistry({
+      filePath: file,
+      now: () => new Date('2026-09-26T01:02:03.000Z'),
+      createId: () => { throw new Error('minted'); },
+    }),
+    workspaces: [{
+      id,
+      path: '/configured',
+      name: 'Configured',
+      addedAt: '2026-01-01T00:00:00.000Z',
+    }],
+  });
+  assert.equal(harness.service.listWorkspaces().workspaces[0].id, id);
+  assert.equal(
+    readdirSync(dir).some((name) => name.includes('registry.json.corrupt-')),
+    true,
+  );
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).projects[0].workspaceId, id);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('returns project metadata with basename fallback', () => {

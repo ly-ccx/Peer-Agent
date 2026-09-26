@@ -27,7 +27,7 @@ export interface DesktopStartupSnapshot {
     readonly pinnedOrder?: number | null;
   }[];
   readonly workspaceInfo: { readonly name: string; readonly absolutePath: string; readonly git?: { readonly branch?: string; readonly isDirty?: boolean } } | null;
-  readonly workspaces: readonly { readonly path: string; readonly name: string; readonly addedAt: string }[];
+  readonly workspaces: readonly { readonly id: string; readonly path: string; readonly name: string; readonly addedAt: string }[];
 }
 
 export interface DesktopBootstrapState {

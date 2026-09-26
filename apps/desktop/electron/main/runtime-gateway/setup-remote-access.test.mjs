@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createProjectRegistry } from '@peer-agent/runtime-node';
 import { setupRemoteAccess } from './setup-remote-access.mjs';
 
 /** Each case gets a real (empty) data dir so the binding SQLite can open. */
@@ -76,6 +77,7 @@ async function withConnection(overrides = {}) {
     goalPlanStore, sessionStore, buildProjection: projection, host,
     connectorFactory(options) { captured = options; return stubConnector(); },
     identityStore,
+    registryFile: null,
     ...rest,
   });
   await remote.start();
@@ -414,4 +416,37 @@ test('主动停止会清掉失败原因，不让旧原因冒充新状态', async
 
   remote.stop();
   assert.equal(remote.status().lastFailure, null, '停止后不应残留上一次的失败原因');
+});
+
+test('稳定 id 和远程别名都能通过准入', async () => {
+  const root = freshDir();
+  const registryFile = join(root, 'projects', 'registry.json');
+  const registry = createProjectRegistry({
+    filePath: registryFile,
+    createId: () => '11111111-1111-4111-8111-111111111111',
+  });
+  const project = registry.ensureForPath(join(root, 'repo'));
+  assert.equal(registry.setRemoteAlias(project.workspaceId, 'legacy-box').ok, true);
+
+  const { remote, options, host } = await withConnection({
+    userDataPath: root,
+    workspaceId: project.workspaceId,
+    registryFile,
+  });
+  assert.deepEqual(options.delegation.workspaceIds, [project.workspaceId, 'legacy-box']);
+  const { bindingVersion, epoch } = bind(remote, options);
+  const byAlias = await options.onTaskRead(readRequest({
+    bindingVersion, epoch, workspaceId: 'legacy-box',
+  }));
+  assert.equal(byAlias.status, 'ok', JSON.stringify(byAlias));
+  const byId = await options.onTaskRead(readRequest({
+    bindingVersion, epoch, workspaceId: project.workspaceId,
+  }));
+  assert.equal(byId.status, 'ok', JSON.stringify(byId));
+  const denied = await options.onTaskRead(readRequest({
+    bindingVersion, epoch, workspaceId: 'ws-other',
+  }));
+  assert.equal(denied.status, 'rejected');
+  assert.equal(denied.code, 'WORKSPACE_DENIED');
+  assert.equal(host.calls(), 2);
 });
