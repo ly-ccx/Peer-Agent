@@ -9,7 +9,8 @@
  * rewrites the same object so chrome updates without rewiring every import.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { loadMigratedSettings } from '@peer-agent/runtime-node';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -385,11 +386,6 @@ export type TuiThemeStore = {
   readonly subscribe: (listener: TuiThemeChangeListener) => () => void;
 };
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-
 export type SystemThemeWatcherOptions = {
   readonly getMode: () => TuiThemeMode;
   readonly onChange: (state: TuiThemeState) => void;
@@ -454,15 +450,7 @@ export function createTuiThemeStore({
 }: TuiThemeStoreOptions): TuiThemeStore {
   const settingsFile = path.join(userDataPath, 'settings.json');
 
-  const readSettings = (): Record<string, unknown> => {
-    if (!existsSync(settingsFile)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(settingsFile, 'utf8')) as unknown;
-      return isObjectRecord(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  };
+  const readSettings = (): Record<string, unknown> => loadMigratedSettings(settingsFile);
 
   const writeSettings = (next: Record<string, unknown>): void => {
     mkdirSync(userDataPath, { recursive: true });
