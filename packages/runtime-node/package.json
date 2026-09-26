@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "node --test src/*.test.ts src/*.test.mjs src/project-agent/*.test.mjs src/testing/*.test.mjs",
+    "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/project-agent/*.test.mjs src/testing/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
