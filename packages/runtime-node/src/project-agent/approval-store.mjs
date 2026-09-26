@@ -117,6 +117,7 @@ export function createApprovalStore({
       conversationId: nullableString(input.conversationId),
       streamId: nullableString(input.streamId),
       planId: nullableString(input.planId),
+      ...(nullableString(input.sessionId) ? { sessionId: nullableString(input.sessionId) } : {}),
       capabilityId: nullableString(input.capabilityId) || 'unknown',
       summary: redactSummary(input.summary),
       riskLevel: nullableString(input.riskLevel),

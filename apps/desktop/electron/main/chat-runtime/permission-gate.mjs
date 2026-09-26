@@ -334,12 +334,19 @@ export function createChatPermissionGate({
     } catch {
       scope = {};
     }
+    const profile = activeStreams.get(streamId)?.turnProfile;
+    const profileWorkspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId.trim() : '';
+    const profileSessionId = typeof profile?.sessionId === 'string' ? profile.sessionId.trim() : '';
+    const profilePlanId = typeof profile?.planId === 'string' ? profile.planId.trim() : '';
     const record = {
       approvalId: call.toolCallId,
-      workspaceId: workspaceId !== undefined ? workspaceId : (scope.workspaceId ?? null),
+      workspaceId: profileWorkspaceId
+        || (workspaceId !== undefined ? workspaceId : (scope.workspaceId ?? null))
+        || null,
+      ...(profileSessionId ? { sessionId: profileSessionId } : {}),
       conversationId: scope.conversationId ?? conversationId ?? null,
       streamId: streamId ?? null,
-      planId: planId !== undefined ? planId : (scope.planId ?? null),
+      planId: profilePlanId || (planId !== undefined ? planId : (scope.planId ?? null)) || null,
       capabilityId: call.capabilityId || 'unknown',
       summary: previewSummary(call),
       riskLevel: call.riskLevel ?? null,

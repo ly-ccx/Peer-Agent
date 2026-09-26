@@ -70,6 +70,11 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
 
 import { isSelectionDiscussion } from '../selection-background-context.mjs';
 
+function excludeCapabilityPrefixes(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((prefix) => typeof prefix === 'string' && prefix.length > 0);
+}
+
 export function createRuntimeToolProjection({
   mcpRegistry,
   skillStore,
@@ -77,6 +82,15 @@ export function createRuntimeToolProjection({
   projectionOptions = {},
 } = {}) {
   if (isSelectionDiscussion()) registry = createToolRegistry({ tools: [] });
+  const prefixes = excludeCapabilityPrefixes(projectionOptions.excludeCapabilityPrefixes);
+  if (prefixes.length > 0) {
+    registry = createToolRegistry({
+      tools: registry.listTools().filter((tool) => {
+        const capabilityId = tool.runtime?.executorCapabilityId || tool.capabilityId || '';
+        return !prefixes.some((prefix) => capabilityId.startsWith(prefix));
+      }),
+    });
+  }
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
   const modelProjection = createModelToolProjectionFromRuntimeProjection(
     projection,
