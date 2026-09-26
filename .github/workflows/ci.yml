@@ -83,14 +83,15 @@ jobs:
             exit 0
           fi
           echo "::warning::Full test run failed. Retrying each failed file once."
-          mapfile -t files < <(grep -oE '(apps|packages|scripts|marketplace)/[A-Za-z0-9_./-]+\.test\.(mjs|ts|tsx)' "$log" | sort -u)
-          if [ "${#files[@]}" -eq 0 ]; then
+          files=$(grep -oE '(apps|packages|scripts|marketplace)/[A-Za-z0-9_./-]+\.test\.(mjs|ts|tsx)' "$log" | sort -u)
+          if [ -z "$files" ]; then
             echo "::error::Could not identify a failed test file to retry."
             exit "$code"
           fi
           retry_failed=0
-          for file in "${files[@]}"; do
-            [ -f "$file" ] || continue
+          # macOS runners ship Bash 3.2, which has no mapfile.
+          while IFS= read -r file; do
+            [ -n "$file" ] && [ -f "$file" ] || continue
             echo "::group::retry $file"
             if [[ "$file" == apps/tui/* ]]; then
               bun test "$file" || retry_failed=1
@@ -98,5 +99,7 @@ jobs:
               node --test --test-reporter=tap "$file" || retry_failed=1
             fi
             echo "::endgroup::"
-          done
+          done <<EOF
+$files
+EOF
           exit "$retry_failed"
