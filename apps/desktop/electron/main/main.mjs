@@ -13,7 +13,8 @@ import os from 'node:os';
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 
 const execFileAsync = promisify(execFile);
-import { createCollectingSink } from './agent-host/turn-sinks.mjs';
+import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
+import { createBroadcastSink, createCollectingSink } from './agent-host/turn-sinks.mjs';
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
@@ -72,7 +73,7 @@ import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
 } from './quick-chat-window.mjs';
-import { getMainWindowWebContents, getOAuthWindowWebContents } from './window-routing.mjs';
+import { getOAuthWindowWebContents } from './window-routing.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
@@ -878,9 +879,6 @@ function showTaskSystemNotification({ title, body, onClick }) {
   }
 }
 
-function getRunnerWebContents() {
-  return getMainWindowWebContents(BrowserWindow.getAllWindows());
-}
 
 function toDesktopProviderMessages(messages = []) {
   return messages.map((message) => ({
@@ -1241,6 +1239,7 @@ const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   }),
   startRunner: (planId) => goalRunner.start(planId),
 });
+const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 goalRunner = createGoalRunner({
   goalPlanStore,
   uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
@@ -1259,10 +1258,6 @@ goalRunner = createGoalRunner({
   },
   chatRuntime: {
     async runGoalTurn({ plan, turnNumber }) {
-      const webContents = getRunnerWebContents();
-      if (!webContents) {
-        return { blocked: true, blockedReason: 'No renderer window is available for Goal Runner' };
-      }
       const conversation = conversationStore.getConversation(plan.conversationId);
       if (!conversation) {
         return { failed: true, failureReason: 'Goal conversation not found' };
@@ -1324,9 +1319,10 @@ goalRunner = createGoalRunner({
           }
         },
       };
-      const outcome = await llmChatService.sendMessage({
+      const outcome = await agentTurnExecutor.runTurn({
+        turnProfile: { role: 'goal_runner' },
+        sink: createBroadcastSink({ getWindows: () => BrowserWindow.getAllWindows().filter((window) => window.__peerAgentMainWindow === true) }),
         messages,
-        webContents,
         streamId,
         effort: 'default',
         // Runner 归 goal 模式独占(A1):托管推进的 turn 以 goal 模式驱动,使 goal-runner-source
@@ -1368,9 +1364,10 @@ goalRunner = createGoalRunner({
         streamId,
         startedAt: Date.now(),
       });
-      await llmChatService.sendMessage({
+      await agentTurnExecutor.runTurn({
+        turnProfile: { role: 'explorer' },
+        sink: webContents,
         messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
-        webContents,
         streamId,
         effort: 'default',
         mode: 'explorer',
@@ -1418,9 +1415,10 @@ goalRunner = createGoalRunner({
         streamId,
         startedAt: Date.now(),
       });
-      await llmChatService.sendMessage({
+      await agentTurnExecutor.runTurn({
+        turnProfile: { role: 'verifier' },
+        sink: webContents,
         messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
-        webContents,
         streamId,
         effort: 'default',
         // Verifier 复用 explorer 的只读工具投影；任务语义由 verifierContext Source 注入。

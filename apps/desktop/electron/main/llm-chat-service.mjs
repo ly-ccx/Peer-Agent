@@ -80,6 +80,13 @@ const SAME_PROVIDER_RETRY_DELAYS_MS = [500, 1_500, 3_000];
 // terminal 并保留一段时间，使「切回已结束的后台轮次」仍能通过 reattach 回放完整终态
 // 快照（正文/segments/interrupted/usage）。保留期满后才硬删除，释放内存。
 const TERMINAL_RETENTION_MS = 5 * 60 * 1000;
+const TURN_ROLES = new Set(['user_chat', 'goal_runner', 'explorer', 'verifier', 'visual_verifier', 'automation']);
+
+function normalizeTurnProfile(value) {
+  if (!value || typeof value !== 'object') return null;
+  const role = TURN_ROLES.has(value.role) ? value.role : null;
+  return role ? { role } : null;
+}
 
 // 可被用户 abort 打断的退避等待：abort 时以 AbortError 拒绝，沿用既有
 // AbortError -> chat:stream:aborted 的结构化取消路径。
@@ -930,6 +937,7 @@ export function createLlmChatService({
         byConversation.set(record.conversationId, {
           conversationId: record.conversationId,
           streamId: record.streamId,
+          role: record.turnProfile?.role ?? null,
           // 绿点真值：origin（会话发起工作区）
           workspacePath: originWorkspacePath,
           originWorkspacePath,
@@ -1095,6 +1103,7 @@ export function createLlmChatService({
     // 作为本轮累积种子——正文/segments 从已落盘内容继续追加，计时锚点回拨到原消息
     // 时间戳，不重置。用于「网络中断 → 继续」的原地续写，而不是整条重写。
     resumeInterruptedReply = false,
+    turnProfile = null,
   }) {
     // 托管回合（Goal Runner 等）没有 renderer 再次透传 modelProviderId，但只要绑定了
     // conversationId，就必须继承该会话的模型选择。否则会静默落到全局默认 provider，
@@ -1202,6 +1211,7 @@ export function createLlmChatService({
       startedAt: resumeSeed?.timestamp ?? Date.now(),
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
+      turnProfile: normalizeTurnProfile(turnProfile),
       // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
       modelProviderId: effectiveModelProviderId ?? null,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
