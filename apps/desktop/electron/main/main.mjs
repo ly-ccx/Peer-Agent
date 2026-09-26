@@ -1239,7 +1239,7 @@ const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   }),
   startRunner: (planId) => goalRunner.start(planId),
 });
-const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
+let agentTurnExecutor;
 goalRunner = createGoalRunner({
   goalPlanStore,
   uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
@@ -1456,6 +1456,7 @@ goalRunner = createGoalRunner({
     });
   },
 });
+agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 
 function buildRuntimeProjection() {
   const session = sessionStore.getSession();

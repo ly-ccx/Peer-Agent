@@ -2268,6 +2268,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
         streamId: 's1',
+        role: null,
         workspacePath: '/ws/alpha',
         originWorkspacePath: '/ws/alpha',
       });
@@ -2338,6 +2339,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c-goal',
         streamId: 's-goal',
+        role: null,
         workspacePath: originWs,
         originWorkspacePath: originWs,
       });
