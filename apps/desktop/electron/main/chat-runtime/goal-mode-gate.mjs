@@ -46,6 +46,22 @@ const GATE_DEFINITIVE_TERMINAL_PLAN_STATUSES = Object.freeze(new Set(['completed
 // 带「目标路径」的写工具 → 参与 pre-act 写盘范围守卫。
 const PATH_WRITE_TOOLS = Object.freeze(new Set(['write_file', 'edit_file']));
 
+// project_agent 不是 chat/plan/goal。未知模式不能默认放行这些副作用。
+const PROJECT_AGENT_MUTATING_TOOLS = Object.freeze(new Set([
+  'write_file',
+  'edit_file',
+  'bash',
+  'shell_stop',
+  'web_fetch',
+  'desktop_preview',
+]));
+
+function isProjectAgentSideEffect({ toolName, riskLevel }) {
+  if (PROJECT_AGENT_MUTATING_TOOLS.has(toolName)) return true;
+  if (typeof toolName === 'string' && toolName.startsWith('browser_')) return true;
+  return !INERT_RISK_LEVELS.has(riskLevel);
+}
+
 // 转义正则元字符（用函数替换器，避免 '$&' 之类替换特殊记号被上游误展开）。
 function escapeRegExp(literal) {
   return literal.replace(/[.+^${}()|[\]\\]/g, (m) => '\\' + m);
@@ -390,6 +406,19 @@ export function evaluateGoalModeGate({
     return { allowed: true };
   }
 
+  // project_agent 不走「未知模式默认放行」。只读调查放行；写、Shell、浏览器、联网一律拒绝。
+  // 能力白名单由 project-agent-mode-gate 先判。这里只挡副作用，避免投影漏网后落到 allowed:true。
+  if (mode === 'project_agent') {
+    if (isProjectAgentSideEffect({ toolName, riskLevel })) {
+      return {
+        allowed: false,
+        reason: 'project_agent_side_effect_denied',
+        detail: toolName ?? undefined,
+      };
+    }
+    return { allowed: true };
+  }
+
   if (mode !== 'plan') return { allowed: true };
 
   // 规划 / 回写 / 提问：始终放行（这正是产出计划与求批准的手段）。
@@ -449,6 +478,11 @@ function denialMessage(reason, locale) {
     return zh
       ? 'Goal 模式：高风险动作未获用户确认，已拒绝执行。'
       : 'Goal mode: a high-risk action was not confirmed by the user and was denied.';
+  }
+  if (reason === 'project_agent_side_effect_denied') {
+    return zh
+      ? '项目代理不能执行有副作用的工具。当前只允许读取工作区。'
+      : 'Project agent cannot run side-effecting tools. Only workspace reads are allowed.';
   }
   return zh
     ? 'Plan 模式：必须先用 goal_create_plan 产出目标与完整计划，并经用户批准，才能执行有副作用的操作。'

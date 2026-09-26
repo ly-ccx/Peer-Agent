@@ -221,6 +221,13 @@ export {
   digestApprovalArgs,
 } from './project-agent/approval-store.mjs';
 export {
+  PROJECT_AGENT_ALLOWED_CAPABILITIES,
+  evaluateProjectAgentTurn,
+  isProjectAgentCapabilityAllowed,
+  isProjectAgentDeniedPermissionKind,
+  isProjectAgentTurn,
+} from './project-agent/mode-policy.mjs';
+export {
   aggregateProgress,
   applyGoalTimingTransition,
   canConsumeRequestedUserInput,

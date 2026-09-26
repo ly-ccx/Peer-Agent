@@ -90,7 +90,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.listFiles,
     capabilityId: 'legacy.local.file.list',
     prompt: () => 'List the immediate entries in a directory. Use this instead of shell commands when you only need directory contents.',
-    availableInModes: ['chat', 'plan', 'explorer', 'goal'],
+    availableInModes: ['chat', 'plan', 'explorer', 'goal', 'project_agent'],
     runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.listFiles.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
@@ -111,7 +111,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.readFile,
     capabilityId: 'legacy.local.file.read',
     prompt: () => readPromptAsset('read_file.txt'),
-    availableInModes: ['chat', 'plan', 'explorer', 'goal'],
+    availableInModes: ['chat', 'plan', 'explorer', 'goal', 'project_agent'],
     runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.readFile.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
@@ -142,7 +142,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     capabilityId: 'legacy.local.file.search',
     prompt: () => readPromptAsset('search_files.txt'),
     // 只读搜索：Explorer 子 Agent 可用，用于在 workspace 内按内容定位文件。
-    availableInModes: ['chat', 'plan', 'explorer', 'goal'],
+    availableInModes: ['chat', 'plan', 'explorer', 'goal', 'project_agent'],
     runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.searchFiles.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
