@@ -320,6 +320,70 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.equal(byName.get('goal_update_task')?.health, 'mode_excluded');
   });
 
+  it('projects only the read whitelist in project_agent mode', () => {
+    const names = materializedNames('project_agent');
+    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'batch_search']);
+  });
+
+  it('keeps classic projections unchanged when the turn is not project_agent', () => {
+    const chat = materializedNames('chat');
+    assert.ok(chat.includes('bash'));
+    assert.ok(chat.includes('shell_stop'));
+    assert.ok(chat.includes('edit_file'));
+    assert.ok(chat.includes('write_file'));
+    for (const goalTool of GOAL_TOOL_NAMES) {
+      assert.ok(chat.includes(goalTool));
+    }
+    assert.deepEqual(materializedNames('explorer'), ['list_files', 'read_file', 'search_files', 'batch_search']);
+    const registry = createRuntimeToolRegistry();
+    const chatProjection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
+    assert.equal(chatProjection.accessLevel, 'ask_before_local');
+    const scoped = registry.listTools().filter((tool) => tool.availableInModes?.includes('project_agent'));
+    assert.deepEqual(
+      scoped.map((tool) => tool.name),
+      ['list_files', 'read_file', 'search_files', 'batch_search'],
+    );
+  });
+
+  it('hides MCP, Skill, shell, browser, and write tools from project_agent', () => {
+    const mcpRegistry = {
+      listCapabilityManifests: () => [{
+        name: 'mcp__demo',
+        capabilityId: 'local.mcp.demo.echo',
+        description: 'echo',
+        inputSchema: { type: 'object' },
+      }],
+    };
+    const skillStore = {
+      listSkills: () => [{
+        skillId: 'weather-plus',
+        name: 'weather-plus',
+        description: 'weather',
+        enabled: true,
+      }],
+    };
+    const registry = createRuntimeToolRegistry({ mcpRegistry, skillStore });
+    const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'project_agent' });
+    const names = buildOpenAIToolsFromRuntimeProjection(projection, registry).map(
+      (tool) => tool.function.name,
+    );
+    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'batch_search']);
+    const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
+    for (const hidden of ['bash', 'edit_file', 'write_file', 'web_fetch', 'mcp__demo', 'skill__weather-plus']) {
+      assert.equal(byName.get(hidden)?.health, 'mode_excluded', hidden);
+    }
+    const browser = [...byName.keys()].filter((name) => name.startsWith('browser_'));
+    assert.ok(browser.length > 0);
+    for (const name of browser) assert.equal(byName.get(name).health, 'mode_excluded');
+    const chatNames = buildOpenAIToolsFromRuntimeProjection(
+      createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' }),
+      registry,
+    ).map((tool) => tool.function.name);
+    assert.ok(chatNames.includes('bash'));
+    assert.ok(chatNames.includes('mcp__demo'));
+    assert.ok(chatNames.includes('skill__weather-plus'));
+  });
+
   it('preserves the all-modes view when mode is omitted', () => {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry);

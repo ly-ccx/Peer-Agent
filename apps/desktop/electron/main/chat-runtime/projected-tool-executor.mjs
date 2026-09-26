@@ -10,6 +10,12 @@ import {
   resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
+import {
+  attachProjectAgentDenialEvidence,
+  buildProjectAgentModeDenial,
+  evaluateProjectAgentModeGate,
+  restrictProjectAgentPermission,
+} from './project-agent-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { getDesktopPreviewService } from '../runtime-gateway/desktop-preview-service.mjs';
 import { createWebUiCapture } from '../runtime-gateway/web-ui-capture.mjs';
@@ -205,6 +211,27 @@ export async function executeProjectedModelTool({
     }
     : toolContext;
 
+  // 项目代理硬闸在 Goal 闸与 PermissionGrant 之前。投影漏出的写能力也在这里拒绝。
+  const turnRole = toolContext?.turnRole ?? toolContext?.turnProfile?.role ?? null;
+  const projectAgentGate = evaluateProjectAgentModeGate({
+    mode,
+    role: turnRole,
+    capabilityId: projection.call.capabilityId,
+    permissionKind: projection.tool?.permissionPolicy?.kind ?? null,
+  });
+  if (!projectAgentGate.allowed) {
+    return {
+      ...buildProjectAgentModeDenial({
+        call: projection.call,
+        locale,
+        toolName: name,
+        capabilityId: projection.call.capabilityId,
+        detail: projectAgentGate.detail ?? null,
+      }),
+      projectionCapability: projection.capability,
+    };
+  }
+
   // 运行时闸门（见 goal-mode-gate.mjs / goal-mode-ultrathink-workflow 设计文档）：
   // - plan 模式：计划未获批准前，拒绝有副作用能力，强制「先规划 → 批准 → 执行」。
   // - goal 模式：pre-act 写盘范围守卫（越界 DENY）+ 不可逆动作逐动作确认。
@@ -222,10 +249,16 @@ export async function executeProjectedModelTool({
       : null,
   });
   if (!gate.allowed) {
-    return {
+    const denial = {
       ...buildGoalModeDenial({ name, reason: gate.reason, locale, detail: gate.detail ?? null }),
       projectionCapability: projection.capability,
     };
+    if (!projectAgentGate.applies) return denial;
+    return attachProjectAgentDenialEvidence(denial, {
+      call: projection.call,
+      locale,
+      reason: gate.reason,
+    });
   }
   // goal 模式高风险动作：不可逆动作或 scope expansion 逐动作确认后放行，拒绝则结构化失败。
   if (gate.requiresConfirmation) {
@@ -328,7 +361,9 @@ export async function executeProjectedModelTool({
   });
   const execution = await host.execute({ call: projection.call, conversationId }, {
     toolContext: effectiveToolContext,
-    requestPermission,
+    requestPermission: projectAgentGate.applies
+      ? restrictProjectAgentPermission(requestPermission)
+      : requestPermission,
     signal,
     locale,
   });

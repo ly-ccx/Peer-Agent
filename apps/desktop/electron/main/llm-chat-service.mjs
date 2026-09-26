@@ -83,7 +83,15 @@ const SAME_PROVIDER_RETRY_DELAYS_MS = [500, 1_500, 3_000];
 // terminal 并保留一段时间，使「切回已结束的后台轮次」仍能通过 reattach 回放完整终态
 // 快照（正文/segments/interrupted/usage）。保留期满后才硬删除，释放内存。
 const TERMINAL_RETENTION_MS = 5 * 60 * 1000;
-const TURN_ROLES = new Set(['user_chat', 'goal_runner', 'explorer', 'verifier', 'visual_verifier', 'automation']);
+const TURN_ROLES = new Set([
+  'user_chat',
+  'goal_runner',
+  'explorer',
+  'verifier',
+  'visual_verifier',
+  'automation',
+  'project_agent',
+]);
 
 function normalizeTurnProfile(value) {
   if (!value || typeof value !== 'object') return null;
@@ -147,10 +155,14 @@ function sleepWithSignal(ms, signal) {
 
 function buildRuntimeTools({ mcpRegistry, skillStore, providerType, mode }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
+  // project_agent 回合把投影上的 accessLevel 标成 restricted_local。共享 permission-gate 不在这里改。
+  const projectionOptions = mode === 'project_agent'
+    ? { mode, accessLevel: 'restricted_local' }
+    : { mode };
   const { registry, projection, modelProjection } = createRuntimeToolProjection({
     mcpRegistry,
     skillStore,
-    projectionOptions: { mode },
+    projectionOptions,
   });
   const tools = providerType === 'anthropic'
     ? buildAnthropicToolsFromModelProjection(modelProjection)
@@ -1189,6 +1201,8 @@ export function createLlmChatService({
     // 造成 UI 显示 ChatGPT、后台实际改跑 Grok 的跨模型漂移。
     // 角色回合把已解析的模型放在 turnProfile.modelSelection，优先于会话绑定。
     const profile = normalizeTurnProfile(turnProfile);
+    const projectAgentTurn = mode === 'project_agent' || profile?.role === 'project_agent';
+    const runtimeMode = projectAgentTurn ? 'project_agent' : mode;
     const effectiveModelProviderId = profile?.modelSelection?.modelProviderId
       || resolveConversationModelProviderId({
         modelProviderId,
@@ -1233,7 +1247,8 @@ export function createLlmChatService({
     // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
     const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
     // Agent 默认（chat）与 legacy goal 均可绑定 active Goal 的 target workspace。
-    if (mode === 'goal' || mode === 'chat') {
+    // 项目代理回合不进入 Goal 工作区准备。
+    if (!projectAgentTurn && (mode === 'goal' || mode === 'chat')) {
       try {
         const activePlan = typeof goalPlanStore?.getActivePlanByConversation === 'function'
           ? goalPlanStore.getActivePlanByConversation(conversationId)
@@ -1254,7 +1269,7 @@ export function createLlmChatService({
         console.warn('[goal-worktree] prepare failed; writing to bound workspace:', error?.message || error);
       }
     }
-    const goalWorkspaceBinding = (mode === 'goal' || mode === 'chat')
+    const goalWorkspaceBinding = (!projectAgentTurn && (mode === 'goal' || mode === 'chat'))
       ? resolveActiveGoalExecutionBinding(conversationId, conversationWorkspacePath, goalPlanStore)
       : null;
     const runWorkspacePath = goalWorkspaceBinding?.executionWorkspacePath || conversationWorkspacePath;
@@ -1435,7 +1450,10 @@ export function createLlmChatService({
       const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
       // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
       // 执行层判定准入。见 Goal 模式运行时闸门设计。
-      toolContext.mode = mode;
+      toolContext.mode = runtimeMode;
+      toolContext.turnRole = profile?.role ?? null;
+      // 复用的会话 toolContext 必须按回合覆写。项目代理固定只读不询问；其他回合清空。
+      toolContext.accessLevel = projectAgentTurn ? 'restricted_local' : null;
       toolContext.workspacePath = runWorkspacePath;
       toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
       toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
@@ -1645,7 +1663,7 @@ export function createLlmChatService({
           mcpRegistry,
           skillStore,
           providerType: resolvedChannel.legacyProvider,
-          mode,
+          mode: runtimeMode,
         });
 
         try {
