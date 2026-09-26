@@ -378,7 +378,7 @@ function normalizeMeta(meta) {
   const lastReadAt = typeof meta?.lastReadAt === 'string' && meta.lastReadAt.trim()
     ? meta.lastReadAt.trim()
     : null;
-  return {
+  const normalized = {
     ...normalizedBase,
     mode: normalizeMode(meta?.mode),
     fastMode: meta?.fastMode === true,
@@ -395,6 +395,18 @@ function normalizeMeta(meta) {
     ...(messageCount === undefined ? {} : { messageCount }),
     ...(automationOrigin ? { automationOrigin } : {}),
   };
+  if (!SPECIAL_CONVERSATION_ROLES.has(normalized.role)) delete normalized.role;
+  if (typeof normalized.parentConversationId !== 'string' || !normalized.parentConversationId.trim()) {
+    delete normalized.parentConversationId;
+  } else {
+    normalized.parentConversationId = normalized.parentConversationId.trim();
+  }
+  if (typeof normalized.workspaceId !== 'string' || !normalized.workspaceId.trim()) delete normalized.workspaceId;
+  else normalized.workspaceId = normalized.workspaceId.trim();
+  const delegation = normalizeDelegation(normalized.delegation);
+  if (delegation) normalized.delegation = delegation;
+  else delete normalized.delegation;
+  return normalized;
 }
 
 // 一次性数据迁移（wire 值迁移，见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
@@ -423,6 +435,29 @@ function migrateLegacyGoalMode(storeDir, indexFile) {
   }
 }
 
+
+const SPECIAL_CONVERSATION_ROLES = new Set(['project_agent', 'work_session']);
+
+function conversationRole(meta) {
+  return SPECIAL_CONVERSATION_ROLES.has(meta?.role) ? meta.role : 'default';
+}
+
+function acceptsConversationRole(meta, roles) {
+  const requested = Array.isArray(roles)
+    ? roles.filter((role) => role === 'default' || SPECIAL_CONVERSATION_ROLES.has(role))
+    : [];
+  if (Array.isArray(roles) && roles.length > 0 && requested.length === 0) return false;
+  return (requested.length ? requested : ['default']).includes(conversationRole(meta));
+}
+
+function normalizeDelegation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sessionId = typeof value.sessionId === 'string' ? value.sessionId.trim() : '';
+  const anchorMessageId = typeof value.anchorMessageId === 'string' ? value.anchorMessageId.trim() : '';
+  const inputId = typeof value.inputId === 'string' ? value.inputId.trim() : '';
+  if (!sessionId || !anchorMessageId || !inputId) return null;
+  return { sessionId, anchorMessageId, inputId };
+}
 
 function normalizeSearchQuery(query) {
   return String(query || '').trim().toLowerCase();
@@ -647,7 +682,8 @@ export function createConversationStore(options = {}) {
   function listConversations(params = {}) {
     const statuses = normalizeStatuses(params?.status);
     const filtered = readIndex()
-      .filter((meta) => !statuses || statuses.has(normalizeStatus(meta.status)));
+      .filter((meta) => (!statuses || statuses.has(normalizeStatus(meta.status)))
+        && acceptsConversationRole(meta, params?.roles));
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
 
     // 显式 backfill 仅用于迁移工具/测试；默认 list 热路径永不读正文。
@@ -681,6 +717,7 @@ export function createConversationStore(options = {}) {
       const automationWorkspace = meta.automationOrigin?.originWorkspacePath || null;
       if (executionWorkspace !== requestedWorkspace && automationWorkspace !== requestedWorkspace) return false;
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
+      if (!acceptsConversationRole(meta, params?.roles)) return false;
       return true;
     });
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
@@ -727,6 +764,7 @@ export function createConversationStore(options = {}) {
     let items = readIndex().filter((meta) => {
       if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
       if (workspaceFilter !== undefined && (meta.workspacePath || null) !== workspaceFilter) return false;
+      if (!acceptsConversationRole(meta, params?.roles)) return false;
       return true;
     });
 
@@ -749,9 +787,13 @@ export function createConversationStore(options = {}) {
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function createConversation({ title, workspacePath, mode, fastMode, preferredExecutionIsolation, automationCreateContext, automationOrigin } = {}) {
+  function createConversation({ title, workspacePath, mode, fastMode, preferredExecutionIsolation, automationCreateContext, automationOrigin, role, workspaceId } = {}) {
+    if (role != null && !SPECIAL_CONVERSATION_ROLES.has(role)) {
+      throw Object.assign(new Error('CONVERSATION_ROLE_INVALID'), { code: 'CONVERSATION_ROLE_INVALID' });
+    }
     const now = new Date().toISOString();
     const normalizedOrigin = normalizeAutomationOrigin(automationOrigin);
+    const storedWorkspaceId = typeof workspaceId === 'string' && workspaceId.trim() ? workspaceId.trim() : undefined;
     const meta = {
       id: randomUUID(),
       title: title || '',
@@ -774,6 +816,8 @@ export function createConversationStore(options = {}) {
       contextSnapshot: null,
       ...(automationCreateContext ? { automationCreateContext: structuredClone(automationCreateContext) } : {}),
       ...(normalizedOrigin ? { automationOrigin: structuredClone(normalizedOrigin) } : {}),
+      ...(role ? { role } : {}),
+      ...(storedWorkspaceId ? { workspaceId: storedWorkspaceId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -805,8 +849,79 @@ export function createConversationStore(options = {}) {
     });
   }
 
-  function createSelectionChild({ parentConversationId, requestId, selection, runtimeState, capturedAt, confirmMissing = false }) {
+  function createSelectionChild(input = {}) {
+    return createChildConversation({
+      parentConversationId: input.parentConversationId,
+      anchorMessageId: input.selection?.messageId,
+      snapshotPolicy: 'inherited',
+      runtimeState: input.runtimeState,
+      capturedAt: input.capturedAt,
+      confirmMissing: input.confirmMissing === true,
+      requestId: input.requestId,
+      selection: input.selection,
+    });
+  }
+
+  function historyThroughAnchor(history, anchorMessageId, fail) {
+    if (!history || !Array.isArray(history.messages)) fail('SOURCE_MISSING');
+    const index = history.messages.findIndex((row) => row.id === anchorMessageId);
+    if (index < 0) fail('CHILD_ANCHOR_MISSING');
+    return { ...history, messages: history.messages.slice(0, index + 1) };
+  }
+
+  function createChildConversation(input = {}) {
     const fail = (code) => { throw Object.assign(new Error(code), { code }); };
+    if (input.snapshotPolicy === 'inherited' || input.selection || input.requestId != null) {
+      return openSelectionChild(input, fail);
+    }
+    const parentConversationId = typeof input.parentConversationId === 'string' ? input.parentConversationId : '';
+    const anchorMessageId = typeof input.anchorMessageId === 'string' ? input.anchorMessageId.trim() : '';
+    if (!parentConversationId) fail('CHILD_PARENT_MISSING');
+    if (!anchorMessageId) fail('CHILD_ANCHOR_MISSING');
+    if (input.role != null && !SPECIAL_CONVERSATION_ROLES.has(input.role)) fail('CONVERSATION_ROLE_INVALID');
+    const delegation = input.delegation == null ? undefined : normalizeDelegation(input.delegation);
+    if (input.delegation != null && !delegation) fail('CHILD_DELEGATION_INVALID');
+    const workspaceId = typeof input.workspaceId === 'string' && input.workspaceId.trim() ? input.workspaceId.trim() : undefined;
+    return withFileLock(indexFile, () => {
+      const index = readIndex();
+      const parent = index.find((row) => row.id === parentConversationId);
+      if (!parent) fail('CHILD_PARENT_MISSING');
+      const history = getPersistedConversationHistory(parentConversationId);
+      const source = historyThroughAnchor(history, anchorMessageId, fail);
+      const snapshot = buildInheritedBackground(source, {
+        expectedRevision: input.runtimeState?.contentRevision,
+        runtimeState: input.runtimeState,
+        capturedAt: input.capturedAt,
+      });
+      if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
+      if (JSON.stringify(getPersistedConversationHistory(parentConversationId)) !== JSON.stringify(history)) fail('BACKGROUND_VERSION_CHANGED');
+      const backgroundSnapshotId = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).put(snapshot);
+      const now = new Date().toISOString();
+      const child = normalizeMeta({
+        id: randomUUID(),
+        title: typeof input.title === 'string' ? input.title : '',
+        workspacePath: input.workspacePath ?? parent.workspacePath ?? null,
+        mode: input.mode || 'chat',
+        fastMode: false,
+        modelProviderId: input.modelProviderId ?? parent.modelProviderId,
+        effort: parent.effort,
+        status: 'active',
+        messageCount: 0,
+        contentRevision: 0,
+        createdAt: now,
+        updatedAt: now,
+        ...(input.role ? { role: input.role } : {}),
+        parentConversationId,
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(delegation ? { delegation } : {}),
+        backgroundSnapshotId,
+      });
+      writeJsonl(indexFile, [...index, child]);
+      return withMessageCount(child);
+    });
+  }
+
+  function openSelectionChild({ parentConversationId, requestId, selection, runtimeState, capturedAt, confirmMissing = false }, fail) {
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200) fail('CHILD_REQUEST_INVALID');
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) fail('INVALID_SELECTION');
     // Fixed field order makes retry identity independent of object insertion order.
@@ -841,6 +956,7 @@ export function createConversationStore(options = {}) {
         workspacePath: parent.workspacePath, mode: 'chat', fastMode: false,
         modelProviderId: parent.modelProviderId, model: parent.model, effort: parent.effort,
         status: 'active', messageCount: 0, contentRevision: 0, createdAt: now, updatedAt: now,
+        parentConversationId,
         selectionOrigin: { schemaVersion: 1, parentConversationId, requestId,
           requestSelection: structuredClone(requestSelection), reference, snapshotId, createdAt: now },
         selectionDraft: { text: '', references: [reference] },
@@ -857,6 +973,24 @@ export function createConversationStore(options = {}) {
       .map(({ selectionOrigin, selectionDraft, ...meta }) => ({ ...withMessageCount(meta),
         parentConversationId, sourceReference: selectionOrigin.reference,
         hasDraft: Boolean(selectionDraft?.text || selectionDraft?.references?.length) }));
+  }
+
+  function childParentId(row) {
+    if (typeof row?.parentConversationId === 'string' && row.parentConversationId.trim()) {
+      return row.parentConversationId;
+    }
+    return typeof row?.selectionOrigin?.parentConversationId === 'string'
+      ? row.selectionOrigin.parentConversationId
+      : '';
+  }
+
+  function listChildren(parentConversationId, params = {}) {
+    const role = params?.role;
+    if (role != null && role !== 'default' && !SPECIAL_CONVERSATION_ROLES.has(role)) return [];
+    return readIndex()
+      .filter((row) => childParentId(row) === parentConversationId
+        && (role == null || conversationRole(row) === role))
+      .map((row) => withMessageCount({ ...row }));
   }
 
   /** Internal draft write. Only references already owned by this session can be retained. */
@@ -1668,7 +1802,9 @@ export function createConversationStore(options = {}) {
     getPersistedConversationHistory,
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
+    createChildConversation: changed(createChildConversation, 'created'),
     listSelectionChildren,
+    listChildren,
     updateSelectionChildDraft,
     captureInheritedBackground,
     readInheritedBackground,

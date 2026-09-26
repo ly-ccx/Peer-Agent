@@ -337,7 +337,7 @@ describe('TUI conversation persistence', () => {
     }]);
     expect(calls).toEqual([{
       method: 'listConversationsByWorkspace',
-      args: ['/workspace', { status: 'active' }],
+      args: ['/workspace', { status: 'active', roles: ['default'] }],
     }]);
   });
 
@@ -377,7 +377,7 @@ describe('TUI conversation persistence', () => {
 
       expect(calls).toContainEqual({
         method: 'listConversationsByWorkspace',
-        args: [canonicalRoot, { status: 'active' }],
+        args: [canonicalRoot, { status: 'active', roles: ['default'] }],
       });
       expect(calls).toContainEqual({
         method: 'createConversation',
@@ -423,7 +423,7 @@ describe('TUI conversation persistence', () => {
     }]);
     expect(calls).toEqual([{
       method: 'listConversations',
-      args: [{ status: 'active' }],
+      args: [{ status: 'active', roles: ['default'] }],
     }]);
   });
 
