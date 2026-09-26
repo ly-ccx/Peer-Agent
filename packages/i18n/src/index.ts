@@ -148,6 +148,51 @@ export type TranslationKey =
   | 'settings.usage.unpricedNote'
   | 'settings.usage.byProvider'
   | 'settings.usage.byModel'
+  | 'settings.usage.byRole'
+  | 'settings.usage.showByRole'
+  | 'settings.usage.col.role'
+  | 'modelRouting.nav'
+  | 'modelRouting.title'
+  | 'modelRouting.description'
+  | 'modelRouting.singleModel'
+  | 'modelRouting.noModel'
+  | 'modelRouting.tiers'
+  | 'modelRouting.roles'
+  | 'modelRouting.primary'
+  | 'modelRouting.fallbacks'
+  | 'modelRouting.addFallback'
+  | 'modelRouting.moveUp'
+  | 'modelRouting.moveDown'
+  | 'modelRouting.remove'
+  | 'modelRouting.mode.tier'
+  | 'modelRouting.mode.fixed'
+  | 'modelRouting.mode.auto'
+  | 'modelRouting.pool'
+  | 'modelRouting.poolInvalid'
+  | 'modelRouting.resolved'
+  | 'modelRouting.unresolved'
+  | 'modelRouting.preferDifferentFamily'
+  | 'modelRouting.spendCap'
+  | 'modelRouting.spendExceeded'
+  | 'modelRouting.essentialSpend'
+  | 'modelRouting.tier.strong'
+  | 'modelRouting.tier.fast'
+  | 'modelRouting.tier.economy'
+  | 'modelRouting.tier.vision'
+  | 'modelRouting.role.project_agent'
+  | 'modelRouting.role.session_worker'
+  | 'modelRouting.role.explorer'
+  | 'modelRouting.role.verifier'
+  | 'modelRouting.role.visual_verifier'
+  | 'modelRouting.role.memory_curator'
+  | 'modelRouting.role.objective_probe'
+  | 'modelRouting.role.compactor'
+  | 'modelRouting.reason.vision'
+  | 'modelRouting.reason.tools'
+  | 'modelRouting.reason.structured'
+  | 'modelRouting.reason.context'
+  | 'modelRouting.loadFailed'
+  | 'modelRouting.saveFailed'
   | 'settings.usage.emptyGroup'
   | 'settings.usage.col.provider'
   | 'settings.usage.col.model'
@@ -741,6 +786,51 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.unpricedNote': '有 {count} 个会话缺少有效单价，其成本未计入总计。',
     'settings.usage.byProvider': '按 Provider',
     'settings.usage.byModel': '按模型',
+    'settings.usage.byRole': '按角色',
+    'settings.usage.showByRole': '按角色查看',
+    'settings.usage.col.role': '角色',
+    'modelRouting.nav': '模型分工',
+    'modelRouting.title': '模型分工',
+    'modelRouting.description': '为不同工作选择档位或具体模型。普通对话仍使用会话里选中的模型。',
+    'modelRouting.singleModel': '只有一个模型时，所有工作都用它',
+    'modelRouting.noModel': '没有可用的模型',
+    'modelRouting.tiers': '档位',
+    'modelRouting.roles': '角色',
+    'modelRouting.primary': '主模型',
+    'modelRouting.fallbacks': '备选',
+    'modelRouting.addFallback': '添加备选',
+    'modelRouting.moveUp': '上移',
+    'modelRouting.moveDown': '下移',
+    'modelRouting.remove': '移除',
+    'modelRouting.mode.tier': '跟随档位',
+    'modelRouting.mode.fixed': '固定模型',
+    'modelRouting.mode.auto': '自动',
+    'modelRouting.pool': '模型池',
+    'modelRouting.poolInvalid': '自动池里需要至少一个满足该角色能力的模型',
+    'modelRouting.resolved': '当前解析',
+    'modelRouting.unresolved': '没有可用的模型',
+    'modelRouting.preferDifferentFamily': '复核优先不同源',
+    'modelRouting.spendCap': '日花费上限（美元）',
+    'modelRouting.spendExceeded': '该角色已达到今日花费上限',
+    'modelRouting.essentialSpend': '已超过今日上限。这是必达工作，仍会继续，并在需要你时提示',
+    'modelRouting.tier.strong': '强',
+    'modelRouting.tier.fast': '快',
+    'modelRouting.tier.economy': '省',
+    'modelRouting.tier.vision': '视觉',
+    'modelRouting.role.project_agent': '项目代理',
+    'modelRouting.role.session_worker': '任务执行',
+    'modelRouting.role.explorer': '探索',
+    'modelRouting.role.verifier': '复核',
+    'modelRouting.role.visual_verifier': '视觉复核',
+    'modelRouting.role.memory_curator': '记忆整理',
+    'modelRouting.role.objective_probe': '目标探查',
+    'modelRouting.role.compactor': '压缩',
+    'modelRouting.reason.vision': '不能看图',
+    'modelRouting.reason.tools': '不能使用工具',
+    'modelRouting.reason.structured': '不能输出结构化结果',
+    'modelRouting.reason.context': '上下文太短',
+    'modelRouting.loadFailed': '模型分工加载失败',
+    'modelRouting.saveFailed': '模型分工保存失败',
     'settings.usage.emptyGroup': '暂无分组数据',
     'settings.usage.col.provider': 'Provider',
     'settings.usage.col.model': '模型',
@@ -1352,6 +1442,51 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.unpricedNote': '{count} conversation(s) lack pricing and are excluded from cost totals.',
     'settings.usage.byProvider': 'By provider',
     'settings.usage.byModel': 'By model',
+    'settings.usage.byRole': 'By role',
+    'settings.usage.showByRole': 'View by role',
+    'settings.usage.col.role': 'Role',
+    'modelRouting.nav': 'Model routing',
+    'modelRouting.title': 'Model routing',
+    'modelRouting.description': 'Choose a tier or a specific model for each kind of work. Ordinary chat still uses the model selected in the conversation.',
+    'modelRouting.singleModel': 'When only one model is available, every kind of work uses it',
+    'modelRouting.noModel': 'No usable model',
+    'modelRouting.tiers': 'Tiers',
+    'modelRouting.roles': 'Roles',
+    'modelRouting.primary': 'Primary',
+    'modelRouting.fallbacks': 'Fallbacks',
+    'modelRouting.addFallback': 'Add fallback',
+    'modelRouting.moveUp': 'Move up',
+    'modelRouting.moveDown': 'Move down',
+    'modelRouting.remove': 'Remove',
+    'modelRouting.mode.tier': 'Follow tier',
+    'modelRouting.mode.fixed': 'Fixed model',
+    'modelRouting.mode.auto': 'Automatic',
+    'modelRouting.pool': 'Pool',
+    'modelRouting.poolInvalid': 'An automatic pool needs at least one model that meets the role.',
+    'modelRouting.resolved': 'Resolved',
+    'modelRouting.unresolved': 'No usable model',
+    'modelRouting.preferDifferentFamily': 'Prefer a different family for verification',
+    'modelRouting.spendCap': 'Daily spend cap (USD)',
+    'modelRouting.spendExceeded': 'This role has reached its daily spend cap',
+    'modelRouting.essentialSpend': 'Over today’s cap. This work still continues, and you will be asked when it needs you',
+    'modelRouting.tier.strong': 'Strong',
+    'modelRouting.tier.fast': 'Fast',
+    'modelRouting.tier.economy': 'Economy',
+    'modelRouting.tier.vision': 'Vision',
+    'modelRouting.role.project_agent': 'Project agent',
+    'modelRouting.role.session_worker': 'Task worker',
+    'modelRouting.role.explorer': 'Explorer',
+    'modelRouting.role.verifier': 'Verifier',
+    'modelRouting.role.visual_verifier': 'Visual review',
+    'modelRouting.role.memory_curator': 'Memory curator',
+    'modelRouting.role.objective_probe': 'Objective probe',
+    'modelRouting.role.compactor': 'Compactor',
+    'modelRouting.reason.vision': 'Cannot see images',
+    'modelRouting.reason.tools': 'Cannot use tools',
+    'modelRouting.reason.structured': 'Cannot return structured output',
+    'modelRouting.reason.context': 'Context window is too short',
+    'modelRouting.loadFailed': 'Could not load model routing',
+    'modelRouting.saveFailed': 'Could not save model routing',
     'settings.usage.emptyGroup': 'No grouped usage yet',
     'settings.usage.col.provider': 'Provider',
     'settings.usage.col.model': 'Model',

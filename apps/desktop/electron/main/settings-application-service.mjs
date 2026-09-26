@@ -1,4 +1,4 @@
-import { resolveStoredModelRouting } from '@peer-agent/runtime-node';
+import { isRoutableProvider, resolveRoleRoute, resolveStoredModelRouting } from '@peer-agent/runtime-node';
 
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
@@ -130,10 +130,82 @@ export function createSettingsApplicationService({
       next.dailySpendCapUsd = Number(nextPartial.dailySpendCapUsd);
     }
     if (isRecord(nextPartial.roleSpendCaps)) {
-      next.roleSpendCaps = { ...(isRecord(current.roleSpendCaps) ? current.roleSpendCaps : {}), ...nextPartial.roleSpendCaps };
+      const caps = { ...(isRecord(current.roleSpendCaps) ? current.roleSpendCaps : {}) };
+      for (const [role, amount] of Object.entries(nextPartial.roleSpendCaps)) {
+        if (amount == null || amount === '') delete caps[role];
+        else if (Number.isFinite(Number(amount)) && Number(amount) >= 0) caps[role] = Number(amount);
+      }
+      if (Object.keys(caps).length) next.roleSpendCaps = caps;
+      else delete next.roleSpendCaps;
     }
+    if (JSON.stringify(next) === JSON.stringify(current)) return current;
     merge({ modelRouting: next });
     return next;
+  }
+
+  function projectRoutingProvider(provider) {
+    if (!isRoutableProvider(provider)) return null;
+    const context = Number(provider.contextWindow);
+    const label = [provider.modelLabel, provider.model, provider.name, provider.id]
+      .find((value) => typeof value === 'string' && value.trim());
+    return {
+      id: String(provider.id).trim(),
+      label: String(label).trim(),
+      providerName: typeof provider.name === 'string' ? provider.name.trim() : '',
+      supportsVision: provider.supportsVision === true,
+      supportsTools: provider.supportsTools !== false && provider.capabilities?.toolUse !== false,
+      supportsStructured: provider.supportsStructured !== false,
+      contextTokens: Number.isFinite(context) && context > 0 ? context : 128_000,
+    };
+  }
+
+  function describeModelRouting(providers = []) {
+    const list = Array.isArray(providers) ? providers : [];
+    const projected = list.map(projectRoutingProvider).filter(Boolean);
+    const usable = list.filter((provider) => projected.some((item) => item.id === provider.id));
+    return {
+      routing: getModelRouting(usable),
+      providers: projected,
+      singleModel: projected.length <= 1,
+    };
+  }
+
+  function previewModelRouting(providers = [], { spentByRole = {} } = {}) {
+    const described = describeModelRouting(providers);
+    const usable = (Array.isArray(providers) ? providers : []).filter((provider) => (
+      described.providers.some((item) => item.id === provider.id)
+    ));
+    const resolutions = [
+      'project_agent',
+      'session_worker',
+      'explorer',
+      'verifier',
+      'visual_verifier',
+      'memory_curator',
+      'objective_probe',
+      'compactor',
+    ].map((role) => {
+      const resolved = resolveRoleRoute({
+        role,
+        providers: usable,
+        routing: read().modelRouting,
+        spentUsd: Number(spentByRole?.[role]) || 0,
+      });
+      const chosenId = resolved.ok ? resolved.selection.modelProviderId : '';
+      const chosen = described.providers.find((item) => item.id === chosenId) || null;
+      return {
+        role,
+        ok: resolved.ok === true,
+        modelProviderId: chosenId || null,
+        label: chosen?.label || chosenId || '',
+        source: resolved.ok ? (resolved.source || null) : null,
+        missing: resolved.ok ? null : (resolved.missing || null),
+        reason: resolved.ok ? null : (resolved.reason || null),
+        spendExceeded: resolved.spendExceeded === true,
+        sameFamilyAsWorker: typeof resolved.sameFamilyAsWorker === 'boolean' ? resolved.sameFamilyAsWorker : null,
+      };
+    });
+    return { ...described, resolutions };
   }
 
   return Object.freeze({
@@ -148,6 +220,8 @@ export function createSettingsApplicationService({
     updateLocale,
     getModelRouting,
     updateModelRouting,
+    describeModelRouting,
+    previewModelRouting,
   });
 }
 

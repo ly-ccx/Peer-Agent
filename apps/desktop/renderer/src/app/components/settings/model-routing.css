@@ -1,0 +1,59 @@
+.model-routing-banner {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--pa-surface-card);
+  color: var(--pa-text-primary);
+}
+
+.model-routing-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.model-routing-table th,
+.model-routing-table td {
+  padding: 8px 6px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--pa-border-subtle);
+}
+
+.model-routing-table th {
+  color: var(--pa-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.model-routing-table select,
+.model-routing-table input[type='number'] {
+  width: 100%;
+  min-width: 0;
+}
+
+.model-routing-fallbacks,
+.model-routing-pool {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-routing-fallback,
+.model-routing-pool label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.model-routing-resolved {
+  color: var(--graphite-soft);
+  font-size: 0.78rem;
+}
+
+.model-routing-table fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

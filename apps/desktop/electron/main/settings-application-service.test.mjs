@@ -181,3 +181,18 @@ test('model routing defaults are computed on read and are not written back', () 
   assert.equal(getSettings().modelRouting.roles, undefined);
   assert.equal(getSettings().modelRouting.tiers.economy, undefined);
 });
+
+test('clearing a role spend cap removes that key', () => {
+  const { service, calls, getSettings } = createHarness();
+  service.updateModelRouting({ roleSpendCaps: { explorer: 1, verifier: 2 } });
+  const stored = service.updateModelRouting({ roleSpendCaps: { explorer: null } });
+  assert.equal(stored.roleSpendCaps.verifier, 2);
+  assert.equal(stored.roleSpendCaps.explorer, undefined);
+  assert.equal(getSettings().modelRouting.roleSpendCaps.explorer, undefined);
+  const cleared = service.updateModelRouting({ roleSpendCaps: { verifier: '' } });
+  assert.equal(cleared.roleSpendCaps, undefined);
+  assert.equal(getSettings().modelRouting.roleSpendCaps, undefined);
+  const mergesBefore = calls.filter((call) => call[0] === 'merge').length;
+  service.updateModelRouting({ roleSpendCaps: { explorer: null } });
+  assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
+});

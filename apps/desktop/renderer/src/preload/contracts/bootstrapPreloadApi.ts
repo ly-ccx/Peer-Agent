@@ -36,6 +36,10 @@ import type {
   LocalMcpServerUpsertRequest,
   LocalMcpServerView,
   LocaleCode,
+  ModelRole,
+  ModelTier,
+  ModelTierBinding,
+  RoleSetting,
   McpConnectionProbeResult,
   McpConnectionTestResult,
   McpCredentialMetadataView,
@@ -269,12 +273,60 @@ export interface UsageStatsSnapshot {
   };
   readonly byProvider: readonly UsageStatsGroupRow[];
   readonly byModel: readonly UsageStatsGroupRow[];
+  readonly byRole: readonly UsageStatsGroupRow[];
   readonly notes: {
     readonly unpricedConversationCount: number;
     readonly missingProviderCount: number;
     readonly pricingUnit: string;
     readonly scope: string;
   };
+}
+
+/** 设置页「模型分工」。真相在 main 的 settings.modelRouting，这里只是投影。 */
+export interface ModelRoutingProviderOption {
+  readonly id: string;
+  readonly label: string;
+  readonly providerName: string;
+  readonly supportsVision: boolean;
+  readonly supportsTools: boolean;
+  readonly supportsStructured: boolean;
+  readonly contextTokens: number;
+}
+
+export interface ModelRoutingView {
+  readonly routing: {
+    readonly tiers: Partial<Record<ModelTier, ModelTierBinding>>;
+    readonly roles: Partial<Record<ModelRole, RoleSetting>>;
+    readonly verifierPreferDifferentFamily: boolean;
+    readonly dailySpendCapUsd?: number;
+    readonly roleSpendCaps?: Partial<Record<ModelRole, number>>;
+  };
+  readonly providers: readonly ModelRoutingProviderOption[];
+  readonly singleModel: boolean;
+}
+
+export interface ModelRoutingPatch {
+  readonly tiers?: Partial<Record<ModelTier, ModelTierBinding>>;
+  readonly roles?: Partial<Record<ModelRole, RoleSetting>>;
+  readonly verifierPreferDifferentFamily?: boolean;
+  readonly dailySpendCapUsd?: number;
+  readonly roleSpendCaps?: Partial<Record<ModelRole, number | null>>;
+}
+
+export interface ModelRoutingPreviewRow {
+  readonly role: ModelRole;
+  readonly ok: boolean;
+  readonly modelProviderId: string | null;
+  readonly label: string;
+  readonly source: string | null;
+  readonly missing: string | null;
+  readonly reason: string | null;
+  readonly spendExceeded: boolean;
+  readonly sameFamilyAsWorker: boolean | null;
+}
+
+export interface ModelRoutingPreview extends ModelRoutingView {
+  readonly resolutions: readonly ModelRoutingPreviewRow[];
 }
 
 /** 请求日志按天聚合（Token 热力图 / 趋势，对应 main `usage:daily`）。 */
@@ -1034,6 +1086,9 @@ export interface BootstrapPreloadApi {
   }) => Promise<{ ok: boolean; reason?: string; workspace?: unknown }>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
+  readonly modelRoutingGet: () => Promise<ModelRoutingView>;
+  readonly modelRoutingUpdate: (partial: ModelRoutingPatch) => Promise<ModelRoutingView>;
+  readonly modelRoutingPreview: () => Promise<ModelRoutingPreview>;
   readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;
   readonly usageGetDay: (params: { date: string }) => Promise<UsageDaySnapshot>;
   readonly conversationsList: (params?: {
