@@ -47,8 +47,8 @@ test('merge overrides only the top-level key, leaves siblings intact', () => {
 test('merge ignores non-object payloads', () => {
   const store = createSettingsStore({ settingsFile });
   store.merge({ appMode: 'work' });
-  assert.deepEqual(store.merge(null), { appMode: 'work', schemaVersion: 1 });
-  assert.deepEqual(store.merge('garbage'), { appMode: 'work', schemaVersion: 1 });
+  assert.deepEqual(store.merge(null), { appMode: 'work', schemaVersion: 2 });
+  assert.deepEqual(store.merge('garbage'), { appMode: 'work', schemaVersion: 2 });
 });
 
 test('getAll tolerates corrupted file', () => {

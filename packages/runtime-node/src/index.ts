@@ -208,6 +208,12 @@ export {
 } from './data-store.mjs';
 export { loadMigratedSettings, runSettingsMigrations, SETTINGS_MIGRATIONS } from './settings-migrations.mjs';
 export {
+  createProjectRegistry,
+  defaultProjectRegistryFile,
+  isRemoteWorkspaceId,
+  readRemoteAliases,
+} from './project-registry.mjs';
+export {
   aggregateProgress,
   applyGoalTimingTransition,
   canConsumeRequestedUserInput,

@@ -62,6 +62,7 @@ interface ConversationMeta {
 }
 
 interface WorkspaceEntry {
+  id: string;
   path: string;
   name: string;
   addedAt: string;

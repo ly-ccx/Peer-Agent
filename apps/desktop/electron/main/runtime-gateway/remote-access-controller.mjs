@@ -86,6 +86,34 @@ export function createRemoteAccessController({
     }
   }
 
+  /** 远程没填 workspaceId 时，用当前项目的稳定 id，不再要求手写一串标识。 */
+  function projectWorkspaceId() {
+    try {
+      const all = settingsStore.getAll();
+      const list = Array.isArray(all?.workspaces) ? all.workspaces : [];
+      const active = typeof all?.activeWorkspace === 'string' ? all.activeWorkspace : '';
+      const current = list.find((item) => item?.path === active)
+        ?? list.find((item) => typeof item?.id === 'string');
+      const id = typeof current?.id === 'string' ? current.id.trim() : '';
+      return WORKSPACE_PATTERN.test(id) ? id : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function patchWithWorkspaceDefault(patch, current) {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+    const next = { ...patch };
+    const explicit = Object.prototype.hasOwnProperty.call(next, 'workspaceId')
+      ? (typeof next.workspaceId === 'string' ? next.workspaceId.trim() : '')
+      : null;
+    const missing = explicit === null ? current.workspaceId === '' : explicit === '';
+    if (!missing) return next;
+    const fallback = projectWorkspaceId();
+    if (fallback) next.workspaceId = fallback;
+    return next;
+  }
+
   /** The live truth: configured values plus what the connection is actually doing. */
   function status() {
     const settings = readSettings();
@@ -155,7 +183,8 @@ export function createRemoteAccessController({
     /** Persist a patch, then reconcile. Returns the resulting status. */
     update(patch) {
       return enqueue(async () => {
-        const merged = normalizeRemoteSettings(patch, readSettings());
+        const current = readSettings();
+        const merged = normalizeRemoteSettings(patchWithWorkspaceDefault(patch, current), current);
         settingsStore.merge({ [settingsKey]: merged });
         return applyInternal();
       });

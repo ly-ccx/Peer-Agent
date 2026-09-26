@@ -11,8 +11,83 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { createProjectRegistry, isRemoteWorkspaceId } from './project-registry.mjs';
 
-/** @typedef {{ version: number, up: (settings: Record<string, unknown>, ctx: { now: () => Date }) => Record<string, unknown> }} SettingsMigration */
+/** @typedef {{ version: number, up: (settings: Record<string, unknown>, ctx: { now: () => Date, registryFile?: string | null, projectRegistry?: object | null }) => Record<string, unknown> }} SettingsMigration */
+
+/**
+ * 给 schemaVersion 2 的设置补上稳定项目 id。
+ * 已有 id 且注册表能按路径对上时不改设置。旧的远程 workspaceId 若不是项目 id，记为活动项目的 remoteAlias。
+ * @param {Record<string, unknown>} settings
+ * @param {ReturnType<typeof createProjectRegistry>} registry
+ */
+export function reconcileWorkspaceIdentity(settings, registry) {
+  if (!settings || settings.schemaVersion !== 2 || !registry) return { settings, changed: false };
+  let changed = false;
+  let workspaces = settings.workspaces;
+  if (Array.isArray(settings.workspaces)) {
+    const entries = registry.sync(settings.workspaces);
+    let workspaceChanged = false;
+    const next = settings.workspaces.map((workspace, index) => {
+      const entry = entries[index];
+      if (!entry || !workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return workspace;
+      if (workspace.id === entry.workspaceId) return workspace;
+      workspaceChanged = true;
+      return { ...workspace, id: entry.workspaceId };
+    });
+    if (workspaceChanged) {
+      workspaces = next;
+      changed = true;
+    }
+  }
+
+  let remoteAccess = settings.remoteAccess;
+  if (remoteAccess && typeof remoteAccess === 'object' && !Array.isArray(remoteAccess)) {
+    const current = typeof remoteAccess.workspaceId === 'string' ? remoteAccess.workspaceId.trim() : '';
+    const projects = registry.list();
+    const known = projects.some((item) => item.workspaceId === current);
+    if (current && !known) {
+      const aliased = projects.find((item) => item.remoteAlias === current);
+      const activeEntry = typeof settings.activeWorkspace === 'string'
+        ? registry.findByPath(settings.activeWorkspace)
+        : null;
+      const listed = Array.isArray(workspaces) ? workspaces : [];
+      const active = aliased
+        ? { id: aliased.workspaceId }
+        : listed.find((item) => activeEntry && item && item.id === activeEntry.workspaceId)
+          ?? listed.find((item) => item && typeof item.id === 'string')
+          ?? null;
+      if (aliased && active.id) {
+        remoteAccess = { ...remoteAccess, workspaceId: active.id };
+        changed = true;
+      } else if (active?.id && isRemoteWorkspaceId(current) && current !== active.id) {
+        const set = registry.setRemoteAlias(active.id, current);
+        if (set.ok) {
+          remoteAccess = { ...remoteAccess, workspaceId: active.id };
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (!changed) return { settings, changed: false };
+  return {
+    changed: true,
+    settings: {
+      ...settings,
+      ...(Array.isArray(settings.workspaces) ? { workspaces } : {}),
+      ...(remoteAccess !== settings.remoteAccess ? { remoteAccess } : {}),
+    },
+  };
+}
+
+function registryFor(ctx) {
+  if (ctx.projectRegistry) return ctx.projectRegistry;
+  return createProjectRegistry({
+    filePath: ctx.registryFile ?? null,
+    now: ctx.now,
+  });
+}
 
 /** @type {SettingsMigration[]} */
 export const SETTINGS_MIGRATIONS = [
@@ -20,6 +95,12 @@ export const SETTINGS_MIGRATIONS = [
     version: 1,
     up(settings) {
       return { ...settings, schemaVersion: 1 };
+    },
+  },
+  {
+    version: 2,
+    up(settings, ctx) {
+      return reconcileWorkspaceIdentity({ ...settings, schemaVersion: 2 }, registryFor(ctx)).settings;
     },
   },
 ];
@@ -43,6 +124,8 @@ export function runSettingsMigrations({
   migrations = SETTINGS_MIGRATIONS,
   now = () => new Date(),
   log = console.error,
+  registryFile = null,
+  projectRegistry = null,
 } = {}) {
   const original = asSettings(settings);
   const ordered = [...migrations].sort((left, right) => left.version - right.version);
@@ -57,7 +140,7 @@ export function runSettingsMigrations({
     for (const migration of ordered) {
       if (migration.version <= version) continue;
       if (migration.version !== version + 1) break;
-      const updated = migration.up({ ...next }, { now });
+      const updated = migration.up({ ...next }, { now, registryFile, projectRegistry });
       if (!updated || typeof updated !== 'object' || Array.isArray(updated)) {
         throw new Error(`settings migration ${migration.version} did not return an object`);
       }
@@ -111,20 +194,43 @@ export function loadMigratedSettings(settingsFile, options = {}) {
   }
   if (!original || typeof original !== 'object' || Array.isArray(original)) return {};
 
-  const result = runSettingsMigrations({ settings: original, ...options });
-  if (result.applied.length === 0) return result.settings;
+  const now = options.now ?? (() => new Date());
+  const migrations = options.migrations ?? SETTINGS_MIGRATIONS;
+  const knowsIdentity = migrations.some((migration) => migration.version === 2);
+  const registryFile = options.registryFile
+    ?? path.join(path.dirname(settingsFile), 'projects', 'registry.json');
+  const projectRegistry = options.projectRegistry
+    ?? (knowsIdentity ? createProjectRegistry({ filePath: registryFile, now }) : null);
+  const result = runSettingsMigrations({
+    settings: original,
+    migrations,
+    now,
+    log: options.log,
+    registryFile,
+    projectRegistry,
+  });
+  let settings = result.settings;
+  let changed = result.applied.length > 0;
+  if (projectRegistry && currentVersion(settings) === 2) {
+    const repaired = reconcileWorkspaceIdentity(settings, projectRegistry);
+    settings = repaired.settings;
+    changed = changed || repaired.changed;
+  }
+  if (!changed) return settings;
 
   try {
     const directory = path.dirname(settingsFile);
     mkdirSync(directory, { recursive: true });
-    const backup = path.join(directory, backupName(settingsFile, currentVersion(original), options.now ?? (() => new Date())));
-    copyFileSync(settingsFile, backup);
-    pruneBackups(directory, path.basename(settingsFile));
-    writeAtomically(settingsFile, result.settings);
+    if (result.applied.length > 0) {
+      const backup = path.join(directory, backupName(settingsFile, currentVersion(original), now));
+      copyFileSync(settingsFile, backup);
+      pruneBackups(directory, path.basename(settingsFile));
+    }
+    writeAtomically(settingsFile, settings);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     (options.log ?? console.error)(`[settings-migration] ${message}`);
     return asSettings(original);
   }
-  return result.settings;
+  return settings;
 }
