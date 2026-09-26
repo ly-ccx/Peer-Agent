@@ -15,10 +15,12 @@ const manifestPath = path.join(dataDir, "manifest.json");
 const embeddedDataPattern = /\n\s*var ENTRIES = \[[\s\S]*?\];\n/;
 const localeMarker = /^(?:<!--\s*)?locale:(zh-CN|en-US)(?:\s*-->)?$/;
 const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
+const releaseNoteName = /^v(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?\.md$/;
+const prereleaseRank = { alpha: 1, beta: 2, rc: 3 };
 
 const sectionKeys = {
   zh: [
-    ["说明", "note"], ["概览", "note"], ["新功能", "added"], ["能力", "added"],
+    ["降级", "known"], ["说明", "note"], ["概览", "note"], ["新功能", "added"], ["能力", "added"],
     ["优化", "improved"], ["体验", "improved"], ["修复", "fixed"],
     ["变更", "changed"], ["安装", "release"], ["发布", "release"],
     ["通道", "release"], ["已知", "known"], ["致谢", "other"],
@@ -26,7 +28,7 @@ const sectionKeys = {
   en: [
     ["overview", "note"], ["note", "note"], ["what's new", "added"], ["feature", "added"],
     ["capability", "added"], ["improvement", "improved"], ["fix", "fixed"],
-    ["reliability", "fixed"], ["change", "changed"], ["install", "release"],
+    ["reliability", "fixed"], ["change", "changed"], ["downgrade", "known"], ["install", "release"],
     ["release", "release"], ["channel", "release"], ["known", "known"], ["thank", "other"],
   ],
 };
@@ -92,15 +94,22 @@ function parseLocale(markdown, marker, lang) {
 }
 
 function parseVersion(filename) {
-  const label = filename.slice(1, -3);
-  const match = label.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const match = filename.match(releaseNoteName);
   if (!match) throw new Error(`Unsupported release note filename: ${filename}`);
+  const label = filename.slice(1, -3);
+  const kind = match[4] || "stable";
   return {
     version: `v${label}`,
     label,
-    channel: "stable",
+    channel: kind === "stable" ? "stable" : "beta",
     file: `v${label}.json`,
-    sort: [Number(match[1]), Number(match[2]), Number(match[3])],
+    sort: [
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+      kind === "stable" ? 4 : prereleaseRank[kind],
+      match[5] ? Number(match[5]) : 0,
+    ],
   };
 }
 
@@ -112,7 +121,7 @@ function compareVersions(a, b) {
 }
 
 async function buildEntries() {
-  const files = (await readdir(notesDir)).filter((name) => /^v\d+\.\d+\.\d+\.md$/.test(name));
+  const files = (await readdir(notesDir)).filter((name) => releaseNoteName.test(name));
   const entries = await Promise.all(files.map(async (filename) => {
     const metadata = parseVersion(filename);
     const markdown = await readFile(path.join(notesDir, filename), "utf8");
@@ -143,7 +152,7 @@ async function computeGeneratedAt() {
     // no git — fall through to file-mtime fallback
   }
   try {
-    const files = (await readdir(notesDir)).filter((name) => /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.md$/.test(name));
+    const files = (await readdir(notesDir)).filter((name) => releaseNoteName.test(name));
     let newest = 0;
     for (const name of files) {
       const { mtimeMs } = await stat(path.join(notesDir, name));
@@ -159,10 +168,11 @@ async function computeGeneratedAt() {
 async function expectedOutputs(entries, generatedAt) {
   const versions = entries.map(({ sort: _sort, zh: _zh, en: _en, ...metadata }) => metadata);
   const stable = versions.filter((entry) => entry.channel === "stable");
+  const beta = versions.filter((entry) => entry.channel === "beta");
   const manifest = {
     generatedAt,
-    latest: { stable: stable[0]?.version ?? null },
-    channels: { stable },
+    latest: { stable: stable[0]?.version ?? null, beta: beta[0]?.version ?? null },
+    channels: { stable, beta },
   };
   const outputs = new Map([[manifestPath, json(manifest)]]);
   for (const { sort: _sort, file, ...entry } of entries) outputs.set(path.join(dataDir, file), json(entry));

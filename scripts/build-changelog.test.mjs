@@ -39,16 +39,24 @@ test('legacy release notes without subheadings remain list sections', async () =
   for (const section of entry.zh) assert.equal(section.subsections, undefined);
 });
 
-test('changelog data exposes the stable channel only', async () => {
+test('changelog data keeps stable releases separate from the beta channel', async () => {
   const manifest = await readJson('docs/changelog-data/manifest.json');
-  assert.deepEqual(Object.keys(manifest.channels), ['stable']);
-  assert.ok(!('beta' in manifest.latest));
-  assert.ok(manifest.channels.stable.length > 0);
+  assert.deepEqual(Object.keys(manifest.channels).sort(), ['beta', 'stable']);
+  assert.equal(manifest.latest.stable, 'v0.0.18');
+  assert.equal(manifest.latest.beta, 'v0.1.0-beta.1');
+  assert.ok(manifest.channels.stable.every((entry) => entry.channel === 'stable'));
+  assert.ok(manifest.channels.beta.every((entry) => entry.channel === 'beta'));
+  assert.equal(manifest.channels.beta[0].version, 'v0.1.0-beta.1');
+  assert.ok(manifest.channels.beta.some((entry) => entry.version === 'v0.0.5-beta.4'));
 });
 
-test('legacy beta release notes are excluded from generated changelog data', async () => {
+test('prerelease notes are published on the beta channel', async () => {
+  const beta = await readJson('docs/changelog-data/v0.1.0-beta.1.json');
+  assert.equal(beta.channel, 'beta');
+  assert.ok(beta.zh.some((section) => section.title === '已知限制'));
+  assert.ok(beta.en.some((section) => section.title === 'Known limits'));
   const files = await readdir(new URL('docs/changelog-data', root));
-  assert.equal(files.filter((name) => name.includes('beta')).length, 0);
+  assert.ok(files.includes('v0.0.5-beta.4.json'));
 });
 
 test('web changelog renders original section titles and nested subsections', async () => {
@@ -57,6 +65,9 @@ test('web changelog renders original section titles and nested subsections', asy
   assert.match(html, /\(sec\.subsections \|\| \[\]\)\.forEach/);
   assert.match(html, /h4\.textContent = subsection\.title/);
   assert.doesNotMatch(html, /h3\.textContent = \(LABELS\[state\.lang\]/);
+  assert.match(html, /channel-beta/);
+  assert.match(html, /预发布/);
+  assert.match(html, /latest\.beta/);
 });
 
 test('changelog manifest carries a real generatedAt, never the epoch placeholder', async () => {
