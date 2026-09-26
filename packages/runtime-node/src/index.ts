@@ -229,6 +229,10 @@ export {
 } from './project-agent/mode-policy.mjs';
 export { createDelegationProvider } from './project-agent/delegation-provider.mjs';
 export {
+  createSessionSupervisor,
+  evaluateWorkSessionWrite,
+} from './project-agent/session-supervisor.mjs';
+export {
   DELEGATION_CAPABILITY_IDS,
   DELEGATION_TOOL_SPECS,
   delegationSpecByCapability,

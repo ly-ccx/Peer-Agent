@@ -1705,6 +1705,90 @@ function normalizeRunnerState(runner, planId) {
   return next;
 }
 
+const DELEGATION_SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
+const DELEGATION_PHASES = new Set(['running', 'queued']);
+const MODEL_SELECTION_SOURCES = new Set([
+  'this_request', 'task', 'objective', 'project', 'global', 'auto',
+]);
+
+function normalizeRuntimeModelSelection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const providerId = normalizeOptionalString(value.providerId);
+  const modelId = normalizeOptionalString(value.modelId);
+  const modelProviderId = normalizeOptionalString(value.modelProviderId);
+  const family = normalizeOptionalString(value.family);
+  if (!providerId || !modelId || !modelProviderId || !family) return null;
+  const selection = { providerId, modelId, modelProviderId, family };
+  const reasoningEffort = normalizeOptionalString(value.reasoningEffort);
+  if (reasoningEffort) selection.reasoningEffort = reasoningEffort;
+  return selection;
+}
+
+function normalizeModelSelectionSnapshot(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const worker = normalizeRuntimeModelSelection(value.worker);
+  const explorer = normalizeRuntimeModelSelection(value.explorer);
+  const verifier = normalizeRuntimeModelSelection(value.verifier);
+  if (!worker || !explorer || !verifier) return null;
+  const resolvedAt = normalizeOptionalString(value.resolvedAt);
+  if (!resolvedAt) return null;
+  const source = {};
+  if (value.source && typeof value.source === 'object' && !Array.isArray(value.source)) {
+    for (const [key, item] of Object.entries(value.source)) {
+      if (MODEL_SELECTION_SOURCES.has(item)) source[key] = item;
+    }
+  }
+  const snapshot = {
+    worker,
+    explorer,
+    verifier: { ...verifier, sameFamilyAsWorker: value.verifier.sameFamilyAsWorker === true },
+    source,
+    resolvedAt,
+  };
+  const visualVerifier = normalizeRuntimeModelSelection(value.visualVerifier);
+  if (visualVerifier) snapshot.visualVerifier = visualVerifier;
+  const autoReason = normalizeOptionalString(value.autoReason);
+  if (autoReason) snapshot.autoReason = autoReason;
+  return snapshot;
+}
+
+/**
+ * 任务来源。协议字段必填；workspaceId / sessionId / readOnly / phase 等是运行时回读所需。
+ * memorySnapshotId 在 B2-10 之前允许为 null。非法形状整段丢弃，避免半截来源进入计划。
+ */
+function normalizeDelegationOrigin(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const anchorMessageId = normalizeOptionalString(value.anchorMessageId);
+  const inputId = normalizeOptionalString(value.inputId);
+  const modelSelection = normalizeModelSelectionSnapshot(value.modelSelection);
+  if (!anchorMessageId || !inputId || !modelSelection) return null;
+  const origin = {
+    anchorMessageId,
+    inputId,
+    surface: DELEGATION_SURFACES.has(value.surface) ? value.surface : 'desktop',
+    memorySnapshotId: normalizeOptionalString(value.memorySnapshotId),
+    modelSelection,
+    depth: Number.isInteger(value.depth) && value.depth >= 0 ? value.depth : 1,
+  };
+  for (const key of [
+    'workspaceId', 'sessionId', 'parentSessionId', 'objectiveId',
+    'idempotencyKey', 'parentConversationId',
+  ]) {
+    const text = normalizeOptionalString(value[key]);
+    if (text) origin[key] = text;
+  }
+  if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
+  if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
+  if (Array.isArray(value.dependsOn)) {
+    const dependsOn = value.dependsOn
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim())
+      .slice(0, 8);
+    if (dependsOn.length > 0) origin.dependsOn = dependsOn;
+  }
+  return origin;
+}
+
 function normalizePlan(plan) {
   if (!plan) return null;
   const normalizedConversationId = normalizeConversationId(plan.conversationId);
@@ -1740,6 +1824,9 @@ function normalizePlan(plan) {
     qualityReview: normalizeQualityReview(plan.qualityReview),
     deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
+  const delegationOrigin = normalizeDelegationOrigin(plan.delegationOrigin);
+  if (delegationOrigin) normalized.delegationOrigin = delegationOrigin;
+  else delete normalized.delegationOrigin;
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   // 读路径只恢复「叶子已全部成功，但计划仍钉在 failed、且没有未消费中断」的过期记录。
   // 仍有 runner.interruption 时保持挂起：最后一片叶子 completed 不得把可恢复中断洗成 completed。
@@ -3005,6 +3092,7 @@ export function createGoalPlanStore({
       createdAt: now,
       updatedAt: now,
       createdBy: draft.createdBy,
+      delegationOrigin: normalizeDelegationOrigin(draft.delegationOrigin) || undefined,
     };
     const isGoalIntake = workflowKind === 'goal_self_driven' && plan.activation?.kind === 'intake';
     const createEventType = isGoalIntake
