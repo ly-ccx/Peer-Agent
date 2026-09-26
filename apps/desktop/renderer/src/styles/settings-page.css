@@ -2144,6 +2144,11 @@
     color var(--za-motion-fast) var(--za-ease-standard);
 }
 
+.settings-btn[aria-pressed='true'] {
+  background: var(--pa-surface-muted);
+  border-color: var(--pa-text-primary);
+}
+
 .settings-btn:hover:not(:disabled) {
   background: var(--pa-surface-muted);
   border-color: var(--pa-text-secondary);

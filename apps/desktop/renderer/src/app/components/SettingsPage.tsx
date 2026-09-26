@@ -11,8 +11,9 @@ import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { RemoteAccessPanel } from './RemoteAccessPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
+import { ModelRoutingPanel } from './settings/ModelRoutingPanel';
 
-export type SettingsSection = 'general' | 'providers' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
+export type SettingsSection = 'general' | 'providers' | 'routing' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
 // 注：skills/插件已提升为主侧栏一级页面，不再作为设置分区。
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
@@ -21,6 +22,7 @@ type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ k
 const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'general',
   'providers',
+  'routing',
   'model', // legacy alias → providers
   'instructions',
   'git',
@@ -97,6 +99,7 @@ export function SettingsPage({
       label: 'AI',
       items: [
         { key: 'providers', label: isZh ? '服务商' : 'Providers' },
+        { key: 'routing', label: i18n.t('modelRouting.nav') },
         { key: 'usage', label: i18n.t('settings.usage') },
       ],
     },
@@ -200,6 +203,8 @@ export function SettingsPage({
             workspacePath={workspacePath}
             onConversationsChanged={onArchivedConversationsChanged}
           />
+        ) : section === 'routing' ? (
+          <ModelRoutingPanel i18n={i18n} />
         ) : section === 'usage' ? (
           <UsageStatsPanel i18n={i18n} />
         ) : section === 'remote' ? (

@@ -1893,7 +1893,7 @@ function registerDesktopIpcHost() {
     }),
     ...createSettingsIpcRegistrations({
       settings: settingsApplicationService,
-      permissions: permissionGrantService,
+      permissions: permissionGrantService, listProviders: () => llmConfigStore.listProviders(),
     }),
     ...createHostIpcRegistrations({
       os: {
