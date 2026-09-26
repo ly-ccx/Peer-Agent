@@ -32,9 +32,10 @@ test('collecting sink getEvents returns a copy', () => {
   assert.deepEqual(sink.getEvents(), [{ channel: 'chat:stream:delta', payload: { content: 'a' } }]);
 });
 
-test('collecting sink has no isDestroyed of its own', () => {
+test('collecting sink has no isDestroyed of its own and no approver', () => {
   const sink = createCollectingSink();
   assert.equal(typeof sink.isDestroyed, 'undefined');
+  assert.equal(sink.approver, 'none');
 });
 
 test('callback sink forwards events and is never destroyed', () => {

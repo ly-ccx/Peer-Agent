@@ -57,6 +57,7 @@ import { createUsageRequestLog } from './usage-request-log.mjs';
 import { estimateUsageCostUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
+import { createApprovalStore, createProjectRegistry } from '@peer-agent/runtime-node';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -64,6 +65,8 @@ const usageRequestLog = createUsageRequestLog();
 const streamProfiler = createStreamProfiler({ enabled: isStreamProfilingEnabled() });
 
 const permissionGate = createChatPermissionGate({ activeStreams });
+const durableApprovals = createApprovalStore();
+let approvalRegistry = null;
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
 
@@ -855,6 +858,36 @@ export function createLlmChatService({
   getSettings = null,
 }) {
   permissionGate.setAccessLevel(preferredAccessLevel);
+  permissionGate.configure({
+    approvalStore: durableApprovals,
+    resolveApprovalScope({ conversationId, workspacePath }) {
+      let workspaceId = null;
+      if (typeof workspacePath === 'string' && workspacePath.trim()) {
+        try {
+          approvalRegistry ??= createProjectRegistry();
+          workspaceId = approvalRegistry.findByPath(workspacePath)?.workspaceId ?? null;
+        } catch {
+          workspaceId = null;
+        }
+      }
+      let planId = null;
+      try {
+        planId = goalPlanStore?.getActivePlanByConversation?.(conversationId)?.planId ?? null;
+      } catch {
+        planId = null;
+      }
+      return { workspaceId, planId, conversationId: conversationId ?? null };
+    },
+    settleNotifier: typeof broadcast === 'function'
+      ? (streamId, toolCallIds) => {
+        try {
+          broadcast('chat:stream:permission-settled', { streamId, toolCallIds });
+        } catch (error) {
+          console.warn('[llm-chat] permission settle broadcast failed:', error?.message || error);
+        }
+      }
+      : null,
+  });
   const runtimeSessions = runtimeSessionAdapter ?? createDesktopRuntimeSessionAdapter();
 
   function setWorkspacePath(wsPath) { activeWorkspacePath = wsPath; }
@@ -1212,6 +1245,8 @@ export function createLlmChatService({
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
       turnProfile: normalizeTurnProfile(turnProfile),
+      // CollectingSink 没有审批人。包裹后的 send 代理不再带这个标记，询问前从流记录读取。
+      ...(webContents?.approver === 'none' ? { approver: 'none' } : {}),
       // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
       modelProviderId: effectiveModelProviderId ?? null,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
@@ -2021,6 +2056,7 @@ export function createLlmChatService({
       interrupted: running ? false : Boolean(record.interrupted),
       usage: record.finalUsage ?? null,
       lifetimeUsage: record.lifetimeUsage ?? null,
+      pendingPermissions: permissionGate.listPendingPermissions({ streamId: id }),
     };
   }
 
