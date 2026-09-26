@@ -12,8 +12,9 @@ import { UpdatesPanel } from './UpdatesPanel';
 import { RemoteAccessPanel } from './RemoteAccessPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 import { ModelRoutingPanel } from './settings/ModelRoutingPanel';
+import { DeveloperPanel } from './settings/DeveloperPanel';
 
-export type SettingsSection = 'general' | 'providers' | 'routing' | 'model' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
+export type SettingsSection = 'general' | 'providers' | 'routing' | 'model' | 'instructions' | 'git' | 'developer' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
 // 注：skills/插件已提升为主侧栏一级页面，不再作为设置分区。
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
@@ -26,6 +27,7 @@ const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'model', // legacy alias → providers
   'instructions',
   'git',
+  'developer',
   'shortcuts',
   'appearance',
   'updates',
@@ -103,7 +105,10 @@ export function SettingsPage({
         { key: 'usage', label: i18n.t('settings.usage') },
       ],
     },
-    { label: isZh ? '开发' : 'Development', items: [{ key: 'git', label: i18n.t('settings.git') }] },
+    { label: isZh ? '开发' : 'Development', items: [
+      { key: 'git', label: i18n.t('settings.git') },
+      { key: 'developer', label: i18n.t('developer.projectAgent.nav') },
+    ] },
     {
       label: isZh ? '连接' : 'Connectivity',
       items: [{ key: 'remote', label: isZh ? '远程访问' : 'Remote access' }],
@@ -187,6 +192,8 @@ export function SettingsPage({
             i18n={i18n}
             onSystemInstructionsChanged={onSystemInstructionsChanged}
           />
+        ) : section === 'developer' ? (
+          <DeveloperPanel i18n={i18n} />
         ) : section === 'git' ? (
           <GitPanel
             i18n={i18n}

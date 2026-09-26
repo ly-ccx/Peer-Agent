@@ -50,6 +50,12 @@ export type TranslationKey =
   | 'developer.saveFailed'
   | 'developer.probeFailed'
   | 'developer.ipcUnavailable'
+  | 'developer.projectAgent.nav'
+  | 'developer.projectAgent.title'
+  | 'developer.projectAgent.description'
+  | 'developer.projectAgent.switch'
+  | 'developer.projectAgent.diagnostics'
+  | 'developer.projectAgent.inactive'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -894,6 +900,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': '开发者配置保存失败',
     'developer.probeFailed': '云端合约探测失败',
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
+    'developer.projectAgent.nav': '开发者',
+    'developer.projectAgent.title': '开发者',
+    'developer.projectAgent.description': '项目代理仍未开放。这个开关只保存偏好，打开后界面和行为都不变。',
+    'developer.projectAgent.switch': '项目代理模式',
+    'developer.projectAgent.diagnostics': '项目代理诊断',
+    'developer.projectAgent.inactive': '未启用',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1550,6 +1562,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.saveFailed': 'Failed to save developer settings',
     'developer.probeFailed': 'Cloud contract probe failed',
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
+    'developer.projectAgent.nav': 'Developer',
+    'developer.projectAgent.title': 'Developer',
+    'developer.projectAgent.description': 'The project agent is not available yet. This switch only stores a preference and does not change the app.',
+    'developer.projectAgent.switch': 'Project agent mode',
+    'developer.projectAgent.diagnostics': 'Project agent diagnostics',
+    'developer.projectAgent.inactive': 'Not enabled',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',
