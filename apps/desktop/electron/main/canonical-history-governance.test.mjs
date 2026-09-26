@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const mainSource = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
+const goalRunnerHostSource = readFileSync(new URL('./agent-host/goal-runner-host.mjs', import.meta.url), 'utf8');
 const rendererSource = readFileSync(
   new URL('../../renderer/src/chat/components/ChatSurface.tsx', import.meta.url),
   'utf8',
@@ -14,7 +15,7 @@ const tuiPersistenceSource = readFileSync(
 
 test('conversation send, restore, Goal Runner and TUI resume share the canonical history seam', () => {
   assert.match(mainSource, /projectConversationHistory\(persistedConversation\.messages\)/);
-  assert.match(mainSource, /projectConversationHistory\(conversation\.messages\)/);
+  assert.match(goalRunnerHostSource, /projectConversationHistory\(conversation\.messages\)/);
   assert.match(mainSource, /projectConversationHistory\(conv\.messages\)/);
   assert.match(tuiPersistenceSource, /projectConversationHistory\(messages\)/);
 });

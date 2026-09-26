@@ -144,11 +144,12 @@ test('sending a new task clears shared draft text while keeping isolation prefer
 });
 
 test('new tasks can opt into worktree isolation from the draft composer', async () => {
-  const [surface, main, service, panel] = await Promise.all([
+  const [surface, main, service, panel, goalRunnerHost] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('../../../../electron/main/main.mjs'),
     readSource('../../../../electron/main/llm-chat-service.mjs'),
     readSource('./GoalPlanPanel.tsx'),
+    readSource('../../../../electron/main/agent-host/goal-runner-host.mjs'),
   ]);
   // The create-branch dialog now owns its own markup and source picker, so the
   // push-by-default assertions below read that module instead of ChatSurface.
@@ -178,7 +179,7 @@ test('new tasks can opt into worktree isolation from the draft composer', async 
   assert.match(main, /preferredExecutionIsolation = 'none'/);
   assert.match(main, /preferredExecutionIsolation,/);
   assert.match(main, /originWorkspacePath: conversationWorkspacePath,\s*targetWorkspacePath: conversationWorkspacePath/);
-  assert.match(main, /preparePlanExecutionWorkspace/);
+  assert.match(goalRunnerHost, /preparePlanExecutionWorkspace/);
   assert.match(service, /preparePlanExecutionWorkspace/);
   assert.match(panel, /goalPlansIsolate/);
   assert.match(surface, /planComposerGitChrome/);
