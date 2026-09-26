@@ -13,6 +13,7 @@ import os from 'node:os';
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 
 const execFileAsync = promisify(execFile);
+import { createCollectingSink } from './agent-host/turn-sinks.mjs';
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
@@ -1033,33 +1034,6 @@ Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}]
   };
 }
 
-function createCollectingWebContents() {
-  // 内存收集器：Explorer / Verifier 专用。不转发到真实渲染窗口，避免内部 JSON 出现在聊天。
-  const events = [];
-  let text = '';
-  let terminal = null;
-  return {
-    send(channel, payload) {
-      events.push({ channel, payload });
-      if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
-        text += payload.content;
-      }
-      if (channel === 'chat:stream:done' || channel === 'chat:stream:error' || channel === 'chat:stream:aborted') {
-        terminal = { channel, payload };
-      }
-    },
-    getText() {
-      return text;
-    },
-    getEvents() {
-      return events.slice();
-    },
-    getTerminal() {
-      return terminal;
-    },
-  };
-}
-
 function addEvidenceRefs(target, value) {
   if (typeof value === 'string' && value.trim()) {
     target.add(value.trim());
@@ -1384,7 +1358,7 @@ goalRunner = createGoalRunner({
   explorerRunner: {
     async runExplorer({ plan, explorer }) {
       const streamId = randomUUID();
-      const webContents = createCollectingWebContents();
+      const webContents = createCollectingSink();
       broadcastToAllWindows('goalRunner:changed', {
         type: 'goalRunner:explorerStreamStarted',
         planId: plan.planId,
@@ -1434,7 +1408,7 @@ goalRunner = createGoalRunner({
         llmChatService, modelProviderId: resolveConversationModelProviderId({
           conversationId: plan.conversationId, conversationStore }) });
       const streamId = randomUUID();
-      const webContents = createCollectingWebContents();
+      const webContents = createCollectingSink();
       broadcastToAllWindows('goalRunner:changed', {
         type: 'goalRunner:verifierStreamStarted',
         planId: plan.planId,
