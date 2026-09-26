@@ -53,6 +53,8 @@
 
 > [!NOTE]
 > 当前正式版：**`0.0.18`**（npm `latest`）。Desktop、TUI/CLI、Agent/Plan/Goal 工作流、Automation、MCP、Skills 与 Open Runtime 现已可用 —— 见 [路线图](#-路线图)。
+>
+> beta 通道 **`0.1.0-beta.1`**。这一版预发布仍是现在的界面，并加上关窗后继续推进目标、待批准不丢失，以及模型分工设置。项目代理还没有开放。
 
 ---
 

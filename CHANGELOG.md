@@ -8,6 +8,29 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-beta.1] - 2026-09-26
+
+### Notes
+
+- First prerelease on the 0.1.0 line. The stable release remains 0.0.18, and the current conversation interface stays in place.
+- Changelog generation accepts `vX.Y.Z-(alpha|beta|rc).N` notes, lists them on a beta channel, and the changelog page marks that channel as pre-release.
+
+### Features
+
+- A running goal can continue after the window closes.
+- Approval requests persist across restart and are marked when they expire.
+- Settings include model routing by kind of work. A single available model is used for every kind of work.
+- Image review prefers a model that can see images.
+
+### Changes
+
+- Developer settings store a project-agent preference. The switch does not change the app.
+
+### Known issues
+
+- The bot list, project agent, memory, parallel tasks, project objectives, and remote viewing are not open.
+- Installing 0.0.18 again still opens existing conversations. Conversation text is not rewritten. Settings are backed up before the schema version and project ids are written.
+
 ## [0.0.18] - 2026-09-26
 
 ### Notes

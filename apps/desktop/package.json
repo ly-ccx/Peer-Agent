@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/desktop",
-  "version": "0.0.18",
+  "version": "0.1.0-beta.1",
   "description": "Peer Agent Desktop - local-first Task Flow Agent",
   "author": "Peer Agent Team <dev@peer-agent.local>",
   "homepage": "https://github.com/ly-ccx/Peer-Agent",
