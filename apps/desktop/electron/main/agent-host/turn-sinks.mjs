@@ -42,6 +42,31 @@ export function createCollectingSink() {
  * @param {((event: { channel: string, payload: unknown }) => void) | null} [onEvent]
  * @returns {TurnSink}
  */
+/**
+ * Sends each event to every window that is still alive. No windows means the
+ * event is dropped; the turn record remains the source of truth.
+ * @param {{ getWindows?: () => unknown[] }} [options]
+ * @returns {TurnSink}
+ */
+export function createBroadcastSink({ getWindows } = {}) {
+  return {
+    isDestroyed: () => false,
+    send(channel, payload) {
+      const windows = typeof getWindows === 'function' ? getWindows() : [];
+      if (!Array.isArray(windows)) return;
+      for (const window of windows) {
+        if (!window || window.isDestroyed?.()) continue;
+        const target = window.webContents && typeof window.webContents.send === 'function'
+          ? window.webContents
+          : window;
+        if (target.isDestroyed?.()) continue;
+        if (typeof target.send !== 'function') continue;
+        target.send(channel, payload);
+      }
+    },
+  };
+}
+
 export function createCallbackSink(onEvent = null) {
   return {
     isDestroyed: () => false,

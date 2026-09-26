@@ -2130,6 +2130,45 @@ describe('llm chat service tool materialization', () => {
     assert.equal(service.hasUnsupportedToolClaim('[Tool call: read_file {"path":"/tmp/a.txt"}]'), true);
   });
 
+  it('records turnProfile.role on the active stream projection', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const snapshots = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hi' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast: (channel, payload) => {
+          if (channel === 'chat:stream:active-changed') snapshots.push(payload.streams);
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-role',
+        conversationId: 'c-role',
+        webContents: { send: () => {} },
+        turnProfile: { role: 'goal_runner', workspaceId: 'ignored-this-card' },
+      });
+      assert.equal(snapshots[0]?.[0]?.role, 'goal_runner');
+      assert.equal(snapshots[0][0].conversationId, 'c-role');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it('broadcasts active conversation ids while streaming and clears them after done', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
@@ -2229,6 +2268,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
         streamId: 's1',
+        role: null,
         workspacePath: '/ws/alpha',
         originWorkspacePath: '/ws/alpha',
       });
@@ -2299,6 +2339,7 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c-goal',
         streamId: 's-goal',
+        role: null,
         workspacePath: originWs,
         originWorkspacePath: originWs,
       });

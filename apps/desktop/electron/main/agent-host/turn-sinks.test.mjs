@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createCallbackSink, createCollectingSink } from './turn-sinks.mjs';
+import { createBroadcastSink, createCallbackSink, createCollectingSink } from './turn-sinks.mjs';
 
 test('collecting sink accumulates delta text and ignores non-string deltas', () => {
   const sink = createCollectingSink();
@@ -43,6 +43,28 @@ test('callback sink forwards events and is never destroyed', () => {
   sink.send('chat:stream:delta', { content: 'x' });
   assert.deepEqual(seen, [{ channel: 'chat:stream:delta', payload: { content: 'x' } }]);
   assert.equal(sink.isDestroyed(), false);
+});
+
+function fakeWindow(sent, { destroyed = false } = {}) {
+  return {
+    isDestroyed: () => destroyed,
+    webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
+  };
+}
+
+test('broadcast sink delivers to every live window and drops when none exist', () => {
+  const empty = createBroadcastSink({ getWindows: () => [] });
+  assert.doesNotThrow(() => empty.send('chat:stream:delta', { content: 'x' }));
+  assert.equal(empty.isDestroyed(), false);
+
+  const first = [];
+  const second = [];
+  const sink = createBroadcastSink({
+    getWindows: () => [fakeWindow(first), fakeWindow(second, { destroyed: true }), null],
+  });
+  sink.send('chat:stream:delta', { content: 'hi' });
+  assert.deepEqual(first, [{ channel: 'chat:stream:delta', payload: { content: 'hi' } }]);
+  assert.deepEqual(second, []);
 });
 
 test('callback sink tolerates a missing listener', () => {
