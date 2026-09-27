@@ -3,6 +3,7 @@ import { projectConversationHistory } from '@peer-agent/runtime-core';
 import {
   buildGoalRunnerTickMessage,
   createGoalRunner,
+  delegatedPlanRunsWithLease,
   describeVisualRepair,
 } from '@peer-agent/runtime-node';
 import { preparePlanExecutionWorkspace } from '../goal-preferred-worktree.mjs';
@@ -294,6 +295,7 @@ export function createDesktopGoalRunnerHost({
   desktopContinuityContextFromProjection,
   workspaceRoot,
   getMainWindows,
+  hostLeases = null,
 } = {}) {
   function routeRole(role, plan) {
     const workerModelProviderId = resolveConversationModelProviderId({
@@ -351,8 +353,18 @@ export function createDesktopGoalRunnerHost({
     });
   }
 
+  function canRunPlan(plan) {
+    const allowed = delegatedPlanRunsWithLease(
+      plan,
+      (workspaceId) => hostLeases?.holds?.(workspaceId) === true,
+    );
+    if (allowed !== null) return allowed;
+    return true;
+  }
+
   const goalRunnerOptions = {
     goalPlanStore,
+    canRunPlan,
     uiDeliveryAuthority: desktopPreviewProvider?.authority ?? null,
     prepareIsolation: async (plan) => {
       if (!plan) return plan;
