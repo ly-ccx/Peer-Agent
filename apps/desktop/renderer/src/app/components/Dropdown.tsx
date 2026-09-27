@@ -26,6 +26,19 @@ export interface DropdownFooterAction {
   readonly disabled?: boolean | ((query: string) => boolean);
 }
 
+function moveEnabledIndex(
+  options: readonly { readonly disabled?: boolean }[],
+  from: number,
+  delta: 1 | -1,
+): number {
+  let index = from;
+  while (index + delta >= 0 && index + delta < options.length) {
+    index += delta;
+    if (!options[index]?.disabled) return index;
+  }
+  return from;
+}
+
 interface MenuCoords {
   readonly left: number;
   readonly top: number;
@@ -152,8 +165,9 @@ export function Dropdown({
       setActiveTab('');
       return;
     }
-    const idx = visibleOptions.findIndex((o) => o.value === value);
-    setActiveIndex(idx >= 0 ? idx : (visibleOptions.length > 0 ? 0 : -1));
+    const idx = visibleOptions.findIndex((o) => o.value === value && !o.disabled);
+    const firstEnabled = visibleOptions.findIndex((o) => !o.disabled);
+    setActiveIndex(idx >= 0 ? idx : firstEnabled);
   }, [open, value, visibleOptions]);
 
   useLayoutEffect(() => {
@@ -192,7 +206,8 @@ export function Dropdown({
   const commit = useCallback(
     (index: number) => {
       const opt = visibleOptions[index];
-      if (opt) onChange(opt.value);
+      if (!opt || opt.disabled) return;
+      onChange(opt.value);
       setOpen(false);
     },
     [visibleOptions, onChange],
@@ -214,11 +229,11 @@ export function Dropdown({
         break;
       case 'ArrowDown':
         event.preventDefault();
-        setActiveIndex((i) => Math.min(Math.max(i, -1) + 1, visibleOptions.length - 1));
+        setActiveIndex((i) => moveEnabledIndex(visibleOptions, i, 1));
         break;
       case 'ArrowUp':
         event.preventDefault();
-        setActiveIndex((i) => Math.max(i - 1, 0));
+        setActiveIndex((i) => moveEnabledIndex(visibleOptions, i, -1));
         break;
       case 'Enter':
         event.preventDefault();
@@ -281,8 +296,12 @@ export function Dropdown({
           type="button"
           role="option"
           aria-selected={opt.value === value}
-          className={`pa-dropdown-item ${index === activeIndex ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''}`}
-          onMouseEnter={() => setActiveIndex(index)}
+          aria-disabled={opt.disabled || undefined}
+          disabled={opt.disabled === true}
+          className={`pa-dropdown-item ${index === activeIndex && !opt.disabled ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''} ${opt.disabled ? 'is-disabled' : ''}`}
+          onMouseEnter={() => {
+            if (!opt.disabled) setActiveIndex(index);
+          }}
           onMouseDown={(event) => {
             event.preventDefault();
             commit(index);
