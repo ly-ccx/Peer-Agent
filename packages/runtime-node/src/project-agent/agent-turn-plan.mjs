@@ -17,15 +17,18 @@ export function planAgentTurn({
   modelProviderId = null,
   context = null,
   roster = null,
+  workspaceId = null,
 } = {}) {
   const wake = kind !== 'user';
   const inputs = wake ? [] : (Array.isArray(userInputs) ? userInputs.filter(Boolean) : []);
   const facts = Array.isArray(events) ? events.filter(Boolean) : [];
+  const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   return {
     kind: wake ? 'wake' : 'user',
     mode: 'project_agent',
     turnProfile: {
       role: 'project_agent',
+      ...(workspace ? { workspaceId: workspace } : {}),
       context: context ?? null,
     },
     modelProviderId: modelProviderId ?? null,

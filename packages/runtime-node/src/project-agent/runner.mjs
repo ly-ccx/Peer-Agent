@@ -30,6 +30,7 @@ export function createProjectAgentRunner({
   retryDelays = SAME_PROVIDER_RETRY_DELAYS_MS,
   onStatus = null,
   onDigest = null,
+  onDigestDelivered = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -161,6 +162,9 @@ export function createProjectAgentRunner({
     try {
       if (job.kind === 'digest') {
         if (job.message) remember(job.message);
+        if (job.message && typeof onDigestDelivered === 'function') {
+          try { onDigestDelivered(job.message); } catch { /* 正文已写入；确认失败时下次还能再送 */ }
+        }
         return 'ok';
       }
       if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
@@ -214,6 +218,7 @@ export function createProjectAgentRunner({
       modelProviderId: model.modelProviderId,
       context: readSlot(resolveContext, job.kind),
       roster: readSlot(resolveRoster, job.kind),
+      workspaceId: workspace,
     });
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason };
@@ -369,10 +374,14 @@ export function createProjectAgentRunner({
 
   function enqueueTimer(timer) {
     if (disposed) return { skipped: 'disposed' };
-    timers.push({
+    const next = {
       ...(timer && typeof timer === 'object' ? timer : {}),
       enqueuedAt: stamp(),
-    });
+    };
+    if (typeof next.id === 'string' && next.id && timers.some((item) => item?.id === next.id)) {
+      return { queued: false, duplicate: true };
+    }
+    timers.push(next);
     return { queued: true };
   }
 

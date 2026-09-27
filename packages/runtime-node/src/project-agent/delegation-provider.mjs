@@ -231,7 +231,15 @@ export function createDelegationProvider({
     if (name === 'get_verification_detail') return readVerification(input);
     if (name === 'verify_session') return verifySession(input);
     if (name === 'set_proactivity') return setProactivity(input, view);
-    return accepted(await callPort(replyComposer?.postReply, input, 'composer_unavailable'), 'composer_unavailable');
+    if (name === 'post_reply') {
+      const post = replyComposer?.postReply;
+      return accepted(await callPort(
+        typeof post === 'function' ? (payload) => post(payload, view) : null,
+        input,
+        'composer_unavailable',
+      ), 'composer_unavailable');
+    }
+    return accepted(await callPort(null, input, 'composer_unavailable'), 'composer_unavailable');
   }
 
   function verificationAvailable() {

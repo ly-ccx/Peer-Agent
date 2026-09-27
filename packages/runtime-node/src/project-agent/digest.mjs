@@ -127,11 +127,12 @@ export function createDigestQueue({ file = null } = {}) {
     const settingsTime = clock(digestTime) || '09:00';
     const moment = digestMoment(at, settingsTime, state.fired[id]);
     if (!moment) return { fire: false, reason: 'not_due' };
-    state.fired[id] = moment.date;
-    const items = Array.isArray(state.items[id]) ? state.items[id] : [];
-    state.items[id] = [];
-    persist();
-    if (items.length === 0) return { fire: false, reason: 'empty', date: moment.date };
+    const items = Array.isArray(state.items[id]) ? state.items[id].slice() : [];
+    if (items.length === 0) {
+      state.fired[id] = moment.date;
+      persist();
+      return { fire: false, reason: 'empty', date: moment.date };
+    }
     const separatorLabel = digestSeparator(settingsTime);
     const message = {
       id: `digest:${id}:${moment.date}`,
@@ -140,7 +141,7 @@ export function createDigestQueue({ file = null } = {}) {
       proactive: true,
       separatorLabel,
       content: items.map((item) => item.text).join('\n'),
-      meta: { surfacing: 'digest' },
+      meta: { surfacing: 'digest', digestDate: moment.date },
     };
     return {
       fire: true,
@@ -157,9 +158,19 @@ export function createDigestQueue({ file = null } = {}) {
     };
   }
 
+  function acknowledge(workspaceId, date) {
+    const id = typeof workspaceId === 'string' ? workspaceId.trim() : '';
+    if (!id || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+    state.fired[id] = date;
+    state.items[id] = [];
+    persist();
+    return true;
+  }
+
   return {
     hold,
     consider,
+    acknowledge,
     pending: (workspaceId) => (Array.isArray(state.items[workspaceId]) ? state.items[workspaceId].length : 0),
   };
 }

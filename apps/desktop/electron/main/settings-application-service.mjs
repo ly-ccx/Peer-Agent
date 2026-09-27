@@ -23,11 +23,15 @@ function projectAgentPartial(before, partial) {
     : current.quietHours;
   return {
     ...partial,
-    projectAgent: normalizeProjectAgentSettings({
+    projectAgent: {
       ...current,
       ...partial.projectAgent,
-      ...(quietHours ? { quietHours } : {}),
-    }),
+      ...normalizeProjectAgentSettings({
+        ...current,
+        ...partial.projectAgent,
+        ...(quietHours ? { quietHours } : {}),
+      }),
+    },
   };
 }
 

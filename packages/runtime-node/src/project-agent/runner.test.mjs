@@ -545,6 +545,36 @@ test('没有租约时不跑回合，没有模型时停在错误等 retry', async
   }
 });
 
+test('同一条今日小结只进一次邮箱，写入对话后才确认', async () => {
+  const box = world('ws-digest-ack');
+  const delivered = [];
+  try {
+    const runner = runnerFor(box, async () => ({ text: '不该跑模型' }), {
+      onDigestDelivered: (message) => delivered.push(message.meta.digestDate),
+    });
+    const timer = {
+      kind: 'digest_due',
+      wake: true,
+      id: 'digest:ws-digest-ack:2026-09-27',
+      message: {
+        id: 'digest:ws-digest-ack:2026-09-27',
+        role: 'assistant',
+        kind: 'agent_reply',
+        content: '一条',
+        meta: { surfacing: 'digest', digestDate: '2026-09-27' },
+      },
+    };
+    assert.equal(runner.enqueueTimer(timer).queued, true);
+    assert.equal(runner.enqueueTimer({ ...timer }).duplicate, true);
+    assert.equal(runner.mailbox().timers.length, 1);
+    await runner.kick();
+    assert.deepEqual(delivered, ['2026-09-27']);
+    assert.equal(box.messages[0].content, '一条');
+  } finally {
+    box.cleanup();
+  }
+});
+
 test('今日小结定时邮件唤醒后写入分隔消息，digest 回复改入暂存', async () => {
   const box = world('ws-digest');
   const held = [];

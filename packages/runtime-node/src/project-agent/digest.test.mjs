@@ -140,8 +140,14 @@ test('今日小结到点合并，空队列跳过，同一天不重复', () => {
     assert.equal(due.message.separatorLabel, digestSeparator('09:00'));
     assert.equal(due.message.separatorLabel, '今天 09:00 · 今日小结');
     assert.equal(due.message.content, '登录修好了\n文档补了一段');
+    assert.equal(due.message.meta.digestDate, '2026-09-27');
     assert.equal(due.timer.kind, 'digest_due');
     assert.equal(due.timer.wake, true);
+    assert.equal(queue.pending('ws-1'), 2);
+    assert.equal(queue.consider('ws-1', new Date(2026, 8, 27, 18, 0), '09:00').fire, true);
+    const crashed = createDigestQueue({ file: path.join(root, 'digest.json') });
+    assert.equal(crashed.pending('ws-1'), 2);
+    assert.equal(queue.acknowledge('ws-1', due.date), true);
     assert.equal(queue.pending('ws-1'), 0);
     assert.equal(queue.consider('ws-1', new Date(2026, 8, 27, 18, 0), '09:00').reason, 'not_due');
 

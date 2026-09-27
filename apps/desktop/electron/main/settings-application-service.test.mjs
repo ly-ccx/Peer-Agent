@@ -219,4 +219,13 @@ test('project agent settings keep the standard level and merge quiet hours', () 
   assert.deepEqual(second.projectAgent.quietHours, { enabled: true, start: '21:00', end: '08:00' });
   assert.equal(getSettings().projectAgent.digestTime, '18:30');
   assert.equal(service.update({ projectAgent: { proactivity: 'nope' } }).projectAgent.proactivity, 'standard');
+  const rooted = service.update({ projectAgent: { managedRoot: '/tmp/bots', proactivity: 'low' } });
+  assert.equal(rooted.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(rooted.projectAgent.proactivity, 'low');
+  assert.equal(rooted.projectAgent.digestTime, '18:30');
+  const kept = service.update({ projectAgent: { digestTime: '07:15' } });
+  assert.equal(kept.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(kept.projectAgent.proactivity, 'low');
+  assert.equal(kept.projectAgent.digestTime, '07:15');
+  assert.equal(kept.projectAgent.quietHours.enabled, true);
 });

@@ -247,6 +247,7 @@ function readSurfacing(value) {
       ...(event.deadlineImminent === true ? { deadlineImminent: true } : {}),
     },
     proactivity,
+    ...(typeof input.botLevel === 'string' ? { botLevel: input.botLevel } : {}),
     foreground,
     quietHours,
     needsYou,
