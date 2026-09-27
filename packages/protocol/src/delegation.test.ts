@@ -9,6 +9,7 @@ import {
   decideAcceptance,
   decideSurfacing,
   delegationEventId,
+  dispositionEventsFromToolCalls,
   projectMessageDispositions,
   projectWorkSession,
   type AcceptanceSessionFacts,
@@ -178,6 +179,63 @@ test('dispositions answer the last user message and keep quoted sessions in scop
       { kind: 'answered', messageId: 'u1', replyMessageIds: ['a3'] },
     ],
   );
+});
+
+test('dispositions are derived from tool calls and ignore a model-written disposition', () => {
+  const anchor = 'u-turn';
+  const onlyReply = dispositionEventsFromToolCalls(anchor, [
+    { name: 'post_reply', input: { text: '好', replyTo: [anchor], disposition: 'stopped' }, result: { ok: true } },
+  ]);
+  assert.deepEqual(onlyReply, []);
+  const answered = projectMessageDispositions(
+    [
+      { id: anchor, role: 'user' },
+      { id: 'a-turn', role: 'assistant', replyTo: [anchor] },
+    ],
+    onlyReply,
+  );
+  assert.deepEqual(answered, [{ kind: 'answered', messageId: anchor, replyMessageIds: ['a-turn'] }]);
+
+  const merged = dispositionEventsFromToolCalls(anchor, [
+    { name: 'message_session', input: { intent: 'amend', sessionId: 's-merge', disposition: 'queued' }, result: { ok: true, sessionId: 's-merge' } },
+  ]);
+  assert.deepEqual(merged, [{ kind: 'merge', anchorMessageId: anchor, sessionId: 's-merge' }]);
+
+  const stopped = dispositionEventsFromToolCalls(anchor, [
+    { name: 'cancel_session', input: { sessionId: 's-stop', reason: 'user said stop' }, result: { sessionId: 's-stop', status: 'cancelled' } },
+  ]);
+  assert.equal(projectMessageDispositions([{ id: anchor, role: 'user' }], stopped)[0]?.kind, 'stopped');
+
+  const replaced = dispositionEventsFromToolCalls(anchor, [
+    { name: 'spawn_session', input: { supersedes: 's-old', disposition: 'parallel' }, result: { sessionId: 's-new', status: 'running' } },
+  ]);
+  assert.deepEqual(projectMessageDispositions([{ id: anchor, role: 'user' }], replaced)[0], {
+    kind: 'superseded',
+    messageId: anchor,
+    oldSessionId: 's-old',
+    newSessionId: 's-new',
+    reason: '',
+  });
+
+  const parallel = dispositionEventsFromToolCalls(anchor, [
+    { name: 'spawn_session', input: { dependsOn: [] }, result: { ok: true, sessionId: 's-now', status: 'running' } },
+  ]);
+  assert.equal(projectMessageDispositions([{ id: anchor, role: 'user' }], parallel)[0]?.kind, 'parallel');
+
+  const queued = dispositionEventsFromToolCalls(anchor, [
+    { name: 'spawn_session', input: { dependsOn: ['s-now'] }, result: { sessionId: 's-later', status: 'queued' } },
+  ]);
+  assert.deepEqual(projectMessageDispositions([{ id: anchor, role: 'user' }], queued)[0], {
+    kind: 'queued',
+    messageId: anchor,
+    sessionId: 's-later',
+    dependsOn: ['s-now'],
+  });
+
+  const failed = dispositionEventsFromToolCalls(anchor, [
+    { name: 'cancel_session', input: { sessionId: 's-stop', reason: 'nope' }, result: { ok: false, error: 'session_not_found' } },
+  ]);
+  assert.deepEqual(failed, []);
 });
 
 test('delegation event ids ignore object key order', () => {

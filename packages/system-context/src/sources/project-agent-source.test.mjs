@@ -18,6 +18,8 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /post_reply/);
   assert.match(section.content, /Hand code changes and other workspace writes to a work session/);
   assert.match(section.content, /Do not restate raw tool output/);
+  assert.match(section.content, /message_session with intent amend/);
+  assert.match(section.content, /call cancel_session on that next turn/);
   assert.doesNotMatch(section.content, /mem-/);
 });
 

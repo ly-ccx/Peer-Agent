@@ -1,8 +1,18 @@
 /**
  * 机器人对话的纯投影。分页、乐观发送和时间分隔都不碰 IPC。
  * 输入队列落盘的用户消息可能没有 kind，按 user_input 显示。
- * agent_turn 的内部文本不进入列表。
+ * agent_turn 的内部文本不进入列表，但它的工具调用用来推导用户消息上的处置标记。
+ * 模型不能直接写处置。
  */
+import type { TranslationKey } from '@peer-agent/i18n';
+import {
+  dispositionEventsFromToolCalls,
+  projectMessageDispositions,
+  type DispositionEvent,
+  type DispositionMessage,
+  type DispositionToolCall,
+  type MessageDisposition,
+} from '@peer-agent/protocol';
 
 export const CONVERSATION_PAGE_SIZE = 50;
 export const CONVERSATION_GAP_MS = 10 * 60 * 1000;
@@ -38,6 +48,23 @@ export interface BotChatMeta {
   readonly separatorLabel?: string;
 }
 
+export interface BotToolCall {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>> | null;
+  readonly result: Readonly<Record<string, unknown>> | null;
+}
+
+export interface BotToolRound {
+  readonly text: string;
+  readonly toolCalls: readonly BotToolCall[];
+}
+
+export interface BotDispositionMark {
+  readonly kind: MessageDisposition['kind'];
+  readonly sessionIds: readonly string[];
+  readonly labelKey: TranslationKey;
+}
+
 export interface BotChatMessage {
   readonly id: string;
   readonly kind: string;
@@ -48,6 +75,8 @@ export interface BotChatMessage {
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
   readonly marks: readonly BotChatMark[];
+  readonly dispositions: readonly BotDispositionMark[];
+  readonly rounds: readonly BotToolRound[];
   readonly meta: BotChatMeta;
   readonly proactive: boolean;
   readonly cards: readonly BotChatCard[];
@@ -94,6 +123,8 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     replyTo,
     sources,
     marks: readMarks(raw.marks),
+    dispositions: [],
+    rounds: readRounds(raw.rounds),
     meta,
     proactive: raw.proactive === true || meta.surfacing === 'digest',
     cards: readCards(raw.cards),
@@ -152,6 +183,8 @@ export function applyOptimistic(
       replyTo: [],
       sources: [],
       marks: [],
+      dispositions: [],
+      rounds: [],
       meta: {},
       proactive: false,
       cards: [],
@@ -171,8 +204,101 @@ export function repliedUserIds(messages: readonly BotChatMessage[]): ReadonlySet
   return ids;
 }
 
+const DISPOSITION_LABEL_KEYS: Record<MessageDisposition['kind'], TranslationKey> = {
+  answered: 'projectAgent.chat.disposition.answered',
+  merged: 'projectAgent.chat.disposition.merged',
+  stopped: 'projectAgent.chat.disposition.stopped',
+  superseded: 'projectAgent.chat.disposition.superseded',
+  parallel: 'projectAgent.chat.disposition.parallel',
+  queued: 'projectAgent.chat.disposition.queued',
+  out_of_scope: 'projectAgent.chat.disposition.outOfScope',
+};
+
+function toolCallsOf(message: BotChatMessage): DispositionToolCall[] {
+  const calls: DispositionToolCall[] = [];
+  for (const round of message.rounds) {
+    for (const call of round.toolCalls) calls.push(call);
+  }
+  return calls;
+}
+
+function sessionIdsOf(item: MessageDisposition, replySources: ReadonlyMap<string, readonly string[]>): string[] {
+  switch (item.kind) {
+    case 'answered': {
+      const ids: string[] = [];
+      for (const replyId of item.replyMessageIds) {
+        for (const source of replySources.get(replyId) ?? []) {
+          if (!ids.includes(source)) ids.push(source);
+        }
+      }
+      return ids;
+    }
+    case 'merged':
+    case 'queued':
+    case 'out_of_scope':
+      return item.sessionId ? [item.sessionId] : [];
+    case 'stopped':
+      return [...item.sessionIds];
+    case 'superseded':
+      return item.newSessionId ? [item.newSessionId] : [];
+    case 'parallel':
+      return [...item.sessionIds];
+    default:
+      return [];
+  }
+}
+
+function sameMark(left: BotDispositionMark, right: BotDispositionMark): boolean {
+  return left.kind === right.kind && left.sessionIds.join('\0') === right.sessionIds.join('\0');
+}
+
+/**
+ * 把本回合工具调用投影成用户气泡上的处置。
+ * agent_turn 仍留在输入里，显示时再滤掉。
+ * 已经写在消息上的 disposition 字段不采用。
+ */
+export function applyDispositions(messages: readonly BotChatMessage[]): BotChatMessage[] {
+  const events: DispositionEvent[] = [];
+  const dispositionMessages: DispositionMessage[] = [];
+  const replySources = new Map<string, readonly string[]>();
+  let pendingUsers: string[] = [];
+  for (const message of messages) {
+    if (message.kind === 'user_input') {
+      pendingUsers.push(message.id);
+      dispositionMessages.push({ id: message.id, role: 'user', replyTo: message.replyTo });
+      continue;
+    }
+    if (message.kind === 'agent_turn') {
+      const calls = toolCallsOf(message);
+      for (const anchor of pendingUsers) events.push(...dispositionEventsFromToolCalls(anchor, calls));
+      pendingUsers = [];
+      continue;
+    }
+    if (message.kind === 'agent_reply') {
+      dispositionMessages.push({ id: message.id, role: 'assistant', replyTo: message.replyTo });
+      replySources.set(message.id, message.sources);
+    }
+  }
+  const byMessage = new Map<string, BotDispositionMark[]>();
+  for (const item of projectMessageDispositions(dispositionMessages, events)) {
+    const mark: BotDispositionMark = {
+      kind: item.kind,
+      sessionIds: sessionIdsOf(item, replySources),
+      labelKey: DISPOSITION_LABEL_KEYS[item.kind],
+    };
+    const list = byMessage.get(item.messageId) ?? [];
+    if (!list.some((existing) => sameMark(existing, mark))) list.push(mark);
+    byMessage.set(item.messageId, list);
+  }
+  return messages.map((message) => {
+    const dispositions = byMessage.get(message.id);
+    if (!dispositions || dispositions.length === 0) return message;
+    return { ...message, dispositions };
+  });
+}
+
 export function conversationRows(messages: readonly BotChatMessage[]): ConversationRow[] {
-  const visible = visibleBotMessages(messages);
+  const visible = visibleBotMessages(applyDispositions(messages));
   const rows: ConversationRow[] = [];
   for (let index = 0; index < visible.length; index += 1) {
     const message = visible[index]!;
@@ -318,6 +444,33 @@ function readActions(value: unknown): BotChatCardAction[] {
     });
   }
   return actions;
+}
+
+function readRounds(value: unknown): BotToolRound[] {
+  if (!Array.isArray(value)) return [];
+  const rounds: BotToolRound[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const toolCalls: BotToolCall[] = [];
+    if (Array.isArray(record.toolCalls)) {
+      for (const call of record.toolCalls) {
+        if (!call || typeof call !== 'object') continue;
+        const raw = call as Record<string, unknown>;
+        const name = readString(raw.name);
+        if (!name) continue;
+        const input = raw.input && typeof raw.input === 'object' && !Array.isArray(raw.input)
+          ? raw.input as Record<string, unknown>
+          : null;
+        const result = raw.result && typeof raw.result === 'object' && !Array.isArray(raw.result)
+          ? raw.result as Record<string, unknown>
+          : null;
+        toolCalls.push({ name, input, result });
+      }
+    }
+    rounds.push({ text: readString(record.text), toolCalls });
+  }
+  return rounds;
 }
 
 function readStringList(value: unknown): string[] {

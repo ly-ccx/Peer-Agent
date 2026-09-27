@@ -189,7 +189,7 @@ test('list, get, cancel, message, and post_reply return structured success and e
       },
       message(input) {
         if (input.sessionId !== 'sess-1') return null;
-        return { sessionId: input.sessionId, delivered: true };
+        return { sessionId: input.sessionId, delivered: true, intent: input.intent };
       },
     },
     replyComposer: {
@@ -253,7 +253,9 @@ test('list, get, cancel, message, and post_reply return structured success and e
     }, 'msg-2'),
     { ...context, toolCallOrdinal: 7 },
   ));
-  assert.equal(amend.error, 'unsupported_intent');
+  assert.equal(amend.delivered, true);
+  assert.equal(amend.intent, 'amend');
+  assert.equal(amend.error, undefined);
   const messageMissing = outputOf(await provider.executeCapability(
     call('local.delegation.message_session', {
       sessionId: 'missing',

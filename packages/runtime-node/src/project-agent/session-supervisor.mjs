@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs';
 
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
+import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
@@ -17,6 +18,11 @@ import { digestApprovalArgs } from './approval-store.mjs';
  * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
  * spawn(input, context)。调度 Provider 目前只把 input 传给端口，宿主接线不在本卡。
+ * message intent amend 写入「来自项目代理转达：用户说……」。
+ * 任务正在等用户时，这句话就是回答，并恢复执行。
+ * 任务仍在跑时，只写入子会话和一条 user_correction，下一回合开始时生效，不取消未完成任务。
+ * 聊天表面的纠正路由会收尾剩余工作，并入不能走那条取消。
+ * spawn 带 supersedes 时先停旧会话再开新会话。
  * settle 在任务完成后计算结论。只有代理回复已经引用该任务、策略允许、关闭闸门通过，才写入代签。
  */
 
@@ -309,8 +315,15 @@ export function createSessionSupervisor({
     if (!parentConversationId || !workspaceId || anchorMessageIds.length === 0 || !title || !brief) {
       return { error: 'invalid_input', message: 'spawn input is incomplete' };
     }
+    const supersedes = text(input?.supersedes);
     const key = spawnKey(parentConversationId, {
-      anchorMessageIds, title, brief, kind: input?.kind, readOnly: input?.readOnly, successCriteria: input?.successCriteria,
+      anchorMessageIds,
+      title,
+      brief,
+      kind: input?.kind,
+      readOnly: input?.readOnly,
+      successCriteria: input?.successCriteria,
+      ...(supersedes ? { supersedes } : {}),
     });
     const replay = findByKey(key);
     if (replay) {
@@ -331,6 +344,14 @@ export function createSessionSupervisor({
     const known = new Set(history.messages.map((message) => message?.id).filter(Boolean));
     if (anchorMessageIds.some((id) => !known.has(id))) {
       return { error: 'invalid_input', message: 'anchor message is missing' };
+    }
+    if (supersedes) {
+      const previous = findBySession(supersedes);
+      if (!previous) return { error: 'session_not_found', message: 'superseded session was not found' };
+      if (!TERMINAL.has(previous.status)) {
+        const cancelled = await cancelLocked({ sessionId: supersedes, reason: 'superseded by a new session' });
+        if (!cancelled) return { error: 'session_not_found', message: 'superseded session was not found' };
+      }
     }
 
     let child = null;
@@ -635,16 +656,62 @@ export function createSessionSupervisor({
     }
   }
 
-  function messageLocked(input) {
+  async function messageLocked(input) {
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    if (input?.intent !== 'amend') {
+      conversationStore.appendMessage(plan.conversationId, {
+        id: randomUUID(),
+        role: 'user',
+        content: body,
+      });
+      return project(goalPlanStore.getPlan(plan.planId) || plan);
+    }
+    const relay = `来自项目代理转达：用户说${body}`;
+    const waiting = canConsumeRequestedUserInput(plan);
     conversationStore.appendMessage(plan.conversationId, {
       id: randomUUID(),
       role: 'user',
-      content: body,
+      kind: 'user_input',
+      content: relay,
+      relayFrom: 'project_agent',
+      routeIntent: waiting ? 'answer' : 'correction',
     });
-    return project(goalPlanStore.getPlan(plan.planId) || plan);
+    if (waiting) {
+      if (typeof goalPlanStore.consumeRequestedUserInput === 'function') {
+        goalPlanStore.consumeRequestedUserInput(plan.planId, {
+          type: 'message_routed',
+          summary: relay,
+          payload: {
+            source: 'project_agent',
+            summaryCode: 'msg_follow_up',
+            intent: 'follow_up',
+            messageText: relay,
+            relayFrom: 'project_agent',
+          },
+        });
+      }
+      if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId);
+      const fresh = goalPlanStore.getPlan(plan.planId) || plan;
+      return { ...project(fresh), delivered: true, delivery: 'answer', relayFrom: 'project_agent' };
+    }
+    if (typeof goalPlanStore.appendRunEvent === 'function') {
+      goalPlanStore.appendRunEvent(plan.planId, {
+        type: 'user_correction',
+        summary: relay,
+        payload: {
+          source: 'project_agent',
+          summaryCode: 'msg_correction',
+          intent: 'correction',
+          messageText: relay,
+          relayFrom: 'project_agent',
+          effect: 'next_turn',
+        },
+      });
+    }
+    const fresh = goalPlanStore.getPlan(plan.planId) || plan;
+    return { ...project(fresh), delivered: true, delivery: 'next_turn', relayFrom: 'project_agent' };
   }
 
   function recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria }) {
