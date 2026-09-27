@@ -7,6 +7,7 @@ import { BotList } from './BotList';
 import { MeMenu } from './MeMenu';
 import { NewBotSheet } from './NewBotSheet';
 import { BotConversation } from './conversation/BotConversation';
+import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import {
   BOT_LIST_WIDTH_DEFAULT,
   BOT_LIST_WIDTH_MAX,
@@ -17,6 +18,14 @@ import {
   sumNeedsYou,
   validateManagedBotName,
 } from './state/botListState';
+import {
+  closeDrawer,
+  locateDrawerSession,
+  openDrawer,
+  readDrawerMemory,
+  writeDrawerMemory,
+  type DrawerMemory,
+} from './state/drawerState';
 import { useBotList } from './state/useBotList';
 import './styles/bot-list.css';
 
@@ -59,16 +68,45 @@ export function BotListShell({
 }: BotListShellProps) {
   const list = useBotList();
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const profileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerLoadedFor = useRef<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
+  const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   const needsYouCount = sumNeedsYou(list.catalog);
 
   useEffect(() => {
     setLocateSessionId(null);
+    drawerLoadedFor.current = null;
   }, [opened?.workspaceId]);
+
+  useEffect(() => {
+    const workspaceId = opened?.workspaceId;
+    if (!workspaceId) return;
+    setDrawerMemory(readDrawerMemory(workspaceId, {
+      get: (key) => localStorage.getItem(key),
+      set: (key, value) => localStorage.setItem(key, value),
+    }));
+    drawerLoadedFor.current = workspaceId;
+  }, [opened?.workspaceId]);
+
+  useEffect(() => {
+    const workspaceId = opened?.workspaceId;
+    if (!workspaceId || drawerLoadedFor.current !== workspaceId) return;
+    writeDrawerMemory(workspaceId, drawerMemory, {
+      get: (key) => localStorage.getItem(key),
+      set: (key, value) => localStorage.setItem(key, value),
+    });
+  }, [drawerMemory, opened?.workspaceId]);
+
+  useEffect(() => {
+    if (!locateSessionId) return;
+    setDrawerMemory((current) => locateDrawerSession(current, locateSessionId));
+    setLocateSessionId(null);
+  }, [locateSessionId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -260,11 +298,18 @@ export function BotListShell({
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
+                ref={profileButtonRef}
                 type="button"
                 className="bot-profile"
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
-                data-session-id={locateSessionId ?? undefined}
+                data-session-id={locateSessionId ?? drawerMemory.sessionId ?? undefined}
+                aria-expanded={drawerMemory.open}
+                onClick={() => {
+                  setDrawerMemory((current) => (
+                    current.open ? closeDrawer(current) : openDrawer(current, 'overview')
+                  ));
+                }}
               >
                 {i18n.t('projectAgent.list.profile')}
               </button>
@@ -282,6 +327,22 @@ export function BotListShell({
           </div>
         )}
       </section>
+      {opened && !pageOverride ? (
+        <BotProfileDrawer
+          workspaceId={opened.workspaceId}
+          profile={opened.profile}
+          memory={drawerMemory}
+          locateSessionId={locateSessionId}
+          triggerRef={profileButtonRef}
+          i18n={i18n}
+          isZh={isZh}
+          onMemory={setDrawerMemory}
+          onProfile={() => {}}
+          onDeleted={() => {
+            setDrawerMemory((current) => closeDrawer(current));
+          }}
+        />
+      ) : null}
       <NewBotSheet
         open={list.sheetOpen}
         busy={list.creating}

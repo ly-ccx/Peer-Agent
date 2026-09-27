@@ -125,6 +125,52 @@ export type TranslationKey =
   | 'projectAgent.chat.approve'
   | 'projectAgent.chat.reject'
   | 'projectAgent.chat.answer'
+  | 'projectAgent.drawer.title'
+  | 'projectAgent.drawer.close'
+  | 'projectAgent.drawer.back'
+  | 'projectAgent.drawer.missing'
+  | 'projectAgent.drawer.tab.overview'
+  | 'projectAgent.drawer.tab.tasks'
+  | 'projectAgent.drawer.tab.objectives'
+  | 'projectAgent.drawer.tab.memory'
+  | 'projectAgent.drawer.tab.settings'
+  | 'projectAgent.drawer.folder'
+  | 'projectAgent.drawer.noPath'
+  | 'projectAgent.drawer.reveal'
+  | 'projectAgent.drawer.brief'
+  | 'projectAgent.drawer.briefEmpty'
+  | 'projectAgent.drawer.running'
+  | 'projectAgent.drawer.runningEmpty'
+  | 'projectAgent.drawer.acceptance'
+  | 'projectAgent.drawer.acceptance.auto'
+  | 'projectAgent.drawer.acceptance.pending'
+  | 'projectAgent.drawer.model'
+  | 'projectAgent.drawer.modelEmpty'
+  | 'projectAgent.drawer.model.pending'
+  | 'projectAgent.drawer.tasksEmpty'
+  | 'projectAgent.drawer.group.needsYou'
+  | 'projectAgent.drawer.group.running'
+  | 'projectAgent.drawer.group.queued'
+  | 'projectAgent.drawer.group.done'
+  | 'projectAgent.drawer.anchor'
+  | 'projectAgent.drawer.frozenModel'
+  | 'projectAgent.drawer.conclusion'
+  | 'projectAgent.drawer.evidence'
+  | 'projectAgent.drawer.progress'
+  | 'projectAgent.drawer.openScene'
+  | 'projectAgent.drawer.scene'
+  | 'projectAgent.drawer.sceneMissing'
+  | 'projectAgent.drawer.objectives.body'
+  | 'projectAgent.drawer.memory.empty'
+  | 'projectAgent.drawer.memory.readonly'
+  | 'projectAgent.drawer.settings.name'
+  | 'projectAgent.drawer.settings.save'
+  | 'projectAgent.drawer.settings.avatar'
+  | 'projectAgent.drawer.settings.avatarNew'
+  | 'projectAgent.drawer.settings.avatarUpload'
+  | 'projectAgent.drawer.settings.delete'
+  | 'projectAgent.drawer.settings.deleteManaged'
+  | 'projectAgent.drawer.settings.deleteConfirm'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -1044,6 +1090,52 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approve': '批准',
     'projectAgent.chat.reject': '拒绝',
     'projectAgent.chat.answer': '回答',
+    'projectAgent.drawer.title': '档案',
+    'projectAgent.drawer.close': '关闭',
+    'projectAgent.drawer.back': '返回任务',
+    'projectAgent.drawer.missing': '还没有',
+    'projectAgent.drawer.tab.overview': '概况',
+    'projectAgent.drawer.tab.tasks': '任务',
+    'projectAgent.drawer.tab.objectives': '目标',
+    'projectAgent.drawer.tab.memory': '记忆',
+    'projectAgent.drawer.tab.settings': '设置',
+    'projectAgent.drawer.folder': '绑定文件夹',
+    'projectAgent.drawer.noPath': '还没有文件夹',
+    'projectAgent.drawer.reveal': '在访达中显示',
+    'projectAgent.drawer.brief': '项目简报',
+    'projectAgent.drawer.briefEmpty': '还没有项目简报',
+    'projectAgent.drawer.running': '在推进的任务',
+    'projectAgent.drawer.runningEmpty': '现在没有在推进的任务',
+    'projectAgent.drawer.acceptance': '签收策略',
+    'projectAgent.drawer.acceptance.auto': '自动',
+    'projectAgent.drawer.acceptance.pending': '签收策略还没有单独的保存接口，当前按自动处理。',
+    'projectAgent.drawer.model': '对话模型',
+    'projectAgent.drawer.modelEmpty': '跟随全局分工',
+    'projectAgent.drawer.model.pending': '项目级模型范围还没有单独的保存接口，这里显示全局对话模型。',
+    'projectAgent.drawer.tasksEmpty': '还没有任务',
+    'projectAgent.drawer.group.needsYou': '需要你',
+    'projectAgent.drawer.group.running': '进行中',
+    'projectAgent.drawer.group.queued': '排队',
+    'projectAgent.drawer.group.done': '已完成',
+    'projectAgent.drawer.anchor': '锚点',
+    'projectAgent.drawer.frozenModel': '冻结的模型',
+    'projectAgent.drawer.conclusion': '结论',
+    'projectAgent.drawer.evidence': '证据',
+    'projectAgent.drawer.progress': '最近进展',
+    'projectAgent.drawer.openScene': '打开现场',
+    'projectAgent.drawer.scene': '任务现场',
+    'projectAgent.drawer.sceneMissing': '现场还没有会话',
+    'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
+    'projectAgent.drawer.memory.empty': '还没有记忆',
+    'projectAgent.drawer.memory.readonly': '这一阶段只能查看记忆',
+    'projectAgent.drawer.settings.name': '名字',
+    'projectAgent.drawer.settings.save': '保存',
+    'projectAgent.drawer.settings.avatar': '头像',
+    'projectAgent.drawer.settings.avatarNew': '换一个',
+    'projectAgent.drawer.settings.avatarUpload': '上传',
+    'projectAgent.drawer.settings.delete': '删除机器人',
+    'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
+    'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1775,6 +1867,52 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approve': 'Approve',
     'projectAgent.chat.reject': 'Reject',
     'projectAgent.chat.answer': 'Answer',
+    'projectAgent.drawer.title': 'Profile',
+    'projectAgent.drawer.close': 'Close',
+    'projectAgent.drawer.back': 'Back to tasks',
+    'projectAgent.drawer.missing': 'None yet',
+    'projectAgent.drawer.tab.overview': 'Overview',
+    'projectAgent.drawer.tab.tasks': 'Tasks',
+    'projectAgent.drawer.tab.objectives': 'Objectives',
+    'projectAgent.drawer.tab.memory': 'Memory',
+    'projectAgent.drawer.tab.settings': 'Settings',
+    'projectAgent.drawer.folder': 'Bound folder',
+    'projectAgent.drawer.noPath': 'No folder yet',
+    'projectAgent.drawer.reveal': 'Show in Finder',
+    'projectAgent.drawer.brief': 'Project brief',
+    'projectAgent.drawer.briefEmpty': 'No project brief yet',
+    'projectAgent.drawer.running': 'Tasks in progress',
+    'projectAgent.drawer.runningEmpty': 'Nothing is in progress',
+    'projectAgent.drawer.acceptance': 'Sign-off',
+    'projectAgent.drawer.acceptance.auto': 'Automatic',
+    'projectAgent.drawer.acceptance.pending': 'Sign-off does not have its own save path yet. It stays automatic.',
+    'projectAgent.drawer.model': 'Conversation model',
+    'projectAgent.drawer.modelEmpty': 'Follow the global routing',
+    'projectAgent.drawer.model.pending': 'A per-project model scope does not have its own save path yet. This shows the global conversation model.',
+    'projectAgent.drawer.tasksEmpty': 'No tasks yet',
+    'projectAgent.drawer.group.needsYou': 'Needs you',
+    'projectAgent.drawer.group.running': 'In progress',
+    'projectAgent.drawer.group.queued': 'Queued',
+    'projectAgent.drawer.group.done': 'Done',
+    'projectAgent.drawer.anchor': 'Anchor',
+    'projectAgent.drawer.frozenModel': 'Frozen model',
+    'projectAgent.drawer.conclusion': 'Conclusion',
+    'projectAgent.drawer.evidence': 'Evidence',
+    'projectAgent.drawer.progress': 'Latest progress',
+    'projectAgent.drawer.openScene': 'Open the scene',
+    'projectAgent.drawer.scene': 'Task scene',
+    'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
+    'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
+    'projectAgent.drawer.memory.empty': 'No memories yet',
+    'projectAgent.drawer.memory.readonly': 'Memories are view-only for now',
+    'projectAgent.drawer.settings.name': 'Name',
+    'projectAgent.drawer.settings.save': 'Save',
+    'projectAgent.drawer.settings.avatar': 'Avatar',
+    'projectAgent.drawer.settings.avatarNew': 'Another one',
+    'projectAgent.drawer.settings.avatarUpload': 'Upload',
+    'projectAgent.drawer.settings.delete': 'Delete bot',
+    'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
+    'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

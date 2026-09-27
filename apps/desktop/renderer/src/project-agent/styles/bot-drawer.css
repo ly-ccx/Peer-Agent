@@ -1,0 +1,137 @@
+.bot-drawer-dock,
+.bot-drawer-panel {
+  --pa-drawer-width: 380px;
+}
+
+.bot-drawer-dock {
+  display: flex;
+  flex: 0 0 380px;
+  flex-direction: column;
+  width: 380px;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet, var(--za-surface-0));
+}
+
+.bot-drawer-panel {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: 92vw;
+  height: 100%;
+  background: var(--paper-sheet, var(--za-surface-0));
+}
+
+.bot-drawer-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px;
+  gap: 12px;
+  overflow: auto;
+}
+
+.bot-drawer-head,
+.bot-drawer-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bot-drawer-head p,
+.bot-drawer-tab h2,
+.bot-drawer-detail h2 {
+  margin: 0;
+  color: var(--graphite-base, var(--za-text));
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.bot-drawer-tabs {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.bot-drawer-tabs button,
+.bot-drawer-tab button,
+.bot-drawer-detail button,
+.bot-drawer-head button {
+  border: 1px solid var(--chrome-hairline, var(--separator));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--graphite-base, var(--za-text));
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.bot-drawer-tabs button[aria-selected='true'],
+.bot-drawer-tab button.is-selected {
+  border-color: var(--graphite-base, var(--za-text));
+}
+
+.bot-drawer-tab,
+.bot-drawer-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bot-drawer-tab section,
+.bot-drawer-detail dl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.bot-drawer-tab p,
+.bot-drawer-detail dd,
+.bot-drawer-note,
+.bot-drawer-tab li p {
+  margin: 0;
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bot-drawer-tab ul,
+.bot-drawer-detail dl {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bot-drawer-tab li button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.bot-drawer-detail dt {
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 12px;
+}
+
+.bot-drawer-tab input {
+  width: 100%;
+  border: 1px solid var(--chrome-hairline, var(--separator));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px 8px;
+}
+
+.bot-drawer-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

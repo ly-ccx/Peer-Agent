@@ -71,6 +71,11 @@ function agrees(snapshot: GoalPlanProjectionSnapshot, conversation: WorkSessionC
   return session;
 }
 
+test('work session keeps the child conversation id for the scene drawer', () => {
+  const session = projectWorkSession(plan({}), meta({ conversationId: 'child-conv' }));
+  assert.equal(session.conversationId, 'child-conv');
+});
+
 test('work session conclusion matches the goal-plan projection', () => {
   const awaiting = agrees(plan({ status: 'awaiting_approval' }));
   assert.equal(awaiting.status, 'waiting_user');
