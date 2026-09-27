@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { clientApi } from '../clientApi';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { BotAvatar } from './BotAvatar';
@@ -43,6 +44,11 @@ export interface BotListShellProps {
   readonly onOpenConversation: (conversationId: number) => void;
   readonly onCreateAutomation: () => void;
   readonly onClosePage: () => void;
+  readonly notificationFocus?: {
+    readonly workspaceId: string;
+    readonly messageId: string | null;
+    readonly requestId: number;
+  } | null;
 }
 
 function typingTarget(target: EventTarget | null): boolean {
@@ -65,6 +71,7 @@ export function BotListShell({
   onOpenConversation,
   onCreateAutomation,
   onClosePage,
+  notificationFocus = null,
 }: BotListShellProps) {
   const list = useBotList();
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -101,6 +108,21 @@ export function BotListShell({
       set: (key, value) => localStorage.setItem(key, value),
     });
   }, [drawerMemory, opened?.workspaceId]);
+
+  useEffect(() => {
+    if (!notificationFocus?.workspaceId) return;
+    list.openBot(notificationFocus.workspaceId);
+  }, [list.openBot, notificationFocus]);
+
+  const lookingAtBot = Boolean(opened?.workspaceId) && !pageOverride && activePage !== 'settings';
+  useEffect(() => {
+    const workspaceId = lookingAtBot ? opened?.workspaceId : '';
+    if (!workspaceId) {
+      void clientApi.projectAgentMarkRead({ workspaceId: opened?.workspaceId || '_', viewing: false }).catch(() => {});
+      return;
+    }
+    void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
+  }, [lookingAtBot, opened?.workspaceId]);
 
   useEffect(() => {
     if (!locateSessionId) return;
@@ -318,6 +340,8 @@ export function BotListShell({
               workspaceId={opened.workspaceId}
               i18n={i18n}
               onLocateSession={setLocateSessionId}
+              focusMessageId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.messageId : null}
+              focusRequestId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.requestId : 0}
             />
           </div>
         ) : (

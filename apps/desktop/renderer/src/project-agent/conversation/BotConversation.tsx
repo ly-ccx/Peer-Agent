@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { quoteRefsFor } from '../state/botConversationState';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotComposer } from './BotComposer';
@@ -10,13 +10,20 @@ export function BotConversation({
   workspaceId,
   i18n,
   onLocateSession,
+  focusMessageId = null,
+  focusRequestId = 0,
 }: {
   readonly workspaceId: string;
   readonly i18n: I18nRuntime;
   readonly onLocateSession: (sessionId: string) => void;
+  readonly focusMessageId?: string | null;
+  readonly focusRequestId?: number;
 }) {
   const conversation = useBotConversation(workspaceId);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusMessageId) setHighlightedId(focusMessageId);
+  }, [focusMessageId, focusRequestId]);
   const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
 
   return (

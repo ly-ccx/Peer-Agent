@@ -289,6 +289,12 @@ function MainApp() {
     requestId: number;
   } | null>(null);
   const notificationMessageRequestRef = useRef(0);
+  const [botNotificationFocus, setBotNotificationFocus] = useState<{
+    workspaceId: string;
+    messageId: string | null;
+    requestId: number;
+  } | null>(null);
+  const botNotificationRequestRef = useRef(0);
   const focusTaskRelatedMessage = useCallback((item: TaskOverviewItem) => {
     if (!item.conversationId) return;
     const conversationId = String(item.conversationId);
@@ -457,7 +463,20 @@ function MainApp() {
   }), [activeWorkspace, conversationView, refreshConversations]);
 
   useEffect(() => {
-    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId }) => {
+    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId, source, workspaceId }) => {
+      if (source === 'project-agent-notification') {
+        if (workspaceId) {
+          botNotificationRequestRef.current += 1;
+          setBotNotificationFocus({
+            workspaceId,
+            messageId: messageId ?? null,
+            requestId: botNotificationRequestRef.current,
+          });
+          setCollectionDrawer(null);
+          setActivePage('chat');
+        }
+        return;
+      }
       void (async () => {
         await navigateToQuickChatConversation(
           { conversationId, workspacePath },
@@ -973,6 +992,7 @@ function MainApp() {
                     setCollectionDrawer(null);
                     setActivePage('chat');
                   }}
+                  notificationFocus={botNotificationFocus}
                 />
               ) : (
               <div className="app-layout">

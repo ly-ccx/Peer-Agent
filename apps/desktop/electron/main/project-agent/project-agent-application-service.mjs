@@ -28,6 +28,7 @@ export function createProjectAgentApplicationService({
   createManaged = null,
   chooseAvatar = null,
   wake = null,
+  onViewing = null,
   broadcast = () => {},
   schedule = defaultSchedule,
   now = () => new Date().toISOString(),
@@ -229,8 +230,15 @@ export function createProjectAgentApplicationService({
 
   function markRead(payload = {}) {
     if (!open()) return disabled();
+    if (payload?.viewing === false) {
+      if (typeof onViewing === 'function') onViewing(null);
+      return { ok: true, viewing: false };
+    }
     const marked = directory.markRead(payload.workspaceId);
-    if (marked?.ok) queueChanged(payload.workspaceId);
+    if (marked?.ok) {
+      queueChanged(payload.workspaceId);
+      if (typeof onViewing === 'function') onViewing(payload.workspaceId);
+    }
     return marked;
   }
 
