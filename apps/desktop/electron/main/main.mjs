@@ -112,7 +112,7 @@ import {
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-  applyStartupApprovalRecovery, createApprovalStore,
+  applyStartupApprovalRecovery, createApprovalStore, createHostLease, listBotWorkspaceIds,
 } from '@peer-agent/runtime-node';
 import {
   createContextAccountingCompactionPipeline,
@@ -951,11 +951,7 @@ desktopPreviewProvider = !isPackaged && !isManagedPreview
   })
   : null;
 if (desktopPreviewProvider) registerDesktopPreviewService(goalPlanStore, workspaceRoot, desktopPreviewProvider);
-// 验收报告写入器：completed 迁移时把证据索引与视觉判定汇总成 markdown
-// 落盘 ~/.peer-agent/goal-reports/<planId>.md（见 goal-acceptance-report-writer.mjs）。
 goalAcceptanceReportWriter = createGoalAcceptanceReportWriter({ goalPlanStore });
-// 网页侧复用同一套账本、产物仓与宿主复核调度器：只有显式声明计划归属的截图才会走它。
-// 复用（而不是新建调度器）保证每个计划仍只有一条在飞复核。
 const webUiCapture = createWebUiCapture({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
@@ -964,6 +960,10 @@ const webUiCapture = createWebUiCapture({
   workspaceRoot,
 });
 const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
+const hostLeases = createHostLease({
+  surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
+  projectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true, botWorkspaceIds: listBotWorkspaceIds,
+});
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
@@ -987,6 +987,7 @@ goalRunner = createDesktopGoalRunnerHost({
   desktopContinuityContextFromProjection,
   workspaceRoot,
   getMainWindows: () => BrowserWindow.getAllWindows().filter((window) => window.__peerAgentMainWindow === true),
+  hostLeases,
 }).goalRunner;
 
 function buildRuntimeProjection() {
@@ -3447,9 +3448,7 @@ function startLocalRuntime() {
     onRuntimeEvent: forwardRuntimeEvent,
   });
   flushPendingRuntimeEvents();
-  // 远程只读接入（ADR 75 M1）。连接的唯一所有者是 remoteAccessController：
-  // 设置页、用户开关、常驻服务都经由它，避免多处以不同理由启停同一个连接。
-  // 环境变量只在首次引导时作为种子写入设置（不直接启动连接），随后一切以设置页为准。
+  // 远程只读接入（ADR 75）。连接只由 remoteAccessController 按设置启停；环境变量只在首次写入设置。
   try {
     const current = settingsStore.getAll()?.remoteAccess;
     const seeded = current && typeof current === 'object' && typeof current.gatewayOrigin === 'string'
@@ -3491,6 +3490,7 @@ function startLocalRuntime() {
     name: 'local-tool-host-events',
     dispose: async () => {
       try {
+        hostLeases.close();
         await remoteAccess?.stop().catch(() => {});
         remoteAccess = null;
         await Promise.all([

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { resolveRoleRoute } from '@peer-agent/runtime-node';
+import { createHostLease, resolveRoleRoute } from '@peer-agent/runtime-node';
 import { createScriptedTurnExecutor } from '@peer-agent/runtime-node/testing';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createDesktopGoalRunnerHost } from './goal-runner-host.mjs';
@@ -480,6 +480,101 @@ test('explorer throws the router miss instead of calling the model', async () =>
     );
     assert.equal(seen.length, 0);
   } finally {
+    if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ordinary plans still run, and task plans run only while this desktop holds the lease', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'goal-runner-host-lease-'));
+  const previousHome = process.env.PEER_AGENT_HOME;
+  process.env.PEER_AGENT_HOME = path.join(root, '.peer-agent');
+  const leases = createHostLease({
+    rootDir: path.join(root, 'leases'),
+    hostId: 'desktop-test',
+    surface: 'desktop',
+    pid: 404,
+    appVersion: 'test',
+    schedule: () => ({ unref() {} }),
+    cancel() {},
+  });
+  try {
+    const goalPlanStore = createGoalPlanStore();
+    const selection = {
+      providerId: 'local', modelId: 'worker-1', modelProviderId: 'worker-1', family: 'alpha',
+    };
+    const ordinary = goalPlanStore.createPlan({
+      conversationId: 'conv-ordinary',
+      title: 'Ordinary',
+      goal: 'Ordinary plans ignore the host lease',
+      successCriteria: ['The ordinary plan reaches the turn'],
+      tasks: [{ taskId: 't1', order: 0, title: 'Task', status: 'pending', evidenceRefs: [] }],
+    });
+    const task = goalPlanStore.createPlan({
+      conversationId: 'conv-task',
+      title: 'Task',
+      goal: 'Task plans follow the host lease',
+      successCriteria: ['The task plan reaches the turn only with a lease'],
+      tasks: [{ taskId: 't1', order: 0, title: 'Task', status: 'pending', evidenceRefs: [] }],
+      delegationOrigin: {
+        anchorMessageId: 'anchor-1',
+        inputId: 'input-1',
+        surface: 'desktop',
+        workspaceId: 'ws-task',
+        depth: 1,
+        modelSelection: {
+          worker: selection,
+          explorer: selection,
+          verifier: { ...selection, sameFamilyAsWorker: true },
+          source: { worker: 'global' },
+          resolvedAt: '2026-09-27T00:00:00.000Z',
+        },
+      },
+    });
+    goalPlanStore.recordApproval(ordinary.planId, { decision: 'approve', decidedBy: 'tester' });
+    goalPlanStore.recordApproval(task.planId, { decision: 'approve', decidedBy: 'tester' });
+    assert.equal(goalPlanStore.getPlan(task.planId).delegationOrigin.workspaceId, 'ws-task');
+    let lookups = 0;
+    const host = createDesktopGoalRunnerHost({
+      goalPlanStore,
+      conversationStore: {
+        getConversation() {
+          lookups += 1;
+          return null;
+        },
+        appendMessage() {},
+      },
+      agentTurnExecutor: { async runTurn() { throw new Error('conversation is missing'); } },
+      broadcast() {},
+      llmChatService: {},
+      hostLeases: leases,
+      goalWorktreeAdapter: null,
+      goalTaskBranchAdapter: null,
+      desktopPreviewProvider: null,
+      runPlanVisualVerifier: async () => ({ passed: true }),
+      resolveConversationModelProviderId: () => 'model-host',
+      toDesktopProviderMessages: (messages) => messages,
+      desktopContinuityContextFromProjection: () => [],
+      workspaceRoot: root,
+      getMainWindows: () => [],
+    });
+
+    await host.goalRunner.start(ordinary.planId, { awaitIdle: true });
+    assert.equal(lookups > 0, true);
+
+    lookups = 0;
+    const before = goalPlanStore.getPlan(task.planId)?.runner;
+    await host.goalRunner.start(task.planId, { awaitIdle: true });
+    await host.goalRunner.resume(task.planId);
+    assert.equal(lookups, 0);
+    assert.deepEqual(goalPlanStore.getPlan(task.planId)?.runner, before);
+
+    assert.equal(leases.acquire('ws-task').acquired, true);
+    await host.goalRunner.start(task.planId, { awaitIdle: true });
+    assert.equal(lookups > 0, true);
+  } finally {
+    leases.close();
     if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
     else process.env.PEER_AGENT_HOME = previousHome;
     rmSync(root, { recursive: true, force: true });

@@ -239,6 +239,14 @@ export {
 } from './project-agent/event-mapper.mjs';
 export { createProjectInbox } from './project-agent/project-inbox.mjs';
 export {
+  HOST_LEASE_HEARTBEAT_MS,
+  HOST_LEASE_STALE_MS,
+  createHostLease,
+  delegatedPlanRunsWithLease,
+  listBotWorkspaceIds,
+} from './project-agent/host-lease.mjs';
+export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
+export {
   DELEGATION_CAPABILITY_IDS,
   DELEGATION_TOOL_SPECS,
   delegationSpecByCapability,
