@@ -181,6 +181,46 @@ test('用户气泡带上从工具调用推导的处置标记，模型自填的�
   ]);
 });
 
+test('引用回复时，范围外的停止显示为没有影响其他任务', () => {
+  const rows = conversationRows([
+    message({ id: 'u0', kind: 'user_input', createdAt: '2026-09-27T05:00:00.000Z', content: '做登录' }),
+    message({
+      id: 'r1',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T05:01:00.000Z',
+      content: '登录任务在跑',
+      replyTo: ['u0'],
+      sources: ['s-login'],
+    }),
+    message({
+      id: 'u1',
+      kind: 'user_input',
+      createdAt: '2026-09-27T05:02:00.000Z',
+      content: '把这个停掉',
+      quoteRefs: ['r1', '登录任务在跑'],
+    }),
+    message({
+      id: 'turn-quote',
+      kind: 'agent_turn',
+      createdAt: '2026-09-27T05:03:00.000Z',
+      rounds: [{
+        text: '',
+        toolCalls: [
+          { name: 'cancel_session', input: { sessionId: 's-other', reason: '停' }, result: { sessionId: 's-other', status: 'cancelled' } },
+          { name: 'message_session', input: { intent: 'amend', sessionId: 's-login' }, result: { ok: true, sessionId: 's-login' } },
+        ],
+      }],
+    }),
+  ]);
+  const user = rows.find((row) => row.type === 'message' && row.message.id === 'u1');
+  assert.equal(user?.type, 'message');
+  if (user?.type !== 'message') return;
+  assert.deepEqual(user.message.dispositions.map((item) => [item.kind, item.sessionIds[0]]), [
+    ['out_of_scope', 's-other'],
+    ['merged', 's-login'],
+  ]);
+});
+
 test('引用和思考状态', () => {
   assert.deepEqual(quoteRefsFor(' reply-1 ', '  那一句  '), ['reply-1', '那一句']);
   assert.deepEqual(quoteRefsFor('', '文字'), []);

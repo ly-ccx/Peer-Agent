@@ -257,7 +257,26 @@ function sameMark(left: BotDispositionMark, right: BotDispositionMark): boolean 
  * agent_turn 仍留在输入里，显示时再滤掉。
  * 已经写在消息上的 disposition 字段不采用。
  */
+function quotedSessionIds(message: BotChatMessage, byId: ReadonlyMap<string, BotChatMessage>): string[] {
+  const sessionIds: string[] = [];
+  const seen = new Set<string>();
+  const queue = [message.quoteRefs[0], ...message.replyTo].filter((id): id is string => Boolean(id));
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const target = byId.get(id);
+    if (!target) continue;
+    for (const source of target.sources) {
+      if (source && !sessionIds.includes(source)) sessionIds.push(source);
+    }
+    for (const parent of target.replyTo) queue.push(parent);
+  }
+  return sessionIds;
+}
+
 export function applyDispositions(messages: readonly BotChatMessage[]): BotChatMessage[] {
+  const byId = new Map(messages.map((message) => [message.id, message]));
   const events: DispositionEvent[] = [];
   const dispositionMessages: DispositionMessage[] = [];
   const replySources = new Map<string, readonly string[]>();
@@ -265,7 +284,12 @@ export function applyDispositions(messages: readonly BotChatMessage[]): BotChatM
   for (const message of messages) {
     if (message.kind === 'user_input') {
       pendingUsers.push(message.id);
-      dispositionMessages.push({ id: message.id, role: 'user', replyTo: message.replyTo });
+      dispositionMessages.push({
+        id: message.id,
+        role: 'user',
+        replyTo: message.replyTo,
+        quoteSessionIds: quotedSessionIds(message, byId),
+      });
       continue;
     }
     if (message.kind === 'agent_turn') {

@@ -22,7 +22,8 @@ import { digestApprovalArgs } from './approval-store.mjs';
  * 任务正在等用户时，这句话就是回答，并恢复执行。
  * 任务仍在跑时，只写入子会话和一条 user_correction，下一回合开始时生效，不取消未完成任务。
  * 聊天表面的纠正路由会收尾剩余工作，并入不能走那条取消。
- * spawn 带 supersedes 时先停旧会话再开新会话。
+ * spawn 带 supersedes 时先建好新会话，再停旧会话，并且不把名额让给更早的排队任务。
+ * 新会话没建成时，旧会话保持原状。已经结束的会话不能 amend。
  * settle 在任务完成后计算结论。只有代理回复已经引用该任务、策略允许、关闭闸门通过，才写入代签。
  */
 
@@ -345,17 +346,17 @@ export function createSessionSupervisor({
     if (anchorMessageIds.some((id) => !known.has(id))) {
       return { error: 'invalid_input', message: 'anchor message is missing' };
     }
-    if (supersedes) {
-      const previous = findBySession(supersedes);
-      if (!previous) return { error: 'session_not_found', message: 'superseded session was not found' };
-      if (!TERMINAL.has(previous.status)) {
-        const cancelled = await cancelLocked({ sessionId: supersedes, reason: 'superseded by a new session' });
-        if (!cancelled) return { error: 'session_not_found', message: 'superseded session was not found' };
-      }
+    const previous = supersedes ? findBySession(supersedes) : null;
+    if (supersedes && !previous) {
+      return { error: 'session_not_found', message: 'superseded session was not found' };
     }
+    const replacingOpen = Boolean(previous && !TERMINAL.has(previous.status));
+    const replacingHolder = Boolean(replacingOpen && occupiesRunningSlot(previous));
 
     let child = null;
     let planId = null;
+    let spawnedSessionId = null;
+    let releasedHolder = false;
     try {
       const sessionId = randomUUID();
       const inputId = text(context?.inputId) || randomUUID();
@@ -398,7 +399,9 @@ export function createSessionSupervisor({
         throw error;
       }
       const hold = resolvePlanApproval(approvalPolicy(workspaceId, context), input);
-      const phase = hold ? 'awaiting_approval' : decidePhase(workspaceId, input.dependsOn);
+      const phase = hold
+        ? 'awaiting_approval'
+        : (replacingHolder ? 'queued' : decidePhase(workspaceId, input.dependsOn));
       const plan = goalPlanStore.createGoalContract({
         conversationId: child.id,
         title,
@@ -426,24 +429,48 @@ export function createSessionSupervisor({
         },
       });
       planId = plan?.planId || null;
+      spawnedSessionId = sessionId;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
       if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (phase === 'running') {
         if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
         await goalRunner.start(plan.planId, { awaitIdle: true });
       }
+      let reportedPhase = phase;
+      if (replacingOpen) {
+        const cancelled = await cancelLocked({
+          sessionId: supersedes,
+          reason: 'superseded by a new session',
+          promote: false,
+        });
+        if (!cancelled) throw new Error('superseded session was not found');
+        if (replacingHolder) {
+          releasedHolder = true;
+          const current = goalPlanStore.getPlan(plan.planId) || plan;
+          goalPlanStore.revisePlan(plan.planId, {
+            status: 'executing',
+            delegationOrigin: { ...current.delegationOrigin, phase: 'running' },
+          }, { reason: 'replacement took the running slot', changedBy: 'session-supervisor' });
+          if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
+          await goalRunner.start(plan.planId, { awaitIdle: true });
+          reportedPhase = 'running';
+        }
+      }
       emit({ kind: 'session_started', sessionId, planId: plan.planId, workspaceId });
-      const queuedBehind = phase === 'queued'
+      const queuedBehind = reportedPhase === 'queued'
         ? openPlans(workspaceId).filter((item) => item.delegationOrigin.phase === 'queued'
           || occupiesRunningSlot(item)).length - 1
         : 0;
       return {
         sessionId,
-        status: hold ? 'awaiting_approval' : phase,
+        status: hold && !replacingHolder ? 'awaiting_approval' : reportedPhase,
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
       const reason = error?.code || error?.message || 'spawn failed';
+      if (releasedHolder && planId && spawnedSessionId) {
+        return { sessionId: spawnedSessionId, status: 'running', error: 'spawn_failed', message: reason };
+      }
       if (planId) {
         try { goalPlanStore.deletePlan(planId); } catch { /* 计划已不在 */ }
       }
@@ -488,7 +515,7 @@ export function createSessionSupervisor({
       workspaceId: plan.delegationOrigin.workspaceId,
       reason,
     });
-    await promote(plan.delegationOrigin.workspaceId);
+    if (input?.promote !== false) await promote(plan.delegationOrigin.workspaceId);
     const next = goalPlanStore.getPlan(plan.planId);
     return next ? project(next) : null;
   }
@@ -660,6 +687,12 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    if (input?.intent === 'amend' && TERMINAL.has(plan.status)) {
+      return {
+        error: 'session_not_running',
+        message: 'amend only applies to a session that can still run',
+      };
+    }
     if (input?.intent !== 'amend') {
       conversationStore.appendMessage(plan.conversationId, {
         id: randomUUID(),

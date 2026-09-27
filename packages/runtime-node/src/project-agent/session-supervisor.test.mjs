@@ -1102,7 +1102,7 @@ test('amend 在运行中留到下一回合，不取消未完成任务', async ()
   }
 });
 
-test('supersedes 先停旧会话再开新会话，缺失的旧会话不会开新任务', async () => {
+test('supersedes 停掉旧会话并开新会话，缺失的旧会话不会开新任务', async () => {
   const env = await harness();
   try {
     const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
@@ -1130,6 +1130,69 @@ test('supersedes 先停旧会话再开新会话，缺失的旧会话不会开新
     assert.equal(again.replayed, true);
     assert.equal(again.sessionId, replaced.sessionId);
     assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 2);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('supersedes 建成后才停旧会话，排队中的其他任务不会抢走名额', async () => {
+  const env = await harness();
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '占住名额' }),
+      contextOf(env, { inputId: 'input-holder' }),
+    );
+    const queued = await env.supervisor.spawn(
+      spawnInput({ title: '在排队', brief: '等名额' }),
+      contextOf(env, { inputId: 'input-queued' }),
+    );
+    assert.equal(queued.status, 'queued');
+    const original = env.goalPlanStore.createGoalContract.bind(env.goalPlanStore);
+    env.goalPlanStore.createGoalContract = (input) => {
+      if (input?.title === '替换失败') throw new Error('snapshot broke');
+      return original(input);
+    };
+    const failed = await env.supervisor.spawn(spawnInput({
+      title: '替换失败',
+      brief: '这一次不该停掉旧任务',
+      supersedes: running.sessionId,
+    }), contextOf(env, { inputId: 'input-fail' }));
+    assert.equal(failed.error, 'spawn_failed');
+    assert.notEqual(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
+
+    env.goalPlanStore.createGoalContract = original;
+    const replaced = await env.supervisor.spawn(spawnInput({
+      title: '换成新的',
+      brief: '接过正在跑的名额',
+      supersedes: running.sessionId,
+    }), contextOf(env, { inputId: 'input-take' }));
+    assert.equal(replaced.error, undefined);
+    assert.equal(replaced.status, 'running');
+    assert.equal(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: replaced.sessionId }).planId).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('已经结束的会话拒绝 amend', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ title: '做完了', brief: '不再改' }), contextOf(env, { inputId: 'input-done' }));
+    const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })
+      .find((item) => item.delegation?.sessionId === opened.sessionId);
+    const before = env.conversationStore.getConversation(child.id).messages.length;
+    env.goalPlanStore.setPlanStatus(planId, 'completed');
+    const delivered = await env.supervisor.message({
+      sessionId: opened.sessionId,
+      text: '再改一下',
+      intent: 'amend',
+    });
+    assert.equal(delivered.error, 'session_not_running');
+    assert.equal(env.conversationStore.getConversation(child.id).messages.length, before);
   } finally {
     await env.cleanup();
   }
