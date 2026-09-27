@@ -25,6 +25,8 @@ export interface BotProfile {
   readonly managed?: boolean;
   readonly agentConversationId?: string;
   readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
+  /** Absent means this bot uses memory. */
+  readonly memoryEnabled?: boolean;
   readonly updatedAt?: string;
 }
 

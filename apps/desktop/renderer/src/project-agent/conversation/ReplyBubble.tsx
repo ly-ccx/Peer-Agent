@@ -1,7 +1,9 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef, useState } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
+import { clientApi } from '../../clientApi';
 import type { BotChatMessage } from '../state/botConversationState';
+import { readMemoryRecords, type MemoryRecord } from '../state/drawerState';
 import { CardView } from './CardView';
 
 const VERDICT_KEYS = {
@@ -43,8 +45,8 @@ export function ReplyBubble({
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [excerpt, setExcerpt] = useState('');
-  const used = message.meta.memoryUsed?.length ?? 0;
-  const learned = message.meta.memoryLearned?.length ?? 0;
+  const used = message.meta.memoryUsed ?? [];
+  const learned = message.meta.memoryLearned ?? [];
   const surfacing = message.meta.surfacing;
   const evidenceRefs = message.meta.evidenceRefs ?? [];
   const sourceIds = [...new Set([
@@ -110,13 +112,69 @@ export function ReplyBubble({
           if (!key) return null;
           return <span key={`${mark.sessionId ?? ''}-${mark.outcome}`}>{i18n.t(key)}</span>;
         })}
-        {used > 0 ? <span>{i18n.t('projectAgent.chat.memoryUsed', { count: used })}</span> : null}
-        {learned > 0 ? <span>{i18n.t('projectAgent.chat.memoryLearned', { count: learned })}</span> : null}
+        <MemoryChip
+          workspaceId={workspaceId}
+          ids={used}
+          label={i18n.t('projectAgent.chat.memoryUsed', { count: used.length })}
+        />
+        <MemoryChip
+          workspaceId={workspaceId}
+          ids={learned}
+          label={i18n.t('projectAgent.chat.memoryLearned', { count: learned.length })}
+        />
         {surfacing && surfacing in SURFACING_KEYS ? (
           <span>{i18n.t(SURFACING_KEYS[surfacing as keyof typeof SURFACING_KEYS])}</span>
         ) : null}
       </div>
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
     </article>
+  );
+}
+
+function MemoryChip({
+  workspaceId,
+  ids,
+  label,
+}: {
+  readonly workspaceId: string;
+  readonly ids: readonly string[];
+  readonly label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<readonly MemoryRecord[]>([]);
+  if (ids.length === 0) return null;
+  return (
+    <span className="bot-memory-chip">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          void clientApi.projectMemoryList({ workspaceId, ids }).then((result) => {
+            const records = readMemoryRecords(result?.items);
+            const byId = new Map(records.map((item) => [item.id, item]));
+            setRows(ids.map((id) => byId.get(id) ?? {
+              id,
+              kind: 'fact',
+              text: id,
+              trust: 'stated',
+              status: 'active',
+              pinned: false,
+            }));
+            setOpen(true);
+          });
+        }}
+      >
+        {label}
+      </button>
+      {open ? (
+        <ul>
+          {rows.map((row) => <li key={row.id}>{row.text}</li>)}
+        </ul>
+      ) : null}
+    </span>
   );
 }

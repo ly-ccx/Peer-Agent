@@ -23,6 +23,26 @@ test('关闭抽屉时把焦点还给触发按钮', () => {
   assert.match(drawer, /from '\.\.\/\.\.\/app\/components\/Drawer'/);
 });
 
+test('记忆页动作和回复芯片都经记忆 IPC', () => {
+  const page = source('project-agent/drawer/MemoryTab.tsx');
+  const calls = [...page.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
+  assert.deepEqual([...new Set(calls)].sort(), [
+    'projectMemoryEdit',
+    'projectMemoryExport',
+    'projectMemoryForget',
+    'projectMemoryList',
+    'projectMemoryPin',
+    'projectMemoryRestore',
+    'projectMemorySetSwitches',
+  ]);
+  assert.equal(page.includes('localStorage'), false);
+  assert.equal(page.includes('child_process'), false);
+  const bubble = source('project-agent/conversation/ReplyBubble.tsx');
+  assert.match(bubble, /projectMemoryList/);
+  assert.match(bubble, /aria-expanded/);
+  assert.equal(bubble.includes('<span>{i18n.t(\'projectAgent.chat.memoryUsed\''), false);
+});
+
 test('设置项只经 IPC 写入', () => {
   const settings = source('project-agent/drawer/BotSettingsTab.tsx');
   const calls = [...settings.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);

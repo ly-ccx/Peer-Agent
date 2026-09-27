@@ -202,3 +202,40 @@ test('敏感内容不进 Evidence，索引删掉后仍能从 jsonl 重建', asyn
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('关闭记忆后既不写也不检索', async () => {
+  const root = tempRoot('off');
+  const store = createMemoryStore({ rootDir: root });
+  const provider = createMemoryProvider({
+    rootDir: root,
+    store,
+    enabled: () => false,
+  });
+  try {
+    const saved = await provider.executeCapability(
+      call('local.memory.remember', {
+        text: '登录页在 src/login.tsx',
+        kind: 'fact',
+        anchorMessageId: 'm-user',
+      }),
+      context(),
+    );
+    assert.equal(outputOf(saved).error, 'memory_disabled');
+    assert.equal(existsSync(store.projectFile('ws-1')), false);
+    store.writeVerified({
+      workspaceId: 'ws-1',
+      kind: 'fact',
+      text: '登录页在 src/login.tsx',
+      sourceRefs: ['ev-1'],
+    });
+    const found = outputOf(await provider.executeCapability(
+      call('local.memory.search', { query: '登录页' }),
+      context(),
+    ));
+    assert.equal(found.error, 'memory_disabled');
+    assert.equal(found.items, undefined);
+  } finally {
+    provider.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

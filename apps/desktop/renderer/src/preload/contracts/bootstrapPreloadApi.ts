@@ -46,6 +46,17 @@ import type {
   McpCredentialPutRequest,
   McpManifestRefreshResult,
   PermissionGrant,
+  ProjectMemoryEditRequest,
+  ProjectMemoryExportRequest,
+  ProjectMemoryExportResult,
+  ProjectMemoryForgetRequest,
+  ProjectMemoryItemResult,
+  ProjectMemoryListRequest,
+  ProjectMemoryListResult,
+  ProjectMemoryPinRequest,
+  ProjectMemoryRestoreRequest,
+  ProjectMemorySetSwitchesRequest,
+  ProjectMemorySetSwitchesResult,
   PromptContextEpochEventRecord,
   PromptContextEpochRecord,
   PromptSnapshotIndexEntry,
@@ -1081,6 +1092,13 @@ export interface BootstrapPreloadApi {
   }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
   readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
   readonly projectAgentSearch: (params?: { query?: string }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
+  readonly projectMemoryList: (params: ProjectMemoryListRequest) => Promise<ProjectMemoryListResult>;
+  readonly projectMemoryPin: (params: ProjectMemoryPinRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryForget: (params: ProjectMemoryForgetRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryRestore: (params: ProjectMemoryRestoreRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryEdit: (params: ProjectMemoryEditRequest) => Promise<ProjectMemoryItemResult>;
+  readonly projectMemoryExport: (params: ProjectMemoryExportRequest) => Promise<ProjectMemoryExportResult>;
+  readonly projectMemorySetSwitches: (params: ProjectMemorySetSwitchesRequest) => Promise<ProjectMemorySetSwitchesResult>;
   readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly workspaceList: () => Promise<{

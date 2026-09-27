@@ -1,5 +1,5 @@
 /**
- * 开任务时冻结当时的 active 记忆 id。
+ * 开任务时冻结当时的 active 记忆 id 和正文。
  * 之后的写入不改已有快照。
  */
 import { randomUUID } from 'node:crypto';
@@ -17,6 +17,31 @@ function fail(reason) {
   return { ok: false, reason };
 }
 
+function freezeItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const id = typeof item.id === 'string' ? item.id.trim() : '';
+  const text = typeof item.text === 'string' ? item.text : '';
+  if (!id || !text) return null;
+  return {
+    id,
+    kind: typeof item.kind === 'string' ? item.kind : 'fact',
+    text,
+    trust: item.trust === 'verified' ? 'verified' : 'stated',
+    status: item.status === 'forgotten' ? 'forgotten' : 'active',
+    scope: item.scope === 'user' ? 'user' : 'project',
+  };
+}
+
+function readFrozenItems(raw) {
+  if (!Array.isArray(raw)) return null;
+  const items = [];
+  for (const entry of raw) {
+    const item = freezeItem(entry);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
 function readLines(file) {
   if (!existsSync(file)) return [];
   let raw = '';
@@ -32,11 +57,14 @@ function readLines(file) {
       const parsed = JSON.parse(line);
       if (!parsed || typeof parsed.snapshotId !== 'string' || !Array.isArray(parsed.itemIds)) continue;
       const itemIds = parsed.itemIds.filter((id) => typeof id === 'string' && id.trim());
-      snapshots.push({
+      const snapshot = {
         snapshotId: parsed.snapshotId,
         itemIds,
         createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : '',
-      });
+      };
+      const items = readFrozenItems(parsed.items);
+      if (items) snapshot.items = items;
+      snapshots.push(snapshot);
     } catch {
       // 坏行跳过。
     }
@@ -52,12 +80,12 @@ export function createSnapshot(workspaceId, options = {}) {
   if (!isMemoryWorkspaceId(workspaceId)) return fail('invalid_workspace');
   const store = options.store || createMemoryStore(options);
   const now = options.now || (() => new Date());
-  const itemIds = store.list({ workspaceId, status: 'active' })
-    .map((item) => item.id)
-    .sort((left, right) => left.localeCompare(right));
+  const active = store.list({ workspaceId, status: 'active' })
+    .sort((left, right) => left.id.localeCompare(right.id));
   const snapshot = {
     snapshotId: `snap-${randomUUID()}`,
-    itemIds,
+    itemIds: active.map((item) => item.id),
+    items: active.map((item) => freezeItem(item)).filter(Boolean),
     createdAt: now().toISOString(),
   };
   const file = path.join(path.dirname(store.projectFile(workspaceId)), 'snapshots.jsonl');

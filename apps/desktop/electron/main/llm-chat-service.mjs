@@ -9,7 +9,7 @@ import {
   renderSystemContext,
   renderStableSystemContext,
 } from './llm-prompts.mjs';
-import { taskAcceptanceFromMessages } from '@peer-agent/system-context';
+import { memoryIdsFromAssembledContext, taskAcceptanceFromMessages } from '@peer-agent/system-context';
 import { withSelectionRequestContext } from './selection-background-context.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
@@ -64,6 +64,7 @@ import {
   readSnapshots,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
+import { liveMemoryGate } from './project-agent/memory-gate-port.mjs';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -192,6 +193,9 @@ function loadSnapshotItems(workspaceId, snapshotId) {
     const snapshot = readSnapshots(workspaceId, { store })
       .find((item) => item.snapshotId === snapshotId);
     if (!snapshot) return [];
+    if (Array.isArray(snapshot.items) && snapshot.items.length) {
+      return snapshot.items.map((item) => ({ ...item }));
+    }
     const items = [];
     for (const id of snapshot.itemIds) {
       const item = store.get(id);
@@ -245,8 +249,10 @@ export function projectTurnSystemContext(profile, {
   conversationStore = null,
   readMemory = loadProjectMemory,
   readSnapshot = loadSnapshotItems,
+  memoryEnabled = true,
 } = {}) {
   if (profile?.role !== 'project_agent' && profile?.role !== 'work_session') return {};
+  const useMemory = memoryEnabled !== false;
   const turnContext = sanitizeTurnContext(profile.context);
   const fields = {
     role: profile.role,
@@ -256,7 +262,7 @@ export function projectTurnSystemContext(profile, {
     ...(textField(profile.memorySnapshotId) ? { memorySnapshotId: textField(profile.memorySnapshotId) } : {}),
     ...(turnContext ? { turnContext } : {}),
   };
-  if (profile.role === 'project_agent') {
+  if (profile.role === 'project_agent' && useMemory) {
     const injected = explicitArray(turnContext?.projectMemory)
       ?? explicitArray(turnContext?.memoryItems)
       ?? explicitArray(turnContext?.items);
@@ -278,10 +284,12 @@ export function projectTurnSystemContext(profile, {
       || textField(profile.memorySnapshotId)
       || textField(origin.memorySnapshotId);
     const injectedItems = explicitArray(bag.snapshotItems) ?? explicitArray(bag.items);
-    const snapshotItems = injectedItems
-      ?? (snapshotId && textField(profile.workspaceId)
-        ? readSnapshot(textField(profile.workspaceId), snapshotId)
-        : []);
+    const snapshotItems = useMemory
+      ? (injectedItems
+        ?? (snapshotId && textField(profile.workspaceId)
+          ? readSnapshot(textField(profile.workspaceId), snapshotId)
+          : []))
+      : [];
     const readOnly = typeof bag.readOnly === 'boolean' ? bag.readOnly : origin.readOnly === true;
     const summary = textField(bag.summary) || textField(bag.brief) || textField(plan?.goal);
     const anchorText = textField(bag.anchorText) || readAnchorText(conversationStore, origin);
@@ -1649,6 +1657,8 @@ export function createLlmChatService({
       // 引用范围只看本回合对话里的 quoteRefs。复用的 toolContext 按回合覆写。
       toolContext.messages = null;
       if (projectAgentTurn) {
+        toolContext.turnToolCalls = [];
+        toolContext.turnMemoryIds = [];
         try {
           const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
           toolContext.messages = Array.isArray(history?.messages) ? history.messages : [];
@@ -1767,8 +1777,14 @@ export function createLlmChatService({
             conversationId,
             goalPlanStore,
             conversationStore,
+            memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
           }),
         });
+        if (projectAgentTurn) {
+          const ids = memoryIdsFromAssembledContext(systemContext);
+          toolContext.turnMemoryIds = ids;
+          streamRecord.turnMemoryIds = ids;
+        }
         const systemPrompt = renderSystemContext(systemContext);
         const stableSystemPrompt = renderStableSystemContext(systemContext);
         if (visualReviewHandle !== null) {
@@ -1821,8 +1837,14 @@ export function createLlmChatService({
               conversationId,
               goalPlanStore,
               conversationStore,
+              memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
             }),
           });
+          if (projectAgentTurn) {
+            const ids = memoryIdsFromAssembledContext(rebuiltContext);
+            toolContext.turnMemoryIds = ids;
+            streamRecord.turnMemoryIds = ids;
+          }
           const rebuiltPrompt = renderSystemContext(rebuiltContext);
           recordPromptSnapshot(promptSnapshotStore, rebuiltContext, {
             streamId,
@@ -2158,7 +2180,11 @@ export function createLlmChatService({
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
-      return { ...buildAgentRunOutcome(streamRecord), ...(visualReviewReport ? { visualReviewReport } : {}) };
+      return {
+        ...buildAgentRunOutcome(streamRecord),
+        ...(Array.isArray(streamRecord.turnMemoryIds) ? { memoryIds: streamRecord.turnMemoryIds } : {}),
+        ...(visualReviewReport ? { visualReviewReport } : {}),
+      };
     }
   }
 

@@ -21,6 +21,8 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         ...(typeof view?.turnId === 'string' && view.turnId ? { turnId: view.turnId } : {}),
         userMessages: Array.isArray(view?.messages) ? view.messages : [],
         projectSessionIds: Array.isArray(delivery.sessionIds) ? delivery.sessionIds : [],
+        memoryUsed: memoryIdsOf(view),
+        toolCalls: Array.isArray(view?.turnToolCalls) ? view.turnToolCalls : [],
         surfacing: {
           proactivity: typeof delivery.proactivity === 'string' ? delivery.proactivity : 'standard',
           ...(typeof delivery.botLevel === 'string' ? { botLevel: delivery.botLevel } : {}),
@@ -37,4 +39,17 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
       };
     },
   };
+}
+
+function memoryIdsOf(view) {
+  if (!Array.isArray(view?.memoryIds)) return [];
+  const ids = [];
+  for (const item of view.memoryIds) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed || trimmed.length > 200 || ids.includes(trimmed)) continue;
+    ids.push(trimmed);
+    if (ids.length >= 200) break;
+  }
+  return ids;
 }

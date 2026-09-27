@@ -103,7 +103,9 @@ export function BotProfileDrawer({
         .map((item: unknown) => readDrawerSession(item))
         .filter((item): item is DrawerSession => item !== null);
       setSessions(nextSessions);
-      setMemories(readMemoryItems([]));
+      const memories = await clientApi.projectMemoryList({ workspaceId });
+      if (cancelled) return;
+      setMemories(readMemoryItems(memories?.items));
       setModelLabel(conversationModelLabel(preview));
     })();
     return () => {
@@ -199,7 +201,9 @@ export function BotProfileDrawer({
         />
       ) : null}
       {memory.tab === 'objectives' ? <ObjectivesTab i18n={i18n} /> : null}
-      {memory.tab === 'memory' ? <MemoryTab items={memories} i18n={i18n} /> : null}
+      {memory.tab === 'memory' ? (
+        <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />
+      ) : null}
       {memory.tab === 'settings' ? (
         <BotSettingsTab
           workspaceId={workspaceId}

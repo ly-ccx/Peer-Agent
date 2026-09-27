@@ -8,6 +8,7 @@ import { planDelivery } from './digest.mjs';
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
 const LIST_MAX = 20;
+const MEMORY_LIST_MAX = 200;
 const ORIGINS = new Set(['user_request', 'objective_signal', 'agent_idea']);
 const EVENT_KINDS = new Set([
   'needs_user',
@@ -50,9 +51,9 @@ export function composeReply(input = {}) {
   if (question && question.ok === false) return question;
   const sessionIds = readIdSet(input.projectSessionIds, 'projectSessionIds must be a list of session ids.');
   if (sessionIds && sessionIds.ok === false) return sessionIds;
-  const memoryUsed = readList(input.memoryUsed, 'memoryUsed must be a list of memory ids.');
+  const memoryUsed = readMemoryList(input.memoryUsed, 'memoryUsed must be a list of memory ids.');
   if (memoryUsed && memoryUsed.ok === false) return memoryUsed;
-  const memoryLearned = readList(input.memoryLearned, 'memoryLearned must be a list of memory ids.');
+  const memoryLearned = readMemoryList(input.memoryLearned, 'memoryLearned must be a list of memory ids.');
   if (memoryLearned && memoryLearned.ok === false) return memoryLearned;
   const evidenceRefs = readEvidenceRefs(input.evidenceRefs);
   if (evidenceRefs && evidenceRefs.ok === false) return evidenceRefs;
@@ -139,6 +140,92 @@ function readList(value, message) {
   const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: ID_MAX });
   if (!ids) return fail('invalid_input', message);
   return { ids };
+}
+
+function readMemoryList(value, message) {
+  if (value == null) return { ids: [] };
+  const ids = stringList(value, { min: 0, max: MEMORY_LIST_MAX, itemMax: ID_MAX });
+  if (!ids) return fail('invalid_input', message);
+  return { ids };
+}
+
+export function normalizeMemoryIds(value) {
+  return cleanIds(value);
+}
+
+export function memoryListsFromResult(result) {
+  let memoryUsed = [];
+  let memoryLearned = [];
+  for (const pile of pilesOf(result)) {
+    const meta = pile?.meta;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) continue;
+    if (memoryUsed.length === 0) memoryUsed = cleanIds(meta.memoryUsed);
+    if (memoryLearned.length === 0) memoryLearned = cleanIds(meta.memoryLearned);
+    if (memoryUsed.length > 0 && memoryLearned.length > 0) break;
+  }
+  return { memoryUsed, memoryLearned };
+}
+
+export function learnedMemoryIds(toolCalls) {
+  const ids = [];
+  const seen = new Set();
+  for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
+    const name = call?.name || call?.toolName;
+    if (name !== 'memory_remember' && name !== 'local.memory.remember') continue;
+    const id = memoryIdIn(call?.result);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
+  }
+  return ids;
+}
+
+function cleanIds(value) {
+  if (!Array.isArray(value)) return [];
+  const ids = [];
+  const seen = new Set();
+  for (const item of value) {
+    const id = boundedId(item, ID_MAX);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
+  }
+  return ids;
+}
+
+function memoryIdIn(result) {
+  for (const pile of pilesOf(result)) {
+    if (pile?.ok === false || pile?.success === false) continue;
+    const id = boundedId(pile?.id ?? pile?.memoryId, ID_MAX);
+    if (id) return id;
+  }
+  return '';
+}
+
+function pilesOf(value, depth = 0) {
+  if (depth > 6 || value == null) return [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return [];
+    try {
+      return pilesOf(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return [];
+    }
+  }
+  if (typeof value !== 'object') return [];
+  const piles = [value];
+  if (Array.isArray(value)) {
+    for (const item of value) piles.push(...pilesOf(item, depth + 1));
+    return piles;
+  }
+  for (const key of ['output', 'result', 'legacyResult']) {
+    if (value[key] != null) piles.push(...pilesOf(value[key], depth + 1));
+  }
+  if (value.outputPreview != null) piles.push(...pilesOf(value.outputPreview, depth + 1));
+  return piles;
 }
 
 function readEvidenceRefs(value) {
@@ -293,17 +380,7 @@ function latestVerdictRef(sources, bySession) {
 }
 
 function learnedFromTools(toolCalls) {
-  const ids = [];
-  for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
-    const name = call?.name || call?.toolName;
-    if (name !== 'memory_remember') continue;
-    const result = call?.result && typeof call.result === 'object' ? call.result : {};
-    const output = result.output && typeof result.output === 'object' ? result.output : {};
-    const raw = result.id ?? result.memoryId ?? output.id ?? output.memoryId;
-    const id = boundedId(raw, ID_MAX);
-    if (id) ids.push(id);
-  }
-  return ids;
+  return learnedMemoryIds(toolCalls);
 }
 
 function mergeIds(left, right) {
@@ -313,6 +390,7 @@ function mergeIds(left, right) {
     if (seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
+    if (ids.length >= MEMORY_LIST_MAX) break;
   }
   return ids;
 }

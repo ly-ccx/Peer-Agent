@@ -44,6 +44,101 @@ export interface MemorySnapshot {
   readonly createdAt: string;
 }
 
+/** 记忆页跨进程载荷。渲染层不读存储。 */
+export interface ProjectMemoryRecord {
+  readonly id: string;
+  readonly scope: 'project' | 'user';
+  readonly workspaceId?: string;
+  readonly kind: MemoryKind;
+  readonly text: string;
+  readonly trust: MemoryTrust;
+  readonly sourceRefs: readonly string[];
+  readonly pinned: boolean;
+  readonly status: MemoryStatus;
+  readonly confirmedCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastUsedAt?: string;
+  readonly anchorMessageId?: string;
+  readonly forgetReason?: string;
+}
+
+export interface ProjectMemorySwitches {
+  readonly memoryEnabled: boolean;
+  readonly useMemory: boolean;
+  readonly learnPreferences: boolean;
+}
+
+export interface ProjectMemoryListRequest {
+  readonly workspaceId: string;
+  readonly kind?: MemoryKind;
+  readonly trust?: MemoryTrust;
+  readonly status?: MemoryStatus;
+  readonly ids?: readonly string[];
+}
+
+export interface ProjectMemoryListResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly items?: readonly ProjectMemoryRecord[];
+  readonly switches?: ProjectMemorySwitches;
+}
+
+export interface ProjectMemoryPinRequest {
+  readonly workspaceId: string;
+  readonly id: string;
+  readonly pinned: boolean;
+}
+
+export interface ProjectMemoryForgetRequest {
+  readonly workspaceId: string;
+  readonly id: string;
+  readonly reason?: string;
+}
+
+export interface ProjectMemoryRestoreRequest {
+  readonly workspaceId: string;
+  readonly id: string;
+}
+
+export interface ProjectMemoryEditRequest {
+  readonly workspaceId: string;
+  readonly id: string;
+  readonly text: string;
+}
+
+export interface ProjectMemoryItemResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly item?: ProjectMemoryRecord;
+  readonly revokedId?: string;
+}
+
+export interface ProjectMemoryExportRequest {
+  readonly workspaceId: string;
+  readonly format: 'json' | 'markdown';
+}
+
+export interface ProjectMemoryExportResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly path?: string;
+  readonly format?: 'json' | 'markdown';
+}
+
+export interface ProjectMemorySetSwitchesRequest {
+  readonly workspaceId: string;
+  readonly memoryEnabled?: boolean;
+  readonly useMemory?: boolean;
+  readonly learnPreferences?: boolean;
+}
+
+export interface ProjectMemorySetSwitchesResult {
+  readonly ok: boolean;
+  readonly code?: string;
+  readonly switches?: ProjectMemorySwitches;
+}
+
 export type MemoryAdmission =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: string };

@@ -133,6 +133,8 @@ export function createMemoryStore({
       createdAt: clip(input.createdAt, 40) || now().toISOString(),
       updatedAt: clip(input.updatedAt, 40) || now().toISOString(),
     };
+    const lastUsedAt = clip(input.lastUsedAt, 40);
+    if (lastUsedAt) record.lastUsedAt = lastUsedAt;
     if (input.scope === 'project') record.workspaceId = input.workspaceId;
     const anchorMessageId = clip(input.anchorMessageId, REF_MAX);
     if (anchorMessageId) record.anchorMessageId = anchorMessageId;
@@ -289,6 +291,72 @@ export function createMemoryStore({
     return { ok: true, item: copyItem(record) };
   }
 
+  function setPinned(input = {}) {
+    if (typeof input.pinned !== 'boolean') return fail('invalid_input');
+    const id = clip(input.id, 200);
+    if (!id) return fail('invalid_input');
+    const current = visible(get(id), input.workspaceId);
+    if (!current || current.status !== 'active') return fail('not_found');
+    if (current.pinned === input.pinned) return { ok: true, item: current };
+    const record = {
+      ...current,
+      pinned: input.pinned,
+      updatedAt: now().toISOString(),
+    };
+    append(fileFor(record), record);
+    return { ok: true, item: copyItem(record) };
+  }
+
+  function reviseStated(input = {}) {
+    const id = clip(input.id, 200);
+    const text = clip(input.text, TEXT_MAX);
+    if (!id || !text) return fail('invalid_input');
+    if (memorySecretReason(text)) return fail('sensitive');
+    const current = visible(get(id), input.workspaceId);
+    if (!current || current.status !== 'active') return fail('not_found');
+    const stamp = now().toISOString();
+    const forgotten = {
+      ...current,
+      status: 'forgotten',
+      forgetReason: 'edited',
+      updatedAt: stamp,
+    };
+    const record = {
+      id: `mem-${randomUUID()}`,
+      scope: current.scope,
+      kind: current.kind,
+      text,
+      trust: 'stated',
+      sourceRefs: [`edit:${current.id}`],
+      pinned: current.pinned === true,
+      status: 'active',
+      confirmedCount: 1,
+      createdAt: stamp,
+      updatedAt: stamp,
+    };
+    if (current.scope === 'project') record.workspaceId = current.workspaceId;
+    append(fileFor(forgotten), forgotten);
+    append(fileFor(record), record);
+    return { ok: true, item: copyItem(record), revokedId: current.id };
+  }
+
+  function markUsed(ids, at = now().toISOString()) {
+    const stamp = clip(at, 40);
+    if (!stamp) return [];
+    const touched = [];
+    for (const raw of Array.isArray(ids) ? ids : []) {
+      const current = get(raw);
+      if (!current || current.status !== 'active') continue;
+      const record = {
+        ...current,
+        lastUsedAt: stamp,
+      };
+      append(fileFor(record), record);
+      touched.push(copyItem(record));
+    }
+    return touched;
+  }
+
   function restore(input = {}) {
     const id = clip(input.id, 200);
     if (!id) return fail('invalid_input');
@@ -310,6 +378,9 @@ export function createMemoryStore({
     writeVerified,
     forget,
     restore,
+    setPinned,
+    reviseStated,
+    markUsed,
     list,
     get,
     userFile,

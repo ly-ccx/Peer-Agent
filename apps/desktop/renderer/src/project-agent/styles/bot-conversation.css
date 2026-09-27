@@ -62,6 +62,19 @@
   align-items: center;
 }
 
+.bot-memory-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.bot-memory-chip ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .bot-user-marks span,
 .bot-reply-marks span,
 .bot-reply-marks button,

@@ -9,6 +9,8 @@ import { createDesktopReplyComposer } from '../project-agent/reply-composer-port
 import { liveSessionVerification } from '../project-agent/session-verification.mjs';
 import { liveProjectProactivity } from '../project-agent/proactivity-port.mjs';
 import { createLocalMemoryProvider } from './local-memory-provider.mjs';
+import { liveMemoryGate } from '../project-agent/memory-gate-port.mjs';
+import { installMemoryIndex } from '../project-agent/memory-index-port.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
@@ -33,7 +35,7 @@ export function createLocalToolHost({
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
   delegationProvider = null,
-  memoryProvider = createLocalMemoryProvider(),
+  memoryProvider = null,
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
@@ -51,6 +53,14 @@ export function createLocalToolHost({
   hookRunner = null,
   onRuntimeEvent = null,
 }) {
+  const activeMemoryProvider = memoryProvider ?? createLocalMemoryProvider({
+    enabled: (workspaceId) => liveMemoryGate().enabled(workspaceId),
+  });
+  installMemoryIndex({
+    rebuild() {
+      activeMemoryProvider.rebuildIndex?.();
+    },
+  });
   const activeDelegationProvider = delegationProvider ?? createLocalDelegationProvider({
     verification: liveSessionVerification(),
     proactivity: liveProjectProactivity(),
@@ -75,7 +85,7 @@ export function createLocalToolHost({
       activeShellProvider,
       goalProvider,
       activeDelegationProvider,
-      memoryProvider,
+      activeMemoryProvider,
       interactionProvider,
       automationProposalProvider,
       webProvider,

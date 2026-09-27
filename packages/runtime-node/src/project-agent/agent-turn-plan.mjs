@@ -1,4 +1,5 @@
 import { inputMessageId } from './input-queue.mjs';
+import { learnedMemoryIds, memoryListsFromResult, normalizeMemoryIds } from './reply-composer.mjs';
 
 /** 用户回合预算。到上限后不再开始下一轮。 */
 export const USER_TURN_LIMITS = Object.freeze({ maxRounds: 10, maxToolCalls: 20 });
@@ -50,6 +51,7 @@ export function finishAgentTurn({
   rounds = [],
   failed = false,
   reason = '',
+  memoryUsed = [],
 } = {}) {
   const storedRounds = normalizeRounds(rounds);
   const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds })];
@@ -59,14 +61,15 @@ export function finishAgentTurn({
   }
   const replies = postReplies(storedRounds);
   const evidenceRefs = hostEvidenceRefs(storedRounds);
+  const learned = learnedMemoryIds(toolCallsOf(storedRounds));
   if (replies.length > 0) {
     replies.forEach((call, index) => {
-      messages.push(attachEvidence(replyFromTool(turnId, index, call), evidenceRefs));
+      messages.push(attachEvidence(replyFromTool(turnId, index, call, learned, memoryUsed), evidenceRefs));
     });
     return { messages, replied: true };
   }
   if (plan?.kind === 'user') {
-    messages.push(attachEvidence({
+    messages.push(attachEvidence(applyMemoryMeta({
       id: `${turnId}-reply`,
       role: 'assistant',
       kind: 'agent_reply',
@@ -75,7 +78,7 @@ export function finishAgentTurn({
       sources: [],
       fallback: true,
       turnId,
-    }, evidenceRefs));
+    }, memoryUsed, learned), evidenceRefs));
     return { messages, replied: true };
   }
   return { messages, replied: false };
@@ -123,7 +126,7 @@ function unavailableCard(turnId, reason) {
   };
 }
 
-function replyFromTool(turnId, index, call) {
+function replyFromTool(turnId, index, call, learned, turnMemoryIds) {
   const input = call.input && typeof call.input === 'object' ? call.input : {};
   const message = {
     id: `${turnId}-reply-${index + 1}`,
@@ -145,10 +148,38 @@ function replyFromTool(turnId, index, call) {
       ...(surfacing === 'silent' ? { unread: false } : {}),
     };
   }
-  return message;
+  const fromResult = memoryListsFromResult(call.result);
+  const memoryUsed = fromResult.memoryUsed.length > 0 ? fromResult.memoryUsed : turnMemoryIds;
+  const memoryLearned = mergeMemoryIds(fromResult.memoryLearned, learned);
+  return applyMemoryMeta(message, memoryUsed, memoryLearned);
+}
+
+function applyMemoryMeta(message, used, learned) {
+  const memoryUsed = normalizeMemoryIds(used);
+  const memoryLearned = normalizeMemoryIds(learned);
+  if (memoryUsed.length === 0 && memoryLearned.length === 0) return message;
+  const meta = message.meta && typeof message.meta === 'object' ? { ...message.meta } : {};
+  if (memoryUsed.length > 0) meta.memoryUsed = memoryUsed;
+  if (memoryLearned.length > 0) meta.memoryLearned = memoryLearned;
+  return { ...message, meta };
+}
+
+function mergeMemoryIds(left, right) {
+  return normalizeMemoryIds([...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])]);
 }
 
 function surfacingOf(result) {
+  if (typeof result === 'string') {
+    const trimmed = result.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return surfacingOf(JSON.parse(trimmed));
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
   const piles = [];
   if (result && typeof result === 'object') piles.push(result);
   const nested = result?.output || result?.outputPreview?.legacyResult?.output;
@@ -169,13 +200,15 @@ function surfacingOf(result) {
 }
 
 function postReplies(rounds) {
-  const replies = [];
+  return toolCallsOf(rounds).filter((call) => call.name === 'post_reply');
+}
+
+function toolCallsOf(rounds) {
+  const calls = [];
   for (const round of rounds) {
-    for (const call of round.toolCalls) {
-      if (call.name === 'post_reply') replies.push(call);
-    }
+    for (const call of round.toolCalls) calls.push(call);
   }
-  return replies;
+  return calls;
 }
 
 function replyTargets(inputs) {

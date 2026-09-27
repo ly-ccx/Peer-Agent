@@ -352,7 +352,23 @@ function executionView(context) {
     toolCallOrdinal: context?.toolCallOrdinal ?? nested.toolCallOrdinal ?? '',
     workspaceId: text(context?.workspaceId) || text(nested.workspaceId),
     conversationId: text(context?.conversationId) || text(nested.conversationId),
+    memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
+    turnToolCalls: Array.isArray(context?.turnToolCalls)
+      ? context.turnToolCalls.slice()
+      : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),
   };
+}
+
+function idList(value) {
+  if (!Array.isArray(value)) return [];
+  const ids = [];
+  for (const item of value) {
+    const id = text(item);
+    if (!id || id.length > 200 || ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length >= 200) break;
+  }
+  return ids;
 }
 
 function parseArgs(call) {
