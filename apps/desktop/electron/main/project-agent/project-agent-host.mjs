@@ -161,12 +161,15 @@ export function registerDesktopProjectAgent({
   const registry = createProjectRegistry({
     filePath: path.join(dataHome, 'projects', 'registry.json'),
   });
+  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
   const supervisor = createSessionSupervisor({
     conversationStore,
     goalPlanStore,
     goalRunner,
+    approvalStore,
+    readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
-  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -186,7 +189,6 @@ export function registerDesktopProjectAgent({
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
   });
-  const profileStore = createBotProfileStore({ rootDir: dataHome });
 
   function resolveConversationId(workspaceId) {
     return directory.conversationId(workspaceId);
@@ -275,6 +277,7 @@ export function registerDesktopProjectAgent({
     wake: (workspaceId) => {
       void host.sync([workspaceId]).catch(() => {});
     },
+    agentOnline: (workspaceId) => typeof holdsLease === 'function' && holdsLease(workspaceId) === true,
     onViewing,
     broadcast,
   });

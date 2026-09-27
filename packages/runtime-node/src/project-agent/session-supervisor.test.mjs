@@ -52,6 +52,8 @@ async function harness({
   goalRunner: injectedRunner = null,
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
+  approvalStore = null,
+  readPlanApproval = null,
 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
   const previous = process.env.PEER_AGENT_HOME;
@@ -103,6 +105,8 @@ async function harness({
     emitEvent: (event) => { events.push(event); },
     resolveAcceptancePolicy,
     readSessionFacts,
+    approvalStore,
+    readPlanApproval,
     now: () => '2026-09-27T00:00:00.000Z',
   });
   return {
@@ -519,6 +523,61 @@ test('项目策略为 confirm 时不代签，用户确认写入 acceptedBy user'
     assert.equal(confirmed.resultAcceptance.acceptedAt, '2026-09-27T00:00:00.000Z');
     assert.equal(confirmed.resultAcceptance.verdictRef, `verdict:${opened.sessionId}:passed`);
     assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance.acceptedBy, 'user');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('计划批准挡住启动，批准后才跑；只读任务在 writes 下直接跑', { timeout: 30_000 }, async () => {
+  const recorded = [];
+  const env = await harness({
+    approvalStore: {
+      append(row) {
+        recorded.push(row);
+        return row;
+      },
+    },
+    readPlanApproval: () => 'writes',
+  });
+  try {
+    const direct = await env.supervisor.spawn(
+      spawnInput({ title: '只看', brief: '只读看一眼', readOnly: true }),
+      contextOf(env, { inputId: 'input-ro' }),
+    );
+    assert.equal(direct.status, 'running');
+    assert.equal(recorded.length, 0);
+
+    const held = await env.supervisor.spawn(spawnInput(), contextOf(env, { inputId: 'input-hold' }));
+    assert.equal(held.status, 'awaiting_approval');
+    const stored = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: held.sessionId }).planId);
+    assert.equal(stored.delegationOrigin.phase, 'awaiting_approval');
+    assert.equal(stored.status, 'paused');
+    assert.equal(recorded[0].capabilityId, 'goal.plan');
+    assert.equal(recorded[0].kind, 'plan_approval');
+    assert.match(recorded[0].summary, /让登录流程重新可用/);
+    assert.match(recorded[0].summary, /登录请求返回成功/);
+    const turnsBefore = env.turns.length;
+
+    const resumed = await env.supervisor.resumeFromApproval(recorded[0]);
+    assert.equal(resumed.ok, true);
+    assert.equal(env.turns.length > turnsBefore, true);
+    assert.equal(env.goalPlanStore.getPlan(stored.planId).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('代理不在线时回答直接投进任务，并记 user_intervened', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ readOnly: true }), contextOf(env));
+    const delivered = await env.supervisor.deliverAnswer({
+      sessionId: opened.sessionId,
+      text: '用方案 A',
+      answerTo: `card:question:${opened.sessionId}:q1`,
+    });
+    assert.equal(delivered.userIntervened, true);
+    assert.equal(delivered.session.interventions[0].id, delivered.messageId);
   } finally {
     await env.cleanup();
   }

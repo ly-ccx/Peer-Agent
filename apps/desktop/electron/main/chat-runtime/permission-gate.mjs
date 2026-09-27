@@ -1,6 +1,48 @@
 import { randomUUID } from 'node:crypto';
 import { digestApprovalArgs } from '@peer-agent/runtime-node';
 
+const ONE_TIME_GRANT_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * 同一 capabilityId + argsDigest 的一次性放行。用过或过期后下一次仍要问。
+ */
+export function createOneTimeApprovalBook({ ttlMs = ONE_TIME_GRANT_TTL_MS } = {}) {
+  const entries = new Map();
+  function keyOf(capabilityId, argsDigest) {
+    if (typeof capabilityId !== 'string' || !capabilityId.trim()) return '';
+    if (typeof argsDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(argsDigest)) return '';
+    return `${capabilityId.trim()}::${argsDigest.toLowerCase()}`;
+  }
+  function remember({ capabilityId, argsDigest, at }) {
+    const key = keyOf(capabilityId, argsDigest);
+    if (!key || !Number.isFinite(at)) return null;
+    const record = { expiresAt: at + ttlMs, used: false };
+    entries.set(key, record);
+    return { capabilityId: capabilityId.trim(), argsDigest: argsDigest.toLowerCase(), expiresAt: record.expiresAt };
+  }
+  function match({ capabilityId, argsDigest, at }) {
+    const key = keyOf(capabilityId, argsDigest);
+    if (!key || !Number.isFinite(at)) return false;
+    const record = entries.get(key);
+    if (!record) return false;
+    if (record.used || at >= record.expiresAt) {
+      entries.delete(key);
+      return false;
+    }
+    record.used = true;
+    return true;
+  }
+  return { remember, match };
+}
+
+export const sharedOneTimeApprovals = createOneTimeApprovalBook();
+let activeGate = null;
+
+export function settleActivePermissionRequest(toolCallId, grant, options) {
+  if (!activeGate || typeof activeGate.settlePermissionRequest !== 'function') return false;
+  return activeGate.settlePermissionRequest(toolCallId, grant, options);
+}
+
 const LOCAL_ACCESS_LEVELS = new Set([
   'ask_before_local',
   'session_local',
@@ -298,6 +340,8 @@ export function createChatPermissionGate({
   approvalStore = null,
   resolveApprovalScope = null,
   settleNotifier = null,
+  oneTimeApprovals = sharedOneTimeApprovals,
+  now = () => Date.now(),
 } = {}) {
   const pendingPermissionRequests = new Map();
   const approvedPermissionScopes = new Map();
@@ -424,6 +468,32 @@ export function createChatPermissionGate({
     conversationId = null,
     workspacePath = null,
   }) {
+    const at = Number(now());
+    const argsDigest = digestApprovalArgs(call?.arguments);
+    if (oneTimeApprovals?.match?.({ capabilityId: call?.capabilityId, argsDigest, at })) {
+      resolve({
+        granted: true,
+        grant: {
+          grantId: `once-${randomUUID()}`,
+          toolCallId: call.toolCallId,
+          granted: true,
+          duration: 'once',
+          scope: call.capabilityId,
+          decidedAt: new Date(at).toISOString(),
+        },
+        reason: 'local_user_approved_once',
+      });
+      recordApproval({
+        call,
+        streamId,
+        conversationId,
+        workspacePath,
+        state: 'approved',
+        decidedBy: 'local_ui',
+        argsDigest,
+      });
+      return;
+    }
     // Explorer / Verifier 没有审批人。询问会永远挂住，这里直接拒绝。
     // reason 会进入工具结果的 PermissionGrant / error，成为 Evidence 可见的拒绝原因。
     const approver = webContents?.approver ?? activeStreams.get(streamId)?.approver;
@@ -616,7 +686,9 @@ export function createChatPermissionGate({
     if (!pending) return false;
     pendingPermissionRequests.delete(toolCallId);
     activeStreams.get(pending.streamId)?.permissionIds?.delete(toolCallId);
-    const rememberType = Boolean(grant?.granted && pending.reusable && pending.scopeKey);
+    const rememberType = options.remember === false
+      ? false
+      : Boolean(grant?.granted && pending.reusable && pending.scopeKey);
     if (rememberType) {
       approvedPermissionScopes.set(pending.scopeKey, {
         ...grant,
@@ -691,7 +763,7 @@ export function createChatPermissionGate({
     }
   }
 
-  return {
+  const gate = {
     configure,
     createFilePermissionRequester,
     createLocalCapabilityPermissionRequester,
@@ -701,4 +773,6 @@ export function createChatPermissionGate({
     settlePermissionRequest,
     settleStreamPermissionRequests,
   };
+  activeGate = gate;
+  return gate;
 }

@@ -190,6 +190,7 @@ export function createInputQueue({
             anchorRefs: input.anchorRefs,
             quoteRefs: input.quoteRefs,
             attachmentRefs: input.attachmentRefs,
+            ...(input.answerTo ? { answerTo: input.answerTo } : {}),
           });
         }
         writeCursor(dirName, input.inputId);
@@ -218,7 +219,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   if (!text) throw new TypeError('text is required');
   if (text.length > 100_000) throw new TypeError('text is too long');
   const suppliedAt = Date.parse(input?.createdAt);
-  return {
+  const normalized = {
     inputId,
     workspaceId,
     surface: input.surface,
@@ -228,6 +229,9 @@ function normalizeSubmission(input, workspaceId, createdAt) {
     attachmentRefs: stringRefs(input?.attachmentRefs),
     createdAt: Number.isFinite(suppliedAt) ? new Date(suppliedAt).toISOString() : createdAt,
   };
+  const answerTo = optionalAnswer(input?.answerTo);
+  if (answerTo) normalized.answerTo = answerTo;
+  return normalized;
 }
 
 function normalizeStored(value, workspaceId) {
@@ -238,6 +242,13 @@ function normalizeStored(value, workspaceId) {
   } catch {
     return null;
   }
+}
+
+function optionalAnswer(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 500 || /[\r\n]/.test(trimmed)) return '';
+  return trimmed;
 }
 
 function stringRefs(value) {

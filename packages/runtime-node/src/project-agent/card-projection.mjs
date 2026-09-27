@@ -12,7 +12,7 @@ const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const ID_MAX = 200;
 const CARD_ID_MAX = 500;
 const TEXT_MAX = 240;
-const TERMINAL_APPROVAL = new Set(['approved', 'denied', 'expired', 'stale']);
+const CLOSED_APPROVAL = new Set(['approved', 'denied', 'expired']);
 
 /**
  * 纯投影。resolutions 是已经折叠前的追加记录，后出现的覆盖先出现的。
@@ -22,6 +22,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
   const stored = foldResolutions(resolutions);
   const built = [
     ...approvalCards(facts),
+    ...planApprovalCards(facts),
     ...taskQuestionCards(facts),
     ...replyQuestionCards(facts),
     ...confirmCards(facts),
@@ -88,29 +89,87 @@ export function createCardProjection({ rootDir = null, now = () => new Date() } 
   return { project, resolve };
 }
 
+function isPlanApproval(approval) {
+  return approval?.kind === 'plan_approval' || approval?.capabilityId === 'goal.plan';
+}
+
 function approvalCards(facts) {
   const cards = [];
   for (const approval of asList(facts.approvals)) {
+    if (isPlanApproval(approval)) continue;
     const approvalId = boundedId(approval?.approvalId, ID_MAX);
     if (!approvalId) continue;
     const state = typeof approval.state === 'string' ? approval.state : 'open';
-    if (state !== 'open' && !TERMINAL_APPROVAL.has(state)) continue;
-    const terminal = TERMINAL_APPROVAL.has(state);
+    if (state !== 'open' && state !== 'stale' && !CLOSED_APPROVAL.has(state)) continue;
+    const closed = CLOSED_APPROVAL.has(state);
     const cardId = cardIdOf('approval', approvalId);
     cards.push(draft({
       cardId,
       kind: 'approval',
-      content: clip(approval.summary, '需要你批准'),
-      factResolved: terminal,
-      factState: terminal ? state : '',
-      actions: terminal ? [] : [
-        action('approve', 'project-agent:decide-approval', { approvalId, decision: 'approve' }),
-        action('reject', 'project-agent:decide-approval', { approvalId, decision: 'reject' }),
-      ],
-      refs: refs({ approvalId, sessionId: boundedId(approval.sessionId, ID_MAX) }),
+      content: approvalContent(approval),
+      factResolved: closed,
+      factState: closed ? state : '',
+      actions: closed ? [] : approvalActions(approvalId, state),
+      refs: approvalRefs(approval, approvalId),
     }));
   }
   return cards;
+}
+
+function planApprovalCards(facts) {
+  const cards = [];
+  for (const approval of [...asList(facts.planApprovals), ...asList(facts.approvals).filter(isPlanApproval)]) {
+    const approvalId = boundedId(approval?.approvalId, ID_MAX);
+    const sessionId = boundedId(approval?.sessionId, ID_MAX);
+    if (!approvalId && !sessionId) continue;
+    const state = typeof approval.state === 'string' ? approval.state : 'open';
+    if (state !== 'open' && state !== 'stale' && !CLOSED_APPROVAL.has(state)) continue;
+    const closed = CLOSED_APPROVAL.has(state);
+    const cardId = cardIdOf('plan_approval', approvalId || sessionId);
+    cards.push(draft({
+      cardId,
+      kind: 'plan_approval',
+      content: clip(approval.summary, '计划待批准'),
+      factResolved: closed,
+      factState: closed ? state : '',
+      actions: closed ? [] : [
+        action('approve', 'project-agent:decide-approval', { approvalId: approvalId || sessionId, decision: 'approve' }),
+        action('reject', 'project-agent:decide-approval', { approvalId: approvalId || sessionId, decision: 'reject', duration: 'denied' }),
+      ],
+      refs: approvalRefs(approval, approvalId || sessionId),
+    }));
+  }
+  return cards;
+}
+
+function approvalContent(approval) {
+  const summary = clip(approval.summary, '需要你批准');
+  const extra = [approval.capabilityId, approval.riskLevel, approval.taskName]
+    .map((item) => boundedId(item, ID_MAX))
+    .filter(Boolean);
+  if (extra.length === 0) return summary;
+  return clip(`${summary} · ${extra.join(' · ')}`, summary);
+}
+
+function approvalActions(approvalId, state) {
+  if (state === 'stale') {
+    return [action('continue', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'once' })];
+  }
+  return [
+    action('allow', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'once' }),
+    action('allow_task', 'project-agent:decide-approval', { approvalId, decision: 'approve', duration: 'task' }),
+    action('reject', 'project-agent:decide-approval', { approvalId, decision: 'reject', duration: 'denied' }),
+  ];
+}
+
+function approvalRefs(approval, approvalId) {
+  return refs({
+    approvalId,
+    sessionId: boundedId(approval.sessionId, ID_MAX),
+    capabilityId: boundedId(approval.capabilityId, ID_MAX),
+    riskLevel: boundedId(approval.riskLevel, ID_MAX),
+    taskName: boundedId(approval.taskName, ID_MAX),
+  });
 }
 
 function taskQuestionCards(facts) {

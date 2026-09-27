@@ -123,6 +123,9 @@ export type TranslationKey =
   | 'projectAgent.chat.surfacing.digest'
   | 'projectAgent.chat.surfacing.silent'
   | 'projectAgent.chat.approve'
+  | 'projectAgent.chat.allowOnce'
+  | 'projectAgent.chat.allowTask'
+  | 'projectAgent.chat.approveContinue'
   | 'projectAgent.chat.reject'
   | 'projectAgent.chat.answer'
   | 'projectAgent.drawer.title'
@@ -1088,6 +1091,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': '收进小结',
     'projectAgent.chat.surfacing.silent': '不打扰',
     'projectAgent.chat.approve': '批准',
+    'projectAgent.chat.allowOnce': '允许',
+    'projectAgent.chat.allowTask': '本任务内都允许',
+    'projectAgent.chat.approveContinue': '批准并继续',
     'projectAgent.chat.reject': '拒绝',
     'projectAgent.chat.answer': '回答',
     'projectAgent.drawer.title': '档案',
@@ -1865,6 +1871,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': 'Keep for the digest',
     'projectAgent.chat.surfacing.silent': 'Stay quiet',
     'projectAgent.chat.approve': 'Approve',
+    'projectAgent.chat.allowOnce': 'Allow',
+    'projectAgent.chat.allowTask': 'Allow for this task',
+    'projectAgent.chat.approveContinue': 'Approve and continue',
     'projectAgent.chat.reject': 'Reject',
     'projectAgent.chat.answer': 'Answer',
     'projectAgent.drawer.title': 'Profile',
