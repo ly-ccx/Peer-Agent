@@ -40,10 +40,13 @@ test('计划失败时通知 onPlanTerminal', async () => {
     });
     runner.setOnPlanTerminal((event) => { seen.push(event); });
     await runner.resume(plan.planId, { awaitIdle: true, reason: 'goal_accepted' });
+    const saved = store.getPlan(plan.planId);
+    assert.equal(saved.status, 'interrupted');
+    assert.equal(saved.runner.status, 'failed');
+    assert.equal(saved.runner.interruption.recoverable, false);
     assert.equal(seen.length, 1);
     assert.equal(seen[0].type, 'goalRunner:failed');
     assert.equal(seen[0].planId, plan.planId);
-    assert.equal(['failed', 'interrupted'].includes(store.getPlan(plan.planId).status), true);
   } finally {
     if (previous === undefined) delete process.env.PEER_AGENT_HOME;
     else process.env.PEER_AGENT_HOME = previous;

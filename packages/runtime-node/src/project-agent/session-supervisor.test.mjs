@@ -892,3 +892,139 @@ test('普通计划完成不会把项目任务从队列里拉起来', async () =>
     await env.cleanup();
   }
 });
+
+function persistFinalFailure(store, planId) {
+  store.setPlanStatus(planId, 'failed');
+  store.setRunnerState(planId, {
+    enabled: true,
+    status: 'failed',
+    intent: 'block',
+    phase: 'blocked',
+    lastError: 'boom',
+    interruption: {
+      source: 'runGoalTurn',
+      reason: 'boom',
+      interruptedAt: '2026-09-27T00:00:00.000Z',
+    },
+  });
+}
+
+test('重试用尽后落成 interrupted 的失败会让出队列', async () => {
+  const runner = countingRunner();
+  const env = await harness({ goalRunner: runner.goalRunner });
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '先占住名额', readOnly: true }),
+      contextOf(env, { inputId: 'input-run' }),
+    );
+    const queued = await env.supervisor.spawn(
+      spawnInput({ title: '等着', brief: '等前面失败' }),
+      contextOf(env, { inputId: 'input-next' }),
+    );
+    const runningPlanId = planIdOf(env, running.sessionId);
+    persistFinalFailure(env.goalPlanStore, runningPlanId);
+    const stored = env.goalPlanStore.getPlan(runningPlanId);
+    assert.equal(stored.status, 'interrupted');
+    assert.equal(stored.runner.status, 'failed');
+    assert.equal(stored.runner.interruption.recoverable, false);
+    const released = await env.supervisor.releaseSlot({ planId: runningPlanId });
+    assert.equal(released.ok, true);
+    assert.equal(runner.starts.at(-1), planIdOf(env, queued.sessionId));
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('可恢复中断仍占着名额，不启动下一个', async () => {
+  const runner = countingRunner();
+  const env = await harness({ goalRunner: runner.goalRunner });
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '先占住名额', readOnly: true }),
+      contextOf(env, { inputId: 'input-run' }),
+    );
+    const queued = await env.supervisor.spawn(
+      spawnInput({ title: '等着', brief: '先别启动' }),
+      contextOf(env, { inputId: 'input-next' }),
+    );
+    const runningPlanId = planIdOf(env, running.sessionId);
+    env.goalPlanStore.setRunnerState(runningPlanId, {
+      enabled: true,
+      status: 'running',
+      interruption: {
+        source: 'runGoalTurn',
+        reason: 'timeout',
+        interruptedAt: '2026-09-27T00:00:00.000Z',
+        recoverable: true,
+        attempt: 1,
+      },
+      recoverableInterruptionCount: 1,
+      maxRecoverableInterruptionRetries: 3,
+    });
+    const released = await env.supervisor.releaseSlot({ planId: runningPlanId });
+    assert.equal(released.reason, 'still_running');
+    assert.equal(runner.starts.length, 1);
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.phase, 'queued');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('前置最终失败后，依赖它的任务会启动', async () => {
+  const runner = countingRunner();
+  const env = await harness({ goalRunner: runner.goalRunner });
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '前置', brief: '先做完', readOnly: true }),
+      contextOf(env, { inputId: 'input-run' }),
+    );
+    const dependent = await env.supervisor.spawn(
+      spawnInput({ title: '随后', brief: '等前置结束', dependsOn: [running.sessionId] }),
+      contextOf(env, { inputId: 'input-dep' }),
+    );
+    assert.equal(dependent.status, 'queued');
+    persistFinalFailure(env.goalPlanStore, planIdOf(env, running.sessionId));
+    await env.supervisor.releaseSlot({ planId: planIdOf(env, running.sessionId) });
+    assert.equal(runner.starts.at(-1), planIdOf(env, dependent.sessionId));
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, dependent.sessionId)).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('重新建立监督者时，已经结束的占用者会把队列里的下一个拉起来', async () => {
+  const runner = countingRunner();
+  const env = await harness({ goalRunner: runner.goalRunner });
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '先占住名额', readOnly: true }),
+      contextOf(env, { inputId: 'input-run' }),
+    );
+    const queued = await env.supervisor.spawn(
+      spawnInput({ title: '等着', brief: '等重启' }),
+      contextOf(env, { inputId: 'input-next' }),
+    );
+    const whileRunning = createSessionSupervisor({
+      conversationStore: env.conversationStore,
+      goalPlanStore: env.goalPlanStore,
+      goalRunner: runner.goalRunner,
+      now: () => '2026-09-27T00:00:00.000Z',
+    });
+    await whileRunning.reconciled;
+    assert.equal(runner.starts.length, 1);
+
+    env.goalPlanStore.setPlanStatus(planIdOf(env, running.sessionId), 'completed');
+    const afterRestart = createSessionSupervisor({
+      conversationStore: env.conversationStore,
+      goalPlanStore: env.goalPlanStore,
+      goalRunner: runner.goalRunner,
+      now: () => '2026-09-27T00:00:00.000Z',
+    });
+    await afterRestart.reconciled;
+    assert.equal(runner.starts.at(-1), planIdOf(env, queued.sessionId));
+    assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});

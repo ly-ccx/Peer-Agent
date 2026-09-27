@@ -11,6 +11,7 @@ import { digestApprovalArgs } from './approval-store.mjs';
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
  * 每个项目同时只有一个 phase=running 的任务，其余 queued。
  * 占用名额的任务完成、失败，或任一任务被取消后，启动队列里最早且依赖已满足的下一个。
+ * 重试用尽后落成 interrupted 的失败也让出名额。监督者建立时会再扫一遍已经落盘的队列。
  * 名额仍被占用时，这次唤醒直接返回。
  * 只读写入判定在 evaluateWorkSessionWrite。协议里的 writeScope 只有 workspace_and_boundaries，不能用来表示禁止写。
  * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
@@ -128,14 +129,34 @@ export function createSessionSupervisor({
       && (plan.delegationOrigin.phase === 'running' || plan.delegationOrigin.phase === 'queued'));
   }
 
+  function finalFailureReleased(plan) {
+    if (plan?.status !== 'interrupted') return false;
+    const runner = plan.runner;
+    const runnerStatus = runner?.status;
+    if (runnerStatus === 'running' || runnerStatus === 'exploring' || runnerStatus === 'waiting_user') return false;
+    const interruption = runner?.interruption;
+    if (interruption?.recoverable === true) {
+      const limit = runner?.maxRecoverableInterruptionRetries;
+      const used = runner?.recoverableInterruptionCount;
+      if (!Number.isFinite(limit) || !Number.isFinite(used) || used < limit) return false;
+    }
+    return runnerStatus === 'failed';
+  }
+
   function occupiesRunningSlot(plan) {
-    return plan?.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status);
+    return plan?.delegationOrigin?.phase === 'running'
+      && !TERMINAL.has(plan.status)
+      && !finalFailureReleased(plan);
+  }
+
+  function settled(plan) {
+    return TERMINAL.has(plan?.status) || finalFailureReleased(plan);
   }
 
   function depsMet(dependsOn) {
     if (!Array.isArray(dependsOn) || dependsOn.length === 0) return true;
     const byId = new Map(delegatedPlans().map((plan) => [plan.delegationOrigin.sessionId, plan]));
-    return dependsOn.every((id) => TERMINAL.has(byId.get(id)?.status));
+    return dependsOn.every((id) => settled(byId.get(id)));
   }
 
   function decidePhase(workspaceId, dependsOn) {
@@ -687,7 +708,9 @@ export function createSessionSupervisor({
     return { ok: Boolean(resumed), planId, resumed };
   }
 
-  // 完成、失败、取消才让出名额。可恢复的 interrupted 仍占着名额，避免和稍后的恢复执行叠成两个任务。
+  // 完成、失败、取消，以及重试已经用尽的失败，才让出名额。
+  // failPlanRun 会带上 interruption，计划状态因此经常落成 interrupted 而不是 failed。
+  // 可恢复、预算还没用完的中断仍占着名额。
   async function releaseSlotLocked(input = {}) {
     const planId = text(typeof input === 'string' ? input : input?.planId);
     if (!planId) return { ok: false, reason: 'missing_plan' };
@@ -695,7 +718,7 @@ export function createSessionSupervisor({
     const origin = plan?.delegationOrigin;
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
     if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
-    if (origin.phase !== 'running' || !TERMINAL.has(plan.status)) return { ok: false, reason: 'not_slot_holder' };
+    if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
     await promote(origin.workspaceId);
     return { ok: true, planId };
   }
@@ -717,6 +740,17 @@ export function createSessionSupervisor({
       void releaseSlot({ planId: event?.planId }).catch(() => {});
     });
   }
+
+  async function reconcilePersistedQueues() {
+    const workspaces = new Set();
+    for (const plan of delegatedPlans()) {
+      const workspaceId = plan.delegationOrigin?.workspaceId;
+      if (workspaceId) workspaces.add(workspaceId);
+    }
+    for (const workspaceId of workspaces) await promote(workspaceId);
+  }
+
+  const reconciled = exclusive(() => reconcilePersistedQueues());
 
   return {
     spawn(input, context) {
@@ -747,6 +781,7 @@ export function createSessionSupervisor({
       return evaluateWorkSessionWrite(plan, action);
     },
     releaseSlot,
+    reconciled,
   };
 }
 
