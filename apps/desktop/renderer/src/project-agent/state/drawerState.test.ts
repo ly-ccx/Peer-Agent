@@ -10,7 +10,10 @@ import {
   openDrawer,
   readDrawerMemory,
   readDrawerSession,
+  filterMemoryRecords,
   readMemoryItems,
+  readMemoryRecords,
+  readMemorySwitches,
   writeDrawerMemory,
   type DrawerMemory,
   type DrawerSession,
@@ -107,8 +110,26 @@ test('记忆只读投影和对话模型标签', () => {
     { id: 'm2', kind: 'fact', text: '已忘记', status: 'forgotten' },
     { id: '', text: '没有 id' },
   ]);
-  assert.deepEqual(items, [{ id: 'm1', kind: 'responsibility', text: '这个项目负责发布说明' }]);
+  assert.deepEqual(items, [{
+    id: 'm1',
+    kind: 'responsibility',
+    text: '这个项目负责发布说明',
+    trust: 'stated',
+    status: 'active',
+    pinned: false,
+  }]);
   assert.equal(briefFromMemories(items), '这个项目负责发布说明');
+  const records = readMemoryRecords([
+    { id: 'm1', kind: 'fact', text: '最近的事实', trust: 'verified', status: 'active', pinned: true },
+    { id: 'm2', kind: 'fact', text: '已撤销', trust: 'stated', status: 'forgotten', pinned: false },
+  ]);
+  assert.equal(records.length, 2);
+  assert.deepEqual(filterMemoryRecords(records, { kind: 'fact', trust: 'verified', status: 'active' }).map((item) => item.id), ['m1']);
+  assert.deepEqual(readMemorySwitches({ memoryEnabled: false, useMemory: true }), {
+    memoryEnabled: false,
+    useMemory: true,
+    learnPreferences: true,
+  });
   assert.equal(conversationModelLabel({
     resolutions: [{ role: 'session_worker', label: '工人' }, { role: 'project_agent', label: '对话模型' }],
   }), '对话模型');

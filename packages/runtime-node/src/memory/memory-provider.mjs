@@ -26,6 +26,7 @@ const MESSAGES = {
   invalid_kind: ['记忆类型无效。', 'The memory kind is invalid.'],
   not_found: ['没有这条记忆。', 'Memory was not found.'],
   not_project_agent: ['只有项目代理可以读写记忆。', 'Only the project agent can read or write memory.'],
+  memory_disabled: ['记忆已关闭，没有写入，也没有读取。', 'Memory is off. Nothing was written or read.'],
   invalid_input: ['记忆参数无效。', 'Memory input is invalid.'],
 };
 
@@ -127,6 +128,17 @@ export function createMemoryProvider(options = {}) {
         output: { ok: false, error: 'not_project_agent', message: explain('not_project_agent', locale) },
       });
     }
+    const workspaceId = text(context?.workspaceId);
+    if (typeof options.enabled === 'function' && options.enabled(workspaceId) === false) {
+      return finish({
+        call,
+        capabilityId,
+        name: item.name,
+        locale,
+        status: 'failed',
+        output: { ok: false, error: 'memory_disabled', message: explain('memory_disabled', locale) },
+      });
+    }
     const validated = validateMemoryInput(item.name, parseArgs(call));
     if (!validated.ok) {
       return finish({
@@ -179,6 +191,9 @@ export function createMemoryProvider(options = {}) {
       if (!found) continue;
       items.push(publicItem(found));
       if (items.length >= limit) break;
+    }
+    if (items.length) {
+      resources().store.markUsed?.(items.map((item) => item.id));
     }
     return { ok: true, items };
   }

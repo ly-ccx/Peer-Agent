@@ -22,9 +22,12 @@ import { createProjectAgentApplicationService } from './project-agent-applicatio
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
+import { createProjectMemoryIpcRegistrations } from '../ipc/register-project-memory-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
 import { installProjectProactivity } from './proactivity-port.mjs';
 import { installDeliveryFacts } from './delivery-facts-port.mjs';
+import { installMemoryGate, memoryUseEnabled } from './memory-gate-port.mjs';
+import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
 /**
@@ -294,6 +297,14 @@ export function registerDesktopProjectAgent({
       return { ok: true, level };
     },
   });
+  const memoryStore = createMemoryStore({ rootDir: dataHome });
+  installMemoryGate({
+    enabled(workspaceId) {
+      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const profile = workspaceId ? profileStore.read(workspaceId) : null;
+      return memoryUseEnabled({ settings, profile });
+    },
+  });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -309,7 +320,7 @@ export function registerDesktopProjectAgent({
     enabled,
     registry,
     conversationStore,
-    memoryStore: createMemoryStore({ rootDir: dataHome }),
+    memoryStore,
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
   });
@@ -431,7 +442,23 @@ export function registerDesktopProjectAgent({
       workspaceIdForConversation,
     });
   }
-  return createProjectAgentIpcRegistrations({ projectAgent });
+  const memory = createProjectMemoryService({
+    store: memoryStore,
+    profileStore,
+    getSettings: typeof getSettings === 'function' ? getSettings : () => ({}),
+    mergeSettings: typeof mergeSettings === 'function' ? mergeSettings : () => {},
+    showSaveDialog: async (options) => {
+      if (!dialog || typeof dialog.showSaveDialog !== 'function') return { canceled: true };
+      const parent = typeof BrowserWindow?.getFocusedWindow === 'function'
+        ? BrowserWindow.getFocusedWindow() ?? undefined
+        : undefined;
+      return dialog.showSaveDialog(parent, options);
+    },
+  });
+  return [
+    ...createProjectAgentIpcRegistrations({ projectAgent }),
+    ...createProjectMemoryIpcRegistrations({ memory }),
+  ];
 }
 
 function readRegisteredArtifact(dataHome, ref, record) {

@@ -1081,6 +1081,13 @@ export interface BootstrapPreloadApi {
   }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
   readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
   readonly projectAgentSearch: (params?: { query?: string }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
+  readonly projectMemoryList: (params: { workspaceId: string; kind?: string; trust?: string; status?: string; ids?: readonly string[] }) => Promise<{ ok: boolean; code?: string; items?: readonly unknown[]; switches?: { memoryEnabled?: boolean; useMemory?: boolean; learnPreferences?: boolean } }>;
+  readonly projectMemoryPin: (params: { workspaceId: string; id: string; pinned: boolean }) => Promise<{ ok: boolean; code?: string; item?: unknown }>;
+  readonly projectMemoryForget: (params: { workspaceId: string; id: string; reason?: string }) => Promise<{ ok: boolean; code?: string; item?: unknown }>;
+  readonly projectMemoryRestore: (params: { workspaceId: string; id: string }) => Promise<{ ok: boolean; code?: string; item?: unknown }>;
+  readonly projectMemoryEdit: (params: { workspaceId: string; id: string; text: string }) => Promise<{ ok: boolean; code?: string; item?: unknown; revokedId?: string }>;
+  readonly projectMemoryExport: (params: { workspaceId: string; format: 'json' | 'markdown' }) => Promise<{ ok: boolean; code?: string; path?: string; format?: string }>;
+  readonly projectMemorySetSwitches: (params: { workspaceId: string; memoryEnabled?: boolean; useMemory?: boolean; learnPreferences?: boolean }) => Promise<{ ok: boolean; code?: string; switches?: { memoryEnabled: boolean; useMemory: boolean; learnPreferences: boolean } }>;
   readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly workspaceList: () => Promise<{

@@ -44,11 +44,17 @@ test('快照只记录当时的 active 条目，之后的变更不改这份快照
     const raw = readFileSync(path.join(root, 'projects', 'ws-1', 'memory', 'snapshots.jsonl'), 'utf8');
 
     const later = stated(store, { text: '快照之后才记住的' });
+    store.forget({ id: fact.item.id, reason: '快照之后忘掉', workspaceId: 'ws-1' });
+    store.reviseStated({ id: preference.item.id, text: '快照之后改成的偏好' });
     assert.equal(
       readFileSync(path.join(root, 'projects', 'ws-1', 'memory', 'snapshots.jsonl'), 'utf8').startsWith(raw.trim()),
       true,
     );
-    assert.deepEqual(readSnapshots('ws-1', options)[0].itemIds, first.itemIds);
+    const frozen = readSnapshots('ws-1', options)[0];
+    assert.deepEqual(frozen.itemIds, first.itemIds);
+    assert.deepEqual(frozen.items.map((item) => item.text).sort(), ['只说结论', '登录页在 src/login.tsx']);
+    assert.equal(frozen.items.every((item) => item.status === 'active'), true);
+    assert.equal(frozen.items.some((item) => item.text === '快照之后改成的偏好'), false);
 
     const second = createSnapshot('ws-1', options);
     assert.equal(second.itemIds.includes(later.item.id), true);

@@ -64,6 +64,7 @@ import {
   readSnapshots,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
+import { liveMemoryGate } from './project-agent/memory-gate-port.mjs';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -192,6 +193,9 @@ function loadSnapshotItems(workspaceId, snapshotId) {
     const snapshot = readSnapshots(workspaceId, { store })
       .find((item) => item.snapshotId === snapshotId);
     if (!snapshot) return [];
+    if (Array.isArray(snapshot.items) && snapshot.items.length) {
+      return snapshot.items.map((item) => ({ ...item }));
+    }
     const items = [];
     for (const id of snapshot.itemIds) {
       const item = store.get(id);
@@ -245,8 +249,10 @@ export function projectTurnSystemContext(profile, {
   conversationStore = null,
   readMemory = loadProjectMemory,
   readSnapshot = loadSnapshotItems,
+  memoryEnabled = true,
 } = {}) {
   if (profile?.role !== 'project_agent' && profile?.role !== 'work_session') return {};
+  const useMemory = memoryEnabled !== false;
   const turnContext = sanitizeTurnContext(profile.context);
   const fields = {
     role: profile.role,
@@ -256,7 +262,7 @@ export function projectTurnSystemContext(profile, {
     ...(textField(profile.memorySnapshotId) ? { memorySnapshotId: textField(profile.memorySnapshotId) } : {}),
     ...(turnContext ? { turnContext } : {}),
   };
-  if (profile.role === 'project_agent') {
+  if (profile.role === 'project_agent' && useMemory) {
     const injected = explicitArray(turnContext?.projectMemory)
       ?? explicitArray(turnContext?.memoryItems)
       ?? explicitArray(turnContext?.items);
@@ -278,10 +284,12 @@ export function projectTurnSystemContext(profile, {
       || textField(profile.memorySnapshotId)
       || textField(origin.memorySnapshotId);
     const injectedItems = explicitArray(bag.snapshotItems) ?? explicitArray(bag.items);
-    const snapshotItems = injectedItems
-      ?? (snapshotId && textField(profile.workspaceId)
-        ? readSnapshot(textField(profile.workspaceId), snapshotId)
-        : []);
+    const snapshotItems = useMemory
+      ? (injectedItems
+        ?? (snapshotId && textField(profile.workspaceId)
+          ? readSnapshot(textField(profile.workspaceId), snapshotId)
+          : []))
+      : [];
     const readOnly = typeof bag.readOnly === 'boolean' ? bag.readOnly : origin.readOnly === true;
     const summary = textField(bag.summary) || textField(bag.brief) || textField(plan?.goal);
     const anchorText = textField(bag.anchorText) || readAnchorText(conversationStore, origin);
@@ -1767,6 +1775,7 @@ export function createLlmChatService({
             conversationId,
             goalPlanStore,
             conversationStore,
+            memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
           }),
         });
         const systemPrompt = renderSystemContext(systemContext);
@@ -1821,6 +1830,7 @@ export function createLlmChatService({
               conversationId,
               goalPlanStore,
               conversationStore,
+              memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
             }),
           });
           const rebuiltPrompt = renderSystemContext(rebuiltContext);

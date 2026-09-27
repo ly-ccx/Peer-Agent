@@ -192,6 +192,13 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentDecideApproval: (params) => ipcRenderer.invoke('project-agent:decide-approval', params),
   projectAgentMarkRead: (params) => ipcRenderer.invoke('project-agent:mark-read', params),
   projectAgentSearch: (params) => ipcRenderer.invoke('project-agent:search', params),
+  projectMemoryList: (params) => ipcRenderer.invoke('project-memory:list', params),
+  projectMemoryPin: (params) => ipcRenderer.invoke('project-memory:pin', params),
+  projectMemoryForget: (params) => ipcRenderer.invoke('project-memory:forget', params),
+  projectMemoryRestore: (params) => ipcRenderer.invoke('project-memory:restore', params),
+  projectMemoryEdit: (params) => ipcRenderer.invoke('project-memory:edit', params),
+  projectMemoryExport: (params) => ipcRenderer.invoke('project-memory:export', params),
+  projectMemorySetSwitches: (params) => ipcRenderer.invoke('project-memory:set-switches', params),
   onProjectAgentChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('project-agent:changed', handler);

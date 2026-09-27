@@ -206,6 +206,43 @@ test('密钥和令牌被拒绝，已有条目保持原样', () => {
   }
 });
 
+test('固定、编辑和最近使用都追加在原条目上', () => {
+  const root = tempRoot('page');
+  try {
+    const store = createMemoryStore({ rootDir: root, now: () => new Date('2026-09-27T00:00:00.000Z') });
+    const saved = stated(store);
+    const pinned = store.setPinned({ id: saved.item.id, pinned: true, workspaceId: 'ws-1' });
+    assert.equal(pinned.ok, true);
+    assert.equal(pinned.item.pinned, true);
+    const unpinned = store.setPinned({ id: saved.item.id, pinned: false, workspaceId: 'ws-1' });
+    assert.equal(unpinned.item.pinned, false);
+
+    const edited = store.reviseStated({
+      id: saved.item.id,
+      text: '登录页改到 src/auth/login.tsx',
+      workspaceId: 'ws-1',
+    });
+    assert.equal(edited.ok, true);
+    assert.equal(edited.item.trust, 'stated');
+    assert.deepEqual(edited.item.sourceRefs, [`edit:${saved.item.id}`]);
+    assert.notEqual(edited.item.id, saved.item.id);
+    assert.equal(store.get(saved.item.id).status, 'forgotten');
+    const stillAnchored = store.rememberStated({
+      workspaceId: 'ws-1',
+      kind: 'fact',
+      text: '没有锚点不能走工具路径',
+    });
+    assert.equal(stillAnchored.reason, 'anchor_required');
+
+    const used = store.markUsed([edited.item.id], '2026-09-27T09:00:00.000Z');
+    assert.equal(used[0].lastUsedAt, '2026-09-27T09:00:00.000Z');
+    assert.equal(used[0].text, '登录页改到 src/auth/login.tsx');
+    assert.equal(store.get(edited.item.id).lastUsedAt, '2026-09-27T09:00:00.000Z');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('workspaceId 不能逃出项目目录', () => {
   const root = tempRoot('path');
   try {

@@ -39,6 +39,30 @@ export interface DrawerMemoryItem {
   readonly id: string;
   readonly kind: string;
   readonly text: string;
+  readonly trust?: string;
+  readonly status?: string;
+  readonly pinned?: boolean;
+}
+
+export interface MemoryRecord {
+  readonly id: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly trust: string;
+  readonly status: string;
+  readonly pinned: boolean;
+}
+
+export interface MemorySwitches {
+  readonly memoryEnabled: boolean;
+  readonly useMemory: boolean;
+  readonly learnPreferences: boolean;
+}
+
+export interface MemoryFilter {
+  readonly kind: string;
+  readonly trust: string;
+  readonly status: string;
 }
 
 const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
@@ -140,18 +164,55 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
 }
 
 export function readMemoryItems(raw: unknown): DrawerMemoryItem[] {
+  return readMemoryRecords(raw)
+    .filter((item) => item.status !== 'forgotten' && item.status !== 'deleted')
+    .map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      text: item.text,
+      trust: item.trust,
+      status: item.status,
+      pinned: item.pinned,
+    }));
+}
+
+export function readMemoryRecords(raw: unknown): MemoryRecord[] {
   if (!Array.isArray(raw)) return [];
-  const items: DrawerMemoryItem[] = [];
+  const items: MemoryRecord[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
     const id = readString(record.id);
     const text = readString(record.text);
     if (!id || !text) continue;
-    if (record.status === 'forgotten' || record.status === 'deleted') continue;
-    items.push({ id, kind: readString(record.kind) || 'fact', text });
+    items.push({
+      id,
+      kind: readString(record.kind) || 'fact',
+      text,
+      trust: readString(record.trust) || 'stated',
+      status: readString(record.status) || 'active',
+      pinned: record.pinned === true,
+    });
   }
   return items;
+}
+
+export function readMemorySwitches(raw: unknown): MemorySwitches {
+  const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  return {
+    memoryEnabled: record.memoryEnabled !== false,
+    useMemory: record.useMemory !== false,
+    learnPreferences: record.learnPreferences !== false,
+  };
+}
+
+export function filterMemoryRecords(items: readonly MemoryRecord[], filter: MemoryFilter): MemoryRecord[] {
+  return items.filter((item) => {
+    if (filter.kind && item.kind !== filter.kind) return false;
+    if (filter.trust && item.trust !== filter.trust) return false;
+    if (filter.status && item.status !== filter.status) return false;
+    return true;
+  });
 }
 
 export function conversationModelLabel(preview: unknown): string {

@@ -343,7 +343,7 @@ describe('project agent mode gate', () => {
     assert.match(task, /Read-only constraint:/);
     assert.match(task, new RegExp(snapshot.snapshotId));
     assert.match(task, /frozen login fact/);
-    assert.match(task, /forgotten/);
+    assert.doesNotMatch(task, /forgotten/);
     assert.match(task, /Mode: agent \(default\)/);
     assert.doesNotMatch(task, /Mode: project_agent/);
     assert.doesNotMatch(task, /Hand code changes/);
@@ -358,4 +358,28 @@ it('其他角色不会把 turnProfile.context 送进系统上下文', () => {
     context: { roster: [{ sessionId: 'sess-x', title: 'nope' }] },
   }), {});
   assert.deepEqual(projectTurnSystemContext(null), {});
+});
+
+it('关闭记忆后项目代理和任务回合都不用记忆', () => {
+  const item = {
+    id: 'mem-1',
+    kind: 'fact',
+    trust: 'verified',
+    status: 'active',
+    text: '登录页在 src/login.tsx',
+  };
+  const agent = projectTurnSystemContext({
+    role: 'project_agent',
+    workspaceId: 'ws-1',
+    context: { projectMemory: [item] },
+  }, { memoryEnabled: false, readMemory: () => [item] });
+  assert.equal(agent.projectMemory, undefined);
+  const task = projectTurnSystemContext({
+    role: 'work_session',
+    workspaceId: 'ws-1',
+    memorySnapshotId: 'snap-1',
+    context: { workSessionOrigin: { summary: '修登录', snapshotItems: [item] } },
+  }, { memoryEnabled: false, readSnapshot: () => [item] });
+  assert.deepEqual(task.workSessionOrigin.snapshotItems, []);
+  assert.equal(task.workSessionOrigin.summary, '修登录');
 });

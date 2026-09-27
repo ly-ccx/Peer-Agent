@@ -118,6 +118,32 @@
   font-size: 12px;
 }
 
+.bot-memory-filters,
+.bot-memory-switches,
+.bot-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.bot-memory-filters label,
+.bot-memory-switches label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.bot-memory-filters select {
+  border: 1px solid var(--chrome-hairline, var(--separator));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 4px 8px;
+}
+
 .bot-drawer-tab input {
   width: 100%;
   border: 1px solid var(--chrome-hairline, var(--separator));
