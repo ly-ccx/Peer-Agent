@@ -176,6 +176,37 @@ describe('task-notification-broker', () => {
     assert.equal(h.shown[1].title, '任务失败');
   });
 
+  it('does not notify plans that belong to a project agent', () => {
+    const h = createHarness();
+    h.plans.set('p-bot', {
+      planId: 'p-bot',
+      status: 'executing',
+      title: '机器人任务',
+      conversationId: 'c-bot',
+      delegationOrigin: { workspaceId: 'ws-1', sessionId: 'sess-1' },
+    });
+    h.broker.evaluatePlan(h.plans.get('p-bot'));
+    h.plans.set('p-bot', { ...h.plans.get('p-bot'), status: 'completed' });
+    const delegated = h.broker.evaluatePlan(h.plans.get('p-bot'));
+    assert.equal(delegated.action, 'skip');
+    assert.equal(delegated.reason, 'delegated_plan');
+    assert.equal(h.shown.length, 0);
+    assert.equal(h.receiptStore.get('p-bot'), null);
+
+    h.plans.set('p-plain', {
+      planId: 'p-plain',
+      status: 'executing',
+      title: '普通任务',
+      conversationId: 'c-plain',
+    });
+    h.broker.evaluatePlan(h.plans.get('p-plain'));
+    h.plans.set('p-plain', { ...h.plans.get('p-plain'), status: 'completed' });
+    const plain = h.broker.evaluatePlan(h.plans.get('p-plain'));
+    assert.equal(plain.action, 'notify');
+    assert.equal(h.shown.length, 1);
+    assert.equal(h.shown[0].title, '任务已完成');
+  });
+
   it('does not replay existing notifiable plans on bootstrap', () => {
     const h = createHarness({
       plans: [

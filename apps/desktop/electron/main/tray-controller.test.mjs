@@ -6,11 +6,28 @@ import {
   TRAY_RECENT_EXPANDED_LIMIT,
   TRAY_RECENT_LIMIT,
   TRAY_SUBSCRIPTION_REFRESH_DELAY_MS,
+  applyTrayBadge,
   buildTrayMenuFingerprint,
   buildTrayMenuTemplate,
+  trayBadgeTitle,
   truncateTrayTitle,
   workspaceShortName,
 } from './tray-controller.mjs';
+
+describe('trayBadgeTitle', () => {
+  it('stays empty while the project agent switch is off', () => {
+    const tray = { titles: [], setTitle(value) { this.titles.push(value); } };
+    assert.equal(trayBadgeTitle(0), '');
+    assert.equal(trayBadgeTitle(4), '4');
+    assert.equal(trayBadgeTitle(120), '99+');
+    assert.equal(applyTrayBadge(tray, { enabled: false, count: 4, previous: '' }), '');
+    assert.deepEqual(tray.titles, []);
+    assert.equal(applyTrayBadge(tray, { enabled: true, count: 4, previous: '' }), '4');
+    assert.equal(applyTrayBadge(tray, { enabled: true, count: 120, previous: '4' }), '99+');
+    assert.equal(applyTrayBadge(tray, { enabled: false, count: 4, previous: '99+' }), '');
+    assert.deepEqual(tray.titles, ['4', '99+', '']);
+  });
+});
 
 describe('truncateTrayTitle', () => {
   it('falls back to 新任务 for empty titles', () => {

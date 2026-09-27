@@ -153,6 +153,9 @@ export function registerDesktopProjectAgent({
   dialog,
   BrowserWindow,
   shell,
+  onReady = null,
+  onAppendedMessage = null,
+  onViewing = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const registry = createProjectRegistry({
@@ -196,6 +199,21 @@ export function registerDesktopProjectAgent({
 
   function appendMessage(conversationId, message) {
     conversationStore.appendMessage(conversationId, message);
+    if (typeof onAppendedMessage !== 'function') return;
+    try {
+      onAppendedMessage({ conversationId, message });
+    } catch (error) {
+      console.warn('[project-agent-notifier] append hook failed:', error);
+    }
+  }
+
+  function workspaceIdForConversation(conversationId) {
+    const id = typeof conversationId === 'string' ? conversationId : '';
+    if (!id) return '';
+    for (const workspaceId of directory.workspaceIds()) {
+      if (directory.conversationId(workspaceId) === id) return workspaceId;
+    }
+    return '';
   }
 
   const inputQueue = createInputQueue({
@@ -257,7 +275,19 @@ export function registerDesktopProjectAgent({
     wake: (workspaceId) => {
       void host.sync([workspaceId]).catch(() => {});
     },
+    onViewing,
     broadcast,
   });
+  if (typeof onReady === 'function') {
+    onReady({
+      listItems: () => directory.list(),
+      botName: (workspaceId) => {
+        const got = directory.get(workspaceId);
+        if (!got?.ok) return '';
+        return got.profile?.displayName || got.item?.profile?.displayName || '';
+      },
+      workspaceIdForConversation,
+    });
+  }
   return createProjectAgentIpcRegistrations({ projectAgent });
 }

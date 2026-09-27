@@ -1072,7 +1072,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentListApprovals: (params?: { workspaceId?: string }) => Promise<{ ok: boolean; code?: string; approvals?: readonly unknown[] }>;
   readonly projectAgentDecideApproval: (params: { workspaceId: string; approvalId: string; decision: 'approve' | 'reject' | 'deny' }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
-  readonly projectAgentMarkRead: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null }>;
+  readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
   readonly projectAgentSearch: (params?: { query?: string }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
   readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
@@ -1659,6 +1659,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     messageId?: string | null;
     attentionVersion?: number | null;
     source?: string;
+    workspaceId?: string | null;
   }) => void) => () => void;
   /** 菜单栏托盘：New Chat。 */
   readonly onTrayNewChat: (listener: (payload?: { source?: string }) => void) => () => void;

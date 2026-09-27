@@ -133,6 +133,7 @@ import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
+import { createProjectAgentNotifier } from './project-agent/project-agent-notifier.mjs';
 import { createAutomationRuntimeOwner } from './automation-runtime-owner.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationOutcomeController } from './automation-outcome-controller.mjs';
@@ -573,6 +574,13 @@ const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   },
 });
 let taskNotificationBroker = null;
+let projectAgentNotifier = null;
+let viewingBotWorkspaceId = null;
+let projectAgentDirectory = {
+  listItems: () => [],
+  botName: () => '',
+  workspaceIdForConversation: () => '',
+};
 let trayController = null;
 let desktopLifecycleBinding = null;
 const stopGoalPlanChangeSubscription = bindExternalGoalPlanChanges({
@@ -676,6 +684,13 @@ function broadcastToAllWindows(channel, payload) {
   for (const win of wins) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   }
+  if (channel === 'project-agent:changed') {
+    try {
+      trayController?.refreshBadge?.();
+    } catch (error) {
+      console.warn('[tray] badge refresh failed:', error);
+    }
+  }
 }
 
 function getPeerAgentMainWindow() {
@@ -723,6 +738,27 @@ function openConversationFromTaskNotification(payload = {}) {
     return true;
   }
   return false;
+}
+
+function openBotFromSurfacing(payload = {}) {
+  const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
+  if (!workspaceId) return false;
+  showOrCreateMainWindow();
+  const window = getPeerAgentMainWindow();
+  if (!window || window.isDestroyed()) return false;
+  const eventPayload = {
+    conversationId: workspaceId,
+    workspacePath: '',
+    workspaceId,
+    messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
+    source: 'project-agent-notification',
+  };
+  const send = () => {
+    if (!window.isDestroyed()) window.webContents.send('quick-chat:open-conversation', eventPayload);
+  };
+  if (window.webContents.isLoadingMainFrame()) window.webContents.once('did-finish-load', send);
+  else send();
+  return true;
 }
 
 function openAutomationRunFromNotification(payload = {}) {
@@ -843,6 +879,11 @@ function createAppTrayController() {
       onQuit: () => {
         app.quit();
       },
+    },
+    isProjectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+    getNeedsYouCount: () => {
+      const items = projectAgentDirectory.listItems?.() || [];
+      return items.reduce((sum, item) => sum + (Number(item?.state?.needsYou) || 0), 0);
     },
   });
 }
@@ -2121,6 +2162,19 @@ function registerDesktopIpcHost() {
       holdsLease: (workspaceId) => hostLeases.holds(workspaceId),
       getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
       dialog, BrowserWindow, shell,
+      onReady: (api) => {
+        projectAgentDirectory = api;
+      },
+      onViewing: (workspaceId) => {
+        viewingBotWorkspaceId = typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
+      },
+      onAppendedMessage: (payload) => {
+        try {
+          projectAgentNotifier?.handleAppended(payload);
+        } catch (error) {
+          console.warn('[project-agent-notifier] handleAppended failed:', error);
+        }
+      },
     }),
   ],
   });
@@ -3516,6 +3570,7 @@ function startDesktopAffordances() {
         () => stopAutoUpdater(),
         () => shortcutService.dispose(),
         () => trayController?.destroy?.(),
+        () => { projectAgentNotifier = null; },
         () => quickChatWindowController.destroy(),
       ]) {
         try {
@@ -3559,6 +3614,26 @@ function startDesktopAffordances() {
   } catch (err) {
     console.warn('[task-notification] broker init failed:', err);
     taskNotificationBroker = null;
+  }
+
+  try {
+    projectAgentNotifier = createProjectAgentNotifier({
+      isEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+      isForegroundSameBot: (workspaceId) => (
+        isMainAppForegroundForNotifications() && viewingBotWorkspaceId === workspaceId
+      ),
+      botNameForWorkspace: (workspaceId) => projectAgentDirectory.botName?.(workspaceId) || '',
+      workspaceIdForConversation: (conversationId) => (
+        projectAgentDirectory.workspaceIdForConversation?.(conversationId) || ''
+      ),
+      openBot: (payload) => openBotFromSurfacing(payload),
+      showNotification: (payload) => showTaskSystemNotification(payload),
+      receiptStore: taskNotificationBroker?.getReceiptStore?.(),
+      logWarn: (message, err) => console.warn(message, err),
+    });
+  } catch (err) {
+    console.warn('[project-agent-notifier] init failed:', err);
+    projectAgentNotifier = null;
   }
 
   // 启动后预热 Quick 窗口（隐藏态创建 + 加载 renderer），避免首次快捷键唤醒冷创建。

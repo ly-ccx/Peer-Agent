@@ -18,6 +18,25 @@ export const TRAY_SUBSCRIPTION_REFRESH_DELAY_MS = 5_000;
  */
 export const TRAY_MENU_INPUT_CACHE_TTL_MS = 5_000;
 
+/** 菜单栏角标。开关关闭或没有「需要你」时为空，调用方据此保持 beta.1 不写 title。 */
+export function trayBadgeTitle(count) {
+  const value = Number(count);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const rounded = Math.trunc(value);
+  return rounded > 99 ? '99+' : String(rounded);
+}
+
+/**
+ * 只在角标变化时写 Tray title。开关关闭且从未写过时不调用 setTitle。
+ * @returns {string} 这次应显示的角标
+ */
+export function applyTrayBadge(tray, { enabled = false, count = 0, previous = '' } = {}) {
+  const next = enabled === true ? trayBadgeTitle(count) : '';
+  if (next === previous) return next;
+  if (typeof tray?.setTitle === 'function') tray.setTitle(next);
+  return next;
+}
+
 export function truncateTrayTitle(title, maxChars = TRAY_TITLE_MAX_CHARS) {
   const text = String(title ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return '新任务';
@@ -239,11 +258,14 @@ export function createTrayController({
   getAutomationRuntime = null,
   handlers = {},
   platform = process.platform,
+  isProjectAgentEnabled = () => false,
+  getNeedsYouCount = () => 0,
 } = {}) {
   if (typeof Tray !== 'function' || typeof Menu?.buildFromTemplate !== 'function') {
     return {
       isActive: () => false,
       refresh: async () => {},
+      refreshBadge: () => {},
       destroy: () => {},
     };
   }
@@ -256,6 +278,7 @@ export function createTrayController({
     return {
       isActive: () => false,
       refresh: async () => {},
+      refreshBadge: () => {},
       destroy: () => {},
     };
   }
@@ -277,6 +300,26 @@ export function createTrayController({
   let lastMenuFingerprint = null;
   let cachedMenuInputs = null;
   let cachedMenuInputsAt = 0;
+  let badgeTitle = '';
+
+  function updateBadge() {
+    if (destroyed || !tray) return;
+    let enabled = false;
+    try {
+      enabled = isProjectAgentEnabled() === true;
+    } catch {
+      enabled = false;
+    }
+    let count = 0;
+    if (enabled) {
+      try {
+        count = getNeedsYouCount();
+      } catch {
+        count = 0;
+      }
+    }
+    badgeTitle = applyTrayBadge(tray, { enabled, count, previous: badgeTitle });
+  }
 
   async function loadTrayMenuInputs({ force = false } = {}) {
     const now = Date.now();
@@ -312,8 +355,13 @@ export function createTrayController({
     return inputs;
   }
 
+  function refreshBadge() {
+    updateBadge();
+  }
+
   async function refresh({ force = false } = {}) {
     if (destroyed || !tray) return;
+    updateBadge();
     try {
       const inputs = await loadTrayMenuInputs({ force });
       const fingerprint = buildTrayMenuFingerprint(inputs);
@@ -375,6 +423,7 @@ export function createTrayController({
   return {
     isActive: () => Boolean(tray) && !destroyed,
     refresh,
+    refreshBadge,
     scheduleRefresh,
     destroy: () => {
       destroyed = true;
