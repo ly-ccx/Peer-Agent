@@ -557,6 +557,7 @@ test('计划批准挡住启动，批准后才跑；只读任务在 writes 下直
     assert.match(recorded[0].summary, /让登录流程重新可用/);
     assert.match(recorded[0].summary, /登录请求返回成功/);
     const turnsBefore = env.turns.length;
+    await env.supervisor.cancel({ sessionId: direct.sessionId, reason: 'slot free' });
 
     const resumed = await env.supervisor.resumeFromApproval(recorded[0]);
     assert.equal(resumed.ok, true);
@@ -567,12 +568,83 @@ test('计划批准挡住启动，批准后才跑；只读任务在 writes 下直
   }
 });
 
+test('已有任务在跑时，批准计划只排队，取消占用后再启动', async () => {
+  const starts = [];
+  const recorded = [];
+  const env = await harness({
+    goalRunner: {
+      async start(planId) { starts.push(planId); },
+      pause() {},
+    },
+    approvalStore: {
+      append(row) {
+        recorded.push(row);
+        return row;
+      },
+    },
+  });
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '先占住名额', readOnly: true }),
+      contextOf(env, { inputId: 'input-run' }),
+    );
+    assert.equal(running.status, 'running');
+    assert.equal(starts.length, 1);
+    const held = await env.supervisor.spawn(
+      spawnInput({ title: '等批准', brief: '批准后再做' }),
+      contextOf(env, { inputId: 'input-held', planApproval: 'always' }),
+    );
+    assert.equal(held.status, 'awaiting_approval');
+    const resumed = await env.supervisor.resumeFromApproval(recorded[0]);
+    assert.equal(resumed.queued, true);
+    assert.equal(starts.length, 1);
+    const heldPlanId = env.supervisor.get({ sessionId: held.sessionId }).planId;
+    assert.equal(env.goalPlanStore.getPlan(heldPlanId).delegationOrigin.phase, 'queued');
+
+    await env.supervisor.cancel({ sessionId: running.sessionId, reason: '让出' });
+    assert.equal(starts.length, 2);
+    assert.equal(starts[1], heldPlanId);
+    assert.equal(env.goalPlanStore.getPlan(heldPlanId).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('拒绝计划批准会取消还没启动的任务', async () => {
+  const env = await harness({
+    goalRunner: { async start() {}, pause() {} },
+    readPlanApproval: () => 'always',
+  });
+  try {
+    const held = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    assert.equal(held.status, 'awaiting_approval');
+    const cancelled = await env.supervisor.cancel({
+      sessionId: held.sessionId,
+      reason: 'plan_approval_denied',
+    });
+    assert.equal(cancelled.status, 'cancelled');
+    const plan = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: held.sessionId }).planId);
+    assert.equal(plan.status, 'cancelled');
+  } finally {
+    await env.cleanup();
+  }
+});
+
 test('代理不在线时回答直接投进任务，并记 user_intervened', async () => {
   const env = await harness();
   try {
     const opened = await env.supervisor.spawn(spawnInput({ readOnly: true }), contextOf(env));
+    const rejected = await env.supervisor.deliverAnswer({
+      sessionId: opened.sessionId,
+      workspaceId: 'ws-other',
+      text: '用方案 A',
+      answerTo: `card:question:${opened.sessionId}:q1`,
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error, 'workspace_mismatch');
     const delivered = await env.supervisor.deliverAnswer({
       sessionId: opened.sessionId,
+      workspaceId: 'ws-1',
       text: '用方案 A',
       answerTo: `card:question:${opened.sessionId}:q1`,
     });

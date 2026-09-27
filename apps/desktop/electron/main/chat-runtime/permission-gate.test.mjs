@@ -819,6 +819,11 @@ describe('one-time approval grant', () => {
     assert.equal(book.remember({ capabilityId, argsDigest, at: 0 }).expiresAt, ttl);
     assert.equal(book.match({ capabilityId: 'local.file.write', argsDigest, at: 1 }), false);
     assert.equal(book.match({ capabilityId, argsDigest: otherDigest, at: 1 }), false);
+    const scoped = createOneTimeApprovalBook();
+    scoped.remember({ capabilityId, argsDigest, at: 0, sessionId: 'sess-1', workspaceId: 'ws-1' });
+    assert.equal(scoped.match({ capabilityId, argsDigest, at: 1, sessionId: 'sess-2', workspaceId: 'ws-1' }), false);
+    assert.equal(scoped.match({ capabilityId, argsDigest, at: 1, sessionId: 'sess-1', workspaceId: 'ws-2' }), false);
+    assert.equal(scoped.match({ capabilityId, argsDigest, at: 1, sessionId: 'sess-1', workspaceId: 'ws-1' }), true);
     assert.equal(book.match({ capabilityId, argsDigest, at: 1 }), true);
     assert.equal(book.match({ capabilityId, argsDigest, at: 2 }), false);
 
@@ -894,5 +899,74 @@ describe('one-time approval grant', () => {
       decidedAt: new Date(clock).toISOString(),
     }, { remember: false });
     await expired;
+  });
+
+  it('denies a no-approver turn without consuming the resumed session grant', async () => {
+    const book = createOneTimeApprovalBook();
+    const activeStreams = new Map([['s1', { permissionIds: new Set(), approver: 'none' }]]);
+    const events = [];
+    const gate = createChatPermissionGate({
+      activeStreams,
+      oneTimeApprovals: book,
+      now: () => 1_000,
+    });
+    const requestArgs = {
+      tool: 'write_file',
+      args: { path: '/outside/one.txt', content: 'one' },
+      filePath: '/outside/one.txt',
+      workspacePath: '/workspace',
+    };
+    const probe = createChatPermissionGate({
+      activeStreams: new Map([['probe', { permissionIds: new Set() }]]),
+      oneTimeApprovals: createOneTimeApprovalBook(),
+      now: () => 1_000,
+    });
+    const probeEvents = [];
+    const pendingProbe = probe.createFilePermissionRequester({
+      webContents: createWebContents(probeEvents),
+      streamId: 'probe',
+      toolCallId: 'probe-tool',
+      conversationId: 'c1',
+    })(requestArgs);
+    const call = probeEvents[0].payload.call;
+    probe.settlePermissionRequest(call.toolCallId, {
+      grantId: 'probe-deny',
+      toolCallId: call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date(1_000).toISOString(),
+    }, { remember: false });
+    await pendingProbe;
+    book.remember({
+      capabilityId: call.capabilityId,
+      argsDigest: digestApprovalArgs(call.arguments),
+      at: 1_000,
+      sessionId: 'sess-1',
+      workspaceId: 'ws-1',
+    });
+
+    const denied = await gate.createFilePermissionRequester({
+      webContents: { approver: 'none', send() { events.push('sent'); } },
+      streamId: 's1',
+      toolCallId: 'ephemeral-tool',
+      conversationId: 'c1',
+    })(requestArgs);
+    assert.equal(denied.granted, false);
+    assert.equal(denied.reason, 'ephemeral_no_approver');
+    assert.equal(events.length, 0);
+
+    activeStreams.set('s2', {
+      permissionIds: new Set(),
+      turnProfile: { sessionId: 'sess-1', workspaceId: 'ws-1' },
+    });
+    const granted = await gate.createFilePermissionRequester({
+      webContents: { send() { events.push('sent'); } },
+      streamId: 's2',
+      toolCallId: 'resumed-tool',
+      conversationId: 'c1',
+    })(requestArgs);
+    assert.equal(granted.granted, true);
+    assert.equal(granted.reason, 'local_user_approved_once');
+    assert.equal(events.length, 0);
   });
 });
