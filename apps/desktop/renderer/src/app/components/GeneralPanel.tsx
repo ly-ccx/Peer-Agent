@@ -30,6 +30,26 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof value === 'string' && value.trim() ? value.trim() : 'auto';
 }
 
+const BOT_LEVELS = ['quiet', 'low', 'standard', 'high'] as const;
+
+function readBots(settings: Record<string, unknown> | null | undefined) {
+  const agent = settings?.projectAgent;
+  const source = agent && typeof agent === 'object' ? agent as Record<string, unknown> : {};
+  const hours = source.quietHours && typeof source.quietHours === 'object'
+    ? source.quietHours as Record<string, unknown>
+    : {};
+  const proactivity = BOT_LEVELS.includes(source.proactivity as typeof BOT_LEVELS[number])
+    ? source.proactivity as typeof BOT_LEVELS[number]
+    : 'standard';
+  return {
+    proactivity,
+    quietEnabled: hours.enabled === true,
+    quietStart: typeof hours.start === 'string' && hours.start ? hours.start : '22:00',
+    quietEnd: typeof hours.end === 'string' && hours.end ? hours.end : '08:00',
+    digestTime: typeof source.digestTime === 'string' && source.digestTime ? source.digestTime : '09:00',
+  };
+}
+
 export interface GeneralPanelProps {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
@@ -41,6 +61,12 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replyLanguage, setReplyLanguage] = useState(() => readReplyLanguage(clientApi.initialSettings));
+  const initialBots = readBots(clientApi.initialSettings);
+  const [proactivity, setProactivity] = useState(initialBots.proactivity);
+  const [quietEnabled, setQuietEnabled] = useState(initialBots.quietEnabled);
+  const [quietStart, setQuietStart] = useState(initialBots.quietStart);
+  const [quietEnd, setQuietEnd] = useState(initialBots.quietEnd);
+  const [digestTime, setDigestTime] = useState(initialBots.digestTime);
 
   const localeOptions = useMemo(() => {
     const locales = availableLocales.length > 0 ? availableLocales : ([i18n.locale] as readonly LocaleCode[]);
@@ -71,6 +97,46 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
       await onLocaleChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update language.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveBots(next: {
+    proactivity?: typeof proactivity;
+    quietEnabled?: boolean;
+    quietStart?: string;
+    quietEnd?: string;
+    digestTime?: string;
+  }) {
+    const previous = { proactivity, quietEnabled, quietStart, quietEnd, digestTime };
+    const merged = { ...previous, ...next };
+    setProactivity(merged.proactivity);
+    setQuietEnabled(merged.quietEnabled);
+    setQuietStart(merged.quietStart);
+    setQuietEnd(merged.quietEnd);
+    setDigestTime(merged.digestTime);
+    setIsSaving(true);
+    setError(null);
+    try {
+      await clientApi.updateSettings({
+        projectAgent: {
+          proactivity: merged.proactivity,
+          quietHours: {
+            enabled: merged.quietEnabled,
+            start: merged.quietStart,
+            end: merged.quietEnd,
+          },
+          digestTime: merged.digestTime,
+        },
+      });
+    } catch (err) {
+      setProactivity(previous.proactivity);
+      setQuietEnabled(previous.quietEnabled);
+      setQuietStart(previous.quietStart);
+      setQuietEnd(previous.quietEnd);
+      setDigestTime(previous.digestTime);
+      setError(err instanceof Error ? err.message : 'Failed to update bot settings.');
     } finally {
       setIsSaving(false);
     }
@@ -130,6 +196,67 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
           </div>
         </div>
         {error ? <p className="general-setting-error">{error}</p> : null}
+      </section>
+      <section className="llm-instructions-card general-card">
+        <div className="general-setting-row">
+          <div className="general-setting-copy">
+            <h3>{i18n.t('settings.bots.title')}</h3>
+            <p>{i18n.t('settings.bots.proactivity')}</p>
+          </div>
+          <div className="general-language-select">
+            <Dropdown
+              value={proactivity}
+              options={BOT_LEVELS.map((level) => ({
+                value: level,
+                label: i18n.t(`settings.bots.proactivity.${level}`),
+              }))}
+              disabled={isSaving}
+              ariaLabel={i18n.t('settings.bots.proactivity')}
+              onChange={(value) => { void saveBots({ proactivity: value as typeof proactivity }); }}
+            />
+          </div>
+        </div>
+        <div className="general-setting-row">
+          <div className="general-setting-copy">
+            <h3>{i18n.t('settings.bots.quietHours')}</h3>
+            <p>{i18n.t('settings.bots.quietHours.description')}</p>
+          </div>
+          <label className="general-bots-hours">
+            <input
+              type="checkbox"
+              checked={quietEnabled}
+              disabled={isSaving}
+              onChange={(event) => { void saveBots({ quietEnabled: event.target.checked }); }}
+            />
+            <input
+              type="time"
+              value={quietStart}
+              disabled={isSaving}
+              aria-label={i18n.t('settings.bots.quietHours')}
+              onChange={(event) => { void saveBots({ quietStart: event.target.value }); }}
+            />
+            <input
+              type="time"
+              value={quietEnd}
+              disabled={isSaving}
+              aria-label={i18n.t('settings.bots.quietHours')}
+              onChange={(event) => { void saveBots({ quietEnd: event.target.value }); }}
+            />
+          </label>
+        </div>
+        <div className="general-setting-row">
+          <div className="general-setting-copy">
+            <h3>{i18n.t('settings.bots.digestTime')}</h3>
+            <p>{i18n.t('settings.bots.digestTime.description')}</p>
+          </div>
+          <input
+            type="time"
+            value={digestTime}
+            disabled={isSaving}
+            aria-label={i18n.t('settings.bots.digestTime')}
+            onChange={(event) => { void saveBots({ digestTime: event.target.value }); }}
+          />
+        </div>
       </section>
     </div>
   );

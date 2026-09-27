@@ -534,6 +534,43 @@ test('引用限定范围内，verify_session 越界被拒绝，读取细节不�
   assert.equal(detail.outcome, 'passed');
 });
 
+test('set_proactivity 没有用户锚点就拒绝，成功时只改当前项目', async () => {
+  const saved = [];
+  const provider = createDelegationProvider({
+    proactivity: {
+      set(input) {
+        saved.push(input);
+        return { ok: true, level: input.level };
+      },
+    },
+  });
+  const missing = outputOf(await provider.executeCapability(
+    call('local.delegation.set_proactivity', { level: 'quiet', anchorMessageId: 'missing' }),
+    agentContext({ workspaceId: 'ws-1' }),
+  ));
+  assert.equal(missing.error, 'anchor_not_found');
+  assert.equal(saved.length, 0);
+  const assistant = outputOf(await provider.executeCapability(
+    call('local.delegation.set_proactivity', { level: 'quiet', anchorMessageId: 'a1' }, 'tool-2'),
+    agentContext({ workspaceId: 'ws-1', toolCallOrdinal: 1 }),
+  ));
+  assert.equal(assistant.error, 'anchor_not_user_input');
+  const changed = outputOf(await provider.executeCapability(
+    call('local.delegation.set_proactivity', { level: 'muted', anchorMessageId: 'u1' }, 'tool-3'),
+    agentContext({ workspaceId: 'ws-1', toolCallOrdinal: 2 }),
+  ));
+  assert.equal(changed.ok, true);
+  assert.equal(changed.level, 'muted');
+  assert.equal(changed.workspaceId, 'ws-1');
+  assert.deepEqual(saved, [{ workspaceId: 'ws-1', level: 'muted', anchorMessageId: 'u1' }]);
+  const unwired = createDelegationProvider();
+  const unavailable = outputOf(await unwired.executeCapability(
+    call('local.delegation.set_proactivity', { level: 'low', anchorMessageId: 'u1' }, 'tool-4'),
+    agentContext({ workspaceId: 'ws-1', toolCallOrdinal: 3 }),
+  ));
+  assert.equal(unavailable.error, 'proactivity_unavailable');
+});
+
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }

@@ -8,8 +8,10 @@ import {
   createBotProfileStore,
   createInputQueue,
   createMemoryStore,
+  createDigestQueue,
   createProjectAgentRunner,
   createProjectInbox,
+  normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
   resolveRoleRoute,
@@ -20,6 +22,7 @@ import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
+import { installProjectProactivity } from './proactivity-port.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
 /**
@@ -42,6 +45,8 @@ export function createProjectAgentHost({
   retryDelays,
   inbox = null,
   inputQueue = null,
+  readSettings = null,
+  digestQueue = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -56,6 +61,9 @@ export function createProjectAgentHost({
     appendMessage,
   });
   const runners = new Map();
+  const digests = digestQueue || createDigestQueue({
+    file: rootDir ? path.join(rootDir, 'digest-queue.json') : null,
+  });
 
   function resolveTurnModel(workspaceId, conversationId) {
     if (typeof resolveModel === 'function') {
@@ -97,6 +105,7 @@ export function createProjectAgentHost({
       sink: createBroadcastSink({ getWindows }),
       now,
       retryDelays,
+      onDigest: (item) => digests.hold(workspaceId, item),
     });
     runners.set(workspaceId, runner);
     return runner;
@@ -121,12 +130,23 @@ export function createProjectAgentHost({
     const runs = [];
     for (const { workspaceId, conversationId } of wanted) {
       const runner = ensureRunner(workspaceId, conversationId);
+      const due = armDigest(runner, workspaceId);
       const consumed = queue.consume(workspaceId);
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (!consumed.skipped) runs.push(runner.kick());
+      else if (!consumed.skipped || due) runs.push(runner.kick());
     }
     await Promise.all(runs);
     return { workspaces: wanted.map((item) => item.workspaceId) };
+  }
+
+  function armDigest(runner, workspaceId) {
+    if (typeof readSettings !== 'function') return false;
+    const settings = normalizeProjectAgentSettings(readSettings()?.projectAgent);
+    const at = typeof now === 'function' ? now() : new Date();
+    const due = digests.consider(workspaceId, at, settings.digestTime);
+    if (!due?.timer) return false;
+    runner.enqueueTimer(due.timer);
+    return true;
   }
 
   function dispose() {
@@ -179,6 +199,15 @@ export function registerDesktopProjectAgent({
     verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
     appendMessage,
   }));
+  installProjectProactivity({
+    set({ workspaceId, level }) {
+      const profile = profileStore.read(workspaceId);
+      if (!profile || profile.status === 'archived') return { ok: false, error: 'not_found' };
+      const saved = profileStore.save({ ...profile, proactivity: level });
+      if (!saved?.ok) return { ok: false, error: saved?.code || 'save_failed' };
+      return { ok: true, level };
+    },
+  });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -243,6 +272,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
     executeTurn: (input) => agentTurnExecutor.runTurn(input),
     inputQueue,
+    readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
   });
   const projectAgent = createProjectAgentApplicationService({

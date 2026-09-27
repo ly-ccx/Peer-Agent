@@ -24,6 +24,7 @@ export interface BotProfile {
   readonly avatar: BotAvatar;
   readonly managed?: boolean;
   readonly agentConversationId?: string;
+  readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
   readonly updatedAt?: string;
 }
 
@@ -59,6 +60,8 @@ export interface BotListMessage {
   readonly role: 'user' | 'assistant';
   readonly text: string;
   readonly at: string;
+  /** silent replies stay in the conversation and do not raise the unread badge. */
+  readonly countUnread?: boolean;
 }
 
 export const BOT_AVATAR_SHAPES = [
@@ -124,7 +127,10 @@ export function projectBotListItem(input: {
   const waitingSessions = sessions.filter((item) => NEEDS_YOU_STATUSES.has(item.status)).length;
   const running = sessions.filter((item) => RUNNING_STATUSES.has(item.status)).length;
   const lastMessage = input.lastMessage ?? null;
-  const unread = lastMessage && lastMessage.role === 'assistant' && (!input.readCursor || lastMessage.at > input.readCursor)
+  const unread = lastMessage
+    && lastMessage.role === 'assistant'
+    && lastMessage.countUnread !== false
+    && (!input.readCursor || lastMessage.at > input.readCursor)
     ? 1
     : 0;
   return {

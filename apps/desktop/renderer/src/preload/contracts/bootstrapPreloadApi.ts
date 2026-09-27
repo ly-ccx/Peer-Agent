@@ -1054,7 +1054,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentList: (params?: { query?: string; needsYouOnly?: boolean }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
   readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
-  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; regenerateAvatar?: boolean; chooseAvatar?: boolean; avatarPath?: string }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; chooseAvatar?: boolean; avatarPath?: string }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentSubmitInput: (params: {
     workspaceId: string;

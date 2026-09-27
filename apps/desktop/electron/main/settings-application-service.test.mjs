@@ -205,3 +205,18 @@ test('clearing a role spend cap removes that key', () => {
   service.updateModelRouting({ roleSpendCaps: { explorer: null } });
   assert.equal(calls.filter((call) => call[0] === 'merge').length, mergesBefore);
 });
+
+test('project agent settings keep the standard level and merge quiet hours', () => {
+  const { service, getSettings } = createHarness();
+  const first = service.update({ projectAgent: { proactivity: 'high', digestTime: '18:30' } });
+  assert.deepEqual(first.projectAgent, {
+    proactivity: 'high',
+    quietHours: { enabled: false, start: '22:00', end: '08:00' },
+    digestTime: '18:30',
+  });
+  const second = service.update({ projectAgent: { quietHours: { enabled: true, start: '21:00' } } });
+  assert.equal(second.projectAgent.proactivity, 'high');
+  assert.deepEqual(second.projectAgent.quietHours, { enabled: true, start: '21:00', end: '08:00' });
+  assert.equal(getSettings().projectAgent.digestTime, '18:30');
+  assert.equal(service.update({ projectAgent: { proactivity: 'nope' } }).projectAgent.proactivity, 'standard');
+});

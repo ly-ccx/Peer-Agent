@@ -2,10 +2,10 @@
  * 项目代理的系统通知。
  *
  * 只在 decideSurfacing 给出 interrupt 时弹出。前台抑制是单独一步：
- * 送达策略不看 foreground。B3-05 之前，没写明的主动性按标准档。
+ * 送达策略不看 foreground。没写明的主动性按标准档。安静时段把打断降成消息，需要你除外。
  * 回执沿用任务通知的存储，键是 eventId，版本固定为 1。
  */
-import { decideSurfacing } from '@peer-agent/protocol';
+import { planDelivery } from '@peer-agent/runtime-node';
 
 import { createTaskNotificationReceiptStore } from '../task-notification-receipt-store.mjs';
 
@@ -78,11 +78,10 @@ export function considerProjectAgentNotification(input = {}, receiptStore = null
 
 function resolveSurfacing(input) {
   if (input.event && typeof input.event === 'object' && !Array.isArray(input.event)) {
-    return decideSurfacing({
+    return planDelivery({
       event: input.event,
-      proactivity: input.proactivity === 'off' || input.proactivity === 'low' || input.proactivity === 'high'
-        ? input.proactivity
-        : 'normal',
+      proactivity: input.proactivity,
+      botLevel: input.botLevel,
       foreground: input.foreground === true,
       quietHours: input.quietHours === true,
       needsYou: input.needsYou === true,
@@ -181,7 +180,8 @@ export function createProjectAgentNotifier(deps = {}) {
         ? deps.isForegroundSameBot(workspaceId) === true
         : false,
       decision: typeof stored === 'string' ? stored : undefined,
-      proactivity: 'normal',
+      proactivity: typeof facts?.proactivity === 'string' ? facts.proactivity : 'normal',
+      botLevel: typeof facts?.botLevel === 'string' ? facts.botLevel : undefined,
     });
   }
 

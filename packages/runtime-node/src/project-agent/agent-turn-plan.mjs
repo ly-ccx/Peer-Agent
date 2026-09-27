@@ -134,7 +134,35 @@ function replyFromTool(turnId, index, call) {
   };
   if (input.proactive === true) message.proactive = true;
   if (input.question && typeof input.question === 'object') message.question = input.question;
+  const surfacing = surfacingOf(call.result);
+  if (surfacing) {
+    message.meta = {
+      ...(message.meta && typeof message.meta === 'object' ? message.meta : {}),
+      surfacing,
+      ...(surfacing === 'silent' ? { unread: false } : {}),
+    };
+  }
   return message;
+}
+
+function surfacingOf(result) {
+  const piles = [];
+  if (result && typeof result === 'object') piles.push(result);
+  const nested = result?.output || result?.outputPreview?.legacyResult?.output;
+  if (nested && typeof nested === 'object') piles.push(nested);
+  if (typeof nested === 'string') {
+    try {
+      const parsed = JSON.parse(nested);
+      if (parsed && typeof parsed === 'object') piles.push(parsed);
+    } catch {
+      // 工具结果不是 JSON 时没有送达标记。
+    }
+  }
+  for (const pile of piles) {
+    const value = pile?.meta?.surfacing || pile?.surfacing;
+    if (value === 'interrupt' || value === 'message' || value === 'digest' || value === 'silent') return value;
+  }
+  return '';
 }
 
 function postReplies(rounds) {

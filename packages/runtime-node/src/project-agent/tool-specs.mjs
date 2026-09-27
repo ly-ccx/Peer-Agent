@@ -2,6 +2,7 @@
  * 调度工具的名字、capabilityId 和输入约束。桌面与 TUI 共用这一份。
  * 开任务和写回复的执行不在这里，只做能在调用前判定的输入校验。
  */
+import { TOOL_LEVELS } from './digest.mjs';
 export const DELEGATION_TOOL_SPECS = Object.freeze([
   spec('spawn_session', 'local.delegation.spawn_session', {
     type: 'object',
@@ -91,6 +92,15 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['sessionId'],
     additionalProperties: false,
   }),
+  spec('set_proactivity', 'local.delegation.set_proactivity', {
+    type: 'object',
+    properties: {
+      level: { type: 'string', enum: ['quiet', 'low', 'standard', 'high', 'muted'] },
+      anchorMessageId: { type: 'string' },
+    },
+    required: ['level', 'anchorMessageId'],
+    additionalProperties: false,
+  }),
   spec('post_reply', 'local.delegation.post_reply', {
     type: 'object',
     properties: {
@@ -134,6 +144,7 @@ export function validateDelegationInput(name, raw) {
   if (name === 'message_session') return validateMessage(input);
   if (name === 'get_verification_detail') return validateSessionOnly(input);
   if (name === 'verify_session') return validateVerify(input);
+  if (name === 'set_proactivity') return validateProactivity(input);
   return validateReply(input);
 }
 
@@ -290,6 +301,13 @@ function validateVerify(input) {
     value.focus = focus;
   }
   return { ok: true, value };
+}
+
+function validateProactivity(input) {
+  if (!TOOL_LEVELS.includes(input.level)) return invalid('level must be quiet, low, standard, high, or muted.');
+  const anchorMessageId = text(input.anchorMessageId, 200);
+  if (!anchorMessageId) return invalid('anchorMessageId is required.');
+  return { ok: true, value: { level: input.level, anchorMessageId } };
 }
 
 function validateReply(input) {

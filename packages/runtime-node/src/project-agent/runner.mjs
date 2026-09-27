@@ -29,6 +29,7 @@ export function createProjectAgentRunner({
   now = () => new Date().toISOString(),
   retryDelays = SAME_PROVIDER_RETRY_DELAYS_MS,
   onStatus = null,
+  onDigest = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -104,6 +105,8 @@ export function createProjectAgentRunner({
         carried,
       };
     }
+    const digest = takeDigestTimer();
+    if (digest) return digest;
     const batch = inbox.takeBatch(workspace);
     const events = Array.isArray(batch?.events) ? batch.events : [];
     if (events.length === 0) return null;
@@ -156,6 +159,10 @@ export function createProjectAgentRunner({
     const signal = controller.signal;
     setStatus('thinking');
     try {
+      if (job.kind === 'digest') {
+        if (job.message) remember(job.message);
+        return 'ok';
+      }
       if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
         preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
@@ -177,7 +184,17 @@ export function createProjectAgentRunner({
         reason: outcome.reason,
       });
       if (disposed) return 'disposed';
-      for (const message of finished.messages) remember(message);
+      for (const message of finished.messages) {
+        if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
+          onDigest({
+            id: message.id,
+            text: typeof message.content === 'string' ? message.content : '',
+            at: stamp(),
+          });
+          continue;
+        }
+        remember(message);
+      }
       if (outcome.failed) return 'error';
       commit(job.throughSeq);
       return 'ok';
@@ -341,6 +358,13 @@ export function createProjectAgentRunner({
     }
     if (failedJob && !retryArmed) return Promise.resolve({ queued: list.length, skipped: 'error' });
     return kick();
+  }
+
+  function takeDigestTimer() {
+    const index = timers.findIndex((timer) => timer?.kind === 'digest_due' && timer.wake === true && timer.message);
+    if (index < 0) return null;
+    const [timer] = timers.splice(index, 1);
+    return { kind: 'digest', message: timer.message };
   }
 
   function enqueueTimer(timer) {

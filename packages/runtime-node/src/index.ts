@@ -263,6 +263,18 @@ export {
   createProjectAgentRunner,
 } from './project-agent/runner.mjs';
 export { composeReply } from './project-agent/reply-composer.mjs';
+export {
+  BOT_LEVELS,
+  GLOBAL_LEVELS,
+  TOOL_LEVELS,
+  createDigestQueue,
+  defaultProjectAgentSettings,
+  digestSeparator,
+  inQuietHours,
+  normalizeProjectAgentSettings,
+  planDelivery,
+  resolveBotLevel,
+} from './project-agent/digest.mjs';
 export { createCardProjection, projectCards } from './project-agent/card-projection.mjs';
 export {
   DELEGATION_CAPABILITY_IDS,

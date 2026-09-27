@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { decideSurfacing } from '@peer-agent/protocol';
+import { planDelivery } from './digest.mjs';
 import { projectCards } from './card-projection.mjs';
 import { composeReply } from './reply-composer.mjs';
 
@@ -136,14 +137,14 @@ test('标记和送达由宿主事实重算，模型自带的结论与卡片被�
   ]);
   assert.deepEqual(first.meta.memoryUsed, ['mem-used']);
   assert.deepEqual(first.meta.memoryLearned, ['mem-new']);
-  assert.equal(first.meta.surfacing, decideSurfacing(surfacing).decision);
+  assert.equal(first.meta.surfacing, planDelivery(surfacing).decision);
   assert.equal(first.message.cards, undefined);
   assert.deepEqual(first.message.question, { options: ['继续', '停'] });
 
   const spoken = { ...surfacing, needsYou: false, quietHours: false, proactivity: 'high' };
   const quiet = composeReply({ ...input, surfacing: spoken });
   assert.equal(quiet.meta.surfacing, decideSurfacing(spoken).decision);
-  assert.equal(first.meta.surfacing, 'message');
+  assert.equal(first.meta.surfacing, 'interrupt');
   assert.equal(quiet.meta.surfacing, 'interrupt');
 
   const cards = projectCards('ws-1', { replies: [first.message] });

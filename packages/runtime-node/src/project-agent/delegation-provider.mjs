@@ -26,6 +26,7 @@ export function createDelegationProvider({
   supervisor = null,
   replyComposer = null,
   verification = null,
+  proactivity = null,
   checkModel = null,
   ledger = null,
   storeDir = null,
@@ -123,6 +124,19 @@ export function createDelegationProvider({
         });
       }
     }
+    if (item.name === 'set_proactivity') {
+      const anchorError = validateAnchors([input.anchorMessageId], view.messages);
+      if (anchorError) {
+        return finish({
+          call,
+          capabilityId,
+          name: item.name,
+          locale,
+          status: 'failed',
+          output: anchorError,
+        });
+      }
+    }
     if (item.name === 'spawn_session') {
       const anchorError = validateAnchors(input.anchorMessageIds, view.messages);
       if (anchorError) {
@@ -174,7 +188,7 @@ export function createDelegationProvider({
       });
     }
 
-    const dispatched = await dispatch(item.name, input);
+    const dispatched = await dispatch(item.name, input, view);
     if (!dispatched.ok) {
       return finish({
         call,
@@ -202,7 +216,7 @@ export function createDelegationProvider({
     });
   }
 
-  async function dispatch(name, input) {
+  async function dispatch(name, input, view) {
     if (name === 'spawn_session') {
       return accepted(await callPort(supervisor?.spawn, input, 'supervisor_unavailable'), 'supervisor_unavailable');
     }
@@ -216,6 +230,7 @@ export function createDelegationProvider({
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable'));
     if (name === 'get_verification_detail') return readVerification(input);
     if (name === 'verify_session') return verifySession(input);
+    if (name === 'set_proactivity') return setProactivity(input, view);
     return accepted(await callPort(replyComposer?.postReply, input, 'composer_unavailable'), 'composer_unavailable');
   }
 
@@ -275,6 +290,37 @@ export function createDelegationProvider({
       await verification.record({ event, card, detail, status: 'verifying' });
     }
     return { ok: true, output: { ok: true, status: 'verifying', event, card, detail } };
+  }
+
+  async function setProactivity(input, view) {
+    const workspaceId = text(view?.workspaceId);
+    if (!workspaceId) {
+      return { ok: false, output: { ok: false, error: 'project_required', message: 'project_required' } };
+    }
+    if (!proactivity || typeof proactivity.set !== 'function'
+      || (typeof proactivity.available === 'function' && proactivity.available() !== true)) {
+      return { ok: false, output: { ok: false, error: 'proactivity_unavailable', message: 'proactivity_unavailable' } };
+    }
+    const saved = await proactivity.set({
+      workspaceId,
+      level: input.level,
+      anchorMessageId: input.anchorMessageId,
+    });
+    if (!saved || saved.ok === false) {
+      return {
+        ok: false,
+        output: { ok: false, error: saved?.error || 'proactivity_failed', message: saved?.error || 'proactivity_failed' },
+      };
+    }
+    return {
+      ok: true,
+      output: {
+        ok: true,
+        level: input.level,
+        anchorMessageId: input.anchorMessageId,
+        workspaceId,
+      },
+    };
   }
 
   return {

@@ -183,6 +183,13 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.delete'
   | 'projectAgent.drawer.settings.deleteManaged'
   | 'projectAgent.drawer.settings.deleteConfirm'
+  | 'projectAgent.drawer.settings.proactivity'
+  | 'projectAgent.drawer.settings.proactivity.inherit'
+  | 'projectAgent.drawer.settings.proactivity.quiet'
+  | 'projectAgent.drawer.settings.proactivity.low'
+  | 'projectAgent.drawer.settings.proactivity.standard'
+  | 'projectAgent.drawer.settings.proactivity.high'
+  | 'projectAgent.drawer.settings.proactivity.muted'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -247,6 +254,16 @@ export type TranslationKey =
   | 'settings.appearance.description'
   | 'settings.language.description'
   | 'settings.replyLanguage'
+  | 'settings.bots.title'
+  | 'settings.bots.proactivity'
+  | 'settings.bots.proactivity.quiet'
+  | 'settings.bots.proactivity.low'
+  | 'settings.bots.proactivity.standard'
+  | 'settings.bots.proactivity.high'
+  | 'settings.bots.quietHours'
+  | 'settings.bots.quietHours.description'
+  | 'settings.bots.digestTime'
+  | 'settings.bots.digestTime.description'
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
@@ -885,6 +902,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
     'settings.language.description': '选择界面显示语言。',
     'settings.replyLanguage': '回复语言',
+    'settings.bots.title': '机器人',
+    'settings.bots.proactivity': '主动性',
+    'settings.bots.proactivity.quiet': '安静',
+    'settings.bots.proactivity.low': '少',
+    'settings.bots.proactivity.standard': '标准',
+    'settings.bots.proactivity.high': '多',
+    'settings.bots.quietHours': '安静时段',
+    'settings.bots.quietHours.description': '这段时间里，除了需要你处理的事，通知会改成未读消息。',
+    'settings.bots.digestTime': '今日小结',
+    'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
     'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
@@ -1160,6 +1187,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
+    'projectAgent.drawer.settings.proactivity': '主动性',
+    'projectAgent.drawer.settings.proactivity.inherit': '跟随全局',
+    'projectAgent.drawer.settings.proactivity.quiet': '安静',
+    'projectAgent.drawer.settings.proactivity.low': '少',
+    'projectAgent.drawer.settings.proactivity.standard': '标准',
+    'projectAgent.drawer.settings.proactivity.high': '多',
+    'projectAgent.drawer.settings.proactivity.muted': '静音',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1674,6 +1708,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
     'settings.language.description': 'Choose the display language for the interface.',
     'settings.replyLanguage': 'Reply language',
+    'settings.bots.title': 'Bots',
+    'settings.bots.proactivity': 'How often to speak up',
+    'settings.bots.proactivity.quiet': 'Quiet',
+    'settings.bots.proactivity.low': 'Low',
+    'settings.bots.proactivity.standard': 'Standard',
+    'settings.bots.proactivity.high': 'High',
+    'settings.bots.quietHours': 'Quiet hours',
+    'settings.bots.quietHours.description': 'During these hours, notifications become unread messages unless something needs you.',
+    'settings.bots.digestTime': 'Daily summary',
+    'settings.bots.digestTime.description': 'At this time, held notes become one message.',
     'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
@@ -1949,6 +1993,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',
+    'projectAgent.drawer.settings.proactivity': 'How often to speak up',
+    'projectAgent.drawer.settings.proactivity.inherit': 'Follow the global setting',
+    'projectAgent.drawer.settings.proactivity.quiet': 'Quiet',
+    'projectAgent.drawer.settings.proactivity.low': 'Low',
+    'projectAgent.drawer.settings.proactivity.standard': 'Standard',
+    'projectAgent.drawer.settings.proactivity.high': 'High',
+    'projectAgent.drawer.settings.proactivity.muted': 'Muted',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

@@ -3,7 +3,7 @@
  * 开关关闭时直接拒绝，不调用会写盘的依赖。
  * 变化事件按 100ms 合并，带上这段时间里变化的 workspaceId。
  */
-import { cleanDisplayName } from '@peer-agent/runtime-node';
+import { BOT_LEVELS, cleanDisplayName } from '@peer-agent/runtime-node';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
@@ -163,6 +163,12 @@ export function createProjectAgentApplicationService({
     if (payload.regenerateAvatar === true) {
       const rotated = lifecycle.regenerateAvatar(workspaceId);
       if (!rotated?.ok) return rotated;
+    }
+    if (typeof payload.proactivity === 'string') {
+      if (!BOT_LEVELS.includes(payload.proactivity)) return { ok: false, code: 'INVALID_PROACTIVITY' };
+      const latest = profileStore.read(workspaceId) || current;
+      const saved = profileStore.save({ ...latest, proactivity: payload.proactivity });
+      if (!saved?.ok) return saved;
     }
     if (payload.chooseAvatar === true) {
       if (typeof chooseAvatar !== 'function') return { ok: false, code: 'AVATAR_UNAVAILABLE' };
