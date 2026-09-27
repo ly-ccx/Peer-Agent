@@ -256,6 +256,8 @@ export {
   SAME_PROVIDER_RETRY_DELAYS_MS,
   createProjectAgentRunner,
 } from './project-agent/runner.mjs';
+export { composeReply } from './project-agent/reply-composer.mjs';
+export { createCardProjection, projectCards } from './project-agent/card-projection.mjs';
 export {
   DELEGATION_CAPABILITY_IDS,
   DELEGATION_TOOL_SPECS,
