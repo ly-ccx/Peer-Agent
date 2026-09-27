@@ -247,6 +247,12 @@
   min-width: 0;
 }
 
+.general-bots-hours {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* 分支下拉：撑满槽位并让长分支名省略，而不是把整行顶开。 */
 .general-language-select .pa-dropdown {
   width: 100%;

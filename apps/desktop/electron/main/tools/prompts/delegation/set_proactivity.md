@@ -1,0 +1,1 @@
+Change how often this bot speaks up. Call this only when the user explicitly asks. anchorMessageId must be that user_input message. level is quiet, low, standard, high, or muted. This changes the current bot only.

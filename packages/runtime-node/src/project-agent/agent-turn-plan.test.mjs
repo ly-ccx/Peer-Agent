@@ -19,7 +19,9 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(user.kind, 'user');
   assert.equal(user.mode, 'project_agent');
   assert.equal(user.turnProfile.role, 'project_agent');
+  assert.equal(user.turnProfile.workspaceId, undefined);
   assert.deepEqual(user.turnProfile.context, { sources: ['memory-1'] });
+  assert.equal(planAgentTurn({ kind: 'user', workspaceId: ' ws-1 ' }).turnProfile.workspaceId, 'ws-1');
   assert.equal(user.modelProviderId, 'model-pa');
   assert.deepEqual(user.limits, { maxRounds: 10, maxToolCalls: 20 });
   assert.equal(user.reminder, null);

@@ -57,7 +57,13 @@ export function isVisibleBotMessage(message) {
 function toListMessage(message) {
   const kind = messageKind(message);
   const role = kind === 'user_input' || message?.role === 'user' ? 'user' : 'assistant';
-  return { role, text: clip(messageText(message)), at: messageAt(message) };
+  const surfacing = message?.meta?.surfacing || message?.surfacing;
+  return {
+    role,
+    text: clip(messageText(message)),
+    at: messageAt(message),
+    ...(surfacing === 'silent' || message?.meta?.unread === false ? { countUnread: false } : {}),
+  };
 }
 
 function questionsIn(messages) {

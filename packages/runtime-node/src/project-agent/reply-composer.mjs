@@ -3,7 +3,7 @@
  * replyTo、sources、结论标记、记忆 id 和送达方式只来自宿主事实。
  * 模型附在工具参数上的结论、标记和卡片不会进入结果。
  */
-import { decideSurfacing } from '@peer-agent/protocol';
+import { planDelivery } from './digest.mjs';
 
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
@@ -19,7 +19,7 @@ const EVENT_KINDS = new Set([
   'objective_risk',
 ]);
 const SEVERITIES = new Set(['info', 'notable', 'urgent']);
-const PROACTIVITY = new Set(['off', 'low', 'normal', 'high']);
+const PROACTIVITY = new Set(['off', 'low', 'normal', 'high', 'quiet', 'standard', 'muted']);
 const OUTCOMES = new Set(['passed', 'failed', 'partial', 'unverifiable']);
 
 /**
@@ -238,7 +238,7 @@ function readSurfacing(value) {
   if (typeof novelty !== 'boolean' || typeof foreground !== 'boolean' || typeof quietHours !== 'boolean' || typeof needsYou !== 'boolean') {
     return fail('invalid_input', 'surfacing facts are invalid.');
   }
-  const decision = decideSurfacing({
+  const decision = planDelivery({
     event: {
       origin,
       kind,
@@ -247,6 +247,7 @@ function readSurfacing(value) {
       ...(event.deadlineImminent === true ? { deadlineImminent: true } : {}),
     },
     proactivity,
+    ...(typeof input.botLevel === 'string' ? { botLevel: input.botLevel } : {}),
     foreground,
     quietHours,
     needsYou,

@@ -81,6 +81,14 @@ test('bot row counts approvals, waiting sessions, running work, and unread repli
     readCursor: '2026-09-26T02:00:00.000Z',
   });
   assert.equal(read.state.unread, 0);
+
+  const silent = projectBotListItem({
+    profile: profile('ws'),
+    lastMessage: { role: 'assistant', text: '只留在对话里', at: '2026-09-26T06:00:00.000Z', countUnread: false },
+    readCursor: '2026-09-26T01:00:00.000Z',
+  });
+  assert.equal(silent.state.unread, 0);
+  assert.equal(silent.preview, '只留在对话里');
 });
 
 test('generated avatars are deterministic and cover shape and color', () => {

@@ -1,4 +1,9 @@
-import { isRoutableProvider, resolveRoleRoute, resolveStoredModelRouting } from '@peer-agent/runtime-node';
+import {
+  isRoutableProvider,
+  normalizeProjectAgentSettings,
+  resolveRoleRoute,
+  resolveStoredModelRouting,
+} from '@peer-agent/runtime-node';
 
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
@@ -7,6 +12,27 @@ function assertFunction(value, label) {
 
 function isRecord(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function projectAgentPartial(before, partial) {
+  if (!isRecord(partial) || !isRecord(partial.projectAgent)) return partial;
+  const current = isRecord(before?.projectAgent) ? before.projectAgent : {};
+  const requestedHours = isRecord(partial.projectAgent.quietHours) ? partial.projectAgent.quietHours : null;
+  const quietHours = requestedHours
+    ? { ...(isRecord(current.quietHours) ? current.quietHours : {}), ...requestedHours }
+    : current.quietHours;
+  return {
+    ...partial,
+    projectAgent: {
+      ...current,
+      ...partial.projectAgent,
+      ...normalizeProjectAgentSettings({
+        ...current,
+        ...partial.projectAgent,
+        ...(quietHours ? { quietHours } : {}),
+      }),
+    },
+  };
 }
 
 export function createSettingsApplicationService({
@@ -53,7 +79,8 @@ export function createSettingsApplicationService({
 
   function update(partial) {
     const before = read();
-    const next = merge(partial);
+    const request = projectAgentPartial(before, partial);
+    const next = merge(request);
     if (isRecord(partial) && Object.prototype.hasOwnProperty.call(partial, 'appearance')) {
       publishAppearance(next.appearance);
     }

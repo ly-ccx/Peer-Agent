@@ -29,6 +29,8 @@ export function createProjectAgentRunner({
   now = () => new Date().toISOString(),
   retryDelays = SAME_PROVIDER_RETRY_DELAYS_MS,
   onStatus = null,
+  onDigest = null,
+  onDigestDelivered = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -104,6 +106,8 @@ export function createProjectAgentRunner({
         carried,
       };
     }
+    const digest = takeDigestTimer();
+    if (digest) return digest;
     const batch = inbox.takeBatch(workspace);
     const events = Array.isArray(batch?.events) ? batch.events : [];
     if (events.length === 0) return null;
@@ -156,6 +160,13 @@ export function createProjectAgentRunner({
     const signal = controller.signal;
     setStatus('thinking');
     try {
+      if (job.kind === 'digest') {
+        if (job.message) remember(job.message);
+        if (job.message && typeof onDigestDelivered === 'function') {
+          try { onDigestDelivered(job.message); } catch { /* 正文已写入；确认失败时下次还能再送 */ }
+        }
+        return 'ok';
+      }
       if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
         preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
@@ -177,7 +188,17 @@ export function createProjectAgentRunner({
         reason: outcome.reason,
       });
       if (disposed) return 'disposed';
-      for (const message of finished.messages) remember(message);
+      for (const message of finished.messages) {
+        if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
+          onDigest({
+            id: message.id,
+            text: typeof message.content === 'string' ? message.content : '',
+            at: stamp(),
+          });
+          continue;
+        }
+        remember(message);
+      }
       if (outcome.failed) return 'error';
       commit(job.throughSeq);
       return 'ok';
@@ -197,6 +218,7 @@ export function createProjectAgentRunner({
       modelProviderId: model.modelProviderId,
       context: readSlot(resolveContext, job.kind),
       roster: readSlot(resolveRoster, job.kind),
+      workspaceId: workspace,
     });
     if (!model.ok) {
       return { turnId, plan, rounds: [], failed: true, reason: model.reason };
@@ -343,12 +365,23 @@ export function createProjectAgentRunner({
     return kick();
   }
 
+  function takeDigestTimer() {
+    const index = timers.findIndex((timer) => timer?.kind === 'digest_due' && timer.wake === true && timer.message);
+    if (index < 0) return null;
+    const [timer] = timers.splice(index, 1);
+    return { kind: 'digest', message: timer.message };
+  }
+
   function enqueueTimer(timer) {
     if (disposed) return { skipped: 'disposed' };
-    timers.push({
+    const next = {
       ...(timer && typeof timer === 'object' ? timer : {}),
       enqueuedAt: stamp(),
-    });
+    };
+    if (typeof next.id === 'string' && next.id && timers.some((item) => item?.id === next.id)) {
+      return { queued: false, duplicate: true };
+    }
+    timers.push(next);
     return { queued: true };
   }
 

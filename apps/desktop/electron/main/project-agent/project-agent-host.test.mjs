@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createDigestQueue } from '../../../../../packages/runtime-node/src/project-agent/digest.mjs';
 import { createProjectAgentHost } from './project-agent-host.mjs';
 
 const provider = {
@@ -46,6 +47,7 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
           role: turnProfile.role,
           modelProviderId,
           context: turnProfile.context,
+          workspaceId: turnProfile.workspaceId,
           kind: plan.kind,
         });
         sink.send('chat:stream:delta', { content: 'hi' });
@@ -69,6 +71,7 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
     assert.equal(calls[0].mode, 'project_agent');
     assert.equal(calls[0].role, 'project_agent');
     assert.equal(calls[0].kind, 'user');
+    assert.equal(calls[0].workspaceId, 'ws-leased');
     assert.equal(calls[0].modelProviderId, 'text-default');
     assert.deepEqual(calls[0].context, { sources: [] });
     assert.equal(host.runnerFor('ws-client'), null);
@@ -85,6 +88,54 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
     assert.equal(host.runnerFor('ws-leased'), null);
     assert.equal(calls.length, 1);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('到了小结时间即使没有新输入也会写入分隔消息', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b3-05-digest-host-'));
+  const messages = [];
+  const calls = [];
+  const digests = createDigestQueue();
+  digests.hold('ws-leased', { id: 'a', text: '登录修好了' });
+  let pending = null;
+  const host = createProjectAgentHost({
+    rootDir: root,
+    holdsLease: (workspaceId) => workspaceId === 'ws-leased',
+    listWorkspaceIds: () => ['ws-leased'],
+    resolveConversationId: () => 'conv-leased',
+    hasMessage: () => false,
+    appendMessage(_conversationId, message) {
+      messages.push(message);
+    },
+    getWindows: () => [],
+    readSettings: () => ({ projectAgent: { digestTime: '09:00', proactivity: 'standard' } }),
+    now: () => new Date(2026, 8, 27, 9, 5),
+    digestQueue: digests,
+    schedule(fn, delay) {
+      pending = { fn, delay };
+      return pending;
+    },
+    clearSchedule() {
+      pending = null;
+    },
+    async executeTurn() {
+      calls.push('model');
+      return { text: '不该跑模型' };
+    },
+  });
+  try {
+    assert.equal(pending.delay, 0);
+    assert.equal(calls.length, 0);
+    await pending.fn();
+    assert.equal(calls.length, 0);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].separatorLabel, '今天 09:00 · 今日小结');
+    assert.equal(messages[0].content, '登录修好了');
+    assert.equal(digests.pending('ws-leased'), 0);
+    assert.ok(pending.delay >= 60 * 60 * 1000);
+  } finally {
+    host.dispose();
     rmSync(root, { recursive: true, force: true });
   }
 });

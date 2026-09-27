@@ -4,7 +4,10 @@ import { createCapabilityProviderRegistry } from './capability-provider-registry
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
+import { liveDeliveryFacts } from '../project-agent/delivery-facts-port.mjs';
+import { createDesktopReplyComposer } from '../project-agent/reply-composer-port.mjs';
 import { liveSessionVerification } from '../project-agent/session-verification.mjs';
+import { liveProjectProactivity } from '../project-agent/proactivity-port.mjs';
 import { createLocalMemoryProvider } from './local-memory-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
@@ -50,6 +53,10 @@ export function createLocalToolHost({
 }) {
   const activeDelegationProvider = delegationProvider ?? createLocalDelegationProvider({
     verification: liveSessionVerification(),
+    proactivity: liveProjectProactivity(),
+    replyComposer: createDesktopReplyComposer({
+      readDelivery: (view) => liveDeliveryFacts().read(view),
+    }),
   });
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
   const activeShellProvider = shellProvider ?? createLocalShellProvider({

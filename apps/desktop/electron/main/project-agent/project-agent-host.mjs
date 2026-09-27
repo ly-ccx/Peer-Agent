@@ -8,8 +8,11 @@ import {
   createBotProfileStore,
   createInputQueue,
   createMemoryStore,
+  createDigestQueue,
   createProjectAgentRunner,
+  inQuietHours,
   createProjectInbox,
+  normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
   resolveRoleRoute,
@@ -20,6 +23,8 @@ import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
+import { installProjectProactivity } from './proactivity-port.mjs';
+import { installDeliveryFacts } from './delivery-facts-port.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
 /**
@@ -42,6 +47,10 @@ export function createProjectAgentHost({
   retryDelays,
   inbox = null,
   inputQueue = null,
+  readSettings = null,
+  digestQueue = null,
+  schedule = null,
+  clearSchedule = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -56,6 +65,9 @@ export function createProjectAgentHost({
     appendMessage,
   });
   const runners = new Map();
+  const digests = digestQueue || createDigestQueue({
+    file: rootDir ? path.join(rootDir, 'digest-queue.json') : null,
+  });
 
   function resolveTurnModel(workspaceId, conversationId) {
     if (typeof resolveModel === 'function') {
@@ -97,6 +109,11 @@ export function createProjectAgentHost({
       sink: createBroadcastSink({ getWindows }),
       now,
       retryDelays,
+      onDigest: (item) => digests.hold(workspaceId, item),
+      onDigestDelivered: (message) => {
+        const date = message?.meta?.digestDate;
+        if (typeof date === 'string') digests.acknowledge(workspaceId, date);
+      },
     });
     runners.set(workspaceId, runner);
     return runner;
@@ -121,15 +138,93 @@ export function createProjectAgentHost({
     const runs = [];
     for (const { workspaceId, conversationId } of wanted) {
       const runner = ensureRunner(workspaceId, conversationId);
+      const due = armDigest(runner, workspaceId);
       const consumed = queue.consume(workspaceId);
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (!consumed.skipped) runs.push(runner.kick());
+      else if (!consumed.skipped || due) runs.push(runner.kick());
     }
     await Promise.all(runs);
     return { workspaces: wanted.map((item) => item.workspaceId) };
   }
 
+  function armDigest(runner, workspaceId) {
+    if (typeof readSettings !== 'function') return false;
+    const settings = normalizeProjectAgentSettings(readSettings()?.projectAgent);
+    const at = typeof now === 'function' ? now() : new Date();
+    const due = digests.consider(workspaceId, at, settings.digestTime);
+    if (!due?.timer) return false;
+    const queued = runner.enqueueTimer(due.timer);
+    return queued?.queued === true;
+  }
+
+  async function deliverDigests() {
+    const settings = normalizeProjectAgentSettings(
+      typeof readSettings === 'function' ? readSettings()?.projectAgent : null,
+    );
+    const at = typeof now === 'function' ? now() : new Date();
+    const listed = listWorkspaceIds();
+    const seen = new Set();
+    const runs = [];
+    for (const workspaceId of listed) {
+      if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
+      seen.add(workspaceId);
+      if (holdsLease(workspaceId) !== true) continue;
+      const conversationId = resolveConversationId(workspaceId);
+      if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
+      const preview = digests.consider(workspaceId, at, settings.digestTime);
+      if (!preview?.timer && !runners.has(workspaceId)) continue;
+      const runner = ensureRunner(workspaceId, conversationId.trim());
+      const due = armDigest(runner, workspaceId);
+      const waiting = runner.mailbox().timers.some((timer) => timer?.kind === 'digest_due' && timer.wake === true);
+      if (due || waiting) runs.push(runner.kick());
+    }
+    await Promise.all(runs);
+  }
+
+  const useSchedule = typeof schedule === 'function' ? schedule : setTimeout;
+  const useClearSchedule = typeof clearSchedule === 'function' ? clearSchedule : clearTimeout;
+  let digestHandle = null;
+  let hostDisposed = false;
+
+  function clearDigestHandle() {
+    if (digestHandle == null) return;
+    useClearSchedule(digestHandle);
+    digestHandle = null;
+  }
+
+  function nextDigestDelay() {
+    const settings = normalizeProjectAgentSettings(
+      typeof readSettings === 'function' ? readSettings()?.projectAgent : null,
+    );
+    const at = typeof now === 'function' ? now() : new Date();
+    const date = at instanceof Date ? new Date(at.getTime()) : new Date(at);
+    if (Number.isNaN(date.getTime())) return 60_000;
+    const [hour, minute] = settings.digestTime.split(':').map((part) => Number(part));
+    const next = new Date(date);
+    next.setHours(hour, minute, 0, 0);
+    if (next.getTime() <= date.getTime()) next.setDate(next.getDate() + 1);
+    return Math.max(1000, next.getTime() - date.getTime());
+  }
+
+  function planDigestClock(delay) {
+    clearDigestHandle();
+    if (hostDisposed || typeof readSettings !== 'function') return;
+    digestHandle = useSchedule(() => {
+      digestHandle = null;
+      return Promise.resolve()
+        .then(() => deliverDigests())
+        .catch(() => {})
+        .finally(() => {
+          if (!hostDisposed) planDigestClock(nextDigestDelay());
+        });
+    }, delay);
+  }
+
+  if (typeof readSettings === 'function') planDigestClock(0);
+
   function dispose() {
+    hostDisposed = true;
+    clearDigestHandle();
     for (const workspaceId of [...runners.keys()]) drop(workspaceId);
   }
 
@@ -179,6 +274,26 @@ export function registerDesktopProjectAgent({
     verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
     appendMessage,
   }));
+  installDeliveryFacts({
+    read(view) {
+      const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
+      const level = profileStore.read(view?.workspaceId)?.proactivity;
+      return {
+        proactivity: settings.proactivity,
+        ...(typeof level === 'string' && level !== 'inherit' ? { botLevel: level } : {}),
+        quietHours: inQuietHours(new Date(), settings.quietHours),
+      };
+    },
+  });
+  installProjectProactivity({
+    set({ workspaceId, level }) {
+      const profile = profileStore.read(workspaceId);
+      if (!profile || profile.status === 'archived') return { ok: false, error: 'not_found' };
+      const saved = profileStore.save({ ...profile, proactivity: level });
+      if (!saved?.ok) return { ok: false, error: saved?.code || 'save_failed' };
+      return { ok: true, level };
+    },
+  });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -243,6 +358,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
     executeTurn: (input) => agentTurnExecutor.runTurn(input),
     inputQueue,
+    readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
   });
   const projectAgent = createProjectAgentApplicationService({

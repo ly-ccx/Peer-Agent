@@ -3,6 +3,13 @@ import type { BotProfile } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
 
+const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
+type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
+
+function isProactivityLevel(value: string): value is ProactivityLevel {
+  return (PROACTIVITY_LEVELS as readonly string[]).includes(value);
+}
+
 /**
  * 名字、头像和删除只走项目代理 IPC。
  * 签收策略和项目模型覆盖还没有单独的写入通道，这里只展示，不另存一份。
@@ -23,6 +30,7 @@ export function BotSettingsTab({
   readonly onDeleted: () => void;
 }) {
   const [name, setName] = useState(profile.displayName);
+  const [level, setLevel] = useState<ProactivityLevel>(profile.proactivity || 'inherit');
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -35,6 +43,25 @@ export function BotSettingsTab({
     try {
       const result = await clientApi.projectAgentUpdateProfile({ workspaceId, displayName });
       if (!result?.ok || !result.profile) {
+        setError(result?.code || 'FAILED');
+        return;
+      }
+      onProfile(result.profile);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveProactivity(next: string) {
+    if (!isProactivityLevel(next)) return;
+    const previous = level;
+    setLevel(next);
+    setBusy(true);
+    setError('');
+    try {
+      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, proactivity: next });
+      if (!result?.ok || !result.profile) {
+        setLevel(previous);
         setError(result?.code || 'FAILED');
         return;
       }
@@ -104,6 +131,20 @@ export function BotSettingsTab({
           {i18n.t('projectAgent.drawer.settings.avatarUpload')}
         </button>
       </section>
+      <label>
+        <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
+        <select
+          value={level}
+          disabled={busy}
+          onChange={(event) => { void saveProactivity(event.target.value); }}
+        >
+          {PROACTIVITY_LEVELS.map((item) => (
+            <option key={item} value={item}>
+              {i18n.t(`projectAgent.drawer.settings.proactivity.${item}`)}
+            </option>
+          ))}
+        </select>
+      </label>
       <section>
         <h2>{i18n.t('projectAgent.drawer.acceptance')}</h2>
         <p>{i18n.t('projectAgent.drawer.acceptance.auto')}</p>
