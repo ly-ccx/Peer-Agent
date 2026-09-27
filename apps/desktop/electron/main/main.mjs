@@ -186,6 +186,7 @@ import { createProviderConfigurationIpcRegistrations } from './ipc/register-prov
 import { createProviderAccessIpcRegistrations } from './ipc/register-provider-access-ipc.mjs';
 import { createRuntimeHostIpcRegistrations } from './ipc/register-runtime-host-ipc.mjs';
 import { createWorkspaceIpcRegistrations } from './ipc/register-workspace-ipc.mjs';
+import { registerDesktopProjectAgent } from './project-agent/project-agent-host.mjs';
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
@@ -2111,11 +2112,15 @@ function registerDesktopIpcHost() {
     ...createProviderAccessIpcRegistrations({
       providers: providerAccessApplicationService,
     }),
-    ...createWorkspaceIpcRegistrations({
-      workspace: workspaceApplicationService,
-    }),
-    ...createFileAccessIpcRegistrations({
-      fileAccess: fileAccessApplicationService,
+    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
+    ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
+    ...registerDesktopProjectAgent({
+      enabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+      dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
+      workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
+      holdsLease: (workspaceId) => hostLeases.holds(workspaceId),
+      getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
+      dialog, BrowserWindow, shell,
     }),
   ],
   });
@@ -2131,8 +2136,6 @@ function createWindow() {
     minWidth: 1040,
     minHeight: 720,
     title: 'Peer Agent',
-    // 冷启动首帧前不要把空窗露出来：show:false + ready-to-show 再显示。
-    // 否则 macOS 透明底会在 HTML/CSS 注入前短暂露黑（「首次打开黑一下，第二次正常」）。
     show: false,
     backgroundColor: isMac ? '#00000000' : '#1e1e2e',
     ...(isMac
@@ -2140,9 +2143,6 @@ function createWindow() {
           transparent: true,
           vibrancy: 'sidebar',
           visualEffectState: 'active',
-          // trafficLightPosition 是按钮簇左上角，不是圆心。
-          // 12pt 灯在 40px hiddenInset 标题栏内垂直居中：(40 - 12) / 2 = 14。
-          // y: 18 会把视觉中心压到 24px，三点会明显偏低。仅 macOS 生效。
           trafficLightPosition: { x: 16, y: 14 },
         }
       : {}),

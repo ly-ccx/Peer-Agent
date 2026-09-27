@@ -1,10 +1,22 @@
+import path from 'node:path';
+
 import {
+  createApprovalStore,
+  createBotDirectory,
+  createBotLifecycle,
+  createBotProfileStore,
   createInputQueue,
+  createMemoryStore,
   createProjectAgentRunner,
   createProjectInbox,
+  createProjectRegistry,
+  createSessionSupervisor,
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
+import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
+import { createManagedFolder } from './managed-folder.mjs';
+import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 
 /**
  * 桌面装配：只为当前进程持有租约、并且已经有代理对话的项目创建 runner。
@@ -124,4 +136,128 @@ export function createProjectAgentHost({
     inbox: inboxStore,
     inputQueue: queue,
   };
+}
+
+export function registerDesktopProjectAgent({
+  enabled,
+  dataHome,
+  conversationStore,
+  goalPlanStore,
+  goalRunner,
+  agentTurnExecutor,
+  workspace,
+  broadcast,
+  holdsLease,
+  getSettings,
+  mergeSettings,
+  dialog,
+  BrowserWindow,
+  shell,
+} = {}) {
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const registry = createProjectRegistry({
+    filePath: path.join(dataHome, 'projects', 'registry.json'),
+  });
+  const supervisor = createSessionSupervisor({
+    conversationStore,
+    goalPlanStore,
+    goalRunner,
+  });
+  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
+  const directory = createBotDirectory({
+    rootDir: dataHome,
+    registry,
+    readMessages: (conversationId) => (
+      conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
+    ),
+    listSessions: (workspaceId) => supervisor.list({ workspaceId }),
+    getSession: (sessionId) => supervisor.get({ sessionId }),
+    listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
+  });
+  const lifecycle = createBotLifecycle({
+    rootDir: dataHome,
+    enabled,
+    registry,
+    conversationStore,
+    memoryStore: createMemoryStore({ rootDir: dataHome }),
+    removeWorkspace: (folder) => workspace.removeWorkspace(folder),
+    moveToTrash: (folder) => shell.trashItem(folder),
+  });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+
+  function resolveConversationId(workspaceId) {
+    return directory.conversationId(workspaceId);
+  }
+
+  function hasMessage(conversationId, messageId) {
+    const history = conversationStore.getPersistedConversationHistory(conversationId);
+    return history?.messages?.some((message) => message?.id === messageId) === true;
+  }
+
+  function appendMessage(conversationId, message) {
+    conversationStore.appendMessage(conversationId, message);
+  }
+
+  const inputQueue = createInputQueue({
+    rootDir: runtimeRoot,
+    holdsLease,
+    resolveConversationId,
+    hasMessage,
+    appendMessage,
+  });
+  const host = createProjectAgentHost({
+    rootDir: runtimeRoot,
+    holdsLease,
+    listWorkspaceIds: () => directory.workspaceIds(),
+    resolveConversationId,
+    hasMessage,
+    appendMessage,
+    executeTurn: (input) => agentTurnExecutor.runTurn(input),
+    inputQueue,
+    getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
+  });
+  const projectAgent = createProjectAgentApplicationService({
+    enabled,
+    directory,
+    lifecycle,
+    profileStore,
+    inputQueue,
+    sessions: supervisor,
+    approvals: approvalStore,
+    bindWorkspace: (sender) => workspace.addWorkspace(sender),
+    rememberWorkspace({ workspaceId, path: folder, name }) {
+      const settings = getSettings() || {};
+      const workspaces = Array.isArray(settings.workspaces) ? [...settings.workspaces] : [];
+      if (workspaces.some((item) => item?.path === folder || item?.id === workspaceId)) return;
+      mergeSettings({
+        workspaces: [...workspaces, {
+          id: workspaceId,
+          path: folder,
+          name,
+          addedAt: new Date().toISOString(),
+          linkedFolders: [],
+        }],
+        activeWorkspace: folder,
+      });
+    },
+    createManaged: (name) => createManagedFolder({
+      name,
+      managedRoot: getSettings()?.projectAgent?.managedRoot || null,
+      registry,
+    }),
+    chooseAvatar: async (sender) => {
+      const parent = sender ? BrowserWindow.fromWebContents(sender) : undefined;
+      const { canceled, filePaths } = await dialog.showOpenDialog(parent, {
+        title: '选择头像',
+        properties: ['openFile'],
+        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+      return canceled ? null : (filePaths?.[0] ?? null);
+    },
+    wake: (workspaceId) => {
+      void host.sync([workspaceId]).catch(() => {});
+    },
+    broadcast,
+  });
+  return createProjectAgentIpcRegistrations({ projectAgent });
 }

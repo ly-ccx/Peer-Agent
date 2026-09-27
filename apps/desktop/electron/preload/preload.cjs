@@ -177,6 +177,30 @@ contextBridge.exposeInMainWorld('peerAgent', {
   installQoderSkill: (identity) => ipcRenderer.invoke('skills:qoder:install', identity || {}),
   listQoderTaxonomies: () => ipcRenderer.invoke('skills:qoder:list-taxonomies'),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  projectAgentList: (params) => ipcRenderer.invoke('project-agent:list', params),
+  projectAgentGet: (params) => ipcRenderer.invoke('project-agent:get', params),
+  projectAgentCreate: (params) => ipcRenderer.invoke('project-agent:create', params),
+  projectAgentUpdateProfile: (params) => ipcRenderer.invoke('project-agent:update-profile', params),
+  projectAgentDelete: (params) => ipcRenderer.invoke('project-agent:delete', params),
+  projectAgentSubmitInput: (params) => ipcRenderer.invoke('project-agent:submit-input', params),
+  projectAgentReadConversation: (params) => ipcRenderer.invoke('project-agent:read-conversation', params),
+  projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),
+  projectAgentGetSession: (params) => ipcRenderer.invoke('project-agent:get-session', params),
+  projectAgentCancelSession: (params) => ipcRenderer.invoke('project-agent:cancel-session', params),
+  projectAgentListApprovals: (params) => ipcRenderer.invoke('project-agent:list-approvals', params),
+  projectAgentDecideApproval: (params) => ipcRenderer.invoke('project-agent:decide-approval', params),
+  projectAgentMarkRead: (params) => ipcRenderer.invoke('project-agent:mark-read', params),
+  projectAgentSearch: (params) => ipcRenderer.invoke('project-agent:search', params),
+  onProjectAgentChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:changed', handler);
+    return () => ipcRenderer.removeListener('project-agent:changed', handler);
+  },
+  onProjectAgentConversationChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:conversation-changed', handler);
+    return () => ipcRenderer.removeListener('project-agent:conversation-changed', handler);
+  },
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
   quickChatSetContentHeight: (height) => ipcRenderer.invoke('quick-chat:set-content-height', { height }),

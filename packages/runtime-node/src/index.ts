@@ -246,6 +246,12 @@ export {
   listBotWorkspaceIds,
 } from './project-agent/host-lease.mjs';
 export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
+export { createBotDirectory } from './project-agent/bot-directory.mjs';
+export {
+  cleanDisplayName,
+  createBotProfileStore,
+} from './project-agent/bot-profile-store.mjs';
+export { createBotLifecycle } from './project-agent/bot-lifecycle.mjs';
 export {
   USER_TURN_LIMITS,
   WAKE_TURN_LIMITS,

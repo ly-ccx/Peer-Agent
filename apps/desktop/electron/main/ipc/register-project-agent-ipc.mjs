@@ -1,0 +1,46 @@
+function assertFunction(value, label) {
+  if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
+  return value;
+}
+
+function owner(ownerName, register) {
+  return Object.freeze({ owner: ownerName, register });
+}
+
+export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
+  const ports = {
+    list: assertFunction(projectAgent?.list, 'projectAgent.list'),
+    get: assertFunction(projectAgent?.get, 'projectAgent.get'),
+    create: assertFunction(projectAgent?.create, 'projectAgent.create'),
+    updateProfile: assertFunction(projectAgent?.updateProfile, 'projectAgent.updateProfile'),
+    deleteBot: assertFunction(projectAgent?.deleteBot, 'projectAgent.deleteBot'),
+    submitInput: assertFunction(projectAgent?.submitInput, 'projectAgent.submitInput'),
+    readConversation: assertFunction(projectAgent?.readConversation, 'projectAgent.readConversation'),
+    listSessions: assertFunction(projectAgent?.listSessions, 'projectAgent.listSessions'),
+    getSession: assertFunction(projectAgent?.getSession, 'projectAgent.getSession'),
+    cancelSession: assertFunction(projectAgent?.cancelSession, 'projectAgent.cancelSession'),
+    listApprovals: assertFunction(projectAgent?.listApprovals, 'projectAgent.listApprovals'),
+    decideApproval: assertFunction(projectAgent?.decideApproval, 'projectAgent.decideApproval'),
+    markRead: assertFunction(projectAgent?.markRead, 'projectAgent.markRead'),
+    search: assertFunction(projectAgent?.search, 'projectAgent.search'),
+  };
+
+  return Object.freeze([
+    owner('project-agent-ipc', (ipc) => {
+      ipc.handle('project-agent:list', (_event, payload) => ports.list(payload));
+      ipc.handle('project-agent:get', (_event, payload) => ports.get(payload));
+      ipc.handle('project-agent:create', (event, payload) => ports.create(payload, event.sender));
+      ipc.handle('project-agent:update-profile', (event, payload) => ports.updateProfile(payload, event.sender));
+      ipc.handle('project-agent:delete', (_event, payload) => ports.deleteBot(payload));
+      ipc.handle('project-agent:submit-input', (_event, payload) => ports.submitInput(payload));
+      ipc.handle('project-agent:read-conversation', (_event, payload) => ports.readConversation(payload));
+      ipc.handle('project-agent:list-sessions', (_event, payload) => ports.listSessions(payload));
+      ipc.handle('project-agent:get-session', (_event, payload) => ports.getSession(payload));
+      ipc.handle('project-agent:cancel-session', (_event, payload) => ports.cancelSession(payload));
+      ipc.handle('project-agent:list-approvals', (_event, payload) => ports.listApprovals(payload));
+      ipc.handle('project-agent:decide-approval', (_event, payload) => ports.decideApproval(payload));
+      ipc.handle('project-agent:mark-read', (_event, payload) => ports.markRead(payload));
+      ipc.handle('project-agent:search', (_event, payload) => ports.search(payload));
+    }),
+  ]);
+}
