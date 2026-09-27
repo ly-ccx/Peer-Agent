@@ -54,7 +54,7 @@ Three first-class shells share one unified core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-beta.1`**. This prerelease keeps the current interface. It adds background goal progress, durable approvals, and model-routing settings. The project agent is not open yet.
+> beta channel **`0.1.0-beta.2`**. The project agent must be turned on in Settings → Developer. Until then, the app stays on the current conversation screen. With the switch on, each project appears as a bot that can talk, open tasks, and remember the project. It cannot write files.
 
 ---
 
