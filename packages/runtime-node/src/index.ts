@@ -233,6 +233,12 @@ export {
   evaluateWorkSessionWrite,
 } from './project-agent/session-supervisor.mjs';
 export {
+  PROGRESS_THROTTLE_MS,
+  delegationEventId,
+  mapDelegationEvents,
+} from './project-agent/event-mapper.mjs';
+export { createProjectInbox } from './project-agent/project-inbox.mjs';
+export {
   DELEGATION_CAPABILITY_IDS,
   DELEGATION_TOOL_SPECS,
   delegationSpecByCapability,
