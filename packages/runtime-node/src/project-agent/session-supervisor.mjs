@@ -10,6 +10,9 @@ import { digestApprovalArgs } from './approval-store.mjs';
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
  * 每个项目同时只有一个 phase=running 的任务，其余 queued。
+ * 占用名额的任务完成、失败，或任一任务被取消后，启动队列里最早且依赖已满足的下一个。
+ * 重试用尽后落成 interrupted 的失败也让出名额。监督者建立时会再扫一遍已经落盘的队列。
+ * 名额仍被占用时，这次唤醒直接返回。
  * 只读写入判定在 evaluateWorkSessionWrite。协议里的 writeScope 只有 workspace_and_boundaries，不能用来表示禁止写。
  * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
@@ -69,8 +72,15 @@ export function createSessionSupervisor({
   }
 
   let tail = Promise.resolve();
+  let depth = 0;
   function exclusive(task) {
-    const run = tail.then(() => task(), () => task());
+    const run = tail.then(() => {
+      depth += 1;
+      return Promise.resolve().then(task).finally(() => { depth -= 1; });
+    }, () => {
+      depth += 1;
+      return Promise.resolve().then(task).finally(() => { depth -= 1; });
+    });
     tail = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -119,14 +129,34 @@ export function createSessionSupervisor({
       && (plan.delegationOrigin.phase === 'running' || plan.delegationOrigin.phase === 'queued'));
   }
 
+  function finalFailureReleased(plan) {
+    if (plan?.status !== 'interrupted') return false;
+    const runner = plan.runner;
+    const runnerStatus = runner?.status;
+    if (runnerStatus === 'running' || runnerStatus === 'exploring' || runnerStatus === 'waiting_user') return false;
+    const interruption = runner?.interruption;
+    if (interruption?.recoverable === true) {
+      const limit = runner?.maxRecoverableInterruptionRetries;
+      const used = runner?.recoverableInterruptionCount;
+      if (!Number.isFinite(limit) || !Number.isFinite(used) || used < limit) return false;
+    }
+    return runnerStatus === 'failed';
+  }
+
   function occupiesRunningSlot(plan) {
-    return plan?.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status);
+    return plan?.delegationOrigin?.phase === 'running'
+      && !TERMINAL.has(plan.status)
+      && !finalFailureReleased(plan);
+  }
+
+  function settled(plan) {
+    return TERMINAL.has(plan?.status) || finalFailureReleased(plan);
   }
 
   function depsMet(dependsOn) {
     if (!Array.isArray(dependsOn) || dependsOn.length === 0) return true;
     const byId = new Map(delegatedPlans().map((plan) => [plan.delegationOrigin.sessionId, plan]));
-    return dependsOn.every((id) => TERMINAL.has(byId.get(id)?.status));
+    return dependsOn.every((id) => settled(byId.get(id)));
   }
 
   function decidePhase(workspaceId, dependsOn) {
@@ -402,10 +432,12 @@ export function createSessionSupervisor({
   }
 
   async function promote(workspaceId) {
-    const next = openPlans(workspaceId)
-      .filter((plan) => plan.delegationOrigin.phase === 'queued')
+    const open = openPlans(workspaceId);
+    if (open.some(occupiesRunningSlot)) return;
+    const next = open
+      .filter((plan) => plan.delegationOrigin.phase === 'queued' && depsMet(plan.delegationOrigin.dependsOn))
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.planId).localeCompare(String(b.planId)))[0];
-    if (!next || !depsMet(next.delegationOrigin.dependsOn)) return;
+    if (!next) return;
     if (typeof goalRunner?.start !== 'function') return;
     goalPlanStore.revisePlan(next.planId, {
       status: 'executing',
@@ -418,7 +450,6 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     if (!plan) return null;
     const reason = text(input?.reason) || 'cancelled';
-    const wasRunning = occupiesRunningSlot(plan);
     if (typeof goalRunner?.pause === 'function') goalRunner.pause(plan.planId, reason);
     if (typeof abortStream === 'function') {
       await abortStream({
@@ -436,7 +467,7 @@ export function createSessionSupervisor({
       workspaceId: plan.delegationOrigin.workspaceId,
       reason,
     });
-    if (wasRunning) await promote(plan.delegationOrigin.workspaceId);
+    await promote(plan.delegationOrigin.workspaceId);
     const next = goalPlanStore.getPlan(plan.planId);
     return next ? project(next) : null;
   }
@@ -677,6 +708,50 @@ export function createSessionSupervisor({
     return { ok: Boolean(resumed), planId, resumed };
   }
 
+  // 完成、失败、取消，以及重试已经用尽的失败，才让出名额。
+  // failPlanRun 会带上 interruption，计划状态因此经常落成 interrupted 而不是 failed。
+  // 可恢复、预算还没用完的中断仍占着名额。
+  async function releaseSlotLocked(input = {}) {
+    const planId = text(typeof input === 'string' ? input : input?.planId);
+    if (!planId) return { ok: false, reason: 'missing_plan' };
+    const plan = goalPlanStore.getPlan(planId);
+    const origin = plan?.delegationOrigin;
+    if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
+    if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
+    if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
+    await promote(origin.workspaceId);
+    return { ok: true, planId };
+  }
+
+  function releaseSlot(input) {
+    const job = () => releaseSlotLocked(input || {});
+    if (depth > 0) {
+      return new Promise((resolve, reject) => {
+        setImmediate(() => {
+          exclusive(job).then(resolve, reject);
+        });
+      });
+    }
+    return exclusive(job);
+  }
+
+  if (typeof goalRunner?.setOnPlanTerminal === 'function') {
+    goalRunner.setOnPlanTerminal((event) => {
+      void releaseSlot({ planId: event?.planId }).catch(() => {});
+    });
+  }
+
+  async function reconcilePersistedQueues() {
+    const workspaces = new Set();
+    for (const plan of delegatedPlans()) {
+      const workspaceId = plan.delegationOrigin?.workspaceId;
+      if (workspaceId) workspaces.add(workspaceId);
+    }
+    for (const workspaceId of workspaces) await promote(workspaceId);
+  }
+
+  const reconciled = exclusive(() => reconcilePersistedQueues());
+
   return {
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
@@ -705,6 +780,8 @@ export function createSessionSupervisor({
       const plan = findBySession(text(sessionId));
       return evaluateWorkSessionWrite(plan, action);
     },
+    releaseSlot,
+    reconciled,
   };
 }
 
