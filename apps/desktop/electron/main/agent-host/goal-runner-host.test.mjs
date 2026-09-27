@@ -125,6 +125,7 @@ test('host runs one goal turn, one explorer, and one verifier through a scripted
       signal: null,
     });
     assert.equal(verifierReport.passed, true);
+    assert.equal(typeof host.goalRunner.verifyDelegatedSession, 'function');
     assert.deepEqual(verifierReport.evidenceRefs, ['tool-result://host-verifier']);
 
     const visual = await host.verifierRunner.runVerifier({

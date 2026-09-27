@@ -305,8 +305,10 @@ function delegationStatus(
     if (meta.acceptance === 'confirm' && meta.accepted !== true) return 'result_ready';
     return 'accepted';
   }
+  // 复核进行中盖过「需要你」。草稿、待批准、等回答的计划在独立复核时都显示 verifying。
+  if (meta.verifying || meta.phase === 'verifying') return 'verifying';
   if (projected.actionRight === 'needs_you') return 'waiting_user';
-  if (snapshot.runnerStatus === 'exploring' || meta.phase === 'verifying') return 'verifying';
+  if (snapshot.runnerStatus === 'exploring') return 'verifying';
   if (meta.phase === 'starting') return 'starting';
   if (
     snapshot.status === 'approved'

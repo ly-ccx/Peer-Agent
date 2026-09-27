@@ -493,6 +493,47 @@ test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying
   assert.notEqual(cards[0].verdictRef, cards[1].verdictRef);
 });
 
+test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {
+  let runs = 0;
+  const provider = createDelegationProvider({
+    verification: {
+      async facts() {
+        return {
+          plan: hostPlan('ev-real'),
+          evidenceIndex: ['ev-real'],
+          independentVerifier: 'passed',
+          workerModel: 'worker-a',
+          verifierModel: 'verifier-b',
+          sameFamilyAsWorker: false,
+        };
+      },
+      async run() {
+        runs += 1;
+        return { ok: true, facts: { plan: hostPlan('ev-real'), evidenceIndex: ['ev-real'] } };
+      },
+      async markVerifying() {},
+    },
+  });
+  const quoted = agentContext({
+    messages: [
+      { id: 'r1', role: 'assistant', kind: 'agent_reply', sources: ['s-other'] },
+      { id: 'u1', role: 'user', kind: 'user_input', quoteRefs: ['r1', '别的'] },
+    ],
+  });
+  const denied = outputOf(await provider.executeCapability(
+    call('local.delegation.verify_session', { sessionId: 's-keep' }, 'verify-scope'),
+    quoted,
+  ));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'out_of_scope');
+  assert.equal(runs, 0);
+  const detail = outputOf(await provider.executeCapability(
+    call('local.delegation.get_verification_detail', { sessionId: 's-keep' }, 'detail-scope'),
+    { ...quoted, toolCallOrdinal: 1 },
+  ));
+  assert.equal(detail.outcome, 'passed');
+});
+
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }

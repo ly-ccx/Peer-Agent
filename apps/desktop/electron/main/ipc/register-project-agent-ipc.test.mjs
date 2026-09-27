@@ -87,8 +87,8 @@ test('证据正文只经 read-evidence 通道从 main 读出', async () => {
     enabled: () => true,
     directory: { list: () => [], search: () => [] },
     readEvidenceBody(evidenceRef) {
-      assert.equal(evidenceRef, 'ev-1');
-      return { evidenceRef, kind: 'command', text };
+      if (evidenceRef === 'ev-1') return { evidenceRef, kind: 'command', text };
+      return { evidenceRef, kind: 'command', text: 'npm test' };
     },
     broadcast() {},
   });
@@ -109,4 +109,10 @@ test('证据正文只经 read-evidence 通道从 main 读出', async () => {
   const escaped = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: '../secret' });
   assert.equal(escaped.ok, false);
   assert.equal(escaped.code, 'INVALID_REF');
+  const toolResult = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'tool-result://host-verifier' });
+  assert.equal(toolResult.ok, true);
+  assert.equal(toolResult.summary, 'npm test');
+  const stdout = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'local-shell-artifact://task/stdout' });
+  assert.equal(stdout.ok, true);
+  assert.equal(stdout.evidenceRef, 'local-shell-artifact://task/stdout');
 });

@@ -55,14 +55,15 @@ export function finishAgentTurn({
     return { messages, replied: false };
   }
   const replies = postReplies(storedRounds);
+  const evidenceRefs = hostEvidenceRefs(storedRounds);
   if (replies.length > 0) {
     replies.forEach((call, index) => {
-      messages.push(replyFromTool(turnId, index, call));
+      messages.push(attachEvidence(replyFromTool(turnId, index, call), evidenceRefs));
     });
     return { messages, replied: true };
   }
   if (plan?.kind === 'user') {
-    messages.push({
+    messages.push(attachEvidence({
       id: `${turnId}-reply`,
       role: 'assistant',
       kind: 'agent_reply',
@@ -71,7 +72,7 @@ export function finishAgentTurn({
       sources: [],
       fallback: true,
       turnId,
-    });
+    }, evidenceRefs));
     return { messages, replied: true };
   }
   return { messages, replied: false };
@@ -187,4 +188,60 @@ function normalizeRounds(rounds) {
 function stringList(value) {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+}
+
+const EVIDENCE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
+const EVIDENCE_URI = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/;
+
+function hostEvidenceRefs(rounds) {
+  const refs = [];
+  for (const round of rounds) {
+    for (const call of round.toolCalls) {
+      if (call.name === 'post_reply') continue;
+      collectEvidenceRefs(call.result, refs, 0);
+    }
+  }
+  return refs.slice(0, 20);
+}
+
+function attachEvidence(message, evidenceRefs) {
+  if (evidenceRefs.length === 0) return message;
+  const meta = message.meta && typeof message.meta === 'object' ? message.meta : {};
+  return { ...message, meta: { ...meta, evidenceRefs } };
+}
+
+function collectEvidenceRefs(value, refs, depth) {
+  if (refs.length >= 20 || depth > 6) return;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        collectEvidenceRefs(JSON.parse(trimmed), refs, depth + 1);
+      } catch {
+        // 不是 JSON 的正文不拿来当证据引用。
+      }
+    }
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  if (value.ok === false || value.status === 'failed') return;
+  addEvidenceRef(refs, value.evidenceRef);
+  if (Array.isArray(value.evidenceRefs)) {
+    for (const item of value.evidenceRefs) addEvidenceRef(refs, item);
+  }
+  for (const key of ['output', 'detail', 'result', 'legacyResult', 'outputPreview']) {
+    if (value[key] != null) collectEvidenceRefs(value[key], refs, depth + 1);
+  }
+  for (const list of [value.checks, value.outputs]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) collectEvidenceRefs(item, refs, depth + 1);
+  }
+}
+
+function addEvidenceRef(refs, value) {
+  if (refs.length >= 20 || typeof value !== 'string') return;
+  const text = value.trim();
+  if (!text || text.length > 500 || text.includes('..') || /[\s\u0000-\u001f\\]/.test(text)) return;
+  if (!EVIDENCE_URI.test(text) && !EVIDENCE_TOKEN.test(text)) return;
+  if (!refs.includes(text)) refs.push(text);
 }

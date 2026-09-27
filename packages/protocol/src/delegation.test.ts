@@ -134,6 +134,12 @@ test('verifying, result_ready, starting, and superseded are delegation statuses'
     projectWorkSession(plan({ runnerStatus: 'exploring' }), meta()).status,
     'verifying',
   );
+  const draftingReview = projectWorkSession(
+    plan({ status: 'drafting' }),
+    meta({ verifying: true, phase: 'verifying' }),
+  );
+  assert.equal(draftingReview.status, 'verifying');
+  assert.equal(draftingReview.actionRight, projectGoalPlan(plan({ status: 'drafting' })).actionRight);
   assert.equal(
     projectWorkSession(plan({ runnerStatus: 'running' }), meta({ phase: 'starting' })).status,
     'starting',

@@ -54,6 +54,8 @@ export function composeReply(input = {}) {
   if (memoryUsed && memoryUsed.ok === false) return memoryUsed;
   const memoryLearned = readList(input.memoryLearned, 'memoryLearned must be a list of memory ids.');
   if (memoryLearned && memoryLearned.ok === false) return memoryLearned;
+  const evidenceRefs = readEvidenceRefs(input.evidenceRefs);
+  if (evidenceRefs && evidenceRefs.ok === false) return evidenceRefs;
   if (input.toolCalls != null && !Array.isArray(input.toolCalls)) {
     return fail('invalid_input', 'toolCalls must be a list.');
   }
@@ -94,6 +96,7 @@ export function composeReply(input = {}) {
     ...(verdictRef ? { verdictRef } : {}),
     memoryUsed: memoryUsed.ids,
     memoryLearned: learned,
+    ...(evidenceRefs.ids.length > 0 ? { evidenceRefs: evidenceRefs.ids } : {}),
     surfacing: surfacing.decision,
   };
   const message = {
@@ -136,6 +139,14 @@ function readList(value, message) {
   const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: ID_MAX });
   if (!ids) return fail('invalid_input', message);
   return { ids };
+}
+
+function readEvidenceRefs(value) {
+  if (value == null) return { ids: [] };
+  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 500 });
+  if (!ids) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
+  const allowed = ids.filter((id) => !id.includes('..') && !/[\s\\]/.test(id));
+  return { ids: allowed };
 }
 
 function readIdSet(value, message) {

@@ -595,6 +595,17 @@ export function createDesktopGoalRunnerHost({
     },
   };
   const goalRunner = createGoalRunner(goalRunnerOptions);
+  goalRunner.verifyDelegatedSession = async ({ plan, focus } = {}) => {
+    if (typeof goalRunnerOptions.verifierRunner?.runVerifier !== 'function') {
+      return { ok: false, error: 'verifier_unavailable' };
+    }
+    return goalRunnerOptions.verifierRunner.runVerifier({
+      plan,
+      verifierRunId: `delegated-verify-${plan?.planId || 'session'}`,
+      stage: 'delegated',
+      ...(typeof focus === 'string' && focus.trim() ? { focus: focus.trim() } : {}),
+    });
+  };
   return {
     goalRunner,
     explorerRunner: goalRunnerOptions.explorerRunner,

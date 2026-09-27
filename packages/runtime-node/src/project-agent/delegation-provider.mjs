@@ -98,7 +98,7 @@ export function createDelegationProvider({
     }
 
     const input = validated.value;
-    if (item.name === 'message_session' || item.name === 'cancel_session') {
+    if (item.name === 'message_session' || item.name === 'cancel_session' || item.name === 'verify_session') {
       const scope = resolveAnchorScope({
         messages: view.messages,
         quoteRefs: view.quoteRefs,
@@ -219,8 +219,14 @@ export function createDelegationProvider({
     return accepted(await callPort(replyComposer?.postReply, input, 'composer_unavailable'), 'composer_unavailable');
   }
 
+  function verificationAvailable() {
+    if (!verification || typeof verification !== 'object') return false;
+    if (typeof verification.available === 'function' && verification.available() !== true) return false;
+    return true;
+  }
+
   async function readVerification(input) {
-    if (typeof verification?.facts !== 'function') {
+    if (!verificationAvailable() || typeof verification?.facts !== 'function') {
       return { ok: false, output: { ok: false, error: 'verification_unavailable', message: 'verification_unavailable' } };
     }
     const facts = await verification.facts(input.sessionId);
@@ -231,7 +237,7 @@ export function createDelegationProvider({
   }
 
   async function verifySession(input) {
-    if (typeof verification?.run !== 'function') {
+    if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
     if (typeof verification.markVerifying === 'function') {

@@ -206,6 +206,7 @@ export function createSessionSupervisor({
       workspaceId: origin.workspaceId || '',
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
+      ...(origin.verifying === true ? { verifying: true, phase: 'verifying' } : {}),
       origin,
     });
     const interventions = interventionsOf(plan.conversationId);
