@@ -95,6 +95,36 @@ export type TranslationKey =
   | 'projectAgent.list.columnResize'
   | 'projectAgent.list.backToBots'
   | 'projectAgent.list.close'
+  | 'projectAgent.chat.empty'
+  | 'projectAgent.chat.loadFailed'
+  | 'projectAgent.chat.thinking'
+  | 'projectAgent.chat.sending'
+  | 'projectAgent.chat.failed'
+  | 'projectAgent.chat.retry'
+  | 'projectAgent.chat.replied'
+  | 'projectAgent.chat.quote'
+  | 'projectAgent.chat.quoteRemove'
+  | 'projectAgent.chat.placeholder'
+  | 'projectAgent.chat.send'
+  | 'projectAgent.chat.hint'
+  | 'projectAgent.chat.source'
+  | 'projectAgent.chat.memoryUsed'
+  | 'projectAgent.chat.memoryLearned'
+  | 'projectAgent.chat.digest'
+  | 'projectAgent.chat.today'
+  | 'projectAgent.chat.earlierDay'
+  | 'projectAgent.chat.replyTo'
+  | 'projectAgent.chat.verdict.passed'
+  | 'projectAgent.chat.verdict.failed'
+  | 'projectAgent.chat.verdict.partial'
+  | 'projectAgent.chat.verdict.unverifiable'
+  | 'projectAgent.chat.surfacing.interrupt'
+  | 'projectAgent.chat.surfacing.message'
+  | 'projectAgent.chat.surfacing.digest'
+  | 'projectAgent.chat.surfacing.silent'
+  | 'projectAgent.chat.approve'
+  | 'projectAgent.chat.reject'
+  | 'projectAgent.chat.answer'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -984,6 +1014,36 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.columnResize': '调整列表宽度',
     'projectAgent.list.backToBots': '返回机器人',
     'projectAgent.list.close': '关闭',
+    'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
+    'projectAgent.chat.loadFailed': '对话没有加载出来',
+    'projectAgent.chat.thinking': '思考中…',
+    'projectAgent.chat.sending': '发送中',
+    'projectAgent.chat.failed': '没有发出去',
+    'projectAgent.chat.retry': '重发',
+    'projectAgent.chat.replied': '已回复',
+    'projectAgent.chat.quote': '引用',
+    'projectAgent.chat.quoteRemove': '取消引用',
+    'projectAgent.chat.placeholder': '跟这个机器人说',
+    'projectAgent.chat.send': '发送',
+    'projectAgent.chat.hint': '回车发送，Shift+回车换行',
+    'projectAgent.chat.source': '来源',
+    'projectAgent.chat.memoryUsed': '参考了 {count} 条记忆',
+    'projectAgent.chat.memoryLearned': '新记住 {count} 条',
+    'projectAgent.chat.digest': '今日小结',
+    'projectAgent.chat.today': '今天 {time}',
+    'projectAgent.chat.earlierDay': '{date} {time}',
+    'projectAgent.chat.replyTo': '回复',
+    'projectAgent.chat.verdict.passed': '结论：已验证',
+    'projectAgent.chat.verdict.failed': '结论：没通过',
+    'projectAgent.chat.verdict.partial': '结论：部分验证',
+    'projectAgent.chat.verdict.unverifiable': '结论：无法验证',
+    'projectAgent.chat.surfacing.interrupt': '马上告诉你',
+    'projectAgent.chat.surfacing.message': '出现在对话里',
+    'projectAgent.chat.surfacing.digest': '收进小结',
+    'projectAgent.chat.surfacing.silent': '不打扰',
+    'projectAgent.chat.approve': '批准',
+    'projectAgent.chat.reject': '拒绝',
+    'projectAgent.chat.answer': '回答',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1685,6 +1745,36 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.columnResize': 'Resize the bot list',
     'projectAgent.list.backToBots': 'Back to bots',
     'projectAgent.list.close': 'Close',
+    'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
+    'projectAgent.chat.loadFailed': 'The conversation did not load',
+    'projectAgent.chat.thinking': 'Thinking…',
+    'projectAgent.chat.sending': 'Sending',
+    'projectAgent.chat.failed': 'Not sent',
+    'projectAgent.chat.retry': 'Retry',
+    'projectAgent.chat.replied': 'Replied',
+    'projectAgent.chat.quote': 'Quote',
+    'projectAgent.chat.quoteRemove': 'Remove quote',
+    'projectAgent.chat.placeholder': 'Message this bot',
+    'projectAgent.chat.send': 'Send',
+    'projectAgent.chat.hint': 'Enter to send, Shift+Enter for a new line',
+    'projectAgent.chat.source': 'Source',
+    'projectAgent.chat.memoryUsed': 'Used {count} memories',
+    'projectAgent.chat.memoryLearned': 'Remembered {count} new',
+    'projectAgent.chat.digest': 'Daily digest',
+    'projectAgent.chat.today': 'Today {time}',
+    'projectAgent.chat.earlierDay': '{date} {time}',
+    'projectAgent.chat.replyTo': 'Reply',
+    'projectAgent.chat.verdict.passed': 'Verdict: verified',
+    'projectAgent.chat.verdict.failed': 'Verdict: failed',
+    'projectAgent.chat.verdict.partial': 'Verdict: partial',
+    'projectAgent.chat.verdict.unverifiable': 'Verdict: unverifiable',
+    'projectAgent.chat.surfacing.interrupt': 'Tell you now',
+    'projectAgent.chat.surfacing.message': 'Show in the chat',
+    'projectAgent.chat.surfacing.digest': 'Keep for the digest',
+    'projectAgent.chat.surfacing.silent': 'Stay quiet',
+    'projectAgent.chat.approve': 'Approve',
+    'projectAgent.chat.reject': 'Reject',
+    'projectAgent.chat.answer': 'Answer',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',
