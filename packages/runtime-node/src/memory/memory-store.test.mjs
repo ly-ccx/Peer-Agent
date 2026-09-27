@@ -256,3 +256,50 @@ test('workspaceId 不能逃出项目目录', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('推断偏好只有满 3 次后才能由 Curator 写入，工具路径仍然要求用户锚点', () => {
+  const root = tempRoot('curated');
+  try {
+    const store = createMemoryStore({ rootDir: root });
+    const early = store.writeCurated({
+      kind: 'preference',
+      trust: 'inferred',
+      text: '回复要短',
+      confirmedCount: 2,
+      sourceRefs: ['ep-1', 'ep-2'],
+    });
+    assert.equal(early.reason, 'preference_unconfirmed');
+    const saved = store.writeCurated({
+      kind: 'preference',
+      trust: 'inferred',
+      text: '回复要短',
+      confirmedCount: 3,
+      sourceRefs: ['ep-1', 'ep-2', 'ep-3'],
+    });
+    assert.equal(saved.ok, true);
+    assert.equal(saved.item.trust, 'inferred');
+    assert.equal(saved.item.scope, 'user');
+    assert.equal(store.get(saved.item.id).confirmedCount, 3);
+    appendFileSync(store.userFile(), `${JSON.stringify({
+      id: 'mem-low',
+      scope: 'user',
+      kind: 'preference',
+      text: '还没到三次',
+      trust: 'inferred',
+      sourceRefs: ['ep-1'],
+      pinned: false,
+      status: 'active',
+      confirmedCount: 2,
+      createdAt: '2026-09-27T00:00:00.000Z',
+      updatedAt: '2026-09-27T00:00:00.000Z',
+    })}\n`, 'utf8');
+    assert.equal(store.get('mem-low'), null);
+    const anchored = store.rememberStated({
+      kind: 'preference',
+      text: '记住：回复要短',
+    });
+    assert.equal(anchored.reason, 'anchor_required');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

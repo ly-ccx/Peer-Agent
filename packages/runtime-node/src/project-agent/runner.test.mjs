@@ -660,3 +660,42 @@ test('今日小结定时邮件唤醒后写入分隔消息，digest 回复改入�
     box.cleanup();
   }
 });
+
+test('回合结束后触发整理，学到的 id 出现在下一条回复', async () => {
+  const box = world('ws-curator');
+  const seen = [];
+  try {
+    const runner = runnerFor(box, async () => ({ text: '好' }), {
+      onCurator: async (info) => {
+        seen.push({
+          kind: info.kind,
+          events: (info.events || []).map((event) => event.kind),
+        });
+        return { learnedIds: info.kind === 'user' ? ['mem-curated'] : [] };
+      },
+    });
+    await runner.enqueueUserInputs([input('a', '一')]);
+    const first = box.messages.filter((message) => message.kind === 'agent_reply');
+    assert.equal(first.length, 1);
+    assert.equal(first[0].meta, undefined);
+    assert.deepEqual(seen.map((item) => item.kind), ['user']);
+
+    await runner.enqueueUserInputs([input('b', '二')]);
+    const replies = box.messages.filter((message) => message.kind === 'agent_reply');
+    assert.equal(replies.length, 2);
+    assert.deepEqual(replies[1].meta.memoryLearned, ['mem-curated']);
+
+    box.inbox.append(box.workspaceId, [{
+      eventId: 'evt-curator',
+      kind: 'session_verified',
+      sessionId: 'sess-1',
+      at: '2026-09-27T02:00:00.000Z',
+      payload: { summary: '做完了' },
+    }]);
+    await runner.kick();
+    assert.deepEqual(seen.map((item) => item.kind), ['user', 'user', 'wake']);
+    assert.deepEqual(seen[2].events, ['session_verified']);
+  } finally {
+    box.cleanup();
+  }
+});

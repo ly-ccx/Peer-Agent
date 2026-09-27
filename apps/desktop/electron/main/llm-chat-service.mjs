@@ -99,6 +99,7 @@ const TURN_ROLES = new Set([
   'automation',
   'project_agent',
   'work_session',
+  'memory_curator',
 ]);
 
 function normalizeTurnProfile(value) {

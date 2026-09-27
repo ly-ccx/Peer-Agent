@@ -31,6 +31,7 @@ export function createProjectAgentRunner({
   onStatus = null,
   onDigest = null,
   onDigestDelivered = null,
+  onCurator = null,
 } = {}) {
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   const conversation = typeof conversationId === 'string' ? conversationId.trim() : '';
@@ -60,6 +61,8 @@ export function createProjectAgentRunner({
   let abortController = null;
   let turnSeq = 0;
   let statusValue = 'idle';
+  let curatorFlight = null;
+  const pendingLearned = [];
 
   function setStatus(next) {
     if (statusValue === next) return;
@@ -129,6 +132,7 @@ export function createProjectAgentRunner({
   }
 
   async function pump() {
+    let drained = false;
     while (!disposed) {
       if (holdsLease() !== true) {
         setStatus(failedJob ? 'error' : 'idle');
@@ -140,9 +144,15 @@ export function createProjectAgentRunner({
       }
       const job = takeNext();
       if (!job) {
+        if (!drained) {
+          drained = true;
+          await drainCurator();
+          continue;
+        }
         setStatus(failedJob ? 'error' : 'idle');
         return;
       }
+      drained = false;
       const outcome = await runJob(job);
       if (outcome === 'disposed') return;
       if (outcome === 'error') {
@@ -180,6 +190,7 @@ export function createProjectAgentRunner({
         preempted.push({ events: job.events, throughSeq: job.throughSeq });
         return 'preempted';
       }
+      const learned = await takePendingLearned();
       const finished = finishAgentTurn({
         turnId: outcome.turnId,
         plan: outcome.plan,
@@ -188,6 +199,7 @@ export function createProjectAgentRunner({
         reason: outcome.reason,
         memoryUsed: outcome.memoryIds,
       });
+      if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
       for (const message of finished.messages) {
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
@@ -202,6 +214,7 @@ export function createProjectAgentRunner({
       }
       if (outcome.failed) return 'error';
       commit(job.throughSeq);
+      if (job.kind === 'user' || job.kind === 'wake') scheduleCurator(job);
       return 'ok';
     } finally {
       if (abortController === controller) abortController = null;
@@ -401,6 +414,43 @@ export function createProjectAgentRunner({
     abortController?.abort();
   }
 
+  function scheduleCurator(job) {
+    if (typeof onCurator !== 'function') return;
+    const payload = {
+      workspaceId: workspace,
+      conversationId: conversation,
+      kind: job.kind,
+      userInputs: (Array.isArray(job.userInputs) ? job.userInputs : []).map((item) => ({ ...item })),
+      events: (Array.isArray(job.events) ? job.events : []).map((event) => ({ ...event })),
+    };
+    curatorFlight = Promise.resolve()
+      .then(() => onCurator(payload))
+      .then((result) => {
+        for (const id of memoryIdsOf({ memoryIds: result?.learnedIds })) {
+          if (!pendingLearned.includes(id) && pendingLearned.length < 200) pendingLearned.push(id);
+        }
+      })
+      .catch(() => {
+        // 整理失败不打断代理回合。
+      });
+  }
+
+  async function drainCurator() {
+    const flight = curatorFlight;
+    curatorFlight = null;
+    if (!flight) return;
+    try {
+      await flight;
+    } catch {
+      // 整理失败不打断代理回合。
+    }
+  }
+
+  async function takePendingLearned() {
+    await drainCurator();
+    return pendingLearned.splice(0, pendingLearned.length);
+  }
+
   return {
     workspaceId: workspace,
     conversationId: conversation,
@@ -453,8 +503,27 @@ function memoryIdsOf(raw) {
     const trimmed = item.trim();
     if (!trimmed || trimmed.length > 200 || ids.includes(trimmed)) continue;
     ids.push(trimmed);
+    if (ids.length >= 200) break;
   }
   return ids;
+}
+
+function stampLearned(messages, ids) {
+  const learned = memoryIdsOf({ memoryIds: ids });
+  if (learned.length === 0) return true;
+  let stamped = false;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (message?.kind !== 'agent_reply') continue;
+    const existing = memoryIdsOf({ memoryIds: message.meta?.memoryLearned });
+    const merged = memoryIdsOf({ memoryIds: [...existing, ...learned] });
+    if (merged.length === 0) continue;
+    message.meta = {
+      ...(message.meta && typeof message.meta === 'object' ? message.meta : {}),
+      memoryLearned: merged,
+    };
+    stamped = true;
+  }
+  return stamped;
 }
 
 function sleep(ms, signal) {

@@ -8,6 +8,8 @@ import {
   createBotProfileStore,
   createInputQueue,
   createMemoryStore,
+  createEpisodeLog,
+  createMemoryCurator,
   createDigestQueue,
   createProjectAgentRunner,
   inQuietHours,
@@ -18,6 +20,7 @@ import {
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
+import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
@@ -27,6 +30,7 @@ import { installSessionVerification, createSessionVerification } from './session
 import { installProjectProactivity } from './proactivity-port.mjs';
 import { installDeliveryFacts } from './delivery-facts-port.mjs';
 import { installMemoryGate, memoryUseEnabled } from './memory-gate-port.mjs';
+import { liveMemoryIndex } from './memory-index-port.mjs';
 import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
@@ -48,6 +52,7 @@ export function createProjectAgentHost({
   getWindows = () => [],
   now,
   retryDelays,
+  onCurator = null,
   inbox = null,
   inputQueue = null,
   readSettings = null,
@@ -117,6 +122,9 @@ export function createProjectAgentHost({
         const date = message?.meta?.digestDate;
         if (typeof date === 'string') digests.acknowledge(workspaceId, date);
       },
+      onCurator: typeof onCurator === 'function'
+        ? (info) => onCurator({ ...info, workspaceId })
+        : null,
     });
     runners.set(workspaceId, runner);
     return runner;
@@ -305,6 +313,22 @@ export function registerDesktopProjectAgent({
       return memoryUseEnabled({ settings, profile });
     },
   });
+  const memoryCurator = createMemoryCurator({
+    store: memoryStore,
+    episodes: createEpisodeLog({ rootDir: dataHome }),
+    learnPreferences: () => getSettings()?.memory?.learnPreferences !== false,
+    memoryEnabled: (workspaceId) => {
+      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const profile = workspaceId ? profileStore.read(workspaceId) : null;
+      return memoryUseEnabled({ settings, profile });
+    },
+    runTurn: (request) => runMemoryCuratorTurn({
+      request,
+      getSettings,
+      runTurn: (input) => agentTurnExecutor.runTurn(input),
+    }),
+    onWrote: () => liveMemoryIndex().rebuild(),
+  });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -368,6 +392,7 @@ export function registerDesktopProjectAgent({
     hasMessage,
     appendMessage,
     executeTurn: (input) => agentTurnExecutor.runTurn(input),
+    onCurator: (info) => memoryCurator.consider(info),
     inputQueue,
     readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),

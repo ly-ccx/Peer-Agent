@@ -21,7 +21,13 @@ function admit(item, seen) {
   if (!text || !KINDS.has(item.kind)) return null;
   const status = typeof item.status === 'string' && item.status ? item.status : 'active';
   if (status !== 'active') return null;
-  if (item.trust !== 'stated' && item.trust !== 'verified') return null;
+  const confirmedCount = Number.isInteger(item.confirmedCount) && item.confirmedCount > 0
+    ? item.confirmedCount
+    : 0;
+  const inferredPreference = item.trust === 'inferred'
+    && item.kind === 'preference'
+    && confirmedCount >= 3;
+  if (item.trust !== 'stated' && item.trust !== 'verified' && !inferredPreference) return null;
   const scope = item.kind === 'preference' || item.scope === 'user' ? 'user' : 'project';
   if (scope === 'user' && item.kind !== 'preference') return null;
   seen.add(id);
@@ -31,6 +37,7 @@ function admit(item, seen) {
     scope,
     text,
     trust: item.trust,
+    confirmedCount,
     pinned: item.pinned === true,
     lastUsedAt: stamp(item.lastUsedAt),
     updatedAt: stamp(item.updatedAt),
@@ -58,7 +65,7 @@ function groupOf(item) {
   if (item.pinned) return 'pinned';
   if (item.kind === 'responsibility') return 'responsibilities';
   if (item.kind === 'fact' && item.trust === 'verified') return 'facts';
-  if (item.kind === 'preference' && item.trust === 'stated') return 'preferences';
+  if (item.kind === 'preference' && (item.trust === 'stated' || item.trust === 'inferred')) return 'preferences';
   return '';
 }
 

@@ -206,3 +206,14 @@ test('memory_remember 的嵌套结果也能抽出 id', () => {
   });
   assert.deepEqual(refused.meta.memoryLearned, []);
 });
+
+test('Curator 生效的记忆 id 并进新记住', () => {
+  const result = reply({
+    text: '记下了',
+    memoryLearned: ['mem-host'],
+    curatorLearned: ['mem-curated'],
+    toolCalls: [{ name: 'memory_remember', result: { ok: true, id: 'mem-tool' } }],
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.meta.memoryLearned, ['mem-host', 'mem-curated', 'mem-tool']);
+});

@@ -55,6 +55,8 @@ export function composeReply(input = {}) {
   if (memoryUsed && memoryUsed.ok === false) return memoryUsed;
   const memoryLearned = readMemoryList(input.memoryLearned, 'memoryLearned must be a list of memory ids.');
   if (memoryLearned && memoryLearned.ok === false) return memoryLearned;
+  const curatorLearned = readMemoryList(input.curatorLearned, 'curatorLearned must be a list of memory ids.');
+  if (curatorLearned && curatorLearned.ok === false) return curatorLearned;
   const evidenceRefs = readEvidenceRefs(input.evidenceRefs);
   if (evidenceRefs && evidenceRefs.ok === false) return evidenceRefs;
   if (input.toolCalls != null && !Array.isArray(input.toolCalls)) {
@@ -90,7 +92,7 @@ export function composeReply(input = {}) {
   const verdicts = indexVerdicts(input.verdicts);
   const marks = marksFor(sources.ids, verdicts);
   const verdictRef = latestVerdictRef(sources.ids, verdicts);
-  const learned = mergeIds(memoryLearned.ids, learnedFromTools(input.toolCalls));
+  const learned = mergeIds(mergeIds(memoryLearned.ids, curatorLearned.ids), learnedFromTools(input.toolCalls));
   const meta = {
     replyTo: anchors,
     sources: sources.ids,
