@@ -56,6 +56,45 @@ export type TranslationKey =
   | 'developer.projectAgent.switch'
   | 'developer.projectAgent.diagnostics'
   | 'developer.projectAgent.inactive'
+  | 'projectAgent.list.brand'
+  | 'projectAgent.list.newBot'
+  | 'projectAgent.list.searchPlaceholder'
+  | 'projectAgent.list.needsYou'
+  | 'projectAgent.list.empty'
+  | 'projectAgent.list.emptyHint'
+  | 'projectAgent.list.emptyNeedsYou'
+  | 'projectAgent.list.emptySearch'
+  | 'projectAgent.list.me'
+  | 'projectAgent.list.settings'
+  | 'projectAgent.list.automations'
+  | 'projectAgent.list.capabilities'
+  | 'projectAgent.list.capabilitiesHint'
+  | 'projectAgent.list.loading'
+  | 'projectAgent.list.unavailable'
+  | 'projectAgent.list.loadFailed'
+  | 'projectAgent.list.noPreview'
+  | 'projectAgent.list.mainEmptyTitle'
+  | 'projectAgent.list.mainEmptyBody'
+  | 'projectAgent.list.mainPlaceholder'
+  | 'projectAgent.list.profile'
+  | 'projectAgent.list.unread'
+  | 'projectAgent.list.running'
+  | 'projectAgent.list.needsYouBadge'
+  | 'projectAgent.list.newSheetTitle'
+  | 'projectAgent.list.bindFolder'
+  | 'projectAgent.list.bindFolderHint'
+  | 'projectAgent.list.blankBot'
+  | 'projectAgent.list.blankBotHint'
+  | 'projectAgent.list.namePlaceholder'
+  | 'projectAgent.list.nameInvalid'
+  | 'projectAgent.list.nameWillUse'
+  | 'projectAgent.list.create'
+  | 'projectAgent.list.creating'
+  | 'projectAgent.list.createFailed'
+  | 'projectAgent.list.nameExhausted'
+  | 'projectAgent.list.columnResize'
+  | 'projectAgent.list.backToBots'
+  | 'projectAgent.list.close'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -906,6 +945,45 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.projectAgent.switch': '项目代理模式',
     'developer.projectAgent.diagnostics': '项目代理诊断',
     'developer.projectAgent.inactive': '未启用',
+    'projectAgent.list.brand': 'Peer',
+    'projectAgent.list.newBot': '新建机器人',
+    'projectAgent.list.searchPlaceholder': '搜索机器人、消息、任务',
+    'projectAgent.list.needsYou': '需要你 {count}',
+    'projectAgent.list.empty': '还没有机器人',
+    'projectAgent.list.emptyHint': '用左上角 + 绑定文件夹，或建一个空白机器人。',
+    'projectAgent.list.emptyNeedsYou': '现在没有需要你处理的事。',
+    'projectAgent.list.emptySearch': '没有匹配的机器人。',
+    'projectAgent.list.me': '我',
+    'projectAgent.list.settings': '设置',
+    'projectAgent.list.automations': '自动化',
+    'projectAgent.list.capabilities': '能力',
+    'projectAgent.list.capabilitiesHint': '插件、技能与 MCP',
+    'projectAgent.list.loading': '正在读取机器人',
+    'projectAgent.list.unavailable': '项目代理没有打开',
+    'projectAgent.list.loadFailed': '机器人列表没有读出来',
+    'projectAgent.list.noPreview': '还没有消息',
+    'projectAgent.list.mainEmptyTitle': '选一个机器人',
+    'projectAgent.list.mainEmptyBody': '选中左边的机器人，或新建一个。对话会留在这里。',
+    'projectAgent.list.mainPlaceholder': '和这个机器人的对话会显示在这里。',
+    'projectAgent.list.profile': '档案',
+    'projectAgent.list.unread': '未读',
+    'projectAgent.list.running': '进行中',
+    'projectAgent.list.needsYouBadge': '需要你 {count}',
+    'projectAgent.list.newSheetTitle': '新建机器人',
+    'projectAgent.list.bindFolder': '选择文件夹',
+    'projectAgent.list.bindFolderHint': '绑定已有项目。机器人会先只读熟悉这个文件夹。',
+    'projectAgent.list.blankBot': '空白机器人',
+    'projectAgent.list.blankBotHint': '输入名字，在本机受管目录里建一个空项目。',
+    'projectAgent.list.namePlaceholder': '机器人名字',
+    'projectAgent.list.nameInvalid': '这个名字不能用',
+    'projectAgent.list.nameWillUse': '将使用「{name}」',
+    'projectAgent.list.create': '建立',
+    'projectAgent.list.creating': '正在建立',
+    'projectAgent.list.createFailed': '没有建成',
+    'projectAgent.list.nameExhausted': '这个名字已经用得太多了',
+    'projectAgent.list.columnResize': '调整列表宽度',
+    'projectAgent.list.backToBots': '返回机器人',
+    'projectAgent.list.close': '关闭',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -1568,6 +1646,45 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.projectAgent.switch': 'Project agent mode',
     'developer.projectAgent.diagnostics': 'Project agent diagnostics',
     'developer.projectAgent.inactive': 'Not enabled',
+    'projectAgent.list.brand': 'Peer',
+    'projectAgent.list.newBot': 'New bot',
+    'projectAgent.list.searchPlaceholder': 'Search bots, messages, tasks',
+    'projectAgent.list.needsYou': 'Needs you {count}',
+    'projectAgent.list.empty': 'No bots yet',
+    'projectAgent.list.emptyHint': 'Use + to bind a folder, or create a blank bot.',
+    'projectAgent.list.emptyNeedsYou': 'Nothing needs you right now.',
+    'projectAgent.list.emptySearch': 'No matching bots.',
+    'projectAgent.list.me': 'Me',
+    'projectAgent.list.settings': 'Settings',
+    'projectAgent.list.automations': 'Automations',
+    'projectAgent.list.capabilities': 'Capabilities',
+    'projectAgent.list.capabilitiesHint': 'Plugins, skills, and MCP',
+    'projectAgent.list.loading': 'Loading bots',
+    'projectAgent.list.unavailable': 'Project agent is off',
+    'projectAgent.list.loadFailed': 'The bot list did not load',
+    'projectAgent.list.noPreview': 'No messages yet',
+    'projectAgent.list.mainEmptyTitle': 'Choose a bot',
+    'projectAgent.list.mainEmptyBody': 'Select a bot on the left, or create one. The conversation stays here.',
+    'projectAgent.list.mainPlaceholder': 'The conversation with this bot will show up here.',
+    'projectAgent.list.profile': 'Profile',
+    'projectAgent.list.unread': 'Unread',
+    'projectAgent.list.running': 'In progress',
+    'projectAgent.list.needsYouBadge': 'Needs you {count}',
+    'projectAgent.list.newSheetTitle': 'New bot',
+    'projectAgent.list.bindFolder': 'Choose a folder',
+    'projectAgent.list.bindFolderHint': 'Bind an existing project. The bot will familiarize itself by reading only.',
+    'projectAgent.list.blankBot': 'Blank bot',
+    'projectAgent.list.blankBotHint': 'Type a name to create an empty project in the managed folder.',
+    'projectAgent.list.namePlaceholder': 'Bot name',
+    'projectAgent.list.nameInvalid': 'This name cannot be used',
+    'projectAgent.list.nameWillUse': 'Will use “{name}”',
+    'projectAgent.list.create': 'Create',
+    'projectAgent.list.creating': 'Creating',
+    'projectAgent.list.createFailed': 'Could not create it',
+    'projectAgent.list.nameExhausted': 'Too many folders already use this name',
+    'projectAgent.list.columnResize': 'Resize the bot list',
+    'projectAgent.list.backToBots': 'Back to bots',
+    'projectAgent.list.close': 'Close',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

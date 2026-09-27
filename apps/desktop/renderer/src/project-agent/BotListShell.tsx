@@ -1,0 +1,305 @@
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import { AutomationCenter } from '../automations/AutomationCenter';
+import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
+import { BotAvatar } from './BotAvatar';
+import { BotList } from './BotList';
+import { MeMenu } from './MeMenu';
+import { NewBotSheet } from './NewBotSheet';
+import {
+  BOT_LIST_WIDTH_DEFAULT,
+  BOT_LIST_WIDTH_MAX,
+  BOT_LIST_WIDTH_MIN,
+  clampBotListWidth,
+  enterBotSelection,
+  moveBotSelection,
+  sumNeedsYou,
+  validateManagedBotName,
+} from './state/botListState';
+import { useBotList } from './state/useBotList';
+import './styles/bot-list.css';
+
+type BotPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
+
+export interface BotListShellProps {
+  readonly i18n: I18nRuntime;
+  readonly isZh: boolean;
+  readonly activePage: BotPage;
+  readonly workspacePath: string;
+  readonly automationRunTarget: { automationId: string; runId: string } | null;
+  readonly onOpenSettings: () => void;
+  readonly onOpenAutomations: () => void;
+  readonly onOpenCapabilities: () => void;
+  readonly onOpenConversation: (conversationId: number) => void;
+  readonly onCreateAutomation: () => void;
+  readonly onClosePage: () => void;
+}
+
+function typingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'TEXTAREA' || target.isContentEditable) return true;
+  if (tag !== 'INPUT') return false;
+  return target.getAttribute('type') !== 'search';
+}
+
+export function BotListShell({
+  i18n,
+  isZh,
+  activePage,
+  workspacePath,
+  automationRunTarget,
+  onOpenSettings,
+  onOpenAutomations,
+  onOpenCapabilities,
+  onOpenConversation,
+  onCreateAutomation,
+  onClosePage,
+}: BotListShellProps) {
+  const list = useBotList();
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [name, setName] = useState('');
+  const [errorCode, setErrorCode] = useState('');
+  const pageOverride = activePage === 'automations' || activePage === 'tools';
+  const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const needsYouCount = sumNeedsYou(list.catalog);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      const key = event.key.toLowerCase();
+      const meta = event.metaKey || event.ctrlKey;
+      if (meta && key === 'n' && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setErrorCode('');
+        list.setSheetOpen(true);
+        list.setMenuOpen(false);
+        return;
+      }
+      if (meta && (key === 'f' || key === 'k') && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!list.sheetOpen) {
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        }
+        return;
+      }
+      if (list.sheetOpen) return;
+      if (list.menuOpen) {
+        if (event.key === 'Escape') list.setMenuOpen(false);
+        return;
+      }
+      if (pageOverride) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (typingTarget(event.target) && event.target !== searchRef.current) return;
+        event.preventDefault();
+        list.setHighlightedId(moveBotSelection(list.visible, list.highlightedId, event.key === 'ArrowDown' ? 1 : -1));
+        return;
+      }
+      if (event.key === 'Enter' && !meta) {
+        if (typingTarget(event.target) && event.target !== searchRef.current) return;
+        const next = enterBotSelection(list.visible, list.highlightedId);
+        if (!next) return;
+        event.preventDefault();
+        list.openBot(next);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [list, pageOverride]);
+
+  const emptyLabel = list.status === 'loading'
+    ? i18n.t('projectAgent.list.loading')
+    : list.status === 'disabled'
+      ? i18n.t('projectAgent.list.unavailable')
+      : list.status === 'error'
+        ? i18n.t('projectAgent.list.loadFailed')
+        : list.searching
+          ? i18n.t('projectAgent.list.emptySearch')
+          : list.needsYouOnly
+            ? i18n.t('projectAgent.list.emptyNeedsYou')
+            : i18n.t('projectAgent.list.empty');
+
+  const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = list.width;
+    document.body.style.cursor = 'col-resize';
+    const move = (ev: PointerEvent) => {
+      list.setWidth(clampBotListWidth(startWidth + ev.clientX - startX));
+    };
+    const up = () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className="bot-shell" data-bot-shell="open" style={{ ['--peer-bot-list-width' as string]: `${list.width}px` }}>
+      <aside className="bot-column" aria-label={i18n.t('projectAgent.list.brand')}>
+        <div className="bot-column-top">
+          <div className="bot-brand">
+            <span className="bot-brand-mark" aria-hidden="true">P</span>
+            <span>{i18n.t('projectAgent.list.brand')}</span>
+          </div>
+          <button
+            type="button"
+            className="bot-new"
+            aria-label={i18n.t('projectAgent.list.newBot')}
+            onClick={() => {
+              setErrorCode('');
+              list.setMenuOpen(false);
+              list.setSheetOpen(true);
+            }}
+          >
+            +
+          </button>
+        </div>
+        <input
+          ref={searchRef}
+          className="bot-search"
+          type="search"
+          value={list.query}
+          placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
+          aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
+          onChange={(event) => list.setQuery(event.target.value)}
+        />
+        {list.catalog.length > 0 ? (
+          <button
+            type="button"
+            className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
+            aria-pressed={list.needsYouOnly}
+            onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
+          >
+            {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
+          </button>
+        ) : null}
+        <BotList
+          items={list.visible}
+          highlightedId={list.highlightedId}
+          openedId={list.openedId}
+          emptyLabel={list.catalog.length === 0 && list.status === 'ready' && !list.searching && !list.needsYouOnly
+            ? i18n.t('projectAgent.list.empty')
+            : emptyLabel}
+          i18n={i18n}
+          onHighlight={list.setHighlightedId}
+          onOpen={list.openBot}
+        />
+        {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
+          <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
+        ) : null}
+        <MeMenu
+          open={list.menuOpen}
+          i18n={i18n}
+          onToggle={() => list.setMenuOpen(!list.menuOpen)}
+          onClose={() => list.setMenuOpen(false)}
+          onOpenSettings={() => {
+            list.setMenuOpen(false);
+            onOpenSettings();
+          }}
+          onOpenAutomations={() => {
+            list.setMenuOpen(false);
+            onOpenAutomations();
+          }}
+          onOpenCapabilities={() => {
+            list.setMenuOpen(false);
+            onOpenCapabilities();
+          }}
+        />
+        <div
+          className="bot-column-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={i18n.t('projectAgent.list.columnResize')}
+          aria-valuemin={BOT_LIST_WIDTH_MIN}
+          aria-valuemax={BOT_LIST_WIDTH_MAX}
+          aria-valuenow={list.width}
+          tabIndex={0}
+          onPointerDown={onResizeStart}
+          onDoubleClick={() => list.setWidth(BOT_LIST_WIDTH_DEFAULT)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') list.setWidth(clampBotListWidth(list.width - 8));
+            if (event.key === 'ArrowRight') list.setWidth(clampBotListWidth(list.width + 8));
+            if (event.key === 'Home') list.setWidth(BOT_LIST_WIDTH_MIN);
+            if (event.key === 'End') list.setWidth(BOT_LIST_WIDTH_MAX);
+          }}
+        />
+      </aside>
+      <section className="bot-main" aria-label={opened?.profile.displayName ?? i18n.t('projectAgent.list.mainEmptyTitle')}>
+        {pageOverride ? (
+          <div className="bot-main-page">
+            <button type="button" className="bot-back" onClick={onClosePage}>
+              {i18n.t('projectAgent.list.backToBots')}
+            </button>
+            {activePage === 'automations' ? (
+              <AutomationCenter
+                isZh={isZh}
+                defaultWorkspace={workspacePath}
+                initialRunTarget={automationRunTarget}
+                onOpenConversation={onOpenConversation}
+                onCreateNew={onCreateAutomation}
+              />
+            ) : (
+              <CapabilitiesPanel />
+            )}
+          </div>
+        ) : opened ? (
+          <div className="bot-main-thread">
+            <header className="bot-main-head">
+              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
+              <p className="bot-main-title">{opened.profile.displayName}</p>
+              <button type="button" className="bot-profile" data-profile-drawer="b2-16" data-seam="b2-16">
+                {i18n.t('projectAgent.list.profile')}
+              </button>
+            </header>
+            <p className="bot-main-placeholder">{i18n.t('projectAgent.list.mainPlaceholder')}</p>
+          </div>
+        ) : (
+          <div className="bot-main-empty">
+            <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
+            <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+          </div>
+        )}
+      </section>
+      <NewBotSheet
+        open={list.sheetOpen}
+        busy={list.creating}
+        name={name}
+        errorCode={errorCode}
+        i18n={i18n}
+        onName={(value) => {
+          setName(value);
+          if (errorCode === 'INVALID_NAME') setErrorCode('');
+        }}
+        onBind={() => {
+          setErrorCode('');
+          void list.createBind().then((result) => {
+            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
+          });
+        }}
+        onCreate={() => {
+          const checked = validateManagedBotName(name);
+          if (!checked.ok) {
+            setErrorCode(checked.code);
+            return;
+          }
+          setErrorCode('');
+          void list.createManaged(checked.name).then((result) => {
+            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
+            else setName('');
+          });
+        }}
+        onClose={() => {
+          if (list.creating) return;
+          list.setSheetOpen(false);
+          setErrorCode('');
+        }}
+      />
+    </div>
+  );
+}
