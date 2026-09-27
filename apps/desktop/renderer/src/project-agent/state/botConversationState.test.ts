@@ -1,0 +1,145 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  applyOptimistic,
+  conversationRows,
+  mergeConversationPage,
+  normalizeBotMessage,
+  quoteRefsFor,
+  repliedUserIds,
+  showAgentThinking,
+  visibleBotMessages,
+  windowConversationRows,
+  type BotChatMessage,
+} from './botConversationState.ts';
+
+function message(partial: Partial<BotChatMessage> & Pick<BotChatMessage, 'id' | 'kind' | 'createdAt'>): BotChatMessage {
+  return {
+    role: partial.kind === 'user_input' ? 'user' : 'assistant',
+    content: partial.content ?? '',
+    replyTo: partial.replyTo ?? [],
+    sources: partial.sources ?? [],
+    marks: partial.marks ?? [],
+    meta: partial.meta ?? {},
+    proactive: partial.proactive ?? false,
+    cards: partial.cards ?? [],
+    quoteRefs: partial.quoteRefs ?? [],
+    separatorLabel: partial.separatorLabel ?? '',
+    ...partial,
+  };
+}
+
+test('按 kind 过滤，agent_turn 不显示，没有 kind 的用户消息仍显示', () => {
+  const visible = visibleBotMessages([
+    message({ id: 'u1', kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z', content: '你好' }),
+    message({ id: 'turn', kind: 'agent_turn', createdAt: '2026-09-27T01:01:00.000Z', content: '内部回合不给用户看' }),
+    message({ id: 'tool', kind: 'tool_result', createdAt: '2026-09-27T01:02:00.000Z', content: '工具原文' }),
+    message({ id: 'card', kind: 'system_card', createdAt: '2026-09-27T01:03:00.000Z', content: '需要确认' }),
+    message({ id: 'reply', kind: 'agent_reply', createdAt: '2026-09-27T01:04:00.000Z', content: '看过了' }),
+  ]);
+  const bare = normalizeBotMessage({ id: 'bare', role: 'user', content: '队列里的话', createdAt: '2026-09-27T01:05:00.000Z' });
+  assert.ok(bare);
+  assert.equal(bare?.kind, 'user_input');
+  assert.deepEqual(visible.map((item) => item.id), ['u1', 'card', 'reply']);
+  assert.equal(visibleBotMessages([bare!]).length, 1);
+  assert.equal(normalizeBotMessage({ role: 'assistant', content: '没有 id' }), null);
+});
+
+test('分页合并把更早的页放前面，同一条用新内容替换', () => {
+  const first = [
+    message({ id: 'm2', kind: 'user_input', createdAt: '2026-09-27T02:00:00.000Z', content: '旧' }),
+  ];
+  const older = [
+    message({ id: 'm1', kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z', content: '更早' }),
+  ];
+  const newer = [
+    message({ id: 'm2', kind: 'user_input', createdAt: '2026-09-27T02:00:00.000Z', content: '新' }),
+    message({ id: 'm3', kind: 'agent_reply', createdAt: '2026-09-27T02:05:00.000Z', content: '回复' }),
+  ];
+  const merged = mergeConversationPage(mergeConversationPage(first, older), newer);
+  assert.deepEqual(merged.map((item) => [item.id, item.content]), [
+    ['m1', '更早'],
+    ['m2', '新'],
+    ['m3', '回复'],
+  ]);
+});
+
+test('乐观发送在服务端回声后被替换，失败的仍留在列表里', () => {
+  const pending = [{
+    inputId: 'in-1',
+    text: '在发送',
+    quoteRefs: ['reply-1', '那一句'],
+    createdAt: '2026-09-27T03:00:00.000Z',
+    state: 'sending' as const,
+  }, {
+    inputId: 'in-2',
+    text: '失败了',
+    quoteRefs: [],
+    createdAt: '2026-09-27T03:01:00.000Z',
+    state: 'failed' as const,
+  }];
+  const shown = applyOptimistic([], pending);
+  assert.deepEqual(shown.map((item) => item.id), ['input-in-1', 'input-in-2']);
+  assert.equal(shown[0]?.pending, 'sending');
+  const echoed = applyOptimistic([
+    message({
+      id: 'input-in-1',
+      kind: 'user_input',
+      createdAt: '2026-09-27T03:00:00.000Z',
+      content: '在发送',
+      inputId: 'in-1',
+    }),
+  ], pending);
+  assert.deepEqual(echoed.map((item) => item.id), ['input-in-1', 'input-in-2']);
+  assert.equal(echoed[0]?.pending, undefined);
+  assert.equal(echoed[1]?.pending, 'failed');
+});
+
+test('间隔超过 10 分钟或主动消息才插入时间分隔', () => {
+  const rows = conversationRows([
+    message({ id: 'a', kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z' }),
+    message({ id: 'b', kind: 'agent_reply', createdAt: '2026-09-27T01:05:00.000Z', replyTo: ['a'] }),
+    message({ id: 'c', kind: 'user_input', createdAt: '2026-09-27T01:16:00.000Z' }),
+    message({
+      id: 'd',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T01:17:00.000Z',
+      proactive: true,
+      separatorLabel: '今天 09:17 · 今日小结',
+    }),
+    message({ id: 'hidden', kind: 'agent_turn', createdAt: '2026-09-27T01:18:00.000Z', content: '不进分隔' }),
+  ]);
+  assert.deepEqual(rows.map((row) => row.type === 'separator' ? `sep:${row.label || row.at}` : row.message.id), [
+    'a',
+    'b',
+    'sep:2026-09-27T01:16:00.000Z',
+    'c',
+    'sep:今天 09:17 · 今日小结',
+    'd',
+  ]);
+  assert.equal(repliedUserIds(visibleBotMessages([
+    message({ id: 'a', kind: 'user_input', createdAt: '2026-09-27T01:00:00.000Z' }),
+    message({ id: 'b', kind: 'agent_reply', createdAt: '2026-09-27T01:05:00.000Z', replyTo: ['a'] }),
+  ])).has('a'), true);
+});
+
+test('超过 200 行时只留锚点附近的窗口', () => {
+  const short = Array.from({ length: 40 }, (_item, index) => index);
+  assert.equal(windowConversationRows(short, 10).rows.length, 40);
+  const rows = Array.from({ length: 250 }, (_item, index) => index);
+  const early = windowConversationRows(rows, 10, 80);
+  assert.equal(early.rows.length, 80);
+  assert.equal(early.start, 0);
+  assert.equal(early.rows.includes(240), false);
+  const late = windowConversationRows(rows, 240, 80);
+  assert.equal(late.rows.at(-1), 249);
+  assert.equal(late.rows.includes(10), false);
+});
+
+test('引用和思考状态', () => {
+  assert.deepEqual(quoteRefsFor(' reply-1 ', '  那一句  '), ['reply-1', '那一句']);
+  assert.deepEqual(quoteRefsFor('', '文字'), []);
+  assert.equal(showAgentThinking([], true), true);
+  assert.equal(showAgentThinking([{ inputId: 'a', text: 'x', quoteRefs: [], createdAt: '', state: 'sending' }], true), false);
+  assert.equal(showAgentThinking([], false), false);
+});

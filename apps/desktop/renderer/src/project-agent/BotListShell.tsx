@@ -6,6 +6,7 @@ import { BotAvatar } from './BotAvatar';
 import { BotList } from './BotList';
 import { MeMenu } from './MeMenu';
 import { NewBotSheet } from './NewBotSheet';
+import { BotConversation } from './conversation/BotConversation';
 import {
   BOT_LIST_WIDTH_DEFAULT,
   BOT_LIST_WIDTH_MAX,
@@ -60,9 +61,14 @@ export function BotListShell({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
+  const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
   const needsYouCount = sumNeedsYou(list.catalog);
+
+  useEffect(() => {
+    setLocateSessionId(null);
+  }, [opened?.workspaceId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -253,11 +259,21 @@ export function BotListShell({
             <header className="bot-main-head">
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
-              <button type="button" className="bot-profile" data-profile-drawer="b2-16" data-seam="b2-16">
+              <button
+                type="button"
+                className="bot-profile"
+                data-profile-drawer="b2-16"
+                data-seam="b2-16"
+                data-session-id={locateSessionId ?? undefined}
+              >
                 {i18n.t('projectAgent.list.profile')}
               </button>
             </header>
-            <p className="bot-main-placeholder">{i18n.t('projectAgent.list.mainPlaceholder')}</p>
+            <BotConversation
+              workspaceId={opened.workspaceId}
+              i18n={i18n}
+              onLocateSession={setLocateSessionId}
+            />
           </div>
         ) : (
           <div className="bot-main-empty">

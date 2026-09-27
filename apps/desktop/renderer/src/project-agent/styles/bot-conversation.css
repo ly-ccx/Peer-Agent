@@ -1,0 +1,205 @@
+.bot-convo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--frost-bg, var(--bg));
+}
+
+.bot-thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 22px 8px;
+}
+
+.bot-thread-empty,
+.bot-thread-error,
+.bot-thinking {
+  margin: 0;
+  color: var(--frost-text-secondary, var(--text-secondary));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bot-thinking {
+  padding: 0 22px 8px;
+}
+
+.bot-separator {
+  margin: 4px 0;
+  color: var(--frost-text-tertiary, var(--text-tertiary));
+  font-size: 12px;
+  text-align: center;
+}
+
+.bot-user,
+.bot-reply,
+.bot-system {
+  max-width: 720px;
+}
+
+.bot-user {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(560px, 80%);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--frost-fill-secondary, var(--fill-secondary));
+}
+
+.bot-user-marks,
+.bot-reply-marks,
+.bot-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.bot-user-marks span,
+.bot-reply-marks span,
+.bot-reply-marks button,
+.bot-quote-action,
+.bot-card-actions button,
+.bot-user-marks button {
+  border: 1px solid var(--frost-separator, var(--separator));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--frost-text-secondary, var(--text-secondary));
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 8px;
+}
+
+.bot-user-text,
+.bot-user-quote,
+.bot-card p,
+.bot-quote-chip {
+  margin: 0;
+  color: var(--frost-text, var(--text));
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.bot-user-quote,
+.bot-quote-chip {
+  border-left: 2px solid var(--frost-separator, var(--separator));
+  color: var(--frost-text-secondary, var(--text-secondary));
+  padding-left: 8px;
+}
+
+.bot-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.bot-reply.is-anchored,
+.bot-system.is-anchored {
+  outline: 2px solid var(--frost-separator, var(--separator));
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.bot-reply-bar {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--frost-text-secondary, var(--text-secondary));
+  font-size: 12px;
+  text-align: left;
+}
+
+.bot-reply-bar span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-reply-body {
+  color: var(--frost-text, var(--text));
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.bot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--frost-separator, var(--separator));
+  border-radius: 10px;
+  background: var(--frost-bg-elevated, var(--bg-elevated));
+}
+
+.bot-card.is-resolved {
+  opacity: 0.72;
+}
+
+.bot-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 16px 16px;
+  padding: 10px;
+  border: 1px solid var(--frost-separator, var(--separator));
+  border-radius: 12px;
+  background: var(--frost-bg-elevated, var(--bg-elevated));
+}
+
+.bot-quote-chip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bot-quote-chip button,
+.bot-composer-bar button {
+  border: 1px solid var(--frost-separator, var(--separator));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--frost-text, var(--text));
+}
+
+.bot-composer textarea {
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--frost-text, var(--text));
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.bot-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bot-composer-bar p {
+  margin: 0;
+  color: var(--frost-text-tertiary, var(--text-tertiary));
+  font-size: 12px;
+}
+
+.bot-composer-bar button:disabled {
+  opacity: 0.45;
+}

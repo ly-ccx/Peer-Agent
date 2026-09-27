@@ -1056,7 +1056,16 @@ export interface BootstrapPreloadApi {
   readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; regenerateAvatar?: boolean; chooseAvatar?: boolean; avatarPath?: string }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
-  readonly projectAgentSubmitInput: (params: { workspaceId: string; inputId: string; text: string; surface?: string }) => Promise<{ ok: boolean; code?: string }>;
+  readonly projectAgentSubmitInput: (params: {
+    workspaceId: string;
+    inputId: string;
+    text: string;
+    surface?: string;
+    quoteRefs?: readonly string[];
+    anchorRefs?: readonly string[];
+    attachmentRefs?: readonly string[];
+    createdAt?: string;
+  }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null }>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
