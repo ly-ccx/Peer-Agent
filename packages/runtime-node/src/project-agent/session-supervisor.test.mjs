@@ -46,7 +46,13 @@ function visionCatalog() {
   ];
 }
 
-async function harness({ catalog = visionCatalog(), goalPlanStore: injectedStore = null, goalRunner: injectedRunner = null } = {}) {
+async function harness({
+  catalog = visionCatalog(),
+  goalPlanStore: injectedStore = null,
+  goalRunner: injectedRunner = null,
+  resolveAcceptancePolicy = null,
+  readSessionFacts = null,
+} = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b2-04-'));
   const previous = process.env.PEER_AGENT_HOME;
   process.env.PEER_AGENT_HOME = root;
@@ -95,6 +101,8 @@ async function harness({ catalog = visionCatalog(), goalPlanStore: injectedStore
     routing: routing(),
     abortStream: async (request) => { aborts.push(request); },
     emitEvent: (event) => { events.push(event); },
+    resolveAcceptancePolicy,
+    readSessionFacts,
     now: () => '2026-09-27T00:00:00.000Z',
   });
   return {
@@ -424,6 +432,91 @@ test('启动失败时归档子会话并删掉计划', { timeout: 20_000 }, async
       .filter((plan) => plan?.delegationOrigin);
     assert.equal(leftover.length, 0);
     assert.equal(env.events.length, 0);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+function hostPassPatch() {
+  return {
+    tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: ['ev-1'] }],
+    successCriteria: [{ id: 'c1', kind: 'test', description: '测试通过' }],
+    criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef: 'ev-1' }],
+  };
+}
+
+async function completedSession(env) {
+  const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+  const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+  env.goalPlanStore.revisePlan(planId, hostPassPatch(), { reason: 'host evidence', changedBy: 'test' });
+  env.goalPlanStore.recordEvidenceRefs({
+    planId,
+    evidenceRefs: ['ev-1'],
+  });
+  env.goalPlanStore.setPlanStatus(planId, 'completed');
+  return { ...opened, planId };
+}
+
+test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
+  const env = await harness();
+  try {
+    const opened = await completedSession(env);
+    const early = await env.supervisor.settle(opened.sessionId, { userAgreed: true, acceptedBy: 'user' });
+    assert.equal(early.accepted, false);
+    assert.equal(early.acceptedBy, undefined);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'note-1',
+      role: 'assistant',
+      content: '模型说做完了',
+      sources: [opened.sessionId],
+    });
+    const unlabeled = await env.supervisor.settle(opened.sessionId);
+    assert.equal(unlabeled.accepted, false);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'reply-1',
+      role: 'assistant',
+      kind: 'agent_reply',
+      content: '登录已经修好',
+      sources: [opened.sessionId],
+    });
+    const settled = await env.supervisor.settle(opened.sessionId);
+    assert.equal(settled.accepted, true);
+    assert.equal(settled.acceptedBy, 'policy');
+    const stored = env.goalPlanStore.getPlan(opened.planId).resultAcceptance;
+    assert.equal(stored.acceptedBy, 'policy');
+    assert.equal(stored.acceptedAt, '2026-09-27T00:00:00.000Z');
+    assert.equal(stored.verdictRef, `verdict:${opened.sessionId}:passed`);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('项目策略为 confirm 时不代签，用户确认写入 acceptedBy user', { timeout: 20_000 }, async () => {
+  const env = await harness({ resolveAcceptancePolicy: () => 'confirm' });
+  try {
+    const opened = await completedSession(env);
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'reply-1',
+      role: 'assistant',
+      kind: 'agent_reply',
+      content: '登录已经修好',
+      meta: { sources: [opened.sessionId] },
+    });
+    const settled = await env.supervisor.settle(opened.sessionId, { userAgreed: true });
+    assert.equal(settled.accepted, false);
+    assert.equal(settled.reasons.includes('project_requires_confirm'), true);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+
+    const confirmed = await env.supervisor.confirmResult(opened.sessionId);
+    assert.equal(confirmed.accepted, true);
+    assert.equal(confirmed.resultAcceptance.acceptedBy, 'user');
+    assert.equal(confirmed.resultAcceptance.acceptedAt, '2026-09-27T00:00:00.000Z');
+    assert.equal(confirmed.resultAcceptance.verdictRef, `verdict:${opened.sessionId}:passed`);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance.acceptedBy, 'user');
   } finally {
     await env.cleanup();
   }
