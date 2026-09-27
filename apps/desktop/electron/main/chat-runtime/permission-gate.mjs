@@ -8,23 +8,35 @@ const ONE_TIME_GRANT_TTL_MS = 30 * 60 * 1000;
  */
 export function createOneTimeApprovalBook({ ttlMs = ONE_TIME_GRANT_TTL_MS } = {}) {
   const entries = new Map();
-  function keyOf(capabilityId, argsDigest) {
+  function scopeId(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+  function keyOf(capabilityId, argsDigest, sessionId) {
     if (typeof capabilityId !== 'string' || !capabilityId.trim()) return '';
     if (typeof argsDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(argsDigest)) return '';
-    return `${capabilityId.trim()}::${argsDigest.toLowerCase()}`;
+    const base = `${capabilityId.trim()}::${argsDigest.toLowerCase()}`;
+    const session = scopeId(sessionId);
+    return session ? `${base}::${session}` : base;
   }
-  function remember({ capabilityId, argsDigest, at }) {
-    const key = keyOf(capabilityId, argsDigest);
+  function remember({ capabilityId, argsDigest, at, sessionId, workspaceId }) {
+    const key = keyOf(capabilityId, argsDigest, sessionId);
     if (!key || !Number.isFinite(at)) return null;
-    const record = { expiresAt: at + ttlMs, used: false };
+    const record = { expiresAt: at + ttlMs, used: false, workspaceId: scopeId(workspaceId) };
     entries.set(key, record);
-    return { capabilityId: capabilityId.trim(), argsDigest: argsDigest.toLowerCase(), expiresAt: record.expiresAt };
+    return {
+      capabilityId: capabilityId.trim(),
+      argsDigest: argsDigest.toLowerCase(),
+      expiresAt: record.expiresAt,
+      ...(scopeId(sessionId) ? { sessionId: scopeId(sessionId) } : {}),
+      ...(record.workspaceId ? { workspaceId: record.workspaceId } : {}),
+    };
   }
-  function match({ capabilityId, argsDigest, at }) {
-    const key = keyOf(capabilityId, argsDigest);
+  function match({ capabilityId, argsDigest, at, sessionId, workspaceId }) {
+    const key = keyOf(capabilityId, argsDigest, sessionId);
     if (!key || !Number.isFinite(at)) return false;
     const record = entries.get(key);
     if (!record) return false;
+    if (record.workspaceId && record.workspaceId !== scopeId(workspaceId)) return false;
     if (record.used || at >= record.expiresAt) {
       entries.delete(key);
       return false;
@@ -468,9 +480,34 @@ export function createChatPermissionGate({
     conversationId = null,
     workspacePath = null,
   }) {
+    const approver = webContents?.approver ?? activeStreams.get(streamId)?.approver;
+    if (approver === 'none') {
+      resolve(createPolicyDenial({
+        toolCallId: call.toolCallId,
+        reason: 'ephemeral_no_approver',
+      }));
+      recordApproval({
+        call,
+        streamId,
+        conversationId,
+        workspacePath,
+        state: 'denied',
+        decidedBy: 'policy',
+      });
+      return;
+    }
     const at = Number(now());
     const argsDigest = digestApprovalArgs(call?.arguments);
-    if (oneTimeApprovals?.match?.({ capabilityId: call?.capabilityId, argsDigest, at })) {
+    const profile = activeStreams.get(streamId)?.turnProfile;
+    const sessionId = typeof profile?.sessionId === 'string' ? profile.sessionId.trim() : '';
+    const grantWorkspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId.trim() : '';
+    if (oneTimeApprovals?.match?.({
+      capabilityId: call?.capabilityId,
+      argsDigest,
+      at,
+      sessionId,
+      workspaceId: grantWorkspaceId,
+    })) {
       resolve({
         granted: true,
         grant: {
@@ -491,24 +528,6 @@ export function createChatPermissionGate({
         state: 'approved',
         decidedBy: 'local_ui',
         argsDigest,
-      });
-      return;
-    }
-    // Explorer / Verifier 没有审批人。询问会永远挂住，这里直接拒绝。
-    // reason 会进入工具结果的 PermissionGrant / error，成为 Evidence 可见的拒绝原因。
-    const approver = webContents?.approver ?? activeStreams.get(streamId)?.approver;
-    if (approver === 'none') {
-      resolve(createPolicyDenial({
-        toolCallId: call.toolCallId,
-        reason: 'ephemeral_no_approver',
-      }));
-      recordApproval({
-        call,
-        streamId,
-        conversationId,
-        workspacePath,
-        state: 'denied',
-        decidedBy: 'policy',
       });
       return;
     }

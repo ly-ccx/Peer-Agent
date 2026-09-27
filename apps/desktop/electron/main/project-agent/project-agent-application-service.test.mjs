@@ -214,6 +214,8 @@ test('stale 批准写入一次性授权并恢复任务', async () => {
   assert.equal(result.approval.state, 'approved');
   assert.equal(grants[0].capabilityId, 'local.shell.exec');
   assert.equal(grants[0].argsDigest, 'b'.repeat(64));
+  assert.equal(grants[0].sessionId, 'sess-9');
+  assert.equal(grants[0].workspaceId, 'ws-1');
   assert.deepEqual(resumed, ['tool-9']);
 });
 
@@ -242,5 +244,73 @@ test('代理不在线时提问的回答直接投递并记 user_intervened', asyn
   assert.equal(result.delivery, 'user_intervened');
   assert.equal(result.input.answerTo, 'card:question:sess-1:q1');
   assert.equal(delivered[0].sessionId, 'sess-1');
+  assert.equal(delivered[0].workspaceId, 'ws-1');
   assert.equal(delivered[0].text, '用方案 A');
+});
+
+test('回答不能写进另一个项目的任务', async () => {
+  const delivered = [];
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    inputQueue: { submitInput: (input) => input },
+    agentOnline: () => false,
+    sessions: {
+      deliverAnswer: (input) => {
+        delivered.push(input);
+        if (input.sessionId !== 'sess-1' || input.workspaceId !== 'ws-1') {
+          return { ok: false, error: 'workspace_mismatch' };
+        }
+        return { userIntervened: true };
+      },
+    },
+    schedule: () => 1,
+    directory: { list: () => [], search: () => [] },
+  });
+  const result = await service.submitInput({
+    workspaceId: 'ws-1',
+    inputId: 'in-cross',
+    text: '写到别处',
+    answerTo: 'card:question:sess-other:q1',
+  });
+  assert.equal(delivered[0].workspaceId, 'ws-1');
+  assert.equal(delivered[0].sessionId, 'sess-other');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'NOT_FOUND');
+});
+
+test('拒绝计划批准时取消对应任务', async () => {
+  const cancelled = [];
+  const approval = {
+    approvalId: 'plan:sess-3',
+    workspaceId: 'ws-1',
+    state: 'open',
+    capabilityId: 'goal.plan',
+    sessionId: 'sess-3',
+    planId: 'plan-3',
+    argsDigest: 'c'.repeat(64),
+  };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    approvals: {
+      list: () => [approval],
+      append: (row) => ({ ...row }),
+    },
+    sessions: {
+      cancel: async (input) => {
+        cancelled.push(input);
+        return { status: 'cancelled' };
+      },
+    },
+    settleLive: () => { throw new Error('plan rejection is not a live tool grant'); },
+    schedule: () => 1,
+    directory: { list: () => [], search: () => [] },
+  });
+  const result = await service.decideApproval({
+    workspaceId: 'ws-1',
+    approvalId: 'plan:sess-3',
+    decision: 'reject',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.approval.state, 'denied');
+  assert.deepEqual(cancelled, [{ sessionId: 'sess-3', reason: 'plan_approval_denied' }]);
 });

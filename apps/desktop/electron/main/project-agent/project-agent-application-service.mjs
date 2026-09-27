@@ -210,7 +210,15 @@ export function createProjectAgentApplicationService({
         const sessionId = sessionIdFromAnswer(answerTo);
         if (sessionId) {
           try {
-            const delivered = await Promise.resolve(sessions.deliverAnswer({ sessionId, text: input.text, answerTo }));
+            const delivered = await Promise.resolve(sessions.deliverAnswer({
+              sessionId,
+              text: input.text,
+              answerTo,
+              workspaceId: payload.workspaceId,
+            }));
+            if (delivered?.error === 'workspace_mismatch') {
+              return { ok: false, code: 'NOT_FOUND', input };
+            }
             if (delivered?.userIntervened === true) delivery = 'user_intervened';
           } catch {
             delivery = 'queued';
@@ -278,6 +286,8 @@ export function createProjectAgentApplicationService({
           rememberGrant({
             capabilityId: current.capabilityId,
             argsDigest: current.argsDigest,
+            sessionId: current.sessionId,
+            workspaceId: current.workspaceId,
             at: Date.now(),
           });
         } catch {
@@ -290,6 +300,15 @@ export function createProjectAgentApplicationService({
         } catch (error) {
           resumed = { ok: false, message: error?.message || 'resume failed' };
         }
+      }
+    } else if (plan && decision !== 'approved' && typeof sessions?.cancel === 'function') {
+      try {
+        resumed = await sessions.cancel({
+          sessionId: current.sessionId,
+          reason: 'plan_approval_denied',
+        });
+      } catch (error) {
+        return { ok: false, code: 'CANCEL_FAILED', message: error?.message || 'cancel failed' };
       }
     } else if (current.state === 'open' && !plan && typeof settleLive === 'function') {
       try {

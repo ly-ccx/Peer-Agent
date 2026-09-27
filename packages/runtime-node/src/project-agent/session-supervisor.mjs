@@ -640,7 +640,9 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input.sessionId));
     const body = text(input.text);
     const answerTo = text(input.answerTo);
-    if (!plan || !body || !answerTo) return { ok: false };
+    const workspaceId = text(input.workspaceId);
+    if (!plan || !body || !answerTo || !workspaceId) return { ok: false, error: 'workspace_mismatch' };
+    if (plan.delegationOrigin?.workspaceId !== workspaceId) return { ok: false, error: 'workspace_mismatch' };
     const id = randomUUID();
     conversationStore.appendMessage(plan.conversationId, {
       id,
@@ -660,10 +662,12 @@ export function createSessionSupervisor({
     const current = goalPlanStore.getPlan(planId) || plan;
     if (!current) return { ok: false, reason: 'missing_plan' };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
+      const phase = decidePhase(current.delegationOrigin.workspaceId, current.delegationOrigin.dependsOn);
       goalPlanStore.revisePlan(planId, {
-        status: 'executing',
-        delegationOrigin: { ...current.delegationOrigin, phase: 'running' },
+        status: phase === 'running' ? 'executing' : 'paused',
+        delegationOrigin: { ...current.delegationOrigin, phase },
       }, { reason: 'plan approved', changedBy: 'session-supervisor' });
+      if (phase !== 'running') return { ok: true, planId, queued: true };
       if (typeof goalRunner?.start !== 'function') return { ok: false, reason: 'runner_unavailable', planId };
       await goalRunner.start(planId, { awaitIdle: true });
       return { ok: true, planId, started: true };
