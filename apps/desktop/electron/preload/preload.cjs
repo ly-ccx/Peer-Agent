@@ -184,6 +184,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentDelete: (params) => ipcRenderer.invoke('project-agent:delete', params),
   projectAgentSubmitInput: (params) => ipcRenderer.invoke('project-agent:submit-input', params),
   projectAgentReadConversation: (params) => ipcRenderer.invoke('project-agent:read-conversation', params),
+  projectAgentReadEvidence: (params) => ipcRenderer.invoke('project-agent:read-evidence', params),
   projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),
   projectAgentGetSession: (params) => ipcRenderer.invoke('project-agent:get-session', params),
   projectAgentCancelSession: (params) => ipcRenderer.invoke('project-agent:cancel-session', params),

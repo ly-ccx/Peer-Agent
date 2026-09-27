@@ -5,6 +5,7 @@
  */
 import { cleanDisplayName } from '@peer-agent/runtime-node';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
+import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
 function defaultRememberGrant(input) {
   return sharedOneTimeApprovals.remember(input);
@@ -64,6 +65,7 @@ export function createProjectAgentApplicationService({
   rememberGrant = defaultRememberGrant,
   settleLive = defaultSettleLive,
   agentOnline = () => true,
+  readEvidenceBody = null,
 } = {}) {
   const pendingChanged = new Set();
   const pendingConversation = new Set();
@@ -351,6 +353,16 @@ export function createProjectAgentApplicationService({
     return { ok: true, items: directory.search(payload.query) };
   }
 
+  function readEvidence(payload = {}) {
+    if (!open()) return disabled();
+    const evidenceRef = typeof payload?.evidenceRef === 'string' ? payload.evidenceRef.trim() : '';
+    if (!evidenceRefAllowed(evidenceRef)) return { ok: false, code: 'INVALID_REF' };
+    if (typeof readEvidenceBody !== 'function') return { ok: false, code: 'NOT_FOUND' };
+    const body = readEvidenceBody(evidenceRef);
+    if (!body) return { ok: false, code: 'NOT_FOUND' };
+    return presentEvidence({ ...body, evidenceRef });
+  }
+
   return {
     list,
     get,
@@ -366,5 +378,6 @@ export function createProjectAgentApplicationService({
     decideApproval,
     markRead,
     search,
+    readEvidence,
   };
 }

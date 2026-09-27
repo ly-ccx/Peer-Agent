@@ -115,6 +115,8 @@ export type TranslationKey =
   | 'projectAgent.chat.send'
   | 'projectAgent.chat.hint'
   | 'projectAgent.chat.source'
+  | 'projectAgent.chat.evidence'
+  | 'projectAgent.chat.process'
   | 'projectAgent.chat.memoryUsed'
   | 'projectAgent.chat.memoryLearned'
   | 'projectAgent.chat.digest'
@@ -1090,6 +1092,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.send': '发送',
     'projectAgent.chat.hint': '回车发送，Shift+回车换行',
     'projectAgent.chat.source': '来源',
+    'projectAgent.chat.evidence': '证据',
+    'projectAgent.chat.process': '过程',
     'projectAgent.chat.memoryUsed': '参考了 {count} 条记忆',
     'projectAgent.chat.memoryLearned': '新记住 {count} 条',
     'projectAgent.chat.digest': '今日小结',
@@ -1877,6 +1881,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.send': 'Send',
     'projectAgent.chat.hint': 'Enter to send, Shift+Enter for a new line',
     'projectAgent.chat.source': 'Source',
+    'projectAgent.chat.evidence': 'Evidence',
+    'projectAgent.chat.process': 'Process',
     'projectAgent.chat.memoryUsed': 'Used {count} memories',
     'projectAgent.chat.memoryLearned': 'Remembered {count} new',
     'projectAgent.chat.digest': 'Daily digest',

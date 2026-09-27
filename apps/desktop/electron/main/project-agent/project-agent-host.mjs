@@ -244,6 +244,29 @@ export function registerDesktopProjectAgent({
     inputQueue,
     sessions: supervisor,
     approvals: approvalStore,
+    readEvidenceBody(evidenceRef) {
+      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return null;
+      let records = [];
+      try {
+        records = goalPlanStore.findEvidenceIndexRecords([evidenceRef]) || [];
+      } catch {
+        return null;
+      }
+      const record = records[0];
+      if (!record) return null;
+      const toolName = typeof record.toolName === 'string' ? record.toolName : '';
+      const kind = /screenshot|image/i.test(toolName)
+        ? 'screenshot'
+        : /diff/i.test(toolName)
+          ? 'diff'
+          : 'command';
+      const text = typeof record.output === 'string'
+        ? record.output
+        : typeof record.summary === 'string'
+          ? record.summary
+          : '';
+      return { evidenceRef, kind, text };
+    },
     bindWorkspace: (sender) => workspace.addWorkspace(sender),
     rememberWorkspace({ workspaceId, path: folder, name }) {
       const settings = getSettings() || {};

@@ -9,6 +9,7 @@ import { MeMenu } from './MeMenu';
 import { NewBotSheet } from './NewBotSheet';
 import { BotConversation } from './conversation/BotConversation';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
+import type { BotInspect } from './drawer/agentProcess';
 import {
   BOT_LIST_WIDTH_DEFAULT,
   BOT_LIST_WIDTH_MAX,
@@ -80,6 +81,7 @@ export function BotListShell({
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
+  const [inspect, setInspect] = useState<BotInspect | null>(null);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
@@ -87,6 +89,7 @@ export function BotListShell({
 
   useEffect(() => {
     setLocateSessionId(null);
+    setInspect(null);
     drawerLoadedFor.current = null;
   }, [opened?.workspaceId]);
 
@@ -340,6 +343,10 @@ export function BotListShell({
               workspaceId={opened.workspaceId}
               i18n={i18n}
               onLocateSession={setLocateSessionId}
+              onInspect={(next) => {
+                setInspect(next);
+                setDrawerMemory((current) => openDrawer(current));
+              }}
               focusMessageId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.messageId : null}
               focusRequestId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.requestId : 0}
             />
@@ -357,6 +364,7 @@ export function BotListShell({
           profile={opened.profile}
           memory={drawerMemory}
           locateSessionId={locateSessionId}
+          inspect={inspect}
           triggerRef={profileButtonRef}
           i18n={i18n}
           isZh={isZh}

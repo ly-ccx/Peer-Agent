@@ -128,6 +128,29 @@
   padding: 6px 8px;
 }
 
+.bot-inspect,
+.bot-process {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-inspect h3,
+.bot-process h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bot-inspect pre,
+.bot-process pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .bot-drawer-sr {
   position: absolute;
   width: 1px;

@@ -195,6 +195,7 @@ export function useBotConversation(workspaceId: string) {
 
   return {
     status,
+    messages: shown,
     rows,
     thinking: showAgentThinking(pending, awaitingSince !== null),
     send,

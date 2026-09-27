@@ -27,6 +27,8 @@ export function ReplyBubble({
   onJump,
   onQuote,
   onLocateSession,
+  onOpenEvidence,
+  onOpenProcess,
 }: {
   readonly workspaceId: string;
   readonly message: BotChatMessage;
@@ -36,12 +38,15 @@ export function ReplyBubble({
   readonly onJump: (messageId: string) => void;
   readonly onQuote: (excerpt: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
+  readonly onOpenEvidence?: (evidenceRef: string) => void;
+  readonly onOpenProcess?: () => void;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [excerpt, setExcerpt] = useState('');
   const used = message.meta.memoryUsed?.length ?? 0;
   const learned = message.meta.memoryLearned?.length ?? 0;
   const surfacing = message.meta.surfacing;
+  const evidenceRefs = message.meta.evidenceRefs ?? [];
   const sourceIds = [...new Set([
     ...message.sources,
     ...message.marks.map((mark) => mark.sessionId).filter((id): id is string => Boolean(id)),
@@ -83,6 +88,16 @@ export function ReplyBubble({
         </button>
       ) : null}
       <div className="bot-reply-marks">
+        {evidenceRefs.map((evidenceRef) => (
+          <button key={evidenceRef} type="button" onClick={() => onOpenEvidence?.(evidenceRef)}>
+            {i18n.t('projectAgent.chat.evidence')}
+          </button>
+        ))}
+        {onOpenProcess ? (
+          <button type="button" onClick={onOpenProcess}>
+            {i18n.t('projectAgent.chat.process')}
+          </button>
+        ) : null}
         {sourceIds.map((sessionId) => (
           <button key={sessionId} type="button" onClick={() => onLocateSession(sessionId)}>
             {i18n.t('projectAgent.chat.source')}

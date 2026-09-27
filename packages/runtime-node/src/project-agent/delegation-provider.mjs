@@ -5,7 +5,9 @@ import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goa
 
 import { createPermissionGrant } from '../tool-result-factory.mjs';
 import { resolveAnchorScope } from './anchor-scope.mjs';
+import { verdictRefFor } from './acceptance.mjs';
 import { isProjectAgentTurn } from './mode-policy.mjs';
+import { computeVerificationVerdict } from './verification-verdict.mjs';
 import {
   DELEGATION_CAPABILITY_IDS,
   delegationSpecByCapability,
@@ -18,9 +20,12 @@ const RESULT_PREFIX = 'delegation-result:';
  * 调度能力。校验、幂等、自授权和 Evidence 在这里完成。
  * spawn 交给 SessionSupervisor，post_reply 交给 ReplyComposer；两者未接入时返回结构化错误，不留下半次调用。
  */
+const OUTPUT_LIMIT = 2000;
+
 export function createDelegationProvider({
   supervisor = null,
   replyComposer = null,
+  verification = null,
   checkModel = null,
   ledger = null,
   storeDir = null,
@@ -209,7 +214,61 @@ export function createDelegationProvider({
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable'));
+    if (name === 'get_verification_detail') return readVerification(input);
+    if (name === 'verify_session') return verifySession(input);
     return accepted(await callPort(replyComposer?.postReply, input, 'composer_unavailable'), 'composer_unavailable');
+  }
+
+  async function readVerification(input) {
+    if (typeof verification?.facts !== 'function') {
+      return { ok: false, output: { ok: false, error: 'verification_unavailable', message: 'verification_unavailable' } };
+    }
+    const facts = await verification.facts(input.sessionId);
+    if (!facts) {
+      return { ok: false, output: { ok: false, error: 'session_not_found', message: 'Session was not found.' } };
+    }
+    return { ok: true, output: { ok: true, ...buildVerificationDetail({ ...facts, sessionId: input.sessionId }) } };
+  }
+
+  async function verifySession(input) {
+    if (typeof verification?.run !== 'function') {
+      return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
+    }
+    if (typeof verification.markVerifying === 'function') {
+      await verification.markVerifying(input.sessionId);
+    }
+    const reviewed = await verification.run({
+      sessionId: input.sessionId,
+      ...(input.focus ? { focus: input.focus } : {}),
+      role: 'verifier',
+      preferDifferentSource: true,
+    });
+    if (!reviewed || reviewed.ok === false || !reviewed.facts) {
+      return {
+        ok: false,
+        output: { ok: false, error: reviewed?.error || 'verifier_failed', message: reviewed?.error || 'verifier_failed' },
+      };
+    }
+    const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
+    const event = {
+      kind: 'verdict',
+      sessionId: input.sessionId,
+      outcome: detail.outcome,
+      verdictRef: verdictRefFor(input.sessionId, detail.outcome),
+      at: typeof reviewed.at === 'string' ? reviewed.at : new Date().toISOString(),
+    };
+    const card = {
+      cardId: `card:verdict:${input.sessionId}`,
+      kind: 'verdict',
+      sessionId: input.sessionId,
+      content: detail.outcome,
+      verdictRef: event.verdictRef,
+      resolvedState: 'resolved',
+    };
+    if (typeof verification.record === 'function') {
+      await verification.record({ event, card, detail, status: 'verifying' });
+    }
+    return { ok: true, output: { ok: true, status: 'verifying', event, card, detail } };
   }
 
   return {
@@ -351,6 +410,50 @@ function sessionOrMissing(result) {
     };
   }
   return { ok: true, output: { ok: true, ...result.output } };
+}
+
+/**
+ * 结论、检查和输出摘要只来自宿主证据索引。
+ * 计划上的模型自述、runner.verifierRuns 和调用方塞进来的 modelClaim 都不读。
+ */
+export function buildVerificationDetail(facts = {}) {
+  const plan = facts.plan && typeof facts.plan === 'object' ? facts.plan : {};
+  const evidenceIndex = facts.evidenceIndex instanceof Set || Array.isArray(facts.evidenceIndex)
+    ? facts.evidenceIndex
+    : [];
+  const authority = {};
+  if (typeof facts.independentVerifier === 'string') authority.independentVerifier = facts.independentVerifier;
+  if (typeof facts.verifierModel === 'string') authority.verifierModel = facts.verifierModel;
+  if (typeof facts.sameFamilyAsWorker === 'boolean') authority.sameFamilyAsWorker = facts.sameFamilyAsWorker;
+  const verdict = computeVerificationVerdict(plan, evidenceIndex, authority);
+  const allowed = new Set(verdict.evidenceRefs);
+  const outputs = [];
+  for (const item of Array.isArray(facts.outputs) ? facts.outputs : []) {
+    const evidenceRef = typeof item?.evidenceRef === 'string' ? item.evidenceRef.trim() : '';
+    if (!evidenceRef || !allowed.has(evidenceRef)) continue;
+    const body = typeof item.text === 'string' ? item.text : '';
+    const summary = Array.from(body).slice(0, OUTPUT_LIMIT).join('');
+    outputs.push({
+      name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'output',
+      evidenceRef,
+      summary,
+      truncated: body.length > summary.length,
+    });
+  }
+  return {
+    sessionId: typeof facts.sessionId === 'string' ? facts.sessionId : '',
+    outcome: verdict.outcome,
+    checks: verdict.checks.map((check) => ({
+      name: check.name,
+      result: check.passed === true ? 'passed' : 'failed',
+      evidenceRefs: verdict.evidenceRefs,
+      ...(check.reason ? { reason: check.reason } : {}),
+    })),
+    workerModel: typeof facts.workerModel === 'string' ? facts.workerModel : null,
+    verifierModel: typeof authority.verifierModel === 'string' ? authority.verifierModel : null,
+    sameSource: facts.sameFamilyAsWorker === true,
+    outputs,
+  };
 }
 
 function finish({ call, capabilityId, name, locale, status, output }) {
