@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createI18n } from '@peer-agent/i18n';
 import {
   applyOptimistic,
   conversationRows,
@@ -185,6 +186,17 @@ test('引用回复时，范围外的停止显示为没有影响其他任务', ()
   const rows = conversationRows([
     message({ id: 'u0', kind: 'user_input', createdAt: '2026-09-27T05:00:00.000Z', content: '做登录' }),
     message({
+      id: 'turn-spawn',
+      kind: 'agent_turn',
+      createdAt: '2026-09-27T05:00:30.000Z',
+      rounds: [{
+        text: '',
+        toolCalls: [
+          { name: 'spawn_session', input: { title: '登录' }, result: { sessionId: 's-login', status: 'running' } },
+        ],
+      }],
+    }),
+    message({
       id: 'r1',
       kind: 'agent_reply',
       createdAt: '2026-09-27T05:01:00.000Z',
@@ -219,6 +231,12 @@ test('引用回复时，范围外的停止显示为没有影响其他任务', ()
     ['out_of_scope', 's-other'],
     ['merged', 's-login'],
   ]);
+  const outside = user.message.dispositions[0];
+  assert.equal(outside?.title, '登录');
+  assert.equal(
+    createI18n('zh-CN').t(outside!.labelKey, { title: outside?.title }),
+    '这句话针对的是『登录』，没有影响其他任务',
+  );
 });
 
 test('引用和思考状态', () => {

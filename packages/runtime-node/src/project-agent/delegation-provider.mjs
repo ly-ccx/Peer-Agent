@@ -4,6 +4,7 @@ import { createEvidenceBundle } from '@peer-agent/runtime-core';
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
 
 import { createPermissionGrant } from '../tool-result-factory.mjs';
+import { resolveAnchorScope } from './anchor-scope.mjs';
 import { isProjectAgentTurn } from './mode-policy.mjs';
 import {
   DELEGATION_CAPABILITY_IDS,
@@ -47,6 +48,7 @@ export function createDelegationProvider({
     const call = request?.call ?? {};
     const capabilityId = call.capabilityId;
     const item = delegationSpecByCapability(capabilityId);
+    const view = executionView(context);
     const locale = context.locale === 'en-US' ? 'en-US' : 'zh-CN';
     if (!item) {
       return finish({
@@ -59,8 +61,8 @@ export function createDelegationProvider({
       });
     }
     if (!isProjectAgentTurn({
-      mode: context.mode ?? request?.mode,
-      role: context.role ?? context.turnProfile?.role ?? request?.turnProfile?.role,
+      mode: view.mode ?? request?.mode,
+      role: view.role ?? request?.turnProfile?.role,
     })) {
       return finish({
         call,
@@ -91,8 +93,33 @@ export function createDelegationProvider({
     }
 
     const input = validated.value;
+    if (item.name === 'message_session' || item.name === 'cancel_session') {
+      const scope = resolveAnchorScope({
+        messages: view.messages,
+        quoteRefs: view.quoteRefs,
+        replyTo: view.replyTo,
+      });
+      if (scope.scoped && !scope.sessionIds.includes(input.sessionId)) {
+        return finish({
+          call,
+          capabilityId,
+          name: item.name,
+          locale,
+          status: 'failed',
+          output: {
+            ok: false,
+            error: 'out_of_scope',
+            sessionId: input.sessionId,
+            sessionIds: scope.sessionIds,
+            message: locale === 'zh-CN'
+              ? '这句话针对的是引用里的任务，没有影响其他任务。先向用户确认。'
+              : 'This message is limited to the quoted tasks and did not affect that one. Confirm with the user.',
+          },
+        });
+      }
+    }
     if (item.name === 'spawn_session') {
-      const anchorError = validateAnchors(input.anchorMessageIds, context.messages);
+      const anchorError = validateAnchors(input.anchorMessageIds, view.messages);
       if (anchorError) {
         return finish({
           call,
@@ -124,12 +151,12 @@ export function createDelegationProvider({
     }
 
     const key = idempotencyKey({
-      turnId: text(context.turnId) || '',
-      toolCallOrdinal: context.toolCallOrdinal ?? '',
+      turnId: view.turnId,
+      toolCallOrdinal: view.toolCallOrdinal,
       name: item.name,
       input,
     });
-    const book = ledgerFor(context);
+    const book = ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
     const previous = readResult(book?.get?.(key));
     if (previous) {
       return finish({
@@ -189,6 +216,23 @@ export function createDelegationProvider({
     providerId: 'local.delegation',
     capabilityIds: [...DELEGATION_CAPABILITY_IDS],
     executeCapability,
+  };
+}
+
+function executionView(context) {
+  const nested = context?.toolContext && typeof context.toolContext === 'object' && !Array.isArray(context.toolContext)
+    ? context.toolContext
+    : {};
+  return {
+    mode: context?.mode ?? nested.mode,
+    role: context?.role ?? context?.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
+    messages: Array.isArray(context?.messages) ? context.messages : nested.messages,
+    quoteRefs: context?.quoteRefs ?? nested.quoteRefs,
+    replyTo: context?.replyTo ?? nested.replyTo,
+    turnId: text(context?.turnId) || text(nested.turnId) || '',
+    toolCallOrdinal: context?.toolCallOrdinal ?? nested.toolCallOrdinal ?? '',
+    workspaceId: text(context?.workspaceId) || text(nested.workspaceId),
+    conversationId: text(context?.conversationId) || text(nested.conversationId),
   };
 }
 
