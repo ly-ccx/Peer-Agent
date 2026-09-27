@@ -11,7 +11,8 @@ import {
   evaluateProjectAgentModeGate,
   restrictProjectAgentPermission,
 } from './project-agent-mode-gate.mjs';
-import { buildRuntimeTools, createLlmChatService } from '../llm-chat-service.mjs';
+import { createMemoryStore, createSnapshot } from '@peer-agent/runtime-node';
+import { buildRuntimeTools, createLlmChatService, projectTurnSystemContext } from '../llm-chat-service.mjs';
 import { createToolRegistry } from '../tools/tool-registry.mjs';
 import {
   createRuntimeProjectionFromToolRegistry,
@@ -225,4 +226,136 @@ describe('project agent mode gate', () => {
       globalThis.fetch = previousFetch;
     }
   });
+
+  it('passes turnProfile context into the system prompt without a new sendMessage parameter', async () => {
+    const dir = tempDir();
+    const previousHome = process.env.PEER_AGENT_HOME;
+    process.env.PEER_AGENT_HOME = dir;
+    const store = createMemoryStore({ rootDir: dir });
+    const frozen = store.writeVerified({
+      workspaceId: 'ws-b211',
+      kind: 'fact',
+      text: 'frozen login fact',
+      sourceRefs: ['evidence-frozen'],
+    });
+    assert.equal(frozen.ok, true);
+    const snapshot = createSnapshot('ws-b211', { store });
+    assert.equal(snapshot.ok, true);
+    assert.equal(store.forget({
+      id: frozen.item.id,
+      reason: 'later',
+      workspaceId: 'ws-b211',
+    }).ok, true);
+    const live = store.writeVerified({
+      workspaceId: 'ws-b211',
+      kind: 'responsibility',
+      text: 'owns the login boundary',
+      sourceRefs: ['evidence-live'],
+    });
+    assert.equal(live.ok, true);
+
+    const previousFetch = globalThis.fetch;
+    const bodies = [];
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: [DONE]\n\n',
+      ].join(''), { status: 200 });
+    };
+    const llmConfigStore = {
+      listProviders: () => [{
+        id: 'p1',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        model: 'test-model',
+        isDefault: true,
+        apiKeyConfigured: true,
+      }],
+      getDecryptedApiKey: () => 'test-key',
+    };
+    try {
+      const service = createLlmChatService({ llmConfigStore });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-context',
+        conversationId: 'c-context',
+        mode: 'chat',
+        webContents: { send: () => {} },
+        turnProfile: {
+          role: 'project_agent',
+          workspaceId: 'ws-b211',
+          context: {
+            roster: [{
+              sessionId: 'sess-1',
+              title: 'Fix login',
+              status: 'running',
+              latestEvent: 'started',
+              needsUser: true,
+            }],
+            events: [{ kind: 'result', sessionId: 'sess-1', summary: 'tests passed' }],
+          },
+        },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-plain',
+        conversationId: 'c-plain',
+        mode: 'chat',
+        webContents: { send: () => {} },
+      });
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-task',
+        conversationId: 'c-task',
+        mode: 'goal',
+        webContents: { send: () => {} },
+        turnProfile: {
+          role: 'work_session',
+          workspaceId: 'ws-b211',
+          memorySnapshotId: snapshot.snapshotId,
+          context: {
+            workSessionOrigin: {
+              summary: 'Fix login',
+              anchorText: 'please fix login',
+              readOnly: true,
+            },
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+      else process.env.PEER_AGENT_HOME = previousHome;
+    }
+
+    assert.equal(bodies.length, 3);
+    const agent = JSON.stringify(bodies[0]);
+    const plain = JSON.stringify(bodies[1]);
+    const task = JSON.stringify(bodies[2]);
+    assert.match(agent, /owns the login boundary/);
+    assert.match(agent, /Hand code changes and other workspace writes to a work session/);
+    assert.match(agent, /sess-1 \[running\] Fix login; needs you/);
+    assert.match(agent, /tests passed/);
+    assert.doesNotMatch(agent, /frozen login fact/);
+    assert.doesNotMatch(plain, /owns the login boundary|Hand code changes|sess-1/);
+    assert.match(task, /please fix login/);
+    assert.match(task, /Read-only constraint:/);
+    assert.match(task, new RegExp(snapshot.snapshotId));
+    assert.match(task, /frozen login fact/);
+    assert.match(task, /forgotten/);
+    assert.match(task, /Mode: agent \(default\)/);
+    assert.doesNotMatch(task, /Mode: project_agent/);
+    assert.doesNotMatch(task, /Hand code changes/);
+    assert.doesNotMatch(task, /owns the login boundary/);
+  });
+});
+
+it('其他角色不会把 turnProfile.context 送进系统上下文', () => {
+  assert.deepEqual(projectTurnSystemContext({
+    role: 'goal_runner',
+    workspaceId: 'ws-1',
+    context: { roster: [{ sessionId: 'sess-x', title: 'nope' }] },
+  }), {});
+  assert.deepEqual(projectTurnSystemContext(null), {});
 });
