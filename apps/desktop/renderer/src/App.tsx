@@ -57,6 +57,8 @@ import { registeredWorkspacePath } from './chat/state/registeredWorkspace';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
+import { BotListShell } from './project-agent/BotListShell';
+import { useBotListShell } from './project-agent/state/useBotList';
 
 const DEFAULT_NEW_TASK_SHORTCUT = 'CommandOrControl+N';
 
@@ -136,6 +138,7 @@ export function App() {
 
 function MainApp() {
   const { availableLocales, initError, llmProviders: bootstrapProviders, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
+  const botListShell = useBotListShell();
   // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
   const brandStartupHoldDone = useBrandStartupMinHold(!initError);
   const showMainShell = Boolean(session) && brandStartupHoldDone;
@@ -943,6 +946,35 @@ function MainApp() {
               conversationId={activeConversationId}
               isPageActive={activePage === 'chat'}
             >
+              {botListShell.active ? (
+                <BotListShell
+                  i18n={i18n}
+                  isZh={isZh}
+                  activePage={activePage}
+                  workspacePath={activeWorkspace ?? ''}
+                  automationRunTarget={automationRunTarget}
+                  onOpenSettings={() => openSettings('general')}
+                  onOpenAutomations={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('automations');
+                  }}
+                  onOpenCapabilities={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('tools');
+                  }}
+                  onOpenConversation={(conversationId) => {
+                    setConversationView('active');
+                    setActiveConversationId(String(conversationId));
+                    setCollectionDrawer(null);
+                    setActivePage('chat');
+                  }}
+                  onCreateAutomation={handleCreateAutomation}
+                  onClosePage={() => {
+                    setCollectionDrawer(null);
+                    setActivePage('chat');
+                  }}
+                />
+              ) : (
               <div className="app-layout">
             <Sidebar
               conversations={conversations}
@@ -1181,6 +1213,7 @@ function MainApp() {
             </section>
                 {activePage === 'chat' ? <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} /> : null}
               </div>
+              )}
             </WorkbenchProvider>
           </section>
           {activePage === 'settings' ? (
