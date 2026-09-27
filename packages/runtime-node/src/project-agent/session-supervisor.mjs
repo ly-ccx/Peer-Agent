@@ -3,6 +3,8 @@ import { readdirSync } from 'node:fs';
 
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
+import { decideSessionAcceptance } from './acceptance.mjs';
+
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
  * 每个项目同时只有一个 phase=running 的任务，其余 queued。
@@ -10,6 +12,7 @@ import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
  * memorySnapshotId 在 B2-10 之前为 null。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
  * spawn(input, context)。调度 Provider 目前只把 input 传给端口，宿主接线不在本卡。
+ * settle 在任务完成后计算结论。只有代理回复已经引用该任务、策略允许、关闭闸门通过，才写入代签。
  */
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
@@ -46,6 +49,8 @@ export function createSessionSupervisor({
   projectPolicy = null,
   abortStream = null,
   emitEvent = null,
+  resolveAcceptancePolicy = null,
+  readSessionFacts = null,
   now = () => new Date().toISOString(),
 } = {}) {
   if (!conversationStore || !goalPlanStore) {
@@ -412,6 +417,150 @@ export function createSessionSupervisor({
     return session;
   }
 
+  function policyFor(workspaceId) {
+    if (typeof resolveAcceptancePolicy !== 'function') return 'auto';
+    try {
+      return resolveAcceptancePolicy(workspaceId) === 'confirm' ? 'confirm' : 'auto';
+    } catch {
+      return 'auto';
+    }
+  }
+
+  function hostFacts(plan) {
+    if (typeof readSessionFacts !== 'function') return {};
+    try {
+      const facts = readSessionFacts(plan);
+      return facts && typeof facts === 'object' ? facts : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function filesOf(plan) {
+    const files = [];
+    for (const item of Array.isArray(plan?.involvedFiles) ? plan.involvedFiles : []) {
+      if (typeof item === 'string') files.push(item);
+      else if (typeof item?.path === 'string') files.push(item.path);
+    }
+    return files;
+  }
+
+  function parentMessages(plan) {
+    const history = conversationStore.getPersistedConversationHistory?.(plan?.delegationOrigin?.parentConversationId);
+    return Array.isArray(history?.messages) ? history.messages : [];
+  }
+
+  function replyCites(message, sessionId) {
+    if (!message || message.kind !== 'agent_reply' || !sessionId) return false;
+    const sources = [
+      ...(Array.isArray(message.sources) ? message.sources : []),
+      ...(Array.isArray(message.meta?.sources) ? message.meta.sources : []),
+    ];
+    return sources.includes(sessionId);
+  }
+
+  function indexedRefs(plan) {
+    if (typeof goalPlanStore.listEvidenceIndex !== 'function') return [];
+    let records = [];
+    try {
+      records = goalPlanStore.listEvidenceIndex() || [];
+    } catch {
+      return [];
+    }
+    const conversationId = plan?.conversationId;
+    return records
+      .filter((record) => record?.planId === plan?.planId
+        || (conversationId && record?.conversationId === conversationId))
+      .map((record) => record.evidenceRef)
+      .filter((ref) => typeof ref === 'string' && ref.trim());
+  }
+
+  function acceptanceFacts(plan) {
+    const origin = plan.delegationOrigin || {};
+    const messages = parentMessages(plan);
+    const anchor = messages.find((message) => message?.id === origin.anchorMessageId);
+    const extra = hostFacts(plan);
+    const hostAuthority = extra.hostAuthority && typeof extra.hostAuthority === 'object' ? extra.hostAuthority : {};
+    return {
+      plan,
+      sessionId: origin.sessionId,
+      policy: policyFor(origin.workspaceId),
+      reported: messages.some((message) => replyCites(message, origin.sessionId)),
+      readOnly: origin.readOnly === true,
+      changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),
+      irreversible: extra.irreversible === true,
+      anchorText: typeof anchor?.content === 'string' ? anchor.content : '',
+      manualCriteriaPending: extra.manualCriteriaPending === true,
+      externalSideEffects: extra.externalSideEffects === true,
+      outOfScopeWrite: extra.outOfScopeWrite === true,
+      verificationBelowFloor: extra.verificationBelowFloor === true,
+      hostAuthority,
+      evidenceIndex: indexedRefs(plan),
+    };
+  }
+
+  function writeAcceptance(plan, acceptedBy, verdictRef) {
+    return goalPlanStore.revisePlan(plan.planId, {
+      resultAcceptance: {
+        acceptedAt: now(),
+        acceptedBy,
+        verdictRef,
+      },
+    }, { reason: acceptedBy === 'policy' ? 'policy acceptance' : 'user acceptance', changedBy: 'session-supervisor' });
+  }
+
+  function settleLocked(sessionId) {
+    const plan = findBySession(text(sessionId));
+    if (!plan) return null;
+    if (plan.resultAcceptance?.acceptedAt) {
+      return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
+    }
+    if (plan.status !== 'completed') return { ok: false, error: 'session_not_completed' };
+    const decision = decideSessionAcceptance(acceptanceFacts(plan));
+    emit({
+      kind: 'session_verified',
+      sessionId: plan.delegationOrigin.sessionId,
+      planId: plan.planId,
+      workspaceId: plan.delegationOrigin.workspaceId,
+      mode: decision.mode,
+      verdictRef: decision.verdictRef,
+    });
+    if (decision.acceptedBy !== 'policy') return { ok: true, accepted: false, ...decision };
+    try {
+      const saved = writeAcceptance(plan, 'policy', decision.verdictRef);
+      return {
+        ok: true,
+        accepted: true,
+        ...decision,
+        resultAcceptance: saved?.resultAcceptance ?? null,
+      };
+    } catch (error) {
+      return { ok: false, error: error?.code || 'close_gate', ...decision };
+    }
+  }
+
+  function confirmLocked(sessionId) {
+    const plan = findBySession(text(sessionId));
+    if (!plan) return null;
+    if (plan.resultAcceptance?.acceptedAt) {
+      return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
+    }
+    if (plan.status !== 'completed') return { ok: false, error: 'session_not_completed' };
+    const decision = decideSessionAcceptance(acceptanceFacts(plan), { userConfirm: true });
+    if (decision.acceptedBy !== 'user') return { ok: false, error: 'not_confirmable', ...decision };
+    try {
+      const saved = writeAcceptance(plan, 'user', decision.verdictRef);
+      return {
+        ok: true,
+        accepted: true,
+        ...decision,
+        resultAcceptance: saved?.resultAcceptance ?? null,
+      };
+    } catch (error) {
+      return { ok: false, error: error?.code || 'close_gate', ...decision };
+    }
+  }
+
   function messageLocked(input) {
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
@@ -435,6 +584,12 @@ export function createSessionSupervisor({
     },
     message(input) {
       return exclusive(() => messageLocked(input || {}));
+    },
+    settle(sessionId) {
+      return exclusive(() => settleLocked(sessionId));
+    },
+    confirmResult(sessionId) {
+      return exclusive(() => confirmLocked(sessionId));
     },
     evaluateWrite(sessionId, action) {
       const plan = findBySession(text(sessionId));

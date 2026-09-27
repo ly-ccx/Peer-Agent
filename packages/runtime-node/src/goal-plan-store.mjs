@@ -1789,6 +1789,19 @@ function normalizeDelegationOrigin(value) {
   return origin;
 }
 
+function normalizeResultAcceptance(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const acceptedAt = normalizeOptionalString(value.acceptedAt);
+  if (!acceptedAt) return null;
+  const record = { acceptedAt };
+  const acceptedBy = normalizeOptionalString(value.acceptedBy);
+  if (acceptedBy) record.acceptedBy = acceptedBy;
+  if (value.userOverride === true) record.userOverride = true;
+  const verdictRef = normalizeOptionalString(value.verdictRef);
+  if (verdictRef) record.verdictRef = verdictRef;
+  return record;
+}
+
 function normalizePlan(plan) {
   if (!plan) return null;
   const normalizedConversationId = normalizeConversationId(plan.conversationId);
@@ -1824,6 +1837,9 @@ function normalizePlan(plan) {
     qualityReview: normalizeQualityReview(plan.qualityReview),
     deliveryHandoff: normalizeDeliveryHandoff(plan.deliveryHandoff),
   };
+  const resultAcceptance = normalizeResultAcceptance(plan.resultAcceptance);
+  if (resultAcceptance) normalized.resultAcceptance = resultAcceptance;
+  else delete normalized.resultAcceptance;
   const delegationOrigin = normalizeDelegationOrigin(plan.delegationOrigin);
   if (delegationOrigin) normalized.delegationOrigin = delegationOrigin;
   else delete normalized.delegationOrigin;
