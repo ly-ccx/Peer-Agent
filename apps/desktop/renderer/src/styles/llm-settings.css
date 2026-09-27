@@ -925,6 +925,15 @@
 .pa-dropdown-item.selected {
   font-weight: 600;
 }
+.pa-dropdown-item:disabled,
+.pa-dropdown-item.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pa-dropdown-item:disabled:hover,
+.pa-dropdown-item.is-disabled.active {
+  background: transparent;
+}
 .pa-dropdown-item.danger {
   color: var(--state-danger);
 }

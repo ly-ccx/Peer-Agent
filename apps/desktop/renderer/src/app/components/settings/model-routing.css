@@ -1,59 +1,257 @@
+/* 模型分工。对齐设置页其它分区：标题、卡片行、自定义下拉。 */
+
+.model-routing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--settings-panel-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  padding-top: 52px;
+}
+
+.model-routing-header h2 {
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-family: var(--font-serif-zh);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.model-routing-header p,
+.model-routing-banner {
+  margin: 6px 0 0;
+  max-width: 42rem;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
 .model-routing-banner {
   margin: 0;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--pa-border-subtle);
   border-radius: var(--radius-lg);
   background: var(--pa-surface-card);
-  color: var(--pa-text-primary);
 }
 
-.model-routing-table {
-  width: 100%;
-  border-collapse: collapse;
+.model-routing-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
 }
 
-.model-routing-table th,
-.model-routing-table td {
-  padding: 8px 6px;
-  text-align: left;
-  vertical-align: top;
+.model-routing-pref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 44px;
+  padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--pa-border-subtle);
+  color: var(--pa-text-primary);
+  font-size: 0.92rem;
 }
 
-.model-routing-table th {
+.model-routing-head {
   color: var(--pa-text-secondary);
-  font-size: 0.75rem;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.35;
 }
 
-.model-routing-table select,
-.model-routing-table input[type='number'] {
+.model-routing-tier,
+.model-routing-role {
+  display: grid;
+  align-items: center;
+  column-gap: var(--space-4);
+}
+
+.model-routing-tier {
+  grid-template-columns: 88px minmax(180px, 260px) minmax(0, 1fr);
+}
+
+.model-routing-role {
+  grid-template-columns: minmax(96px, 132px) 156px 168px minmax(72px, 1fr) minmax(136px, 168px);
+  column-gap: var(--space-3);
+}
+
+.model-routing-row {
+  min-height: 52px;
+  padding: var(--space-3) 0;
+}
+
+.model-routing-row + .model-routing-row {
+  border-top: 1px solid var(--pa-border-subtle);
+}
+
+.model-routing-row.model-routing-tier,
+.model-routing-role.is-auto {
+  align-items: start;
+}
+
+.model-routing-name {
+  min-width: 0;
+  min-height: 32px;
+  overflow: hidden;
+  color: var(--pa-text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-routing-panel .pa-dropdown {
+  display: block;
   width: 100%;
   min-width: 0;
 }
 
-.model-routing-fallbacks,
-.model-routing-pool {
+.model-routing-fallbacks {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.model-routing-fallback,
-.model-routing-pool label {
-  display: flex;
-  gap: 6px;
+.model-routing-fallbacks > .pa-dropdown {
+  flex: 0 0 168px;
+  width: 168px;
+}
+
+.model-routing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--chrome-sunken);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+}
+
+.model-routing-chip__label {
+  overflow: hidden;
+  max-width: 180px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-routing-chip__actions {
+  display: inline-flex;
   align-items: center;
 }
 
-.model-routing-resolved {
+.model-routing-chip__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius-sm);
   color: var(--graphite-soft);
+}
+
+.model-routing-chip__actions button:hover:not(:disabled) {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
+.model-routing-icon {
+  display: block;
+}
+
+.model-routing-icon--up {
+  transform: rotate(180deg);
+}
+
+.model-routing-resolved {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-routing-spend input {
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--chrome-sunken);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-routing-spend input::placeholder {
+  color: var(--graphite-mute);
+}
+
+.model-routing-spend input:focus {
+  border-color: var(--za-primary-control-bg, var(--chrome-hairline));
+}
+
+.model-routing-spend input::-webkit-outer-spin-button,
+.model-routing-spend input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.model-routing-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.model-routing-pool-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--pa-text-secondary);
   font-size: 0.78rem;
 }
 
-.model-routing-table fieldset {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
+@media (max-width: 860px) {
+  .model-routing-head.model-routing-role {
+    display: none;
+  }
+
+  .model-routing-role {
+    grid-template-columns: 1fr 1fr;
+    row-gap: var(--space-2);
+    align-items: start;
+  }
+
+  .model-routing-role .model-routing-name {
+    grid-column: 1 / -1;
+  }
+
+  .model-routing-resolved {
+    line-height: 1.4;
+  }
+
+  .model-routing-resolved::before,
+  .model-routing-spend::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: var(--pa-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
 }

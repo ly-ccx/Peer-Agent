@@ -4,6 +4,8 @@ export interface DropdownOption {
   readonly tone?: 'danger';
   readonly group?: string;
   readonly hint?: string;
+  /** Shown, but not selectable. Used when a model is visible yet fails a capability check. */
+  readonly disabled?: boolean;
   /** When set, the option is only listed while this tab is active. Untagged options stay visible on every tab. */
   readonly tab?: string;
 }
