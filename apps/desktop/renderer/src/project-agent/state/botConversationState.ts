@@ -63,6 +63,7 @@ export interface BotDispositionMark {
   readonly kind: MessageDisposition['kind'];
   readonly sessionIds: readonly string[];
   readonly labelKey: TranslationKey;
+  readonly title?: string;
 }
 
 export interface BotChatMessage {
@@ -214,6 +215,45 @@ const DISPOSITION_LABEL_KEYS: Record<MessageDisposition['kind'], TranslationKey>
   out_of_scope: 'projectAgent.chat.disposition.outOfScope',
 };
 
+function spawnTitleIndex(messages: readonly BotChatMessage[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const message of messages) {
+    for (const call of toolCallsOf(message)) {
+      if (call.name !== 'spawn_session' || !call.input) continue;
+      const title = typeof call.input.title === 'string' ? call.input.title.trim() : '';
+      const sessionId = sessionIdOfCall(call);
+      if (title && sessionId) titles.set(sessionId, title);
+    }
+  }
+  return titles;
+}
+
+function sessionIdOfCall(call: DispositionToolCall): string {
+  const result = call.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+  const record = result as Readonly<Record<string, unknown>>;
+  const direct = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
+  if (direct) return direct;
+  const output = record.output;
+  if (output && typeof output === 'object' && !Array.isArray(output) && 'sessionId' in output) {
+    const nested = output.sessionId;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  }
+  return '';
+}
+
+function scopeTitle(
+  message: BotChatMessage,
+  byId: ReadonlyMap<string, BotChatMessage>,
+  titles: ReadonlyMap<string, string>,
+): string {
+  const names = quotedSessionIds(message, byId)
+    .map((id) => titles.get(id))
+    .filter((name): name is string => Boolean(name));
+  if (names.length > 0) return names.join('、');
+  return message.quoteRefs.length > 1 ? message.quoteRefs.slice(1).join(' ').trim() : '';
+}
+
 function toolCallsOf(message: BotChatMessage): DispositionToolCall[] {
   const calls: DispositionToolCall[] = [];
   for (const round of message.rounds) {
@@ -249,7 +289,9 @@ function sessionIdsOf(item: MessageDisposition, replySources: ReadonlyMap<string
 }
 
 function sameMark(left: BotDispositionMark, right: BotDispositionMark): boolean {
-  return left.kind === right.kind && left.sessionIds.join('\0') === right.sessionIds.join('\0');
+  return left.kind === right.kind
+    && left.sessionIds.join('\0') === right.sessionIds.join('\0')
+    && (left.title ?? '') === (right.title ?? '');
 }
 
 /**
@@ -303,12 +345,16 @@ export function applyDispositions(messages: readonly BotChatMessage[]): BotChatM
       replySources.set(message.id, message.sources);
     }
   }
+  const titles = spawnTitleIndex(messages);
   const byMessage = new Map<string, BotDispositionMark[]>();
   for (const item of projectMessageDispositions(dispositionMessages, events)) {
+    const user = byId.get(item.messageId);
+    const title = item.kind === 'out_of_scope' && user ? scopeTitle(user, byId, titles) : '';
     const mark: BotDispositionMark = {
       kind: item.kind,
       sessionIds: sessionIdsOf(item, replySources),
       labelKey: DISPOSITION_LABEL_KEYS[item.kind],
+      ...(title ? { title } : {}),
     };
     const list = byMessage.get(item.messageId) ?? [];
     if (!list.some((existing) => sameMark(existing, mark))) list.push(mark);

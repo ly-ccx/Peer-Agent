@@ -1643,6 +1643,16 @@ export function createLlmChatService({
       // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
       // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
       toolContext.onToolCall = agentProgress?.onToolCall ?? null;
+      // 引用范围只看本回合对话里的 quoteRefs。复用的 toolContext 按回合覆写。
+      toolContext.messages = null;
+      if (projectAgentTurn) {
+        try {
+          const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
+          toolContext.messages = Array.isArray(history?.messages) ? history.messages : [];
+        } catch {
+          toolContext.messages = [];
+        }
+      }
 
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
         let provider = providerCandidates[attemptIndex];

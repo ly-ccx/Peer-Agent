@@ -16,6 +16,11 @@ export function UserBubble({
 }) {
   const excerpt = message.quoteRefs.length > 1 ? message.quoteRefs[1] : '';
   const answered = message.dispositions.some((item) => item.kind === 'answered');
+  const markText = (item: BotChatMessage['dispositions'][number]) => (
+    item.kind === 'out_of_scope'
+      ? i18n.t(item.labelKey, { title: item.title || (i18n.locale === 'zh-CN' ? '这个任务' : 'that task') })
+      : i18n.t(item.labelKey)
+  );
   return (
     <article className="bot-user" id={`bot-msg-${message.id}`} data-kind="user_input">
       <div className="bot-user-marks">
@@ -37,10 +42,10 @@ export function UserBubble({
                 type="button"
                 onClick={() => onLocateSession(sessionId)}
               >
-                {i18n.t(item.labelKey)}
+                {markText(item)}
               </button>
             ))
-            : <span key={`${item.kind}-${index}`}>{i18n.t(item.labelKey)}</span>
+            : <span key={`${item.kind}-${index}`}>{markText(item)}</span>
         ))}
       </div>
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}

@@ -295,6 +295,81 @@ test('list, get, cancel, message, and post_reply return structured success and e
   assert.equal(noSupervisor.error, 'supervisor_unavailable');
 });
 
+test('引用限定范围内，越界的 message 和 cancel 被拒绝，新开任务不受限', async () => {
+  let spawned = 0;
+  let messaged = 0;
+  let cancelled = 0;
+  const provider = createDelegationProvider({
+    supervisor: {
+      spawn() {
+        spawned += 1;
+        return { sessionId: 's-new', status: 'running' };
+      },
+      message(input) {
+        messaged += 1;
+        return { sessionId: input.sessionId, delivered: true, intent: input.intent };
+      },
+      cancel() {
+        cancelled += 1;
+        return { sessionId: 's-keep', status: 'cancelled' };
+      },
+    },
+  });
+  const quoted = [
+    { id: 'u0', role: 'user', kind: 'user_input' },
+    { id: 'r1', role: 'assistant', kind: 'agent_reply', sources: ['s-keep'], replyTo: ['u0'] },
+    { id: 'u1', role: 'user', kind: 'user_input', quoteRefs: ['r1', '登录任务在跑'] },
+  ];
+  const context = agentContext({ messages: quoted });
+
+  const rejected = outputOf(await provider.executeCapability(
+    call('local.delegation.cancel_session', { sessionId: 's-other', reason: '停掉别的' }, 'scope-cancel'),
+    context,
+  ));
+  assert.equal(rejected.error, 'out_of_scope');
+  assert.equal(rejected.sessionId, 's-other');
+  assert.deepEqual(rejected.sessionIds, ['s-keep']);
+  assert.equal(cancelled, 0);
+
+  const amend = outputOf(await provider.executeCapability(
+    call('local.delegation.message_session', {
+      sessionId: 's-keep',
+      text: '把标题改短',
+      intent: 'amend',
+    }, 'scope-amend'),
+    { ...context, toolCallOrdinal: 1 },
+  ));
+  assert.equal(amend.delivered, true);
+  assert.equal(messaged, 1);
+
+  const spawnedOut = outputOf(await provider.executeCapability(
+    call('local.delegation.spawn_session', spawnInput(), 'scope-spawn'),
+    { ...context, toolCallOrdinal: 2 },
+  ));
+  assert.equal(spawnedOut.sessionId, 's-new');
+  assert.equal(spawnedOut.error, undefined);
+  assert.equal(spawned, 1);
+
+  const nested = outputOf(await provider.executeCapability(
+    call('local.delegation.message_session', {
+      sessionId: 's-other',
+      text: '不要动这个',
+      intent: 'answer',
+    }, 'scope-nested'),
+    {
+      locale: 'zh-CN',
+      toolContext: {
+        mode: 'project_agent',
+        turnRole: 'project_agent',
+        turnId: 'turn-nested',
+        messages: quoted,
+      },
+    },
+  ));
+  assert.equal(nested.error, 'out_of_scope');
+  assert.equal(messaged, 1);
+});
+
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }
