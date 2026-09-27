@@ -25,6 +25,8 @@ function message(partial: Partial<BotChatMessage> & Pick<BotChatMessage, 'id' | 
     cards: partial.cards ?? [],
     quoteRefs: partial.quoteRefs ?? [],
     separatorLabel: partial.separatorLabel ?? '',
+    dispositions: [],
+    rounds: [],
     ...partial,
   };
 }
@@ -134,6 +136,89 @@ test('超过 200 行时只留锚点附近的窗口', () => {
   const late = windowConversationRows(rows, 240, 80);
   assert.equal(late.rows.at(-1), 249);
   assert.equal(late.rows.includes(10), false);
+});
+
+test('用户气泡带上从工具调用推导的处置标记，模型自填的处置不生效', () => {
+  const stored = normalizeBotMessage({
+    id: 'turn-1',
+    role: 'assistant',
+    kind: 'agent_turn',
+    createdAt: '2026-09-27T04:01:00.000Z',
+    rounds: [{
+      text: '',
+      toolCalls: [
+        { name: 'message_session', input: { intent: 'amend', sessionId: 's-merge', disposition: 'stopped' }, result: { ok: true, sessionId: 's-merge' } },
+        { name: 'cancel_session', input: { sessionId: 's-stop', reason: '停下' }, result: { sessionId: 's-stop', status: 'cancelled' } },
+        { name: 'spawn_session', input: { supersedes: 's-old' }, result: { sessionId: 's-new', status: 'running' } },
+        { name: 'spawn_session', input: {}, result: { sessionId: 's-now', status: 'running' } },
+        { name: 'spawn_session', input: { dependsOn: ['s-now'] }, result: { sessionId: 's-wait', status: 'queued' } },
+        { name: 'post_reply', input: { text: '好', replyTo: ['u1'], sources: ['s-merge'], disposition: 'queued' }, result: { ok: true } },
+      ],
+    }],
+  });
+  assert.equal(stored?.rounds[0]?.toolCalls.length, 6);
+  const rows = conversationRows([
+    message({ id: 'u1', kind: 'user_input', createdAt: '2026-09-27T04:00:00.000Z', content: '插一句' }),
+    stored!,
+    message({
+      id: 'reply-1',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T04:02:00.000Z',
+      content: '好',
+      replyTo: ['u1'],
+      sources: ['s-merge'],
+    }),
+  ]);
+  const shown = rows.filter((row) => row.type === 'message').map((row) => row.type === 'message' ? row.message : null);
+  assert.deepEqual(shown.map((item) => item?.id), ['u1', 'reply-1']);
+  assert.deepEqual(shown[0]?.dispositions.map((item) => [item.kind, item.sessionIds, item.labelKey]), [
+    ['merged', ['s-merge'], 'projectAgent.chat.disposition.merged'],
+    ['stopped', ['s-stop'], 'projectAgent.chat.disposition.stopped'],
+    ['superseded', ['s-new'], 'projectAgent.chat.disposition.superseded'],
+    ['parallel', ['s-now'], 'projectAgent.chat.disposition.parallel'],
+    ['queued', ['s-wait'], 'projectAgent.chat.disposition.queued'],
+    ['answered', ['s-merge'], 'projectAgent.chat.disposition.answered'],
+  ]);
+});
+
+test('引用回复时，范围外的停止显示为没有影响其他任务', () => {
+  const rows = conversationRows([
+    message({ id: 'u0', kind: 'user_input', createdAt: '2026-09-27T05:00:00.000Z', content: '做登录' }),
+    message({
+      id: 'r1',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T05:01:00.000Z',
+      content: '登录任务在跑',
+      replyTo: ['u0'],
+      sources: ['s-login'],
+    }),
+    message({
+      id: 'u1',
+      kind: 'user_input',
+      createdAt: '2026-09-27T05:02:00.000Z',
+      content: '把这个停掉',
+      quoteRefs: ['r1', '登录任务在跑'],
+    }),
+    message({
+      id: 'turn-quote',
+      kind: 'agent_turn',
+      createdAt: '2026-09-27T05:03:00.000Z',
+      rounds: [{
+        text: '',
+        toolCalls: [
+          { name: 'cancel_session', input: { sessionId: 's-other', reason: '停' }, result: { sessionId: 's-other', status: 'cancelled' } },
+          { name: 'message_session', input: { intent: 'amend', sessionId: 's-login' }, result: { ok: true, sessionId: 's-login' } },
+        ],
+      }],
+    }),
+  ]);
+  const user = rows.find((row) => row.type === 'message' && row.message.id === 'u1');
+  assert.equal(user?.type, 'message');
+  if (user?.type !== 'message') return;
+  assert.deepEqual(user.message.dispositions.map((item) => [item.kind, item.sessionIds[0]]), [
+    ['out_of_scope', 's-other'],
+    ['merged', 's-login'],
+  ]);
 });
 
 test('引用和思考状态', () => {

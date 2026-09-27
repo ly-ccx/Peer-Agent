@@ -8,7 +8,6 @@ import {
   normalizeBotMessage,
   optimisticInputMessageId,
   showAgentThinking,
-  visibleBotMessages,
   type BotChatMessage,
   type ConversationRow,
   type PendingBotInput,
@@ -22,7 +21,7 @@ function pageMessages(raw: readonly Record<string, unknown>[] | undefined): BotC
     const message = normalizeBotMessage(item);
     if (message) normalized.push(message);
   }
-  return visibleBotMessages(normalized);
+  return normalized;
 }
 
 function lastRawId(raw: readonly Record<string, unknown>[] | undefined): string | null {

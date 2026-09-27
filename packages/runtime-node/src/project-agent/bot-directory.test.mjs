@@ -77,7 +77,7 @@ function harness(root) {
     listConfirmations: () => confirmations,
     now: () => new Date('2026-09-27T06:00:00.000Z'),
   });
-  return { entry, directory, conversationId };
+  return { entry, directory, conversationId, conversationStore };
 }
 
 test('列表项截断最后一条可见消息，并计入批准、提问、确认和进行中', () => {
@@ -119,6 +119,27 @@ test('读游标之后未读清零，对话按 kind 分页', () => {
     assert.equal(mixed.nextCursor, 'card-1');
     const rest = directory.readConversation(entry.workspaceId, { limit: 2, before: 'card-1' });
     assert.deepEqual(rest.messages.map((message) => message.id), ['reply-1']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('默认对话页保留 agent_turn，列表预览仍不显示它', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, {
+      id: 'turn-1',
+      role: 'assistant',
+      kind: 'agent_turn',
+      content: '',
+      createdAt: '2026-09-27T04:30:00.000Z',
+      rounds: [{ text: '', toolCalls: [{ name: 'cancel_session', input: { sessionId: 'sess-1' }, result: { sessionId: 'sess-1' } }] }],
+    });
+    const page = directory.readConversation(entry.workspaceId, { limit: 10 });
+    assert.equal(page.messages.some((message) => message.id === 'turn-1'), true);
+    assert.equal(page.messages.some((message) => message.id === 'hidden-1'), false);
+    assert.equal(directory.list()[0].preview.includes('cancel_session'), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

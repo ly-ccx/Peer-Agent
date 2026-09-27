@@ -386,6 +386,113 @@ function dispositionFor(message: DispositionMessage, event: DispositionEvent): M
   }
 }
 
+export interface DispositionToolCall {
+  readonly name?: string;
+  /** Arbitrary tool input. A disposition field here is ignored. */
+  readonly input?: Readonly<Record<string, unknown>> | null;
+  readonly result?: unknown;
+}
+
+function toolRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function toolBody(result: unknown): Record<string, unknown> | null {
+  const record = toolRecord(result);
+  if (!record) return null;
+  const nested = toolRecord(record.output);
+  if (nested && typeof record.sessionId !== 'string' && (typeof nested.sessionId === 'string' || typeof nested.error === 'string' || nested.ok === false)) {
+    return nested;
+  }
+  return record;
+}
+
+function toolFailed(body: Record<string, unknown> | null): boolean {
+  if (!body) return true;
+  if (typeof body.error === 'string' && body.error.trim()) return true;
+  return body.ok === false;
+}
+
+function toolSessionId(body: Record<string, unknown> | null, fallback: string | undefined): string {
+  if (body && typeof body.sessionId === 'string' && body.sessionId.trim()) return body.sessionId.trim();
+  return typeof fallback === 'string' ? fallback.trim() : '';
+}
+
+function toolQueued(body: Record<string, unknown>): boolean {
+  return body.status === 'queued' || body.queued === true;
+}
+
+/**
+ * Derive disposition events from one turn's tool calls.
+ * Answer is not an event: only post_reply, projected later from the assistant reply.
+ * A model-supplied disposition field is ignored.
+ */
+export function dispositionEventsFromToolCalls(
+  anchorMessageId: string,
+  toolCalls: readonly DispositionToolCall[],
+): DispositionEvent[] {
+  const anchor = anchorMessageId.trim();
+  if (!anchor) return [];
+  const events: DispositionEvent[] = [];
+  for (const call of toolCalls) {
+    const name = call?.name;
+    const input = call?.input ?? null;
+    const body = toolBody(call?.result);
+    if (toolFailed(body)) continue;
+    if (name === 'message_session' && fieldText(input, 'intent') === 'amend') {
+      const sessionId = toolSessionId(body, fieldText(input, 'sessionId'));
+      if (!sessionId) continue;
+      events.push({ kind: 'merge', anchorMessageId: anchor, sessionId });
+      continue;
+    }
+    if (name === 'cancel_session') {
+      const sessionId = toolSessionId(body, fieldText(input, 'sessionId'));
+      if (!sessionId) continue;
+      events.push({
+        kind: 'stop',
+        anchorMessageId: anchor,
+        sessionId,
+        sessionIds: [sessionId],
+        reason: fieldText(input, 'reason'),
+      });
+      continue;
+    }
+    if (name !== 'spawn_session') continue;
+    const sessionId = toolSessionId(body, '');
+    if (!sessionId || !body) continue;
+    const supersedes = fieldText(input, 'supersedes');
+    if (supersedes) {
+      events.push({
+        kind: 'supersede',
+        anchorMessageId: anchor,
+        sessionId,
+        oldSessionId: supersedes,
+        newSessionId: sessionId,
+        reason: '',
+      });
+      continue;
+    }
+    if (toolQueued(body)) {
+      const depends = input?.dependsOn;
+      events.push({
+        kind: 'queue',
+        anchorMessageId: anchor,
+        sessionId,
+        dependsOn: Array.isArray(depends) ? depends.filter((item): item is string => typeof item === 'string') : [],
+      });
+      continue;
+    }
+    events.push({ kind: 'parallel', anchorMessageId: anchor, sessionId, sessionIds: [sessionId] });
+  }
+  return events;
+}
+
+function fieldText(record: Readonly<Record<string, unknown>> | null, key: string): string {
+  const value = record?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 /**
  * Dispositions are a projection of anchor events plus replies.
  * The assistant text answers the last user message in the turn unless replyTo says otherwise.

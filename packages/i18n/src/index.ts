@@ -102,6 +102,13 @@ export type TranslationKey =
   | 'projectAgent.chat.failed'
   | 'projectAgent.chat.retry'
   | 'projectAgent.chat.replied'
+  | 'projectAgent.chat.disposition.answered'
+  | 'projectAgent.chat.disposition.merged'
+  | 'projectAgent.chat.disposition.stopped'
+  | 'projectAgent.chat.disposition.superseded'
+  | 'projectAgent.chat.disposition.parallel'
+  | 'projectAgent.chat.disposition.queued'
+  | 'projectAgent.chat.disposition.outOfScope'
   | 'projectAgent.chat.quote'
   | 'projectAgent.chat.quoteRemove'
   | 'projectAgent.chat.placeholder'
@@ -1070,6 +1077,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.failed': '没有发出去',
     'projectAgent.chat.retry': '重发',
     'projectAgent.chat.replied': '已回复',
+    'projectAgent.chat.disposition.answered': '已回答',
+    'projectAgent.chat.disposition.merged': '已并入',
+    'projectAgent.chat.disposition.stopped': '已停止',
+    'projectAgent.chat.disposition.superseded': '已取代',
+    'projectAgent.chat.disposition.parallel': '已并行',
+    'projectAgent.chat.disposition.queued': '已排队',
+    'projectAgent.chat.disposition.outOfScope': '这句话针对的是这个任务，没有影响其他任务',
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
     'projectAgent.chat.placeholder': '跟这个机器人说',
@@ -1850,6 +1864,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.failed': 'Not sent',
     'projectAgent.chat.retry': 'Retry',
     'projectAgent.chat.replied': 'Replied',
+    'projectAgent.chat.disposition.answered': 'Answered',
+    'projectAgent.chat.disposition.merged': 'Merged',
+    'projectAgent.chat.disposition.stopped': 'Stopped',
+    'projectAgent.chat.disposition.superseded': 'Replaced',
+    'projectAgent.chat.disposition.parallel': 'In parallel',
+    'projectAgent.chat.disposition.queued': 'Queued',
+    'projectAgent.chat.disposition.outOfScope': 'This message was about that task and did not affect the others',
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
     'projectAgent.chat.placeholder': 'Message this bot',

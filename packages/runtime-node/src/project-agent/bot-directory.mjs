@@ -212,8 +212,9 @@ export function createBotDirectory({
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
     const allowed = Array.isArray(kinds) ? new Set(kinds.filter((kind) => typeof kind === 'string')) : null;
     const filtered = messagesOf(profile).filter((message) => {
-      if (!allowed) return isVisibleBotMessage(message);
-      return allowed.has(messageKind(message));
+      if (allowed) return allowed.has(messageKind(message));
+      // agent_turn stays available so the client can derive disposition marks, then hide the turn.
+      return isVisibleBotMessage(message) || messageKind(message) === 'agent_turn';
     });
     const size = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 50;
     let start = 0;

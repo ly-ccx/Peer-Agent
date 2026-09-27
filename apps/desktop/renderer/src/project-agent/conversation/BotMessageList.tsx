@@ -82,6 +82,7 @@ export function BotMessageList({
             replied={replied.has(row.message.id)}
             i18n={i18n}
             onRetry={onRetry}
+            onLocateSession={onLocateSession}
           />
         ) : row.message.kind === 'system_card' ? (
           <SystemCard

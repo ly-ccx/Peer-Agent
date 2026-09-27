@@ -251,6 +251,8 @@ test('开任务全链路：冻结模型、子会话、委托消息、计划、�
     const after = env.conversationStore.getConversation(children[0].id);
     assert.equal(after.messages.at(-1).role, 'user');
     assert.match(after.messages.at(-1).content, /保留现有文案/);
+    assert.doesNotMatch(after.messages.at(-1).content, /来自项目代理转达/);
+    assert.equal(after.messages.at(-1).relayFrom, undefined);
     assert.equal(await env.supervisor.get({ sessionId: 'missing' }), null);
   } finally {
     await env.cleanup();
@@ -1024,6 +1026,173 @@ test('重新建立监督者时，已经结束的占用者会把队列里的下�
     await afterRestart.reconciled;
     assert.equal(runner.starts.at(-1), planIdOf(env, queued.sessionId));
     assert.equal(env.goalPlanStore.getPlan(planIdOf(env, queued.sessionId)).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('amend 在等待用户时作为回答投递，并标注来自项目代理', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    const before = env.goalPlanStore.getPlan(planId);
+    assert.equal(before.runner.waitingOnUser, true);
+    const delivered = await env.supervisor.message({
+      sessionId: opened.sessionId,
+      text: '把标题改短',
+      intent: 'amend',
+    });
+    assert.equal(delivered.delivery, 'answer');
+    assert.equal(delivered.relayFrom, 'project_agent');
+    assert.equal(env.turns.length, 2);
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })[0];
+    const relay = env.conversationStore.getConversation(child.id).messages.find((item) => item.relayFrom === 'project_agent');
+    assert.equal(relay.content, '来自项目代理转达：用户说把标题改短');
+    assert.equal(relay.routeIntent, 'answer');
+    const fresh = env.goalPlanStore.getPlan(planId);
+    assert.notEqual(fresh.status, 'cancelled');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('amend 在运行中留到下一回合，不取消未完成任务', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(
+      spawnInput({ title: '正在改文案', brief: '改登录文案' }),
+      contextOf(env, { inputId: 'input-running' }),
+    );
+    const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    env.goalPlanStore.revisePlan(planId, {
+      tasks: [{ taskId: 'leaf-1', title: '改文案', status: 'running', subtasks: [] }],
+    }, { reason: 'test leaf', changedBy: 'test' });
+    env.goalPlanStore.setRunnerState(planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'orient',
+      waitingOnUser: false,
+    });
+    const delivered = await env.supervisor.message({
+      sessionId: opened.sessionId,
+      text: '标题再短一点',
+      intent: 'amend',
+    });
+    assert.equal(delivered.delivery, 'next_turn');
+    assert.equal(delivered.relayFrom, 'project_agent');
+    assert.equal(env.turns.length, 1);
+    const fresh = env.goalPlanStore.getPlan(planId);
+    assert.equal(fresh.status, 'executing');
+    assert.equal(fresh.tasks[0].status, 'running');
+    assert.equal(fresh.runner.status, 'running');
+    const correction = fresh.runTrace.events.find((event) => event.type === 'user_correction');
+    assert.equal(correction.payload.relayFrom, 'project_agent');
+    assert.equal(correction.payload.effect, 'next_turn');
+    assert.match(correction.summary, /来自项目代理转达：用户说标题再短一点/);
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })
+      .find((item) => item.delegation?.sessionId === opened.sessionId);
+    const relay = env.conversationStore.getConversation(child.id).messages.at(-1);
+    assert.equal(relay.content, '来自项目代理转达：用户说标题再短一点');
+    assert.equal(relay.relayFrom, 'project_agent');
+    assert.equal(relay.routeIntent, 'correction');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('supersedes 停掉旧会话并开新会话，缺失的旧会话不会开新任务', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const missing = await env.supervisor.spawn(spawnInput({
+      title: '不该出现',
+      brief: '旧会话不存在',
+      supersedes: 'missing-session',
+    }), contextOf(env, { inputId: 'input-missing' }));
+    assert.equal(missing.error, 'session_not_found');
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 1);
+
+    const replaced = await env.supervisor.spawn(spawnInput({
+      title: '换成短标题',
+      brief: '用短标题重做登录',
+      supersedes: opened.sessionId,
+    }), contextOf(env, { inputId: 'input-replace' }));
+    assert.equal(replaced.error, undefined);
+    assert.notEqual(replaced.sessionId, opened.sessionId);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).status, 'cancelled');
+    const again = await env.supervisor.spawn(spawnInput({
+      title: '换成短标题',
+      brief: '用短标题重做登录',
+      supersedes: opened.sessionId,
+    }), contextOf(env, { inputId: 'input-replay' }));
+    assert.equal(again.replayed, true);
+    assert.equal(again.sessionId, replaced.sessionId);
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, 2);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('supersedes 建成后才停旧会话，排队中的其他任务不会抢走名额', async () => {
+  const env = await harness();
+  try {
+    const running = await env.supervisor.spawn(
+      spawnInput({ title: '正在做', brief: '占住名额' }),
+      contextOf(env, { inputId: 'input-holder' }),
+    );
+    const queued = await env.supervisor.spawn(
+      spawnInput({ title: '在排队', brief: '等名额' }),
+      contextOf(env, { inputId: 'input-queued' }),
+    );
+    assert.equal(queued.status, 'queued');
+    const original = env.goalPlanStore.createGoalContract.bind(env.goalPlanStore);
+    env.goalPlanStore.createGoalContract = (input) => {
+      if (input?.title === '替换失败') throw new Error('snapshot broke');
+      return original(input);
+    };
+    const failed = await env.supervisor.spawn(spawnInput({
+      title: '替换失败',
+      brief: '这一次不该停掉旧任务',
+      supersedes: running.sessionId,
+    }), contextOf(env, { inputId: 'input-fail' }));
+    assert.equal(failed.error, 'spawn_failed');
+    assert.notEqual(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
+
+    env.goalPlanStore.createGoalContract = original;
+    const replaced = await env.supervisor.spawn(spawnInput({
+      title: '换成新的',
+      brief: '接过正在跑的名额',
+      supersedes: running.sessionId,
+    }), contextOf(env, { inputId: 'input-take' }));
+    assert.equal(replaced.error, undefined);
+    assert.equal(replaced.status, 'running');
+    assert.equal(env.supervisor.get({ sessionId: running.sessionId }).status, 'cancelled');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: queued.sessionId }).planId).delegationOrigin.phase, 'queued');
+    assert.equal(env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: replaced.sessionId }).planId).delegationOrigin.phase, 'running');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('已经结束的会话拒绝 amend', async () => {
+  const env = await harness();
+  try {
+    const opened = await env.supervisor.spawn(spawnInput({ title: '做完了', brief: '不再改' }), contextOf(env, { inputId: 'input-done' }));
+    const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })
+      .find((item) => item.delegation?.sessionId === opened.sessionId);
+    const before = env.conversationStore.getConversation(child.id).messages.length;
+    env.goalPlanStore.setPlanStatus(planId, 'completed');
+    const delivered = await env.supervisor.message({
+      sessionId: opened.sessionId,
+      text: '再改一下',
+      intent: 'amend',
+    });
+    assert.equal(delivered.error, 'session_not_running');
+    assert.equal(env.conversationStore.getConversation(child.id).messages.length, before);
   } finally {
     await env.cleanup();
   }

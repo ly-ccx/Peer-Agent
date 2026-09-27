@@ -6,13 +6,16 @@ export function UserBubble({
   replied,
   i18n,
   onRetry,
+  onLocateSession,
 }: {
   readonly message: BotChatMessage;
   readonly replied: boolean;
   readonly i18n: I18nRuntime;
   readonly onRetry: (inputId: string) => void;
+  readonly onLocateSession: (sessionId: string) => void;
 }) {
   const excerpt = message.quoteRefs.length > 1 ? message.quoteRefs[1] : '';
+  const answered = message.dispositions.some((item) => item.kind === 'answered');
   return (
     <article className="bot-user" id={`bot-msg-${message.id}`} data-kind="user_input">
       <div className="bot-user-marks">
@@ -25,7 +28,20 @@ export function UserBubble({
             </button>
           </>
         ) : null}
-        {replied && !message.pending ? <span>{i18n.t('projectAgent.chat.replied')}</span> : null}
+        {replied && !message.pending && !answered ? <span>{i18n.t('projectAgent.chat.replied')}</span> : null}
+        {message.dispositions.map((item, index) => (
+          item.sessionIds.length > 0
+            ? item.sessionIds.map((sessionId) => (
+              <button
+                key={`${item.kind}-${sessionId}`}
+                type="button"
+                onClick={() => onLocateSession(sessionId)}
+              >
+                {i18n.t(item.labelKey)}
+              </button>
+            ))
+            : <span key={`${item.kind}-${index}`}>{i18n.t(item.labelKey)}</span>
+        ))}
       </div>
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
       <p className="bot-user-text">{message.content}</p>

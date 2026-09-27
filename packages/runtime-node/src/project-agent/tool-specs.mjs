@@ -32,6 +32,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       },
       priority: { type: 'string' },
       dependsOn: { type: 'array', items: { type: 'string' } },
+      supersedes: { type: 'string' },
       isolation: { type: 'string' },
     },
     required: ['anchorMessageIds', 'title', 'brief', 'successCriteria', 'kind', 'readOnly'],
@@ -68,7 +69,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     properties: {
       sessionId: { type: 'string' },
       text: { type: 'string' },
-      intent: { type: 'string', enum: ['answer'] },
+      intent: { type: 'string', enum: ['answer', 'amend'] },
     },
     required: ['sessionId', 'text', 'intent'],
     additionalProperties: false,
@@ -197,6 +198,11 @@ function validateSpawn(input) {
     if (!isolation) return invalid('isolation must be a short string.');
     value.isolation = isolation;
   }
+  if (input.supersedes !== undefined) {
+    const supersedes = text(input.supersedes, 200);
+    if (!supersedes) return invalid('supersedes must be a session id.');
+    value.supersedes = supersedes;
+  }
   return { ok: true, value };
 }
 
@@ -239,14 +245,14 @@ function validateMessage(input) {
   const body = text(input.text, 4000);
   if (!sessionId) return invalid('sessionId is required.');
   if (!body) return invalid('text is required and must be at most 4000 characters.');
-  if (input.intent !== 'answer') {
+  if (input.intent !== 'answer' && input.intent !== 'amend') {
     return {
       ok: false,
       error: 'unsupported_intent',
-      message: 'message_session currently accepts only intent "answer".',
+      message: 'message_session accepts intent "answer" or "amend".',
     };
   }
-  return { ok: true, value: { sessionId, text: body, intent: 'answer' } };
+  return { ok: true, value: { sessionId, text: body, intent: input.intent } };
 }
 
 function validateReply(input) {
