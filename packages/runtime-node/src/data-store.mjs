@@ -57,7 +57,10 @@ export const DATA_STORE_ENTRIES = {
   promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
   memoryIndex:       { rel: 'cache/memory-index',     kind: 'dir',  scope: 'cache'    },
   // 稳定项目身份。注册表文件是 projects/registry.json，随设置一起迁移。
+  // 项目记忆在 projects/<workspaceId>/memory/，不另开根。
   projects:          { rel: 'projects',                kind: 'dir',  scope: 'portable' },
+  // 跨项目用户偏好。条目真源是 memory/items.jsonl。
+  userMemory:        { rel: 'memory',                  kind: 'dir',  scope: 'portable' },
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
 };

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -225,7 +225,9 @@ test('开任务全链路：冻结模型、子会话、委托消息、计划、�
     const plan = env.goalPlanStore.getPlan(session.planId);
     assert.equal(plan.activation.kind, 'accepted_goal');
     assert.equal(plan.conversationId, children[0].id);
-    assert.equal(plan.delegationOrigin.memorySnapshotId, null);
+    assert.match(plan.delegationOrigin.memorySnapshotId, /^snap-/);
+    const snapFile = path.join(env.root, 'projects', 'ws-1', 'memory', 'snapshots.jsonl');
+    assert.match(readFileSync(snapFile, 'utf8'), new RegExp(plan.delegationOrigin.memorySnapshotId));
     assert.equal(plan.delegationOrigin.depth, 1);
     assert.equal(plan.delegationOrigin.modelSelection.worker.modelProviderId, 'worker-1');
     assert.equal(plan.delegationOrigin.modelSelection.visualVerifier.modelProviderId, 'vision-1');

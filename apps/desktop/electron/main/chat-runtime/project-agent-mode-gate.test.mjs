@@ -165,10 +165,13 @@ describe('project agent mode gate', () => {
     assert.deepEqual(agentNames, [
       'list_files', 'read_file', 'search_files', 'batch_search',
       'spawn_session', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'post_reply',
+      'memory_search', 'memory_remember', 'memory_forget',
     ]);
     const chatNames = chat.tools.map((tool) => tool.function?.name ?? tool.name);
     assert.ok(chatNames.includes('bash'));
     assert.ok(chatNames.includes('write_file'));
+    assert.equal(chatNames.includes('memory_remember'), false);
+    assert.equal(chatNames.includes('memory_search'), false);
   });
 
   it('does not keep a global full or session auto-grant on a project agent turn', async () => {

@@ -5,6 +5,7 @@ import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.m
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mjs';
 import { DELEGATION_TOOL_DEFINITIONS } from './delegation-tool-definitions.mjs';
+import { MEMORY_TOOL_DEFINITIONS } from './memory-tool-definitions.mjs';
 import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
@@ -57,6 +58,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
       ...SEARCH_TOOL_DEFINITIONS,
       ...DELEGATION_TOOL_DEFINITIONS,
+      ...MEMORY_TOOL_DEFINITIONS,
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
       ...AUTOMATION_TOOL_DEFINITIONS,

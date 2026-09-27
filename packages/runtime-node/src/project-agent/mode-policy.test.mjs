@@ -21,6 +21,9 @@ test('project agent whitelist is the read capabilities plus delegation', () => {
     'local.delegation.cancel_session',
     'local.delegation.message_session',
     'local.delegation.post_reply',
+    'local.memory.search',
+    'local.memory.remember',
+    'local.memory.forget',
   ]);
   for (const capabilityId of PROJECT_AGENT_ALLOWED_CAPABILITIES) {
     assert.equal(isProjectAgentCapabilityAllowed(capabilityId), true);

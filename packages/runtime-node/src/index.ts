@@ -263,7 +263,16 @@ export {
   DELEGATION_TOOL_SPECS,
   delegationSpecByCapability,
   validateDelegationInput,
+  MEMORY_CAPABILITY_IDS,
+  MEMORY_TOOL_SPECS,
+  memorySpecByCapability,
+  validateMemoryInput,
 } from './project-agent/tool-specs.mjs';
+export { createMemoryStore } from './memory/memory-store.mjs';
+export { createMemoryIndex } from './memory/memory-index.mjs';
+export { memorySecretReason } from './memory/memory-redaction.mjs';
+export { createSnapshot, readSnapshots } from './memory/memory-snapshot.mjs';
+export { createMemoryProvider } from './memory/memory-provider.mjs';
 export {
   aggregateProgress,
   applyGoalTimingTransition,

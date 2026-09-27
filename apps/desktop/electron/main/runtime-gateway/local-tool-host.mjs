@@ -4,6 +4,7 @@ import { createCapabilityProviderRegistry } from './capability-provider-registry
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
+import { createLocalMemoryProvider } from './local-memory-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
@@ -28,6 +29,7 @@ export function createLocalToolHost({
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
   delegationProvider = createLocalDelegationProvider(),
+  memoryProvider = createLocalMemoryProvider(),
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
   ensureBrowserReady = null,
@@ -62,6 +64,7 @@ export function createLocalToolHost({
       activeShellProvider,
       goalProvider,
       delegationProvider,
+      memoryProvider,
       interactionProvider,
       automationProposalProvider,
       webProvider,
