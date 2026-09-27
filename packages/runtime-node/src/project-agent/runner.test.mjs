@@ -247,6 +247,41 @@ test('用户回合没有 post_reply 时，兜底回复盖住本回合的全部�
   }
 });
 
+test('回合带回的记忆 id 写进兜底回复和 post_reply', async () => {
+  const box = world('ws-memory');
+  try {
+    const runner = runnerFor(box, async () => ({ text: '记下了', memoryIds: ['mem-1'] }));
+    await runner.enqueueUserInputs([input('m1', '记住')]);
+    const fallback = box.messages.find((message) => message.kind === 'agent_reply');
+    assert.deepEqual(fallback.meta.memoryUsed, ['mem-1']);
+  } finally {
+    box.cleanup();
+  }
+
+  const spoken = world('ws-memory-reply');
+  try {
+    const runner = runnerFor(spoken, async () => ({
+      text: '',
+      toolCalls: [
+        { name: 'memory_remember', input: {}, result: { ok: true, id: 'mem-new' } },
+        {
+          name: 'post_reply',
+          input: { text: '记住了', replyTo: ['input-m2'] },
+          result: { ok: true, meta: { memoryUsed: ['mem-used'], surfacing: 'message' } },
+        },
+      ],
+    }));
+    await runner.enqueueUserInputs([input('m2', '记住')]);
+    const reply = spoken.messages.find((message) => message.kind === 'agent_reply');
+    assert.equal(reply.content, '记住了');
+    assert.deepEqual(reply.meta.memoryUsed, ['mem-used']);
+    assert.deepEqual(reply.meta.memoryLearned, ['mem-new']);
+    assert.equal(reply.meta.surfacing, 'message');
+  } finally {
+    spoken.cleanup();
+  }
+});
+
 test('可重试错误按 ADR 30 再试三次，第四次成功不写卡片', async () => {
   const box = world('ws-retry-ok');
   let calls = 0;

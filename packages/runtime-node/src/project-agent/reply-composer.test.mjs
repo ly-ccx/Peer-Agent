@@ -189,3 +189,20 @@ test('省略送达事实时按用户请求的结果计算', () => {
   assert.deepEqual(result.meta.memoryUsed, []);
   assert.deepEqual(result.meta.memoryLearned, []);
 });
+
+test('memory_remember 的嵌套结果也能抽出 id', () => {
+  const nested = reply({
+    text: '记下了',
+    toolCalls: [{
+      name: 'memory_remember',
+      result: { outputPreview: { legacyResult: { output: JSON.stringify({ ok: true, id: 'mem-nested' }) } } },
+    }],
+  });
+  assert.equal(nested.ok, true);
+  assert.deepEqual(nested.meta.memoryLearned, ['mem-nested']);
+  const refused = reply({
+    text: '没记下',
+    toolCalls: [{ name: 'memory_remember', result: { ok: false, error: 'anchor_required' } }],
+  });
+  assert.deepEqual(refused.meta.memoryLearned, []);
+});

@@ -44,6 +44,38 @@ test('a goal turn still finishes when the broadcast sink has no windows', async 
   assert.equal(outcome.terminalStatus, 'done');
 });
 
+test('项目代理回合把流上的工具调用带回 runner', async () => {
+  const executor = createAgentTurnExecutor({
+    llmChatService: {
+      async sendMessage(input) {
+        input.webContents.send('chat:stream:delta', { content: '旁白' });
+        input.webContents.send('chat:stream:tool-call', {
+          tool: 'post_reply',
+          toolCallId: 'c1',
+          args: { text: '收到', replyTo: ['u1'] },
+        });
+        input.webContents.send('chat:stream:tool-result', {
+          toolCallId: 'c1',
+          result: JSON.stringify({ ok: true, meta: { memoryUsed: ['mem-1'], surfacing: 'message' } }),
+        });
+        return { terminalStatus: 'done', toolCallCount: 1, memoryIds: ['mem-1'] };
+      },
+    },
+  });
+  const events = [];
+  const outcome = await executor.runTurn({
+    turnProfile: { role: 'project_agent' },
+    mode: 'project_agent',
+    sink: { send: (channel) => events.push(channel) },
+  });
+  assert.deepEqual(events, ['chat:stream:delta', 'chat:stream:tool-call', 'chat:stream:tool-result']);
+  assert.equal(outcome.text, '旁白');
+  assert.deepEqual(outcome.memoryIds, ['mem-1']);
+  assert.equal(outcome.toolCalls[0].name, 'post_reply');
+  assert.deepEqual(outcome.toolCalls[0].input, { text: '收到', replyTo: ['u1'] });
+  assert.deepEqual(outcome.toolCalls[0].result.meta.memoryUsed, ['mem-1']);
+});
+
 test('runTurn rejects a missing chat service or sink', () => {
   assert.throws(() => createAgentTurnExecutor({}), /sendMessage/);
   const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage() {} } });

@@ -571,6 +571,30 @@ test('set_proactivity 没有用户锚点就拒绝，成功时只改当前项目'
   assert.equal(unavailable.error, 'proactivity_unavailable');
 });
 
+test('post_reply 看见本回合已经放进上下文的记忆和先前的工具结果', async () => {
+  let seen = null;
+  const provider = createDelegationProvider({
+    replyComposer: {
+      postReply(_input, view) {
+        seen = view;
+        return { messageId: 'm-1' };
+      },
+    },
+  });
+  const output = outputOf(await provider.executeCapability(
+    call('local.delegation.post_reply', { replyTo: ['u1'], text: '收到' }, 'reply-mem'),
+    agentContext({
+      toolContext: {
+        turnMemoryIds: ['mem-used', ''],
+        turnToolCalls: [{ name: 'memory_remember', result: { ok: true, id: 'mem-new' } }],
+      },
+    }),
+  ));
+  assert.deepEqual(seen.memoryIds, ['mem-used']);
+  assert.equal(seen.turnToolCalls[0].result.id, 'mem-new');
+  assert.equal(output.messageId, 'm-1');
+});
+
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }

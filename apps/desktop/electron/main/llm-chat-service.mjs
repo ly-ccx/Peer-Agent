@@ -9,7 +9,7 @@ import {
   renderSystemContext,
   renderStableSystemContext,
 } from './llm-prompts.mjs';
-import { taskAcceptanceFromMessages } from '@peer-agent/system-context';
+import { memoryIdsFromAssembledContext, taskAcceptanceFromMessages } from '@peer-agent/system-context';
 import { withSelectionRequestContext } from './selection-background-context.mjs';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
 import { reprojectContextAccountingWindow } from '@peer-agent/runtime-core';
@@ -1657,6 +1657,8 @@ export function createLlmChatService({
       // 引用范围只看本回合对话里的 quoteRefs。复用的 toolContext 按回合覆写。
       toolContext.messages = null;
       if (projectAgentTurn) {
+        toolContext.turnToolCalls = [];
+        toolContext.turnMemoryIds = [];
         try {
           const history = conversationStore?.getPersistedConversationHistory?.(conversationId);
           toolContext.messages = Array.isArray(history?.messages) ? history.messages : [];
@@ -1778,6 +1780,11 @@ export function createLlmChatService({
             memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
           }),
         });
+        if (projectAgentTurn) {
+          const ids = memoryIdsFromAssembledContext(systemContext);
+          toolContext.turnMemoryIds = ids;
+          streamRecord.turnMemoryIds = ids;
+        }
         const systemPrompt = renderSystemContext(systemContext);
         const stableSystemPrompt = renderStableSystemContext(systemContext);
         if (visualReviewHandle !== null) {
@@ -1833,6 +1840,11 @@ export function createLlmChatService({
               memoryEnabled: liveMemoryGate().enabled(textField(profile?.workspaceId)),
             }),
           });
+          if (projectAgentTurn) {
+            const ids = memoryIdsFromAssembledContext(rebuiltContext);
+            toolContext.turnMemoryIds = ids;
+            streamRecord.turnMemoryIds = ids;
+          }
           const rebuiltPrompt = renderSystemContext(rebuiltContext);
           recordPromptSnapshot(promptSnapshotStore, rebuiltContext, {
             streamId,
@@ -2168,7 +2180,11 @@ export function createLlmChatService({
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
-      return { ...buildAgentRunOutcome(streamRecord), ...(visualReviewReport ? { visualReviewReport } : {}) };
+      return {
+        ...buildAgentRunOutcome(streamRecord),
+        ...(Array.isArray(streamRecord.turnMemoryIds) ? { memoryIds: streamRecord.turnMemoryIds } : {}),
+        ...(visualReviewReport ? { visualReviewReport } : {}),
+      };
     }
   }
 

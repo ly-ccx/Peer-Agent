@@ -9,6 +9,7 @@ import {
 } from '@peer-agent/runtime-core';
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
 import { pathOf } from '../data-store.mjs';
+import { noteTurnToolCall } from '../project-agent/turn-memory.mjs';
 
 export function createToolContext({
   conversationId = null,
@@ -522,6 +523,7 @@ export async function executeModelToolCall({
     }
   }
   const output = appendEvidenceRefsToToolOutput(rawOutput, evidenceRefs);
+  noteTurnToolCall(toolContext, { name, input: args, result: output });
   const streamResult = formatToolResultForStream({ name, args, output });
   // Layer 0 材料化(17 号文档 §3.1 / 23 号台账阶段 E):回灌给模型的超阈值输出
   // 落盘 artifact,消息内只留 ref 骨架(预览+检索命令);UI 流(streamResult)不受影响。

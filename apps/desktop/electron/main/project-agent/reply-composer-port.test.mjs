@@ -38,3 +38,19 @@ test('回复按本机器人档位和安静时段送达', () => {
   assert.equal(standard.surfacing, 'interrupt');
   installDeliveryFacts(null);
 });
+
+test('记忆 id 来自宿主视图，模型参数里的 id 被忽略', () => {
+  const reply = composer().postReply({
+    text: '做完了',
+    replyTo: ['u1'],
+    memoryUsed: ['forged'],
+    memoryLearned: ['forged'],
+  }, {
+    ...view,
+    memoryIds: ['mem-used'],
+    turnToolCalls: [{ name: 'memory_remember', result: { ok: true, id: 'mem-new' } }],
+  });
+  assert.equal(reply.error, undefined);
+  assert.deepEqual(reply.meta.memoryUsed, ['mem-used']);
+  assert.deepEqual(reply.meta.memoryLearned, ['mem-new']);
+});

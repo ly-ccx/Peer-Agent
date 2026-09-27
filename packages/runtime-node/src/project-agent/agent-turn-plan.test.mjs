@@ -136,3 +136,60 @@ test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默�
   assert.equal(failed.messages[1].content, '代理暂时不可用：连接中断');
   assert.deepEqual(failed.messages[1].actions, ['retry']);
 });
+
+test('回复上的记忆 id 来自宿主结果，模型参数里的 id 不进入 meta', () => {
+  const user = planAgentTurn({
+    kind: 'user',
+    userInputs: [{ inputId: 'in1' }],
+  });
+  const forged = finishAgentTurn({
+    turnId: 'turn-forged',
+    plan: user,
+    rounds: [{
+      text: '',
+      toolCalls: [{
+        name: 'post_reply',
+        input: { text: '收到', replyTo: ['input-in1'], memoryUsed: ['forged'], memoryLearned: ['forged'] },
+        result: { ok: true },
+      }],
+    }],
+  });
+  assert.equal(forged.messages[1].meta, undefined);
+
+  const spoken = finishAgentTurn({
+    turnId: 'turn-memory',
+    plan: user,
+    memoryUsed: ['mem-turn'],
+    rounds: [{
+      text: '',
+      toolCalls: [
+        { name: 'memory_remember', input: {}, result: { ok: true, id: 'mem-new' } },
+        {
+          name: 'post_reply',
+          input: { text: '记下了', replyTo: ['input-in1'] },
+          result: JSON.stringify({
+            ok: true,
+            meta: { memoryUsed: ['mem-used'], memoryLearned: [], surfacing: 'silent' },
+          }),
+        },
+      ],
+    }],
+  });
+  assert.deepEqual(spoken.messages[1].meta.memoryUsed, ['mem-used']);
+  assert.deepEqual(spoken.messages[1].meta.memoryLearned, ['mem-new']);
+  assert.equal(spoken.messages[1].meta.surfacing, 'silent');
+  assert.equal(spoken.messages[1].meta.unread, false);
+
+  const fallback = finishAgentTurn({
+    turnId: 'turn-fallback',
+    plan: user,
+    memoryUsed: ['mem-turn'],
+    rounds: [
+      { text: '先看', toolCalls: [{ name: 'memory_remember', input: {}, result: { outputPreview: { legacyResult: { output: JSON.stringify({ ok: true, id: 'mem-nested' }) } } } }] },
+      { text: '一起处理', toolCalls: [] },
+    ],
+  });
+  assert.equal(fallback.messages[1].fallback, true);
+  assert.deepEqual(fallback.messages[1].meta.memoryUsed, ['mem-turn']);
+  assert.deepEqual(fallback.messages[1].meta.memoryLearned, ['mem-nested']);
+});

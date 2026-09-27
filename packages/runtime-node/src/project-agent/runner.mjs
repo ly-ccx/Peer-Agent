@@ -186,6 +186,7 @@ export function createProjectAgentRunner({
         rounds: outcome.rounds,
         failed: outcome.failed === true,
         reason: outcome.reason,
+        memoryUsed: outcome.memoryIds,
       });
       if (disposed) return 'disposed';
       for (const message of finished.messages) {
@@ -221,10 +222,11 @@ export function createProjectAgentRunner({
       workspaceId: workspace,
     });
     if (!model.ok) {
-      return { turnId, plan, rounds: [], failed: true, reason: model.reason };
+      return { turnId, plan, rounds: [], failed: true, reason: model.reason, memoryIds: [] };
     }
     const rounds = [];
     let toolCallsUsed = 0;
+    let memoryIds = [];
     while (rounds.length < plan.limits.maxRounds && toolCallsUsed < plan.limits.maxToolCalls) {
       if (disposed) return { turnId, plan, rounds, disposed: true };
       if (job.kind === 'wake' && (signal.aborted || userInputs.length > 0)) {
@@ -243,16 +245,17 @@ export function createProjectAgentRunner({
         return { turnId, plan, rounds, preempted: true };
       }
       if (result.failed) {
-        return { turnId, plan, rounds, failed: true, reason: result.reason };
+        return { turnId, plan, rounds, failed: true, reason: result.reason, memoryIds };
       }
       rounds.push(result.round);
+      if (result.memoryIds?.length) memoryIds = result.memoryIds;
       toolCallsUsed += result.toolCallCount;
       const keepGoing = result.hasPostReply
         ? false
         : result.continued === true && result.toolCallCount > 0;
       if (!keepGoing) break;
     }
-    return { turnId, plan, rounds, failed: false };
+    return { turnId, plan, rounds, failed: false, memoryIds };
   }
 
   async function callRound({ job, plan, rounds, signal, toolCallsUsed }) {
@@ -304,6 +307,7 @@ export function createProjectAgentRunner({
           toolCallCount,
           hasPostReply: toolCalls.some((call) => call.name === 'post_reply'),
           continued: raw?.continued,
+          memoryIds: memoryIdsOf(raw),
         };
       }
       lastError = textOf(raw?.error) || '提供方错误';
@@ -439,6 +443,18 @@ function normalizeTool(call) {
 
 function textOf(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function memoryIdsOf(raw) {
+  if (!Array.isArray(raw?.memoryIds)) return [];
+  const ids = [];
+  for (const item of raw.memoryIds) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed || trimmed.length > 200 || ids.includes(trimmed)) continue;
+    ids.push(trimmed);
+  }
+  return ids;
 }
 
 function sleep(ms, signal) {
