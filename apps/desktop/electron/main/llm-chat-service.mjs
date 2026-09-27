@@ -57,7 +57,13 @@ import { createUsageRequestLog } from './usage-request-log.mjs';
 import { estimateUsageCostUsd, startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
-import { createApprovalStore, createProjectRegistry, resolveRoleRoute } from '@peer-agent/runtime-node';
+import {
+  createApprovalStore,
+  createMemoryStore,
+  createProjectRegistry,
+  readSnapshots,
+  resolveRoleRoute,
+} from '@peer-agent/runtime-node';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -133,6 +139,7 @@ function normalizeTurnProfile(value) {
           : {}),
       }
     : null;
+  const context = sanitizeTurnContext(value.context);
   return {
     role,
     ...(workspaceId ? { workspaceId } : {}),
@@ -142,7 +149,156 @@ function normalizeTurnProfile(value) {
     ...(excludeCapabilityPrefixes.length ? { excludeCapabilityPrefixes } : {}),
     ...(modelSelection ? { modelSelection } : {}),
     ...(recoveryCandidateIds.length ? { recoveryCandidateIds } : {}),
+    ...(context ? { context } : {}),
   };
+}
+
+const TURN_CONTEXT_JSON_MAX = 200_000;
+
+function sanitizeTurnContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  let raw = '';
+  try {
+    raw = JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  if (!raw || raw.length > TURN_CONTEXT_JSON_MAX) return null;
+  const cloned = JSON.parse(raw);
+  if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) return null;
+  return cloned;
+}
+
+function textField(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function explicitArray(value) {
+  return Array.isArray(value) ? value : null;
+}
+
+function loadProjectMemory(workspaceId) {
+  try {
+    return createMemoryStore().list({ workspaceId, status: 'active' });
+  } catch {
+    return [];
+  }
+}
+
+function loadSnapshotItems(workspaceId, snapshotId) {
+  if (!workspaceId || !snapshotId) return [];
+  try {
+    const store = createMemoryStore();
+    const snapshot = readSnapshots(workspaceId, { store })
+      .find((item) => item.snapshotId === snapshotId);
+    if (!snapshot) return [];
+    const items = [];
+    for (const id of snapshot.itemIds) {
+      const item = store.get(id);
+      if (item) items.push(item);
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+function readDelegatedPlan(goalPlanStore, profile, conversationId) {
+  if (!goalPlanStore) return null;
+  try {
+    if (profile?.planId && typeof goalPlanStore.getPlan === 'function') {
+      const plan = goalPlanStore.getPlan(profile.planId);
+      if (plan) return plan;
+    }
+    if (conversationId && typeof goalPlanStore.getActivePlanByConversation === 'function') {
+      return goalPlanStore.getActivePlanByConversation(conversationId) ?? null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function readAnchorText(conversationStore, origin) {
+  const anchorId = textField(origin?.anchorMessageId);
+  const parentId = textField(origin?.parentConversationId);
+  if (!anchorId || !parentId || !conversationStore) return '';
+  try {
+    const history = conversationStore.getPersistedConversationHistory?.(parentId)
+      ?? conversationStore.getConversation?.(parentId);
+    const messages = Array.isArray(history?.messages) ? history.messages : [];
+    const message = messages.find((item) => item?.id === anchorId);
+    return typeof message?.content === 'string' ? message.content : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 把已有 turnProfile 上的上下文交给 assembleSystemContext。
+ * 不增加 sendMessage 参数。名册和事件留在 context 袋里；
+ * 记忆与冻结快照在袋里没有显式条目时，才按 workspaceId 从本地记忆读取。
+ */
+export function projectTurnSystemContext(profile, {
+  conversationId = null,
+  goalPlanStore = null,
+  conversationStore = null,
+  readMemory = loadProjectMemory,
+  readSnapshot = loadSnapshotItems,
+} = {}) {
+  if (profile?.role !== 'project_agent' && profile?.role !== 'work_session') return {};
+  const turnContext = sanitizeTurnContext(profile.context);
+  const fields = {
+    role: profile.role,
+    ...(textField(profile.workspaceId) ? { workspaceId: textField(profile.workspaceId) } : {}),
+    ...(textField(profile.sessionId) ? { sessionId: textField(profile.sessionId) } : {}),
+    ...(textField(profile.planId) ? { planId: textField(profile.planId) } : {}),
+    ...(textField(profile.memorySnapshotId) ? { memorySnapshotId: textField(profile.memorySnapshotId) } : {}),
+    ...(turnContext ? { turnContext } : {}),
+  };
+  if (profile.role === 'project_agent') {
+    const injected = explicitArray(turnContext?.projectMemory)
+      ?? explicitArray(turnContext?.memoryItems)
+      ?? explicitArray(turnContext?.items);
+    if (injected) fields.projectMemory = injected;
+    else if (textField(profile.workspaceId)) {
+      const loaded = readMemory(textField(profile.workspaceId));
+      if (Array.isArray(loaded) && loaded.length) fields.projectMemory = loaded;
+    }
+  }
+  if (profile.role === 'work_session') {
+    const plan = readDelegatedPlan(goalPlanStore, profile, conversationId);
+    const origin = plan?.delegationOrigin && typeof plan.delegationOrigin === 'object'
+      ? plan.delegationOrigin
+      : {};
+    const bag = turnContext?.workSessionOrigin && typeof turnContext.workSessionOrigin === 'object'
+      ? turnContext.workSessionOrigin
+      : {};
+    const snapshotId = textField(bag.memorySnapshotId)
+      || textField(profile.memorySnapshotId)
+      || textField(origin.memorySnapshotId);
+    const injectedItems = explicitArray(bag.snapshotItems) ?? explicitArray(bag.items);
+    const snapshotItems = injectedItems
+      ?? (snapshotId && textField(profile.workspaceId)
+        ? readSnapshot(textField(profile.workspaceId), snapshotId)
+        : []);
+    const readOnly = typeof bag.readOnly === 'boolean' ? bag.readOnly : origin.readOnly === true;
+    const summary = textField(bag.summary) || textField(bag.brief) || textField(plan?.goal);
+    const anchorText = textField(bag.anchorText) || readAnchorText(conversationStore, origin);
+    const workSessionOrigin = {
+      ...(summary ? { summary } : {}),
+      ...(anchorText ? { anchorText } : {}),
+      ...(textField(bag.anchorMessageId) || textField(origin.anchorMessageId)
+        ? { anchorMessageId: textField(bag.anchorMessageId) || textField(origin.anchorMessageId) }
+        : {}),
+      ...(snapshotId ? { memorySnapshotId: snapshotId } : {}),
+      ...(readOnly ? { readOnly: true } : {}),
+      snapshotItems: Array.isArray(snapshotItems) ? snapshotItems : [],
+    };
+    const hasFacts = summary || anchorText || snapshotId || workSessionOrigin.snapshotItems.length || readOnly;
+    if (hasFacts) fields.workSessionOrigin = workSessionOrigin;
+  }
+  return fields;
 }
 
 // 可被用户 abort 打断的退避等待：abort 时以 AbortError 拒绝，沿用既有
@@ -1594,6 +1750,11 @@ export function createLlmChatService({
           provider: resolvedChannel.legacyProvider,
           model: provider.model,
           ...(taskAcceptance ? { taskAcceptance } : {}),
+          ...projectTurnSystemContext(profile, {
+            conversationId,
+            goalPlanStore,
+            conversationStore,
+          }),
         });
         const systemPrompt = renderSystemContext(systemContext);
         const stableSystemPrompt = renderStableSystemContext(systemContext);
@@ -1643,6 +1804,11 @@ export function createLlmChatService({
             provider: resolvedChannel.legacyProvider,
             model: provider.model,
             ...(taskAcceptance ? { taskAcceptance } : {}),
+            ...projectTurnSystemContext(profile, {
+              conversationId,
+              goalPlanStore,
+              conversationStore,
+            }),
           });
           const rebuiltPrompt = renderSystemContext(rebuiltContext);
           recordPromptSnapshot(promptSnapshotStore, rebuiltContext, {

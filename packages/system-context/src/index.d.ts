@@ -149,6 +149,14 @@ export function createGoalCheckpointPromptSource(): PromptSource;
 export function createMcpHostPromptSource(): PromptSource;
 export function createModePromptSource(): PromptSource;
 export function createProjectInstructionsPromptSource(options?: Readonly<Record<string, unknown>>): PromptSource;
+export function createProjectAgentPromptSource(): PromptSource;
+export function createProjectRosterPromptSource(): PromptSource;
+export function createProjectMemoryPromptSource(): PromptSource;
+export function memoryIdsFromAssembledContext(
+  context: Pick<AssembledSystemContext, 'sections'> | null | undefined,
+): readonly string[];
+export const PROJECT_MEMORY_BRIEF_LIMIT: 6000;
+export function createWorkSessionOriginPromptSource(): PromptSource;
 export function createProviderPromptSource(): PromptSource;
 export function createRuntimePromptSource(): PromptSource;
 export function createRuntimeReminderPromptSource(): PromptSource;

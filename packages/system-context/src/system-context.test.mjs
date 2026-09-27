@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   assembleSystemContext,
   createDefaultPromptSourceRegistry,
+  createPromptSourceRegistry,
 } from './index.mjs';
 import {
   assembleSystemContext as assembleDesktopSystemContext,
@@ -31,6 +32,10 @@ const DEFAULT_SOURCE_IDS = [
   'agent.mcp-host',
   'runtime.explorer',
   'runtime.verifier',
+  'project-agent',
+  'project-roster',
+  'project-memory',
+  'work-session-origin',
   'runtime.continuity',
 ];
 
@@ -296,6 +301,32 @@ test('chat and goal inject construction falsification between adaptive planning 
 
   const plan = assembleSystemContext({ mode: 'plan' });
   assert.equal(plan.sections.some((section) => section.id === 'agent.construction-falsification'), false);
+});
+
+test('普通会话的系统上下文与未注册项目来源时逐字相同', () => {
+  const full = createDefaultPromptSourceRegistry();
+  const baseline = createPromptSourceRegistry({
+    sources: full.listSources().filter((source) => ![
+      'project-agent',
+      'project-roster',
+      'project-memory',
+      'work-session-origin',
+    ].includes(source.id)),
+  });
+  const inputs = [
+    { mode: 'chat' },
+    { mode: 'goal', workspacePath: '/tmp/peer-workspace', effort: 'high' },
+    { mode: 'plan', continuityContext: [{ summary: 'keep the handoff' }] },
+    { mode: 'chat', runtimeReminders: [{ id: 'note', content: 'stay local' }] },
+  ];
+  for (const input of inputs) {
+    const next = assembleSystemContext(input, { registry: full });
+    const previous = assembleSystemContext(input, { registry: baseline });
+    assert.equal(next.rendered, previous.rendered);
+    assert.equal(next.snapshot.renderedHash, previous.snapshot.renderedHash);
+    assert.equal(next.sections.some((section) => section.id.startsWith('project-')), false);
+    assert.equal(next.sections.some((section) => section.id === 'work-session-origin'), false);
+  }
 });
 
 test('task acceptance stays dark unless the host pins the original brief', () => {

@@ -20,6 +20,10 @@ import { createDiagnosisGatePromptSource } from './sources/diagnosis-gate-source
 import { createTaskAcceptancePromptSource } from './sources/task-acceptance-source.mjs';
 import { createProviderPromptSource } from './sources/provider-source.mjs';
 import { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
+import { createProjectAgentPromptSource } from './sources/project-agent-source.mjs';
+import { createProjectRosterPromptSource } from './sources/project-roster-source.mjs';
+import { createProjectMemoryPromptSource } from './sources/project-memory-source.mjs';
+import { createWorkSessionOriginPromptSource } from './sources/work-session-origin-source.mjs';
 import { createRuntimePromptSource } from './sources/runtime-source.mjs';
 import { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
 import { createWebEntryPromptSource } from './sources/web-entry-source.mjs';
@@ -99,6 +103,10 @@ export function createDefaultPromptSourceRegistry() {
       createMcpHostPromptSource(),
       createExplorerPromptSource(),
       createVerifierPromptSource(),
+      createProjectAgentPromptSource(),
+      createProjectRosterPromptSource(),
+      createProjectMemoryPromptSource(),
+      createWorkSessionOriginPromptSource(),
       createContinuityPromptSource(),
     ],
   });

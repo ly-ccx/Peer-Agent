@@ -43,6 +43,14 @@ export { createModePromptSource } from './sources/mode-source.mjs';
 export { MODE_COPY } from './sources/mode-copy.mjs';
 export { isSelfDrivenMode, isGoalPlanMode, productModeLabel } from './mode-utils.mjs';
 export { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
+export { createProjectAgentPromptSource } from './sources/project-agent-source.mjs';
+export { createProjectRosterPromptSource } from './sources/project-roster-source.mjs';
+export {
+  createProjectMemoryPromptSource,
+  memoryIdsFromAssembledContext,
+  PROJECT_MEMORY_BRIEF_LIMIT,
+} from './sources/project-memory-source.mjs';
+export { createWorkSessionOriginPromptSource } from './sources/work-session-origin-source.mjs';
 export { createProviderPromptSource } from './sources/provider-source.mjs';
 export { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
 export { createCorePromptSource, renderSystemCorePrompt } from './sources/core-source.mjs';
