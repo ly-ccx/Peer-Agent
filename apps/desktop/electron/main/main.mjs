@@ -960,6 +960,10 @@ const webUiCapture = createWebUiCapture({
   workspaceRoot,
 });
 const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
+const hostLeases = createHostLease({
+  surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
+  projectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true, botWorkspaceIds: listBotWorkspaceIds,
+});
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
@@ -967,10 +971,6 @@ const visualCompletionHandoff = createGoalVisualCompletionHandoff({
     reason: 'goal-visual-completion-handoff',
   }),
   startRunner: (planId) => goalRunner.start(planId),
-});
-const hostLeases = createHostLease({
-  surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
-  projectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true, botWorkspaceIds: listBotWorkspaceIds,
 });
 goalRunner = createDesktopGoalRunnerHost({
   goalPlanStore,
