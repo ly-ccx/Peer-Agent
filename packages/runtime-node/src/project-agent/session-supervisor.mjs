@@ -5,6 +5,7 @@ import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
+import { digestApprovalArgs } from './approval-store.mjs';
 
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
@@ -41,6 +42,13 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   return { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
 }
 
+export function resolvePlanApproval(policy, input = {}) {
+  const mode = policy === 'always' || policy === 'writes' ? policy : 'never';
+  if (mode === 'always') return true;
+  if (mode === 'writes') return input?.readOnly !== true;
+  return false;
+}
+
 export function createSessionSupervisor({
   conversationStore,
   goalPlanStore,
@@ -52,6 +60,8 @@ export function createSessionSupervisor({
   emitEvent = null,
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
+  approvalStore = null,
+  readPlanApproval = null,
   now = () => new Date().toISOString(),
 } = {}) {
   if (!conversationStore || !goalPlanStore) {
@@ -138,16 +148,39 @@ export function createSessionSupervisor({
     };
   }
 
+  function approvalPolicy(workspaceId, context) {
+    const fromContext = text(context?.planApproval);
+    if (fromContext === 'never' || fromContext === 'writes' || fromContext === 'always') return fromContext;
+    let fromProfile = '';
+    try {
+      fromProfile = text(typeof readPlanApproval === 'function' ? readPlanApproval(workspaceId) : '');
+    } catch {
+      fromProfile = '';
+    }
+    if (fromProfile === 'writes' || fromProfile === 'always') return fromProfile;
+    return 'never';
+  }
+
   function project(plan) {
     const origin = plan.delegationOrigin;
     const conversation = conversationStore.getConversation?.(plan.conversationId);
-    return projectWorkSession(snapshotOf(plan), {
+    const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       origin,
     });
+    const interventions = interventionsOf(plan.conversationId);
+    return interventions.length > 0 ? { ...session, interventions } : session;
+  }
+
+  function interventionsOf(conversationId) {
+    const history = conversationStore.getPersistedConversationHistory?.(conversationId);
+    const messages = Array.isArray(history?.messages) ? history.messages : [];
+    return messages
+      .filter((message) => typeof message?.answerTo === 'string' && message.answerTo && message.id)
+      .map((message) => ({ id: message.id }));
   }
 
   function buildReport(plan, session) {
@@ -313,7 +346,8 @@ export function createSessionSupervisor({
         error.code = 'memory_snapshot_failed';
         throw error;
       }
-      const phase = decidePhase(workspaceId, input.dependsOn);
+      const hold = resolvePlanApproval(approvalPolicy(workspaceId, context), input);
+      const phase = hold ? 'awaiting_approval' : decidePhase(workspaceId, input.dependsOn);
       const plan = goalPlanStore.createGoalContract({
         conversationId: child.id,
         title,
@@ -342,6 +376,7 @@ export function createSessionSupervisor({
       });
       planId = plan?.planId || null;
       if (!plan?.delegationOrigin?.sessionId) throw new Error('delegationOrigin was not stored');
+      if (hold) recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria: input.successCriteria });
       if (phase === 'running') {
         if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
         await goalRunner.start(plan.planId, { awaitIdle: true });
@@ -353,7 +388,7 @@ export function createSessionSupervisor({
         : 0;
       return {
         sessionId,
-        status: phase,
+        status: hold ? 'awaiting_approval' : phase,
         ...(queuedBehind > 0 ? { queuedBehind } : {}),
       };
     } catch (error) {
@@ -581,6 +616,63 @@ export function createSessionSupervisor({
     return project(goalPlanStore.getPlan(plan.planId) || plan);
   }
 
+  function recordPlanApproval({ workspaceId, sessionId, plan, title, brief, successCriteria }) {
+    if (!approvalStore || typeof approvalStore.append !== 'function') return null;
+    const criteria = Array.isArray(successCriteria) ? successCriteria.filter((item) => typeof item === 'string') : [];
+    return approvalStore.append({
+      approvalId: `plan:${sessionId}`,
+      workspaceId,
+      sessionId,
+      planId: plan.planId,
+      conversationId: plan.conversationId,
+      capabilityId: 'goal.plan',
+      kind: 'plan_approval',
+      taskName: title,
+      summary: [title, brief, ...criteria].filter(Boolean).join('；'),
+      riskLevel: 'plan',
+      argsDigest: digestApprovalArgs({ title, brief, successCriteria: criteria }),
+      state: 'open',
+      createdAt: now(),
+    });
+  }
+
+  function deliverAnswerLocked(input = {}) {
+    const plan = findBySession(text(input.sessionId));
+    const body = text(input.text);
+    const answerTo = text(input.answerTo);
+    if (!plan || !body || !answerTo) return { ok: false };
+    const id = randomUUID();
+    conversationStore.appendMessage(plan.conversationId, {
+      id,
+      role: 'user',
+      content: body,
+      answerTo,
+      kind: 'user_input',
+    });
+    return { ok: true, userIntervened: true, messageId: id, session: project(plan) };
+  }
+
+  async function resumeFromApprovalLocked(approval = {}) {
+    const sessionId = text(approval.sessionId);
+    const plan = sessionId ? findBySession(sessionId) : null;
+    const planId = text(approval.planId) || plan?.planId;
+    if (!planId) return { ok: false, reason: 'missing_plan' };
+    const current = goalPlanStore.getPlan(planId) || plan;
+    if (!current) return { ok: false, reason: 'missing_plan' };
+    if (current.delegationOrigin?.phase === 'awaiting_approval') {
+      goalPlanStore.revisePlan(planId, {
+        status: 'executing',
+        delegationOrigin: { ...current.delegationOrigin, phase: 'running' },
+      }, { reason: 'plan approved', changedBy: 'session-supervisor' });
+      if (typeof goalRunner?.start !== 'function') return { ok: false, reason: 'runner_unavailable', planId };
+      await goalRunner.start(planId, { awaitIdle: true });
+      return { ok: true, planId, started: true };
+    }
+    if (typeof goalRunner?.resume !== 'function') return { ok: false, reason: 'runner_unavailable', planId };
+    const resumed = await goalRunner.resume(planId);
+    return { ok: Boolean(resumed), planId, resumed };
+  }
+
   return {
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
@@ -592,6 +684,12 @@ export function createSessionSupervisor({
     },
     message(input) {
       return exclusive(() => messageLocked(input || {}));
+    },
+    deliverAnswer(input) {
+      return exclusive(() => deliverAnswerLocked(input || {}));
+    },
+    resumeFromApproval(approval) {
+      return exclusive(() => resumeFromApprovalLocked(approval || {}));
     },
     settle(sessionId) {
       return exclusive(() => settleLocked(sessionId));

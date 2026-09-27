@@ -103,6 +103,22 @@ describe('project-agent-notifier', () => {
     assert.equal(h.receiptStore.get('evt-2'), null);
   });
 
+  it('still notifies when a needs-you event arrives while the bot is muted', () => {
+    const h = createHarness();
+    const decision = h.notifier.consider({
+      eventId: 'evt-mute',
+      workspaceId: 'ws-1',
+      botName: '笔记',
+      messageId: 'msg-mute',
+      text: '需要你批准。',
+      proactivity: 'off',
+      event: { origin: 'user_request', kind: 'needs_user', novelty: true, severity: 'info' },
+    });
+    assert.equal(decision.action, 'notify');
+    assert.equal(decision.surfacing.decision, 'interrupt');
+    assert.equal(h.shown.length, 1);
+  });
+
   it('stays quiet when the developer switch is off', () => {
     const h = createHarness({ enabled: false });
     const decision = h.notifier.consider({

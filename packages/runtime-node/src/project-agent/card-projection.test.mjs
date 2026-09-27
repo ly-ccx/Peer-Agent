@@ -45,14 +45,19 @@ test('卡片动作只点名已有通道，确认结果不登记通道', () => {
 
   assert.deepEqual(cards.approval.actions, [
     {
-      id: 'approve',
+      id: 'allow',
       channel: 'project-agent:decide-approval',
-      payload: { approvalId: 'ap-1', decision: 'approve' },
+      payload: { approvalId: 'ap-1', decision: 'approve', duration: 'once' },
+    },
+    {
+      id: 'allow_task',
+      channel: 'project-agent:decide-approval',
+      payload: { approvalId: 'ap-1', decision: 'approve', duration: 'task' },
     },
     {
       id: 'reject',
       channel: 'project-agent:decide-approval',
-      payload: { approvalId: 'ap-1', decision: 'reject' },
+      payload: { approvalId: 'ap-1', decision: 'reject', duration: 'denied' },
     },
   ]);
   assert.deepEqual(cards.question.actions.map((item) => item.channel), [
@@ -146,6 +151,59 @@ test('卡片解决后重开存储，事实仍在时状态还在', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('批准、提问和计划批准各生成一张卡', () => {
+  const cards = projectCards('ws-1', {
+    approvals: [
+      {
+        approvalId: 'ap-1',
+        state: 'open',
+        summary: '写文件',
+        capabilityId: 'local.file.write',
+        riskLevel: 'L2_local_write',
+        taskName: '修好登录',
+        sessionId: 'sess-1',
+      },
+      {
+        approvalId: 'plan:sess-2',
+        kind: 'plan_approval',
+        state: 'open',
+        capabilityId: 'goal.plan',
+        summary: '修好登录；登录请求返回成功',
+        sessionId: 'sess-2',
+        taskName: '修好登录',
+      },
+    ],
+    questions: [{ sessionId: 'sess-1', questionId: 'q1', prompt: '用哪种方案', options: ['A', 'B'] }],
+  });
+  const byKind = Object.fromEntries(cards.map((card) => [card.kind, card]));
+  assert.equal(byKind.approval.content, '写文件 · local.file.write · L2_local_write · 修好登录');
+  assert.equal(byKind.approval.refs.capabilityId, 'local.file.write');
+  assert.equal(byKind.approval.refs.taskName, '修好登录');
+  assert.equal(byKind.question.kind, 'question');
+  assert.match(byKind.plan_approval.content, /登录请求返回成功/);
+  assert.equal(byKind.plan_approval.actions[0].payload.decision, 'approve');
+  assert.equal(byKind.plan_approval.cardId, 'card:plan_approval:plan:sess-2');
+});
+
+test('stale 批准保留批准并继续，已拒绝的不再给按钮', () => {
+  const cards = projectCards('ws-1', {
+    approvals: [
+      { approvalId: 'old', state: 'stale', summary: '执行命令', capabilityId: 'local.shell.exec' },
+      { approvalId: 'done', state: 'denied', summary: '已经拒绝' },
+    ],
+  });
+  const stale = cards.find((card) => card.cardId === 'card:approval:old');
+  const denied = cards.find((card) => card.cardId === 'card:approval:done');
+  assert.equal(stale.resolvedState, 'open');
+  assert.deepEqual(stale.actions, [{
+    id: 'continue',
+    channel: 'project-agent:decide-approval',
+    payload: { approvalId: 'old', decision: 'approve', duration: 'once' },
+  }]);
+  assert.equal(denied.resolvedState, 'resolved');
+  assert.deepEqual(denied.actions, []);
 });
 
 test('非法 workspace 不写文件', () => {

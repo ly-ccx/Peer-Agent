@@ -1706,7 +1706,7 @@ function normalizeRunnerState(runner, planId) {
 }
 
 const DELEGATION_SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
-const DELEGATION_PHASES = new Set(['running', 'queued']);
+const DELEGATION_PHASES = new Set(['running', 'queued', 'awaiting_approval']);
 const MODEL_SELECTION_SOURCES = new Set([
   'this_request', 'task', 'objective', 'project', 'global', 'auto',
 ]);

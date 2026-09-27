@@ -4,6 +4,34 @@
  * 变化事件按 100ms 合并，带上这段时间里变化的 workspaceId。
  */
 import { cleanDisplayName } from '@peer-agent/runtime-node';
+import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
+
+function defaultRememberGrant(input) {
+  return sharedOneTimeApprovals.remember(input);
+}
+
+function defaultSettleLive(approval, grant) {
+  const granted = grant?.decision === 'approved';
+  return settleActivePermissionRequest(approval?.approvalId, {
+    grantId: `card-${approval?.approvalId || 'approval'}`,
+    toolCallId: approval?.approvalId,
+    granted,
+    duration: granted ? (grant.duration === 'task' ? 'task' : 'once') : 'denied',
+    scope: approval?.capabilityId || null,
+    decidedAt: new Date().toISOString(),
+  }, { remember: grant?.remember === true });
+}
+
+function sessionIdFromAnswer(answerTo) {
+  const matched = /^card:question:([^:]+):/.exec(answerTo);
+  if (!matched || matched[1] === 'reply') return '';
+  return matched[1];
+}
+
+function isPlanApproval(record) {
+  return record?.capabilityId === 'goal.plan'
+    || (typeof record?.approvalId === 'string' && record.approvalId.startsWith('plan:'));
+}
 
 function disabled() {
   return { ok: false, code: 'PROJECT_AGENT_DISABLED' };
@@ -33,6 +61,9 @@ export function createProjectAgentApplicationService({
   schedule = defaultSchedule,
   now = () => new Date().toISOString(),
   debounceMs = 100,
+  rememberGrant = defaultRememberGrant,
+  settleLive = defaultSettleLive,
+  agentOnline = () => true,
 } = {}) {
   const pendingChanged = new Set();
   const pendingConversation = new Set();
@@ -154,9 +185,10 @@ export function createProjectAgentApplicationService({
     return result;
   }
 
-  function submitInput(payload = {}) {
+  async function submitInput(payload = {}) {
     if (!open()) return disabled();
     try {
+      const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo.trim() : '';
       const input = inputQueue.submitInput({
         workspaceId: payload.workspaceId,
         inputId: payload.inputId,
@@ -166,13 +198,26 @@ export function createProjectAgentApplicationService({
         quoteRefs: payload.quoteRefs,
         attachmentRefs: payload.attachmentRefs,
         createdAt: payload.createdAt,
+        ...(answerTo ? { answerTo } : {}),
       });
       if (typeof wake === 'function') {
         try { wake(payload.workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
       }
       queueConversation(payload.workspaceId);
       queueChanged(payload.workspaceId);
-      return { ok: true, input };
+      let delivery = 'queued';
+      if (answerTo && agentOnline(payload.workspaceId) !== true && typeof sessions?.deliverAnswer === 'function') {
+        const sessionId = sessionIdFromAnswer(answerTo);
+        if (sessionId) {
+          try {
+            const delivered = await Promise.resolve(sessions.deliverAnswer({ sessionId, text: input.text, answerTo }));
+            if (delivered?.userIntervened === true) delivery = 'user_intervened';
+          } catch {
+            delivery = 'queued';
+          }
+        }
+      }
+      return { ok: true, input, delivery };
     } catch (error) {
       return { ok: false, code: 'INVALID_INPUT', message: error?.message || 'invalid input' };
     }
@@ -208,7 +253,7 @@ export function createProjectAgentApplicationService({
     return { ok: true, approvals: approvals.list(payload) };
   }
 
-  function decideApproval(payload = {}) {
+  async function decideApproval(payload = {}) {
     if (!open()) return disabled();
     const decision = payload.decision === 'approve'
       ? 'approved'
@@ -217,6 +262,46 @@ export function createProjectAgentApplicationService({
     const listed = approvals.list({ workspaceId: payload.workspaceId });
     const current = listed.find((item) => item.approvalId === payload.approvalId);
     if (!current) return { ok: false, code: 'NOT_FOUND' };
+    if (current.state === 'approved' || current.state === 'denied' || current.state === 'expired') {
+      return { ok: true, approval: current };
+    }
+    const duration = decision !== 'approved'
+      ? 'denied'
+      : payload.duration === 'task'
+        ? 'task'
+        : 'once';
+    const plan = isPlanApproval(current);
+    let resumed = null;
+    if (decision === 'approved' && (plan || current.state === 'stale')) {
+      if (!plan && current.state === 'stale' && typeof rememberGrant === 'function') {
+        try {
+          rememberGrant({
+            capabilityId: current.capabilityId,
+            argsDigest: current.argsDigest,
+            at: Date.now(),
+          });
+        } catch {
+          // 授权簿写失败时仍然记下决定，恢复路径还能再问一次。
+        }
+      }
+      if (typeof sessions?.resumeFromApproval === 'function') {
+        try {
+          resumed = await sessions.resumeFromApproval(current);
+        } catch (error) {
+          resumed = { ok: false, message: error?.message || 'resume failed' };
+        }
+      }
+    } else if (current.state === 'open' && !plan && typeof settleLive === 'function') {
+      try {
+        settleLive(current, {
+          decision,
+          duration,
+          remember: decision === 'approved' && duration === 'task',
+        });
+      } catch {
+        // 现场请求已经不在时，持久记录仍然是两处共同的事实。
+      }
+    }
     const saved = approvals.append({
       ...current,
       state: decision,
@@ -225,7 +310,7 @@ export function createProjectAgentApplicationService({
     });
     if (!saved) return { ok: false, code: 'NOT_FOUND' };
     queueChanged(payload.workspaceId);
-    return { ok: true, approval: saved };
+    return { ok: true, approval: saved, ...(resumed ? { resumed } : {}) };
   }
 
   function markRead(payload = {}) {

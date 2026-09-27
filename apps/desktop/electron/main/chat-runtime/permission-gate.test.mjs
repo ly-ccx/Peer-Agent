@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { createApprovalStore } from '@peer-agent/runtime-node';
+import { createApprovalStore, digestApprovalArgs } from '@peer-agent/runtime-node';
 
-import { createChatPermissionGate } from './permission-gate.mjs';
+import { createChatPermissionGate, createOneTimeApprovalBook } from './permission-gate.mjs';
 
 function createWebContents(events) {
   return {
@@ -805,5 +805,94 @@ describe('chat permission gate', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('one-time approval grant', () => {
+  const ttl = 30 * 60 * 1000;
+
+  it('matches one capability and digest, once, until it expires', () => {
+    const book = createOneTimeApprovalBook();
+    const capabilityId = 'local.shell.exec';
+    const argsDigest = digestApprovalArgs({ command: 'echo hello' });
+    const otherDigest = digestApprovalArgs({ command: 'echo other' });
+    assert.equal(book.remember({ capabilityId, argsDigest, at: 0 }).expiresAt, ttl);
+    assert.equal(book.match({ capabilityId: 'local.file.write', argsDigest, at: 1 }), false);
+    assert.equal(book.match({ capabilityId, argsDigest: otherDigest, at: 1 }), false);
+    assert.equal(book.match({ capabilityId, argsDigest, at: 1 }), true);
+    assert.equal(book.match({ capabilityId, argsDigest, at: 2 }), false);
+
+    const still = createOneTimeApprovalBook();
+    still.remember({ capabilityId, argsDigest, at: 0 });
+    assert.equal(still.match({ capabilityId, argsDigest, at: ttl - 1 }), true);
+    const expired = createOneTimeApprovalBook();
+    expired.remember({ capabilityId, argsDigest, at: 0 });
+    assert.equal(expired.match({ capabilityId, argsDigest, at: ttl }), false);
+  });
+
+  it('lets the same call through once and asks again for a second or different call', async () => {
+    const book = createOneTimeApprovalBook();
+    let clock = 1_000;
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({
+      activeStreams,
+      oneTimeApprovals: book,
+      now: () => clock,
+    });
+    const webContents = createWebContents(events);
+    const request = () => gate.createFilePermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: `tool-${events.length}`,
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/one.txt', content: 'one' },
+      filePath: '/outside/one.txt',
+      workspacePath: '/workspace',
+    });
+
+    const firstPending = request();
+    assert.equal(events.length, 1);
+    const call = events[0].payload.call;
+    gate.settlePermissionRequest(call.toolCallId, {
+      grantId: 'g-ask',
+      toolCallId: call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date(clock).toISOString(),
+    }, { remember: false });
+    assert.equal((await firstPending).granted, false);
+
+    book.remember({ capabilityId: call.capabilityId, argsDigest: digestApprovalArgs(call.arguments), at: clock });
+    const granted = await request();
+    assert.equal(granted.granted, true);
+    assert.equal(granted.reason, 'local_user_approved_once');
+    assert.equal(events.length, 1);
+
+    const again = request();
+    assert.equal(events.length, 2);
+    gate.settlePermissionRequest(events[1].payload.call.toolCallId, {
+      grantId: 'g-again',
+      toolCallId: events[1].payload.call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date(clock).toISOString(),
+    }, { remember: false });
+    assert.equal((await again).granted, false);
+
+    clock += 30 * 60 * 1000;
+    book.remember({ capabilityId: call.capabilityId, argsDigest: digestApprovalArgs(call.arguments), at: clock - 30 * 60 * 1000 });
+    const expired = request();
+    assert.equal(events.length, 3);
+    gate.settlePermissionRequest(events[2].payload.call.toolCallId, {
+      grantId: 'g-expired',
+      toolCallId: events[2].payload.call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date(clock).toISOString(),
+    }, { remember: false });
+    await expired;
   });
 });

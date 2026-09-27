@@ -40,6 +40,7 @@ import { pathOf } from '../data-store.mjs';
 
 const STATES = new Set(['open', 'approved', 'denied', 'expired', 'stale']);
 const DECIDERS = new Set(['local_ui', 'policy']);
+const KINDS = new Set(['approval', 'plan_approval']);
 const KEPT_ON_COMPACT = new Set(['open', 'stale']);
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const UNSCOPED_DIR = '_unscoped';
@@ -130,6 +131,9 @@ export function createApprovalStore({
     const decidedAt = nullableString(input.decidedAt);
     if (decidedAt) record.decidedAt = decidedAt;
     if (DECIDERS.has(input.decidedBy)) record.decidedBy = input.decidedBy;
+    if (KINDS.has(input.kind)) record.kind = input.kind;
+    const taskName = nullableString(input.taskName);
+    if (taskName && taskName.length <= 200) record.taskName = taskName;
     return record;
   }
 
@@ -280,7 +284,7 @@ function runningLeafIds(tasks, out = []) {
 
 /**
  * 启动装配：open 转 stale；仍在执行的 GoalPlan 按 ADR 73 挂起。
- * 没有 GoalPlan 的会话只标记，不恢复。一次性批准 stale 项留给 B3-01。
+ * 没有 GoalPlan 的会话只标记，不恢复。stale 项的一次性放行在决定批准时写入。
  * @param {{ approvalStore?: { markStaleOnStartup?: () => PendingApproval[] }, goalPlanStore?: object, now?: () => Date }} [deps]
  */
 export function applyStartupApprovalRecovery({

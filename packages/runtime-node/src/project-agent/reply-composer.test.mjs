@@ -158,6 +158,21 @@ test('标记和送达由宿主事实重算，模型自带的结论与卡片被�
   ]);
 });
 
+test('静音时需要你仍然马上送达', () => {
+  const muted = reply({
+    text: '需要你批准写文件',
+    surfacing: {
+      event: { origin: 'user_request', kind: 'needs_user', novelty: true, severity: 'info' },
+      proactivity: 'off',
+      foreground: false,
+      quietHours: false,
+      needsYou: true,
+    },
+  });
+  assert.equal(muted.ok, true);
+  assert.equal(muted.meta.surfacing, 'interrupt');
+});
+
 test('省略送达事实时按用户请求的结果计算', () => {
   const result = reply({ text: '收到' });
   assert.equal(result.ok, true);

@@ -67,6 +67,9 @@ function CardItem({
 function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
   const text = typeof action.payload?.text === 'string' ? action.payload.text.trim() : '';
   if (text) return text;
+  if (action.id === 'allow') return i18n.t('projectAgent.chat.allowOnce');
+  if (action.id === 'allow_task') return i18n.t('projectAgent.chat.allowTask');
+  if (action.id === 'continue') return i18n.t('projectAgent.chat.approveContinue');
   if (action.id === 'approve') return i18n.t('projectAgent.chat.approve');
   if (action.id === 'reject') return i18n.t('projectAgent.chat.reject');
   if (action.id === 'answer') return i18n.t('projectAgent.chat.answer');
@@ -82,10 +85,16 @@ async function runCardAction(
   if (action.channel === 'project-agent:decide-approval') {
     const approvalId = typeof action.payload?.approvalId === 'string' ? action.payload.approvalId : '';
     const decision = action.payload?.decision;
+    const duration = action.payload?.duration;
     if (!approvalId || (decision !== 'approve' && decision !== 'reject' && decision !== 'deny')) return;
     setBusy(true);
     try {
-      await clientApi.projectAgentDecideApproval({ workspaceId, approvalId, decision });
+      await clientApi.projectAgentDecideApproval({
+        workspaceId,
+        approvalId,
+        decision,
+        ...(duration === 'once' || duration === 'task' || duration === 'denied' ? { duration } : {}),
+      });
       onDone?.();
     } finally {
       setBusy(false);
@@ -94,6 +103,7 @@ async function runCardAction(
   }
   if (action.channel === 'project-agent:submit-input') {
     const text = typeof action.payload?.text === 'string' ? action.payload.text.trim() : '';
+    const answerTo = typeof action.payload?.answerTo === 'string' ? action.payload.answerTo : '';
     if (!text) return;
     setBusy(true);
     try {
@@ -102,6 +112,7 @@ async function runCardAction(
         inputId: crypto.randomUUID(),
         text,
         surface: 'desktop',
+        ...(answerTo ? { answerTo } : {}),
       });
       onDone?.();
     } finally {
