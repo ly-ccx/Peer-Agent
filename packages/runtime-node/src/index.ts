@@ -247,6 +247,16 @@ export {
 } from './project-agent/host-lease.mjs';
 export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
 export {
+  USER_TURN_LIMITS,
+  WAKE_TURN_LIMITS,
+  finishAgentTurn,
+  planAgentTurn,
+} from './project-agent/agent-turn-plan.mjs';
+export {
+  SAME_PROVIDER_RETRY_DELAYS_MS,
+  createProjectAgentRunner,
+} from './project-agent/runner.mjs';
+export {
   DELEGATION_CAPABILITY_IDS,
   DELEGATION_TOOL_SPECS,
   delegationSpecByCapability,
