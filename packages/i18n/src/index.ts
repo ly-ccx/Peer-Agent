@@ -55,6 +55,7 @@ export type TranslationKey =
   | 'developer.projectAgent.description'
   | 'developer.projectAgent.switch'
   | 'developer.projectAgent.diagnostics'
+  | 'developer.projectAgent.active'
   | 'developer.projectAgent.inactive'
   | 'projectAgent.list.brand'
   | 'projectAgent.list.newBot'
@@ -1020,9 +1021,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
     'developer.projectAgent.nav': '开发者',
     'developer.projectAgent.title': '开发者',
-    'developer.projectAgent.description': '项目代理仍未开放。这个开关只保存偏好，打开后界面和行为都不变。',
+    'developer.projectAgent.description': '打开后，主界面进入项目代理。这个偏好保存在本机。',
     'developer.projectAgent.switch': '项目代理模式',
     'developer.projectAgent.diagnostics': '项目代理诊断',
+    'developer.projectAgent.active': '已启用',
     'developer.projectAgent.inactive': '未启用',
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': '新建机器人',
@@ -1800,9 +1802,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
     'developer.projectAgent.nav': 'Developer',
     'developer.projectAgent.title': 'Developer',
-    'developer.projectAgent.description': 'The project agent is not available yet. This switch only stores a preference and does not change the app.',
+    'developer.projectAgent.description': 'When on, the main window opens the project agent. The preference stays on this machine.',
     'developer.projectAgent.switch': 'Project agent mode',
     'developer.projectAgent.diagnostics': 'Project agent diagnostics',
+    'developer.projectAgent.active': 'Enabled',
     'developer.projectAgent.inactive': 'Not enabled',
     'projectAgent.list.brand': 'Peer',
     'projectAgent.list.newBot': 'New bot',

@@ -1,0 +1,49 @@
+/* 开发者分区。对齐设置页：标题在上，开关在行尾。 */
+
+.developer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--settings-panel-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  padding-top: 52px;
+}
+
+.developer-panel__header h2 {
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-family: var(--font-serif-zh);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.developer-panel__header p,
+.developer-panel__status {
+  margin: 6px 0 0;
+  max-width: 42rem;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.developer-panel__status {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.developer-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 44px;
+}
+
+.developer-panel__row h3 {
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-size: 0.98rem;
+}

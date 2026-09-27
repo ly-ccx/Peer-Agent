@@ -10,6 +10,7 @@ const KEYS = [
   'developer.projectAgent.description',
   'developer.projectAgent.switch',
   'developer.projectAgent.diagnostics',
+  'developer.projectAgent.active',
   'developer.projectAgent.inactive',
 ] as const;
 
@@ -30,6 +31,7 @@ test('developer copy exists in both locales and the shell does not read the flag
     assert.notEqual(en.t(key), key, key);
   }
   assert.equal(zh.t('developer.projectAgent.inactive'), '未启用');
+  assert.equal(zh.t('developer.projectAgent.active'), '已启用');
   const app = readFileSync(new URL('../../../App.tsx', import.meta.url), 'utf8');
   assert.equal(app.includes('projectAgentMode'), false);
   assert.equal(app.includes('useDeveloperFlag'), false);
