@@ -1,0 +1,1 @@
+Remember one statement the user just made. text is the statement. kind is fact, preference, decision, procedure, or responsibility. anchorMessageId must be a user_input message in this conversation. Optional pinned marks it for the project brief. Preferences are stored for the user; other kinds belong to the current project. Secrets and tokens are refused and nothing is written.

@@ -3,13 +3,14 @@ import { readdirSync } from 'node:fs';
 
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
+import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
 
 /**
  * 开任务：冻结模型 → 子会话 → 委托消息 → GoalPlan → 排队或启动。
  * 每个项目同时只有一个 phase=running 的任务，其余 queued。
  * 只读写入判定在 evaluateWorkSessionWrite。协议里的 writeScope 只有 workspace_and_boundaries，不能用来表示禁止写。
- * memorySnapshotId 在 B2-10 之前为 null。
+ * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
  * spawn(input, context)。调度 Provider 目前只把 input 传给端口，宿主接线不在本卡。
  * settle 在任务完成后计算结论。只有代理回复已经引用该任务、策略允许、关闭闸门通过，才写入代签。
@@ -305,6 +306,12 @@ export function createSessionSupervisor({
       });
       if (!stored) throw new Error('delegation message was not stored');
 
+      const snapshot = createSnapshot(workspaceId);
+      if (!snapshot.ok || typeof snapshot.snapshotId !== 'string') {
+        const error = new Error(snapshot.reason || 'memory snapshot failed');
+        error.code = 'memory_snapshot_failed';
+        throw error;
+      }
       const phase = decidePhase(workspaceId, input.dependsOn);
       const plan = goalPlanStore.createGoalContract({
         conversationId: child.id,
@@ -319,7 +326,7 @@ export function createSessionSupervisor({
           anchorMessageId,
           inputId,
           surface: surfaceOf(context?.surface),
-          memorySnapshotId: null,
+          memorySnapshotId: snapshot.snapshotId,
           modelSelection: frozen.snapshot,
           depth: Number.isInteger(context?.depth) && context.depth >= 0 ? context.depth : 1,
           workspaceId,

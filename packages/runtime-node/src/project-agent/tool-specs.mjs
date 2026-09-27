@@ -276,3 +276,119 @@ function validateReply(input) {
   }
   return { ok: true, value };
 }
+
+const MEMORY_KINDS = new Set(['fact', 'preference', 'decision', 'procedure', 'responsibility']);
+
+export const MEMORY_TOOL_SPECS = Object.freeze([
+  spec('memory_search', 'local.memory.search', {
+    type: 'object',
+    properties: {
+      query: { type: 'string', maxLength: 500 },
+      scope: { type: 'string', enum: ['project', 'user'] },
+      limit: { type: 'integer', minimum: 1, maximum: 20 },
+    },
+    required: ['query'],
+    additionalProperties: false,
+  }),
+  spec('memory_remember', 'local.memory.remember', {
+    type: 'object',
+    properties: {
+      text: { type: 'string', maxLength: 2000 },
+      kind: { type: 'string', enum: [...MEMORY_KINDS] },
+      anchorMessageId: { type: 'string' },
+      pinned: { type: 'boolean' },
+    },
+    required: ['text', 'kind'],
+    additionalProperties: false,
+  }),
+  spec('memory_forget', 'local.memory.forget', {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      reason: { type: 'string', maxLength: 500 },
+    },
+    required: ['id', 'reason'],
+    additionalProperties: false,
+  }),
+]);
+
+export const MEMORY_CAPABILITY_IDS = Object.freeze(
+  MEMORY_TOOL_SPECS.map((item) => item.capabilityId),
+);
+
+const MEMORY_BY_NAME = new Map(MEMORY_TOOL_SPECS.map((item) => [item.name, item]));
+const MEMORY_BY_CAPABILITY = new Map(MEMORY_TOOL_SPECS.map((item) => [item.capabilityId, item]));
+
+export function memorySpecByCapability(capabilityId) {
+  return MEMORY_BY_CAPABILITY.get(capabilityId) ?? null;
+}
+
+export function validateMemoryInput(name, raw) {
+  const item = MEMORY_BY_NAME.get(name);
+  if (!item) return invalid(`Unknown memory tool: ${name}`);
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  if (name === 'memory_search') return validateMemorySearch(input);
+  if (name === 'memory_remember') return validateMemoryRemember(input);
+  return validateMemoryForget(input);
+}
+
+function rejectRuntimeFields(input) {
+  for (const key of ['trust', 'status', 'sourceRefs', 'scope', 'workspaceId']) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      return invalid('trust, status, sourceRefs, scope, and workspaceId are assigned by the runtime.');
+    }
+  }
+  return null;
+}
+
+function validateMemorySearch(input) {
+  const rejected = rejectRuntimeFields(input);
+  if (rejected) return rejected;
+  const query = text(input.query, 500);
+  if (!query) return invalid('query is required and must be at most 500 characters.');
+  const value = { query };
+  if (input.scope !== undefined) {
+    if (input.scope !== 'project' && input.scope !== 'user') {
+      return invalid('scope must be project or user.');
+    }
+    value.scope = input.scope;
+  }
+  if (input.limit !== undefined) {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 20) {
+      return invalid('limit must be an integer from 1 to 20.');
+    }
+    value.limit = input.limit;
+  }
+  return { ok: true, value };
+}
+
+function validateMemoryRemember(input) {
+  const rejected = rejectRuntimeFields(input);
+  if (rejected) return rejected;
+  const body = text(input.text, 2000);
+  if (!body) return invalid('text is required and must be at most 2000 characters.');
+  if (!MEMORY_KINDS.has(input.kind)) {
+    return invalid('kind must be fact, preference, decision, procedure, or responsibility.');
+  }
+  const value = { text: body, kind: input.kind };
+  if (input.anchorMessageId !== undefined) {
+    const anchorMessageId = text(input.anchorMessageId, 200);
+    if (!anchorMessageId) return invalid('anchorMessageId must be a message id.');
+    value.anchorMessageId = anchorMessageId;
+  }
+  if (input.pinned !== undefined) {
+    if (typeof input.pinned !== 'boolean') return invalid('pinned must be a boolean.');
+    value.pinned = input.pinned;
+  }
+  return { ok: true, value };
+}
+
+function validateMemoryForget(input) {
+  const rejected = rejectRuntimeFields(input);
+  if (rejected) return rejected;
+  const id = text(input.id, 200);
+  const reason = text(input.reason, 500);
+  if (!id) return invalid('id is required.');
+  if (!reason) return invalid('reason is required and must be at most 500 characters.');
+  return { ok: true, value: { id, reason } };
+}

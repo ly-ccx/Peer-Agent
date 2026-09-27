@@ -1,4 +1,4 @@
-import { DELEGATION_CAPABILITY_IDS } from './tool-specs.mjs';
+import { DELEGATION_CAPABILITY_IDS, MEMORY_CAPABILITY_IDS } from './tool-specs.mjs';
 
 /**
  * project_agent 回合能看见、能执行的能力。
@@ -11,6 +11,7 @@ export const PROJECT_AGENT_ALLOWED_CAPABILITIES = Object.freeze([
   'local.file.search',
   'local.search.aggregate',
   ...DELEGATION_CAPABILITY_IDS,
+  ...MEMORY_CAPABILITY_IDS,
 ]);
 
 const ALLOWED = new Set(PROJECT_AGENT_ALLOWED_CAPABILITIES);
