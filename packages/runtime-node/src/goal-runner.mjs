@@ -775,6 +775,7 @@ function summarizeVerificationGate(gate) {
  *   verifierRunner?: { runVerifier: Function } | null,
  *   uiDeliveryAuthority?: { read: (planId: string) => any } | null,
  *   emitEvent?: Function | null,
+ *   onPlanTerminal?: ((event: { planId: string | null, type: string }) => void) | null,
  *   canRunPlan?: Function | null,
  *   prepareIsolation?: Function | null,
  *   now?: () => string,
@@ -793,6 +794,7 @@ export function createGoalRunner({
   now = () => new Date().toISOString(),
   logger = console,
   maxRecoverableInterruptionRetries = DEFAULT_MAX_RECOVERABLE_INTERRUPTION_RETRIES,
+  onPlanTerminal = null,
 } = {}) {
   if (!goalPlanStore) throw new Error('createGoalRunner requires goalPlanStore');
   if (!chatRuntime || typeof chatRuntime.runGoalTurn !== 'function') {
@@ -810,12 +812,26 @@ export function createGoalRunner({
     { allowZero: true },
   );
 
+  let notifyPlanTerminal = typeof onPlanTerminal === 'function' ? onPlanTerminal : null;
+
+  function setOnPlanTerminal(next) {
+    notifyPlanTerminal = typeof next === 'function' ? next : null;
+  }
+
   function emit(type, payload = {}) {
-    if (typeof emitEvent !== 'function') return;
+    if (typeof emitEvent === 'function') {
+      try {
+        emitEvent({ type, ...payload });
+      } catch (error) {
+        logger?.warn?.('[goal-runner] emitEvent failed:', error);
+      }
+    }
+    if (type !== 'goalRunner:completed' && type !== 'goalRunner:failed') return;
+    if (typeof notifyPlanTerminal !== 'function') return;
     try {
-      emitEvent({ type, ...payload });
+      notifyPlanTerminal({ planId: payload?.planId ?? null, type });
     } catch (error) {
-      logger?.warn?.('[goal-runner] emitEvent failed:', error);
+      logger?.warn?.('[goal-runner] onPlanTerminal failed:', error);
     }
   }
 
@@ -2667,5 +2683,6 @@ export function createGoalRunner({
     prepareAndCommitContextCheckpoint,
     consumeContextCheckpointIfNeeded,
     recoverContextCheckpoints,
+    setOnPlanTerminal,
   };
 }
