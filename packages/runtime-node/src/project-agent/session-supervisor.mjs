@@ -145,6 +145,7 @@ export function createSessionSupervisor({
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
+      ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       origin,
     });
   }

@@ -37,6 +37,7 @@ export interface DelegationOrigin {
 
 export interface WorkSessionConversationMeta {
   readonly sessionId?: string;
+  readonly conversationId?: string;
   readonly workspaceId: string;
   readonly spawnedAt?: string;
   readonly origin: DelegationOrigin;
@@ -58,6 +59,7 @@ export interface WorkSession {
   readonly statusLabel: string;
   readonly needsYouReason?: TaskOverviewItem['needsYouReason'];
   readonly spawnedAt: string;
+  readonly conversationId?: string;
   readonly origin: DelegationOrigin;
   readonly supersededBy?: string;
 }
@@ -339,6 +341,7 @@ export function projectWorkSession(
     statusLabel: projected.statusLabel,
     ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
+    ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
     ...(conversationMeta.supersededBy ? { supersededBy: conversationMeta.supersededBy } : {}),
   };
