@@ -8,6 +8,26 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-beta.2] - 2026-09-27
+
+### Notes
+
+- Second prerelease on the 0.1.0 line. The stable release remains 0.0.18.
+- The project agent must be turned on in Settings → Developer. While that switch is off, the app stays on the current conversation screen.
+
+### Features
+
+- With the switch on, the main screen is a bot list: conversation, profile, bind an existing folder, or create a managed bot.
+- A new or bound bot familiarizes itself with the project using read-only tools. The bot cannot write files.
+- A bot can open a task on the model frozen at open time. Finished work follows the acceptance policy.
+- Project memory can be remembered and withdrawn. Surfacing decides system notifications, and the tray badge counts items that need you.
+
+### Known issues
+
+- Project objectives, parallel tasks, the daily digest, remote viewing, and the terminal bot are not open.
+- The profile memory list is view-only. Acceptance policy and a per-project model choice are shown, not edited, in the profile.
+- Proactivity stays at the standard level.
+
 ## [0.1.0-beta.1] - 2026-09-26
 
 ### Notes
