@@ -1,8 +1,7 @@
 // 任务回合的委托来源。摘要、锚点原文和冻结快照都只进 L7。
 // L6 模式提醒仍由 goal 模式的既有来源提供。
-import { clipText, firstArray, hasRole, looksSensitive, readResource, turnBag } from './project-context.mjs';
-
-const READONLY = readResource(new URL('./resources/work-session-readonly.md', import.meta.url));
+import { clipText, firstArray, hasRole, looksSensitive, turnBag } from './project-context.mjs';
+import { workSessionReadonly as READONLY } from './resources/embedded-text.mjs';
 const SECTION_LIMIT = 6000;
 const TEXT_MAX = 1500;
 
