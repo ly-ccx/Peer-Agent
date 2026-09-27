@@ -1,12 +1,6 @@
-import { readFileSync } from 'node:fs';
-
 import { neutralizeToolCallSyntax } from '../sanitize-context-text.mjs';
 
 const SECRET = /sk-[A-Za-z0-9]{8,}|api[_-]?key\s*[:=]|bearer\s+[A-Za-z0-9._-]{8,}/i;
-
-export function readResource(url) {
-  return readFileSync(url, 'utf8').trim();
-}
 
 export function turnBag(input) {
   const bag = input?.turnContext;

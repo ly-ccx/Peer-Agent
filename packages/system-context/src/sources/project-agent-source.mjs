@@ -1,8 +1,7 @@
 // 项目代理工作规则。只在 role === 'project_agent' 时进入 L1。
 // 规则正文在资源文件里；名册、记忆和快照不从这里进入。
-import { hasRole, readResource } from './project-context.mjs';
-
-const RULES = readResource(new URL('./resources/project-agent-rules.md', import.meta.url));
+import { hasRole } from './project-context.mjs';
+import { projectAgentRules as RULES } from './resources/embedded-text.mjs';
 
 export function createProjectAgentPromptSource() {
   return {
