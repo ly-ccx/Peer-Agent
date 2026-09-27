@@ -1778,6 +1778,7 @@ function normalizeDelegationOrigin(value) {
     if (text) origin[key] = text;
   }
   if (value.readOnly === true || value.readOnly === false) origin.readOnly = value.readOnly;
+  if (value.verifying === true) origin.verifying = true;
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;
   if (Array.isArray(value.dependsOn)) {
     const dependsOn = value.dependsOn

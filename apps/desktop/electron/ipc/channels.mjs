@@ -231,6 +231,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:list-sessions',
   'project-agent:mark-read',
   'project-agent:read-conversation',
+  'project-agent:read-evidence',
   'project-agent:search',
   'project-agent:submit-input',
   'project-agent:update-profile',

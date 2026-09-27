@@ -74,6 +74,23 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['sessionId', 'text', 'intent'],
     additionalProperties: false,
   }),
+  spec('get_verification_detail', 'local.delegation.get_verification_detail', {
+    type: 'object',
+    properties: {
+      sessionId: { type: 'string' },
+    },
+    required: ['sessionId'],
+    additionalProperties: false,
+  }),
+  spec('verify_session', 'local.delegation.verify_session', {
+    type: 'object',
+    properties: {
+      sessionId: { type: 'string' },
+      focus: { type: 'string' },
+    },
+    required: ['sessionId'],
+    additionalProperties: false,
+  }),
   spec('post_reply', 'local.delegation.post_reply', {
     type: 'object',
     properties: {
@@ -115,6 +132,8 @@ export function validateDelegationInput(name, raw) {
   if (name === 'get_session') return validateGet(input);
   if (name === 'cancel_session') return validateCancel(input);
   if (name === 'message_session') return validateMessage(input);
+  if (name === 'get_verification_detail') return validateSessionOnly(input);
+  if (name === 'verify_session') return validateVerify(input);
   return validateReply(input);
 }
 
@@ -253,6 +272,24 @@ function validateMessage(input) {
     };
   }
   return { ok: true, value: { sessionId, text: body, intent: input.intent } };
+}
+
+function validateSessionOnly(input) {
+  const sessionId = text(input.sessionId, 200);
+  if (!sessionId) return invalid('sessionId is required.');
+  return { ok: true, value: { sessionId } };
+}
+
+function validateVerify(input) {
+  const sessionId = text(input.sessionId, 200);
+  if (!sessionId) return invalid('sessionId is required.');
+  const value = { sessionId };
+  if (input.focus !== undefined) {
+    const focus = text(input.focus, 500);
+    if (!focus) return invalid('focus must be at most 500 characters.');
+    value.focus = focus;
+  }
+  return { ok: true, value };
 }
 
 function validateReply(input) {

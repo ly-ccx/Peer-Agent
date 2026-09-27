@@ -4,6 +4,7 @@ import { createCapabilityProviderRegistry } from './capability-provider-registry
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalDelegationProvider } from './local-delegation-provider.mjs';
+import { liveSessionVerification } from '../project-agent/session-verification.mjs';
 import { createLocalMemoryProvider } from './local-memory-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
@@ -28,7 +29,7 @@ export function createLocalToolHost({
   fileProvider = createLocalFileProvider({ workspaceRoot }),
   shellProvider = null,
   goalProvider = createLocalGoalProvider(),
-  delegationProvider = createLocalDelegationProvider(),
+  delegationProvider = null,
   memoryProvider = createLocalMemoryProvider(),
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
@@ -47,6 +48,9 @@ export function createLocalToolHost({
   hookRunner = null,
   onRuntimeEvent = null,
 }) {
+  const activeDelegationProvider = delegationProvider ?? createLocalDelegationProvider({
+    verification: liveSessionVerification(),
+  });
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
   const activeShellProvider = shellProvider ?? createLocalShellProvider({
     workspaceRoot,
@@ -63,7 +67,7 @@ export function createLocalToolHost({
       fileProvider,
       activeShellProvider,
       goalProvider,
-      delegationProvider,
+      activeDelegationProvider,
       memoryProvider,
       interactionProvider,
       automationProposalProvider,

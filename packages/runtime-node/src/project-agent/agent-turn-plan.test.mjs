@@ -82,6 +82,37 @@ test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默�
   assert.equal(spoken.messages[1].fallback, false);
   assert.equal(spoken.messages[1].content, '收到');
   assert.deepEqual(spoken.messages[1].replyTo, ['input-in1']);
+  assert.equal(spoken.messages[1].meta, undefined);
+
+  const withEvidence = finishAgentTurn({
+    turnId: 'turn-evidence',
+    plan: user,
+    rounds: [
+      {
+        text: '',
+        toolCalls: [{
+          name: 'get_verification_detail',
+          input: { sessionId: 's-1', evidenceRefs: ['../secret'] },
+          result: {
+            ok: true,
+            output: {
+              ok: true,
+              checks: [{ name: 'leaf_evidence', result: 'passed', evidenceRefs: ['tool-result://host-verifier'] }],
+              outputs: [{ evidenceRef: 'local-shell-artifact://task/stdout', summary: 'npm test' }],
+            },
+          },
+        }],
+      },
+      {
+        text: '结论',
+        toolCalls: [{ name: 'post_reply', input: { text: '通过了', replyTo: ['input-in1'], evidenceRefs: ['forged'] }, result: { ok: true } }],
+      },
+    ],
+  });
+  assert.deepEqual(withEvidence.messages[1].meta.evidenceRefs, [
+    'tool-result://host-verifier',
+    'local-shell-artifact://task/stdout',
+  ]);
 
   const wake = finishAgentTurn({
     turnId: 'turn-3',

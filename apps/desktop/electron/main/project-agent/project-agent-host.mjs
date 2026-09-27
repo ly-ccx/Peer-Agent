@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
 
 import {
   createApprovalStore,
@@ -16,7 +17,10 @@ import {
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
+import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
+import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
+import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
 /**
  * 桌面装配：只为当前进程持有租约、并且已经有代理对话的项目创建 runner。
@@ -170,6 +174,11 @@ export function registerDesktopProjectAgent({
     approvalStore,
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
+  installSessionVerification(createSessionVerification({
+    goalPlanStore,
+    verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
+    appendMessage,
+  }));
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -244,6 +253,20 @@ export function registerDesktopProjectAgent({
     inputQueue,
     sessions: supervisor,
     approvals: approvalStore,
+    readEvidenceBody(evidenceRef) {
+      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return null;
+      let records = [];
+      try {
+        records = goalPlanStore.findEvidenceIndexRecords([evidenceRef]) || [];
+      } catch {
+        return null;
+      }
+      const record = records[0];
+      if (!record) return null;
+      const body = evidenceBodyFromRecord(record, (ref) => readRegisteredArtifact(dataHome, ref, record));
+      if (!body?.text) return null;
+      return { evidenceRef, kind: body.kind, text: body.text };
+    },
     bindWorkspace: (sender) => workspace.addWorkspace(sender),
     rememberWorkspace({ workspaceId, path: folder, name }) {
       const settings = getSettings() || {};
@@ -293,4 +316,19 @@ export function registerDesktopProjectAgent({
     });
   }
   return createProjectAgentIpcRegistrations({ projectAgent });
+}
+
+function readRegisteredArtifact(dataHome, ref, record) {
+  if (typeof ref !== 'string' || !/^local-(?:shell|browser)-artifact:\/\//.test(ref)) return '';
+  const target = resolveArtifactOpenPath(ref, {
+    shell: path.join(dataHome, 'shell-artifacts'),
+    browser: path.join(dataHome, 'browser-artifacts'),
+  }, record?.createdAt);
+  if (!target) return '';
+  try {
+    if (statSync(target).isDirectory() || /\.(png|jpe?g|webp|gif)$/i.test(target)) return ref;
+    return readFileSync(target, 'utf8');
+  } catch {
+    return '';
+  }
 }

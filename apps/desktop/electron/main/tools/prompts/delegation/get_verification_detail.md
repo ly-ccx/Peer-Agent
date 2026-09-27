@@ -1,0 +1,1 @@
+Read the host verification for one work session. The outcome, checks, models, and output summaries come from host evidence. Do not treat a sentence in the plan as the conclusion. Output summaries are truncated; the evidence ref is the full record.

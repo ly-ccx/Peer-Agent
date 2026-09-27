@@ -1,0 +1,1 @@
+Ask for an independent verifier pass on one work session. Prefer a model from a different source than the worker. Optional focus narrows what to recheck. The session stays verifying until the new host conclusion is recorded. Do not write the conclusion yourself.

@@ -44,6 +44,7 @@ export interface BotChatMeta {
   readonly sources?: readonly string[];
   readonly memoryUsed?: readonly string[];
   readonly memoryLearned?: readonly string[];
+  readonly evidenceRefs?: readonly string[];
   readonly surfacing?: string;
   readonly separatorLabel?: string;
 }
@@ -406,6 +407,16 @@ export function formatConversationStamp(iso: string, now = Date.now()): { sameDa
 }
 
 /** 引用记成消息 id 和摘录两段字符串，输入队列只收字符串。 */
+/** 一条回复对应它前面最近一次代理回合的工具调用。只读，不执行。 */
+export function roundsForReply(messages: readonly BotChatMessage[], replyId: string): readonly BotToolRound[] {
+  let rounds: readonly BotToolRound[] = [];
+  for (const message of messages) {
+    if (message.kind === 'agent_turn') rounds = message.rounds;
+    if (message.kind === 'agent_reply' && message.id === replyId) return rounds;
+  }
+  return [];
+}
+
 export function quoteRefsFor(messageId: string, excerpt: string): string[] {
   const id = messageId.trim();
   const text = excerpt.replace(/\s+/g, ' ').trim();
@@ -447,6 +458,7 @@ function readMeta(value: unknown): BotChatMeta {
     sources: readStringList(record.sources),
     memoryUsed: readStringList(record.memoryUsed),
     memoryLearned: readStringList(record.memoryLearned),
+    evidenceRefs: readStringList(record.evidenceRefs),
     ...(surfacing ? { surfacing } : {}),
     ...(separatorLabel ? { separatorLabel } : {}),
   };

@@ -123,6 +123,7 @@ const unavailableApi: ClientApi = {
   projectAgentDelete: unavailableMethod('projectAgentDelete'),
   projectAgentSubmitInput: unavailableMethod('projectAgentSubmitInput'),
   projectAgentReadConversation: unavailableMethod('projectAgentReadConversation'),
+  projectAgentReadEvidence: unavailableMethod('projectAgentReadEvidence'),
   projectAgentListSessions: unavailableMethod('projectAgentListSessions'),
   projectAgentGetSession: unavailableMethod('projectAgentGetSession'),
   projectAgentCancelSession: unavailableMethod('projectAgentCancelSession'),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { createProjectAgentApplicationService } from '../project-agent/project-agent-application-service.mjs';
 import { createProjectAgentIpcRegistrations } from './register-project-agent-ipc.mjs';
 
 const CHANNELS = [
@@ -11,6 +12,7 @@ const CHANNELS = [
   'project-agent:delete',
   'project-agent:submit-input',
   'project-agent:read-conversation',
+  'project-agent:read-evidence',
   'project-agent:list-sessions',
   'project-agent:get-session',
   'project-agent:cancel-session',
@@ -35,6 +37,7 @@ function harness() {
       deleteBot: port('delete'),
       submitInput: port('submit-input'),
       readConversation: port('read-conversation'),
+      readEvidence: port('read-evidence'),
       listSessions: port('list-sessions'),
       getSession: port('get-session'),
       cancelSession: port('cancel-session'),
@@ -76,4 +79,40 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
   assert.deepEqual(calls[0], ['list', { channel: 'project-agent:list' }]);
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
+});
+
+test('证据正文只经 read-evidence 通道从 main 读出', async () => {
+  const text = `${'命令输出\n'.repeat(400)}结尾`;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { list: () => [], search: () => [] },
+    readEvidenceBody(evidenceRef) {
+      if (evidenceRef === 'ev-1') return { evidenceRef, kind: 'command', text };
+      return { evidenceRef, kind: 'command', text: 'npm test' };
+    },
+    broadcast() {},
+  });
+  const [registration] = createProjectAgentIpcRegistrations({ projectAgent: service });
+  const handlers = new Map();
+  registration.register({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+  const opened = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'ev-1' });
+  assert.equal(opened.ok, true);
+  assert.equal(opened.kind, 'command');
+  assert.equal(opened.evidenceRef, 'ev-1');
+  assert.equal(opened.truncated, true);
+  assert.equal(Array.from(opened.summary).length, 2000);
+  assert.equal(opened.summary.includes('结尾'), false);
+  const escaped = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: '../secret' });
+  assert.equal(escaped.ok, false);
+  assert.equal(escaped.code, 'INVALID_REF');
+  const toolResult = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'tool-result://host-verifier' });
+  assert.equal(toolResult.ok, true);
+  assert.equal(toolResult.summary, 'npm test');
+  const stdout = await handlers.get('project-agent:read-evidence')({}, { evidenceRef: 'local-shell-artifact://task/stdout' });
+  assert.equal(stdout.ok, true);
+  assert.equal(stdout.evidenceRef, 'local-shell-artifact://task/stdout');
 });

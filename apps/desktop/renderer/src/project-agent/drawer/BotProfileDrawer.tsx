@@ -16,6 +16,8 @@ import {
   type DrawerSession,
   type DrawerTab,
 } from '../state/drawerState';
+import { AgentProcessView } from './AgentProcessView';
+import type { BotInspect } from './agentProcess';
 import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
@@ -37,6 +39,7 @@ export function BotProfileDrawer({
   profile,
   memory,
   locateSessionId,
+  inspect = null,
   triggerRef,
   i18n,
   isZh,
@@ -48,6 +51,7 @@ export function BotProfileDrawer({
   readonly profile: BotProfile;
   readonly memory: DrawerMemory;
   readonly locateSessionId: string | null;
+  readonly inspect?: BotInspect | null;
   readonly triggerRef: RefObject<HTMLButtonElement | null>;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
@@ -150,6 +154,18 @@ export function BotProfileDrawer({
           </button>
         ))}
       </div>
+      {inspect?.evidence ? (
+        <section className="bot-inspect" aria-label={i18n.t('projectAgent.chat.evidence')}>
+          <h3>{i18n.t('projectAgent.chat.evidence')}</h3>
+          <p>{inspect.evidence.evidenceRef}</p>
+          {inspect.evidence.ok ? (
+            <pre>{inspect.evidence.summary}</pre>
+          ) : (
+            <p>{inspect.evidence.code}</p>
+          )}
+        </section>
+      ) : null}
+      {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}

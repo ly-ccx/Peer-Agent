@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { createDelegationProvider } from './delegation-provider.mjs';
+import { computeVerificationVerdict } from './verification-verdict.mjs';
 import {
   PROJECT_AGENT_ALLOWED_CAPABILITIES,
   evaluateProjectAgentTurn,
@@ -368,6 +369,169 @@ test('引用限定范围内，越界的 message 和 cancel 被拒绝，新开任
   ));
   assert.equal(nested.error, 'out_of_scope');
   assert.equal(messaged, 1);
+});
+
+function hostPlan(evidenceRef = 'ev-1') {
+  return {
+    verificationOutcome: 'passed',
+    runner: { verifierRuns: [{ outcome: 'passed', note: '模型自己说通过了' }] },
+    tasks: [{ taskId: 'leaf', status: 'completed', evidenceRefs: [evidenceRef] }],
+    successCriteria: [{ id: 'c1', kind: 'test', description: '测试通过' }],
+    criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef }],
+  };
+}
+
+test('验证细节只来自宿主事实，模型自述和范围外的输出进不来', async () => {
+  const long = '测'.repeat(2001);
+  const facts = {
+    plan: hostPlan('ev-real'),
+    evidenceIndex: ['ev-real'],
+    independentVerifier: 'passed',
+    verifierModel: 'verifier-b',
+    workerModel: 'worker-a',
+    sameFamilyAsWorker: false,
+    modelClaim: { outcome: 'failed', checks: [{ name: 'forged', result: 'passed' }] },
+    outputs: [
+      { name: 'npm test', evidenceRef: 'ev-real', text: long },
+      { name: 'forged log', evidenceRef: 'ev-forged', text: 'should not appear' },
+    ],
+  };
+  const provider = createDelegationProvider({
+    verification: {
+      facts(sessionId) {
+        return sessionId === 's-keep' ? facts : null;
+      },
+    },
+  });
+  const detail = outputOf(await provider.executeCapability(
+    call('local.delegation.get_verification_detail', { sessionId: 's-keep' }, 'verify-detail'),
+    agentContext(),
+  ));
+  const host = computeVerificationVerdict(facts.plan, facts.evidenceIndex, {
+    independentVerifier: 'passed',
+    verifierModel: 'verifier-b',
+    sameFamilyAsWorker: false,
+  });
+  assert.equal(detail.outcome, host.outcome);
+  assert.equal(detail.outcome, 'passed');
+  assert.equal(detail.checks.some((item) => item.name === 'forged'), false);
+  assert.deepEqual(detail.checks.map((item) => item.evidenceRefs), [host.evidenceRefs, host.evidenceRefs]);
+  assert.equal(detail.workerModel, 'worker-a');
+  assert.equal(detail.verifierModel, 'verifier-b');
+  assert.equal(detail.sameSource, false);
+  assert.equal(detail.outputs.length, 1);
+  assert.equal(detail.outputs[0].evidenceRef, 'ev-real');
+  assert.equal(Array.from(detail.outputs[0].summary).length, 2000);
+  assert.equal(detail.outputs[0].truncated, true);
+  assert.equal(JSON.stringify(detail).includes('模型自己说通过了'), false);
+  assert.equal(JSON.stringify(detail).includes('should not appear'), false);
+
+  const denied = outputOf(await provider.executeCapability(
+    call('local.delegation.get_verification_detail', { sessionId: 's-keep' }, 'verify-denied'),
+    agentContext({
+      toolCallOrdinal: 1,
+      messages: [
+        { id: 'r1', role: 'assistant', kind: 'agent_reply', sources: ['s-other'] },
+        { id: 'u1', role: 'user', kind: 'user_input', quoteRefs: ['r1', '别的'] },
+      ],
+    }),
+  ));
+  assert.equal(denied.outcome, 'passed');
+});
+
+test('复核用 verifier 出新结论并更新卡片，期间任务是 verifying', async () => {
+  const cards = [];
+  let status = 'running';
+  let pass = 0;
+  const provider = createDelegationProvider({
+    verification: {
+      async markVerifying() {
+        status = 'verifying';
+      },
+      async run(request) {
+        assert.equal(status, 'verifying');
+        assert.equal(request.role, 'verifier');
+        assert.equal(request.preferDifferentSource, true);
+        pass += 1;
+        const evidenceRef = pass === 1 ? 'missing' : 'ev-real';
+        return {
+          ok: true,
+          at: '2026-09-27T08:00:00.000Z',
+          prose: '模型说这次通过',
+          facts: {
+            plan: hostPlan(evidenceRef),
+            evidenceIndex: pass === 1 ? [] : ['ev-real'],
+            independentVerifier: 'passed',
+            verifierModel: 'other-family',
+            workerModel: 'worker-a',
+            sameFamilyAsWorker: false,
+            modelClaim: { outcome: 'passed' },
+          },
+        };
+      },
+      async record({ event, card }) {
+        cards.push({ outcome: event.outcome, content: card.content, verdictRef: card.verdictRef });
+      },
+    },
+  });
+  const first = outputOf(await provider.executeCapability(
+    call('local.delegation.verify_session', { sessionId: 's-keep', focus: '测试' }, 'verify-1'),
+    agentContext(),
+  ));
+  assert.equal(first.status, 'verifying');
+  assert.notEqual(first.event.outcome, 'passed');
+  assert.equal(first.card.content, first.event.outcome);
+  assert.equal(first.card.cardId, 'card:verdict:s-keep');
+
+  const second = outputOf(await provider.executeCapability(
+    call('local.delegation.verify_session', { sessionId: 's-keep' }, 'verify-2'),
+    agentContext({ toolCallOrdinal: 1 }),
+  ));
+  assert.equal(second.event.outcome, 'passed');
+  assert.equal(second.event.verdictRef, 'verdict:s-keep:passed');
+  assert.deepEqual(cards.map((item) => item.content), [first.event.outcome, 'passed']);
+  assert.notEqual(cards[0].verdictRef, cards[1].verdictRef);
+});
+
+test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {
+  let runs = 0;
+  const provider = createDelegationProvider({
+    verification: {
+      async facts() {
+        return {
+          plan: hostPlan('ev-real'),
+          evidenceIndex: ['ev-real'],
+          independentVerifier: 'passed',
+          workerModel: 'worker-a',
+          verifierModel: 'verifier-b',
+          sameFamilyAsWorker: false,
+        };
+      },
+      async run() {
+        runs += 1;
+        return { ok: true, facts: { plan: hostPlan('ev-real'), evidenceIndex: ['ev-real'] } };
+      },
+      async markVerifying() {},
+    },
+  });
+  const quoted = agentContext({
+    messages: [
+      { id: 'r1', role: 'assistant', kind: 'agent_reply', sources: ['s-other'] },
+      { id: 'u1', role: 'user', kind: 'user_input', quoteRefs: ['r1', '别的'] },
+    ],
+  });
+  const denied = outputOf(await provider.executeCapability(
+    call('local.delegation.verify_session', { sessionId: 's-keep' }, 'verify-scope'),
+    quoted,
+  ));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'out_of_scope');
+  assert.equal(runs, 0);
+  const detail = outputOf(await provider.executeCapability(
+    call('local.delegation.get_verification_detail', { sessionId: 's-keep' }, 'detail-scope'),
+    { ...quoted, toolCallOrdinal: 1 },
+  ));
+  assert.equal(detail.outcome, 'passed');
 });
 
 function resultGrantRecorded(result) {

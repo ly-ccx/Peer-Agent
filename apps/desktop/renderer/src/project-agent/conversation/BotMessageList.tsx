@@ -20,6 +20,8 @@ export function BotMessageList({
   onQuote,
   onRetry,
   onLocateSession,
+  onOpenEvidence,
+  onOpenProcess,
 }: {
   readonly workspaceId: string;
   readonly rows: readonly ConversationRow[];
@@ -29,6 +31,8 @@ export function BotMessageList({
   readonly onQuote: (messageId: string, excerpt: string) => void;
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
+  readonly onOpenEvidence?: (evidenceRef: string) => void;
+  readonly onOpenProcess?: (replyId: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -103,6 +107,8 @@ export function BotMessageList({
             onJump={onJump}
             onQuote={(excerpt) => onQuote(row.message.id, excerpt)}
             onLocateSession={onLocateSession}
+            onOpenEvidence={onOpenEvidence}
+            onOpenProcess={onOpenProcess ? () => onOpenProcess(row.message.id) : undefined}
           />
         )
       ))}
