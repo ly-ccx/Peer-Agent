@@ -257,6 +257,10 @@ export {
 export { createInputQueue, inputMessageId } from './project-agent/input-queue.mjs';
 export { createBotDirectory } from './project-agent/bot-directory.mjs';
 export {
+  collectConversationSearchDocuments,
+  createConversationSearchIndex,
+} from './project-agent/conversation-search-index.mjs';
+export {
   classicNeedsYouCount,
   projectClassicGoals,
   projectHistory,

@@ -85,6 +85,7 @@ export interface BotChatMessage {
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
   readonly pending?: 'sending' | 'failed';
+  readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
 export interface PendingBotInput {
@@ -132,7 +133,31 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     cards: readCards(raw.cards),
     quoteRefs: readStringList(raw.quoteRefs),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
+    ...imageField(raw.attachments),
   };
+}
+
+function imageField(value: unknown): { images: { id: string; name: string; dataUrl: string }[] } | Record<string, never> {
+  const images = readImages(value);
+  return images.length > 0 ? { images } : {};
+}
+
+function readImages(value: unknown): { id: string; name: string; dataUrl: string }[] {
+  if (!Array.isArray(value)) return [];
+  const images = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const dataUrl = readString(record.dataUrl);
+    if (!dataUrl.startsWith('data:image/')) continue;
+    images.push({
+      id: readString(record.id) || `image-${images.length + 1}`,
+      name: readString(record.name) || 'image',
+      dataUrl,
+    });
+    if (images.length >= 4) break;
+  }
+  return images;
 }
 
 /** 只留下用户输入、锚定回复和系统卡片。agent_turn 与其它内部回合丢掉。 */

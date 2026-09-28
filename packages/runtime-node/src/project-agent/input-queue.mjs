@@ -190,6 +190,9 @@ export function createInputQueue({
             anchorRefs: input.anchorRefs,
             quoteRefs: input.quoteRefs,
             attachmentRefs: input.attachmentRefs,
+            ...(Array.isArray(input.attachments) && input.attachments.length > 0
+              ? { attachments: input.attachments }
+              : {}),
             ...(input.answerTo ? { answerTo: input.answerTo } : {}),
             ...(input.historyRef ? { historyRef: input.historyRef } : {}),
             ...(input.historySnapshotId ? { historySnapshotId: input.historySnapshotId } : {}),
@@ -230,6 +233,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
     anchorRefs: stringRefs(input?.anchorRefs),
     quoteRefs: stringRefs(input?.quoteRefs),
     attachmentRefs: stringRefs(input?.attachmentRefs),
+    ...imageAttachmentField(input?.attachments),
     createdAt: Number.isFinite(suppliedAt) ? new Date(suppliedAt).toISOString() : createdAt,
   };
   const answerTo = optionalAnswer(input?.answerTo);
@@ -264,6 +268,40 @@ function optionalToken(value) {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 200 || /[\r\n]/.test(trimmed)) return '';
   return trimmed;
+}
+
+const THUMBNAIL_LIMIT = 512 * 1024;
+
+export function boundedImageAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  const images = [];
+  for (const item of value) {
+    if (!item || item.kind !== 'image') continue;
+    const dataUrl = typeof item.dataUrl === 'string'
+      && item.dataUrl.startsWith('data:image/')
+      && item.dataUrl.length <= THUMBNAIL_LIMIT
+      ? item.dataUrl
+      : '';
+    const artifactRef = typeof item.artifactRef === 'string' ? item.artifactRef.trim().slice(0, 500) : '';
+    const filePath = typeof item.filePath === 'string' ? item.filePath.trim().slice(0, 500) : '';
+    if (!dataUrl && !artifactRef) continue;
+    images.push({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim().slice(0, 80) : `att-${images.length + 1}`,
+      name: typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 120) : 'image',
+      mimeType: typeof item.mimeType === 'string' && item.mimeType.trim() ? item.mimeType.trim().slice(0, 80) : 'image/png',
+      kind: 'image',
+      ...(dataUrl ? { dataUrl } : {}),
+      ...(artifactRef ? { artifactRef } : {}),
+      ...(filePath ? { filePath } : {}),
+    });
+    if (images.length >= 4) break;
+  }
+  return images;
+}
+
+function imageAttachmentField(value) {
+  const attachments = boundedImageAttachments(value);
+  return attachments.length > 0 ? { attachments } : {};
 }
 
 function stringRefs(value) {

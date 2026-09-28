@@ -84,6 +84,7 @@ export function BotMessageList({
             key={row.message.id}
             message={row.message}
             replied={replied.has(row.message.id)}
+            highlighted={highlightedId === row.message.id}
             i18n={i18n}
             onRetry={onRetry}
             onLocateSession={onLocateSession}

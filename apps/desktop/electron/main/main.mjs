@@ -68,7 +68,7 @@ import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
 import { createAppshotService } from './appshot-service.mjs';
 import { buildAppshotPermissionPreflight, openScreenRecordingSettings } from './appshot-permission-preflight.mjs';
-import { deliverAppshot } from './appshot-delivery.mjs';
+import { completeAppshotHotkey, deliverAppshot } from './appshot-delivery.mjs';
 import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
@@ -876,11 +876,14 @@ function createAppTrayController() {
         if (scheduler) scheduler.setGloballyPaused(paused);
         else automationStore.setRuntimeState({ globallyPaused: paused });
       },
+      onOpenBot: (payload) => openBotFromSurfacing(payload),
       onQuit: () => {
         app.quit();
       },
     },
     isProjectAgentEnabled: () => true,
+    shellMode: () => (settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots'),
+    listNeedsYouBots: () => (projectAgentDirectory.listItems?.() || []).filter((item) => Number(item?.state?.needsYou) > 0),
     getNeedsYouCount: () => {
       const items = projectAgentDirectory.listItems?.() || [];
       return items.reduce((sum, item) => sum + (Number(item?.state?.needsYou) || 0), 0);
@@ -1196,21 +1199,22 @@ async function handleAppshotHotkey(source = 'hotkey') {
       if (!image.isEmpty()) {
         const size = image.getSize();
         const width = Math.min(480, size.width);
-        thumbnailDataUrl = image.resize({ width }).toDataURL();
+        thumbnailDataUrl = `data:image/jpeg;base64,${image.resize({ width }).toJPEG(60).toString('base64')}`;
       }
     } catch {
       thumbnailDataUrl = undefined; // card falls back to the broken/placeholder state
     }
     const delivery = deliverAppshot({
       payload: result.payload,
+      shell: settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots',
+      listBots: () => projectAgentDirectory.listItems?.() || [],
+      submitInput: (input) => projectAgentDirectory.submitInput?.(input),
       listConversations: () => conversationStore.listConversations({ includeMessageCount: false }),
       createConversation: (input) => conversationStore.createConversation(input),
       appendMessage: (id, message) => conversationStore.appendMessage(id, message),
       options: { thumbnailDataUrl },
     });
-    console.log('[appshot] delivered to conversation', delivery.conversationId, delivery.created ? '(new)' : '');
-    notifyAppshotOutcome(source, { ok: true, appName: result.payload.source.appName, delivery });
-    return { ...result, delivery };
+    return completeAppshotHotkey(source, result, delivery, notifyAppshotOutcome, console.log);
   } catch (err) {
     console.error('[appshot] hotkey handling failed:', err?.message ?? err);
     notifyAppshotOutcome(source, { ok: false, code: 'window_not_capturable' });
@@ -1218,14 +1222,6 @@ async function handleAppshotHotkey(source = 'hotkey') {
   }
 }
 
-/**
- * T9: lightweight capture feedback (product §9).
- * - Never force-reveals the Peer main window (the user stays in their app).
- * - Hotkey path only; settings "test capture" already renders inline feedback.
- * - System notification, silent-failure tolerant; click routes to the conversation
- *   via the existing task-notification reveal path.
- * - Log lines carry outcome codes only — no window titles, no image data (ADR 59).
- */
 function notifyAppshotOutcome(source, outcome) {
   if (source !== 'hotkey') return;
   try {
@@ -1233,11 +1229,13 @@ function notifyAppshotOutcome(source, outcome) {
       const notified = showTaskSystemNotification({
         title: 'Appshot',
         body: `已捕获「${outcome.appName}」窗口，已添加到会话。`,
-        onClick: () => openConversationFromTaskNotification({
-          conversationId: outcome.delivery?.conversationId,
-          messageId: outcome.delivery?.messageId,
-          source: 'appshot-notification',
-        }),
+        onClick: () => (outcome.delivery?.workspaceId
+          ? openBotFromSurfacing({ workspaceId: outcome.delivery.workspaceId })
+          : openConversationFromTaskNotification({
+            conversationId: outcome.delivery?.conversationId,
+            messageId: outcome.delivery?.messageId,
+            source: 'appshot-notification',
+          })),
       });
       if (!notified) console.log('[appshot] delivered (notification unavailable)');
       return;
@@ -1247,6 +1245,7 @@ function notifyAppshotOutcome(source, outcome) {
       peer_frontmost: 'Peer 自身在前台，请切换到要捕获的应用后重试。',
       no_window: '未找到可捕获的前台窗口。',
       window_not_capturable: '该窗口不支持捕获。',
+      NO_BOT: '还没有机器人，这次截图没有送出。',
     };
     showTaskSystemNotification({ title: 'Appshot', body: bodies[outcome.code] ?? '捕获失败。' });
   } catch (err) {

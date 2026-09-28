@@ -4,12 +4,14 @@ import type { BotChatMessage } from '../state/botConversationState';
 export function UserBubble({
   message,
   replied,
+  highlighted = false,
   i18n,
   onRetry,
   onLocateSession,
 }: {
   readonly message: BotChatMessage;
   readonly replied: boolean;
+  readonly highlighted?: boolean;
   readonly i18n: I18nRuntime;
   readonly onRetry: (inputId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
@@ -22,7 +24,7 @@ export function UserBubble({
       : i18n.t(item.labelKey)
   );
   return (
-    <article className="bot-user" id={`bot-msg-${message.id}`} data-kind="user_input">
+    <article className={`bot-user${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`} data-kind="user_input">
       <div className="bot-user-marks">
         {message.pending === 'sending' ? <span>{i18n.t('projectAgent.chat.sending')}</span> : null}
         {message.pending === 'failed' && message.inputId ? (
@@ -49,6 +51,13 @@ export function UserBubble({
         ))}
       </div>
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
+      {message.images?.length ? (
+        <div className="bot-user-images">
+          {message.images.map((image) => (
+            <img key={image.id} src={image.dataUrl} alt={image.name} />
+          ))}
+        </div>
+      ) : null}
       <p className="bot-user-text">{message.content}</p>
     </article>
   );

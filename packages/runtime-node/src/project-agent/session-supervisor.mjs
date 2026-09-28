@@ -4,6 +4,7 @@ import { readdirSync } from 'node:fs';
 import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
+import { boundedImageAttachments } from './input-queue.mjs';
 import { createSnapshot } from '../memory/memory-snapshot.mjs';
 import { decideSessionAcceptance } from './acceptance.mjs';
 import { digestApprovalArgs } from './approval-store.mjs';
@@ -364,6 +365,10 @@ export function createSessionSupervisor({
       const anchorMessageId = anchorMessageIds[0];
       const workspacePath = text(context?.workspacePath);
       const presetSnapshotId = text(context?.backgroundSnapshotId);
+      // 行内缩略图会写进任务消息。背景快照仍标明附件未嵌入，但这不再挡住开任务。
+      // 工具结果、非图片附件，以及调用方预先指定的背景快照，仍走原确认。
+      const inlineImagesOnly = !presetSnapshotId
+        && inlineImageAttachmentsCoverOmissions(history.messages, anchorMessageId);
       child = conversationStore.createChildConversation({
         parentConversationId,
         role: 'work_session',
@@ -381,9 +386,11 @@ export function createSessionSupervisor({
         },
         capturedAt: now(),
         ...(presetSnapshotId ? { backgroundSnapshotId: presetSnapshotId } : {}),
-        ...(context?.confirmMissing === true ? { confirmMissing: true } : {}),
+        ...(context?.confirmMissing === true || inlineImagesOnly ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
+      const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
+      const images = imageAttachmentsFromMessages(history.messages, anchorMessageIds);
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
@@ -393,6 +400,8 @@ export function createSessionSupervisor({
           quotes: quotesFor(anchorMessageIds, history.messages),
           readOnly: input.readOnly === true,
         }),
+        ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
+        ...(images.length > 0 ? { attachments: images } : {}),
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -899,6 +908,62 @@ function delegationMessage({ brief, successCriteria, quotes, readOnly }) {
     ? '约束：只读。不要写入、修改或执行会改变工作区的操作。'
     : '约束：可以在工作区边界内修改。';
   return ['委托说明', `目标：${brief}`, '完成标准：', criteria, '锚点原文：', anchors, constraint].join('\n');
+}
+
+function inlineImageAttachmentsCoverOmissions(messages, anchorMessageId) {
+  const rows = Array.isArray(messages) ? messages : [];
+  const index = rows.findIndex((row) => row?.id === anchorMessageId);
+  const slice = index >= 0 ? rows.slice(0, index + 1) : [];
+  let sawImage = false;
+  for (const row of slice) {
+    if (!row || row.role === 'system' || row.role === 'developer') continue;
+    if (row.role === 'tool') return false;
+    if (row.tool_calls?.length) return false;
+    if (Array.isArray(row.segments) && row.segments.some((segment) => segment?.type !== 'text' && segment?.type !== 'thinking')) {
+      return false;
+    }
+    if (row.content != null && typeof row.content !== 'string') return false;
+    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+    if (attachments.length === 0) continue;
+    const carried = boundedImageAttachments(attachments);
+    if (carried.length !== attachments.length || carried.some((image) => !image.dataUrl)) return false;
+    sawImage = true;
+  }
+  return sawImage;
+}
+
+export function imageAttachmentsFromMessages(messages, anchorMessageIds) {
+  const wanted = new Set(Array.isArray(anchorMessageIds) ? anchorMessageIds : []);
+  const images = [];
+  const seen = new Set();
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!wanted.has(message?.id)) continue;
+    for (const image of boundedImageAttachments(message?.attachments)) {
+      const key = image.dataUrl || image.artifactRef;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      images.push(image);
+      if (images.length >= 4) return images;
+    }
+  }
+  return images;
+}
+
+export function attachmentRefsFromMessages(messages, anchorMessageIds) {
+  const wanted = new Set(Array.isArray(anchorMessageIds) ? anchorMessageIds : []);
+  const refs = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!wanted.has(message?.id)) continue;
+    const values = Array.isArray(message?.attachmentRefs) ? message.attachmentRefs : [];
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const ref = value.trim();
+      if (!ref || ref.length > 500 || refs.includes(ref)) continue;
+      refs.push(ref);
+      if (refs.length >= 16) return refs;
+    }
+  }
+  return refs;
 }
 
 function quotesFor(ids, messages) {

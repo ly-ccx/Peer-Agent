@@ -259,6 +259,89 @@ test('开任务全链路：冻结模型、子会话、委托消息、计划、�
   }
 });
 
+test('开任务时把锚点上的附件引用带进任务', { timeout: 20_000 }, async () => {
+  const env = await harness();
+  try {
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'anchor-shot',
+      role: 'user',
+      kind: 'user_input',
+      content: '看这张图',
+      attachmentRefs: ['local-appshot-artifact://abc-123'],
+      attachments: [{
+        id: 'att-shot',
+        kind: 'image',
+        name: 'Appshot — TextEdit',
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,AA==',
+        artifactRef: 'local-appshot-artifact://abc-123',
+      }],
+    });
+    const opened = await env.supervisor.spawn(
+      spawnInput({ anchorMessageIds: ['anchor-shot'], title: '看图', brief: '看这张截图' }),
+      contextOf(env, { inputId: 'input-shot' }),
+    );
+    assert.equal(opened.status, 'running');
+    const children = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' });
+    const child = env.conversationStore.getConversation(children[0].id);
+    assert.deepEqual(child.messages[0].attachmentRefs, ['local-appshot-artifact://abc-123']);
+    assert.equal(child.messages[0].attachments[0].dataUrl, 'data:image/png;base64,AA==');
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test('未解析的附件和工具结果仍然挡住开任务', { timeout: 20_000 }, async () => {
+  const env = await harness();
+  try {
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'anchor-ref-only',
+      role: 'user',
+      kind: 'user_input',
+      content: '只有引用',
+      attachments: [{
+        id: 'att-ref',
+        kind: 'image',
+        name: 'opaque',
+        artifactRef: 'local-appshot-artifact://abc-123',
+      }],
+    });
+    const opaque = await env.supervisor.spawn(
+      spawnInput({ anchorMessageIds: ['anchor-ref-only'], title: '看引用', brief: '只有引用' }),
+      contextOf(env, { inputId: 'input-ref' }),
+    );
+    assert.equal(opaque.error, 'spawn_failed');
+    assert.equal(opaque.message, 'BACKGROUND_CONFIRMATION_REQUIRED');
+
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'tool-row',
+      role: 'tool',
+      content: '工具结果',
+    });
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'anchor-after-tool',
+      role: 'user',
+      kind: 'user_input',
+      content: '看这张图',
+      attachments: [{
+        id: 'att-shot',
+        kind: 'image',
+        name: 'Appshot — TextEdit',
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,AA==',
+      }],
+    });
+    const blocked = await env.supervisor.spawn(
+      spawnInput({ anchorMessageIds: ['anchor-after-tool'], title: '看图', brief: '看这张截图' }),
+      contextOf(env, { inputId: 'input-blocked' }),
+    );
+    assert.equal(blocked.error, 'spawn_failed');
+    assert.equal(blocked.message, 'BACKGROUND_CONFIRMATION_REQUIRED');
+  } finally {
+    await env.cleanup();
+  }
+});
+
 test('模型不可用时不建任何对象', { timeout: 20_000 }, async () => {
   const env = await harness({
     catalog: [

@@ -150,3 +150,25 @@ test('历史引用只在提供时写入，缺省或非法时不出现', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('截图缩略图随输入进入对话消息', () => {
+  const root = tempRoot();
+  try {
+    const { queue, messages } = harness(root);
+    const saved = queue.submitInput(input(randomUUID(), 'Appshot — TextEdit', {
+      attachmentRefs: ['local-appshot-artifact://abc-123'],
+      attachments: [{
+        kind: 'image',
+        name: 'Appshot — TextEdit',
+        dataUrl: 'data:image/png;base64,AA==',
+        artifactRef: 'local-appshot-artifact://abc-123',
+      }],
+    }));
+    assert.equal(saved.attachments[0].dataUrl, 'data:image/png;base64,AA==');
+    queue.consume('ws-1');
+    assert.equal(messages[0].attachments[0].dataUrl, 'data:image/png;base64,AA==');
+    assert.equal(messages[0].attachments[0].kind, 'image');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

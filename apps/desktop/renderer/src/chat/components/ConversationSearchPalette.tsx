@@ -13,12 +13,26 @@ type PaletteItem =
   | { readonly kind: 'conversation'; readonly conversation: SearchConversationHit }
   | { readonly kind: 'new-task' };
 
+export interface ProjectSearchHit {
+  readonly id: string;
+  readonly kind: 'bot' | 'message' | 'task' | 'memory';
+  readonly workspaceId: string;
+  readonly title: string;
+  readonly text: string;
+  readonly messageId?: string;
+  readonly sessionId?: string;
+  readonly memoryId?: string;
+  readonly updatedAt?: string;
+}
+
 interface ConversationSearchPaletteProps {
   readonly open: boolean;
   readonly i18n: I18nRuntime;
   readonly activeWorkspace?: string | null;
+  readonly mode?: 'classic' | 'bots';
   readonly onClose: () => void;
   readonly onSelectConversation: (hit: SearchConversationHit) => void | Promise<void>;
+  readonly onSelectHit?: (hit: ProjectSearchHit) => void;
   readonly onNewTask: () => void | Promise<void>;
 }
 
@@ -113,16 +127,79 @@ function highlightTitle(title: string, query: string): ReactNode {
   );
 }
 
+const SEARCH_KIND_LABEL = {
+  bot: 'projectAgent.search.section.bots',
+  message: 'projectAgent.search.section.messages',
+  task: 'projectAgent.search.section.tasks',
+  memory: 'projectAgent.search.section.memory',
+} as const;
+
+function BotSearchSections({
+  hits,
+  loading,
+  query,
+  activeIndex,
+  i18n,
+  onHover,
+  onSelect,
+}: {
+  readonly hits: readonly ProjectSearchHit[];
+  readonly loading: boolean;
+  readonly query: string;
+  readonly activeIndex: number;
+  readonly i18n: I18nRuntime;
+  readonly onHover: (index: number) => void;
+  readonly onSelect: (hit: ProjectSearchHit) => void;
+}) {
+  const kinds = ['bot', 'message', 'task', 'memory'] as const;
+  return (
+    <>
+      {hits.length === 0 && !loading ? (
+        <div className="conversation-search-empty">{i18n.t('projectAgent.search.empty')}</div>
+      ) : null}
+      {kinds.map((kind) => {
+        const rows = hits
+          .map((hit, index) => ({ hit, index }))
+          .filter((row) => row.hit.kind === kind);
+        if (rows.length === 0) return null;
+        return (
+          <section key={kind} className="conversation-search-workspace-group">
+            <div className="conversation-search-section-label">{i18n.t(SEARCH_KIND_LABEL[kind])}</div>
+            {rows.map(({ hit, index }) => (
+              <button
+                key={hit.id}
+                type="button"
+                className={`conversation-search-item${activeIndex === index ? ' is-active' : ''}`}
+                data-search-index={index}
+                onMouseEnter={() => onHover(index)}
+                onClick={() => onSelect(hit)}
+              >
+                <div className="conversation-search-item-main">
+                  <div className="conversation-search-item-title">{highlightTitle(hit.title || hit.text, query)}</div>
+                </div>
+                {index < 9 ? <kbd className="conversation-search-item-shortcut">⌘{index + 1}</kbd> : null}
+              </button>
+            ))}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
 export function ConversationSearchPalette({
   open,
   i18n,
   activeWorkspace,
+  mode = 'classic',
   onClose,
   onSelectConversation,
+  onSelectHit,
   onNewTask,
 }: ConversationSearchPaletteProps) {
   const [query, setQuery] = useState('');
   const [catalog, setCatalog] = useState<readonly SearchConversationHit[]>([]);
+  const [botHits, setBotHits] = useState<readonly ProjectSearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -131,7 +208,7 @@ export function ConversationSearchPalette({
 
   // Reset query + focus when opening; load the active catalog once per open.
   useEffect(() => {
-    if (!open) return;
+    if (!open || mode === 'bots') return;
     setQuery('');
     setActiveIndex(0);
     setLoading(true);
@@ -153,7 +230,38 @@ export function ConversationSearchPalette({
     return () => {
       window.clearTimeout(focusTimer);
     };
-  }, [open]);
+  }, [mode, open]);
+
+  useEffect(() => {
+    if (!open || mode !== 'bots') return undefined;
+    setQuery('');
+    setActiveIndex(0);
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [mode, open]);
+
+  useEffect(() => {
+    if (!open || mode !== 'bots') return undefined;
+    setLoading(true);
+    const seq = ++loadSeq.current;
+    const handle = window.setTimeout(() => {
+      void clientApi.projectAgentSearch({ query }).then((result) => {
+        if (seq !== loadSeq.current) return;
+        const hits = Array.isArray(result?.hits) ? result.hits : [];
+        setBotHits(hits.filter((hit): hit is ProjectSearchHit => (
+          Boolean(hit)
+          && (hit.kind === 'bot' || hit.kind === 'message' || hit.kind === 'task' || hit.kind === 'memory')
+          && typeof hit.workspaceId === 'string'
+        )));
+        setLoading(false);
+      }).catch(() => {
+        if (seq !== loadSeq.current) return;
+        setBotHits([]);
+        setLoading(false);
+      });
+    }, 80);
+    return () => window.clearTimeout(handle);
+  }, [mode, open, query]);
 
   // Typing only re-ranks the in-memory catalog — no IPC, no debounce needed.
   const rankedResults = useMemo(
@@ -224,7 +332,8 @@ export function ConversationSearchPalette({
             }
             if (event.key === 'ArrowDown') {
               event.preventDefault();
-              setActiveIndex((index) => Math.min(items.length - 1, index + 1));
+              const last = mode === 'bots' ? Math.max(0, botHits.length - 1) : items.length - 1;
+              setActiveIndex((index) => Math.min(last, index + 1));
               return;
             }
             if (event.key === 'ArrowUp') {
@@ -234,13 +343,31 @@ export function ConversationSearchPalette({
             }
             if (event.key === 'Enter') {
               event.preventDefault();
+              if (mode === 'bots') {
+                const hit = botHits[activeIndex];
+                if (hit) {
+                  requestClose();
+                  onSelectHit?.(hit);
+                }
+                return;
+              }
               const item = items[activeIndex];
               if (item) void activateItem(item, requestClose);
               return;
             }
-            // ⌘1–⌘9 jump to first 9 conversation rows (not Suggested).
+            // ⌘1–⌘9 jump to the first 9 results. In the classic palette that is
+            // still a conversation row, not the suggested new-task row.
             if ((event.metaKey || event.ctrlKey) && /^[1-9]$/.test(event.key)) {
               const target = Number(event.key) - 1;
+              if (mode === 'bots') {
+                const hit = botHits[target];
+                if (hit) {
+                  event.preventDefault();
+                  requestClose();
+                  onSelectHit?.(hit);
+                }
+                return;
+              }
               const conversationItems = items.filter((item) => item.kind === 'conversation');
               const item = conversationItems[target];
               if (item) {
@@ -260,8 +387,8 @@ export function ConversationSearchPalette({
               className="conversation-search-input"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={i18n.t('searchChats.placeholder')}
-              aria-label={i18n.t('searchChats.placeholder')}
+              placeholder={mode === 'bots' ? i18n.t('projectAgent.search.placeholder') : i18n.t('searchChats.placeholder')}
+              aria-label={mode === 'bots' ? i18n.t('projectAgent.search.placeholder') : i18n.t('searchChats.placeholder')}
               autoComplete="off"
               spellCheck={false}
             />
@@ -269,11 +396,25 @@ export function ConversationSearchPalette({
           </div>
 
           <div className="conversation-search-body" ref={listRef}>
-            <div className="conversation-search-section-label">{i18n.t('searchChats.section.chats')}</div>
-            {results.length === 0 && !loading ? (
+            {mode === 'bots' ? (
+              <BotSearchSections
+                hits={botHits}
+                loading={loading}
+                query={query}
+                activeIndex={activeIndex}
+                i18n={i18n}
+                onHover={setActiveIndex}
+                onSelect={(hit) => {
+                  onSelectHit?.(hit);
+                  requestClose();
+                }}
+              />
+            ) : null}
+            {mode === 'bots' ? null : <div className="conversation-search-section-label">{i18n.t('searchChats.section.chats')}</div>}
+            {mode !== 'bots' && results.length === 0 && !loading ? (
               <div className="conversation-search-empty">{i18n.t('searchChats.empty')}</div>
             ) : null}
-            {workspaceGroups.map((group, groupIndex) => {
+            {mode === 'bots' ? null : workspaceGroups.map((group, groupIndex) => {
               const groupStartIndex = workspaceGroups
                 .slice(0, groupIndex)
                 .reduce((total, previous) => total + previous.conversations.length, 0);
@@ -320,20 +461,24 @@ export function ConversationSearchPalette({
               );
             })}
 
-            <div className="conversation-search-section-label conversation-search-section-suggested">
-              {i18n.t('searchChats.section.suggested')}
-            </div>
-            <button
-              type="button"
-              className={`conversation-search-item conversation-search-item-suggested${activeIndex === results.length ? ' is-active' : ''}`}
-              data-search-index={results.length}
-              onMouseEnter={() => setActiveIndex(results.length)}
-              onClick={() => { void activateItem({ kind: 'new-task' }, requestClose); }}
-            >
-              <div className="conversation-search-item-main">
-                <div className="conversation-search-item-title">{i18n.t('searchChats.newTask')}</div>
+            {mode === 'bots' ? null : (
+              <div className="conversation-search-section-label conversation-search-section-suggested">
+                {i18n.t('searchChats.section.suggested')}
               </div>
-            </button>
+            )}
+            {mode === 'bots' ? null : (
+              <button
+                type="button"
+                className={`conversation-search-item conversation-search-item-suggested${activeIndex === results.length ? ' is-active' : ''}`}
+                data-search-index={results.length}
+                onMouseEnter={() => setActiveIndex(results.length)}
+                onClick={() => { void activateItem({ kind: 'new-task' }, requestClose); }}
+              >
+                <div className="conversation-search-item-main">
+                  <div className="conversation-search-item-title">{i18n.t('searchChats.newTask')}</div>
+                </div>
+              </button>
+            )}
           </div>
         </div>
       )}

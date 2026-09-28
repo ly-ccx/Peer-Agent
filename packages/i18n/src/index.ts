@@ -79,6 +79,12 @@ export type TranslationKey =
   | 'projectAgent.onboarding.createTitle'
   | 'projectAgent.onboarding.createBody'
   | 'projectAgent.onboarding.createAction'
+  | 'projectAgent.search.placeholder'
+  | 'projectAgent.search.empty'
+  | 'projectAgent.search.section.bots'
+  | 'projectAgent.search.section.messages'
+  | 'projectAgent.search.section.tasks'
+  | 'projectAgent.search.section.memory'
   | 'projectAgent.list.loading'
   | 'projectAgent.list.unavailable'
   | 'projectAgent.list.loadFailed'
@@ -1127,6 +1133,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.onboarding.createTitle': '新建机器人',
     'projectAgent.onboarding.createBody': '绑定一个文件夹，或建一个空白机器人。',
     'projectAgent.onboarding.createAction': '新建机器人',
+    'projectAgent.search.placeholder': '搜索机器人、消息、任务、记忆',
+    'projectAgent.search.empty': '没有匹配',
+    'projectAgent.search.section.bots': '机器人',
+    'projectAgent.search.section.messages': '消息',
+    'projectAgent.search.section.tasks': '任务',
+    'projectAgent.search.section.memory': '记忆',
     'projectAgent.list.loading': '正在读取机器人',
     'projectAgent.list.unavailable': '项目代理没有打开',
     'projectAgent.list.loadFailed': '机器人列表没有读出来',
@@ -1973,6 +1985,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.onboarding.createTitle': 'New bot',
     'projectAgent.onboarding.createBody': 'Bind a folder, or create a blank bot.',
     'projectAgent.onboarding.createAction': 'New bot',
+    'projectAgent.search.placeholder': 'Search bots, messages, tasks, and memory',
+    'projectAgent.search.empty': 'No matches',
+    'projectAgent.search.section.bots': 'Bots',
+    'projectAgent.search.section.messages': 'Messages',
+    'projectAgent.search.section.tasks': 'Tasks',
+    'projectAgent.search.section.memory': 'Memory',
     'projectAgent.list.loading': 'Loading bots',
     'projectAgent.list.unavailable': 'Project agent is off',
     'projectAgent.list.loadFailed': 'The bot list did not load',

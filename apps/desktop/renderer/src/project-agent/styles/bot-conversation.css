@@ -90,6 +90,19 @@
   padding: 2px 8px;
 }
 
+.bot-user-images {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-user-images img {
+  max-width: 240px;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
 .bot-user-text,
 .bot-user-quote,
 .bot-card p,
@@ -115,6 +128,7 @@
   align-self: flex-start;
 }
 
+.bot-user.is-anchored,
 .bot-reply.is-anchored,
 .bot-system.is-anchored {
   outline: 2px solid var(--frost-separator, var(--separator));

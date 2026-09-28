@@ -197,6 +197,18 @@ body:has(.quick-chat-shell) {
   white-space: nowrap;
 }
 
+select.quick-chat-workspace-name {
+  min-width: 0;
+  max-width: 220px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
 .quick-chat-chevron {
   display: block;
   width: 12px;
