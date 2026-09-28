@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, watchFile, unwatchFile } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
@@ -1773,22 +1773,33 @@ export function createConversationStore(options = {}) {
     };
   }
 
+  function readChangeEvent(changeFile) {
+    try {
+      const event = JSON.parse(readFileSync(changeFile, 'utf8'));
+      return event?.revision ? event : null;
+    } catch {
+      // 文件可能还不存在，或正处在一次写入的中间。
+      return null;
+    }
+  }
+
   function subscribeChanges(listener, { interval = 200 } = {}) {
     const changeFile = path.join(storeDir, '.changes.json');
     mkdirSync(storeDir, { recursive: true });
-    let lastRevision = null;
+    // fs.watchFile 走 libuv fs_poll：第一次成功 stat 只当作基线，不会回调。
+    // 订阅之后、这次 stat 返回之前写入的变更会被吞掉，后续没有第二次修改就永远看不到。
+    // 改为按内容轮询。订阅当下的 revision 记为已读，避免把历史变更重放给新订阅者。
+    const period = Number.isFinite(interval) && interval >= 1 ? interval : 200;
+    let lastRevision = readChangeEvent(changeFile)?.revision ?? null;
     const handleChange = () => {
-      try {
-        const event = JSON.parse(readFileSync(changeFile, 'utf8'));
-        if (!event?.revision || event.revision === lastRevision) return;
-        lastRevision = event.revision;
-        listener(event);
-      } catch {
-        // The journal may not exist yet or may be between atomic observations.
-      }
+      const event = readChangeEvent(changeFile);
+      if (!event || event.revision === lastRevision) return;
+      lastRevision = event.revision;
+      listener(event);
     };
-    watchFile(changeFile, { interval, persistent: false }, handleChange);
-    return () => unwatchFile(changeFile, handleChange);
+    const timer = setInterval(handleChange, period);
+    timer.unref?.();
+    return () => clearInterval(timer);
   }
 
   return {

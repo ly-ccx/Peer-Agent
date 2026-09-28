@@ -292,6 +292,22 @@ export { memorySecretReason } from './memory/memory-redaction.mjs';
 export { createSnapshot, readSnapshots } from './memory/memory-snapshot.mjs';
 export { createMemoryProvider } from './memory/memory-provider.mjs';
 export {
+  CURATOR_INTERVAL_MS,
+  USER_INPUTS_PER_RUN,
+  createEpisodeLog,
+  isTaskEndEvent,
+} from './memory/episodes.mjs';
+export {
+  decideMemoryAdmission,
+  parseCuratorOutput,
+  validateCuratorCandidate,
+} from './memory/admission-policy.mjs';
+export {
+  CURATOR_EXCLUDED_CAPABILITY_PREFIXES,
+  createMemoryCurator,
+  curatorTurnRequest,
+} from './memory/curator.mjs';
+export {
   aggregateProgress,
   applyGoalTimingTransition,
   canConsumeRequestedUserInput,

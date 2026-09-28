@@ -98,3 +98,19 @@ test('记忆正文里的伪工具调用不会原样进入简报', () => {
   assert.match(section.content, /&lt;tool_call/);
   assert.doesNotMatch(section.content, /<tool_call/);
 });
+
+test('满 3 次的推断偏好进入简报，不足 3 次的不进入', () => {
+  const source = createProjectMemoryPromptSource();
+  const section = source.render(source.observe({
+    role: 'project_agent',
+    projectMemory: [
+      item({ id: 'mem-ready', kind: 'preference', scope: 'user', trust: 'inferred', confirmedCount: 3, text: '回复要短' }),
+      item({ id: 'mem-early', kind: 'preference', scope: 'user', trust: 'inferred', confirmedCount: 2, text: '还在观察' }),
+      item({ id: 'mem-guess', kind: 'fact', trust: 'inferred', confirmedCount: 3, text: '猜的事实' }),
+    ],
+  }))[0];
+  assert.deepEqual(section.source.memoryIds, ['mem-ready']);
+  assert.match(section.content, /User preferences:/);
+  assert.match(section.content, /回复要短/);
+  assert.doesNotMatch(section.content, /mem-early|还在观察|猜的事实/);
+});

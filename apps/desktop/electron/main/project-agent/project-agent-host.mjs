@@ -8,6 +8,8 @@ import {
   createBotProfileStore,
   createInputQueue,
   createMemoryStore,
+  createEpisodeLog,
+  createMemoryCurator,
   createDigestQueue,
   createProjectAgentRunner,
   inQuietHours,
@@ -18,15 +20,18 @@ import {
   resolveRoleRoute,
 } from '@peer-agent/runtime-node';
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
+import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
+import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { createProjectMemoryIpcRegistrations } from '../ipc/register-project-memory-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
 import { installProjectProactivity } from './proactivity-port.mjs';
 import { installDeliveryFacts } from './delivery-facts-port.mjs';
 import { installMemoryGate, memoryUseEnabled } from './memory-gate-port.mjs';
+import { liveMemoryIndex } from './memory-index-port.mjs';
 import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 
@@ -48,6 +53,7 @@ export function createProjectAgentHost({
   getWindows = () => [],
   now,
   retryDelays,
+  onCurator = null,
   inbox = null,
   inputQueue = null,
   readSettings = null,
@@ -117,6 +123,9 @@ export function createProjectAgentHost({
         const date = message?.meta?.digestDate;
         if (typeof date === 'string') digests.acknowledge(workspaceId, date);
       },
+      onCurator: typeof onCurator === 'function'
+        ? (info) => onCurator({ ...info, workspaceId })
+        : null,
     });
     runners.set(workspaceId, runner);
     return runner;
@@ -305,6 +314,49 @@ export function registerDesktopProjectAgent({
       return memoryUseEnabled({ settings, profile });
     },
   });
+  const memoryCurator = createMemoryCurator({
+    store: memoryStore,
+    episodes: createEpisodeLog({ rootDir: dataHome }),
+    learnPreferences: () => getSettings()?.memory?.learnPreferences !== false,
+    memoryEnabled: (workspaceId) => {
+      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const profile = workspaceId ? profileStore.read(workspaceId) : null;
+      return memoryUseEnabled({ settings, profile });
+    },
+    resolveEvidence(ref) {
+      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return '';
+      let records = [];
+      try {
+        records = goalPlanStore.findEvidenceIndexRecords([ref]) || [];
+      } catch {
+        return '';
+      }
+      const record = records[0];
+      if (!record) return '';
+      const body = evidenceBodyFromRecord(record, (artifactRef) => readRegisteredArtifact(dataHome, artifactRef, record));
+      return typeof body?.text === 'string' ? body.text : '';
+    },
+    contradicts(workspaceId) {
+      const folder = registry.get(workspaceId)?.path;
+      if (typeof folder !== 'string' || !folder) return [];
+      try {
+        return readProjectInstructionLines(folder);
+      } catch {
+        return [];
+      }
+    },
+    runTurn: (request) => runMemoryCuratorTurn({
+      request,
+      getSettings,
+      resolveRoute: (input) => (
+        typeof agentTurnExecutor?.resolveGoalRole === 'function'
+          ? agentTurnExecutor.resolveGoalRole({ role: 'memory_curator', ...input })
+          : null
+      ),
+      runTurn: (input) => agentTurnExecutor.runTurn(input),
+    }),
+    onWrote: () => liveMemoryIndex().rebuild(),
+  });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
@@ -368,6 +420,7 @@ export function registerDesktopProjectAgent({
     hasMessage,
     appendMessage,
     executeTurn: (input) => agentTurnExecutor.runTurn(input),
+    onCurator: (info) => memoryCurator.consider(info),
     inputQueue,
     readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),

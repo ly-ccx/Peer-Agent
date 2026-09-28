@@ -1,7 +1,8 @@
 /**
  * 记忆真源。项目条目在 projects/<workspaceId>/memory/items.jsonl，
  * 用户偏好在 memory/items.jsonl。只追加，按 id 折叠，最后一行有效。
- * 坏行跳过。inferred 本卡不写入。
+ * 坏行跳过。工具路径不写 inferred。
+ * inferred 偏好只由 Curator 在 3 个不同 episode 之后经 writeCurated 写入。
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -105,7 +106,13 @@ export function createMemoryStore({
     const id = clip(input.id, 200);
     const text = clip(input.text, TEXT_MAX);
     if (!id || !text || !KINDS.has(input.kind)) return null;
-    if (input.trust !== 'stated' && input.trust !== 'verified') return null;
+    const inferredPreference = input.trust === 'inferred'
+      && input.kind === 'preference'
+      && input.scope === 'user'
+      && (input.status === 'active' || input.status === 'forgotten')
+      && Number.isInteger(input.confirmedCount)
+      && input.confirmedCount >= 3;
+    if (input.trust !== 'stated' && input.trust !== 'verified' && !inferredPreference) return null;
     if (input.status !== 'active' && input.status !== 'forgotten') return null;
     if (input.scope !== 'project' && input.scope !== 'user') return null;
     if (input.scope === 'project' && !isMemoryWorkspaceId(input.workspaceId)) return null;
@@ -244,6 +251,31 @@ export function createMemoryStore({
     return { ok: true, item: copyItem(record) };
   }
 
+  function writeCurated(input = {}) {
+    if (input?.trust !== 'inferred' || input?.kind !== 'preference') return fail('invalid_input');
+    if (!Number.isInteger(input.confirmedCount) || input.confirmedCount < 3) return fail('preference_unconfirmed');
+    const built = draft(input, 'inferred');
+    if (!built.ok) return built;
+    if (!Array.isArray(input.sourceRefs) || input.sourceRefs.length < 3 || input.sourceRefs.length > REF_COUNT) {
+      return fail('source_refs_required');
+    }
+    const sourceRefs = [];
+    for (const ref of input.sourceRefs) {
+      const next = clip(ref, REF_MAX);
+      if (!next) return fail('source_refs_required');
+      if (memorySecretReason(next)) return fail('sensitive');
+      sourceRefs.push(next);
+    }
+    const record = {
+      ...built.record,
+      trust: 'inferred',
+      confirmedCount: input.confirmedCount,
+      sourceRefs,
+    };
+    append(fileFor(record), record);
+    return { ok: true, item: copyItem(record) };
+  }
+
   function writeVerified(input = {}) {
     const built = draft(input, 'verified');
     if (!built.ok) return built;
@@ -376,6 +408,7 @@ export function createMemoryStore({
   return {
     rememberStated,
     writeVerified,
+    writeCurated,
     forget,
     restore,
     setPinned,
