@@ -14,6 +14,8 @@ import {
   createProjectAgentRunner,
   inQuietHours,
   createProjectInbox,
+  createWatchPublisher,
+  delegationFactsForWorkspace,
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
@@ -60,6 +62,8 @@ export function createProjectAgentHost({
   digestQueue = null,
   schedule = null,
   clearSchedule = null,
+  readFacts = null,
+  subscribePlans = null,
 } = {}) {
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
@@ -91,11 +95,27 @@ export function createProjectAgentHost({
     });
   }
 
+  const watch = typeof readFacts === 'function' ? createWatchPublisher({ now }) : null;
+
   function drop(workspaceId) {
     const runner = runners.get(workspaceId);
     if (!runner) return;
     runner.dispose();
     runners.delete(workspaceId);
+  }
+
+  function publishWatch(workspaceId) {
+    if (!watch) return [];
+    let facts = { sessions: [] };
+    try {
+      facts = readFacts(workspaceId) || { sessions: [] };
+    } catch {
+      return [];
+    }
+    const events = watch.publish(workspaceId, facts);
+    if (events.length === 0) return [];
+    const saved = inboxStore.append(workspaceId, events);
+    return Array.isArray(saved?.appended) ? saved.appended : [];
   }
 
   function ensureRunner(workspaceId, conversationId) {
@@ -151,9 +171,10 @@ export function createProjectAgentHost({
     for (const { workspaceId, conversationId } of wanted) {
       const runner = ensureRunner(workspaceId, conversationId);
       const due = armDigest(runner, workspaceId);
+      const watched = publishWatch(workspaceId);
       const consumed = queue.consume(workspaceId);
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (!consumed.skipped || due) runs.push(runner.kick());
+      else if (!consumed.skipped || due || watched.length > 0) runs.push(runner.kick());
     }
     await Promise.all(runs);
     return { workspaces: wanted.map((item) => item.workspaceId) };
@@ -196,7 +217,10 @@ export function createProjectAgentHost({
   const useSchedule = typeof schedule === 'function' ? schedule : setTimeout;
   const useClearSchedule = typeof clearSchedule === 'function' ? clearSchedule : clearTimeout;
   let digestHandle = null;
+  let watchHandle = null;
+  let watchSoonHandle = null;
   let hostDisposed = false;
+  let unsubscribePlans = () => {};
 
   function clearDigestHandle() {
     if (digestHandle == null) return;
@@ -234,9 +258,88 @@ export function createProjectAgentHost({
 
   if (typeof readSettings === 'function') planDigestClock(0);
 
+  function clearWatchHandle() {
+    if (watchHandle == null) return;
+    useClearSchedule(watchHandle);
+    watchHandle = null;
+  }
+
+  function clearWatchSoon() {
+    if (watchSoonHandle == null) return;
+    useClearSchedule(watchSoonHandle);
+    watchSoonHandle = null;
+  }
+
+  async function sweepWatch() {
+    if (!watch || hostDisposed) return 30_000;
+    const listed = listWorkspaceIds();
+    const seen = new Set();
+    const runs = [];
+    const at = typeof now === 'function' ? now() : new Date();
+    const atIso = at instanceof Date ? at.toISOString() : (typeof at === 'string' ? at : new Date().toISOString());
+    let delay = 30_000;
+    for (const workspaceId of listed) {
+      if (typeof workspaceId !== 'string' || seen.has(workspaceId)) continue;
+      seen.add(workspaceId);
+      if (holdsLease(workspaceId) !== true) continue;
+      const conversationId = resolveConversationId(workspaceId);
+      if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
+      const runner = ensureRunner(workspaceId, conversationId.trim());
+      const watched = publishWatch(workspaceId);
+      if (watched.length > 0) runs.push(runner.kick());
+      delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
+    }
+    await Promise.all(runs);
+    return delay;
+  }
+
+  function planWatchClock(delay) {
+    clearWatchHandle();
+    if (hostDisposed || !watch) return;
+    watchHandle = useSchedule(() => {
+      watchHandle = null;
+      return Promise.resolve()
+        .then(() => sweepWatch())
+        .then((next) => {
+          if (!hostDisposed) planWatchClock(next);
+        })
+        .catch(() => {
+          if (!hostDisposed) planWatchClock(30_000);
+        });
+    }, delay);
+  }
+
+  function scheduleSweepSoon() {
+    if (hostDisposed || !watch || watchSoonHandle != null) return;
+    watchSoonHandle = useSchedule(() => {
+      watchSoonHandle = null;
+      return Promise.resolve()
+        .then(() => sweepWatch())
+        .then((next) => {
+          if (!hostDisposed) planWatchClock(next);
+        })
+        .catch(() => {});
+    }, 1000);
+  }
+
+  if (watch) {
+    if (typeof subscribePlans === 'function') {
+      try {
+        const unsubscribe = subscribePlans(() => { scheduleSweepSoon(); });
+        if (typeof unsubscribe === 'function') unsubscribePlans = unsubscribe;
+      } catch {
+        unsubscribePlans = () => {};
+      }
+    }
+    planWatchClock(0);
+  }
+
   function dispose() {
     hostDisposed = true;
     clearDigestHandle();
+    clearWatchHandle();
+    clearWatchSoon();
+    try { unsubscribePlans(); } catch { /* 订阅已经结束 */ }
     for (const workspaceId of [...runners.keys()]) drop(workspaceId);
   }
 
@@ -424,6 +527,15 @@ export function registerDesktopProjectAgent({
     inputQueue,
     readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
+    readFacts: (workspaceId) => delegationFactsForWorkspace(
+      typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [],
+      workspaceId,
+    ),
+    subscribePlans: (listener) => (
+      typeof goalPlanStore?.subscribeChanges === 'function'
+        ? goalPlanStore.subscribeChanges(() => { listener(); })
+        : () => {}
+    ),
   });
   const projectAgent = createProjectAgentApplicationService({
     enabled,

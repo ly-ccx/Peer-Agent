@@ -237,6 +237,15 @@ export {
   delegationEventId,
   mapDelegationEvents,
 } from './project-agent/event-mapper.mjs';
+export {
+  STALL_WINDOW_MS,
+  assessSameCause,
+  assessStall,
+  delegationFactsForWorkspace,
+  describeFailure,
+  watchFactsFromPlan,
+} from './project-agent/watchdog.mjs';
+export { createWatchPublisher } from './project-agent/watch-publisher.mjs';
 export { createProjectInbox } from './project-agent/project-inbox.mjs';
 export {
   HOST_LEASE_HEARTBEAT_MS,

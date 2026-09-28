@@ -6,7 +6,9 @@ import {
   STALL_WINDOW_MS,
   assessSameCause,
   assessStall,
+  delegationFactsForWorkspace,
   describeFailure,
+  watchFactsFromPlan,
 } from './watchdog.mjs';
 
 const STARTED = '2026-09-27T00:00:00.000Z';
@@ -119,4 +121,108 @@ test('同一任务同一原因满 3 次才停止自动重试，不同原因另�
   assert.equal(otherCause.count, 1);
   assert.equal(otherCause.askUser, false);
   assert.equal(assessSameCause({ sessionId: 'session-1', status: 'failed' }).count, 0);
+});
+
+test('计划上的重试记录和等待用户会进入同一套判断', () => {
+  const runningPlan = watchFactsFromPlan({
+    planId: 'plan-1',
+    status: 'executing',
+    createdAt: STARTED,
+    delegationOrigin: { sessionId: 'session-1', workspaceId: 'ws-1', phase: 'running' },
+    runner: { status: 'running' },
+    tasks: [
+      { taskId: 'orient', status: 'pending' },
+      {
+        taskId: 'scan',
+        status: 'completed',
+        updatedAt: '2026-09-27T00:05:00.000Z',
+        subtasks: [],
+      },
+    ],
+  });
+  assert.equal(runningPlan.status, 'running');
+  assert.equal(runningPlan.lastProgressAt, '2026-09-27T00:05:00.000Z');
+  assert.equal(assessStall(runningPlan, { now: TEN_MINUTES }).stalled, false);
+
+  const waiting = watchFactsFromPlan({
+    planId: 'plan-1',
+    status: 'executing',
+    createdAt: STARTED,
+    delegationOrigin: { sessionId: 'session-1', workspaceId: 'ws-1', phase: 'running' },
+    runner: { status: 'waiting_user' },
+  });
+  assert.equal(waiting.status, 'waiting_user');
+  assert.equal(waiting.needsUser[0].kind, 'question');
+  assert.equal(assessStall(waiting, { now: TEN_MINUTES }).stalled, false);
+
+  const failed = watchFactsFromPlan({
+    planId: 'plan-1',
+    status: 'interrupted',
+    createdAt: STARTED,
+    delegationOrigin: { sessionId: 'session-1', workspaceId: 'ws-1', phase: 'running' },
+    runner: {
+      status: 'failed',
+      lastError: 'boom',
+      interruption: { source: 'runGoalTurn', reason: 'boom', interruptedAt: STARTED },
+      recoverableInterruptionCount: 2,
+    },
+    runTrace: {
+      events: [
+        { type: 'step_failed', payload: { reason: 'boom' } },
+        { type: 'network_interrupted', payload: { reason: 'boom' } },
+        { type: 'problem_found', payload: { message: 'boom', reason: 'runGoalTurn' } },
+      ],
+    },
+  });
+  assert.equal(failed.status, 'interrupted');
+  const third = assessSameCause(failed);
+  assert.equal(third.count, 3);
+  assert.equal(third.askUser, true);
+
+  const other = assessSameCause(watchFactsFromPlan({
+    planId: 'plan-1',
+    status: 'interrupted',
+    delegationOrigin: { sessionId: 'session-1', workspaceId: 'ws-1', phase: 'running' },
+    runner: {
+      status: 'failed',
+      lastError: 'boom',
+      interruption: { reason: 'boom' },
+      recoverableInterruptionCount: 2,
+    },
+    runTrace: {
+      events: [
+        { type: 'step_failed', payload: { reason: 'timeout' } },
+        { type: 'step_failed', payload: { reason: 'timeout' } },
+      ],
+    },
+  }));
+  assert.equal(other.count, 1);
+  assert.equal(other.askUser, false);
+
+  const fromCount = assessSameCause({
+    sessionId: 'session-1',
+    planId: 'plan-1',
+    runner: {
+      lastError: 'boom',
+      interruption: { reason: 'boom' },
+      recoverableInterruptionCount: 2,
+    },
+  });
+  assert.equal(fromCount.count, 3);
+  assert.equal(fromCount.askUser, true);
+
+  const facts = delegationFactsForWorkspace([
+    {
+      planId: 'plan-other',
+      delegationOrigin: { sessionId: 'session-other', workspaceId: 'ws-other', phase: 'running' },
+      status: 'executing',
+    },
+    {
+      planId: 'plan-1',
+      status: 'executing',
+      createdAt: STARTED,
+      delegationOrigin: { sessionId: 'session-1', workspaceId: 'ws-1', phase: 'running' },
+    },
+  ], 'ws-1');
+  assert.deepEqual(facts.sessions.map((session) => session.sessionId), ['session-1']);
 });
