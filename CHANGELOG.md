@@ -8,6 +8,26 @@ All notable changes to Peer Agent are tracked here.
 
 - Nothing yet.
 
+## [0.1.0-beta.3] - 2026-09-28
+
+### Notes
+
+- Third prerelease on the 0.1.0 line. The stable release remains 0.0.18.
+- The default screen is the bot list. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
+
+### Features
+
+- Needs-you cards cover approvals, decisions, and plan approval. The same item is resolved once from the conversation or the task scene.
+- You can fold an interruption into the current task or stop it. A quoted message limits that action to the tasks it cites.
+- Verification detail and evidence can be opened on demand. Proactivity levels, quiet hours, and the daily digest are available.
+- Project memory enters the conversation and has its own page. A background pass extracts memories, and the same failure three times asks you instead of retrying.
+- A stalled task or a repeated failure wakes the bot. Quick chat, screenshots, search, the tray, and shortcuts point at bots.
+
+### Known issues
+
+- One project still runs one task at a time. Project objectives, parallel tasks, remote viewing, and the terminal bot are not in this prerelease.
+- The bot itself cannot write files. Quick chat in bot mode sends text only. A screenshot arrives as a thumbnail.
+
 ## [0.1.0-beta.2] - 2026-09-27
 
 ### Notes

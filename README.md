@@ -54,7 +54,7 @@ Three first-class shells share one unified core runtime:
 > [!NOTE]
 > Current stable release: **`0.0.18`** (npm `latest`). Desktop, TUI/CLI, Agent/Plan/Goal workflows, Automation, MCP, Skills, and the Open Runtime are available today — see [Roadmap](#-roadmap).
 >
-> beta channel **`0.1.0-beta.2`**. The project agent must be turned on in Settings → Developer. Until then, the app stays on the current conversation screen. With the switch on, each project appears as a bot that can talk, open tasks, and remember the project. It cannot write files.
+> beta channel **`0.1.0-beta.3`**. The default screen is the bot list. Each project is a bot that can talk, open tasks, and remember the project. It cannot write files. Settings → General switches back to the classic screen. Older conversations are under each bot's profile → Tasks → History.
 
 ---
 
