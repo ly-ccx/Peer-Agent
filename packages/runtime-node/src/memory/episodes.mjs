@@ -161,6 +161,12 @@ export function createEpisodeLog({ rootDir } = {}) {
       if (!Number.isFinite(lastMs) || !Number.isFinite(atMs)) return true;
       return atMs - lastMs >= CURATOR_INTERVAL_MS;
     },
+    nextDueAt(workspaceId) {
+      const last = readClock(workspaceId).lastRunAt;
+      const lastMs = Date.parse(last || '');
+      const base = Number.isFinite(lastMs) ? lastMs : Date.now();
+      return new Date(base + CURATOR_INTERVAL_MS).toISOString();
+    },
     markRan(workspaceId, atIso) {
       updateClock(workspaceId, (next) => {
         next.lastRunAt = atIso;

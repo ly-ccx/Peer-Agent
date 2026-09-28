@@ -699,3 +699,25 @@ test('回合结束后触发整理，学到的 id 出现在下一条回复', asyn
     box.cleanup();
   }
 });
+
+test('被频率挡住的整理到点后自己再跑，学到的 id 出现在下一条回复', async () => {
+  const box = world('ws-curator-due');
+  const seen = [];
+  try {
+    const runner = runnerFor(box, async () => ({ text: '好' }), {
+      onCurator: async (info) => {
+        seen.push(info.kind);
+        if (info.kind === 'user') return { retryAt: new Date(Date.now() + 30).toISOString() };
+        return { learnedIds: ['mem-due'] };
+      },
+    });
+    await runner.enqueueUserInputs([input('a', '一')]);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(seen, ['user', 'due']);
+    await runner.enqueueUserInputs([input('b', '二')]);
+    const replies = box.messages.filter((message) => message.kind === 'agent_reply');
+    assert.deepEqual(replies[1].meta.memoryLearned, ['mem-due']);
+  } finally {
+    box.cleanup();
+  }
+});

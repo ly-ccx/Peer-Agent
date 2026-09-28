@@ -89,12 +89,15 @@ export function decideMemoryAdmission(raw, context = {}) {
       .filter((ref) => typeof ref === 'string' && ref.trim())
       .map((ref) => ref.trim()),
   );
-  if (item.trust === 'verified') {
+    if (item.trust === 'verified') {
     if (item.kind === 'preference') return { decision: 'reject', reason: 'verified_preference' };
     if (!item.evidenceRefs.some((ref) => resolvable.has(ref))) {
       return { decision: 'reject', reason: 'evidence_unresolved' };
     }
     if (item.untrusted === true) return { decision: 'candidate', reason: 'untrusted_fact' };
+    if (!evidenceSupports(item, resolvable, evidenceTextMap(context))) {
+      return { decision: 'candidate', reason: 'evidence_unsupported' };
+    }
     return { decision: 'activate', reason: 'verified' };
   }
   if (item.kind === 'preference' && item.trust === 'inferred') {
@@ -121,6 +124,30 @@ function episodeCount(context) {
 
 function normalizeText(text) {
   return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function evidenceTextMap(context) {
+  const source = context.evidenceTexts;
+  const map = new Map();
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return map;
+  for (const [ref, text] of Object.entries(source)) {
+    if (typeof ref !== 'string' || typeof text !== 'string') continue;
+    const id = ref.trim();
+    const body = text.trim();
+    if (!id || !body) continue;
+    map.set(id, body);
+  }
+  return map;
+}
+
+function evidenceSupports(item, resolvable, texts) {
+  const needle = normalizeText(item.text);
+  if (!needle) return false;
+  return item.evidenceRefs.some((ref) => {
+    if (!resolvable.has(ref)) return false;
+    const body = texts.get(ref);
+    return typeof body === 'string' && normalizeText(body).includes(needle);
+  });
 }
 
 function unwrapJson(text) {

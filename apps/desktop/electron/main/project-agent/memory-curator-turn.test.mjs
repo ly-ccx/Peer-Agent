@@ -41,3 +41,32 @@ test('整理回合是临时的 memory_curator，省档来自已保存路由', as
   assert.deepEqual(seen[0].turnProfile.excludeCapabilityPrefixes, ['local.']);
   assert.equal(typeof seen[0].streamId, 'string');
 });
+
+test('自动路由的结果优先于省档主模型，花费到顶则不调用模型', async () => {
+  const seen = [];
+  const routed = await runMemoryCuratorTurn({
+    request: { workspaceId: 'ws-1', messages: [{ role: 'user', content: 'Episode' }] },
+    getSettings: () => ({
+      modelRouting: { tiers: { economy: { primary: 'model-eco', fallbacks: [] } } },
+    }),
+    resolveRoute: () => ({ ok: true, selection: { modelProviderId: 'model-auto' } }),
+    createSink() {
+      return { send() {}, getText() { return ''; } };
+    },
+    async runTurn(input) {
+      seen.push(input.modelProviderId);
+    },
+  });
+  assert.equal(routed.text, '');
+  assert.deepEqual(seen, ['model-auto']);
+
+  const blocked = await runMemoryCuratorTurn({
+    request: { messages: [] },
+    resolveRoute: () => ({ ok: false, reason: 'spend_cap_reached' }),
+    async runTurn() {
+      seen.push('called');
+    },
+  });
+  assert.equal(blocked.skipped, 'spend_cap_reached');
+  assert.deepEqual(seen, ['model-auto']);
+});

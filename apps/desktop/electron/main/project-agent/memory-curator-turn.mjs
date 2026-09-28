@@ -23,10 +23,25 @@ export async function runMemoryCuratorTurn({
   request,
   runTurn,
   getSettings,
+  resolveRoute = null,
   createSink = createCollectingSink,
 } = {}) {
   if (typeof runTurn !== 'function') return { text: '' };
-  const modelProviderId = curatorModelProviderId(typeof getSettings === 'function' ? getSettings() : null);
+  let modelProviderId = null;
+  if (typeof resolveRoute === 'function') {
+    let route = null;
+    try {
+      route = resolveRoute({ role: 'memory_curator', workspaceId: request?.workspaceId });
+    } catch {
+      route = null;
+    }
+    if (route && route.ok === false) return { text: '', skipped: route.reason || 'route_blocked' };
+    const selected = route?.selection?.modelProviderId;
+    if (typeof selected === 'string' && selected) modelProviderId = selected;
+  }
+  if (!modelProviderId) {
+    modelProviderId = curatorModelProviderId(typeof getSettings === 'function' ? getSettings() : null);
+  }
   const sink = createSink();
   await runTurn({
     turnProfile: {

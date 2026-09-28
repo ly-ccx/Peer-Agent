@@ -164,7 +164,11 @@ test('关闭学习偏好后仍提取有证据的事实', async () => {
     }),
   });
   try {
-    const result = await box.curator.consider(task(1, { evidenceRefs: ['ev-login'], summary: '核对了登录页' }));
+    const result = await box.curator.consider(task(1, {
+      evidenceRefs: ['ev-login'],
+      summary: '核对了登录页',
+      evidenceTexts: { 'ev-login': '登录页在 src/login.tsx' },
+    }));
     assert.equal(result.learnedIds.length, 1);
     const items = box.store.list({ workspaceId: 'ws-1' });
     assert.deepEqual(items.map((item) => item.text), ['登录页在 src/login.tsx']);
@@ -245,7 +249,11 @@ test('提取结果里的注入、缺证据和坏候选都不会写入记忆', as
         kind: 'result_ready',
         eventId: 'evt-ok',
         sessionId: 'sess-ok',
-        payload: { summary: '登录页路径已核对', evidenceRefs: ['ev-login'] },
+        payload: {
+          summary: '登录页路径已核对',
+          evidenceRefs: ['ev-login'],
+          evidenceTexts: { 'ev-login': '登录页在 src/login.tsx' },
+        },
       }],
     });
     assert.deepEqual(
@@ -265,6 +273,72 @@ test('提取结果里的注入、缺证据和坏候选都不会写入记忆', as
     });
     assert.equal(secretMaterial.skipped, 'sensitive');
     assert.equal(readFileSync(box.episodes.episodeFile('ws-1'), 'utf8').includes('sk-abcdefghi'), false);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('任务结束事件用 outcome、status 和 verdictRef，不依赖 summary', async () => {
+  const box = world('canonical', { textFor: '{"candidates":[]}' });
+  try {
+    const ready = await box.curator.consider({
+      workspaceId: 'ws-1',
+      kind: 'wake',
+      events: [{
+        kind: 'result_ready',
+        eventId: 'evt-ready',
+        sessionId: 'sess-ready',
+        payload: { outcome: 'passed', evidenceRefs: ['ev-1'] },
+      }],
+    });
+    assert.equal(ready.skipped, null);
+    assert.match(box.calls[0].messages[0].content, /outcome: passed/);
+    box.advance(CURATOR_INTERVAL_MS);
+    const failed = await box.curator.consider({
+      workspaceId: 'ws-1',
+      kind: 'wake',
+      events: [{
+        kind: 'failed',
+        eventId: 'evt-failed',
+        sessionId: 'sess-failed',
+        payload: { status: 'failed' },
+      }],
+    });
+    assert.equal(failed.skipped, null);
+    assert.match(box.calls[1].messages[0].content, /status: failed/);
+    box.advance(CURATOR_INTERVAL_MS);
+    const verified = await box.curator.consider({
+      workspaceId: 'ws-1',
+      kind: 'wake',
+      events: [{
+        kind: 'session_verified',
+        eventId: 'evt-verified',
+        sessionId: 'sess-verified',
+        verdictRef: 'verdict:sess-verified:passed',
+      }],
+    });
+    assert.equal(verified.skipped, null);
+    assert.match(box.calls[2].messages[0].content, /verdict: verdict:sess-verified:passed/);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('到点后整理先前被频率挡住的 episode，不需要新材料', async () => {
+  const box = world('due', { textFor: '{"candidates":[]}' });
+  try {
+    await box.curator.consider(task(1, { summary: '材料甲' }));
+    const blocked = await box.curator.consider(task(2, { summary: '材料乙' }));
+    assert.equal(blocked.skipped, 'rate_limited');
+    assert.equal(typeof blocked.retryAt, 'string');
+    const early = await box.curator.consider({ workspaceId: 'ws-1', kind: 'due' });
+    assert.equal(early.skipped, 'rate_limited');
+    assert.equal(box.calls.length, 1);
+    box.advance(CURATOR_INTERVAL_MS);
+    const drained = await box.curator.consider({ workspaceId: 'ws-1', kind: 'due' });
+    assert.equal(drained.skipped, null);
+    assert.equal(box.calls.length, 2);
+    assert.match(box.calls[1].messages[0].content, /材料乙/);
   } finally {
     box.cleanup();
   }

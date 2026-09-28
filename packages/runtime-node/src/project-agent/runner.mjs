@@ -62,6 +62,7 @@ export function createProjectAgentRunner({
   let turnSeq = 0;
   let statusValue = 'idle';
   let curatorFlight = null;
+  let curatorTimer = null;
   const pendingLearned = [];
 
   function setStatus(next) {
@@ -411,7 +412,24 @@ export function createProjectAgentRunner({
 
   function dispose() {
     disposed = true;
+    if (curatorTimer) clearTimeout(curatorTimer);
+    curatorTimer = null;
     abortController?.abort();
+  }
+
+  function armCurator(retryAt) {
+    if (disposed || typeof retryAt !== 'string') return;
+    const at = Date.parse(retryAt);
+    if (!Number.isFinite(at)) return;
+    if (curatorTimer) clearTimeout(curatorTimer);
+    const nowMs = Date.parse(stamp());
+    const delay = Math.max(0, at - (Number.isFinite(nowMs) ? nowMs : Date.now()));
+    curatorTimer = setTimeout(() => {
+      curatorTimer = null;
+      if (disposed) return;
+      scheduleCurator({ kind: 'due', userInputs: [], events: [] });
+    }, delay);
+    curatorTimer.unref?.();
   }
 
   function scheduleCurator(job) {
@@ -423,12 +441,14 @@ export function createProjectAgentRunner({
       userInputs: (Array.isArray(job.userInputs) ? job.userInputs : []).map((item) => ({ ...item })),
       events: (Array.isArray(job.events) ? job.events : []).map((event) => ({ ...event })),
     };
-    curatorFlight = Promise.resolve()
+    const previous = curatorFlight;
+    curatorFlight = Promise.resolve(previous)
       .then(() => onCurator(payload))
       .then((result) => {
         for (const id of memoryIdsOf({ memoryIds: result?.learnedIds })) {
           if (!pendingLearned.includes(id) && pendingLearned.length < 200) pendingLearned.push(id);
         }
+        if (typeof result?.retryAt === 'string') armCurator(result.retryAt);
       })
       .catch(() => {
         // 整理失败不打断代理回合。

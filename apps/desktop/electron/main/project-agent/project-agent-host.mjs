@@ -24,6 +24,7 @@ import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
+import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { createProjectMemoryIpcRegistrations } from '../ipc/register-project-memory-ipc.mjs';
 import { installSessionVerification, createSessionVerification } from './session-verification.mjs';
@@ -322,9 +323,36 @@ export function registerDesktopProjectAgent({
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
+    resolveEvidence(ref) {
+      if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return '';
+      let records = [];
+      try {
+        records = goalPlanStore.findEvidenceIndexRecords([ref]) || [];
+      } catch {
+        return '';
+      }
+      const record = records[0];
+      if (!record) return '';
+      const body = evidenceBodyFromRecord(record, (artifactRef) => readRegisteredArtifact(dataHome, artifactRef, record));
+      return typeof body?.text === 'string' ? body.text : '';
+    },
+    contradicts(workspaceId) {
+      const folder = registry.get(workspaceId)?.path;
+      if (typeof folder !== 'string' || !folder) return [];
+      try {
+        return readProjectInstructionLines(folder);
+      } catch {
+        return [];
+      }
+    },
     runTurn: (request) => runMemoryCuratorTurn({
       request,
       getSettings,
+      resolveRoute: (input) => (
+        typeof agentTurnExecutor?.resolveGoalRole === 'function'
+          ? agentTurnExecutor.resolveGoalRole({ role: 'memory_curator', ...input })
+          : null
+      ),
       runTurn: (input) => agentTurnExecutor.runTurn(input),
     }),
     onWrote: () => liveMemoryIndex().rebuild(),

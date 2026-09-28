@@ -54,6 +54,7 @@ import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './prov
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createStreamProfiler, isStreamProfilingEnabled } from './stream-profiler.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
+import { recordDetachedTurnUsage } from './background-turn-usage.mjs';
 import { estimateUsageCostUsd, startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
@@ -509,12 +510,18 @@ function usageAttributionExtras(streamRecord) {
 }
 
 function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog, llmConfigStore }) {
-  if (
-    (!conversationStore?.recordRuntimeTurnUsage && !conversationStore?.addUsage)
-    || !streamRecord?.conversationId
-    || !hasBillableUsage(usage)
-  ) return null;
-  if (streamRecord.usageRecorded) return null;
+  if (!hasBillableUsage(usage) || streamRecord?.usageRecorded) return null;
+  if (!streamRecord?.conversationId) {
+    try {
+      const recorded = recordDetachedTurnUsage({ streamRecord, usage, usageRequestLog });
+      if (recorded) streamRecord.usageRecorded = true;
+      return recorded;
+    } catch (error) {
+      console.warn('[llm-chat] failed to record background usage:', error?.message || error);
+      return null;
+    }
+  }
+  if (!conversationStore?.recordRuntimeTurnUsage && !conversationStore?.addUsage) return null;
   try {
     const requestedModelProviderId = streamRecord.modelProviderId || null;
     const actualModelProviderId = streamRecord.actualModelProviderId || null;

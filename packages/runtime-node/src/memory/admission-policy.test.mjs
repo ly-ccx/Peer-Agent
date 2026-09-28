@@ -66,7 +66,12 @@ test('关闭学习偏好只拒绝推断偏好，已验证事实仍可生效', ()
   assert.equal(decideMemoryAdmission(candidate(), {
     learnPreferences: false,
     resolvableRefs: ['ev-1'],
+    evidenceTexts: { 'ev-1': '登录页在 src/login.tsx' },
   }).decision, 'activate');
+  assert.equal(decideMemoryAdmission(candidate({ text: '数据库在别的仓库' }), {
+    resolvableRefs: ['ev-1'],
+    evidenceTexts: { 'ev-1': '登录页在 src/login.tsx' },
+  }).reason, 'evidence_unsupported');
 });
 
 test('与项目指令冲突的候选不生效，坏 JSON 被丢弃', () => {
