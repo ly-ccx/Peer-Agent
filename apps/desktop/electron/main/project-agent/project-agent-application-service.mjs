@@ -78,8 +78,10 @@ export function createProjectAgentApplicationService({
   conversationStore = null,
   goalPlanStore = null,
   readSearchCorpus = null,
+  corpusStamp = null,
   searchIndex = createConversationSearchIndex(),
 } = {}) {
+  let corpusToken = null;
   const pendingChanged = new Set();
   const pendingConversation = new Set();
   let changedTimer = null;
@@ -373,7 +375,11 @@ export function createProjectAgentApplicationService({
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {
-        searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus() || {}));
+        const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;
+        if (token === null || token !== corpusToken) {
+          searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus() || {}));
+          if (token !== null) corpusToken = token;
+        }
         hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');
       } catch {
         hits = [];

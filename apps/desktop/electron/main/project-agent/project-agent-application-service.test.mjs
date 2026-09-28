@@ -561,3 +561,31 @@ test('搜索返回语料命中，关闭时不读语料', () => {
   assert.equal(off.search({ query: '咖啡' }).code, 'PROJECT_AGENT_DISABLED');
   assert.equal(reads, 1);
 });
+
+test('同一语料指纹下连续搜索不再重读', () => {
+  let reads = 0;
+  let stamp = 'v1';
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { search: () => [] },
+    corpusStamp: () => stamp,
+    readSearchCorpus: () => {
+      reads += 1;
+      return {
+        bots: [],
+        messages: [{
+          workspaceId: 'ws-1',
+          message: { id: 'm-1', role: 'user', kind: 'user_input', content: '咖啡', createdAt: '2026-09-28T00:00:00.000Z' },
+        }],
+        tasks: [],
+        memories: [],
+      };
+    },
+  });
+  assert.equal(service.search({ query: '咖啡' }).hits.length, 1);
+  assert.equal(service.search({ query: '咖' }).hits.length, 1);
+  assert.equal(reads, 1);
+  stamp = 'v2';
+  assert.equal(service.search({ query: '咖啡' }).hits.length, 1);
+  assert.equal(reads, 2);
+});

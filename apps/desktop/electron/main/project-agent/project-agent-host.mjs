@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
+import { projectConversationHistory } from '@peer-agent/runtime-core';
 
 import {
   createApprovalStore,
@@ -38,6 +39,28 @@ import { installMemoryGate, memoryUseEnabled } from './memory-gate-port.mjs';
 import { liveMemoryIndex } from './memory-index-port.mjs';
 import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
+
+/** Current user inputs become the model messages, including bounded image thumbnails. */
+export function messagesFromUserInputs(plan) {
+  const inputs = Array.isArray(plan?.userInputs) ? plan.userInputs : [];
+  if (inputs.length === 0) return null;
+  const projected = projectConversationHistory(inputs.map((item) => ({
+    role: 'user',
+    content: typeof item?.text === 'string' ? item.text : '',
+    attachments: Array.isArray(item?.attachments) ? item.attachments : [],
+  }))).messages;
+  if (projected.length === 0) return null;
+  return projected.map((message) => ({ role: message.role, content: message.content }));
+}
+
+function fileStamp(file) {
+  try {
+    const stat = statSync(file);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return 'missing';
+  }
+}
 
 /**
  * 桌面装配：只为当前进程持有租约、并且已经有代理对话的项目创建 runner。
@@ -548,7 +571,13 @@ export function registerDesktopProjectAgent({
     resolveConversationId,
     hasMessage,
     appendMessage,
-    executeTurn: (input) => agentTurnExecutor.runTurn(input),
+    executeTurn: (input) => {
+      const messages = messagesFromUserInputs(input?.plan);
+      return agentTurnExecutor.runTurn({
+        ...input,
+        ...(messages ? { messages } : {}),
+      });
+    },
     onCurator: (info) => memoryCurator.consider(info),
     inputQueue,
     readSettings: getSettings,
@@ -661,6 +690,20 @@ export function registerDesktopProjectAgent({
         memories = [];
       }
       return { bots, messages, tasks, memories };
+    },
+    corpusStamp() {
+      const parts = [];
+      const ids = typeof directory.workspaceIds === 'function' ? directory.workspaceIds() : [];
+      for (const workspaceId of ids) {
+        const conversationId = directory.conversationId(workspaceId);
+        if (conversationId) parts.push(fileStamp(path.join(dataHome, 'conversations', `${conversationId}.jsonl`)));
+        parts.push(fileStamp(path.join(dataHome, 'projects', workspaceId, 'profile.json')));
+        if (typeof memoryStore.projectFile === 'function') parts.push(fileStamp(memoryStore.projectFile(workspaceId)));
+      }
+      if (typeof memoryStore.userFile === 'function') parts.push(fileStamp(memoryStore.userFile()));
+      parts.push(fileStamp(path.join(dataHome, 'goal-plans', 'index.jsonl')));
+      parts.push(fileStamp(path.join(dataHome, 'goal-plans', '.changes.jsonl')));
+      return parts.join('|');
     },
   });
   if (typeof onReady === 'function') {

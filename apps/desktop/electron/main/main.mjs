@@ -68,7 +68,7 @@ import { createSettingsStore } from './settings-store.mjs';
 import { createShortcutService } from './shortcut-service.mjs';
 import { createAppshotService } from './appshot-service.mjs';
 import { buildAppshotPermissionPreflight, openScreenRecordingSettings } from './appshot-permission-preflight.mjs';
-import { deliverAppshot } from './appshot-delivery.mjs';
+import { completeAppshotHotkey, deliverAppshot } from './appshot-delivery.mjs';
 import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
@@ -1199,7 +1199,7 @@ async function handleAppshotHotkey(source = 'hotkey') {
       if (!image.isEmpty()) {
         const size = image.getSize();
         const width = Math.min(480, size.width);
-        thumbnailDataUrl = image.resize({ width }).toDataURL();
+        thumbnailDataUrl = `data:image/jpeg;base64,${image.resize({ width }).toJPEG(60).toString('base64')}`;
       }
     } catch {
       thumbnailDataUrl = undefined; // card falls back to the broken/placeholder state
@@ -1214,9 +1214,7 @@ async function handleAppshotHotkey(source = 'hotkey') {
       appendMessage: (id, message) => conversationStore.appendMessage(id, message),
       options: { thumbnailDataUrl },
     });
-    console.log('[appshot] delivered to conversation', delivery.conversationId, delivery.created ? '(new)' : '');
-    notifyAppshotOutcome(source, { ok: true, appName: result.payload.source.appName, delivery });
-    return { ...result, delivery };
+    return completeAppshotHotkey(source, result, delivery, notifyAppshotOutcome, console.log);
   } catch (err) {
     console.error('[appshot] hotkey handling failed:', err?.message ?? err);
     notifyAppshotOutcome(source, { ok: false, code: 'window_not_capturable' });
@@ -1247,6 +1245,7 @@ function notifyAppshotOutcome(source, outcome) {
       peer_frontmost: 'Peer 自身在前台，请切换到要捕获的应用后重试。',
       no_window: '未找到可捕获的前台窗口。',
       window_not_capturable: '该窗口不支持捕获。',
+      NO_BOT: '还没有机器人，这次截图没有送出。',
     };
     showTaskSystemNotification({ title: 'Appshot', body: bodies[outcome.code] ?? '捕获失败。' });
   } catch (err) {

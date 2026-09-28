@@ -46,6 +46,13 @@ test('按 kind 过滤，agent_turn 不显示，没有 kind 的用户消息仍显
   assert.deepEqual(visible.map((item) => item.id), ['u1', 'card', 'reply']);
   assert.equal(visibleBotMessages([bare!]).length, 1);
   assert.equal(normalizeBotMessage({ role: 'assistant', content: '没有 id' }), null);
+  const shot = normalizeBotMessage({
+    id: 'shot',
+    role: 'user',
+    content: 'Appshot — TextEdit',
+    attachments: [{ id: 'att-1', kind: 'image', name: 'shot', dataUrl: 'data:image/png;base64,AA==' }],
+  });
+  assert.equal(shot?.images?.[0]?.dataUrl, 'data:image/png;base64,AA==');
 });
 
 test('分页合并把更早的页放前面，同一条用新内容替换', () => {

@@ -104,10 +104,18 @@ export function QuickChatWindow() {
           : resolvePreferredEffort(levels, selected.reasoningDefaultEffort),
       );
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+    inputRef.current?.focus();
+  }, []);
+
+  const loadBotRouting = useCallback(() => {
     void clientApi.getSettings().then((settings) => {
       const shell = quickChatShell(settings as { projectAgent?: { shell?: string } });
       setBotMode(shell === 'bots');
-      if (shell !== 'bots') return;
+      if (shell !== 'bots') {
+        setBots([]);
+        setBotId('');
+        return;
+      }
       return clientApi.projectAgentList().then((listed) => {
         const choices = (listed.items ?? []).map((item) => ({
           workspaceId: item.workspaceId,
@@ -115,11 +123,18 @@ export function QuickChatWindow() {
           lastActiveAt: item.lastActiveAt,
         }));
         setBots(choices);
-        setBotId(pickQuickChatBot(choices)?.workspaceId ?? '');
+        setBotId((current) => (
+          choices.some((bot) => bot.workspaceId === current)
+            ? current
+            : (pickQuickChatBot(choices)?.workspaceId ?? '')
+        ));
       });
     }).catch(() => {});
-    inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    loadBotRouting();
+  }, [loadBotRouting]);
 
   useEffect(() => { localStorage.setItem('quick-chat:draft', draft); }, [draft]);
   useEffect(() => {
@@ -128,6 +143,7 @@ export function QuickChatWindow() {
   // 每次显示 Quick 时：先聚焦输入框；模型对齐等非关键工作延后到下一帧，避免和首帧争抢。
   useEffect(() => clientApi.onQuickChatShown?.(() => {
     setPopoverState(null);
+    loadBotRouting();
     inputRef.current?.focus();
     const schedule = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
@@ -140,7 +156,7 @@ export function QuickChatWindow() {
         return current;
       });
     });
-  }), [providers]);
+  }), [loadBotRouting, providers]);
   // Quick 内切换模型也回写共享记忆，保持与主聊天同一条“上次模型”链路。
   useEffect(() => {
     writeLastModelProviderId(modelProviderId);

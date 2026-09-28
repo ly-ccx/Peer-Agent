@@ -82,17 +82,36 @@ export function pickAppshotBot(bots) {
   return list[0] || null;
 }
 
-export function buildAppshotSubmission(payload, workspaceId) {
+export function buildAppshotSubmission(payload, workspaceId, options = {}) {
   const raw = `appshot-${String(payload?.appshotId || '').trim()}`.replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 128);
   const inputId = INPUT_ID.test(raw) ? raw : 'appshot';
   const ref = typeof payload?.visual?.artifactRef === 'string' ? payload.visual.artifactRef.trim() : '';
+  const message = buildAppshotMessage(payload, options);
   return {
     workspaceId,
     inputId,
     surface: 'desktop',
     text: `Appshot — ${payload?.source?.appName || 'window'}`,
     attachmentRefs: ref ? [ref] : [],
+    attachments: message.attachments,
   };
+}
+
+/** Hotkey result after delivery. A failed bot delivery must not look like success. */
+export function completeAppshotHotkey(source, result, delivery, notify, log) {
+  if (!delivery || delivery.ok === false) {
+    const code = delivery?.code || 'NO_BOT';
+    if (typeof notify === 'function') notify(source, { ok: false, code });
+    return { ok: false, code, delivery };
+  }
+  if (typeof log === 'function') {
+    const target = delivery.conversationId || delivery.workspaceId || '';
+    log(`[appshot] delivered ${target}${delivery.created ? ' (new)' : ''}`.trim());
+  }
+  if (typeof notify === 'function') {
+    notify(source, { ok: true, appName: result?.payload?.source?.appName, delivery });
+  }
+  return { ...result, delivery };
 }
 
 /**
@@ -114,7 +133,7 @@ export function deliverAppshot({
   if (shell === 'bots') {
     const bot = pickAppshotBot(typeof listBots === 'function' ? listBots() : []);
     if (!bot || typeof submitInput !== 'function') return { ok: false, code: 'NO_BOT' };
-    const submission = buildAppshotSubmission(payload, bot.workspaceId);
+    const submission = buildAppshotSubmission(payload, bot.workspaceId, options);
     const saved = submitInput(submission);
     if (saved && saved.ok === false) return { ok: false, code: 'NO_BOT' };
     return {

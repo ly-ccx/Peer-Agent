@@ -51,6 +51,13 @@ export function UserBubble({
         ))}
       </div>
       {excerpt ? <p className="bot-user-quote">{excerpt}</p> : null}
+      {message.images?.length ? (
+        <div className="bot-user-images">
+          {message.images.map((image) => (
+            <img key={image.id} src={image.dataUrl} alt={image.name} />
+          ))}
+        </div>
+      ) : null}
       <p className="bot-user-text">{message.content}</p>
     </article>
   );

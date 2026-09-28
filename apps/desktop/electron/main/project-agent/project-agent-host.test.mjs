@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createDigestQueue } from '../../../../../packages/runtime-node/src/project-agent/digest.mjs';
-import { createProjectAgentHost } from './project-agent-host.mjs';
+import { createProjectAgentHost, messagesFromUserInputs } from './project-agent-host.mjs';
 
 const provider = {
   id: 'text-default',
@@ -227,4 +227,21 @@ test('安静满 10 分钟会唤醒代理，同一原因第三次失败要求问�
     host.dispose();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('用户回合把缩略图放进模型能看的消息', () => {
+  const messages = messagesFromUserInputs({
+    userInputs: [{
+      text: 'Appshot — TextEdit',
+      attachments: [{
+        kind: 'image',
+        dataUrl: 'data:image/png;base64,AA==',
+        artifactRef: 'local-appshot-artifact://abc',
+      }],
+    }],
+  });
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages[0].content[1].type, 'image_url');
+  assert.equal(messages[0].content[1].image_url.url, 'data:image/png;base64,AA==');
+  assert.equal(messagesFromUserInputs({ userInputs: [] }), null);
 });
