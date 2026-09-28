@@ -110,6 +110,9 @@ export function createWorkspaceApplicationService(options = {}) {
         created: false,
       };
     }
+    if (all?.projectAgent?.shell !== 'classic') {
+      return { id: null, path: null, name: '', created: false };
+    }
 
     const defaultDir = getDefaultWorkspacePath();
     let created = false;

@@ -22,6 +22,7 @@ function createHarness(overrides = {}) {
       { path: '/configured', name: 'Configured', addedAt: '2026-01-01T00:00:00.000Z' },
     ],
     activeWorkspace: overrides.activeWorkspace ?? '/configured',
+    ...(overrides.projectAgent ? { projectAgent: overrides.projectAgent } : {}),
   };
   let selection = overrides.selection ?? null;
   const conversations = overrides.conversations ?? [
@@ -129,11 +130,12 @@ test('reuses an existing active workspace without persistence or synchronization
   assert.deepEqual(calls, []);
 });
 
-test('creates and persists the default workspace when no active path exists', () => {
+test('classic shell still creates the default workspace when no active path exists', () => {
   const { service, calls, state } = createHarness({
     workspaces: [],
     activeWorkspace: null,
     existingPaths: [],
+    projectAgent: { shell: 'classic' },
   });
 
   assert.deepEqual(service.ensureDefaultWorkspace(), {
@@ -153,13 +155,33 @@ test('creates and persists the default workspace when no active path exists', ()
       },
     ],
     activeWorkspace: '/home/user/PeerAgent',
+    projectAgent: { shell: 'classic' },
   });
   assert.deepEqual(calls, [
     ['mkdir', '/home/user/PeerAgent'],
-    ['merge', structuredClone(state)],
+    ['merge', {
+      workspaces: state.workspaces,
+      activeWorkspace: '/home/user/PeerAgent',
+    }],
     ['chat-workspace', '/home/user/PeerAgent'],
     ['skill-workspace', '/home/user/PeerAgent'],
   ]);
+});
+
+test('bot shell and a fresh settings file do not create ~/PeerAgent', () => {
+  for (const projectAgent of [undefined, { shell: 'bots' }]) {
+    const { service, calls, state } = createHarness({
+      workspaces: [],
+      activeWorkspace: null,
+      existingPaths: [],
+      ...(projectAgent ? { projectAgent } : {}),
+    });
+    const result = service.ensureDefaultWorkspace();
+    assert.equal(result.created, false);
+    assert.equal(result.path, null);
+    assert.deepEqual(state.workspaces, []);
+    assert.equal(calls.some(([name]) => name === 'mkdir' || name === 'merge'), false);
+  }
 });
 
 test('directory selection preserves cancellation, existing, and new workspace behavior', async () => {

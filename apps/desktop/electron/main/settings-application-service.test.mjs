@@ -5,8 +5,8 @@ import {
   createSettingsApplicationService,
 } from './settings-application-service.mjs';
 
-function createHarness({ exportDirectory = '/export', importDirectory = '/import' } = {}) {
-  let settings = {
+function createHarness({ exportDirectory = '/export', importDirectory = '/import', settings: initialSettings } = {}) {
+  let settings = initialSettings ?? {
     appearance: 'dark',
     systemInstructions: 'alpha',
     localAccessLevel: 'manual',
@@ -213,6 +213,9 @@ test('project agent settings keep the standard level and merge quiet hours', () 
     proactivity: 'high',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '18:30',
+    shell: 'bots',
+    shellIntroPending: false,
+    shellIntroDismissed: false,
   });
   const second = service.update({ projectAgent: { quietHours: { enabled: true, start: '21:00' } } });
   assert.equal(second.projectAgent.proactivity, 'high');
@@ -228,4 +231,38 @@ test('project agent settings keep the standard level and merge quiet hours', () 
   assert.equal(kept.projectAgent.proactivity, 'low');
   assert.equal(kept.projectAgent.digestTime, '07:15');
   assert.equal(kept.projectAgent.quietHours.enabled, true);
+});
+
+test('switching shells keeps workspaces and the stored developer flag', () => {
+  const initial = {
+    appearance: 'dark',
+    systemInstructions: 'alpha',
+    localAccessLevel: 'manual',
+    developer: { trace: false, projectAgentMode: true },
+    locale: 'zh-CN',
+    workspaces: [{ path: '/repo', name: 'Repo' }],
+    projectAgent: {
+      proactivity: 'high',
+      quietHours: { enabled: false, start: '22:00', end: '08:00' },
+      digestTime: '18:30',
+      shell: 'bots',
+      shellIntroPending: true,
+      shellIntroDismissed: false,
+      managedRoot: '/tmp/bots',
+    },
+  };
+  const { service, getSettings } = createHarness({ settings: structuredClone(initial) });
+  const classic = service.update({ projectAgent: { shell: 'classic' } });
+  assert.equal(classic.projectAgent.shell, 'classic');
+  assert.equal(classic.projectAgent.proactivity, 'high');
+  assert.equal(classic.projectAgent.managedRoot, '/tmp/bots');
+  assert.equal(classic.projectAgent.shellIntroPending, true);
+  assert.deepEqual(classic.workspaces, initial.workspaces);
+  assert.equal(classic.developer.projectAgentMode, true);
+  assert.equal(classic.appearance, 'dark');
+  const bots = service.update({ projectAgent: { shell: 'bots' } });
+  assert.equal(bots.projectAgent.shell, 'bots');
+  assert.deepEqual(bots.workspaces, initial.workspaces);
+  assert.equal(bots.developer.projectAgentMode, true);
+  assert.equal(getSettings().systemInstructions, 'alpha');
 });

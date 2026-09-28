@@ -10,18 +10,20 @@ function tempDir() {
   return mkdtempSync(path.join(tmpdir(), 'peer-settings-migration-'));
 }
 
-test('an existing settings file without a version becomes schemaVersion 2', () => {
+test('an existing settings file without a version becomes schemaVersion 3', () => {
   const dir = tempDir();
   const file = path.join(dir, 'settings.json');
   writeFileSync(file, '{ "appMode": "work" }\n');
   const now = () => new Date('2026-09-26T01:02:03.000Z');
   const loaded = loadMigratedSettings(file, { now });
-  assert.equal(loaded.schemaVersion, 2);
+  assert.equal(loaded.schemaVersion, 3);
+  assert.equal(loaded.projectAgent.shell, 'bots');
+  assert.equal(loaded.projectAgent.shellIntroPending, undefined);
   assert.equal(loaded.appMode, 'work');
   const again = loadMigratedSettings(file, { now: () => new Date('2026-09-26T04:05:06.000Z') });
   assert.deepEqual(again, loaded);
   const raw = readFileSync(file, 'utf8');
-  assert.equal(JSON.parse(raw).schemaVersion, 2);
+  assert.equal(JSON.parse(raw).schemaVersion, 3);
   const backups = readdirSync(dir).filter((name) => name.startsWith('settings.json.bak-'));
   assert.deepEqual(backups, ['settings.json.bak-v0-2026-09-26T01-02-03.000Z']);
   rmSync(dir, { recursive: true, force: true });
@@ -85,9 +87,36 @@ test('a throwing migration leaves the original file in place', () => {
 });
 
 test('runSettingsMigrations does not invent a version for an already current document', () => {
-  const result = runSettingsMigrations({ settings: { schemaVersion: 2, appMode: 'work' } });
+  const result = runSettingsMigrations({ settings: { schemaVersion: 3, appMode: 'work' } });
   assert.deepEqual(result.applied, []);
   assert.equal(result.settings.appMode, 'work');
+});
+
+test('migration v3 is idempotent and keeps the stored developer flag', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'settings.json');
+  writeFileSync(file, JSON.stringify({
+    schemaVersion: 2,
+    appMode: 'work',
+    developer: { projectAgentMode: false, trace: true },
+    workspaces: [{ path: '/repo', name: 'Repo', id: '00000000-0000-4000-8000-000000000009' }],
+    projectAgent: { proactivity: 'low', digestTime: '18:30' },
+  }));
+  const now = () => new Date('2026-09-28T01:02:03.000Z');
+  const loaded = loadMigratedSettings(file, { now });
+  assert.equal(loaded.schemaVersion, 3);
+  assert.equal(loaded.projectAgent.shell, 'bots');
+  assert.equal(loaded.projectAgent.proactivity, 'low');
+  assert.equal(loaded.projectAgent.shellIntroPending, true);
+  assert.equal(loaded.developer.projectAgentMode, false);
+  assert.equal(loaded.developer.trace, true);
+  assert.equal(loaded.workspaces[0].path, '/repo');
+  const before = statSync(file).mtimeMs;
+  const again = loadMigratedSettings(file, { now: () => new Date('2026-09-28T04:05:06.000Z') });
+  assert.deepEqual(again, loaded);
+  assert.equal(statSync(file).mtimeMs, before);
+  assert.equal(readdirSync(dir).filter((name) => name.includes('.bak-')).length, 1);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('old settings gain a workspace id that survives a second load', () => {

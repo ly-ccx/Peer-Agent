@@ -29,6 +29,9 @@ import {
   writeDrawerMemory,
   type DrawerMemory,
 } from './state/drawerState';
+import { BotOnboarding } from './onboarding/BotOnboarding';
+import { UpgradeBanner } from './onboarding/UpgradeBanner';
+import { botOnboardingStep } from './onboarding/botShell';
 import { useBotList } from './state/useBotList';
 import './styles/bot-list.css';
 
@@ -41,6 +44,8 @@ export interface BotListShellProps {
   readonly workspacePath: string;
   readonly automationRunTarget: { automationId: string; runId: string } | null;
   readonly onOpenSettings: () => void;
+  readonly onOpenProviders?: () => void;
+  readonly hasModel?: boolean;
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
   readonly onOpenConversation: (conversationId: string | number) => void;
@@ -68,6 +73,8 @@ export function BotListShell({
   workspacePath,
   automationRunTarget,
   onOpenSettings,
+  onOpenProviders,
+  hasModel = false,
   onOpenAutomations,
   onOpenCapabilities,
   onOpenConversation,
@@ -87,6 +94,11 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const onboarding = botOnboardingStep({
+    hasModel,
+    botCount: list.catalog.length,
+    ready: list.status === 'ready',
+  });
   const needsYouCount = sumNeedsYou(list.catalog);
 
   useEffect(() => {
@@ -213,6 +225,7 @@ export function BotListShell({
   return (
     <div className="bot-shell" data-bot-shell="open" style={{ ['--peer-bot-list-width' as string]: `${list.width}px` }}>
       <aside className="bot-column" aria-label={i18n.t('projectAgent.list.brand')}>
+        <UpgradeBanner i18n={i18n} />
         <div className="bot-column-top">
           <div className="bot-brand">
             <span className="bot-brand-mark" aria-hidden="true">P</span>
@@ -357,6 +370,17 @@ export function BotListShell({
               focusRequestId={notificationFocus?.workspaceId === opened.workspaceId ? notificationFocus.requestId : 0}
             />
           </div>
+        ) : onboarding ? (
+          <BotOnboarding
+            step={onboarding}
+            i18n={i18n}
+            onConnect={() => onOpenProviders?.()}
+            onCreate={() => {
+              setErrorCode('');
+              list.setMenuOpen(false);
+              list.setSheetOpen(true);
+            }}
+          />
         ) : (
           <div className="bot-main-empty">
             <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>

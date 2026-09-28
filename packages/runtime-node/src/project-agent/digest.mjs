@@ -28,6 +28,9 @@ export function defaultProjectAgentSettings() {
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
+    shell: 'bots',
+    shellIntroPending: false,
+    shellIntroDismissed: false,
   };
 }
 
@@ -45,6 +48,9 @@ export function normalizeProjectAgentSettings(value) {
       end: clock(hours.end) || defaults.quietHours.end,
     },
     digestTime: clock(source.digestTime) || defaults.digestTime,
+    shell: source.shell === 'classic' ? 'classic' : 'bots',
+    shellIntroPending: source.shellIntroPending === true,
+    shellIntroDismissed: source.shellIntroDismissed === true,
   };
 }
 

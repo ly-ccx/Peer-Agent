@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { filterBotList, type BotListItem } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
-import { useDeveloperFlag } from '../../app/state/useDeveloperFlag';
+import { PROJECT_AGENT_SHELL_EVENT, projectAgentShellOf } from '../onboarding/botShell';
 import {
   applyBotRefresh,
   BOT_LIST_WIDTH_STORAGE_KEY,
@@ -36,12 +36,29 @@ export interface BotCreateResult {
 }
 
 /**
- * App 只读这个钩子。开关本身留在本文件，避免壳层源码出现开发者开关的名字。
- * 还没读到偏好时保持关闭，首屏继续走原来的布局。
+ * App 只读这个钩子。界面真值在设置里的 projectAgent.shell。
+ * 还没读到设置时先进入机器人列表。
  */
 export function useBotListShell() {
-  const flag = useDeveloperFlag();
-  return { active: flag.enabled === true };
+  const [active, setActive] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void clientApi.getSettings().then((settings) => {
+      if (!cancelled) setActive(projectAgentShellOf(settings) === 'bots');
+    }).catch(() => {});
+    const onShell = (event: Event) => {
+      const shell = (event as CustomEvent<string>).detail;
+      setActive(shell !== 'classic');
+    };
+    window.addEventListener(PROJECT_AGENT_SHELL_EVENT, onShell);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PROJECT_AGENT_SHELL_EVENT, onShell);
+    };
+  }, []);
+
+  return { active };
 }
 
 export function useBotList() {

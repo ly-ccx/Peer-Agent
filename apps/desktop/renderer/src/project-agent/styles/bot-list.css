@@ -123,6 +123,31 @@
 }
 
 .bot-list-empty,
+.bot-upgrade-banner {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: var(--graphite-base);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--chrome-canvas);
+  border-radius: 12px;
+}
+
+.bot-upgrade-banner p,
+.bot-classic-notice {
+  margin: 0 0 8px;
+}
+
+.bot-upgrade-banner button,
+.bot-onboarding-action {
+  font: inherit;
+  padding: 7px 14px;
+  color: var(--chrome-canvas);
+  background: var(--graphite-base);
+  border: 0;
+  border-radius: 999px;
+}
+
 .bot-list-hint {
   margin: 0;
   padding: 8px;

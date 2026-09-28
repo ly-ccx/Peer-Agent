@@ -880,7 +880,7 @@ function createAppTrayController() {
         app.quit();
       },
     },
-    isProjectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+    isProjectAgentEnabled: () => true,
     getNeedsYouCount: () => {
       const items = projectAgentDirectory.listItems?.() || [];
       return items.reduce((sum, item) => sum + (Number(item?.state?.needsYou) || 0), 0);
@@ -1004,7 +1004,7 @@ const webUiCapture = createWebUiCapture({
 const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 const hostLeases = createHostLease({
   surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
-  projectAgentEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true, botWorkspaceIds: listBotWorkspaceIds,
+  projectAgentEnabled: () => true, botWorkspaceIds: listBotWorkspaceIds,
 });
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
@@ -2156,7 +2156,7 @@ function registerDesktopIpcHost() {
     ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
     ...registerDesktopProjectAgent({
-      enabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+      enabled: () => true,
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
       holdsLease: (workspaceId) => hostLeases.holds(workspaceId),
@@ -3618,7 +3618,7 @@ function startDesktopAffordances() {
 
   try {
     projectAgentNotifier = createProjectAgentNotifier({
-      isEnabled: () => settingsStore.getAll()?.developer?.projectAgentMode === true,
+      isEnabled: () => true,
       isForegroundSameBot: (workspaceId) => (
         isMainAppForegroundForNotifications() && viewingBotWorkspaceId === workspaceId
       ),
