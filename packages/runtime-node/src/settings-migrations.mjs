@@ -232,7 +232,9 @@ export function loadMigratedSettings(settingsFile, options = {}) {
   });
   let settings = result.settings;
   let changed = result.applied.length > 0;
-  if (projectRegistry && currentVersion(settings) >= 2) {
+  const maxKnown = migrations.reduce((max, migration) => Math.max(max, migration.version), 0);
+  const version = currentVersion(settings);
+  if (projectRegistry && version >= 2 && version <= maxKnown) {
     const repaired = reconcileWorkspaceIdentity(settings, projectRegistry);
     settings = repaired.settings;
     changed = changed || repaired.changed;

@@ -67,6 +67,19 @@ test('a newer schema than this build is left untouched', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('a newer schema with a workspace missing an id is left byte-identical', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'settings.json');
+  const body = '{ "schemaVersion": 99, "workspaces": [{ "path": "/repo", "name": "Repo" }] }\n';
+  writeFileSync(file, body);
+  const loaded = loadMigratedSettings(file);
+  assert.equal(loaded.schemaVersion, 99);
+  assert.equal(loaded.workspaces[0].id, undefined);
+  assert.equal(readFileSync(file, 'utf8'), body);
+  assert.equal(readdirSync(dir).some((name) => name.includes('.bak-')), false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('a throwing migration leaves the original file in place', () => {
   const dir = tempDir();
   const file = path.join(dir, 'settings.json');
