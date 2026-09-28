@@ -139,3 +139,92 @@ test('到了小结时间即使没有新输入也会写入分隔消息', async ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('安静满 10 分钟会唤醒代理，同一原因第三次失败要求问用户', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b3-08-watch-host-'));
+  const calls = [];
+  const timers = [];
+  const startedAt = '2026-09-27T00:00:00.000Z';
+  let facts = {
+    sessions: [{
+      sessionId: 'session-1',
+      workspaceId: 'ws-leased',
+      planId: 'plan-1',
+      status: 'running',
+      startedAt,
+      version: 1,
+    }],
+  };
+  const host = createProjectAgentHost({
+    rootDir: root,
+    holdsLease: (workspaceId) => workspaceId === 'ws-leased',
+    listWorkspaceIds: () => ['ws-leased'],
+    resolveConversationId: () => 'conv-leased',
+    hasMessage: () => false,
+    appendMessage() {},
+    getWindows: () => [],
+    routing: { providers: [provider] },
+    now: () => '2026-09-27T00:10:00.000Z',
+    retryDelays: [0, 0, 0],
+    readFacts: () => facts,
+    schedule(fn, delay) {
+      const handle = { fn, delay, cleared: false };
+      timers.push(handle);
+      return handle;
+    },
+    clearSchedule(handle) {
+      if (handle) handle.cleared = true;
+    },
+    async executeTurn({ plan }) {
+      calls.push(plan.events.map((event) => ({
+        kind: event.kind,
+        summary: event.payload?.summary,
+        askUser: event.payload?.askUser,
+        stopAutoRetry: event.payload?.stopAutoRetry,
+      })));
+      return { text: '' };
+    },
+  });
+  try {
+    const first = timers.find((timer) => timer.delay === 0 && !timer.cleared);
+    await first.fn();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].some((event) => event.kind === 'stalled'), true);
+
+    const quiet = timers.filter((timer) => !timer.cleared).at(-1);
+    await quiet.fn();
+    assert.equal(calls.length, 1);
+
+    facts = {
+      sessions: [{
+        sessionId: 'session-1',
+        workspaceId: 'ws-leased',
+        planId: 'plan-1',
+        taskId: 'task-login',
+        status: 'interrupted',
+        startedAt,
+        version: 2,
+        runner: {
+          lastError: 'boom',
+          interruption: { reason: 'boom' },
+        },
+        runTrace: {
+          events: [
+            { type: 'step_failed', payload: { reason: 'boom' } },
+            { type: 'step_failed', payload: { reason: 'boom' } },
+          ],
+        },
+      }],
+    };
+    const failed = timers.filter((timer) => !timer.cleared).at(-1);
+    await failed.fn();
+    const failure = calls.at(-1).find((event) => event.kind === 'interrupted');
+    assert.equal(failure.summary, 'boom');
+    assert.equal(failure.askUser, true);
+    assert.equal(failure.stopAutoRetry, true);
+    assert.equal(calls.at(-1).some((event) => event.kind === 'stalled'), false);
+  } finally {
+    host.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

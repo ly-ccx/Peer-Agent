@@ -14,6 +14,11 @@ const INTERRUPT_RULES = `Interrupt handling.
   - parallel: spawn_session that starts now
   - queue: spawn_session that is queued`;
 
+const FAILURE_RULES = `Failure handling.
+- A stalled event means the task is still running, no progress event arrived for 10 minutes, and it is not waiting on an approval or a question. Decide whether to retry, change approach, stop, or ask the user.
+- A failed or interrupted event carries a failure summary: the GoalPlan interruption reason and the last error.
+- After the same task fails three times for the same cause, stop automatic retries and ask the user. Do not start another attempt.`;
+
 export function createProjectAgentPromptSource() {
   return {
     id: 'project-agent',
@@ -30,7 +35,7 @@ export function createProjectAgentPromptSource() {
         layer: 'L1_AGENT',
         priority: 20,
         title: 'Project agent rules',
-        content: `${RULES}\n${INTERRUPT_RULES}`,
+        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}`,
         source: {
           id: 'project-agent',
           kind: 'project-agent-rules',

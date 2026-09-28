@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 
+import { assessSameCause, assessStall, describeFailure } from './watchdog.mjs';
+
 /**
  * 任务事实的变化映射成收件箱事件。纯函数：同一对前后事实得到同一批 eventId。
  * 进度只在叶子新完成时产生，并且同一会话 30 秒内只产生一条。
  * 被节流时宿主应保持上一份事实，稍后再映射，否则这次完成不会再出现。
- * stalled 只转发已经给出的 stallId，检测留给 B3-08。
+ * stalled：显式 stallId 优先。否则 running、10 分钟无进展、且没有待批准或提问时，
+ * 由 watchdog 给出 stallId。只和上一份事实里已经记下的 stallId 比较。
  */
 
 export const PROGRESS_THROTTLE_MS = 30_000;
@@ -66,7 +69,7 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
       kind: session.status,
       version: session.version ?? 1,
       at,
-      payload: { status: session.status },
+      payload: terminalPayload(session),
     }));
   }
   for (const item of newIds(prior?.interventions, session.interventions)) {
@@ -77,15 +80,40 @@ function diffSession(prior, session, { at, progressThrottleMs }) {
       payload: { messageId: item.id },
     }));
   }
-  if (session.stallId && session.stallId !== prior?.stallId) {
+  const stallId = stallIdOf(session, at);
+  if (stallId && stallId !== prior?.stallId) {
     events.push(event(session, {
       kind: 'stalled',
-      version: session.stallId,
+      version: stallId,
       at,
-      payload: { stallId: session.stallId },
+      payload: { stallId },
     }));
   }
   return events;
+}
+
+function stallIdOf(session, at) {
+  if (typeof session?.stallId === 'string' && session.stallId) return session.stallId;
+  const assessed = assessStall(session, { now: at });
+  return assessed.stalled ? assessed.stallId : null;
+}
+
+function terminalPayload(session) {
+  const payload = { status: session.status };
+  if (session.status !== 'failed' && session.status !== 'interrupted') return payload;
+  const failure = describeFailure(session);
+  if (!failure.summary) return payload;
+  payload.summary = failure.summary;
+  if (failure.reason) payload.reason = failure.reason;
+  if (failure.lastError) payload.lastError = failure.lastError;
+  if (failure.cause) payload.cause = failure.cause;
+  const same = assessSameCause(session, failure);
+  if (same.count > 0) payload.sameCauseCount = same.count;
+  if (same.askUser) {
+    payload.stopAutoRetry = true;
+    payload.askUser = true;
+  }
+  return payload;
 }
 
 function progressEvent(prior, session, { at, progressThrottleMs }) {
