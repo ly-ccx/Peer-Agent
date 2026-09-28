@@ -118,3 +118,63 @@ test('失败、取消、中断、用户介入和停滞各有自己的事实 id',
   assert.equal(stalled[0].kind, 'stalled');
   assert.equal(stalled[0].version, 'stall-1');
 });
+
+test('运行满 10 分钟且没有待用户事项时发出一次停滞', () => {
+  const startedAt = '2026-09-27T00:00:00.000Z';
+  const now = '2026-09-27T00:10:00.000Z';
+  const prior = { sessions: [{ ...SESSION, startedAt }] };
+  const stalled = mapDelegationEvents(prior, prior, { now: () => now });
+  assert.deepEqual(stalled.map((event) => event.kind), ['stalled']);
+  assert.equal(stalled[0].version, `stall:${SESSION.sessionId}:${startedAt}`);
+  assert.equal(stalled[0].payload.stallId, stalled[0].version);
+
+  const again = mapDelegationEvents({
+    sessions: [{ ...SESSION, startedAt, stallId: stalled[0].version }],
+  }, prior, { now: () => '2026-09-27T00:20:00.000Z' });
+  assert.equal(again.length, 0);
+
+  const waiting = mapDelegationEvents(prior, {
+    sessions: [{
+      ...SESSION,
+      startedAt,
+      needsUser: [{ approvalId: 'question-1', kind: 'question' }],
+    }],
+  }, { now: () => now });
+  assert.equal(waiting.some((event) => event.kind === 'stalled'), false);
+  assert.equal(waiting.some((event) => event.kind === 'needs_user'), true);
+});
+
+test('失败和中断事件带上中断原因、最后错误，第三次同类失败要求问用户', () => {
+  const prior = { sessions: [{ ...SESSION }] };
+  const failed = mapDelegationEvents(prior, {
+    sessions: [{
+      ...SESSION,
+      status: 'failed',
+      runner: { lastError: '端口被占用', interruption: { reason: 'bind failed' } },
+    }],
+  }, { now: () => '2026-09-27T00:00:00.000Z' });
+  assert.equal(failed[0].kind, 'failed');
+  assert.equal(failed[0].payload.status, 'failed');
+  assert.equal(failed[0].payload.summary, 'bind failed；端口被占用');
+  assert.equal(failed[0].payload.reason, 'bind failed');
+  assert.equal(failed[0].payload.lastError, '端口被占用');
+  assert.equal(failed[0].payload.askUser, undefined);
+
+  const interrupted = mapDelegationEvents(prior, {
+    sessions: [{
+      ...SESSION,
+      status: 'interrupted',
+      taskId: 'task-login',
+      runner: { lastError: 'boom', interruption: { reason: 'boom' } },
+      failureLog: [
+        { taskId: 'task-login', cause: 'boom' },
+        { taskId: 'task-login', cause: 'Boom' },
+      ],
+    }],
+  }, { now: () => '2026-09-27T00:00:00.000Z' });
+  assert.equal(interrupted[0].kind, 'interrupted');
+  assert.equal(interrupted[0].payload.summary, 'boom');
+  assert.equal(interrupted[0].payload.sameCauseCount, 3);
+  assert.equal(interrupted[0].payload.stopAutoRetry, true);
+  assert.equal(interrupted[0].payload.askUser, true);
+});
