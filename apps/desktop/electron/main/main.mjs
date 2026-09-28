@@ -876,11 +876,14 @@ function createAppTrayController() {
         if (scheduler) scheduler.setGloballyPaused(paused);
         else automationStore.setRuntimeState({ globallyPaused: paused });
       },
+      onOpenBot: (payload) => openBotFromSurfacing(payload),
       onQuit: () => {
         app.quit();
       },
     },
     isProjectAgentEnabled: () => true,
+    shellMode: () => (settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots'),
+    listNeedsYouBots: () => (projectAgentDirectory.listItems?.() || []).filter((item) => Number(item?.state?.needsYou) > 0),
     getNeedsYouCount: () => {
       const items = projectAgentDirectory.listItems?.() || [];
       return items.reduce((sum, item) => sum + (Number(item?.state?.needsYou) || 0), 0);
@@ -1203,6 +1206,9 @@ async function handleAppshotHotkey(source = 'hotkey') {
     }
     const delivery = deliverAppshot({
       payload: result.payload,
+      shell: settingsStore.getAll()?.projectAgent?.shell === 'classic' ? 'classic' : 'bots',
+      listBots: () => projectAgentDirectory.listItems?.() || [],
+      submitInput: (input) => projectAgentDirectory.submitInput?.(input),
       listConversations: () => conversationStore.listConversations({ includeMessageCount: false }),
       createConversation: (input) => conversationStore.createConversation(input),
       appendMessage: (id, message) => conversationStore.appendMessage(id, message),
@@ -1218,14 +1224,6 @@ async function handleAppshotHotkey(source = 'hotkey') {
   }
 }
 
-/**
- * T9: lightweight capture feedback (product §9).
- * - Never force-reveals the Peer main window (the user stays in their app).
- * - Hotkey path only; settings "test capture" already renders inline feedback.
- * - System notification, silent-failure tolerant; click routes to the conversation
- *   via the existing task-notification reveal path.
- * - Log lines carry outcome codes only — no window titles, no image data (ADR 59).
- */
 function notifyAppshotOutcome(source, outcome) {
   if (source !== 'hotkey') return;
   try {
@@ -1233,11 +1231,13 @@ function notifyAppshotOutcome(source, outcome) {
       const notified = showTaskSystemNotification({
         title: 'Appshot',
         body: `已捕获「${outcome.appName}」窗口，已添加到会话。`,
-        onClick: () => openConversationFromTaskNotification({
-          conversationId: outcome.delivery?.conversationId,
-          messageId: outcome.delivery?.messageId,
-          source: 'appshot-notification',
-        }),
+        onClick: () => (outcome.delivery?.workspaceId
+          ? openBotFromSurfacing({ workspaceId: outcome.delivery.workspaceId })
+          : openConversationFromTaskNotification({
+            conversationId: outcome.delivery?.conversationId,
+            messageId: outcome.delivery?.messageId,
+            source: 'appshot-notification',
+          })),
       });
       if (!notified) console.log('[appshot] delivered (notification unavailable)');
       return;

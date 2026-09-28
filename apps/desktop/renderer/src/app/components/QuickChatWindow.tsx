@@ -37,6 +37,7 @@ import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { AttachmentStrip, PEER_ATTACHMENT_DND_TYPE } from '../../chat/components/thread/AttachmentStrip';
 import type { QuickChatPopoverAnchorRect, QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
 import { type InlineQuickChatPopoverState } from './QuickChatPopover';
+import { pickQuickChatBot, quickChatShell, quickChatSubmission } from '../state/quickChatBotTarget';
 import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
 
@@ -49,6 +50,9 @@ function id(prefix: string) {
 export function QuickChatWindow() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspacePath, setWorkspacePath] = useState('');
+  const [botMode, setBotMode] = useState(false);
+  const [bots, setBots] = useState<readonly { workspaceId: string; name: string; lastActiveAt: string }[]>([]);
+  const [botId, setBotId] = useState('');
   const [draft, setDraft] = useState(() => localStorage.getItem('quick-chat:draft') ?? '');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [error, setError] = useState('');
@@ -100,6 +104,20 @@ export function QuickChatWindow() {
           : resolvePreferredEffort(levels, selected.reasoningDefaultEffort),
       );
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+    void clientApi.getSettings().then((settings) => {
+      const shell = quickChatShell(settings as { projectAgent?: { shell?: string } });
+      setBotMode(shell === 'bots');
+      if (shell !== 'bots') return;
+      return clientApi.projectAgentList().then((listed) => {
+        const choices = (listed.items ?? []).map((item) => ({
+          workspaceId: item.workspaceId,
+          name: item.profile.displayName,
+          lastActiveAt: item.lastActiveAt,
+        }));
+        setBots(choices);
+        setBotId(pickQuickChatBot(choices)?.workspaceId ?? '');
+      });
+    }).catch(() => {});
     inputRef.current?.focus();
   }, []);
 
@@ -257,6 +275,10 @@ export function QuickChatWindow() {
   const addFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
     const incoming = Array.from(files ?? []);
     if (!incoming.length) return;
+    if (botMode) {
+      setError('机器人快捷对话先只发送文字');
+      return;
+    }
     setError('');
     const next: ChatAttachment[] = [];
     for (const file of incoming) {
@@ -279,7 +301,7 @@ export function QuickChatWindow() {
       }
     }
     if (next.length) setAttachments((current) => [...current, ...next]);
-  }, [attachments.length]);
+  }, [attachments.length, botMode]);
 
   useEffect(() => {
     const element = inputRef.current;
@@ -325,6 +347,36 @@ export function QuickChatWindow() {
 
   async function submit(openMainWindow: boolean) {
     const text = draft.trim();
+    if (botMode) {
+      if (attachments.length) {
+        setError('机器人快捷对话先只发送文字');
+        return;
+      }
+      const routed = quickChatSubmission({ shell: 'bots', workspaceId: botId, text });
+      if (!routed.ok || sending) {
+        if (!routed.ok) setError(bots.length === 0 ? '还没有机器人' : '先写一句话');
+        return;
+      }
+      setSending(true);
+      setError('');
+      await runQuickChatSubmission(async () => {
+        const result = await clientApi.projectAgentSubmitInput({
+          workspaceId: routed.workspaceId,
+          inputId: `qc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          text: routed.text,
+          surface: routed.surface,
+        });
+        if (!result?.ok) throw new Error(result?.code || '发送失败');
+        setDraft('');
+        setAttachments([]);
+        localStorage.removeItem('quick-chat:draft');
+        await clientApi.quickChatHide?.();
+      }, (reason) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+        inputRef.current?.focus();
+      }, () => setSending(false));
+      return;
+    }
     if (!hasQuickChatContent(text, attachments) || !workspacePath || sending) return;
     setSending(true);
     setError('');
@@ -410,12 +462,12 @@ export function QuickChatWindow() {
               }
             }} />
             <input ref={fileInputRef} className="quick-chat-file-input" type="file" multiple onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ''; }} />
-            <button type="button" className="quick-chat-attach" aria-label="添加附件" title="添加附件" disabled={sending} onClick={() => fileInputRef.current?.click()}>
+            {botMode ? null : <button type="button" className="quick-chat-attach" aria-label="添加附件" title="添加附件" disabled={sending} onClick={() => fileInputRef.current?.click()}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
               </svg>
-            </button>
-            <button type="button" className="quick-chat-send" aria-label={sending ? '正在发送' : '发送'} disabled={(!draft.trim() && !attachments.length) || !workspacePath || sending} onClick={() => void submit(false)}>
+            </button>}
+            <button type="button" className="quick-chat-send" aria-label={sending ? '正在发送' : '发送'} disabled={(botMode ? !draft.trim() || !botId : ((!draft.trim() && !attachments.length) || !workspacePath)) || sending} onClick={() => void submit(false)}>
               {sending ? <span className="quick-chat-spinner" aria-hidden="true" /> : (
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
@@ -426,7 +478,24 @@ export function QuickChatWindow() {
         </div>
         <div className="quick-chat-meta-row">
           <div className="quick-chat-selectors">
-            <button
+            {botMode ? (
+              <label className="quick-chat-workspace">
+                <span className="quick-chat-workspace-dot" aria-hidden="true" />
+                <select
+                  className="quick-chat-workspace-name"
+                  aria-label="选择机器人"
+                  value={botId}
+                  disabled={!bots.length || sending}
+                  onChange={(event) => setBotId(event.target.value)}
+                >
+                  {bots.length === 0 ? <option value="">还没有机器人</option> : null}
+                  {bots.map((bot) => (
+                    <option key={bot.workspaceId} value={bot.workspaceId}>{bot.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {botMode ? null : <button
               className="quick-chat-workspace"
               type="button"
               title={workspacePath}
@@ -440,7 +509,7 @@ export function QuickChatWindow() {
               <svg className={`quick-chat-chevron${openPopover === 'workspace' ? ' is-open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="m6 9 6 6 6-6" />
               </svg>
-            </button>
+            </button>}
             <div className="quick-chat-selector-group quick-chat-selector-group-primary">
               <button className={`quick-chat-mode${mode !== 'chat' ? ' is-emphasized' : ''}`} type="button" title={modeTitle(mode, true)} aria-haspopup="listbox" aria-expanded={openPopover === 'mode'} onClick={(event) => togglePopover('mode', event.currentTarget)}>
                 <span>{modeLabel(mode, true)}</span>

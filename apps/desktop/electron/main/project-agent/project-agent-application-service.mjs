@@ -5,7 +5,14 @@
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
 import { randomUUID } from 'node:crypto';
-import { BOT_LEVELS, cleanDisplayName, projectClassicGoals, projectHistory } from '@peer-agent/runtime-node';
+import {
+  BOT_LEVELS,
+  cleanDisplayName,
+  collectConversationSearchDocuments,
+  createConversationSearchIndex,
+  projectClassicGoals,
+  projectHistory,
+} from '@peer-agent/runtime-node';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
@@ -70,6 +77,8 @@ export function createProjectAgentApplicationService({
   readEvidenceBody = null,
   conversationStore = null,
   goalPlanStore = null,
+  readSearchCorpus = null,
+  searchIndex = createConversationSearchIndex(),
 } = {}) {
   const pendingChanged = new Set();
   const pendingConversation = new Set();
@@ -360,7 +369,17 @@ export function createProjectAgentApplicationService({
 
   function search(payload = {}) {
     if (!open()) return disabled();
-    return { ok: true, items: directory.search(payload.query) };
+    const items = typeof directory?.search === 'function' ? directory.search(payload.query) : [];
+    let hits = [];
+    if (searchIndex && typeof readSearchCorpus === 'function') {
+      try {
+        searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus() || {}));
+        hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');
+      } catch {
+        hits = [];
+      }
+    }
+    return { ok: true, items, hits };
   }
 
   function listHistory(payload = {}) {

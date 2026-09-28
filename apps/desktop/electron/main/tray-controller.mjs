@@ -55,8 +55,16 @@ export function buildTrayMenuFingerprint({
   recent = [],
   recentAutomationRuns = [],
   automationRuntime = null,
+  mode = 'classic',
+  needsYou = [],
 } = {}) {
   return JSON.stringify({
+    mode: mode === 'bots' ? 'bots' : 'classic',
+    needsYou: (Array.isArray(needsYou) ? needsYou : []).map((item) => ({
+      id: item?.workspaceId ?? item?.id ?? null,
+      needsYou: item?.state?.needsYou ?? null,
+      title: item?.profile?.displayName ?? item?.title ?? null,
+    })),
     recent: (Array.isArray(recent) ? recent : []).map((item) => ({
       id: item?.id ?? null,
       title: item?.title ?? null,
@@ -93,10 +101,28 @@ export function buildTrayMenuTemplate({
   expandedLimit = TRAY_RECENT_EXPANDED_LIMIT,
   automationRuntime = null,
   recentAutomationRuns = [],
+  mode = 'classic',
+  needsYou = [],
 } = {}) {
+  const botMode = mode === 'bots';
+  const menuRecent = botMode
+    ? (Array.isArray(needsYou) ? needsYou : [])
+      .filter((bot) => bot && typeof bot.workspaceId === 'string' && Number(bot?.state?.needsYou) > 0)
+      .map((bot) => ({
+        id: bot.workspaceId,
+        title: bot.profile?.displayName || bot.workspaceId,
+        subtitle: `${Number(bot.state.needsYou)}`,
+      }))
+    : recent;
+  const menuHandlers = botMode
+    ? {
+      ...handlers,
+      onOpenConversation: (payload) => handlers.onOpenBot?.({ workspaceId: payload?.conversationId }),
+    }
+    : handlers;
   const L = {
-    recent: labels.recent ?? '最近任务',
-    empty: labels.empty ?? '暂无任务',
+    recent: botMode ? (labels.needsYou ?? '需要你') : (labels.recent ?? '最近任务'),
+    empty: botMode ? (labels.needsYouEmpty ?? '没有需要你的机器人') : (labels.empty ?? '暂无任务'),
     more: labels.more ?? '更多',
     newChat: labels.newChat ?? '新任务',
     open: labels.open ?? '打开 Peer Agent',
@@ -106,8 +132,8 @@ export function buildTrayMenuTemplate({
   const items = [];
   items.push({ label: L.recent, enabled: false });
 
-  const all = Array.isArray(recent)
-    ? recent.filter((c) => typeof c?.id === 'string' && c.id)
+  const all = Array.isArray(menuRecent)
+    ? menuRecent.filter((c) => typeof c?.id === 'string' && c.id)
     : [];
   const primaryLimit = Math.max(1, Number(collapsedLimit) || TRAY_RECENT_LIMIT);
   const totalLimit = Math.max(primaryLimit, Number(expandedLimit) || TRAY_RECENT_EXPANDED_LIMIT);
@@ -120,13 +146,13 @@ export function buildTrayMenuTemplate({
     const title = truncateTrayTitle(conversation.title);
     // macOS native menus ignore "\n" in label; use Electron MenuItem.sublabel
     // (darwin >= 14.4) so workspace appears as a second line like Codex.
-    const subtitle = workspaceShortName(conversation.workspacePath);
+    const subtitle = conversation.subtitle || workspaceShortName(conversation.workspacePath);
     return {
       label: title,
       ...(subtitle ? { sublabel: subtitle } : {}),
       id: `tray-recent:${id}`,
       click: () => {
-        handlers.onOpenConversation?.({
+        menuHandlers.onOpenConversation?.({
           conversationId: id,
           workspacePath: typeof conversation.workspacePath === 'string'
             ? conversation.workspacePath
@@ -260,6 +286,8 @@ export function createTrayController({
   platform = process.platform,
   isProjectAgentEnabled = () => false,
   getNeedsYouCount = () => 0,
+  shellMode = () => 'classic',
+  listNeedsYouBots = async () => [],
 } = {}) {
   if (typeof Tray !== 'function' || typeof Menu?.buildFromTemplate !== 'function') {
     return {
@@ -295,6 +323,7 @@ export function createTrayController({
     onOpenAutomationRun: (target) => handlers.onOpenAutomationRun?.(target),
     onToggleAutomations: (paused) => handlers.onToggleAutomations?.(paused),
     onQuit: () => handlers.onQuit?.(),
+    onOpenBot: (payload) => handlers.onOpenBot?.(payload),
   };
 
   let lastMenuFingerprint = null;
@@ -302,11 +331,19 @@ export function createTrayController({
   let cachedMenuInputsAt = 0;
   let badgeTitle = '';
 
+  function currentShell() {
+    try {
+      return shellMode() === 'bots' ? 'bots' : 'classic';
+    } catch {
+      return 'classic';
+    }
+  }
+
   function updateBadge() {
     if (destroyed || !tray) return;
     let enabled = false;
     try {
-      enabled = isProjectAgentEnabled() === true;
+      enabled = currentShell() === 'bots' && isProjectAgentEnabled() !== false;
     } catch {
       enabled = false;
     }
@@ -330,14 +367,26 @@ export function createTrayController({
     ) {
       return cachedMenuInputs;
     }
+    const mode = currentShell();
     let recent = [];
-    try {
-      // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
-      const listed = await listRecentConversations?.({ limit: TRAY_RECENT_EXPANDED_LIMIT });
-      recent = Array.isArray(listed) ? listed : [];
-    } catch (err) {
-      console.warn('[tray] listRecentConversations failed:', err);
-      recent = [];
+    let needsYou = [];
+    if (mode === 'bots') {
+      try {
+        const listed = await listNeedsYouBots?.();
+        needsYou = Array.isArray(listed) ? listed : [];
+      } catch (err) {
+        console.warn('[tray] listNeedsYouBots failed:', err);
+        needsYou = [];
+      }
+    } else {
+      try {
+        // 一次取到 expanded 上限，模板把溢出项放进「更多」二级菜单。
+        const listed = await listRecentConversations?.({ limit: TRAY_RECENT_EXPANDED_LIMIT });
+        recent = Array.isArray(listed) ? listed : [];
+      } catch (err) {
+        console.warn('[tray] listRecentConversations failed:', err);
+        recent = [];
+      }
     }
     let recentAutomationRuns = [];
     try {
@@ -349,7 +398,7 @@ export function createTrayController({
     const automationRuntime = typeof getAutomationRuntime === 'function'
       ? await getAutomationRuntime()
       : null;
-    const inputs = { recent, recentAutomationRuns, automationRuntime };
+    const inputs = { recent, recentAutomationRuns, automationRuntime, mode, needsYou };
     cachedMenuInputs = inputs;
     cachedMenuInputsAt = now;
     return inputs;
@@ -375,6 +424,8 @@ export function createTrayController({
         collapsedLimit: TRAY_RECENT_LIMIT,
         expandedLimit: TRAY_RECENT_EXPANDED_LIMIT,
         automationRuntime: inputs.automationRuntime,
+        mode: inputs.mode,
+        needsYou: inputs.needsYou,
       });
       const menu = Menu.buildFromTemplate(template);
       tray.setContextMenu(menu);

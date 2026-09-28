@@ -526,3 +526,38 @@ test('带工具结果的历史要确认后才入队，原会话文件不变', ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('搜索返回语料命中，关闭时不读语料', () => {
+  let reads = 0;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { search: () => [{ workspaceId: 'ws-1', name: '笔记' }] },
+    readSearchCorpus: () => {
+      reads += 1;
+      return {
+        bots: [{ workspaceId: 'ws-1', profile: { displayName: '笔记机器人' }, lastActiveAt: '2026-09-28T00:00:00.000Z' }],
+        messages: [{
+          workspaceId: 'ws-1',
+          message: { id: 'm-1', role: 'user', kind: 'user_input', content: '记得买咖啡', createdAt: '2026-09-28T00:00:01.000Z' },
+        }],
+        tasks: [],
+        memories: [],
+      };
+    },
+  });
+  const found = service.search({ query: '咖啡' });
+  assert.equal(found.ok, true);
+  assert.equal(found.items[0].workspaceId, 'ws-1');
+  assert.equal(found.hits.some((hit) => hit.kind === 'message' && hit.messageId === 'm-1'), true);
+  assert.equal(reads, 1);
+  const off = createProjectAgentApplicationService({
+    enabled: () => false,
+    directory: { search: throwing('search') },
+    readSearchCorpus: () => {
+      reads += 1;
+      return {};
+    },
+  });
+  assert.equal(off.search({ query: '咖啡' }).code, 'PROJECT_AGENT_DISABLED');
+  assert.equal(reads, 1);
+});

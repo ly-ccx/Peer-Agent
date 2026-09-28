@@ -39,7 +39,7 @@ import { SelectionChatWorkspace } from './chat/components/SelectionChatWorkspace
 import { BackgroundRunsProvider } from './workbench/GlobalBackgroundTasksButton';
 import { useConversationStreamRouter } from './chat/hooks/useConversationStreamRouter';
 import { Sidebar } from './chat/components/Sidebar';
-import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
+import { ConversationSearchPalette, type ProjectSearchHit, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
 import { normalizeConversationListPage } from './chat/state/conversationListPagination';
 import {
@@ -294,6 +294,8 @@ function MainApp() {
   const [botNotificationFocus, setBotNotificationFocus] = useState<{
     workspaceId: string;
     messageId: string | null;
+    sessionId?: string | null;
+    drawerTab?: 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings' | null;
     requestId: number;
   } | null>(null);
   const botNotificationRequestRef = useRef(0);
@@ -1294,8 +1296,23 @@ function MainApp() {
           open={searchOpen}
           i18n={i18n}
           activeWorkspace={activeWorkspace}
+          mode={botListShell.active ? 'bots' : 'classic'}
           onClose={handleCloseSearch}
           onSelectConversation={handleSearchSelectConversation}
+          onSelectHit={(hit: ProjectSearchHit) => {
+            if (!hit.workspaceId && hit.kind !== 'memory') return;
+            botNotificationRequestRef.current += 1;
+            setBotNotificationFocus({
+              workspaceId: hit.workspaceId,
+              messageId: hit.kind === 'message' ? (hit.messageId ?? null) : null,
+              sessionId: hit.kind === 'task' ? (hit.sessionId ?? null) : null,
+              drawerTab: hit.kind === 'memory' ? 'memory' : hit.kind === 'task' ? 'tasks' : null,
+              requestId: botNotificationRequestRef.current,
+            });
+            setCollectionDrawer(null);
+            setActivePage('chat');
+            setSearchOpen(false);
+          }}
           onNewTask={async () => {
             setSearchOpen(false);
             await handleNewChat();

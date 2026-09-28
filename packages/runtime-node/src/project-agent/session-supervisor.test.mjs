@@ -259,6 +259,29 @@ test('开任务全链路：冻结模型、子会话、委托消息、计划、�
   }
 });
 
+test('开任务时把锚点上的附件引用带进任务', { timeout: 20_000 }, async () => {
+  const env = await harness();
+  try {
+    env.conversationStore.appendMessage(env.parent.id, {
+      id: 'anchor-shot',
+      role: 'user',
+      kind: 'user_input',
+      content: '看这张图',
+      attachmentRefs: ['local-appshot-artifact://abc-123'],
+    });
+    const opened = await env.supervisor.spawn(
+      spawnInput({ anchorMessageIds: ['anchor-shot'], title: '看图', brief: '看这张截图' }),
+      contextOf(env, { inputId: 'input-shot' }),
+    );
+    assert.equal(opened.status, 'running');
+    const children = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' });
+    const child = env.conversationStore.getConversation(children[0].id);
+    assert.deepEqual(child.messages[0].attachmentRefs, ['local-appshot-artifact://abc-123']);
+  } finally {
+    await env.cleanup();
+  }
+});
+
 test('模型不可用时不建任何对象', { timeout: 20_000 }, async () => {
   const env = await harness({
     catalog: [

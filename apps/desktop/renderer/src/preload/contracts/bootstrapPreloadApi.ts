@@ -1091,7 +1091,22 @@ export interface BootstrapPreloadApi {
     duration?: 'once' | 'task' | 'denied';
   }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
   readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
-  readonly projectAgentSearch: (params?: { query?: string }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
+  readonly projectAgentSearch: (params?: { query?: string }) => Promise<{
+    ok: boolean;
+    code?: string;
+    items?: readonly import('@peer-agent/protocol').BotListItem[];
+    hits?: readonly {
+      id: string;
+      kind: 'bot' | 'message' | 'task' | 'memory';
+      workspaceId: string;
+      title: string;
+      text: string;
+      messageId?: string;
+      sessionId?: string;
+      memoryId?: string;
+      updatedAt?: string;
+    }[];
+  }>;
   readonly projectAgentListHistory: (params?: { workspaceId?: string; workspacePath?: string; unscoped?: boolean }) => Promise<{
     ok: boolean;
     code?: string;

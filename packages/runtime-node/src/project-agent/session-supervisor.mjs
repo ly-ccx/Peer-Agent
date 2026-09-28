@@ -384,6 +384,7 @@ export function createSessionSupervisor({
         ...(context?.confirmMissing === true ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
+      const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
@@ -393,6 +394,7 @@ export function createSessionSupervisor({
           quotes: quotesFor(anchorMessageIds, history.messages),
           readOnly: input.readOnly === true,
         }),
+        ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -899,6 +901,23 @@ function delegationMessage({ brief, successCriteria, quotes, readOnly }) {
     ? '约束：只读。不要写入、修改或执行会改变工作区的操作。'
     : '约束：可以在工作区边界内修改。';
   return ['委托说明', `目标：${brief}`, '完成标准：', criteria, '锚点原文：', anchors, constraint].join('\n');
+}
+
+export function attachmentRefsFromMessages(messages, anchorMessageIds) {
+  const wanted = new Set(Array.isArray(anchorMessageIds) ? anchorMessageIds : []);
+  const refs = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!wanted.has(message?.id)) continue;
+    const values = Array.isArray(message?.attachmentRefs) ? message.attachmentRefs : [];
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const ref = value.trim();
+      if (!ref || ref.length > 500 || refs.includes(ref)) continue;
+      refs.push(ref);
+      if (refs.length >= 16) return refs;
+    }
+  }
+  return refs;
 }
 
 function quotesFor(ids, messages) {

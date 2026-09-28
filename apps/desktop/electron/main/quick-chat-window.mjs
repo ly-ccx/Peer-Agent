@@ -643,6 +643,23 @@ export function createQuickChatWindowController({
   };
 }
 
+export function quickChatShell(settings) {
+  return settings?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
+}
+
+export function pickQuickChatBot(bots) {
+  const list = (Array.isArray(bots) ? bots : [])
+    .filter((bot) => typeof bot?.workspaceId === 'string' && bot.workspaceId);
+  return [...list].sort((left, right) => String(right.lastActiveAt || '').localeCompare(String(left.lastActiveAt || '')))[0] || null;
+}
+
+export function quickChatSubmission({ shell, workspaceId, text }) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (shell === 'classic') return { mode: 'classic', text: body };
+  if (!workspaceId || !body) return { mode: 'bots', ok: false, code: 'INVALID_INPUT' };
+  return { mode: 'bots', ok: true, workspaceId, text: body, surface: 'quick_chat' };
+}
+
 export {
   DEFAULT_SIZE,
   MAX_CONTENT_HEIGHT,

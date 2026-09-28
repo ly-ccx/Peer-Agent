@@ -623,10 +623,58 @@ export function registerDesktopProjectAgent({
     broadcast,
     conversationStore,
     goalPlanStore,
+    readSearchCorpus() {
+      const bots = typeof directory.list === 'function' ? directory.list() : [];
+      const messages = [];
+      for (const workspaceId of directory.workspaceIds()) {
+        const conversationId = directory.conversationId(workspaceId);
+        if (!conversationId) continue;
+        let history = [];
+        try {
+          history = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
+        } catch {
+          history = [];
+        }
+        for (const message of history) messages.push({ workspaceId, message });
+      }
+      const tasks = [];
+      try {
+        const plans = typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [];
+        for (const plan of Array.isArray(plans) ? plans : []) {
+          const origin = plan?.delegationOrigin;
+          const title = typeof plan?.title === 'string' ? plan.title.trim() : '';
+          if (!origin?.workspaceId || !origin?.sessionId || !title) continue;
+          tasks.push({
+            workspaceId: origin.workspaceId,
+            sessionId: origin.sessionId,
+            title,
+            updatedAt: typeof plan.updatedAt === 'string' ? plan.updatedAt : '',
+          });
+        }
+      } catch {
+        // 计划读失败时搜索仍返回机器人和消息。
+      }
+      let memories = [];
+      try {
+        memories = memoryStore.list({ status: 'active' }) || [];
+      } catch {
+        memories = [];
+      }
+      return { bots, messages, tasks, memories };
+    },
   });
   if (typeof onReady === 'function') {
     onReady({
       listItems: () => directory.list(),
+      submitInput: (input) => {
+        try {
+          const saved = inputQueue.submitInput(input);
+          void host.sync([saved.workspaceId]).catch(() => {});
+          return saved;
+        } catch (error) {
+          return { ok: false, message: error instanceof Error ? error.message : String(error) };
+        }
+      },
       botName: (workspaceId) => {
         const got = directory.get(workspaceId);
         if (!got?.ok) return '';

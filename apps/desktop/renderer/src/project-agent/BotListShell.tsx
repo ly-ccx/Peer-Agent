@@ -32,6 +32,7 @@ import {
 import { BotOnboarding } from './onboarding/BotOnboarding';
 import { UpgradeBanner } from './onboarding/UpgradeBanner';
 import { botOnboardingStep } from './onboarding/botShell';
+import { resolveBotShortcut } from './state/botShortcuts';
 import { useBotList } from './state/useBotList';
 import './styles/bot-list.css';
 
@@ -54,6 +55,8 @@ export interface BotListShellProps {
   readonly notificationFocus?: {
     readonly workspaceId: string;
     readonly messageId: string | null;
+    readonly sessionId?: string | null;
+    readonly drawerTab?: 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings' | null;
     readonly requestId: number;
   } | null;
 }
@@ -94,6 +97,10 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  const openedIdRef = useRef(list.openedId);
+  const firstVisibleIdRef = useRef(list.visible[0]?.workspaceId ?? '');
+  openedIdRef.current = list.openedId;
+  firstVisibleIdRef.current = list.visible[0]?.workspaceId ?? '';
   const onboarding = botOnboardingStep({
     hasModel,
     botCount: list.catalog.length,
@@ -127,8 +134,18 @@ export function BotListShell({
   }, [drawerMemory, opened?.workspaceId]);
 
   useEffect(() => {
-    if (!notificationFocus?.workspaceId) return;
-    list.openBot(notificationFocus.workspaceId);
+    const workspaceId = notificationFocus?.workspaceId
+      || (notificationFocus?.drawerTab === 'memory' ? (openedIdRef.current || firstVisibleIdRef.current) : '');
+    if (!workspaceId) return;
+    list.openBot(workspaceId);
+    if (notificationFocus?.sessionId) {
+      setLocateSessionId(notificationFocus.sessionId);
+      setDrawerMemory((current) => locateDrawerSession(current, notificationFocus.sessionId || ''));
+      return;
+    }
+    if (notificationFocus?.drawerTab) {
+      setDrawerMemory((current) => openDrawer(current, notificationFocus.drawerTab || 'overview'));
+    }
   }, [list.openBot, notificationFocus]);
 
   const lookingAtBot = Boolean(opened?.workspaceId) && !pageOverride && activePage !== 'settings';
@@ -150,9 +167,17 @@ export function BotListShell({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
-      const key = event.key.toLowerCase();
-      const meta = event.metaKey || event.ctrlKey;
-      if (meta && key === 'n' && !event.altKey && !event.shiftKey) {
+      const palette = event.target instanceof Element && Boolean(event.target.closest('.conversation-search'));
+      const shortcut = resolveBotShortcut({
+        key: event.key,
+        meta: event.metaKey,
+        ctrl: event.ctrlKey,
+        shift: event.shiftKey,
+        alt: event.altKey,
+        palette,
+        shell: 'bots',
+      });
+      if (shortcut?.action === 'new-bot') {
         event.preventDefault();
         event.stopPropagation();
         setErrorCode('');
@@ -160,7 +185,7 @@ export function BotListShell({
         list.setMenuOpen(false);
         return;
       }
-      if (meta && (key === 'f' || key === 'k') && !event.altKey && !event.shiftKey) {
+      if (shortcut?.action === 'list-search') {
         event.preventDefault();
         event.stopPropagation();
         if (!list.sheetOpen) {
@@ -169,6 +194,22 @@ export function BotListShell({
         }
         return;
       }
+      if (shortcut?.action === 'toggle-profile') {
+        if (!opened?.workspaceId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDrawerMemory((current) => (current.open ? closeDrawer(current) : openDrawer(current)));
+        return;
+      }
+      if (shortcut?.action === 'switch-bot') {
+        const next = list.visible[shortcut.index];
+        if (!next) return;
+        event.preventDefault();
+        event.stopPropagation();
+        list.openBot(next.workspaceId);
+        return;
+      }
+      const meta = event.metaKey || event.ctrlKey;
       if (list.sheetOpen) return;
       if (list.menuOpen) {
         if (event.key === 'Escape') list.setMenuOpen(false);
@@ -191,7 +232,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, pageOverride]);
+  }, [list, opened?.workspaceId, pageOverride]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')

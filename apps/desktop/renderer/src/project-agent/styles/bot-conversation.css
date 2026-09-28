@@ -115,6 +115,7 @@
   align-self: flex-start;
 }
 
+.bot-user.is-anchored,
 .bot-reply.is-anchored,
 .bot-system.is-anchored {
   outline: 2px solid var(--frost-separator, var(--separator));

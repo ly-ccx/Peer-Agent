@@ -195,6 +195,36 @@ describe('buildTrayMenuTemplate', () => {
 });
 
 
+describe('bot shell tray', () => {
+  it('lists bots that need you and keeps the classic recent menu otherwise', () => {
+    let opened = null;
+    const bots = buildTrayMenuTemplate({
+      mode: 'bots',
+      needsYou: [
+        { workspaceId: 'quiet', profile: { displayName: '安静' }, state: { needsYou: 0 } },
+        { workspaceId: 'ws-1', profile: { displayName: '发布' }, state: { needsYou: 2 } },
+      ],
+      recent: [{ id: 'classic', title: '旧会话' }],
+      handlers: { onOpenBot: (payload) => { opened = payload; } },
+    });
+    assert.equal(bots.some((item) => item.label === '需要你'), true);
+    assert.equal(bots.some((item) => item.label === '旧会话'), false);
+    assert.equal(bots.some((item) => item.label === '安静'), false);
+    const row = bots.find((item) => item.id === 'tray-recent:ws-1');
+    assert.equal(row.label, '发布');
+    assert.equal(row.sublabel, '2');
+    row.click();
+    assert.deepEqual(opened, { workspaceId: 'ws-1' });
+
+    const classic = buildTrayMenuTemplate({
+      recent: [{ id: 'classic', title: '旧会话', workspacePath: '/repo' }],
+    });
+    assert.equal(classic.some((item) => item.label === '最近任务'), true);
+    assert.equal(classic.some((item) => item.label === '旧会话'), true);
+    assert.equal(classic.some((item) => item.label === '需要你'), false);
+  });
+});
+
 describe('buildTrayMenuFingerprint', () => {
   it('is stable for equivalent menu inputs and changes when content changes', () => {
     const base = {

@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createQuickChatWindowController,
+  pickQuickChatBot,
+  quickChatShell,
+  quickChatSubmission,
   resolveQuickChatBounds,
   resolveQuickChatExpandedBounds,
   resolveQuickChatPopoverSize,
@@ -517,5 +520,28 @@ test('destroy closes owned windows once and clears controller references', () =>
 
   assert.equal(parent.isDestroyed(), true);
   assert.equal(controller.getWindow(), null);
+});
+
+test('quick chat send branches on the shell', () => {
+  assert.equal(quickChatShell({ projectAgent: { shell: 'classic' } }), 'classic');
+  assert.equal(quickChatShell({}), 'bots');
+  assert.equal(quickChatShell({ projectAgent: { shell: 'bots' } }), 'bots');
+  const bot = pickQuickChatBot([
+    { workspaceId: 'old', lastActiveAt: '2026-09-27T00:00:00.000Z' },
+    { workspaceId: 'new', lastActiveAt: '2026-09-28T00:00:00.000Z' },
+  ]);
+  assert.equal(bot.workspaceId, 'new');
+  assert.deepEqual(quickChatSubmission({ shell: 'classic', workspaceId: 'ws', text: ' 你好 ' }), {
+    mode: 'classic',
+    text: '你好',
+  });
+  assert.deepEqual(quickChatSubmission({ shell: 'bots', workspaceId: 'new', text: ' 继续 ' }), {
+    mode: 'bots',
+    ok: true,
+    workspaceId: 'new',
+    text: '继续',
+    surface: 'quick_chat',
+  });
+  assert.equal(quickChatSubmission({ shell: 'bots', workspaceId: '', text: '继续' }).ok, false);
 });
 
