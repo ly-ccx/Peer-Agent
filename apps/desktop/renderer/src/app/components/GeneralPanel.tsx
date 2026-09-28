@@ -1,7 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { projectAgentShellOf, publishProjectAgentShell, type ProjectAgentShell } from '../../project-agent/onboarding/botShell';
 import { Dropdown } from './Dropdown';
 
 const LOCALE_LABELS: Record<LocaleCode, string> = {
@@ -67,6 +68,17 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   const [quietStart, setQuietStart] = useState(initialBots.quietStart);
   const [quietEnd, setQuietEnd] = useState(initialBots.quietEnd);
   const [digestTime, setDigestTime] = useState(initialBots.digestTime);
+  const [shell, setShell] = useState<ProjectAgentShell>(() => projectAgentShellOf(clientApi.initialSettings));
+
+  useEffect(() => {
+    let cancelled = false;
+    void clientApi.getSettings().then((settings) => {
+      if (!cancelled) setShell(projectAgentShellOf(settings));
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const localeOptions = useMemo(() => {
     const locales = availableLocales.length > 0 ? availableLocales : ([i18n.locale] as readonly LocaleCode[]);
@@ -86,6 +98,23 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
       }),
     [i18n],
   );
+
+  async function handleShellChange(next: ProjectAgentShell) {
+    if (next === shell || isSaving) return;
+    const previous = shell;
+    setShell(next);
+    setIsSaving(true);
+    setError(null);
+    try {
+      await clientApi.updateSettings({ projectAgent: { shell: next } });
+      publishProjectAgentShell(next);
+    } catch (err) {
+      setShell(previous);
+      setError(err instanceof Error ? err.message : 'Failed to update interface.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   async function handleLocaleChange(nextLocale: LocaleCode) {
     if (nextLocale === i18n.locale || isSaving) return;
@@ -165,6 +194,24 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
   return (
     <div className="general-panel">
       <section className="llm-instructions-card general-card">
+        <div className="general-setting-row">
+          <div className="general-setting-copy">
+            <h3>{i18n.t('settings.shell.title')}</h3>
+            <p>{i18n.t('settings.shell.description')}</p>
+          </div>
+          <div className="general-language-select">
+            <Dropdown
+              value={shell}
+              options={[
+                { value: 'bots', label: i18n.t('settings.shell.bots') },
+                { value: 'classic', label: i18n.t('settings.shell.classic') },
+              ]}
+              disabled={isSaving}
+              ariaLabel={i18n.t('settings.shell.title')}
+              onChange={(value) => void handleShellChange(value === 'classic' ? 'classic' : 'bots')}
+            />
+          </div>
+        </div>
         <div className="general-setting-row">
           <div className="general-setting-copy">
             <h3>{i18n.t('appearance.language')}</h3>

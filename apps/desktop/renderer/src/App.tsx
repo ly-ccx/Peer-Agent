@@ -58,6 +58,8 @@ import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
 import { BotListShell } from './project-agent/BotListShell';
+import { ClassicShellNotice } from './project-agent/onboarding/ClassicShellNotice';
+import { publishProjectAgentShell } from './project-agent/onboarding/botShell';
 import { useBotListShell } from './project-agent/state/useBotList';
 
 const DEFAULT_NEW_TASK_SHORTCUT = 'CommandOrControl+N';
@@ -295,6 +297,9 @@ function MainApp() {
     requestId: number;
   } | null>(null);
   const botNotificationRequestRef = useRef(0);
+  const botShellActiveRef = useRef(botListShell.active);
+  botShellActiveRef.current = botListShell.active;
+  const [classicShellNotice, setClassicShellNotice] = useState(false);
   const focusTaskRelatedMessage = useCallback((item: TaskOverviewItem) => {
     if (!item.conversationId) return;
     const conversationId = String(item.conversationId);
@@ -472,9 +477,13 @@ function MainApp() {
             messageId: messageId ?? null,
             requestId: botNotificationRequestRef.current,
           });
-          setCollectionDrawer(null);
-          setActivePage('chat');
         }
+        if (!botShellActiveRef.current) {
+          setClassicShellNotice(true);
+          return;
+        }
+        setCollectionDrawer(null);
+        setActivePage('chat');
         return;
       }
       void (async () => {
@@ -534,6 +543,18 @@ function MainApp() {
       }
     }).catch(() => undefined);
   }, [applyConversationListPage, refreshProviders, refreshSettings, startupSnapshot]);
+
+  const switchToBotShell = useCallback(async () => {
+    try {
+      await clientApi.updateSettings({ projectAgent: { shell: 'bots' } });
+      publishProjectAgentShell('bots');
+      setClassicShellNotice(false);
+      setCollectionDrawer(null);
+      setActivePage('chat');
+    } catch {
+      setClassicShellNotice(true);
+    }
+  }, []);
 
   const openSettings = useCallback((section: SettingsSection = 'general') => {
     setCollectionDrawer(null);
@@ -954,6 +975,12 @@ function MainApp() {
   return (
     <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
+      <ClassicShellNotice
+        open={classicShellNotice}
+        i18n={i18n}
+        onClose={() => setClassicShellNotice(false)}
+        onSwitch={() => { void switchToBotShell(); }}
+      />
       {showMainShell ? (
         <>
           <section
@@ -973,6 +1000,8 @@ function MainApp() {
                   workspacePath={activeWorkspace ?? ''}
                   automationRunTarget={automationRunTarget}
                   onOpenSettings={() => openSettings('general')}
+                  onOpenProviders={() => openSettings('providers')}
+                  hasModel={providers.some((provider) => provider.apiKeyConfigured)}
                   onOpenAutomations={() => {
                     setCollectionDrawer(null);
                     setActivePage('automations');

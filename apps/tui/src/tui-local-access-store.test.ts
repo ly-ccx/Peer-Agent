@@ -24,7 +24,8 @@ describe('TUI shared local-access settings', () => {
     expect(await Bun.file(settingsFile).json()).toEqual({
       appearance: { theme: 'dark' },
       localAccessLevel: 'full_local',
-      schemaVersion: 2,
+      projectAgent: { shell: 'bots' },
+      schemaVersion: 3,
     });
   });
 

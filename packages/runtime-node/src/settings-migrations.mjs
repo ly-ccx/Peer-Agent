@@ -22,7 +22,9 @@ import { createProjectRegistry, isRemoteWorkspaceId } from './project-registry.m
  * @param {ReturnType<typeof createProjectRegistry>} registry
  */
 export function reconcileWorkspaceIdentity(settings, registry) {
-  if (!settings || settings.schemaVersion !== 2 || !registry) return { settings, changed: false };
+  if (!settings || !Number.isSafeInteger(settings.schemaVersion) || settings.schemaVersion < 2 || !registry) {
+    return { settings, changed: false };
+  }
   let changed = false;
   let workspaces = settings.workspaces;
   if (Array.isArray(settings.workspaces)) {
@@ -101,6 +103,25 @@ export const SETTINGS_MIGRATIONS = [
     version: 2,
     up(settings, ctx) {
       return reconcileWorkspaceIdentity({ ...settings, schemaVersion: 2 }, registryFor(ctx)).settings;
+    },
+  },
+  {
+    version: 3,
+    up(settings) {
+      const projectAgent = settings.projectAgent && typeof settings.projectAgent === 'object' && !Array.isArray(settings.projectAgent)
+        ? settings.projectAgent
+        : {};
+      const hasWorkspaces = Array.isArray(settings.workspaces)
+        && settings.workspaces.some((item) => item && typeof item === 'object');
+      return {
+        ...settings,
+        schemaVersion: 3,
+        projectAgent: {
+          ...projectAgent,
+          shell: 'bots',
+          ...(hasWorkspaces && projectAgent.shellIntroDismissed !== true ? { shellIntroPending: true } : {}),
+        },
+      };
     },
   },
 ];
@@ -211,7 +232,9 @@ export function loadMigratedSettings(settingsFile, options = {}) {
   });
   let settings = result.settings;
   let changed = result.applied.length > 0;
-  if (projectRegistry && currentVersion(settings) === 2) {
+  const maxKnown = migrations.reduce((max, migration) => Math.max(max, migration.version), 0);
+  const version = currentVersion(settings);
+  if (projectRegistry && version >= 2 && version <= maxKnown) {
     const repaired = reconcileWorkspaceIdentity(settings, projectRegistry);
     settings = repaired.settings;
     changed = changed || repaired.changed;

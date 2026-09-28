@@ -70,6 +70,15 @@ export type TranslationKey =
   | 'projectAgent.list.capabilities'
   | 'projectAgent.list.capabilitiesHint'
   | 'projectAgent.list.history'
+  | 'projectAgent.shell.classicNotice'
+  | 'projectAgent.shell.banner'
+  | 'projectAgent.shell.bannerDismiss'
+  | 'projectAgent.onboarding.connectTitle'
+  | 'projectAgent.onboarding.connectBody'
+  | 'projectAgent.onboarding.connectAction'
+  | 'projectAgent.onboarding.createTitle'
+  | 'projectAgent.onboarding.createBody'
+  | 'projectAgent.onboarding.createAction'
   | 'projectAgent.list.loading'
   | 'projectAgent.list.unavailable'
   | 'projectAgent.list.loadFailed'
@@ -263,6 +272,10 @@ export type TranslationKey =
   | 'settings.search'
   | 'settings.searchEmpty'
   | 'settings.general'
+  | 'settings.shell.title'
+  | 'settings.shell.description'
+  | 'settings.shell.bots'
+  | 'settings.shell.classic'
   | 'settings.archived'
   | 'settings.archived.description'
   | 'settings.archived.loading'
@@ -911,6 +924,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': '搜索设置…',
     'settings.searchEmpty': '无匹配的设置项',
     'settings.general': '通用',
+    'settings.shell.title': '界面',
+    'settings.shell.description': '切换后立刻生效，不改动已有会话。',
+    'settings.shell.bots': '机器人列表',
+    'settings.shell.classic': '经典界面',
     'settings.archived': '已归档会话',
     'settings.archived.description': '查看和管理当前工作区中已归档的会话。',
     'settings.archived.loading': '正在加载已归档会话…',
@@ -1083,8 +1100,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
     'developer.projectAgent.nav': '开发者',
     'developer.projectAgent.title': '开发者',
-    'developer.projectAgent.description': '项目代理仍未开放。这个开关只保存偏好，打开后界面和行为都不变。',
-    'developer.projectAgent.switch': '项目代理模式',
+    'developer.projectAgent.description': '界面在设置 → 通用里切换。这里不再读取旧的项目代理开关，原来的值会留着。',
+    'developer.projectAgent.switch': '界面在设置 → 通用里切换。项目代理会继续推进已有任务。',
     'developer.projectAgent.diagnostics': '项目代理诊断',
     'developer.projectAgent.inactive': '未启用',
     'projectAgent.list.brand': 'Peer',
@@ -1101,6 +1118,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.capabilities': '能力',
     'projectAgent.list.capabilitiesHint': '插件、技能与 MCP',
     'projectAgent.list.history': '历史对话',
+    'projectAgent.shell.classicNotice': '切换到机器人界面查看',
+    'projectAgent.shell.banner': '这是新的机器人列表；原来的会话在各机器人的档案 → 任务 → 历史对话；可以在 设置 → 通用 切回经典界面',
+    'projectAgent.shell.bannerDismiss': '知道了',
+    'projectAgent.onboarding.connectTitle': '先接入模型',
+    'projectAgent.onboarding.connectBody': '接入之后才能新建机器人。',
+    'projectAgent.onboarding.connectAction': '接入模型',
+    'projectAgent.onboarding.createTitle': '新建机器人',
+    'projectAgent.onboarding.createBody': '绑定一个文件夹，或建一个空白机器人。',
+    'projectAgent.onboarding.createAction': '新建机器人',
     'projectAgent.list.loading': '正在读取机器人',
     'projectAgent.list.unavailable': '项目代理没有打开',
     'projectAgent.list.loadFailed': '机器人列表没有读出来',
@@ -1744,6 +1770,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': 'Search settings…',
     'settings.searchEmpty': 'No matching settings',
     'settings.general': 'General',
+    'settings.shell.title': 'Interface',
+    'settings.shell.description': 'Switching takes effect immediately and leaves existing chats in place.',
+    'settings.shell.bots': 'Bot list',
+    'settings.shell.classic': 'Classic',
     'settings.archived': 'Archived chats',
     'settings.archived.description': 'View and manage archived chats in the current workspace.',
     'settings.archived.loading': 'Loading archived chats…',
@@ -1916,8 +1946,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
     'developer.projectAgent.nav': 'Developer',
     'developer.projectAgent.title': 'Developer',
-    'developer.projectAgent.description': 'The project agent is not available yet. This switch only stores a preference and does not change the app.',
-    'developer.projectAgent.switch': 'Project agent mode',
+    'developer.projectAgent.description': 'Choose the interface in Settings → General. The old project-agent switch is no longer read, and its stored value stays.',
+    'developer.projectAgent.switch': 'Choose the interface in Settings → General. The project agent keeps working on existing tasks.',
     'developer.projectAgent.diagnostics': 'Project agent diagnostics',
     'developer.projectAgent.inactive': 'Not enabled',
     'projectAgent.list.brand': 'Peer',
@@ -1934,6 +1964,15 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.capabilities': 'Capabilities',
     'projectAgent.list.capabilitiesHint': 'Plugins, skills, and MCP',
     'projectAgent.list.history': 'History',
+    'projectAgent.shell.classicNotice': 'Switch to the bot list to view this',
+    'projectAgent.shell.banner': 'This is the new bot list. Older chats are in each bot’s profile → tasks → history. Switch back from Settings → General.',
+    'projectAgent.shell.bannerDismiss': 'Got it',
+    'projectAgent.onboarding.connectTitle': 'Connect a model first',
+    'projectAgent.onboarding.connectBody': 'A bot needs a model before it can start.',
+    'projectAgent.onboarding.connectAction': 'Connect a model',
+    'projectAgent.onboarding.createTitle': 'New bot',
+    'projectAgent.onboarding.createBody': 'Bind a folder, or create a blank bot.',
+    'projectAgent.onboarding.createAction': 'New bot',
     'projectAgent.list.loading': 'Loading bots',
     'projectAgent.list.unavailable': 'Project agent is off',
     'projectAgent.list.loadFailed': 'The bot list did not load',
