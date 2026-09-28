@@ -191,6 +191,9 @@ export function createInputQueue({
             quoteRefs: input.quoteRefs,
             attachmentRefs: input.attachmentRefs,
             ...(input.answerTo ? { answerTo: input.answerTo } : {}),
+            ...(input.historyRef ? { historyRef: input.historyRef } : {}),
+            ...(input.historySnapshotId ? { historySnapshotId: input.historySnapshotId } : {}),
+            ...(input.historyConfirmed === true ? { historyConfirmed: true } : {}),
           });
         }
         writeCursor(dirName, input.inputId);
@@ -231,6 +234,11 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   };
   const answerTo = optionalAnswer(input?.answerTo);
   if (answerTo) normalized.answerTo = answerTo;
+  const historyRef = optionalToken(input?.historyRef);
+  const historySnapshotId = optionalToken(input?.historySnapshotId);
+  if (historyRef) normalized.historyRef = historyRef;
+  if (historySnapshotId) normalized.historySnapshotId = historySnapshotId;
+  if (input?.historyConfirmed === true) normalized.historyConfirmed = true;
   return normalized;
 }
 
@@ -248,6 +256,13 @@ function optionalAnswer(value) {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 500 || /[\r\n]/.test(trimmed)) return '';
+  return trimmed;
+}
+
+function optionalToken(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 200 || /[\r\n]/.test(trimmed)) return '';
   return trimmed;
 }
 

@@ -3,6 +3,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
+import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
 import { BotList } from './BotList';
 import { MeMenu } from './MeMenu';
@@ -42,7 +43,7 @@ export interface BotListShellProps {
   readonly onOpenSettings: () => void;
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
-  readonly onOpenConversation: (conversationId: number) => void;
+  readonly onOpenConversation: (conversationId: string | number) => void;
   readonly onCreateAutomation: () => void;
   readonly onClosePage: () => void;
   readonly notificationFocus?: {
@@ -82,6 +83,7 @@ export function BotListShell({
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const [inspect, setInspect] = useState<BotInspect | null>(null);
+  const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
@@ -271,6 +273,10 @@ export function BotListShell({
             list.setMenuOpen(false);
             onOpenSettings();
           }}
+          onOpenHistory={() => {
+            list.setMenuOpen(false);
+            setMeHistoryOpen(true);
+          }}
           onOpenAutomations={() => {
             list.setMenuOpen(false);
             onOpenAutomations();
@@ -370,11 +376,27 @@ export function BotListShell({
           isZh={isZh}
           onMemory={setDrawerMemory}
           onProfile={() => {}}
+          onOpenConversation={onOpenConversation}
+          onOpenAutomations={onOpenAutomations}
           onDeleted={() => {
             setDrawerMemory((current) => closeDrawer(current));
           }}
         />
       ) : null}
+      <HistorySheet
+        open={meHistoryOpen}
+        unscoped
+        bots={list.catalog.map((item) => ({
+          workspaceId: item.workspaceId,
+          displayName: item.profile.displayName,
+        }))}
+        i18n={i18n}
+        onClose={() => setMeHistoryOpen(false)}
+        onContinued={(workspaceId) => {
+          setMeHistoryOpen(false);
+          list.openBot(workspaceId);
+        }}
+      />
       <NewBotSheet
         open={list.sheetOpen}
         busy={list.creating}

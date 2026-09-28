@@ -2,8 +2,10 @@
  * 项目代理应用服务。渲染层的数据和动作都从这里过。
  * 开关关闭时直接拒绝，不调用会写盘的依赖。
  * 变化事件按 100ms 合并，带上这段时间里变化的 workspaceId。
+ * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
-import { BOT_LEVELS, cleanDisplayName } from '@peer-agent/runtime-node';
+import { randomUUID } from 'node:crypto';
+import { BOT_LEVELS, cleanDisplayName, projectClassicGoals, projectHistory } from '@peer-agent/runtime-node';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
@@ -66,6 +68,8 @@ export function createProjectAgentApplicationService({
   settleLive = defaultSettleLive,
   agentOnline = () => true,
   readEvidenceBody = null,
+  conversationStore = null,
+  goalPlanStore = null,
 } = {}) {
   const pendingChanged = new Set();
   const pendingConversation = new Set();
@@ -359,6 +363,115 @@ export function createProjectAgentApplicationService({
     return { ok: true, items: directory.search(payload.query) };
   }
 
+  function listHistory(payload = {}) {
+    if (!open()) return disabled();
+    if (!conversationStore || typeof conversationStore.listConversations !== 'function') {
+      return { ok: false, code: 'CONVERSATION_REQUIRED' };
+    }
+    const unscoped = payload?.unscoped === true;
+    let folder = typeof payload?.workspacePath === 'string' ? payload.workspacePath : '';
+    if (!unscoped && !folder && payload?.workspaceId && typeof directory?.get === 'function') {
+      const got = directory.get(payload.workspaceId);
+      if (got?.ok && typeof got.path === 'string') folder = got.path;
+    }
+    if (!unscoped && !folder) return { ok: true, history: [], goals: [] };
+    let conversations = [];
+    try {
+      conversations = conversationStore.listConversations() || [];
+    } catch (error) {
+      return { ok: false, code: 'CONVERSATION_REQUIRED', message: error?.message || 'list failed' };
+    }
+    const history = projectHistory(conversations, { workspacePath: unscoped ? null : folder });
+    let goals = [];
+    if (!unscoped && typeof goalPlanStore?.listPlans === 'function') {
+      try {
+        const plans = goalPlanStore.listPlans();
+        goals = projectClassicGoals(Array.isArray(plans) ? plans : [], {
+          workspacePath: folder,
+          conversationIds: history.map((item) => item.id),
+        });
+      } catch {
+        goals = [];
+      }
+    }
+    return { ok: true, history, goals };
+  }
+
+  function continueHistory(payload = {}) {
+    if (!open()) return disabled();
+    const conversationId = typeof payload?.conversationId === 'string' ? payload.conversationId.trim() : '';
+    const workspaceId = typeof payload?.workspaceId === 'string' ? payload.workspaceId.trim() : '';
+    if (!conversationId || !workspaceId) return { ok: false, code: 'INVALID_INPUT' };
+    if (!conversationStore
+      || typeof conversationStore.getConversation !== 'function'
+      || typeof conversationStore.getPersistedConversationHistory !== 'function'
+      || typeof conversationStore.captureInheritedBackground !== 'function') {
+      return { ok: false, code: 'CONVERSATION_REQUIRED' };
+    }
+    const meta = conversationStore.getConversation(conversationId);
+    if (!meta) return { ok: false, code: 'NOT_FOUND' };
+    if (typeof meta.role === 'string' && meta.role.trim()) return { ok: false, code: 'NOT_HISTORY' };
+    if (meta.status === 'archived') return { ok: false, code: 'ARCHIVED' };
+    const history = conversationStore.getPersistedConversationHistory(conversationId);
+    if (!history) return { ok: false, code: 'NOT_FOUND' };
+    const capturedAt = typeof now === 'function' ? now() : new Date().toISOString();
+    let captured = null;
+    try {
+      captured = conversationStore.captureInheritedBackground(conversationId, {
+        expectedRevision: history.contentRevision,
+        runtimeState: {
+          conversationId,
+          contentRevision: history.contentRevision,
+          status: 'idle',
+        },
+        capturedAt,
+      });
+    } catch (error) {
+      return { ok: false, code: error?.code || 'SNAPSHOT_FAILED', message: error?.message || 'snapshot failed' };
+    }
+    if (!captured?.snapshotId) return { ok: false, code: 'SNAPSHOT_FAILED' };
+    if (captured.snapshot?.requiresMissingConfirmation === true && payload.confirmMissing !== true) {
+      return {
+        ok: false,
+        code: 'BACKGROUND_CONFIRMATION_REQUIRED',
+        snapshot: { snapshotId: captured.snapshotId },
+      };
+    }
+    const title = typeof meta.title === 'string' && meta.title.trim() ? meta.title.trim() : '这段对话';
+    const text = typeof payload.text === 'string' && payload.text.trim() ? payload.text.trim() : `继续：${title}`;
+    const inputId = typeof payload.inputId === 'string' && payload.inputId.trim() ? payload.inputId.trim() : randomUUID();
+    try {
+      const input = inputQueue.submitInput({
+        workspaceId,
+        inputId,
+        surface: 'desktop',
+        text,
+        historyRef: conversationId,
+        historySnapshotId: captured.snapshotId,
+        ...(captured.snapshot?.requiresMissingConfirmation === true ? { historyConfirmed: true } : {}),
+      });
+      if (typeof wake === 'function') {
+        try { wake(workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
+      }
+      queueConversation(workspaceId);
+      queueChanged(workspaceId);
+      return { ok: true, input, snapshot: { snapshotId: captured.snapshotId } };
+    } catch (error) {
+      return { ok: false, code: 'INVALID_INPUT', message: error?.message || 'invalid input' };
+    }
+  }
+
+  function startFamiliarize(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof lifecycle?.startFamiliarize !== 'function') return { ok: false, code: 'FAMILIARIZE_UNAVAILABLE' };
+    const result = lifecycle.startFamiliarize(payload.workspaceId);
+    if (result?.ok) {
+      queueChanged(payload.workspaceId);
+      queueConversation(payload.workspaceId);
+    }
+    return result;
+  }
+
   function readEvidence(payload = {}) {
     if (!open()) return disabled();
     const evidenceRef = typeof payload?.evidenceRef === 'string' ? payload.evidenceRef.trim() : '';
@@ -385,5 +498,8 @@ export function createProjectAgentApplicationService({
     markRead,
     search,
     readEvidence,
+    listHistory,
+    continueHistory,
+    startFamiliarize,
   };
 }

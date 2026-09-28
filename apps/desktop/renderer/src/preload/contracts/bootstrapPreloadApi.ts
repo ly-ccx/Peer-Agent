@@ -1078,7 +1078,7 @@ export interface BootstrapPreloadApi {
     createdAt?: string;
     answerTo?: string;
   }) => Promise<{ ok: boolean; code?: string }>;
-  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null }>;
+  readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; kinds?: readonly string[] }) => Promise<{ ok: boolean; code?: string; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: { evidenceRef: string }) => Promise<{ ok: boolean; code?: string; evidenceRef?: string; kind?: string; summary?: string; truncated?: boolean }>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
@@ -1092,6 +1092,14 @@ export interface BootstrapPreloadApi {
   }) => Promise<{ ok: boolean; code?: string; approval?: unknown }>;
   readonly projectAgentMarkRead: (params: { workspaceId: string; viewing?: boolean }) => Promise<{ ok: boolean; code?: string; at?: string; messageId?: string | null; viewing?: boolean }>;
   readonly projectAgentSearch: (params?: { query?: string }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
+  readonly projectAgentListHistory: (params?: { workspaceId?: string; workspacePath?: string; unscoped?: boolean }) => Promise<{
+    ok: boolean;
+    code?: string;
+    history?: readonly { id: string; title: string; workspacePath: string | null; updatedAt: string; status: string }[];
+    goals?: readonly { planId: string; conversationId: string; title: string; status: string; waitingUser: boolean; updatedAt: string }[];
+  }>;
+  readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string; confirmMissing?: boolean }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string; historyConfirmed?: boolean }; snapshot?: { snapshotId: string } }>;
+  readonly projectAgentStartFamiliarize: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectMemoryList: (params: ProjectMemoryListRequest) => Promise<ProjectMemoryListResult>;
   readonly projectMemoryPin: (params: ProjectMemoryPinRequest) => Promise<ProjectMemoryItemResult>;
   readonly projectMemoryForget: (params: ProjectMemoryForgetRequest) => Promise<ProjectMemoryItemResult>;

@@ -13,7 +13,50 @@ import {
   type PendingBotInput,
 } from './botConversationState';
 
+interface FamiliarizeOffer {
+  readonly text: string;
+  readonly action: string;
+}
+
 export type BotConversationStatus = 'loading' | 'ready' | 'error';
+
+function readFamiliarizeOffer(value: unknown): FamiliarizeOffer | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as { text?: unknown; action?: unknown };
+  const text = typeof record.text === 'string' ? record.text.trim() : '';
+  if (!text) return null;
+  const action = typeof record.action === 'string' && record.action.trim() ? record.action.trim() : '先熟悉一下';
+  return { text, action };
+}
+
+function familiarizeMessage(offer: FamiliarizeOffer, createdAt: string): BotChatMessage {
+  return {
+    id: 'familiarize-offer',
+    kind: 'system_card',
+    role: 'assistant',
+    content: offer.text,
+    createdAt,
+    replyTo: [],
+    sources: [],
+    marks: [],
+    dispositions: [],
+    rounds: [],
+    meta: {},
+    proactive: false,
+    cards: [{
+      cardId: 'familiarize-offer',
+      kind: 'familiarize',
+      content: offer.text,
+      actions: [{
+        id: 'familiarize',
+        channel: 'project-agent:start-familiarize',
+        payload: { text: offer.action },
+      }],
+    }],
+    quoteRefs: [],
+    separatorLabel: '',
+  };
+}
 
 function pageMessages(raw: readonly Record<string, unknown>[] | undefined): BotChatMessage[] {
   const normalized: BotChatMessage[] = [];
@@ -32,6 +75,7 @@ function lastRawId(raw: readonly Record<string, unknown>[] | undefined): string 
 
 export function useBotConversation(workspaceId: string) {
   const [messages, setMessages] = useState<readonly BotChatMessage[]>([]);
+  const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const [pending, setPending] = useState<readonly PendingBotInput[]>([]);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [awaitingSince, setAwaitingSince] = useState<string | null>(null);
@@ -63,6 +107,7 @@ export function useBotConversation(workspaceId: string) {
           return;
         }
         const raw = result.messages ?? [];
+        if (page === 0) setFamiliarizeOffer(readFamiliarizeOffer(result.familiarizeOffer));
         all = mergeConversationPage(all, pageMessages(raw));
         tail = lastRawId(raw) ?? tail;
         if (!result.nextCursor) break;
@@ -120,6 +165,7 @@ export function useBotConversation(workspaceId: string) {
     const ticket = generationRef.current + 1;
     generationRef.current = ticket;
     setMessages([]);
+    setFamiliarizeOffer(null);
     setPending([]);
     setAwaitingSince(null);
     setStatus('loading');
@@ -190,7 +236,10 @@ export function useBotConversation(workspaceId: string) {
     await submit(item.inputId, item.text, item.quoteRefs, item.createdAt);
   }, [pending, submit]);
 
-  const shown = applyOptimistic(messages, pending);
+  const offered = familiarizeOffer
+    ? [...messages, familiarizeMessage(familiarizeOffer, messages[messages.length - 1]?.createdAt || '')]
+    : messages;
+  const shown = applyOptimistic(offered, pending);
   const rows: ConversationRow[] = conversationRows(shown);
 
   return {

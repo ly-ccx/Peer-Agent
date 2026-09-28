@@ -4,7 +4,7 @@ import { clientApi } from '../../clientApi';
 import type { BotChatCard, BotChatCardAction } from '../state/botConversationState';
 
 /**
- * 卡片动作只走已经约定的两条 IPC。
+ * 卡片动作走批准、提交和开始熟悉这三条 IPC。
  * 还没有通道的签收、README 和重试缝只显示，不另开调用。
  */
 export function CardView({
@@ -40,7 +40,8 @@ function CardItem({
   readonly onDone?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const resolved = card.resolvedState === 'resolved';
+  const [done, setDone] = useState(false);
+  const resolved = done || card.resolvedState === 'resolved';
   return (
     <section className={`bot-card${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
       <p>{card.content}</p>
@@ -52,7 +53,7 @@ function CardItem({
               type="button"
               disabled={busy}
               onClick={() => {
-                void runCardAction(workspaceId, action, setBusy, onDone);
+                void runCardAction(workspaceId, action, setBusy, setDone, onDone);
               }}
             >
               {actionLabel(action, i18n)}
@@ -80,6 +81,7 @@ async function runCardAction(
   workspaceId: string,
   action: BotChatCardAction,
   setBusy: (busy: boolean) => void,
+  setDone: (done: boolean) => void,
   onDone?: () => void,
 ) {
   if (action.channel === 'project-agent:decide-approval') {
@@ -115,6 +117,19 @@ async function runCardAction(
         ...(answerTo ? { answerTo } : {}),
       });
       onDone?.();
+    } finally {
+      setBusy(false);
+    }
+    return;
+  }
+  if (action.channel === 'project-agent:start-familiarize') {
+    setBusy(true);
+    try {
+      const result = await clientApi.projectAgentStartFamiliarize({ workspaceId });
+      if (result?.ok) {
+        setDone(true);
+        onDone?.();
+      }
     } finally {
       setBusy(false);
     }

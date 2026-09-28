@@ -1648,6 +1648,9 @@ export function createLlmChatService({
       toolContext.workspaceId = typeof profile?.workspaceId === 'string' && profile.workspaceId.trim()
         ? profile.workspaceId.trim()
         : null;
+      toolContext.conversationId = typeof conversationId === 'string' && conversationId.trim()
+        ? conversationId.trim()
+        : null;
       // 复用的会话 toolContext 必须按回合覆写。项目代理固定只读不询问；其他回合清空。
       toolContext.accessLevel = projectAgentTurn ? 'restricted_local' : null;
       toolContext.workspacePath = runWorkspacePath;

@@ -58,7 +58,7 @@ export function SessionDetail({
         {session.conversationId ? i18n.t('projectAgent.drawer.openScene') : i18n.t('projectAgent.drawer.sceneMissing')}
       </button>
       {sceneOpen && session.conversationId ? (
-        <SceneDrawer
+        <ConversationSceneDrawer
           workspaceId={workspaceId}
           workspacePath={workspacePath}
           conversationId={session.conversationId}
@@ -72,7 +72,7 @@ export function SessionDetail({
   );
 }
 
-function SceneDrawer({
+export function ConversationSceneDrawer({
   workspacePath,
   conversationId,
   title,

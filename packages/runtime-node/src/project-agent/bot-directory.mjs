@@ -76,6 +76,12 @@ function questionsIn(messages) {
   return found;
 }
 
+const FAMILIARIZE_OFFER = {
+  kind: 'familiarize',
+  text: '要我先熟悉一下这个项目吗？',
+  action: '先熟悉一下',
+};
+
 export function createBotDirectory({
   rootDir = null,
   registry = null,
@@ -84,6 +90,7 @@ export function createBotDirectory({
   getSession = () => null,
   listApprovals = () => [],
   listConfirmations = () => [],
+  listClassicGoals = () => [],
   now = () => new Date(),
 } = {}) {
   const profiles = createBotProfileStore({ rootDir, now });
@@ -138,6 +145,16 @@ export function createBotDirectory({
     return Array.isArray(sessions) ? sessions : [];
   }
 
+  function classicGoalsOf(workspaceId) {
+    if (typeof listClassicGoals !== 'function') return [];
+    try {
+      const goals = listClassicGoals(workspaceId);
+      return Array.isArray(goals) ? goals : [];
+    } catch {
+      return [];
+    }
+  }
+
   function projectRow(profile) {
     const messages = messagesOf(profile);
     const visible = messages.filter(isVisibleBotMessage);
@@ -147,6 +164,7 @@ export function createBotDirectory({
     const confirmations = listConfirmations(profile.workspaceId);
     const openConfirmations = (Array.isArray(confirmations) ? confirmations : [])
       .filter((item) => item && item.accepted !== true && item.needsConfirm !== false);
+    const classicGoals = classicGoalsOf(profile.workspaceId);
     const mappedSessions = [
       ...sessions.map((session) => ({
         status: session?.status,
@@ -154,6 +172,9 @@ export function createBotDirectory({
       })),
       ...questions.map(() => ({ status: 'waiting_user' })),
       ...openConfirmations.map(() => ({ status: 'waiting_user' })),
+      ...classicGoals
+        .filter((goal) => goal?.waitingUser === true)
+        .map((goal) => ({ status: 'waiting_user', updatedAt: goal.updatedAt })),
     ];
     const approvals = listApprovals(profile.workspaceId);
     return {
@@ -230,7 +251,15 @@ export function createBotDirectory({
     }
     const page = filtered.slice(start, start + size);
     const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;
-    return { ok: true, messages: page, nextCursor };
+    const familiarizeOffer = (before == null || before === '') && !profile.familiarize
+      ? FAMILIARIZE_OFFER
+      : null;
+    return {
+      ok: true,
+      messages: page,
+      nextCursor,
+      ...(familiarizeOffer ? { familiarizeOffer } : {}),
+    };
   }
 
   function markRead(workspaceId) {

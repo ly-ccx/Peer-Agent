@@ -24,6 +24,9 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     decideApproval: assertFunction(projectAgent?.decideApproval, 'projectAgent.decideApproval'),
     markRead: assertFunction(projectAgent?.markRead, 'projectAgent.markRead'),
     search: assertFunction(projectAgent?.search, 'projectAgent.search'),
+    listHistory: assertFunction(projectAgent?.listHistory, 'projectAgent.listHistory'),
+    continueHistory: assertFunction(projectAgent?.continueHistory, 'projectAgent.continueHistory'),
+    startFamiliarize: assertFunction(projectAgent?.startFamiliarize, 'projectAgent.startFamiliarize'),
   };
 
   return Object.freeze([
@@ -43,6 +46,9 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:decide-approval', (_event, payload) => ports.decideApproval(payload));
       ipc.handle('project-agent:mark-read', (_event, payload) => ports.markRead(payload));
       ipc.handle('project-agent:search', (_event, payload) => ports.search(payload));
+      ipc.handle('project-agent:list-history', (_event, payload) => ports.listHistory(payload));
+      ipc.handle('project-agent:continue-history', (_event, payload) => ports.continueHistory(payload));
+      ipc.handle('project-agent:start-familiarize', (_event, payload) => ports.startFamiliarize(payload));
     }),
   ]);
 }

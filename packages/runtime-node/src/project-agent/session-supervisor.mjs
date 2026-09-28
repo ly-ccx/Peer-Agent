@@ -17,7 +17,7 @@ import { digestApprovalArgs } from './approval-store.mjs';
  * 只读写入判定在 evaluateWorkSessionWrite。协议里的 writeScope 只有 workspace_and_boundaries，不能用来表示禁止写。
  * 开任务时把当时的 active 记忆 id 冻成 memorySnapshotId。
  * 事件 kind 用 session_started / cancelled，收件箱映射留给 B2-05。
- * spawn(input, context)。调度 Provider 目前只把 input 传给端口，宿主接线不在本卡。
+ * spawn(input, context)。调度端口把父会话、工作区和可选的历史背景快照一并传进来。
  * message intent amend 写入「来自项目代理转达：用户说……」。
  * 任务正在等用户时，这句话就是回答，并恢复执行。
  * 任务仍在跑时，只写入子会话和一条 user_correction，下一回合开始时生效，不取消未完成任务。
@@ -363,6 +363,7 @@ export function createSessionSupervisor({
       const inputId = text(context?.inputId) || randomUUID();
       const anchorMessageId = anchorMessageIds[0];
       const workspacePath = text(context?.workspacePath);
+      const presetSnapshotId = text(context?.backgroundSnapshotId);
       child = conversationStore.createChildConversation({
         parentConversationId,
         role: 'work_session',
@@ -379,6 +380,8 @@ export function createSessionSupervisor({
           status: 'idle',
         },
         capturedAt: now(),
+        ...(presetSnapshotId ? { backgroundSnapshotId: presetSnapshotId } : {}),
+        ...(context?.confirmMissing === true ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
       const stored = conversationStore.appendMessage(child.id, {

@@ -69,6 +69,7 @@ export type TranslationKey =
   | 'projectAgent.list.automations'
   | 'projectAgent.list.capabilities'
   | 'projectAgent.list.capabilitiesHint'
+  | 'projectAgent.list.history'
   | 'projectAgent.list.loading'
   | 'projectAgent.list.unavailable'
   | 'projectAgent.list.loadFailed'
@@ -164,6 +165,16 @@ export type TranslationKey =
   | 'projectAgent.drawer.group.running'
   | 'projectAgent.drawer.group.queued'
   | 'projectAgent.drawer.group.done'
+  | 'projectAgent.drawer.group.history'
+  | 'projectAgent.drawer.group.classic'
+  | 'projectAgent.drawer.historyEmpty'
+  | 'projectAgent.drawer.continueHistory'
+  | 'projectAgent.drawer.historyPartial'
+  | 'projectAgent.drawer.historyPartialConfirm'
+  | 'projectAgent.drawer.historyPickBot'
+  | 'projectAgent.drawer.classicOpen'
+  | 'projectAgent.drawer.legacyAutomations'
+  | 'projectAgent.drawer.legacyAutomationsEmpty'
   | 'projectAgent.drawer.anchor'
   | 'projectAgent.drawer.frozenModel'
   | 'projectAgent.drawer.conclusion'
@@ -1089,6 +1100,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.automations': '自动化',
     'projectAgent.list.capabilities': '能力',
     'projectAgent.list.capabilitiesHint': '插件、技能与 MCP',
+    'projectAgent.list.history': '历史对话',
     'projectAgent.list.loading': '正在读取机器人',
     'projectAgent.list.unavailable': '项目代理没有打开',
     'projectAgent.list.loadFailed': '机器人列表没有读出来',
@@ -1184,6 +1196,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
     'projectAgent.drawer.group.done': '已完成',
+    'projectAgent.drawer.group.history': '历史对话',
+    'projectAgent.drawer.group.classic': '经典任务',
+    'projectAgent.drawer.historyEmpty': '没有可继续的历史对话',
+    'projectAgent.drawer.continueHistory': '交给这个机器人继续',
+    'projectAgent.drawer.historyPartial': '这段对话里有工具或附件材料，继续时不会带上。仍然交给机器人吗？',
+    'projectAgent.drawer.historyPartialConfirm': '仍然继续',
+    'projectAgent.drawer.historyPickBot': '选择机器人',
+    'projectAgent.drawer.classicOpen': '打开原来的会话',
+    'projectAgent.drawer.legacyAutomations': '自动化（旧）',
+    'projectAgent.drawer.legacyAutomationsEmpty': '这个项目没有旧的自动化',
     'projectAgent.drawer.anchor': '锚点',
     'projectAgent.drawer.frozenModel': '冻结的模型',
     'projectAgent.drawer.conclusion': '结论',
@@ -1911,6 +1933,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.automations': 'Automations',
     'projectAgent.list.capabilities': 'Capabilities',
     'projectAgent.list.capabilitiesHint': 'Plugins, skills, and MCP',
+    'projectAgent.list.history': 'History',
     'projectAgent.list.loading': 'Loading bots',
     'projectAgent.list.unavailable': 'Project agent is off',
     'projectAgent.list.loadFailed': 'The bot list did not load',
@@ -2006,6 +2029,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
     'projectAgent.drawer.group.done': 'Done',
+    'projectAgent.drawer.group.history': 'History',
+    'projectAgent.drawer.group.classic': 'Classic tasks',
+    'projectAgent.drawer.historyEmpty': 'No history to continue',
+    'projectAgent.drawer.continueHistory': 'Hand this to the bot',
+    'projectAgent.drawer.historyPartial': 'This chat has tool or attachment material that will not come along. Hand it to the bot anyway?',
+    'projectAgent.drawer.historyPartialConfirm': 'Continue anyway',
+    'projectAgent.drawer.historyPickBot': 'Choose a bot',
+    'projectAgent.drawer.classicOpen': 'Open the original conversation',
+    'projectAgent.drawer.legacyAutomations': 'Automations (legacy)',
+    'projectAgent.drawer.legacyAutomationsEmpty': 'This project has no legacy automations',
     'projectAgent.drawer.anchor': 'Anchor',
     'projectAgent.drawer.frozenModel': 'Frozen model',
     'projectAgent.drawer.conclusion': 'Conclusion',

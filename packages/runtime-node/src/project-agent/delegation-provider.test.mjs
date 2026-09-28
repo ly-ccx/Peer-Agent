@@ -595,6 +595,50 @@ test('post_reply 看见本回合已经放进上下文的记忆和先前的工具
   assert.equal(output.messageId, 'm-1');
 });
 
+test('spawn passes the latest user history snapshot to the supervisor', async () => {
+  const seen = [];
+  const provider = createDelegationProvider({
+    supervisor: {
+      async spawn(input, context) {
+        seen.push({ input, context });
+        return { sessionId: 'sess-h', status: 'queued' };
+      },
+    },
+  });
+  const carried = await provider.executeCapability(
+    call('local.delegation.spawn_session', spawnInput(), 'tool-history'),
+    agentContext({
+      workspaceId: 'ws-1',
+      workspacePath: '/repo',
+      messages: [
+        { id: 'old', role: 'user', kind: 'user_input', historyRef: 'hist-old', historySnapshotId: 'snap-old' },
+        { id: 'u1', role: 'user', kind: 'user_input', historyRef: 'hist-1', historySnapshotId: 'snap-1', historyConfirmed: true },
+        { id: 'a1', role: 'assistant', content: '好' },
+      ],
+    }),
+  );
+  assert.equal(outputOf(carried).ok, true);
+  assert.equal(seen[0].context.parentConversationId, 'conv-1');
+  assert.equal(seen[0].context.workspaceId, 'ws-1');
+  assert.equal(seen[0].context.workspacePath, '/repo');
+  assert.equal(seen[0].context.historyConversationId, 'hist-1');
+  assert.equal(seen[0].context.backgroundSnapshotId, 'snap-1');
+  assert.equal(seen[0].context.confirmMissing, true);
+
+  const fresh = await provider.executeCapability(
+    call('local.delegation.spawn_session', spawnInput({ title: '另一件' }), 'tool-history-2'),
+    agentContext({
+      workspaceId: 'ws-1',
+      messages: [
+        { id: 'u1', role: 'user', kind: 'user_input', content: '新的问题' },
+      ],
+    }),
+  );
+  assert.equal(outputOf(fresh).ok, true);
+  assert.equal(seen[1].context.backgroundSnapshotId, undefined);
+  assert.equal(seen[1].context.historyConversationId, undefined);
+});
+
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }

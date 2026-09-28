@@ -16,6 +16,8 @@ import {
   createProjectInbox,
   createWatchPublisher,
   delegationFactsForWorkspace,
+  projectClassicGoals,
+  projectHistory,
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
@@ -469,6 +471,21 @@ export function registerDesktopProjectAgent({
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
+    listClassicGoals(workspaceId) {
+      try {
+        const folder = typeof registry?.get === 'function' ? (registry.get(workspaceId)?.path || '') : '';
+        if (!folder || typeof conversationStore?.listConversations !== 'function') return [];
+        const conversations = conversationStore.listConversations() || [];
+        const history = projectHistory(Array.isArray(conversations) ? conversations : [], { workspacePath: folder });
+        const plans = typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [];
+        return projectClassicGoals(Array.isArray(plans) ? plans : [], {
+          workspacePath: folder,
+          conversationIds: history.map((item) => item.id),
+        });
+      } catch {
+        return [];
+      }
+    },
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,
@@ -479,6 +496,15 @@ export function registerDesktopProjectAgent({
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
   });
+  if (typeof enabled === 'function' && enabled() === true) {
+    try {
+      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const workspaces = Array.isArray(settings?.workspaces) ? settings.workspaces : [];
+      lifecycle.ensureBots(workspaces);
+    } catch (error) {
+      console.warn('[project-agent] ensure bots failed:', error);
+    }
+  }
 
   function resolveConversationId(workspaceId) {
     return directory.conversationId(workspaceId);
@@ -595,6 +621,8 @@ export function registerDesktopProjectAgent({
     agentOnline: (workspaceId) => typeof holdsLease === 'function' && holdsLease(workspaceId) === true,
     onViewing,
     broadcast,
+    conversationStore,
+    goalPlanStore,
   });
   if (typeof onReady === 'function') {
     onReady({

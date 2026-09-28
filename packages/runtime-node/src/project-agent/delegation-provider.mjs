@@ -218,7 +218,10 @@ export function createDelegationProvider({
 
   async function dispatch(name, input, view) {
     if (name === 'spawn_session') {
-      return accepted(await callPort(supervisor?.spawn, input, 'supervisor_unavailable'), 'supervisor_unavailable');
+      return accepted(
+        await callPort(supervisor?.spawn, input, 'supervisor_unavailable', spawnContext(view)),
+        'supervisor_unavailable',
+      );
     }
     if (name === 'list_sessions') {
       const rows = await callPort(supervisor?.list, input, 'supervisor_unavailable');
@@ -351,6 +354,7 @@ function executionView(context) {
     turnId: text(context?.turnId) || text(nested.turnId) || '',
     toolCallOrdinal: context?.toolCallOrdinal ?? nested.toolCallOrdinal ?? '',
     workspaceId: text(context?.workspaceId) || text(nested.workspaceId),
+    workspacePath: text(context?.workspacePath) || text(nested.workspacePath) || '',
     conversationId: text(context?.conversationId) || text(nested.conversationId),
     memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
     turnToolCalls: Array.isArray(context?.turnToolCalls)
@@ -445,11 +449,11 @@ function readResult(entry) {
   }
 }
 
-async function callPort(fn, input, unavailable) {
+async function callPort(fn, input, unavailable, context) {
   if (typeof fn !== 'function') {
     return { ok: false, output: { ok: false, error: unavailable, message: unavailable } };
   }
-  const result = await fn(input);
+  const result = context === undefined ? await fn(input) : await fn(input, context);
   if (result && result.error) {
     return {
       ok: false,
@@ -463,6 +467,32 @@ async function callPort(fn, input, unavailable) {
   }
   if (result == null) return { ok: true, output: null };
   return { ok: true, output: result };
+}
+
+function spawnContext(view) {
+  return {
+    parentConversationId: text(view?.conversationId) || '',
+    workspaceId: text(view?.workspaceId) || '',
+    workspacePath: text(view?.workspacePath) || '',
+    ...historyCarry(view?.messages),
+  };
+}
+
+function historyCarry(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const message = list[index];
+    if (!isUserInput(message)) continue;
+    const historyRef = text(message?.historyRef);
+    const historySnapshotId = text(message?.historySnapshotId);
+    if (!historyRef || !historySnapshotId) return {};
+    return {
+      historyConversationId: historyRef,
+      backgroundSnapshotId: historySnapshotId,
+      ...(message.historyConfirmed === true ? { confirmMissing: true } : {}),
+    };
+  }
+  return {};
 }
 
 function accepted(result, unavailable) {

@@ -14,7 +14,7 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
 
-function harness(root) {
+function harness(root, directoryOptions = {}) {
   const folder = path.join(root, 'demo-project');
   mkdirSync(folder, { recursive: true });
   writeFileSync(path.join(folder, 'README.md'), 'hello');
@@ -76,6 +76,7 @@ function harness(root) {
     listApprovals: () => approvals,
     listConfirmations: () => confirmations,
     now: () => new Date('2026-09-27T06:00:00.000Z'),
+    ...directoryOptions,
   });
   return { entry, directory, conversationId, conversationStore };
 }
@@ -154,6 +155,44 @@ test('搜索命中名字、预览和任务标题', () => {
     assert.equal(directory.search('发布说明').length, 1);
     assert.equal(directory.search('工具原文').length, 0);
     assert.equal(directory.search('没有').length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('没熟悉过的机器人在第一页给出熟悉提议，翻页不带上它', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory } = harness(root);
+    const page = directory.readConversation(entry.workspaceId, { limit: 10 });
+    assert.equal(page.familiarizeOffer.text, '要我先熟悉一下这个项目吗？');
+    assert.equal(page.familiarizeOffer.action, '先熟悉一下');
+    assert.equal(page.messages.some((message) => message.content === page.familiarizeOffer.text), false);
+    const rest = directory.readConversation(entry.workspaceId, { limit: 2, before: 'card-1' });
+    assert.equal(rest.familiarizeOffer, undefined);
+    assert.deepEqual(rest.messages.map((message) => message.id), ['reply-1']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('一个等待中的经典目标让需要你加一，不增加进行中', () => {
+  const root = tempRoot();
+  try {
+    const { directory } = harness(root, {
+      listClassicGoals: () => [{
+        planId: 'plan-wait',
+        waitingUser: true,
+        updatedAt: '2026-09-27T07:00:00.000Z',
+      }, {
+        planId: 'plan-run',
+        waitingUser: false,
+        updatedAt: '2026-09-27T07:00:00.000Z',
+      }],
+    });
+    const [item] = directory.list();
+    assert.equal(item.state.needsYou, 4);
+    assert.equal(item.state.running, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
