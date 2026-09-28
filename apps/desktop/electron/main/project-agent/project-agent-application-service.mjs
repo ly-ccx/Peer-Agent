@@ -430,6 +430,13 @@ export function createProjectAgentApplicationService({
       return { ok: false, code: error?.code || 'SNAPSHOT_FAILED', message: error?.message || 'snapshot failed' };
     }
     if (!captured?.snapshotId) return { ok: false, code: 'SNAPSHOT_FAILED' };
+    if (captured.snapshot?.requiresMissingConfirmation === true && payload.confirmMissing !== true) {
+      return {
+        ok: false,
+        code: 'BACKGROUND_CONFIRMATION_REQUIRED',
+        snapshot: { snapshotId: captured.snapshotId },
+      };
+    }
     const title = typeof meta.title === 'string' && meta.title.trim() ? meta.title.trim() : '这段对话';
     const text = typeof payload.text === 'string' && payload.text.trim() ? payload.text.trim() : `继续：${title}`;
     const inputId = typeof payload.inputId === 'string' && payload.inputId.trim() ? payload.inputId.trim() : randomUUID();
@@ -441,6 +448,7 @@ export function createProjectAgentApplicationService({
         text,
         historyRef: conversationId,
         historySnapshotId: captured.snapshotId,
+        ...(captured.snapshot?.requiresMissingConfirmation === true ? { historyConfirmed: true } : {}),
       });
       if (typeof wake === 'function') {
         try { wake(workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }

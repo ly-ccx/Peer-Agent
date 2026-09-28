@@ -135,12 +135,15 @@ test('历史引用只在提供时写入，缺省或非法时不出现', () => {
     queue.submitInput(input(linked, '继续：旧对话', {
       historyRef: 'conv-old',
       historySnapshotId: 'snap-1',
+      historyConfirmed: true,
     }));
     queue.consume('ws-1');
     assert.equal(messages[0].historyRef, undefined);
     assert.equal(messages[0].historySnapshotId, undefined);
+    assert.equal(messages[0].historyConfirmed, undefined);
     assert.equal(messages[1].historyRef, 'conv-old');
     assert.equal(messages[1].historySnapshotId, 'snap-1');
+    assert.equal(messages[1].historyConfirmed, true);
     const noisy = queue.submitInput(input(randomUUID(), '坏引用', { historyRef: 'has\nnewline' }));
     assert.equal(noisy.historyRef, undefined);
   } finally {

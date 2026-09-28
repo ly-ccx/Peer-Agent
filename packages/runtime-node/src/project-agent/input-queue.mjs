@@ -193,6 +193,7 @@ export function createInputQueue({
             ...(input.answerTo ? { answerTo: input.answerTo } : {}),
             ...(input.historyRef ? { historyRef: input.historyRef } : {}),
             ...(input.historySnapshotId ? { historySnapshotId: input.historySnapshotId } : {}),
+            ...(input.historyConfirmed === true ? { historyConfirmed: true } : {}),
           });
         }
         writeCursor(dirName, input.inputId);
@@ -237,6 +238,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   const historySnapshotId = optionalToken(input?.historySnapshotId);
   if (historyRef) normalized.historyRef = historyRef;
   if (historySnapshotId) normalized.historySnapshotId = historySnapshotId;
+  if (input?.historyConfirmed === true) normalized.historyConfirmed = true;
   return normalized;
 }
 

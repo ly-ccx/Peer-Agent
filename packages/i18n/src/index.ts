@@ -169,6 +169,8 @@ export type TranslationKey =
   | 'projectAgent.drawer.group.classic'
   | 'projectAgent.drawer.historyEmpty'
   | 'projectAgent.drawer.continueHistory'
+  | 'projectAgent.drawer.historyPartial'
+  | 'projectAgent.drawer.historyPartialConfirm'
   | 'projectAgent.drawer.historyPickBot'
   | 'projectAgent.drawer.classicOpen'
   | 'projectAgent.drawer.legacyAutomations'
@@ -1198,6 +1200,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.classic': '经典任务',
     'projectAgent.drawer.historyEmpty': '没有可继续的历史对话',
     'projectAgent.drawer.continueHistory': '交给这个机器人继续',
+    'projectAgent.drawer.historyPartial': '这段对话里有工具或附件材料，继续时不会带上。仍然交给机器人吗？',
+    'projectAgent.drawer.historyPartialConfirm': '仍然继续',
     'projectAgent.drawer.historyPickBot': '选择机器人',
     'projectAgent.drawer.classicOpen': '打开原来的会话',
     'projectAgent.drawer.legacyAutomations': '自动化（旧）',
@@ -2029,6 +2033,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.group.classic': 'Classic tasks',
     'projectAgent.drawer.historyEmpty': 'No history to continue',
     'projectAgent.drawer.continueHistory': 'Hand this to the bot',
+    'projectAgent.drawer.historyPartial': 'This chat has tool or attachment material that will not come along. Hand it to the bot anyway?',
+    'projectAgent.drawer.historyPartialConfirm': 'Continue anyway',
     'projectAgent.drawer.historyPickBot': 'Choose a bot',
     'projectAgent.drawer.classicOpen': 'Open the original conversation',
     'projectAgent.drawer.legacyAutomations': 'Automations (legacy)',

@@ -451,3 +451,78 @@ test('旧会话迁成机器人并继续之后，原文件字节不变，快照�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('带工具结果的历史要确认后才入队，原会话文件不变', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b3-09-partial-'));
+  try {
+    const folder = path.join(root, 'repo');
+    mkdirSync(folder);
+    const storeDir = path.join(root, 'conversations');
+    const registry = createProjectRegistry({ filePath: path.join(root, 'projects', 'registry.json') });
+    const entry = registry.ensureForPath(folder);
+    const conversationStore = createConversationStore({ storeDir });
+    const old = conversationStore.createConversation({ title: '带工具', workspacePath: folder });
+    conversationStore.appendMessage(old.id, { id: 'm1', role: 'user', content: '看一下结果' });
+    conversationStore.appendMessage(old.id, { id: 't1', role: 'tool', content: '工具输出' });
+    const before = createHash('sha256').update(readFileSync(path.join(storeDir, `${old.id}.jsonl`))).digest('hex');
+    const life = createBotLifecycle({
+      rootDir: root,
+      registry,
+      conversationStore,
+      now: () => new Date('2026-09-28T00:00:00.000Z'),
+    });
+    const migrated = life.ensureBots([{ path: folder, name: '演示项目', id: entry.workspaceId }]);
+    const queue = createInputQueue({
+      rootDir: path.join(root, 'runtime'),
+      holdsLease: () => true,
+      resolveConversationId: () => migrated.bots[0].agentConversationId,
+      hasMessage: (conversationId, messageId) => (
+        conversationStore.getPersistedConversationHistory(conversationId)?.messages
+          ?.some((message) => message.id === messageId) === true
+      ),
+      appendMessage: (conversationId, message) => {
+        conversationStore.appendMessage(conversationId, message);
+      },
+    });
+    const service = createProjectAgentApplicationService({
+      enabled: () => true,
+      directory: { get: () => ({ ok: true, path: folder }), list: () => [], search: () => [] },
+      lifecycle: life,
+      inputQueue: queue,
+      conversationStore,
+      broadcast() {},
+      schedule: () => 1,
+      now: () => '2026-09-28T00:00:00.000Z',
+    });
+    const refused = service.continueHistory({
+      workspaceId: entry.workspaceId,
+      conversationId: old.id,
+      inputId: randomUUID(),
+    });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.code, 'BACKGROUND_CONFIRMATION_REQUIRED');
+    assert.equal(queue.consume(entry.workspaceId).consumed.length, 0);
+    const continued = service.continueHistory({
+      workspaceId: entry.workspaceId,
+      conversationId: old.id,
+      inputId: randomUUID(),
+      confirmMissing: true,
+    });
+    assert.equal(continued.ok, true);
+    assert.equal(continued.input.historyConfirmed, true);
+    assert.equal(continued.input.historyRef, old.id);
+    const consumed = queue.consume(entry.workspaceId);
+    assert.equal(consumed.consumed[0].historyConfirmed, true);
+    const agent = conversationStore.getPersistedConversationHistory(migrated.bots[0].agentConversationId);
+    assert.equal(agent.messages.some((message) => message.historyConfirmed === true && message.historyRef === old.id), true);
+    const oldAfter = conversationStore.getConversation(old.id);
+    assert.equal(oldAfter.messages.length, 2);
+    assert.equal(oldAfter.messages[1].content, '工具输出');
+    assert.equal(
+      createHash('sha256').update(readFileSync(path.join(storeDir, `${old.id}.jsonl`))).digest('hex'),
+      before,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

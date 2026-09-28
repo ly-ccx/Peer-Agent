@@ -486,7 +486,11 @@ function historyCarry(messages) {
     const historyRef = text(message?.historyRef);
     const historySnapshotId = text(message?.historySnapshotId);
     if (!historyRef || !historySnapshotId) return {};
-    return { historyConversationId: historyRef, backgroundSnapshotId: historySnapshotId };
+    return {
+      historyConversationId: historyRef,
+      backgroundSnapshotId: historySnapshotId,
+      ...(message.historyConfirmed === true ? { confirmMissing: true } : {}),
+    };
   }
   return {};
 }

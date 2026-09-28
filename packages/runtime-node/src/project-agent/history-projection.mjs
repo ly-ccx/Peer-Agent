@@ -3,7 +3,7 @@
  * 归档留在设置里的归档列表，不进历史对话。
  */
 
-const TERMINAL_GOAL = new Set(['completed', 'cancelled', 'accepted']);
+const TERMINAL_GOAL = new Set(['completed', 'failed', 'cancelled']);
 
 export function projectHistory(conversations, { workspacePath = null, includeArchived = false } = {}) {
   const wanted = workspacePath == null || workspacePath === '' ? null : String(workspacePath);

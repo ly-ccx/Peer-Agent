@@ -491,6 +491,39 @@
   border-radius: 8px;
 }
 
+.bot-history-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  margin: 12px 0;
+  overflow: auto;
+}
+
+.bot-history-line {
+  padding: 8px 10px;
+  background: var(--chrome-canvas);
+  border-radius: 8px;
+}
+
+.bot-history-line span {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.bot-history-line p,
+.bot-history-confirm {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.bot-history-confirm {
+  margin-bottom: 8px;
+}
+
 .bot-sheet-head {
   display: flex;
   align-items: center;

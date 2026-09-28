@@ -1,7 +1,5 @@
 import { useEffect, useId, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { TaskOverviewItem } from '@peer-agent/protocol';
-import { ConversationResultView } from '../app/components/ConversationResultView';
 import { Overlay } from '../app/components/Overlay';
 import { clientApi } from '../clientApi';
 
@@ -14,6 +12,12 @@ export interface HistoryConversation {
 export interface HistoryBotChoice {
   readonly workspaceId: string;
   readonly displayName: string;
+}
+
+interface HistoryLine {
+  readonly id: string;
+  readonly role: string;
+  readonly text: string;
 }
 
 export function HistorySheet({
@@ -38,13 +42,17 @@ export function HistorySheet({
   const titleId = useId();
   const [loaded, setLoaded] = useState<readonly HistoryConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [lines, setLines] = useState<readonly HistoryLine[]>([]);
   const [botId, setBotId] = useState(workspaceId);
   const [busy, setBusy] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) {
       setSelectedId(null);
+      setLines([]);
+      setNeedsConfirm(false);
       setError('');
       setBusy(false);
       return undefined;
@@ -62,6 +70,25 @@ export function HistorySheet({
       cancelled = true;
     };
   }, [open, unscoped, workspaceId]);
+
+  useEffect(() => {
+    if (!open || !selectedId) {
+      setLines([]);
+      setNeedsConfirm(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setNeedsConfirm(false);
+    void clientApi.conversationsGet({ id: selectedId }).then((result) => {
+      if (cancelled) return;
+      setLines(historyLines(result?.messages));
+    }).catch(() => {
+      if (!cancelled) setLines([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedId]);
 
   if (!open) return null;
   const rows = items ?? loaded;
@@ -85,7 +112,14 @@ export function HistorySheet({
           <button type="button" className="bot-back" onClick={() => setSelectedId(null)}>
             {i18n.t('projectAgent.drawer.back')}
           </button>
-          <ConversationResultView item={historyOverview(selected)} isZh={i18n.locale === 'zh-CN'} />
+          <div className="bot-history-log">
+            {lines.map((line) => (
+              <article key={line.id} className="bot-history-line">
+                <span>{line.role}</span>
+                {line.text ? <p>{line.text}</p> : null}
+              </article>
+            ))}
+          </div>
           {unscoped ? (
             <label className="bot-history-pick">
               <span>{i18n.t('projectAgent.drawer.historyPickBot')}</span>
@@ -97,16 +131,27 @@ export function HistorySheet({
               </select>
             </label>
           ) : null}
+          {needsConfirm ? <p className="bot-history-confirm">{i18n.t('projectAgent.drawer.historyPartial')}</p> : null}
           {error ? <p className="bot-sheet-error">{error}</p> : null}
           <button
             type="button"
             className="bot-sheet-submit"
             disabled={busy || !targetBot}
             onClick={() => {
-              void continueHistory(targetBot, selected.id, setBusy, setError, onContinued);
+              void continueHistory(
+                targetBot,
+                selected.id,
+                needsConfirm,
+                setBusy,
+                setError,
+                setNeedsConfirm,
+                onContinued,
+              );
             }}
           >
-            {i18n.t('projectAgent.drawer.continueHistory')}
+            {i18n.t(needsConfirm
+              ? 'projectAgent.drawer.historyPartialConfirm'
+              : 'projectAgent.drawer.continueHistory')}
           </button>
         </div>
       ) : rows.length === 0 ? (
@@ -133,23 +178,35 @@ export function HistorySheet({
   );
 }
 
-function historyOverview(item: HistoryConversation): TaskOverviewItem {
-  return {
-    taskId: item.id,
-    source: 'conversation',
-    actionRight: 'terminal',
-    nextAction: 'none',
-    title: item.title || item.id,
-    statusLabel: item.updatedAt || '',
-    actionLabel: '',
-  };
+function historyLines(messages: unknown): readonly HistoryLine[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((message, index) => {
+    const row = message && typeof message === 'object' ? message as Record<string, unknown> : {};
+    const id = typeof row.id === 'string' && row.id ? row.id : String(index);
+    const role = typeof row.role === 'string' ? row.role : '';
+    return { id, role, text: textOf(row.content) };
+  });
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+      return (part as { text: string }).text;
+    }
+    return '';
+  }).filter(Boolean).join('\n');
 }
 
 async function continueHistory(
   workspaceId: string,
   conversationId: string,
+  confirmMissing: boolean,
   setBusy: (busy: boolean) => void,
   setError: (error: string) => void,
+  setNeedsConfirm: (needed: boolean) => void,
   onContinued?: (workspaceId: string) => void,
 ) {
   if (!workspaceId || !conversationId) return;
@@ -160,7 +217,12 @@ async function continueHistory(
       workspaceId,
       conversationId,
       inputId: crypto.randomUUID(),
+      ...(confirmMissing ? { confirmMissing: true } : {}),
     });
+    if (result?.code === 'BACKGROUND_CONFIRMATION_REQUIRED') {
+      setNeedsConfirm(true);
+      return;
+    }
     if (!result?.ok) {
       setError(result?.code || 'INVALID_INPUT');
       return;

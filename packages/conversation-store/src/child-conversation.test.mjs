@@ -211,3 +211,39 @@ test('a preset background snapshot is the child background and the history file 
   assert.equal(snapshot.entries.some((entry) => entry.text.includes('alpha')), false);
   assert.deepEqual(readFileSync(join(dir, `${history.id}.jsonl`)), before);
 });
+
+test('a partial preset snapshot needs confirmation before it becomes the child background', (t) => {
+  const { dir, store, parent, runtimeState, capturedAt } = setup(t);
+  const history = store.createConversation({ title: '带工具的旧对话' });
+  store.appendMessage(history.id, { id: 'old', role: 'user', content: '以前的原话' });
+  store.appendMessage(history.id, { id: 'tool-1', role: 'tool', content: '工具结果' });
+  const persisted = store.getPersistedConversationHistory(history.id);
+  const captured = store.captureInheritedBackground(history.id, {
+    expectedRevision: persisted.contentRevision,
+    runtimeState: {
+      conversationId: history.id,
+      contentRevision: persisted.contentRevision,
+      status: 'idle',
+    },
+    capturedAt,
+  });
+  assert.equal(captured.snapshot.requiresMissingConfirmation, true);
+  const before = readFileSync(join(dir, `${history.id}.jsonl`));
+  const childInput = {
+    parentConversationId: parent.id,
+    role: 'work_session',
+    anchorMessageId: 'b',
+    title: 'continued',
+    workspaceId: 'ws-1',
+    backgroundSnapshotId: captured.snapshotId,
+    runtimeState,
+    capturedAt,
+  };
+  assert.throws(() => store.createChildConversation(childInput), { code: 'BACKGROUND_CONFIRMATION_REQUIRED' });
+  assert.equal(store.listConversations().some((row) => row.backgroundSnapshotId === captured.snapshotId), false);
+  assert.deepEqual(readFileSync(join(dir, `${history.id}.jsonl`)), before);
+  const child = store.createChildConversation({ ...childInput, confirmMissing: true });
+  assert.equal(child.backgroundSnapshotId, captured.snapshotId);
+  assert.equal(store.readInheritedBackground(child.backgroundSnapshotId).requiresMissingConfirmation, true);
+  assert.deepEqual(readFileSync(join(dir, `${history.id}.jsonl`)), before);
+});

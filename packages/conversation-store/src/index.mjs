@@ -891,15 +891,21 @@ export function createConversationStore(options = {}) {
       const presetSnapshotId = typeof input.backgroundSnapshotId === 'string'
         ? input.backgroundSnapshotId.trim()
         : '';
+      const snapshots = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds'));
       let backgroundSnapshotId = presetSnapshotId;
-      if (!backgroundSnapshotId) {
+      if (backgroundSnapshotId) {
+        const existing = snapshots.read(backgroundSnapshotId);
+        if (existing?.requiresMissingConfirmation && input.confirmMissing !== true) {
+          fail('BACKGROUND_CONFIRMATION_REQUIRED');
+        }
+      } else {
         const snapshot = buildInheritedBackground(source, {
           expectedRevision: input.runtimeState?.contentRevision,
           runtimeState: input.runtimeState,
           capturedAt: input.capturedAt,
         });
         if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
-        backgroundSnapshotId = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).put(snapshot);
+        backgroundSnapshotId = snapshots.put(snapshot);
       }
       if (JSON.stringify(getPersistedConversationHistory(parentConversationId)) !== JSON.stringify(history)) fail('BACKGROUND_VERSION_CHANGED');
       const now = new Date().toISOString();

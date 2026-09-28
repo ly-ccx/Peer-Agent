@@ -1098,7 +1098,7 @@ export interface BootstrapPreloadApi {
     history?: readonly { id: string; title: string; workspacePath: string | null; updatedAt: string; status: string }[];
     goals?: readonly { planId: string; conversationId: string; title: string; status: string; waitingUser: boolean; updatedAt: string }[];
   }>;
-  readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string }; snapshot?: { snapshotId: string } }>;
+  readonly projectAgentContinueHistory: (params: { workspaceId: string; conversationId: string; inputId?: string; text?: string; confirmMissing?: boolean }) => Promise<{ ok: boolean; code?: string; input?: { inputId: string; text: string; historyRef?: string; historySnapshotId?: string; historyConfirmed?: boolean }; snapshot?: { snapshotId: string } }>;
   readonly projectAgentStartFamiliarize: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectMemoryList: (params: ProjectMemoryListRequest) => Promise<ProjectMemoryListResult>;
   readonly projectMemoryPin: (params: ProjectMemoryPinRequest) => Promise<ProjectMemoryItemResult>;

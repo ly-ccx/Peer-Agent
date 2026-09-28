@@ -54,6 +54,19 @@ test('经典目标里等待用户的计入需要你，已结束的和任务计�
       runner: { status: 'waiting_user' },
     },
     {
+      planId: 'plan-failed',
+      title: '失败了',
+      status: 'failed',
+      targetWorkspacePath: '/repo',
+      runner: { status: 'waiting_user' },
+    },
+    {
+      planId: 'plan-accepted',
+      title: '已接手',
+      status: 'accepted',
+      targetWorkspacePath: '/repo',
+    },
+    {
       planId: 'plan-task',
       title: '机器人任务',
       status: 'executing',
@@ -79,6 +92,7 @@ test('经典目标里等待用户的计入需要你，已结束的和任务计�
   assert.deepEqual(goals.map((goal) => goal.planId), [
     'plan-wait',
     'plan-run',
+    'plan-accepted',
     'plan-by-conversation',
   ]);
   assert.equal(classicNeedsYouCount(goals), 2);

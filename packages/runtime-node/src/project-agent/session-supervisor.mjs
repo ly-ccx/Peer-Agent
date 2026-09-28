@@ -381,6 +381,7 @@ export function createSessionSupervisor({
         },
         capturedAt: now(),
         ...(presetSnapshotId ? { backgroundSnapshotId: presetSnapshotId } : {}),
+        ...(context?.confirmMissing === true ? { confirmMissing: true } : {}),
       });
       const messageId = randomUUID();
       const stored = conversationStore.appendMessage(child.id, {
