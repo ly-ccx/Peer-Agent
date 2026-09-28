@@ -20,6 +20,9 @@ const CHANNELS = [
   'project-agent:decide-approval',
   'project-agent:mark-read',
   'project-agent:search',
+  'project-agent:list-history',
+  'project-agent:continue-history',
+  'project-agent:start-familiarize',
 ];
 
 function harness() {
@@ -45,6 +48,9 @@ function harness() {
       decideApproval: port('decide-approval'),
       markRead: port('mark-read'),
       search: port('search'),
+      listHistory: port('list-history'),
+      continueHistory: port('continue-history'),
+      startFamiliarize: port('start-familiarize'),
     },
   });
   const handlers = new Map();

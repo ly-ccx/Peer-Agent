@@ -178,3 +178,36 @@ test('child creation rejects a bad role, anchor, or delegation', (t) => {
   }), { code: 'CHILD_DELEGATION_INVALID' });
   assert.equal(store.listConversations({ roles: ['work_session', 'project_agent'] }).length, 0);
 });
+
+test('a preset background snapshot is the child background and the history file stays put', (t) => {
+  const { dir, store, parent, runtimeState, capturedAt } = setup(t);
+  const history = store.createConversation({ title: '旧对话' });
+  store.appendMessage(history.id, { id: 'old', role: 'user', content: '以前的原话' });
+  const persisted = store.getPersistedConversationHistory(history.id);
+  const captured = store.captureInheritedBackground(history.id, {
+    expectedRevision: persisted.contentRevision,
+    runtimeState: {
+      conversationId: history.id,
+      contentRevision: persisted.contentRevision,
+      status: 'idle',
+    },
+    capturedAt,
+  });
+  const before = readFileSync(join(dir, `${history.id}.jsonl`));
+  const child = store.createChildConversation({
+    parentConversationId: parent.id,
+    role: 'work_session',
+    anchorMessageId: 'b',
+    title: 'continued',
+    workspaceId: 'ws-1',
+    backgroundSnapshotId: captured.snapshotId,
+    runtimeState,
+    capturedAt,
+  });
+  assert.equal(child.backgroundSnapshotId, captured.snapshotId);
+  const snapshot = store.readInheritedBackground(child.backgroundSnapshotId);
+  assert.equal(snapshot.sourceConversationId, history.id);
+  assert.equal(snapshot.entries.some((entry) => entry.text.includes('以前的原话')), true);
+  assert.equal(snapshot.entries.some((entry) => entry.text.includes('alpha')), false);
+  assert.deepEqual(readFileSync(join(dir, `${history.id}.jsonl`)), before);
+});

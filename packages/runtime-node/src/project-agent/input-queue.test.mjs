@@ -124,3 +124,26 @@ test('非宿主不消费输入', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('历史引用只在提供时写入，缺省或非法时不出现', () => {
+  const root = tempRoot();
+  try {
+    const { queue, messages } = harness(root);
+    const plain = randomUUID();
+    const linked = randomUUID();
+    queue.submitInput(input(plain, '普通'));
+    queue.submitInput(input(linked, '继续：旧对话', {
+      historyRef: 'conv-old',
+      historySnapshotId: 'snap-1',
+    }));
+    queue.consume('ws-1');
+    assert.equal(messages[0].historyRef, undefined);
+    assert.equal(messages[0].historySnapshotId, undefined);
+    assert.equal(messages[1].historyRef, 'conv-old');
+    assert.equal(messages[1].historySnapshotId, 'snap-1');
+    const noisy = queue.submitInput(input(randomUUID(), '坏引用', { historyRef: 'has\nnewline' }));
+    assert.equal(noisy.historyRef, undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

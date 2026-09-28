@@ -16,14 +16,15 @@ import {
   type DrawerSession,
   type DrawerTab,
 } from '../state/drawerState';
+import { HistorySheet, type HistoryConversation } from '../HistorySheet';
 import { AgentProcessView } from './AgentProcessView';
 import type { BotInspect } from './agentProcess';
 import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
 import { OverviewTab } from './OverviewTab';
-import { SessionDetail } from './SessionDetail';
-import { TasksTab } from './TasksTab';
+import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
+import { TasksTab, type ClassicGoalRow } from './TasksTab';
 import '../styles/bot-drawer.css';
 
 const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 'projectAgent.drawer.tab.tasks' | 'projectAgent.drawer.tab.objectives' | 'projectAgent.drawer.tab.memory' | 'projectAgent.drawer.tab.settings' }[] = [
@@ -46,6 +47,8 @@ export function BotProfileDrawer({
   onMemory,
   onProfile,
   onDeleted,
+  onOpenConversation,
+  onOpenAutomations,
 }: {
   readonly workspaceId: string;
   readonly profile: BotProfile;
@@ -58,6 +61,8 @@ export function BotProfileDrawer({
   readonly onMemory: (memory: DrawerMemory) => void;
   readonly onProfile: (profile: BotProfile) => void;
   readonly onDeleted: () => void;
+  readonly onOpenConversation?: (conversationId: string) => void;
+  readonly onOpenAutomations?: () => void;
 }) {
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
@@ -65,6 +70,10 @@ export function BotProfileDrawer({
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
   const [modelLabel, setModelLabel] = useState('');
   const [detail, setDetail] = useState<DrawerSession | null>(null);
+  const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
+  const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
   const close = () => {
     onMemory({ ...memory, open: false });
@@ -112,6 +121,28 @@ export function BotProfileDrawer({
       cancelled = true;
     };
   }, [workspaceId, memory.open]);
+
+  useEffect(() => {
+    if (!memory.open || !path) {
+      setHistory([]);
+      setGoals([]);
+      return undefined;
+    }
+    let cancelled = false;
+    void clientApi.projectAgentListHistory({ workspaceId, workspacePath: path }).then((result) => {
+      if (cancelled || !result?.ok) return;
+      setHistory(Array.isArray(result.history) ? result.history : []);
+      setGoals(Array.isArray(result.goals) ? result.goals : []);
+    }).catch(() => {
+      if (!cancelled) {
+        setHistory([]);
+        setGoals([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [memory.open, path, workspaceId]);
 
   useEffect(() => {
     if (!memory.sessionId) {
@@ -185,9 +216,17 @@ export function BotProfileDrawer({
       {memory.tab === 'tasks' && !(memory.sessionId && (detail || selected)) ? (
         <TasksTab
           sessions={sessions}
+          history={history}
+          goals={goals}
           selectedId={memory.sessionId}
           i18n={i18n}
           onSelect={(sessionId) => onMemory({ ...memory, open: true, tab: 'tasks', sessionId })}
+          onOpenHistory={setHistoryId}
+          onOpenClassic={(goal) => {
+            if (!goal.conversationId) return;
+            onOpenConversation?.(goal.conversationId);
+            setClassicScene({ conversationId: goal.conversationId, title: goal.title });
+          }}
         />
       ) : null}
       {memory.tab === 'tasks' && memory.sessionId && (detail || selected) ? (
@@ -200,7 +239,9 @@ export function BotProfileDrawer({
           onBack={() => onMemory({ ...memory, sessionId: null })}
         />
       ) : null}
-      {memory.tab === 'objectives' ? <ObjectivesTab i18n={i18n} /> : null}
+      {memory.tab === 'objectives' ? (
+        <ObjectivesTab workspacePath={path} i18n={i18n} onOpenAutomations={onOpenAutomations} />
+      ) : null}
       {memory.tab === 'memory' ? (
         <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />
       ) : null}
@@ -215,6 +256,25 @@ export function BotProfileDrawer({
         />
       ) : null}
       {locateSessionId ? <span className="bot-drawer-sr" data-locate-session={locateSessionId} /> : null}
+      <HistorySheet
+        open={historyId !== null}
+        workspaceId={workspaceId}
+        items={history}
+        i18n={i18n}
+        onClose={() => setHistoryId(null)}
+        onContinued={() => setHistoryId(null)}
+      />
+      {classicScene ? (
+        <ConversationSceneDrawer
+          workspaceId={workspaceId}
+          workspacePath={path}
+          conversationId={classicScene.conversationId}
+          title={classicScene.title}
+          i18n={i18n}
+          isZh={isZh}
+          onClose={() => setClassicScene(null)}
+        />
+      ) : null}
     </div>
   );
 

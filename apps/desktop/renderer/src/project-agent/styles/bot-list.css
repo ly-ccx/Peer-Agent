@@ -468,6 +468,29 @@
   border-radius: 16px;
 }
 
+.bot-history-sheet {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.bot-history-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.bot-history-pick select {
+  font: inherit;
+  padding: 8px 10px;
+  color: var(--graphite-base);
+  background: var(--chrome-canvas);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 8px;
+}
+
 .bot-sheet-head {
   display: flex;
   align-items: center;

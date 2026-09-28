@@ -60,7 +60,8 @@ export function createBotLifecycle({
     if (!conversationStore || typeof conversationStore.createConversation !== 'function') {
       return fail('CONVERSATION_REQUIRED');
     }
-    const displayName = cleanDisplayName(path.basename(entry.path)) || '项目';
+    const named = cleanDisplayName(options.displayName);
+    const displayName = named || cleanDisplayName(path.basename(entry.path)) || '项目';
     const conversation = conversationStore.createConversation({
       title: displayName,
       role: 'project_agent',
@@ -77,6 +78,49 @@ export function createBotLifecycle({
     });
     if (!created.ok) return created;
     return { ok: true, profile: created.profile, created: created.created === true };
+  }
+
+  function ensureBots(workspaces) {
+    if (enabled() !== true) return fail('PROJECT_AGENT_DISABLED');
+    if (!Array.isArray(workspaces)) return fail('INVALID_INPUT');
+    const bots = [];
+    for (const workspace of workspaces) {
+      const folder = typeof workspace?.path === 'string' ? workspace.path.trim() : '';
+      if (!folder) continue;
+      let entry = null;
+      try {
+        entry = typeof registry?.ensureForPath === 'function' ? registry.ensureForPath(folder) : null;
+      } catch {
+        bots.push({
+          workspaceId: '',
+          ok: false,
+          created: false,
+          code: 'NOT_FOUND',
+          displayName: '',
+          agentConversationId: '',
+          familiarize: null,
+        });
+        continue;
+      }
+      const workspaceId = entry?.workspaceId
+        || (typeof workspace?.id === 'string' ? workspace.id.trim() : '')
+        || (typeof workspace?.workspaceId === 'string' ? workspace.workspaceId.trim() : '');
+      if (!workspaceId) continue;
+      const ensured = ensureBot(workspaceId, {
+        displayName: workspace?.name || workspace?.displayName,
+        managed: workspace?.managed === true,
+      });
+      bots.push({
+        workspaceId,
+        ok: ensured.ok === true,
+        created: ensured.created === true,
+        code: ensured.code,
+        displayName: ensured.profile?.displayName || '',
+        agentConversationId: ensured.profile?.agentConversationId || '',
+        familiarize: ensured.profile?.familiarize ?? null,
+      });
+    }
+    return { ok: true, bots };
   }
 
   function listNames(folder) {
@@ -294,6 +338,7 @@ export function createBotLifecycle({
 
   return {
     ensureBot,
+    ensureBots,
     readProfile: (workspaceId) => profiles.read(workspaceId),
     regenerateAvatar: (workspaceId) => profiles.regenerateAvatar(workspaceId),
     uploadAvatar: (workspaceId, sourcePath) => profiles.installAvatar(workspaceId, sourcePath),

@@ -1197,3 +1197,35 @@ test('已经结束的会话拒绝 amend', async () => {
     await env.cleanup();
   }
 });
+
+test('开任务时子会话沿用指定的历史背景快照', { timeout: 20_000 }, async () => {
+  const env = await harness();
+  try {
+    const history = env.conversationStore.createConversation({ title: '旧对话', workspacePath: env.root });
+    env.conversationStore.appendMessage(history.id, { id: 'old-1', role: 'user', content: '以前的原话' });
+    const persisted = env.conversationStore.getPersistedConversationHistory(history.id);
+    const captured = env.conversationStore.captureInheritedBackground(history.id, {
+      expectedRevision: persisted.contentRevision,
+      runtimeState: {
+        conversationId: history.id,
+        contentRevision: persisted.contentRevision,
+        status: 'idle',
+      },
+      capturedAt: '2026-09-28T00:00:00.000Z',
+    });
+    const opened = await env.supervisor.spawn(
+      spawnInput(),
+      contextOf(env, { backgroundSnapshotId: captured.snapshotId, inputId: 'input-history' }),
+    );
+    assert.equal(opened.error, undefined);
+    const child = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' })
+      .find((item) => item.delegation?.sessionId === opened.sessionId);
+    assert.equal(child.backgroundSnapshotId, captured.snapshotId);
+    const snapshot = env.conversationStore.readInheritedBackground(child.backgroundSnapshotId);
+    assert.equal(snapshot.sourceConversationId, history.id);
+    assert.equal(snapshot.entries.some((entry) => entry.text.includes('以前的原话')), true);
+    assert.equal(snapshot.entries.some((entry) => entry.text.includes('请把登录修好')), false);
+  } finally {
+    await env.cleanup();
+  }
+});

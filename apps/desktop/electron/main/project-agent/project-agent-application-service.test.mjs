@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createConversationStore } from '../../../../../packages/conversation-store/src/index.mjs';
+import { createBotLifecycle } from '../../../../../packages/runtime-node/src/project-agent/bot-lifecycle.mjs';
+import { createInputQueue } from '../../../../../packages/runtime-node/src/project-agent/input-queue.mjs';
+import { createProjectRegistry } from '../../../../../packages/runtime-node/src/project-registry.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 
 const METHODS = [
@@ -21,6 +26,9 @@ const METHODS = [
   ['decideApproval', { workspaceId: 'ws-1', approvalId: 'ap-1', decision: 'approve' }],
   ['markRead', { workspaceId: 'ws-1' }],
   ['search', { query: '笔记' }],
+  ['listHistory', { workspaceId: 'ws-1' }],
+  ['continueHistory', { workspaceId: 'ws-1', conversationId: 'conv-1' }],
+  ['startFamiliarize', { workspaceId: 'ws-1' }],
 ];
 
 function throwing(label) {
@@ -313,4 +321,133 @@ test('拒绝计划批准时取消对应任务', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.approval.state, 'denied');
   assert.deepEqual(cancelled, [{ sessionId: 'sess-3', reason: 'plan_approval_denied' }]);
+});
+
+function fileHashes(dir) {
+  const out = new Map();
+  const walk = (folder) => {
+    if (!existsSync(folder)) return;
+    for (const name of readdirSync(folder)) {
+      const full = path.join(folder, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else out.set(full, createHash('sha256').update(readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+test('旧会话迁成机器人并继续之后，原文件字节不变，快照带着原话', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b3-09-history-'));
+  try {
+    const folder = path.join(root, 'repo');
+    mkdirSync(folder);
+    const storeDir = path.join(root, 'conversations');
+    const registry = createProjectRegistry({ filePath: path.join(root, 'projects', 'registry.json') });
+    const entry = registry.ensureForPath(folder);
+    const conversationStore = createConversationStore({ storeDir });
+    const old = conversationStore.createConversation({ title: '旧对话', workspacePath: folder });
+    conversationStore.appendMessage(old.id, { id: 'm1', role: 'user', content: '以前说过的话' });
+    const loose = conversationStore.createConversation({ title: '没有工作区' });
+    conversationStore.appendMessage(loose.id, { id: 'l1', role: 'user', content: '散的一句' });
+    const before = fileHashes(storeDir);
+    const indexBefore = readFileSync(path.join(storeDir, 'index.jsonl'));
+    const life = createBotLifecycle({
+      rootDir: root,
+      registry,
+      conversationStore,
+      now: () => new Date('2026-09-28T00:00:00.000Z'),
+    });
+    const migrated = life.ensureBots([{ path: folder, name: '演示项目', id: entry.workspaceId }]);
+    assert.equal(migrated.ok, true);
+    assert.equal(migrated.bots[0].created, true);
+    assert.equal(migrated.bots[0].displayName, '演示项目');
+    assert.equal(migrated.bots[0].familiarize, null);
+    const again = life.ensureBots([{ path: folder, name: '演示项目' }]);
+    assert.equal(again.bots[0].created, false);
+    assert.equal(again.bots[0].agentConversationId, migrated.bots[0].agentConversationId);
+    const queue = createInputQueue({
+      rootDir: path.join(root, 'runtime'),
+      holdsLease: () => true,
+      resolveConversationId: () => migrated.bots[0].agentConversationId,
+      hasMessage: (conversationId, messageId) => (
+        conversationStore.getPersistedConversationHistory(conversationId)?.messages
+          ?.some((message) => message.id === messageId) === true
+      ),
+      appendMessage: (conversationId, message) => {
+        conversationStore.appendMessage(conversationId, message);
+      },
+    });
+    const service = createProjectAgentApplicationService({
+      enabled: () => true,
+      directory: { get: () => ({ ok: true, path: folder }), list: () => [], search: () => [] },
+      lifecycle: life,
+      inputQueue: queue,
+      conversationStore,
+      goalPlanStore: {
+        listPlans: () => [{
+          planId: 'plan-wait',
+          conversationId: old.id,
+          title: '旧目标',
+          status: 'paused',
+          runner: { status: 'waiting_user' },
+          targetWorkspacePath: folder,
+        }],
+      },
+      broadcast() {},
+      schedule: () => 1,
+      now: () => '2026-09-28T00:00:00.000Z',
+    });
+    const listed = service.listHistory({ workspaceId: entry.workspaceId, workspacePath: folder });
+    assert.equal(listed.ok, true);
+    assert.equal(listed.history.some((item) => item.id === old.id), true);
+    assert.equal(listed.history.some((item) => item.id === migrated.bots[0].agentConversationId), false);
+    assert.equal(listed.goals[0].planId, 'plan-wait');
+    assert.equal(listed.goals[0].waitingUser, true);
+    const unscoped = service.listHistory({ unscoped: true });
+    assert.equal(unscoped.history.some((item) => item.id === loose.id), true);
+    assert.equal(unscoped.history.some((item) => item.id === old.id), false);
+    const inputId = randomUUID();
+    const continued = service.continueHistory({
+      workspaceId: entry.workspaceId,
+      conversationId: old.id,
+      inputId,
+    });
+    assert.equal(continued.ok, true);
+    assert.equal(continued.input.historyRef, old.id);
+    assert.equal(continued.input.text, '继续：旧对话');
+    const snapshot = conversationStore.readInheritedBackground(continued.snapshot.snapshotId);
+    assert.equal(snapshot.entries.some((row) => row.text.includes('以前说过的话')), true);
+    const rejected = service.continueHistory({
+      workspaceId: entry.workspaceId,
+      conversationId: migrated.bots[0].agentConversationId,
+      inputId: randomUUID(),
+    });
+    assert.equal(rejected.code, 'NOT_HISTORY');
+    const indexAfter = readFileSync(path.join(storeDir, 'index.jsonl'));
+    assert.equal(indexAfter.subarray(0, indexBefore.length).equals(indexBefore), true);
+    const after = fileHashes(storeDir);
+    for (const [file, hash] of before) {
+      if (!file.endsWith('.jsonl') || path.basename(file) === 'index.jsonl') continue;
+      assert.equal(after.get(file), hash, file);
+    }
+    queue.consume(entry.workspaceId);
+    const agent = conversationStore.getPersistedConversationHistory(migrated.bots[0].agentConversationId);
+    assert.equal(agent.messages.some((message) => (
+      message.historyRef === old.id && message.historySnapshotId === continued.snapshot.snapshotId
+    )), true);
+    const oldAfter = conversationStore.getConversation(old.id);
+    assert.equal(oldAfter.messages.length, 1);
+    assert.equal(oldAfter.messages[0].content, '以前说过的话');
+    assert.equal(
+      createHash('sha256').update(readFileSync(path.join(storeDir, `${old.id}.jsonl`))).digest('hex'),
+      before.get(path.join(storeDir, `${old.id}.jsonl`)),
+    );
+    assert.equal(
+      createHash('sha256').update(readFileSync(path.join(storeDir, `${loose.id}.jsonl`))).digest('hex'),
+      before.get(path.join(storeDir, `${loose.id}.jsonl`)),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

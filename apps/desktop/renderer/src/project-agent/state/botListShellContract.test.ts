@@ -24,6 +24,7 @@ const LIST_KEYS = [
   'projectAgent.list.nameInvalid',
   'projectAgent.list.bindFolder',
   'projectAgent.list.blankBot',
+  'projectAgent.list.history',
 ] as const;
 
 test('开关关闭时 App 仍走原来的主布局，机器人壳只在打开时出现', () => {
@@ -48,10 +49,10 @@ test('Sidebar.tsx 行数保持当前壳层', () => {
   assert.equal(lineCount(sidebar), 1152);
 });
 
-test('历史对话入口还没接上，「我」菜单不渲染它', () => {
+test('「我」菜单可以打开历史对话', () => {
   const menu = readFileSync(menuUrl, 'utf8');
-  assert.equal(menu.includes('projectAgent.list.history'), false);
-  assert.match(menu, /B3-09/);
+  assert.match(menu, /projectAgent\.list\.history/);
+  assert.match(menu, /onOpenHistory/);
 });
 
 test('机器人列表文案在中英文里都有', () => {

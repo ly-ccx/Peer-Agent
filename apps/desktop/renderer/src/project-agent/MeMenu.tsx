@@ -7,19 +7,18 @@ interface MeMenuProps {
   readonly onToggle: () => void;
   readonly onClose: () => void;
   readonly onOpenSettings: () => void;
+  readonly onOpenHistory: () => void;
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
 }
 
-/**
- * 历史对话留到 B3-09，这里不渲染入口。
- */
 export function MeMenu({
   open,
   i18n,
   onToggle,
   onClose,
   onOpenSettings,
+  onOpenHistory,
   onOpenAutomations,
   onOpenCapabilities,
 }: MeMenuProps) {
@@ -48,6 +47,9 @@ export function MeMenu({
         <div className="bot-me-menu" id={menuId} role="menu">
           <button type="button" role="menuitem" onClick={onOpenSettings}>
             {i18n.t('projectAgent.list.settings')}
+          </button>
+          <button type="button" role="menuitem" onClick={onOpenHistory}>
+            {i18n.t('projectAgent.list.history')}
           </button>
           <button type="button" role="menuitem" onClick={onOpenAutomations}>
             {i18n.t('projectAgent.list.automations')}

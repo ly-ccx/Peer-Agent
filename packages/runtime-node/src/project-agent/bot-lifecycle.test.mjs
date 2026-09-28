@@ -238,3 +238,56 @@ test('空白机器人先问职责，回答是 stated 且固定，同意后才有
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('批量确保用设置里的名字，第二次还是同一个对话，并且不自动熟悉', () => {
+  const root = tempRoot();
+  try {
+    const { folder, registry, conversationStore, memoryStore } = harness(root);
+    const other = path.join(root, 'notes');
+    mkdirSync(other);
+    const spawned = [];
+    const life = createBotLifecycle({
+      rootDir: root,
+      registry,
+      conversationStore,
+      memoryStore,
+      spawn: (input) => { spawned.push(input); },
+      now: () => new Date('2026-09-27T00:00:00.000Z'),
+    });
+    const first = life.ensureBots([
+      { path: folder, name: '演示项目' },
+      { path: other, name: '笔记' },
+    ]);
+    assert.equal(first.ok, true);
+    assert.equal(first.bots.length, 2);
+    assert.equal(first.bots[0].displayName, '演示项目');
+    assert.equal(first.bots[0].familiarize, null);
+    assert.equal(first.bots[0].created, true);
+    assert.equal(first.bots[1].displayName, '笔记');
+    const second = life.ensureBots([
+      { path: folder, name: '演示项目' },
+      { path: other, name: '笔记' },
+    ]);
+    assert.equal(second.bots[0].created, false);
+    assert.equal(second.bots[0].agentConversationId, first.bots[0].agentConversationId);
+    assert.equal(second.bots[1].agentConversationId, first.bots[1].agentConversationId);
+    assert.equal(spawned.length, 0);
+    assert.equal(conversationStore.listConversations({ roles: ['project_agent'] }).length, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('开关关闭时批量确保不创建档案和对话', () => {
+  const root = tempRoot();
+  try {
+    const { folder, entry, conversationStore, life } = harness(root, { enabled: () => false });
+    const result = life.ensureBots([{ path: folder, name: '演示项目' }]);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'PROJECT_AGENT_DISABLED');
+    assert.equal(existsSync(path.join(root, 'projects', entry.workspaceId, 'profile.json')), false);
+    assert.equal(conversationStore.listConversations().length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

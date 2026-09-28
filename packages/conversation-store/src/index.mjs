@@ -888,14 +888,20 @@ export function createConversationStore(options = {}) {
       if (!parent) fail('CHILD_PARENT_MISSING');
       const history = getPersistedConversationHistory(parentConversationId);
       const source = historyThroughAnchor(history, anchorMessageId, fail);
-      const snapshot = buildInheritedBackground(source, {
-        expectedRevision: input.runtimeState?.contentRevision,
-        runtimeState: input.runtimeState,
-        capturedAt: input.capturedAt,
-      });
-      if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
+      const presetSnapshotId = typeof input.backgroundSnapshotId === 'string'
+        ? input.backgroundSnapshotId.trim()
+        : '';
+      let backgroundSnapshotId = presetSnapshotId;
+      if (!backgroundSnapshotId) {
+        const snapshot = buildInheritedBackground(source, {
+          expectedRevision: input.runtimeState?.contentRevision,
+          runtimeState: input.runtimeState,
+          capturedAt: input.capturedAt,
+        });
+        if (snapshot.requiresMissingConfirmation && input.confirmMissing !== true) fail('BACKGROUND_CONFIRMATION_REQUIRED');
+        backgroundSnapshotId = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).put(snapshot);
+      }
       if (JSON.stringify(getPersistedConversationHistory(parentConversationId)) !== JSON.stringify(history)) fail('BACKGROUND_VERSION_CHANGED');
-      const backgroundSnapshotId = createBackgroundSnapshotStore(path.join(storeDir, 'inherited-backgrounds')).put(snapshot);
       const now = new Date().toISOString();
       const child = normalizeMeta({
         id: randomUUID(),
