@@ -74,6 +74,7 @@ export function createProjectAgentApplicationService({
   rememberGrant = defaultRememberGrant,
   settleLive = defaultSettleLive,
   agentOnline = () => true,
+  readAgentStatus = () => undefined,
   readEvidenceBody = null,
   conversationStore = null,
   goalPlanStore = null,
@@ -115,6 +116,13 @@ export function createProjectAgentApplicationService({
     return enabled() === true;
   }
 
+  function withAgentStatus(item) {
+    if (!item) return item;
+    const status = readAgentStatus(item.workspaceId);
+    if (!['idle', 'thinking', 'waiting_provider', 'error'].includes(status)) return item;
+    return { ...item, state: { ...item.state, agentStatus: status } };
+  }
+
   function list(payload = {}) {
     if (!open()) return disabled();
     const items = typeof payload?.query === 'string' && payload.query.trim()
@@ -123,12 +131,13 @@ export function createProjectAgentApplicationService({
     const filtered = payload?.needsYouOnly === true
       ? items.filter((item) => item.state.needsYou > 0)
       : items;
-    return { ok: true, items: filtered };
+    return { ok: true, items: filtered.map(withAgentStatus) };
   }
 
   function get(payload = {}) {
     if (!open()) return disabled();
-    return directory.get(payload.workspaceId);
+    const result = directory.get(payload.workspaceId);
+    return result?.ok && result.item ? { ...result, item: withAgentStatus(result.item) } : result;
   }
 
   function readAvatar(payload = {}) {

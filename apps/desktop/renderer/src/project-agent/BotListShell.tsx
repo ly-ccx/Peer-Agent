@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
+import { botAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
 import { MeMenu } from './MeMenu';
 import { NewBotSheet } from './NewBotSheet';
@@ -93,6 +94,8 @@ export function BotListShell({
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const [inspect, setInspect] = useState<BotInspect | null>(null);
+  const [replyFlash, setReplyFlash] = useState<string | null>(null);
+  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
@@ -111,8 +114,19 @@ export function BotListShell({
   useEffect(() => {
     setLocateSessionId(null);
     setInspect(null);
+    setReplyFlash(null);
     drawerLoadedFor.current = null;
   }, [opened?.workspaceId]);
+
+  useEffect(() => () => {
+    if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+  }, []);
+
+  const announceReply = useCallback((workspaceId: string) => {
+    if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+    setReplyFlash(workspaceId);
+    replyTimerRef.current = setTimeout(() => setReplyFlash(null), 850);
+  }, []);
 
   useEffect(() => {
     const workspaceId = opened?.workspaceId;
@@ -385,7 +399,8 @@ export function BotListShell({
         ) : opened ? (
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
-              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId} />
+              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
+                mood={replyFlash === opened.workspaceId ? 'reply' : botAvatarMood(opened.state)} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
                 ref={profileButtonRef}
@@ -406,7 +421,11 @@ export function BotListShell({
             </header>
             <BotConversation
               workspaceId={opened.workspaceId}
+              avatar={opened.profile.avatar}
+              label={opened.profile.displayName}
+              avatarMood={botAvatarMood(opened.state)}
               i18n={i18n}
+              onReplyArrived={announceReply}
               onLocateSession={setLocateSessionId}
               onInspect={(next) => {
                 setInspect(next);
@@ -442,7 +461,8 @@ export function BotListShell({
                       className="bot-main-pick"
                       onClick={() => list.openBot(item.workspaceId)}
                     >
-                      <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId} />
+                      <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId}
+                        mood={botAvatarMood(item.state)} />
                       <span className="bot-main-pick-copy">
                         <strong>{item.profile.displayName}</strong>
                         <small>{i18n.t('projectAgent.list.openBot')}</small>

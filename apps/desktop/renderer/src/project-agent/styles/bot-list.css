@@ -399,23 +399,139 @@
   width: 40px;
   height: 40px;
   place-items: center;
-  overflow: hidden;
-  border-radius: 13px;
+  overflow: visible;
   font-size: 17px;
   font-weight: 650;
   line-height: 1;
 }
 
 .bot-avatar-generated {
-  color: #fff;
-  background: color-mix(in srgb, var(--bot-avatar-accent) 62%, #111827);
-  border: 1px solid color-mix(in srgb, var(--bot-avatar-accent) 55%, #fff 45%);
+  isolation: isolate;
+}
+
+.bot-avatar-generated svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--bot-avatar-accent) 24%, transparent));
+  animation: bot-avatar-breathe 4.6s ease-in-out infinite;
+}
+
+.bot-avatar-body,
+.bot-avatar-detail {
+  fill: var(--bot-avatar-accent);
+  stroke: color-mix(in srgb, var(--bot-avatar-accent) 72%, white);
+  stroke-width: 0.9;
+}
+
+.bot-avatar-detail {
+  fill: none;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bot-avatar-highlight {
+  fill: none;
+  stroke: color-mix(in srgb, white 72%, transparent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+
+.bot-avatar-face {
+  transform: translate(var(--bot-gaze-x, 0), var(--bot-gaze-y, 0));
+  transition: transform 160ms ease-out;
+}
+
+.bot-avatar-eye,
+.bot-avatar-mouth-dot {
+  fill: #17212b;
+}
+
+.bot-avatar-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bot-avatar-blink 5.8s ease-in-out infinite;
+}
+
+.bot-avatar-mouth {
+  fill: none;
+  stroke: #17212b;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+.bot-avatar-thought {
+  fill: var(--bot-avatar-accent);
+  opacity: 0;
+}
+
+.bot-avatar[data-avatar-mood="working"] svg,
+.bot-avatar[data-avatar-mood="thinking"] svg {
+  animation: bot-avatar-thinking 1.9s ease-in-out infinite;
+}
+
+.bot-avatar[data-avatar-mood="waiting_provider"] svg {
+  animation: bot-avatar-thinking 2.6s ease-in-out infinite;
+}
+
+.bot-avatar[data-avatar-mood="thinking"] .bot-avatar-thought,
+.bot-avatar[data-avatar-mood="waiting_provider"] .bot-avatar-thought {
+  opacity: 0.8;
+  animation: bot-avatar-thought 1.8s ease-in-out infinite;
+}
+
+.bot-avatar[data-avatar-mood="needs_you"] svg {
+  animation: bot-avatar-attention 2.8s ease-in-out infinite;
+}
+
+.bot-avatar[data-avatar-mood="reply"] svg {
+  animation: bot-avatar-reply 700ms cubic-bezier(0.2, 0.8, 0.2, 1) 1;
+}
+
+.bot-avatar[data-avatar-mood="error"] svg,
+.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye {
+  animation: none;
+}
+
+.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye {
+  transform: scaleY(0.6);
+}
+
+.bot-avatar:hover svg,
+.bot-row:hover .bot-avatar svg {
+  filter: drop-shadow(0 3px 5px color-mix(in srgb, var(--bot-avatar-accent) 42%, transparent));
+}
+
+.bot-avatar:active svg,
+.bot-row:active .bot-avatar svg {
+  transform: scale(0.88) rotate(-7deg);
+  animation-play-state: paused;
 }
 
 .bot-avatar-image {
+  overflow: hidden;
+  border-radius: 13px;
   color: var(--graphite-base);
   background: var(--chrome-hover);
   border: 1px solid var(--chrome-hairline);
+}
+
+.bot-avatar-image[data-avatar-mood="thinking"],
+.bot-avatar-image[data-avatar-mood="waiting_provider"] {
+  animation: bot-avatar-thinking 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-avatar,
+  .bot-avatar svg,
+  .bot-avatar .bot-avatar-eye,
+  .bot-avatar .bot-avatar-thought {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .bot-avatar-image img {

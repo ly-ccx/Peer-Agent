@@ -149,8 +149,11 @@
   flex-basis: 56px;
   width: 56px;
   height: 56px;
-  border-radius: 16px;
   font-size: 23px;
+}
+
+.bot-avatar-settings .bot-avatar-image {
+  border-radius: 16px;
 }
 
 .bot-avatar-settings-actions {

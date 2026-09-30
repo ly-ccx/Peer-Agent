@@ -1,4 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useRef, useState } from 'react';
 import {
   formatConversationStamp,
@@ -7,12 +8,17 @@ import {
   type BotChatMessage,
   type ConversationRow,
 } from '../state/botConversationState';
+import { BotAvatar } from '../BotAvatar';
+import type { BotAvatarMood } from '../state/botAvatarState';
 import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 
 export function BotMessageList({
   workspaceId,
+  avatar,
+  label,
+  avatarMood,
   rows,
   highlightedId,
   i18n,
@@ -24,6 +30,9 @@ export function BotMessageList({
   onOpenProcess,
 }: {
   readonly workspaceId: string;
+  readonly avatar: BotAvatarModel;
+  readonly label: string;
+  readonly avatarMood: BotAvatarMood;
   readonly rows: readonly ConversationRow[];
   readonly highlightedId: string | null;
   readonly i18n: I18nRuntime;
@@ -74,7 +83,12 @@ export function BotMessageList({
         }
       }}
     >
-      {rows.length === 0 ? <p className="bot-thread-empty">{i18n.t('projectAgent.chat.empty')}</p> : null}
+      {rows.length === 0 ? (
+        <div className="bot-thread-empty">
+          <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} />
+          <p>{i18n.t('projectAgent.chat.empty')}</p>
+        </div>
+      ) : null}
       {windowed.start > 0 ? <div className="bot-thread-spacer" style={{ height: windowed.start * 72 }} /> : null}
       {windowed.rows.map((row) => (
         row.type === 'separator' ? (

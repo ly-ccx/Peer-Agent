@@ -52,6 +52,37 @@ test('头像由工作区 id 决定，换一个会带盐重新生成', () => {
   }
 });
 
+test('新建和换一个不会与现有生成头像使用相同组合', () => {
+  const root = tempRoot();
+  try {
+    const signature = (avatar) => `${avatar.shape}:${avatar.color}:${avatar.variant}`;
+    const seen = new Map();
+    let pair = null;
+    for (let index = 0; index < 5000 && !pair; index += 1) {
+      const id = `collision-${index}`;
+      const key = signature(generateAvatar(id));
+      const first = seen.get(key);
+      if (first) pair = [first, id];
+      else seen.set(key, id);
+    }
+    assert.ok(pair, 'fixture should find a deterministic generated collision');
+    const store = createBotProfileStore({ rootDir: root });
+    const first = store.create({ workspaceId: pair[0], displayName: '甲', agentConversationId: 'conv-a' });
+    const second = store.create({ workspaceId: pair[1], displayName: '乙', agentConversationId: 'conv-b' });
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.notEqual(signature(first.profile.avatar), signature(second.profile.avatar));
+    assert.notEqual(second.profile.avatarSalt, '');
+    const rotated = store.regenerateAvatar(pair[0]);
+    assert.equal(rotated.ok, true);
+    assert.notEqual(signature(rotated.profile.avatar), signature(second.profile.avatar));
+    assert.notEqual(signature(rotated.profile.avatar), signature(first.profile.avatar));
+    assert.deepEqual(store.read(pair[1]).avatar, second.profile.avatar);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('上传只接受 png、jpg、webp，并且不超过 1 MB', () => {
   const root = tempRoot();
   try {

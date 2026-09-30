@@ -98,6 +98,29 @@ test('头像展示只读取已保存图片，由主进程编码为 data URL', ()
   assert.deepEqual(calls, ['ws-1', 'missing']);
 });
 
+test('列表与单项只投影本进程已知的代理状态', () => {
+  const item = {
+    workspaceId: 'ws-1',
+    state: { needsYou: 0, unread: 0, running: 0 },
+  };
+  let status = 'thinking';
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: {
+      list: () => [item],
+      get: () => ({ ok: true, item }),
+      search: () => [item],
+    },
+    readAgentStatus: () => status,
+  });
+  assert.equal(service.list().items[0].state.agentStatus, 'thinking');
+  status = 'waiting_provider';
+  assert.equal(service.get({ workspaceId: 'ws-1' }).item.state.agentStatus, 'waiting_provider');
+  status = undefined;
+  assert.equal('agentStatus' in service.list().items[0].state, false);
+  assert.equal('agentStatus' in item.state, false);
+});
+
 test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', () => {
   const events = [];
   const queued = [];

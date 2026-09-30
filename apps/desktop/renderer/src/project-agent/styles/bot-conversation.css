@@ -34,6 +34,29 @@
   line-height: 1.5;
 }
 
+.bot-thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+
+.bot-thread-empty .bot-avatar {
+  flex-basis: 104px;
+  width: 104px;
+  height: 104px;
+}
+
+.bot-thread-empty .bot-avatar-image {
+  border-radius: 28px;
+}
+
+.bot-thread-empty p {
+  margin: 0;
+}
+
 .bot-thinking {
   padding: 0 22px 8px;
 }

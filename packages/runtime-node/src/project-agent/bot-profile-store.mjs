@@ -9,6 +9,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -108,6 +109,48 @@ export function createBotProfileStore({
     return generateAvatar(key);
   }
 
+  function generatedSignature(avatar, workspaceId) {
+    if (avatar?.kind !== 'generated') return null;
+    const variant = Number.isInteger(avatar.variant)
+      ? avatar.variant
+      : generateAvatar(workspaceId).variant;
+    return `${avatar.shape}:${avatar.color}:${variant}`;
+  }
+
+  function occupiedAvatars(exceptWorkspaceId) {
+    const occupied = new Set();
+    let entries = [];
+    try {
+      entries = readdirSync(projectsDir(), { withFileTypes: true });
+    } catch {
+      return occupied;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === exceptWorkspaceId || !isBotWorkspaceId(entry.name)) continue;
+      const profile = read(entry.name);
+      if (!profile || profile.status === 'archived') continue;
+      const signature = generatedSignature(profile.avatar, entry.name);
+      if (signature) occupied.add(signature);
+    }
+    return occupied;
+  }
+
+  function chooseGeneratedAvatar(workspaceId, startSalt, { differentFrom = null, differentColor = null } = {}) {
+    const occupied = occupiedAvatars(workspaceId);
+    let numericSalt = Number.parseInt(String(startSalt || '0'), 10);
+    if (!Number.isInteger(numericSalt) || numericSalt < 0) numericSalt = 0;
+    for (let tries = 0; tries < 2048; tries += 1) {
+      const avatarSalt = numericSalt === 0 ? '' : String(numericSalt);
+      const avatar = generatedAvatar(workspaceId, avatarSalt);
+      const signature = generatedSignature(avatar, workspaceId);
+      if (!occupied.has(signature) && signature !== differentFrom && avatar.color !== differentColor) {
+        return { avatar, avatarSalt };
+      }
+      numericSalt += 1;
+    }
+    return null;
+  }
+
   function create({
     workspaceId,
     displayName,
@@ -124,12 +167,14 @@ export function createBotProfileStore({
     const existing = read(workspaceId);
     if (existing) return { ok: true, profile: existing, created: false };
     const at = stamp(now);
+    const selected = chooseGeneratedAvatar(workspaceId, avatarSalt);
+    if (!selected) return fail('AVATAR_EXHAUSTED');
     const profile = {
       schemaVersion: 1,
       workspaceId,
       displayName: name,
-      avatar: generatedAvatar(workspaceId, avatarSalt),
-      avatarSalt: avatarSalt || '',
+      avatar: selected.avatar,
+      avatarSalt: selected.avatarSalt,
       managed: managed === true,
       agentConversationId: agentConversationId.trim(),
       proactivity: 'inherit',
@@ -162,17 +207,19 @@ export function createBotProfileStore({
     const current = read(workspaceId);
     if (!current) return fail('NOT_FOUND');
     const previous = Number.parseInt(String(current.avatarSalt || '0'), 10);
-    let nextSalt = Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1;
-    let avatar = generatedAvatar(workspaceId, String(nextSalt));
-    for (let tries = 0; tries < 32 && avatar.color === current.avatar?.color; tries += 1) {
-      nextSalt += 1;
-      avatar = generatedAvatar(workspaceId, String(nextSalt));
-    }
-    const avatarSalt = String(nextSalt);
+    const selected = chooseGeneratedAvatar(
+      workspaceId,
+      Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1,
+      {
+        differentFrom: generatedSignature(current.avatar, workspaceId),
+        differentColor: current.avatar?.kind === 'generated' ? current.avatar.color : null,
+      },
+    );
+    if (!selected) return fail('AVATAR_EXHAUSTED');
     return save({
       ...current,
-      avatarSalt,
-      avatar,
+      avatarSalt: selected.avatarSalt,
+      avatar: selected.avatar,
     });
   }
 
