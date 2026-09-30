@@ -15,6 +15,10 @@ const KEYS = [
   'settings.shell.classic',
   'projectAgent.shell.classicNotice',
   'projectAgent.shell.banner',
+  'projectAgent.shell.bannerTitle',
+  'projectAgent.shell.bannerWhere',
+  'projectAgent.shell.bannerPath',
+  'projectAgent.shell.bannerSwitch',
   'projectAgent.onboarding.connectAction',
   'projectAgent.onboarding.createAction',
 ] as const;
@@ -66,5 +70,6 @@ test('经典界面分支仍是原来的主布局，运行时不再读取开发�
     assert.notEqual(en.t(key), key, key);
   }
   assert.equal(zh.t('projectAgent.shell.classicNotice'), '切换到机器人界面查看');
-  assert.match(zh.t('projectAgent.shell.banner'), /历史对话/);
+  assert.match(zh.t('projectAgent.shell.bannerPath'), /历史对话/);
+  assert.match(zh.t('projectAgent.shell.bannerSwitch'), /设置 → 通用/);
 });

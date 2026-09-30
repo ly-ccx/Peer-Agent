@@ -16,6 +16,15 @@
   padding: 18px 22px 8px;
 }
 
+.bot-thread:has(> .bot-system:only-child) {
+  justify-content: center;
+}
+
+.bot-thread:has(> .bot-system:only-child) > .bot-system {
+  width: min(420px, 100%);
+  margin-inline: auto;
+}
+
 .bot-thread-empty,
 .bot-thread-error,
 .bot-thinking {
@@ -87,7 +96,40 @@
   color: var(--frost-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.4;
-  padding: 2px 8px;
+  padding: 6px 12px;
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard),
+    transform var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-card-actions button,
+.bot-reply-marks button,
+.bot-quote-action,
+.bot-user-marks button {
+  cursor: pointer;
+}
+
+.bot-card-actions button:first-child {
+  border-color: transparent;
+  background: var(--graphite-base);
+  color: var(--chrome-canvas, #fff);
+}
+
+.bot-card-actions button:hover {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
+.bot-card-actions button:first-child:hover {
+  background: var(--graphite-base);
+  color: var(--chrome-canvas, #fff);
+  opacity: 0.9;
+}
+
+.bot-card-actions button:active {
+  transform: scale(0.98);
 }
 
 .bot-user-images {
@@ -165,11 +207,12 @@
 .bot-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 16px 16px 14px;
   border: 1px solid var(--frost-separator, var(--separator));
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--frost-bg-elevated, var(--bg-elevated));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--graphite-base) 5%, transparent);
 }
 
 .bot-card.is-resolved {
@@ -181,10 +224,19 @@
   flex-direction: column;
   gap: 8px;
   margin: 8px 16px 16px;
-  padding: 10px;
+  padding: 12px 12px 10px;
   border: 1px solid var(--frost-separator, var(--separator));
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--frost-bg-elevated, var(--bg-elevated));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--graphite-base) 5%, transparent);
+  transition:
+    border-color var(--za-motion-fast) var(--za-ease-standard),
+    box-shadow var(--za-motion-medium) var(--za-ease-out);
+}
+
+.bot-composer:focus-within {
+  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--frost-separator, var(--separator)));
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--graphite-base) 9%, transparent);
 }
 
 .bot-quote-chip {
@@ -194,12 +246,36 @@
   justify-content: space-between;
 }
 
-.bot-quote-chip button,
-.bot-composer-bar button {
-  border: 1px solid var(--frost-separator, var(--separator));
-  border-radius: 8px;
+.bot-quote-chip button {
+  border: 0;
+  border-radius: 999px;
   background: transparent;
-  color: var(--frost-text, var(--text));
+  color: var(--frost-text-secondary, var(--text-secondary));
+  cursor: pointer;
+}
+
+.bot-composer-bar button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--graphite-base);
+  color: var(--chrome-canvas, #fff);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition:
+    opacity var(--za-motion-fast) var(--za-ease-standard),
+    transform var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard),
+    color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-composer-bar button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.bot-composer-bar button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .bot-composer textarea {
@@ -228,5 +304,9 @@
 }
 
 .bot-composer-bar button:disabled {
-  opacity: 0.45;
+  background: transparent;
+  color: var(--frost-text-tertiary, var(--text-tertiary));
+  box-shadow: inset 0 0 0 1px var(--frost-separator, var(--separator));
+  cursor: default;
+  opacity: 1;
 }

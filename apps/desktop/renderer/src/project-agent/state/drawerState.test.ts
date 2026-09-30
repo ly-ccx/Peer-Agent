@@ -5,6 +5,7 @@ import {
   closeDrawer,
   conversationModelLabel,
   drawerLayout,
+  formatDrawerStamp,
   groupDrawerSessions,
   locateDrawerSession,
   openDrawer,
@@ -102,6 +103,14 @@ test('任务详情读出锚点、冻结模型和证据', () => {
   assert.equal(detail?.summary, '说明已写好');
   assert.deepEqual(detail?.evidenceRefs, ['evidence:1']);
   assert.equal(readDrawerSession({ title: '没有 id' }), null);
+});
+
+test('档案时间不展示原始 ISO', () => {
+  const now = new Date(2026, 8, 30, 9, 40).getTime();
+  assert.equal(formatDrawerStamp(new Date(2026, 8, 30, 9, 40, 37).toISOString(), now), '09:40');
+  assert.equal(formatDrawerStamp(new Date(2026, 8, 25, 15, 40, 37).toISOString(), now), '9/25 15:40');
+  assert.equal(formatDrawerStamp(new Date(2025, 10, 2, 3, 52, 19).toISOString(), now), '2025/11/2 03:52');
+  assert.equal(formatDrawerStamp('not-a-time', now), '');
 });
 
 test('记忆只读投影和对话模型标签', () => {

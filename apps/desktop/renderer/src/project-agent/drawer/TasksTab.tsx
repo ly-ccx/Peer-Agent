@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { HistoryConversation } from '../HistorySheet';
-import { groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
+import { formatDrawerStamp, groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
 
 const GROUP_KEY = {
   needsYou: 'projectAgent.drawer.group.needsYou',
@@ -71,7 +71,7 @@ export function TasksTab({
               <li key={item.id}>
                 <button type="button" onClick={() => onOpenHistory?.(item.id)}>
                   <span>{item.title || item.id}</span>
-                  <span>{item.updatedAt}</span>
+                  <span>{formatDrawerStamp(item.updatedAt)}</span>
                 </button>
               </li>
             ))}

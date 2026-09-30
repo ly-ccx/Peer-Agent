@@ -269,7 +269,10 @@ export function BotListShell({
         <UpgradeBanner i18n={i18n} />
         <div className="bot-column-top">
           <div className="bot-brand">
-            <span className="bot-brand-mark" aria-hidden="true">P</span>
+            <span className="bot-brand-mark" aria-hidden="true">
+              <img className="bot-brand-icon light" src="./logo-light.png" alt="" />
+              <img className="bot-brand-icon dark" src="./logo-dark.png" alt="" />
+            </span>
             <span>{i18n.t('projectAgent.list.brand')}</span>
           </div>
           <button
@@ -282,7 +285,9 @@ export function BotListShell({
               list.setSheetOpen(true);
             }}
           >
-            +
+            <svg className="bot-new-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 3.25v9.5M3.25 8h9.5" />
+            </svg>
           </button>
         </div>
         <input
@@ -378,7 +383,7 @@ export function BotListShell({
             )}
           </div>
         ) : opened ? (
-          <div className="bot-main-thread">
+          <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
               <p className="bot-main-title">{opened.profile.displayName}</p>

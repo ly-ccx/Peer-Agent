@@ -5,13 +5,29 @@
 
 .bot-drawer-dock {
   display: flex;
-  flex: 0 0 380px;
+  flex: 0 0 auto;
   flex-direction: column;
-  width: 380px;
+  width: 0;
   min-width: 0;
   min-height: 0;
-  border-left: 1px solid var(--chrome-hairline);
+  overflow: hidden;
+  border-left: 1px solid transparent;
   background: var(--paper-sheet, var(--za-surface-0));
+  opacity: 0;
+  transition:
+    width var(--za-motion-slow) var(--za-ease-decelerate),
+    opacity var(--za-motion-medium) var(--za-ease-out),
+    border-color var(--za-motion-medium) var(--za-ease-standard);
+}
+
+.bot-drawer-dock.is-open {
+  width: var(--pa-drawer-width);
+  border-left-color: var(--chrome-hairline);
+  opacity: 1;
+}
+
+.bot-drawer-dock .bot-drawer-body {
+  min-width: var(--pa-drawer-width);
 }
 
 .bot-drawer-panel {
@@ -41,6 +57,25 @@
   gap: 8px;
 }
 
+.bot-drawer-head button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--graphite-soft, var(--za-text-muted));
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-drawer-head button:hover {
+  color: var(--graphite-base, var(--za-text));
+  background: var(--chrome-hover);
+}
+
 .bot-drawer-head p,
 .bot-drawer-tab h2,
 .bot-drawer-detail h2 {
@@ -54,23 +89,53 @@
 .bot-drawer-tabs {
   justify-content: flex-start;
   flex-wrap: wrap;
+  padding: 3px;
+  background: var(--chrome-canvas);
+  border-radius: 12px;
 }
 
-.bot-drawer-tabs button,
-.bot-drawer-tab button,
-.bot-drawer-detail button,
-.bot-drawer-head button {
-  border: 1px solid var(--chrome-hairline, var(--separator));
+.bot-drawer-tabs button {
+  border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--graphite-base, var(--za-text));
+  color: var(--graphite-soft, var(--za-text-muted));
+  font: inherit;
   font-size: 13px;
-  padding: 4px 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-drawer-tabs button[aria-selected='true'],
+.bot-drawer-tabs button[aria-selected='true'] {
+  background: var(--chrome-hover);
+  color: var(--graphite-base, var(--za-text));
+}
+
+.bot-drawer-tab button,
+.bot-drawer-detail button {
+  border: 1px solid var(--chrome-hairline, var(--separator));
+  border-radius: 10px;
+  background: transparent;
+  color: var(--graphite-base, var(--za-text));
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-drawer-tab button:hover,
+.bot-drawer-detail button:hover {
+  background: var(--chrome-hover);
+}
+
 .bot-drawer-tab button.is-selected {
   border-color: var(--graphite-base, var(--za-text));
+  background: var(--chrome-canvas);
 }
 
 .bot-drawer-tab,
@@ -109,8 +174,33 @@
   display: flex;
   width: 100%;
   justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
+  border-color: transparent;
   text-align: left;
+}
+
+.bot-drawer-tab li button span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-drawer-tab li button span:last-child {
+  flex: none;
+  color: var(--graphite-fade, var(--za-text-muted));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bot-drawer-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .bot-drawer-detail dt {
