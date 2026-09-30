@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createProjectInbox } from '../../../../../packages/runtime-node/src/project-agent/project-inbox.mjs';
 import { createDigestQueue } from '../../../../../packages/runtime-node/src/project-agent/digest.mjs';
 import { createProjectAgentHost, messagesFromUserInputs } from './project-agent-host.mjs';
 
@@ -301,4 +302,36 @@ test('后台巡检在取得租约后恢复提前入队的输入，并且不重�
     host.dispose();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test('periodic lease recovery drains an existing inbox once without fresh watch events', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'inbox-recovery-host-'));
+  const timers = [];
+  const calls = [];
+  let hold = false;
+  const inbox = createProjectInbox({ rootDir: root, mergeWindowMs: 0 });
+  inbox.append('ws-leased', [{ eventId: 'persisted-verified', kind: 'session_verified',
+    sessionId: 'session-old', workspaceId: 'ws-leased', payload: { summary: 'Verified' } }]);
+  const host = createProjectAgentHost({
+    rootDir: root, inbox, holdsLease: () => hold,
+    listWorkspaceIds: () => ['ws-leased'], resolveConversationId: () => 'conv-leased',
+    hasMessage: () => false, appendMessage() {}, getWindows: () => [],
+    routing: { providers: [provider] }, readFacts: () => ({ sessions: [] }),
+    retryDelays: [0, 0, 0],
+    schedule(fn, delay) { const timer = { fn, delay }; timers.push(timer); return timer; },
+    clearSchedule(timer) { timer.cleared = true; },
+    async executeTurn({ plan }) { calls.push(plan.events); return { text: '' }; },
+  });
+  try {
+    await timers.find(timer => timer.delay === 0).fn();
+    assert.equal(calls.length, 0);
+    hold = true;
+    await timers.filter(timer => !timer.cleared).at(-1).fn();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0].eventId, 'persisted-verified');
+    assert.equal(inbox.takeBatch('ws-leased').events.length, 0);
+    await timers.filter(timer => !timer.cleared).at(-1).fn();
+    assert.equal(calls.length, 1);
+  } finally { host.dispose(); rmSync(root, { recursive: true, force: true }); }
 });

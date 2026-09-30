@@ -208,13 +208,13 @@ export function createProjectAgentHost({
     for (const { workspaceId, conversationId } of wanted) {
       const runner = ensureRunner(workspaceId, conversationId);
       const due = armDigest(runner, workspaceId);
-      const watched = publishWatch(workspaceId);
+      publishWatch(workspaceId);
       const consumed = queue.consume(workspaceId);
       if (consumed.consumed?.length && typeof onInputsConsumed === 'function') {
         await onInputsConsumed(workspaceId, consumed.consumed);
       }
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (!consumed.skipped || due || watched.length > 0) runs.push(runner.kick());
+      else if (due || inboxStore.takeBatch(workspaceId).events.length > 0) runs.push(runner.kick());
     }
     await Promise.all(runs);
     return { workspaces: wanted.map((item) => item.workspaceId) };
@@ -325,7 +325,7 @@ export function createProjectAgentHost({
       const conversationId = resolveConversationId(workspaceId);
       if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
       const runner = ensureRunner(workspaceId, conversationId.trim());
-      const watched = publishWatch(workspaceId);
+      publishWatch(workspaceId);
       // An input may have arrived before lease acquisition, or while this host was
       // offline. The durable queue must recover without another user submission.
       const consumed = queue.consume(workspaceId);
@@ -333,7 +333,7 @@ export function createProjectAgentHost({
         await onInputsConsumed(workspaceId, consumed.consumed);
       }
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
-      else if (watched.length > 0) runs.push(runner.kick());
+      else if (inboxStore.takeBatch(workspaceId).events.length > 0) runs.push(runner.kick());
       delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
     }
     await Promise.all(runs);
