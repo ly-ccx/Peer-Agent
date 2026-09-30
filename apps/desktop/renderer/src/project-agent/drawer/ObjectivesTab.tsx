@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 
 interface LegacyAutomation {
   readonly definition?: {
@@ -49,8 +50,10 @@ export function ObjectivesTab({
             <circle cx="16" cy="16" r="1.5" />
           </svg>
         </span>
-        <h2>{i18n.t('projectAgent.drawer.objectives.body')}</h2>
-        <p>{i18n.t('projectAgent.drawer.objectives.hint')}</p>
+        <div className="bot-objectives-copy">
+          <h2>{i18n.t('projectAgent.drawer.objectives.body')}</h2>
+          <p>{i18n.t('projectAgent.drawer.objectives.hint')}</p>
+        </div>
       </div>
       {items.length > 0 && (
         <section className="bot-tasks-section">
@@ -65,9 +68,9 @@ export function ObjectivesTab({
                 <li key={id}>
                   <button type="button" className="bot-task-row" onClick={() => onOpenAutomations?.()}>
                     <span className="bot-task-row-copy">
-                      <span className="bot-task-row-title">{item.definition?.name || id}</span>
+                      <span className="bot-task-row-title" title={item.definition?.name || id}>{item.definition?.name || id}</span>
                     </span>
-                    <span className="bot-task-row-arrow" aria-hidden="true">›</span>
+                    <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
                 </li>
               );

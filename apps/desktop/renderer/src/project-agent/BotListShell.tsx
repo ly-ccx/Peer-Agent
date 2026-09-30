@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
+import { PeerIcon } from '../ui/icons';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { HistorySheet } from './HistorySheet';
@@ -467,7 +468,7 @@ export function BotListShell({
                         <strong>{item.profile.displayName}</strong>
                         <small>{i18n.t('projectAgent.list.openBot')}</small>
                       </span>
-                      <span className="bot-main-pick-arrow" aria-hidden="true">→</span>
+                      <PeerIcon name="chevronRight" size={16} className="bot-main-pick-arrow" />
                     </button>
                   ))}
                 </div>

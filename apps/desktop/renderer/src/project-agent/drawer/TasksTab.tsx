@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { PeerIcon } from '../../ui/icons';
 import type { HistoryConversation } from '../HistorySheet';
 import { formatDrawerStamp, groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
 
@@ -72,10 +73,10 @@ export function TasksTab({
                     onClick={() => onSelect(session.sessionId)}
                   >
                     <span className="bot-task-row-copy">
-                      <span className="bot-task-row-title">{session.title}</span>
+                      <span className="bot-task-row-title" title={session.title}>{session.title}</span>
                       <span className="bot-task-row-meta">{session.statusLabel || session.status}</span>
                     </span>
-                    <span className="bot-task-row-arrow" aria-hidden="true">›</span>
+                    <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
                 </li>
               ))}
@@ -94,10 +95,10 @@ export function TasksTab({
               <li key={item.id}>
                 <button type="button" className="bot-task-row" onClick={() => onOpenHistory?.(item.id)}>
                   <span className="bot-task-row-copy">
-                    <span className="bot-task-row-title">{item.title || item.id}</span>
+                    <span className="bot-task-row-title" title={item.title || item.id}>{item.title || item.id}</span>
                     <span className="bot-task-row-meta">{formatDrawerStamp(item.updatedAt)}</span>
                   </span>
-                  <span className="bot-task-row-arrow" aria-hidden="true">›</span>
+                  <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                 </button>
               </li>
             ))}
@@ -110,7 +111,7 @@ export function TasksTab({
               onClick={() => setShowAllHistory((current) => !current)}
             >
               {i18n.t(showAllHistory ? 'projectAgent.drawer.collapse' : 'projectAgent.drawer.showAll')}
-              <span aria-hidden="true">{showAllHistory ? '↑' : '↓'}</span>
+              <PeerIcon name={showAllHistory ? 'chevronUp' : 'chevronDown'} size={14} />
             </button>
           )}
         </section>
@@ -128,13 +129,13 @@ export function TasksTab({
                   type="button"
                   className="bot-task-row"
                   disabled={!goal.conversationId}
+                  aria-label={`${goal.title || goal.planId}, ${i18n.t('projectAgent.drawer.classicOpen')}`}
                   onClick={() => onOpenClassic?.(goal)}
                 >
                   <span className="bot-task-row-copy">
-                    <span className="bot-task-row-title">{goal.title || goal.planId}</span>
-                    <span className="bot-task-row-meta">{i18n.t('projectAgent.drawer.classicOpen')}</span>
+                    <span className="bot-task-row-title" title={goal.title || goal.planId}>{goal.title || goal.planId}</span>
                   </span>
-                  <span className="bot-task-row-arrow" aria-hidden="true">›</span>
+                  <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                 </button>
               </li>
             ))}
@@ -147,7 +148,7 @@ export function TasksTab({
               onClick={() => setShowAllClassic((current) => !current)}
             >
               {i18n.t(showAllClassic ? 'projectAgent.drawer.collapse' : 'projectAgent.drawer.showAll')}
-              <span aria-hidden="true">{showAllClassic ? '↑' : '↓'}</span>
+              <PeerIcon name={showAllClassic ? 'chevronUp' : 'chevronDown'} size={14} />
             </button>
           )}
         </section>

@@ -398,10 +398,6 @@
   font-size: 12px;
 }
 
-.bot-overview-folder button span {
-  font-size: 14px;
-}
-
 .bot-overview-heading {
   display: flex;
   align-items: center;
@@ -531,8 +527,9 @@
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 12px;
-  padding: 12px 14px;
+  min-height: 44px;
+  gap: 8px;
+  padding: 8px 11px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -551,21 +548,21 @@
 .bot-drawer-tab .bot-task-row-copy {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
 .bot-drawer-tab .bot-task-row-title {
-  display: -webkit-box;
-  flex: none;
+  display: block;
+  flex: 1;
   overflow: hidden;
+  min-width: 0;
   color: var(--graphite-base, var(--za-text));
   font-size: 13px;
-  line-height: 1.45;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bot-drawer-tab .bot-task-row-meta {
@@ -573,13 +570,12 @@
   color: var(--graphite-fade, var(--za-text-muted));
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.bot-drawer-tab .bot-task-row-arrow {
+.bot-drawer-tab .bot-task-row-arrow.peer-icon {
   flex: none;
   color: var(--graphite-fade, var(--za-text-muted));
-  font-size: 18px;
-  font-weight: 300;
 }
 
 .bot-drawer-tab .bot-tasks-more {
@@ -593,12 +589,7 @@
   font-size: 12px;
 }
 
-.bot-tasks-more span {
-  font-size: 13px;
-}
-
-.bot-tasks-empty,
-.bot-objectives-intro {
+.bot-tasks-empty {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -623,20 +614,47 @@
   font-weight: 600;
 }
 
+.bot-objectives-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
+}
+
 .bot-objectives-icon {
   display: grid;
+  flex: 0 0 38px;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  margin-bottom: 3px;
+  width: 38px;
+  height: 38px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--paper-sheet, var(--za-surface-0));
+}
+
+.bot-objectives-icon svg {
+  width: 23px;
+  height: 23px;
+}
+
+.bot-objectives-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bot-objectives-copy h2 {
+  font-size: 13px;
 }
 
 .bot-objectives-intro p {
   color: var(--graphite-secondary, var(--za-text-muted));
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .bot-drawer-detail dt {

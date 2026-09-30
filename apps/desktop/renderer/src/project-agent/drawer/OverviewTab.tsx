@@ -1,4 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { PeerIcon } from '../../ui/icons';
 import type { DrawerSession } from '../state/drawerState';
 
 export function OverviewTab({
@@ -41,7 +42,7 @@ export function OverviewTab({
           </div>
           <button type="button" disabled={!path} onClick={onReveal}>
             {i18n.t('projectAgent.drawer.reveal')}
-            <span aria-hidden="true">↗</span>
+            <PeerIcon name="arrowUpRight" size={14} />
           </button>
         </div>
       </section>
@@ -61,7 +62,7 @@ export function OverviewTab({
               <li key={session.sessionId}>
                 <button type="button" onClick={() => onOpenSession(session.sessionId)}>
                   <span>{session.title}</span>
-                  <span aria-hidden="true">→</span>
+                  <PeerIcon name="chevronRight" size={14} />
                 </button>
               </li>
             ))}

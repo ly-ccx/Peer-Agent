@@ -8,6 +8,7 @@ export type PeerIconName =
   | 'chevronUp'
   | 'chevronLeft'
   | 'chevronRight'
+  | 'arrowUpRight'
   | 'send'
   | 'terminal'
   | 'info'
@@ -34,6 +35,7 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   chevronUp: <path d="m6 15 6-6 6 6" />,
   chevronLeft: <path d="m15 18-6-6 6-6" />,
   chevronRight: <path d="m9 6 6 6-6 6" />,
+  arrowUpRight: <><path d="M7 17 17 7M8 7h9v9" /></>,
   send: (
     <>
       <path d="M12 19V5" />

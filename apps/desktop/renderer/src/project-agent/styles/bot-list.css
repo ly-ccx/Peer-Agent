@@ -789,7 +789,7 @@
 
 .bot-main-pick-copy strong { font-size: 14px; }
 .bot-main-pick-copy small { color: var(--graphite-soft); font-size: 12px; }
-.bot-main-pick-arrow { color: var(--graphite-soft); font-size: 18px; }
+.bot-main-pick-arrow { flex: none; color: var(--graphite-soft); }
 
 .bot-main-page {
   overflow: hidden;
