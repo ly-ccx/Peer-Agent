@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  projectModelRoutingMenuOption,
   resolveRoleModel,
   type CatalogModel,
   type ModelRoutingSettings,
@@ -47,6 +48,24 @@ function routing(roleSetting?: RoleSetting, extra: Partial<ModelRoutingSettings>
     ...extra,
   };
 }
+
+test('routing menu projection keeps the channel id with the model', () => {
+  const projected = projectModelRoutingMenuOption({
+    id: 'deepseek::flash',
+    groupId: 'deepseek',
+    name: 'DeepSeek',
+    model: 'deepseek-flash',
+    modelLabel: 'deepseek-flash',
+    authMethod: 'api_key',
+    supportsVision: false,
+    contextWindow: 64_000,
+  });
+  assert.equal(projected?.groupId, 'deepseek');
+  assert.equal(projected?.model, 'deepseek-flash');
+  assert.equal(projected?.providerName, 'DeepSeek');
+  assert.equal(projected?.authMethod, 'api_key');
+  assert.equal(projectModelRoutingMenuOption({ name: 'missing id' }), null);
+});
 
 test('capability and scope filters do not fall through to a later layer', () => {
   const incapable = resolveRoleModel({

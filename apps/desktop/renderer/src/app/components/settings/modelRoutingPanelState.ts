@@ -1,4 +1,5 @@
 import type { TranslationKey } from '@peer-agent/i18n';
+import { buildModelMenuGroups, modelMenuChannelName } from '@peer-agent/protocol';
 
 export const MODEL_TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
 export const MODEL_ROLES = [
@@ -19,10 +20,47 @@ export type OptionRejectReason = 'vision' | 'tools' | 'structured' | 'context';
 export interface RoutingModelOption {
   readonly id: string;
   readonly label: string;
+  readonly providerName?: string;
+  readonly groupId?: string;
+  readonly model?: string;
+  readonly authMethod?: string;
   readonly supportsVision: boolean;
   readonly supportsTools: boolean;
   readonly supportsStructured: boolean;
   readonly contextTokens: number;
+}
+
+export function routingMenuGroups(
+  options: readonly RoutingModelOption[],
+  target: { readonly kind: 'tier'; readonly tier: ModelTierName } | { readonly kind: 'role'; readonly role: ModelRoleName },
+  isZh: boolean,
+  reasonLabel: (reason: OptionRejectReason) => string,
+) {
+  const groups = buildModelMenuGroups(options.map((option) => ({
+    id: option.id,
+    groupId: option.groupId || option.providerName || option.id,
+    groupLabel: modelMenuChannelName(option.providerName, option.model || option.label, option.authMethod, isZh),
+    model: option.model || option.label,
+    modelLabel: option.label,
+    available: true,
+  })));
+  return groups.map((group) => {
+    const items = group.items.map((item) => {
+      const option = options.find((row) => row.id === item.id);
+      const reason = option ? optionRejectReason(option, target) : null;
+      return {
+        id: item.id,
+        label: reason && option ? `${option.label} — ${reasonLabel(reason)}` : item.label,
+        disabled: Boolean(reason),
+      };
+    });
+    return {
+      id: group.id,
+      label: group.label,
+      items,
+      disabled: items.length > 0 && items.every((item) => item.disabled),
+    };
+  });
 }
 
 const EXPLORER_MIN_CONTEXT = 8_000;

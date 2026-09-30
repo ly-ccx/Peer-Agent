@@ -70,6 +70,56 @@ export interface ModelSelectionSnapshot {
   readonly resolvedAt: string;
 }
 
+/** Model row shown in the routing menu. Shared by main projection and the renderer. */
+export interface ModelRoutingMenuOption {
+  readonly id: string;
+  readonly label: string;
+  readonly providerName: string;
+  readonly groupId: string;
+  readonly model: string;
+  readonly authMethod: string;
+  readonly supportsVision: boolean;
+  readonly supportsTools: boolean;
+  readonly supportsStructured: boolean;
+  readonly contextTokens: number;
+}
+
+/** Project one configured provider into the routing menu contract. */
+export function projectModelRoutingMenuOption(provider: {
+  readonly id?: unknown;
+  readonly groupId?: unknown;
+  readonly name?: unknown;
+  readonly model?: unknown;
+  readonly modelLabel?: unknown;
+  readonly authMethod?: unknown;
+  readonly supportsVision?: unknown;
+  readonly supportsTools?: unknown;
+  readonly supportsStructured?: unknown;
+  readonly capabilities?: { readonly toolUse?: unknown } | null;
+  readonly contextWindow?: unknown;
+} | null | undefined): ModelRoutingMenuOption | null {
+  if (!provider || typeof provider.id !== 'string' || !provider.id.trim()) return null;
+  const id = provider.id.trim();
+  const groupId = typeof provider.groupId === 'string' && provider.groupId.trim()
+    ? provider.groupId.trim()
+    : id;
+  const label = [provider.modelLabel, provider.model, provider.name, id]
+    .find((value) => typeof value === 'string' && value.trim());
+  const context = Number(provider.contextWindow);
+  return {
+    id,
+    label: typeof label === 'string' ? label.trim() : id,
+    providerName: typeof provider.name === 'string' ? provider.name.trim() : '',
+    groupId,
+    model: typeof provider.model === 'string' ? provider.model.trim() : '',
+    authMethod: typeof provider.authMethod === 'string' ? provider.authMethod.trim() : '',
+    supportsVision: provider.supportsVision === true,
+    supportsTools: provider.supportsTools !== false && provider.capabilities?.toolUse !== false,
+    supportsStructured: provider.supportsStructured !== false,
+    contextTokens: Number.isFinite(context) && context > 0 ? context : 128_000,
+  };
+}
+
 export interface CatalogModel {
   readonly modelProviderId: string;
   readonly providerId: string;

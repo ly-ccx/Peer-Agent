@@ -1,3 +1,4 @@
+import { projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import {
   isRoutableProvider,
   normalizeProjectAgentSettings,
@@ -172,18 +173,7 @@ export function createSettingsApplicationService({
 
   function projectRoutingProvider(provider) {
     if (!isRoutableProvider(provider)) return null;
-    const context = Number(provider.contextWindow);
-    const label = [provider.modelLabel, provider.model, provider.name, provider.id]
-      .find((value) => typeof value === 'string' && value.trim());
-    return {
-      id: String(provider.id).trim(),
-      label: String(label).trim(),
-      providerName: typeof provider.name === 'string' ? provider.name.trim() : '',
-      supportsVision: provider.supportsVision === true,
-      supportsTools: provider.supportsTools !== false && provider.capabilities?.toolUse !== false,
-      supportsStructured: provider.supportsStructured !== false,
-      contextTokens: Number.isFinite(context) && context > 0 ? context : 128_000,
-    };
+    return projectModelRoutingMenuOption(provider);
   }
 
   function describeModelRouting(providers = []) {

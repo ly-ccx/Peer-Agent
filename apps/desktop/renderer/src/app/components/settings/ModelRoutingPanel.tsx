@@ -8,6 +8,7 @@ import type {
   ModelRoutingView,
 } from '../../../preload/contracts/bootstrapPreloadApi';
 import { Checkbox, Switch } from '../../../ui/boolean-controls';
+import { CascadingMenu } from '../CascadingMenu';
 import { Dropdown } from '../Dropdown';
 import './model-routing.css';
 import {
@@ -19,6 +20,7 @@ import {
   optionRejectReason,
   reasonTranslationKey,
   roleTranslationKey,
+  routingMenuGroups,
   tierTranslationKey,
   validateAutoPool,
   withoutId,
@@ -31,6 +33,10 @@ function asOptions(providers: readonly ModelRoutingProviderOption[]): RoutingMod
   return providers.map((provider) => ({
     id: provider.id,
     label: provider.label,
+    providerName: provider.providerName,
+    groupId: provider.groupId,
+    model: provider.model,
+    authMethod: provider.authMethod,
     supportsVision: provider.supportsVision,
     supportsTools: provider.supportsTools,
     supportsStructured: provider.supportsStructured,
@@ -377,24 +383,21 @@ function ModelDropdown({
   readonly i18n: I18nRuntime;
   readonly onChange: (id: string) => void;
 }) {
+  const groups = routingMenuGroups(
+    options,
+    target,
+    i18n.locale === 'zh-CN',
+    (reason) => i18n.t(reasonTranslationKey(reason)),
+  );
   return (
-    <Dropdown
+    <CascadingMenu
+      className="model-routing-model-menu"
       value={value}
+      groups={groups}
       disabled={disabled}
       placeholder={placeholder}
       ariaLabel={ariaLabel}
-      onChange={(next) => {
-        if (next) onChange(next);
-      }}
-      options={options.map((option) => {
-        const reason = optionRejectReason(option, target);
-        return {
-          value: option.id,
-          label: option.label,
-          hint: reason ? i18n.t(reasonTranslationKey(reason)) : undefined,
-          disabled: Boolean(reason),
-        };
-      })}
+      onChange={onChange}
     />
   );
 }

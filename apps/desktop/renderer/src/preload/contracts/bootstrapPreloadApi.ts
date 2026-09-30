@@ -37,6 +37,7 @@ import type {
   LocalMcpServerView,
   LocaleCode,
   ModelRole,
+  ModelRoutingMenuOption,
   ModelTier,
   ModelTierBinding,
   RoleSetting,
@@ -294,15 +295,7 @@ export interface UsageStatsSnapshot {
 }
 
 /** 设置页「模型分工」。真相在 main 的 settings.modelRouting，这里只是投影。 */
-export interface ModelRoutingProviderOption {
-  readonly id: string;
-  readonly label: string;
-  readonly providerName: string;
-  readonly supportsVision: boolean;
-  readonly supportsTools: boolean;
-  readonly supportsStructured: boolean;
-  readonly contextTokens: number;
-}
+export type ModelRoutingProviderOption = ModelRoutingMenuOption;
 
 export interface ModelRoutingView {
   readonly routing: {
