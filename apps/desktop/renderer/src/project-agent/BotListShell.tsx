@@ -305,25 +305,27 @@ export function BotListShell({
             </svg>
           </button>
         </div>
-        <input
-          ref={searchRef}
-          className="bot-search"
-          type="search"
-          value={list.query}
-          placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
-          aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
-          onChange={(event) => list.setQuery(event.target.value)}
-        />
-        {list.catalog.length > 0 ? (
-          <button
-            type="button"
-            className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
-            aria-pressed={list.needsYouOnly}
-            onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
-          >
-            {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
-          </button>
-        ) : null}
+        <div className="bot-search-frame">
+          <input
+            ref={searchRef}
+            className="bot-search"
+            type="search"
+            value={list.query}
+            placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
+            aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
+            onChange={(event) => list.setQuery(event.target.value)}
+          />
+          {needsYouCount > 0 || list.needsYouOnly ? (
+            <button
+              type="button"
+              className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
+              aria-pressed={list.needsYouOnly}
+              onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
+            >
+              {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
+            </button>
+          ) : null}
+        </div>
         <BotList
           items={list.visible}
           highlightedId={list.highlightedId}

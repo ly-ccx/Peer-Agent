@@ -26,6 +26,7 @@
 }
 
 .bot-column-top,
+.bot-search-frame,
 .bot-search,
 .bot-need-filter,
 .bot-list,
@@ -123,13 +124,12 @@
   transform: scale(0.96);
 }
 
-.bot-search {
+.bot-search-frame {
+  display: flex;
+  align-items: center;
   width: 100%;
+  min-width: 0;
   margin-bottom: 8px;
-  padding: 8px 12px;
-  color: var(--graphite-base);
-  font: inherit;
-  font-size: 12.5px;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
   border-radius: 10px;
@@ -138,22 +138,36 @@
     box-shadow var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-search:focus {
+.bot-search-frame:focus-within {
   border-color: color-mix(in srgb, var(--graphite-base) 32%, var(--chrome-hairline));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--graphite-base) 8%, transparent);
 }
 
+.bot-search {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  color: var(--graphite-base);
+  font: inherit;
+  font-size: 12.5px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
 .bot-need-filter {
-  align-self: flex-start;
-  margin: 0 2px 8px;
-  padding: 4px 10px;
+  flex: 0 0 auto;
+  margin-right: 5px;
+  padding: 5px 8px;
   color: var(--graphite-soft);
   font: inherit;
-  font-size: 12px;
-  background: var(--chrome-canvas);
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 999px;
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
   cursor: pointer;
+  white-space: nowrap;
   transition:
     color var(--za-motion-fast) var(--za-ease-standard),
     background var(--za-motion-fast) var(--za-ease-standard),
@@ -161,9 +175,14 @@
 }
 
 .bot-need-filter.is-on {
-  color: var(--chrome-canvas);
-  background: var(--graphite-base);
-  border-color: var(--graphite-base);
+  color: var(--graphite-base);
+  background: var(--chrome-hover);
+  box-shadow: inset 0 0 0 1px var(--chrome-hairline);
+}
+
+.bot-need-filter:hover {
+  color: var(--graphite-base);
+  background: var(--chrome-hover);
 }
 
 .bot-list {
@@ -631,7 +650,6 @@
 .bot-column-resizer:focus-visible,
 .bot-row:focus-visible,
 .bot-new:focus-visible,
-.bot-search:focus-visible,
 .bot-need-filter:focus-visible {
   outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
