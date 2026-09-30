@@ -385,7 +385,7 @@ export function BotListShell({
         ) : opened ? (
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
-              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
+              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
                 ref={profileButtonRef}
@@ -429,8 +429,30 @@ export function BotListShell({
           />
         ) : (
           <div className="bot-main-empty">
-            <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
-            <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+            <div className="bot-main-empty-content">
+              <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
+              <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+              {list.catalog.length > 0 ? (
+                <div className="bot-main-picks">
+                  <span className="bot-main-picks-label">{i18n.t('projectAgent.list.recentBots')}</span>
+                  {list.catalog.slice(0, 3).map((item) => (
+                    <button
+                      key={item.workspaceId}
+                      type="button"
+                      className="bot-main-pick"
+                      onClick={() => list.openBot(item.workspaceId)}
+                    >
+                      <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId} />
+                      <span className="bot-main-pick-copy">
+                        <strong>{item.profile.displayName}</strong>
+                        <small>{i18n.t('projectAgent.list.openBot')}</small>
+                      </span>
+                      <span className="bot-main-pick-arrow" aria-hidden="true">→</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </section>

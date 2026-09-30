@@ -29,7 +29,7 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
         if (event.key === 'Enter') onOpen(item.workspaceId);
       }}
     >
-      <BotAvatar avatar={item.profile.avatar} label={name} />
+      <BotAvatar avatar={item.profile.avatar} label={name} workspaceId={item.workspaceId} />
       <span className="bot-row-copy">
         <span className="bot-row-name">{name}</span>
         <span className="bot-row-preview">{preview}</span>

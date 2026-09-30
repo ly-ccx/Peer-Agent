@@ -95,6 +95,8 @@ export type TranslationKey =
   | 'projectAgent.list.noPreview'
   | 'projectAgent.list.mainEmptyTitle'
   | 'projectAgent.list.mainEmptyBody'
+  | 'projectAgent.list.recentBots'
+  | 'projectAgent.list.openBot'
   | 'projectAgent.list.mainPlaceholder'
   | 'projectAgent.list.profile'
   | 'projectAgent.list.unread'
@@ -1151,8 +1153,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.unavailable': '项目代理没有打开',
     'projectAgent.list.loadFailed': '机器人列表没有读出来',
     'projectAgent.list.noPreview': '还没有消息',
-    'projectAgent.list.mainEmptyTitle': '选一个机器人',
-    'projectAgent.list.mainEmptyBody': '选中左边的机器人，或新建一个。对话会留在这里。',
+    'projectAgent.list.mainEmptyTitle': '从一个项目开始',
+    'projectAgent.list.mainEmptyBody': '选择机器人，继续对话或交代新的任务。',
+    'projectAgent.list.recentBots': '最近的机器人',
+    'projectAgent.list.openBot': '打开对话',
     'projectAgent.list.mainPlaceholder': '和这个机器人的对话会显示在这里。',
     'projectAgent.list.profile': '档案',
     'projectAgent.list.unread': '未读',
@@ -1282,8 +1286,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.name': '名字',
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
-    'projectAgent.drawer.settings.avatarNew': '换一个',
-    'projectAgent.drawer.settings.avatarUpload': '上传',
+    'projectAgent.drawer.settings.avatarNew': '重新生成',
+    'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
@@ -2007,8 +2011,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.unavailable': 'Project agent is off',
     'projectAgent.list.loadFailed': 'The bot list did not load',
     'projectAgent.list.noPreview': 'No messages yet',
-    'projectAgent.list.mainEmptyTitle': 'Choose a bot',
-    'projectAgent.list.mainEmptyBody': 'Select a bot on the left, or create one. The conversation stays here.',
+    'projectAgent.list.mainEmptyTitle': 'Start with a project',
+    'projectAgent.list.mainEmptyBody': 'Choose a bot to continue a conversation or assign a new task.',
+    'projectAgent.list.recentBots': 'Recent bots',
+    'projectAgent.list.openBot': 'Open conversation',
     'projectAgent.list.mainPlaceholder': 'The conversation with this bot will show up here.',
     'projectAgent.list.profile': 'Profile',
     'projectAgent.list.unread': 'Unread',
@@ -2138,8 +2144,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.name': 'Name',
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
-    'projectAgent.drawer.settings.avatarNew': 'Another one',
-    'projectAgent.drawer.settings.avatarUpload': 'Upload',
+    'projectAgent.drawer.settings.avatarNew': 'Generate another',
+    'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',

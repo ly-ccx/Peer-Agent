@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { BotAvatar } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
 type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
@@ -124,12 +125,17 @@ export function BotSettingsTab({
       </button>
       <section>
         <h2>{i18n.t('projectAgent.drawer.settings.avatar')}</h2>
-        <button type="button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
-          {i18n.t('projectAgent.drawer.settings.avatarNew')}
-        </button>
-        <button type="button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
-          {i18n.t('projectAgent.drawer.settings.avatarUpload')}
-        </button>
+        <div className="bot-avatar-settings">
+          <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={workspaceId} />
+          <div className="bot-avatar-settings-actions">
+            <button type="button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
+              {i18n.t('projectAgent.drawer.settings.avatarUpload')}
+            </button>
+            <button type="button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
+              {i18n.t('projectAgent.drawer.settings.avatarNew')}
+            </button>
+          </div>
+        </div>
       </section>
       <label>
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>

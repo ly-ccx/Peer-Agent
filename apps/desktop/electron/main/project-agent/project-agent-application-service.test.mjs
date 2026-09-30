@@ -14,6 +14,7 @@ import { createProjectAgentApplicationService } from './project-agent-applicatio
 const METHODS = [
   ['list', {}],
   ['get', { workspaceId: 'ws-1' }],
+  ['readAvatar', { workspaceId: 'ws-1' }],
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
@@ -74,6 +75,27 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {
+  const calls = [];
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: {
+      readAvatar(workspaceId) {
+        calls.push(workspaceId);
+        return workspaceId === 'ws-1'
+          ? { ok: true, mime: 'image/png', bytes: Buffer.from([1, 2, 3]) }
+          : { ok: false, code: 'NOT_FOUND' };
+      },
+    },
+  });
+  assert.deepEqual(service.readAvatar({ workspaceId: 'ws-1', path: '/etc/passwd' }), {
+    ok: true,
+    dataUrl: 'data:image/png;base64,AQID',
+  });
+  assert.deepEqual(service.readAvatar({ workspaceId: 'missing' }), { ok: false, code: 'NOT_FOUND' });
+  assert.deepEqual(calls, ['ws-1', 'missing']);
 });
 
 test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', () => {

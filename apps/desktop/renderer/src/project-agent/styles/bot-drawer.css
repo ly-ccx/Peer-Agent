@@ -138,6 +138,27 @@
   background: var(--chrome-canvas);
 }
 
+.bot-avatar-settings {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.bot-avatar-settings .bot-avatar {
+  flex-basis: 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  font-size: 23px;
+}
+
+.bot-avatar-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .bot-drawer-tab,
 .bot-drawer-detail {
   display: flex;

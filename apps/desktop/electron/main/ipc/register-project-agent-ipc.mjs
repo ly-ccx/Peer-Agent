@@ -11,6 +11,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
   const ports = {
     list: assertFunction(projectAgent?.list, 'projectAgent.list'),
     get: assertFunction(projectAgent?.get, 'projectAgent.get'),
+    readAvatar: assertFunction(projectAgent?.readAvatar, 'projectAgent.readAvatar'),
     create: assertFunction(projectAgent?.create, 'projectAgent.create'),
     updateProfile: assertFunction(projectAgent?.updateProfile, 'projectAgent.updateProfile'),
     deleteBot: assertFunction(projectAgent?.deleteBot, 'projectAgent.deleteBot'),
@@ -33,6 +34,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     owner('project-agent-ipc', (ipc) => {
       ipc.handle('project-agent:list', (_event, payload) => ports.list(payload));
       ipc.handle('project-agent:get', (_event, payload) => ports.get(payload));
+      ipc.handle('project-agent:read-avatar', (_event, payload) => ports.readAvatar(payload));
       ipc.handle('project-agent:create', (event, payload) => ports.create(payload, event.sender));
       ipc.handle('project-agent:update-profile', (event, payload) => ports.updateProfile(payload, event.sender));
       ipc.handle('project-agent:delete', (_event, payload) => ports.deleteBot(payload));

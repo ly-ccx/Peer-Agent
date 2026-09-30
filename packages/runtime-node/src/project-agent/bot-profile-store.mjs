@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -161,11 +162,17 @@ export function createBotProfileStore({
     const current = read(workspaceId);
     if (!current) return fail('NOT_FOUND');
     const previous = Number.parseInt(String(current.avatarSalt || '0'), 10);
-    const avatarSalt = String(Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1);
+    let nextSalt = Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1;
+    let avatar = generatedAvatar(workspaceId, String(nextSalt));
+    for (let tries = 0; tries < 32 && avatar.color === current.avatar?.color; tries += 1) {
+      nextSalt += 1;
+      avatar = generatedAvatar(workspaceId, String(nextSalt));
+    }
+    const avatarSalt = String(nextSalt);
     return save({
       ...current,
       avatarSalt,
-      avatar: generatedAvatar(workspaceId, avatarSalt),
+      avatar,
     });
   }
 
@@ -193,6 +200,25 @@ export function createBotProfileStore({
     });
   }
 
+  function readAvatar(workspaceId) {
+    const profile = read(workspaceId);
+    if (!profile) return fail('NOT_FOUND');
+    const ref = profile.avatar?.kind === 'image' ? profile.avatar.ref : null;
+    const mime = ref === 'avatar.png' ? 'image/png'
+      : ref === 'avatar.jpg' ? 'image/jpeg'
+        : ref === 'avatar.webp' ? 'image/webp' : null;
+    if (!mime) return fail('INVALID_IMAGE');
+    const target = path.join(directory(workspaceId), ref);
+    try {
+      const info = lstatSync(target);
+      if (!info.isFile() || info.size <= 0 || info.size > AVATAR_BYTES) return fail('INVALID_IMAGE');
+      if (imageExtension(target) !== ref.slice('avatar.'.length)) return fail('INVALID_IMAGE');
+      return { ok: true, mime, bytes: readFileSync(target) };
+    } catch {
+      return fail('INVALID_IMAGE');
+    }
+  }
+
   return {
     file,
     read,
@@ -200,6 +226,7 @@ export function createBotProfileStore({
     save,
     regenerateAvatar,
     installAvatar,
+    readAvatar,
     generatedAvatar,
   };
 }

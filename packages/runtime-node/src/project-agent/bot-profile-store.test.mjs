@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -44,8 +44,9 @@ test('头像由工作区 id 决定，换一个会带盐重新生成', () => {
     assert.equal(again.profile.displayName, '演示');
     assert.equal(again.profile.agentConversationId, 'conv-1');
     const rotated = store.regenerateAvatar(workspaceId);
-    assert.equal(rotated.profile.avatarSalt, '1');
-    assert.deepEqual(rotated.profile.avatar, generateAvatar(`${workspaceId}:1`));
+    assert.equal(Number(rotated.profile.avatarSalt) > 0, true);
+    assert.notEqual(rotated.profile.avatar.color, created.profile.avatar.color);
+    assert.deepEqual(rotated.profile.avatar, generateAvatar(`${workspaceId}:${rotated.profile.avatarSalt}`));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -67,6 +68,10 @@ test('上传只接受 png、jpg、webp，并且不超过 1 MB', () => {
     assert.equal(installed.ok, true);
     assert.deepEqual(installed.profile.avatar, { kind: 'image', ref: 'avatar.png' });
     assert.equal(statSync(path.join(root, 'projects', workspaceId, 'avatar.png')).isFile(), true);
+    const shown = store.readAvatar(workspaceId);
+    assert.equal(shown.ok, true);
+    assert.equal(shown.mime, 'image/png');
+    assert.deepEqual(shown.bytes, readFileSync(png));
     const gif = path.join(root, 'avatar.gif');
     writeFileSync(gif, Buffer.from('GIF89a'));
     assert.equal(store.installAvatar(workspaceId, gif).code, 'INVALID_IMAGE');
@@ -77,6 +82,9 @@ test('上传只接受 png、jpg、webp，并且不超过 1 MB', () => {
     ]));
     assert.equal(store.installAvatar(workspaceId, huge).code, 'INVALID_IMAGE');
     assert.equal(store.read(workspaceId).avatar.ref, 'avatar.png');
+    assert.equal(store.readAvatar('../outside').code, 'NOT_FOUND');
+    store.save({ ...store.read(workspaceId), avatar: { kind: 'image', ref: '../../avatar-src.png' } });
+    assert.equal(store.readAvatar(workspaceId).code, 'INVALID_IMAGE');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

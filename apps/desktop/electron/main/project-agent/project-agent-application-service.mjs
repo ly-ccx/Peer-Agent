@@ -131,6 +131,13 @@ export function createProjectAgentApplicationService({
     return directory.get(payload.workspaceId);
   }
 
+  function readAvatar(payload = {}) {
+    if (!open()) return disabled();
+    const result = profileStore?.readAvatar?.(payload.workspaceId);
+    if (!result?.ok) return { ok: false, code: result?.code || 'INVALID_IMAGE' };
+    return { ok: true, dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}` };
+  }
+
   async function create(payload = {}, sender = null) {
     if (!open()) return disabled();
     if (payload?.kind === 'bind') {
@@ -190,9 +197,6 @@ export function createProjectAgentApplicationService({
       const sourcePath = await chooseAvatar(sender);
       if (!sourcePath) return { ok: false, code: 'CANCELLED' };
       const installed = lifecycle.uploadAvatar(workspaceId, sourcePath);
-      if (!installed?.ok) return installed;
-    } else if (typeof payload.avatarPath === 'string' && payload.avatarPath) {
-      const installed = lifecycle.uploadAvatar(workspaceId, payload.avatarPath);
       if (!installed?.ok) return installed;
     }
     queueChanged(workspaceId);
@@ -510,6 +514,7 @@ export function createProjectAgentApplicationService({
   return {
     list,
     get,
+    readAvatar,
     create,
     updateProfile,
     deleteBot,

@@ -118,6 +118,7 @@ const unavailableApi: ClientApi = {
   mcpConnectAndRegister: unavailableMethod('mcpConnectAndRegister'),
   projectAgentList: unavailableMethod('projectAgentList'),
   projectAgentGet: unavailableMethod('projectAgentGet'),
+  projectAgentReadAvatar: unavailableMethod('projectAgentReadAvatar'),
   projectAgentCreate: unavailableMethod('projectAgentCreate'),
   projectAgentUpdateProfile: unavailableMethod('projectAgentUpdateProfile'),
   projectAgentDelete: unavailableMethod('projectAgentDelete'),

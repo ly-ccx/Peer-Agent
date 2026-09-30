@@ -18,6 +18,10 @@ export type BotAvatar =
   | { readonly kind: 'generated'; readonly shape: string; readonly color: string }
   | { readonly kind: 'image'; readonly ref: string };
 
+export type BotAvatarReadResult =
+  | { readonly ok: true; readonly dataUrl: string }
+  | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'INVALID_IMAGE' };
+
 export interface BotProfile {
   readonly workspaceId: string;
   readonly displayName: string;

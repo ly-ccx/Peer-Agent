@@ -7,6 +7,7 @@ import { createProjectAgentIpcRegistrations } from './register-project-agent-ipc
 const CHANNELS = [
   'project-agent:list',
   'project-agent:get',
+  'project-agent:read-avatar',
   'project-agent:create',
   'project-agent:update-profile',
   'project-agent:delete',
@@ -35,6 +36,7 @@ function harness() {
     projectAgent: {
       list: port('list'),
       get: port('get'),
+      readAvatar: port('read-avatar'),
       create: port('create'),
       updateProfile: port('update-profile'),
       deleteBot: port('delete'),
@@ -80,8 +82,8 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
     }
   }
   assert.equal(calls.length, CHANNELS.length);
-  assert.deepEqual(calls[2], ['create', { channel: 'project-agent:create' }, sender]);
-  assert.deepEqual(calls[3], ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
+  assert.deepEqual(calls[3], ['create', { channel: 'project-agent:create' }, sender]);
+  assert.deepEqual(calls[4], ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
   assert.deepEqual(calls[0], ['list', { channel: 'project-agent:list' }]);
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
