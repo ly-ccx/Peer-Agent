@@ -2,11 +2,11 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
 import { useEffect, useState, type RefObject } from 'react';
 import { Drawer } from '../../app/components/Drawer';
+import { prefersReducedMotion } from '../../app/hooks/useMotionPresence';
 import { clientApi } from '../../clientApi';
 import {
   briefFromMemories,
   conversationModelLabel,
-  DRAWER_WIDTH,
   drawerLayout,
   groupDrawerSessions,
   readDrawerSession,
@@ -75,6 +75,7 @@ export function BotProfileDrawer({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
   const layout = drawerLayout(width);
+  const [dockPhase, setDockPhase] = useState<'off' | 'in' | 'on' | 'out'>(memory.open ? 'in' : 'off');
   const close = () => {
     onMemory({ ...memory, open: false });
     triggerRef.current?.focus();
@@ -86,6 +87,31 @@ export function BotProfileDrawer({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (layout !== 'push') return undefined;
+    if (memory.open) {
+      if (prefersReducedMotion()) {
+        setDockPhase('on');
+        return undefined;
+      }
+      setDockPhase('in');
+      const frame = requestAnimationFrame(() => setDockPhase('on'));
+      return () => cancelAnimationFrame(frame);
+    }
+    setDockPhase((current) => (current === 'off' ? 'off' : 'out'));
+    return undefined;
+  }, [layout, memory.open]);
+
+  useEffect(() => {
+    if (dockPhase !== 'out') return undefined;
+    if (prefersReducedMotion()) {
+      setDockPhase('off');
+      return undefined;
+    }
+    const timer = setTimeout(() => setDockPhase('off'), 360);
+    return () => clearTimeout(timer);
+  }, [dockPhase]);
 
   useEffect(() => {
     if (!memory.open) return;
@@ -161,7 +187,7 @@ export function BotProfileDrawer({
     };
   }, [memory.sessionId]);
 
-  if (!memory.open) return null;
+  if (layout === 'cover' ? !memory.open : dockPhase === 'off') return null;
 
   const body = (
     <div className="bot-drawer-body">
@@ -199,6 +225,7 @@ export function BotProfileDrawer({
         </section>
       ) : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}
+      <div key={memory.tab} className="bot-drawer-pane motion-enter-fade">
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
@@ -255,6 +282,7 @@ export function BotProfileDrawer({
           onDeleted={onDeleted}
         />
       ) : null}
+      </div>
       {locateSessionId ? <span className="bot-drawer-sr" data-locate-session={locateSessionId} /> : null}
       <HistorySheet
         open={historyId !== null}
@@ -291,7 +319,10 @@ export function BotProfileDrawer({
   }
 
   return (
-    <aside className="bot-drawer-dock" style={{ width: DRAWER_WIDTH }} aria-label={i18n.t('projectAgent.drawer.title')}>
+    <aside
+      className={`bot-drawer-dock${dockPhase === 'on' ? ' is-open' : ''}`}
+      aria-label={i18n.t('projectAgent.drawer.title')}
+    >
       {body}
     </aside>
   );

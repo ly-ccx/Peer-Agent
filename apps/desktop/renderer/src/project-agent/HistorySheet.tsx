@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { Overlay } from '../app/components/Overlay';
 import { clientApi } from '../clientApi';
+import { formatDrawerStamp } from './state/drawerState';
 
 export interface HistoryConversation {
   readonly id: string;
@@ -169,7 +170,7 @@ export function HistorySheet({
               }}
             >
               <strong>{item.title || item.id}</strong>
-              {item.updatedAt ? <span>{item.updatedAt}</span> : null}
+              {item.updatedAt ? <span>{formatDrawerStamp(item.updatedAt)}</span> : null}
             </button>
           ))}
         </div>

@@ -78,6 +78,22 @@ export function drawerLayout(windowWidth: number): DrawerLayout {
   return windowWidth >= DRAWER_PUSH_MIN_WIDTH ? 'push' : 'cover';
 }
 
+/** 档案列表里的时间：当天只显示时分，同年带月日，跨年再带年份。不展示原始 ISO。 */
+export function formatDrawerStamp(iso: string, now = Date.now()): string {
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) return '';
+  const date = new Date(parsed);
+  const today = new Date(now);
+  const clock = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const sameDay = date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate();
+  if (sameDay) return clock;
+  const day = `${date.getMonth() + 1}/${date.getDate()}`;
+  if (date.getFullYear() === today.getFullYear()) return `${day} ${clock}`;
+  return `${date.getFullYear()}/${day} ${clock}`;
+}
+
 export function drawerStorageKey(workspaceId: string): string {
   return `peer.projectAgent.drawer.${workspaceId}`;
 }

@@ -72,6 +72,10 @@ export type TranslationKey =
   | 'projectAgent.list.history'
   | 'projectAgent.shell.classicNotice'
   | 'projectAgent.shell.banner'
+  | 'projectAgent.shell.bannerTitle'
+  | 'projectAgent.shell.bannerWhere'
+  | 'projectAgent.shell.bannerPath'
+  | 'projectAgent.shell.bannerSwitch'
   | 'projectAgent.shell.bannerDismiss'
   | 'projectAgent.onboarding.connectTitle'
   | 'projectAgent.onboarding.connectBody'
@@ -1126,6 +1130,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.history': '历史对话',
     'projectAgent.shell.classicNotice': '切换到机器人界面查看',
     'projectAgent.shell.banner': '这是新的机器人列表；原来的会话在各机器人的档案 → 任务 → 历史对话；可以在 设置 → 通用 切回经典界面',
+    'projectAgent.shell.bannerTitle': '新的机器人列表',
+    'projectAgent.shell.bannerWhere': '旧会话在各机器人的档案里',
+    'projectAgent.shell.bannerPath': '任务 → 历史对话',
+    'projectAgent.shell.bannerSwitch': '设置 → 通用 可切回经典界面',
     'projectAgent.shell.bannerDismiss': '知道了',
     'projectAgent.onboarding.connectTitle': '先接入模型',
     'projectAgent.onboarding.connectBody': '接入之后才能新建机器人。',
@@ -1978,6 +1986,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.history': 'History',
     'projectAgent.shell.classicNotice': 'Switch to the bot list to view this',
     'projectAgent.shell.banner': 'This is the new bot list. Older chats are in each bot’s profile → tasks → history. Switch back from Settings → General.',
+    'projectAgent.shell.bannerTitle': 'New bot list',
+    'projectAgent.shell.bannerWhere': 'Older chats are in each bot’s profile',
+    'projectAgent.shell.bannerPath': 'Tasks → History',
+    'projectAgent.shell.bannerSwitch': 'Settings → General switches back',
     'projectAgent.shell.bannerDismiss': 'Got it',
     'projectAgent.onboarding.connectTitle': 'Connect a model first',
     'projectAgent.onboarding.connectBody': 'A bot needs a model before it can start.',
