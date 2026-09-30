@@ -95,6 +95,8 @@ export type TranslationKey =
   | 'projectAgent.list.noPreview'
   | 'projectAgent.list.mainEmptyTitle'
   | 'projectAgent.list.mainEmptyBody'
+  | 'projectAgent.list.recentBots'
+  | 'projectAgent.list.openBot'
   | 'projectAgent.list.mainPlaceholder'
   | 'projectAgent.list.profile'
   | 'projectAgent.list.unread'
@@ -180,6 +182,8 @@ export type TranslationKey =
   | 'projectAgent.drawer.modelEmpty'
   | 'projectAgent.drawer.model.pending'
   | 'projectAgent.drawer.tasksEmpty'
+  | 'projectAgent.drawer.showAll'
+  | 'projectAgent.drawer.collapse'
   | 'projectAgent.drawer.group.needsYou'
   | 'projectAgent.drawer.group.running'
   | 'projectAgent.drawer.group.queued'
@@ -203,12 +207,28 @@ export type TranslationKey =
   | 'projectAgent.drawer.scene'
   | 'projectAgent.drawer.sceneMissing'
   | 'projectAgent.drawer.objectives.body'
+  | 'projectAgent.drawer.objectives.hint'
   | 'projectAgent.drawer.memory.empty'
+  | 'projectAgent.drawer.memory.emptyHint'
+  | 'projectAgent.drawer.memory.filterEmpty'
+  | 'projectAgent.drawer.memory.controls'
+  | 'projectAgent.drawer.memory.saved'
+  | 'projectAgent.drawer.memory.scope.project'
+  | 'projectAgent.drawer.memory.scope.global'
   | 'projectAgent.drawer.memory.readonly'
   | 'projectAgent.drawer.memory.filter.kind'
   | 'projectAgent.drawer.memory.filter.trust'
   | 'projectAgent.drawer.memory.filter.status'
   | 'projectAgent.drawer.memory.filter.all'
+  | 'projectAgent.drawer.memory.kind.fact'
+  | 'projectAgent.drawer.memory.kind.preference'
+  | 'projectAgent.drawer.memory.kind.decision'
+  | 'projectAgent.drawer.memory.kind.procedure'
+  | 'projectAgent.drawer.memory.kind.responsibility'
+  | 'projectAgent.drawer.memory.trust.stated'
+  | 'projectAgent.drawer.memory.trust.verified'
+  | 'projectAgent.drawer.memory.status.active'
+  | 'projectAgent.drawer.memory.status.forgotten'
   | 'projectAgent.drawer.memory.pin'
   | 'projectAgent.drawer.memory.unpin'
   | 'projectAgent.drawer.memory.revoke'
@@ -226,6 +246,16 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
   | 'projectAgent.drawer.settings.avatarUpload'
+  | 'projectAgent.drawer.settings.avatarColor'
+  | 'projectAgent.drawer.settings.avatarColorImageHint'
+  | 'projectAgent.drawer.settings.avatarColor.0'
+  | 'projectAgent.drawer.settings.avatarColor.1'
+  | 'projectAgent.drawer.settings.avatarColor.2'
+  | 'projectAgent.drawer.settings.avatarColor.3'
+  | 'projectAgent.drawer.settings.avatarColor.4'
+  | 'projectAgent.drawer.settings.avatarColor.5'
+  | 'projectAgent.drawer.settings.avatarColor.6'
+  | 'projectAgent.drawer.settings.avatarColor.7'
   | 'projectAgent.drawer.settings.delete'
   | 'projectAgent.drawer.settings.deleteManaged'
   | 'projectAgent.drawer.settings.deleteConfirm'
@@ -1151,8 +1181,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.unavailable': '项目代理没有打开',
     'projectAgent.list.loadFailed': '机器人列表没有读出来',
     'projectAgent.list.noPreview': '还没有消息',
-    'projectAgent.list.mainEmptyTitle': '选一个机器人',
-    'projectAgent.list.mainEmptyBody': '选中左边的机器人，或新建一个。对话会留在这里。',
+    'projectAgent.list.mainEmptyTitle': '从一个项目开始',
+    'projectAgent.list.mainEmptyBody': '选择机器人，继续对话或交代新的任务。',
+    'projectAgent.list.recentBots': '最近的机器人',
+    'projectAgent.list.openBot': '打开对话',
     'projectAgent.list.mainPlaceholder': '和这个机器人的对话会显示在这里。',
     'projectAgent.list.profile': '档案',
     'projectAgent.list.unread': '未读',
@@ -1238,6 +1270,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.modelEmpty': '跟随全局分工',
     'projectAgent.drawer.model.pending': '项目级模型范围还没有单独的保存接口，这里显示全局对话模型。',
     'projectAgent.drawer.tasksEmpty': '还没有任务',
+    'projectAgent.drawer.showAll': '查看全部',
+    'projectAgent.drawer.collapse': '收起',
     'projectAgent.drawer.group.needsYou': '需要你',
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
@@ -1261,12 +1295,28 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.scene': '任务现场',
     'projectAgent.drawer.sceneMissing': '现场还没有会话',
     'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
+    'projectAgent.drawer.objectives.hint': '现在可以先通过对话交代具体任务。',
     'projectAgent.drawer.memory.empty': '还没有记忆',
+    'projectAgent.drawer.memory.emptyHint': '机器人记下的项目事实、偏好和决定会显示在这里。',
+    'projectAgent.drawer.memory.filterEmpty': '没有符合筛选条件的记忆',
+    'projectAgent.drawer.memory.controls': '记忆设置',
+    'projectAgent.drawer.memory.saved': '已保存的记忆',
+    'projectAgent.drawer.memory.scope.project': '当前项目',
+    'projectAgent.drawer.memory.scope.global': '所有项目',
     'projectAgent.drawer.memory.readonly': '可以固定、撤销、恢复和导出这些记忆',
     'projectAgent.drawer.memory.filter.kind': '种类',
     'projectAgent.drawer.memory.filter.trust': '信任',
     'projectAgent.drawer.memory.filter.status': '状态',
     'projectAgent.drawer.memory.filter.all': '全部',
+    'projectAgent.drawer.memory.kind.fact': '事实',
+    'projectAgent.drawer.memory.kind.preference': '偏好',
+    'projectAgent.drawer.memory.kind.decision': '决定',
+    'projectAgent.drawer.memory.kind.procedure': '流程',
+    'projectAgent.drawer.memory.kind.responsibility': '职责',
+    'projectAgent.drawer.memory.trust.stated': '用户说明',
+    'projectAgent.drawer.memory.trust.verified': '已验证',
+    'projectAgent.drawer.memory.status.active': '生效中',
+    'projectAgent.drawer.memory.status.forgotten': '已撤销',
     'projectAgent.drawer.memory.pin': '固定',
     'projectAgent.drawer.memory.unpin': '取消固定',
     'projectAgent.drawer.memory.revoke': '撤销',
@@ -1275,15 +1325,25 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.save': '保存',
     'projectAgent.drawer.memory.exportJson': '导出 JSON',
     'projectAgent.drawer.memory.exportMarkdown': '导出 Markdown',
-    'projectAgent.drawer.memory.projectSwitch': '本项目使用记忆',
-    'projectAgent.drawer.memory.useMemory': '使用记忆',
+    'projectAgent.drawer.memory.projectSwitch': '启用记忆',
+    'projectAgent.drawer.memory.useMemory': '对话时使用记忆',
     'projectAgent.drawer.memory.learnPreferences': '从我的习惯里学偏好',
     'projectAgent.drawer.memory.learnLater': '学偏好会在后续阶段生效，这个开关现在就会记住。',
     'projectAgent.drawer.settings.name': '名字',
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
-    'projectAgent.drawer.settings.avatarNew': '换一个',
-    'projectAgent.drawer.settings.avatarUpload': '上传',
+    'projectAgent.drawer.settings.avatarNew': '重新生成',
+    'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
+    'projectAgent.drawer.settings.avatarColor': '颜色',
+    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
+    'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
+    'projectAgent.drawer.settings.avatarColor.1': '珊瑚红',
+    'projectAgent.drawer.settings.avatarColor.2': '琥珀橙',
+    'projectAgent.drawer.settings.avatarColor.3': '薄荷绿',
+    'projectAgent.drawer.settings.avatarColor.4': '丁香紫',
+    'projectAgent.drawer.settings.avatarColor.5': '玫瑰粉',
+    'projectAgent.drawer.settings.avatarColor.6': '湖水蓝',
+    'projectAgent.drawer.settings.avatarColor.7': '暖灰色',
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
@@ -2007,8 +2067,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.unavailable': 'Project agent is off',
     'projectAgent.list.loadFailed': 'The bot list did not load',
     'projectAgent.list.noPreview': 'No messages yet',
-    'projectAgent.list.mainEmptyTitle': 'Choose a bot',
-    'projectAgent.list.mainEmptyBody': 'Select a bot on the left, or create one. The conversation stays here.',
+    'projectAgent.list.mainEmptyTitle': 'Start with a project',
+    'projectAgent.list.mainEmptyBody': 'Choose a bot to continue a conversation or assign a new task.',
+    'projectAgent.list.recentBots': 'Recent bots',
+    'projectAgent.list.openBot': 'Open conversation',
     'projectAgent.list.mainPlaceholder': 'The conversation with this bot will show up here.',
     'projectAgent.list.profile': 'Profile',
     'projectAgent.list.unread': 'Unread',
@@ -2094,6 +2156,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.modelEmpty': 'Follow the global routing',
     'projectAgent.drawer.model.pending': 'A per-project model scope does not have its own save path yet. This shows the global conversation model.',
     'projectAgent.drawer.tasksEmpty': 'No tasks yet',
+    'projectAgent.drawer.showAll': 'Show all',
+    'projectAgent.drawer.collapse': 'Show less',
     'projectAgent.drawer.group.needsYou': 'Needs you',
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
@@ -2117,12 +2181,28 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.scene': 'Task scene',
     'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
     'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
+    'projectAgent.drawer.objectives.hint': 'For now, you can give this bot specific tasks in chat.',
     'projectAgent.drawer.memory.empty': 'No memories yet',
+    'projectAgent.drawer.memory.emptyHint': 'Project facts, preferences, and decisions remembered by the bot will appear here.',
+    'projectAgent.drawer.memory.filterEmpty': 'No memories match these filters',
+    'projectAgent.drawer.memory.controls': 'Memory settings',
+    'projectAgent.drawer.memory.saved': 'Saved memories',
+    'projectAgent.drawer.memory.scope.project': 'This project',
+    'projectAgent.drawer.memory.scope.global': 'All projects',
     'projectAgent.drawer.memory.readonly': 'Pin, revoke, restore, and export these memories',
     'projectAgent.drawer.memory.filter.kind': 'Kind',
     'projectAgent.drawer.memory.filter.trust': 'Trust',
     'projectAgent.drawer.memory.filter.status': 'Status',
     'projectAgent.drawer.memory.filter.all': 'All',
+    'projectAgent.drawer.memory.kind.fact': 'Fact',
+    'projectAgent.drawer.memory.kind.preference': 'Preference',
+    'projectAgent.drawer.memory.kind.decision': 'Decision',
+    'projectAgent.drawer.memory.kind.procedure': 'Procedure',
+    'projectAgent.drawer.memory.kind.responsibility': 'Responsibility',
+    'projectAgent.drawer.memory.trust.stated': 'Stated',
+    'projectAgent.drawer.memory.trust.verified': 'Verified',
+    'projectAgent.drawer.memory.status.active': 'Active',
+    'projectAgent.drawer.memory.status.forgotten': 'Revoked',
     'projectAgent.drawer.memory.pin': 'Pin',
     'projectAgent.drawer.memory.unpin': 'Unpin',
     'projectAgent.drawer.memory.revoke': 'Revoke',
@@ -2131,15 +2211,25 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.save': 'Save',
     'projectAgent.drawer.memory.exportJson': 'Export JSON',
     'projectAgent.drawer.memory.exportMarkdown': 'Export Markdown',
-    'projectAgent.drawer.memory.projectSwitch': 'Use memory for this project',
-    'projectAgent.drawer.memory.useMemory': 'Use memory',
+    'projectAgent.drawer.memory.projectSwitch': 'Enable memory',
+    'projectAgent.drawer.memory.useMemory': 'Use memory in conversations',
     'projectAgent.drawer.memory.learnPreferences': 'Learn preferences from my habits',
     'projectAgent.drawer.memory.learnLater': 'Preference learning starts in a later step. This switch is saved now.',
     'projectAgent.drawer.settings.name': 'Name',
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
-    'projectAgent.drawer.settings.avatarNew': 'Another one',
-    'projectAgent.drawer.settings.avatarUpload': 'Upload',
+    'projectAgent.drawer.settings.avatarNew': 'Generate another',
+    'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
+    'projectAgent.drawer.settings.avatarColor': 'Color',
+    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
+    'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
+    'projectAgent.drawer.settings.avatarColor.1': 'Coral',
+    'projectAgent.drawer.settings.avatarColor.2': 'Amber',
+    'projectAgent.drawer.settings.avatarColor.3': 'Mint',
+    'projectAgent.drawer.settings.avatarColor.4': 'Lilac',
+    'projectAgent.drawer.settings.avatarColor.5': 'Rose',
+    'projectAgent.drawer.settings.avatarColor.6': 'Lagoon',
+    'projectAgent.drawer.settings.avatarColor.7': 'Warm gray',
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',

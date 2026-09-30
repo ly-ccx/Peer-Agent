@@ -1,6 +1,7 @@
 import type { BotListItem } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BotAvatar } from './BotAvatar';
+import { botAvatarMood } from './state/botAvatarState';
 
 interface BotRowProps {
   readonly item: BotListItem;
@@ -29,7 +30,7 @@ export function BotRow({ item, highlighted, opened, timeLabel, i18n, onHighlight
         if (event.key === 'Enter') onOpen(item.workspaceId);
       }}
     >
-      <BotAvatar avatar={item.profile.avatar} label={name} />
+      <BotAvatar avatar={item.profile.avatar} label={name} workspaceId={item.workspaceId} mood={botAvatarMood(item.state)} />
       <span className="bot-row-copy">
         <span className="bot-row-name">{name}</span>
         <span className="bot-row-preview">{preview}</span>

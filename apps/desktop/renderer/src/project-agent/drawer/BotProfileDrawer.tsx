@@ -116,7 +116,7 @@ export function BotProfileDrawer({
   useEffect(() => {
     if (!memory.open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || layout === 'cover') return;
+      if (event.key !== 'Escape' || event.defaultPrevented || layout === 'cover') return;
       event.preventDefault();
       close();
     };

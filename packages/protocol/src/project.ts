@@ -15,8 +15,12 @@ export interface ProjectRegistryEntry {
 }
 
 export type BotAvatar =
-  | { readonly kind: 'generated'; readonly shape: string; readonly color: string }
+  | { readonly kind: 'generated'; readonly shape: string; readonly color: string; readonly variant?: number }
   | { readonly kind: 'image'; readonly ref: string };
+
+export type BotAvatarReadResult =
+  | { readonly ok: true; readonly dataUrl: string }
+  | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'INVALID_IMAGE' };
 
 export interface BotProfile {
   readonly workspaceId: string;
@@ -34,6 +38,8 @@ export interface BotRowState {
   readonly needsYou: number;
   readonly unread: number;
   readonly running: number;
+  /** Ephemeral status of the runner hosted by this desktop process. */
+  readonly agentStatus?: 'idle' | 'thinking' | 'waiting_provider' | 'error';
 }
 
 export interface BotListItem {
@@ -78,14 +84,14 @@ export const BOT_AVATAR_SHAPES = [
 ] as const;
 
 export const BOT_AVATAR_COLORS = [
-  '#2563eb',
-  '#dc2626',
-  '#d97706',
-  '#059669',
-  '#7c3aed',
-  '#db2777',
-  '#0891b2',
-  '#4b5563',
+  '#6474e5',
+  '#f36d63',
+  '#f4ad45',
+  '#61b68c',
+  '#a884e5',
+  '#e774ad',
+  '#55bac7',
+  '#a8a59f',
 ] as const;
 
 const NEEDS_YOU_STATUSES = new Set<WorkSessionStatus>(['waiting_user', 'result_ready']);
@@ -100,11 +106,12 @@ function fnv1a(text: string): number {
   return hash >>> 0;
 }
 
-export function generateAvatar(workspaceId: string): BotAvatar {
+export function generateAvatar(workspaceId: string): Extract<BotAvatar, { kind: 'generated' }> {
   const hash = fnv1a(workspaceId);
   const shape = BOT_AVATAR_SHAPES[hash % BOT_AVATAR_SHAPES.length] ?? BOT_AVATAR_SHAPES[0];
   const color = BOT_AVATAR_COLORS[(hash >>> 16) % BOT_AVATAR_COLORS.length] ?? BOT_AVATAR_COLORS[0];
-  return { kind: 'generated', shape, color };
+  const variant = (hash >>> 8) % 32;
+  return { kind: 'generated', shape, color, variant };
 }
 
 function latestIso(values: readonly (string | undefined)[]): string {

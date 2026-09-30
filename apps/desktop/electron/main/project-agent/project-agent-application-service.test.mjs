@@ -14,6 +14,7 @@ import { createProjectAgentApplicationService } from './project-agent-applicatio
 const METHODS = [
   ['list', {}],
   ['get', { workspaceId: 'ws-1' }],
+  ['readAvatar', { workspaceId: 'ws-1' }],
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
@@ -53,6 +54,7 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
         ensureBot: throwing('ensure'),
         startFamiliarize: throwing('familiarize'),
         regenerateAvatar: throwing('avatar'),
+        setAvatarColor: throwing('color'),
         uploadAvatar: throwing('upload'),
         deleteBot: throwing('delete'),
       },
@@ -74,6 +76,70 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('头像选色通过宿主保存并返回最新档案', async () => {
+  const calls = [];
+  let profile = { workspaceId: 'ws-1', status: 'active', avatar: { kind: 'generated', shape: 'circle', color: '#6474e5', variant: 0 } };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: { read: () => profile },
+    lifecycle: {
+      setAvatarColor(workspaceId, color) {
+        calls.push([workspaceId, color]);
+        profile = { ...profile, avatar: { ...profile.avatar, color } };
+        return { ok: true, profile };
+      },
+    },
+  });
+  const result = await service.updateProfile({ workspaceId: 'ws-1', avatarColor: '#61b68c' });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.avatar.color, '#61b68c');
+  assert.deepEqual(calls, [['ws-1', '#61b68c']]);
+});
+
+test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {
+  const calls = [];
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: {
+      readAvatar(workspaceId) {
+        calls.push(workspaceId);
+        return workspaceId === 'ws-1'
+          ? { ok: true, mime: 'image/png', bytes: Buffer.from([1, 2, 3]) }
+          : { ok: false, code: 'NOT_FOUND' };
+      },
+    },
+  });
+  assert.deepEqual(service.readAvatar({ workspaceId: 'ws-1', path: '/etc/passwd' }), {
+    ok: true,
+    dataUrl: 'data:image/png;base64,AQID',
+  });
+  assert.deepEqual(service.readAvatar({ workspaceId: 'missing' }), { ok: false, code: 'NOT_FOUND' });
+  assert.deepEqual(calls, ['ws-1', 'missing']);
+});
+
+test('列表与单项只投影本进程已知的代理状态', () => {
+  const item = {
+    workspaceId: 'ws-1',
+    state: { needsYou: 0, unread: 0, running: 0 },
+  };
+  let status = 'thinking';
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: {
+      list: () => [item],
+      get: () => ({ ok: true, item }),
+      search: () => [item],
+    },
+    readAgentStatus: () => status,
+  });
+  assert.equal(service.list().items[0].state.agentStatus, 'thinking');
+  status = 'waiting_provider';
+  assert.equal(service.get({ workspaceId: 'ws-1' }).item.state.agentStatus, 'waiting_provider');
+  status = undefined;
+  assert.equal('agentStatus' in service.list().items[0].state, false);
+  assert.equal('agentStatus' in item.state, false);
 });
 
 test('100ms 内的多次变化合并成一次，并带上全部 workspaceId', () => {

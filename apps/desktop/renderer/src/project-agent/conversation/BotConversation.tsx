@@ -1,7 +1,9 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useEffect, useState } from 'react';
+import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import { useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
+import type { BotAvatarMood } from '../state/botAvatarState';
 import { quoteRefsFor, roundsForReply } from '../state/botConversationState';
 import { useBotConversation } from '../state/useBotConversation';
 import { BotComposer } from './BotComposer';
@@ -10,20 +12,38 @@ import '../styles/bot-conversation.css';
 
 export function BotConversation({
   workspaceId,
+  avatar,
+  label,
+  avatarMood,
   i18n,
+  onReplyArrived,
   onLocateSession,
   onInspect,
   focusMessageId = null,
   focusRequestId = 0,
 }: {
   readonly workspaceId: string;
+  readonly avatar: BotAvatarModel;
+  readonly label: string;
+  readonly avatarMood: BotAvatarMood;
   readonly i18n: I18nRuntime;
+  readonly onReplyArrived?: (workspaceId: string) => void;
   readonly onLocateSession: (sessionId: string) => void;
   readonly onInspect?: (inspect: BotInspect) => void;
   readonly focusMessageId?: string | null;
   readonly focusRequestId?: number;
 }) {
   const conversation = useBotConversation(workspaceId);
+  const lastReplyRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (conversation.status !== 'ready') return;
+    const replies = conversation.messages.filter((message) => message.kind === 'agent_reply');
+    const lastId = replies[replies.length - 1]?.id ?? null;
+    if (lastReplyRef.current !== undefined && lastId && lastId !== lastReplyRef.current) {
+      onReplyArrived?.(workspaceId);
+    }
+    lastReplyRef.current = lastId;
+  }, [conversation.status, conversation.messages, onReplyArrived, workspaceId]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   useEffect(() => {
     if (focusMessageId) setHighlightedId(focusMessageId);
@@ -37,6 +57,9 @@ export function BotConversation({
       ) : (
         <BotMessageList
           workspaceId={workspaceId}
+          avatar={avatar}
+          label={label}
+          avatarMood={avatarMood}
           rows={conversation.rows}
           highlightedId={highlightedId}
           i18n={i18n}

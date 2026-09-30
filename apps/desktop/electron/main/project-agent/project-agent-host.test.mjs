@@ -24,6 +24,7 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
   const messages = [];
   const calls = [];
   const sent = [];
+  const statuses = [];
   let hold = true;
   try {
     const host = createProjectAgentHost({
@@ -38,6 +39,7 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
         messages.push({ ...message, conversationId });
       },
       getWindows: () => [{ send(channel, payload) { sent.push({ channel, payload }); } }],
+      onStatus: (workspaceId, status) => statuses.push({ workspaceId, status }),
       routing: { providers: [provider] },
       resolveContext: () => ({ sources: [] }),
       retryDelays: [0, 0, 0],
@@ -76,6 +78,8 @@ test('只有持有租约且已有对话的项目会跑代理回合', async () =>
     assert.deepEqual(calls[0].context, { sources: [] });
     assert.equal(host.runnerFor('ws-client'), null);
     assert.equal(host.runnerFor('ws-leased')?.conversationId, 'conv-leased');
+    assert.deepEqual(statuses.map((item) => item.status), ['thinking', 'waiting_provider', 'thinking', 'idle']);
+    assert.ok(statuses.every((item) => item.workspaceId === 'ws-leased'));
     assert.deepEqual(sent, [{ channel: 'chat:stream:delta', payload: { content: 'hi' } }]);
     assert.deepEqual(messages.filter((message) => message.role === 'user').map((message) => message.content), ['你好']);
     assert.equal(host.inputQueue.cursor('ws-client'), null);

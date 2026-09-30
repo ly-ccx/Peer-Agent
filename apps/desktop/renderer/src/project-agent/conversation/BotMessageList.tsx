@@ -1,4 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useRef, useState } from 'react';
 import {
   formatConversationStamp,
@@ -7,12 +8,17 @@ import {
   type BotChatMessage,
   type ConversationRow,
 } from '../state/botConversationState';
+import { BotAvatar } from '../BotAvatar';
+import type { BotAvatarMood } from '../state/botAvatarState';
 import { CardView } from './CardView';
 import { ReplyBubble } from './ReplyBubble';
 import { UserBubble } from './UserBubble';
 
 export function BotMessageList({
   workspaceId,
+  avatar,
+  label,
+  avatarMood,
   rows,
   highlightedId,
   i18n,
@@ -24,6 +30,9 @@ export function BotMessageList({
   onOpenProcess,
 }: {
   readonly workspaceId: string;
+  readonly avatar: BotAvatarModel;
+  readonly label: string;
+  readonly avatarMood: BotAvatarMood;
   readonly rows: readonly ConversationRow[];
   readonly highlightedId: string | null;
   readonly i18n: I18nRuntime;
@@ -74,7 +83,12 @@ export function BotMessageList({
         }
       }}
     >
-      {rows.length === 0 ? <p className="bot-thread-empty">{i18n.t('projectAgent.chat.empty')}</p> : null}
+      {rows.length === 0 ? (
+        <div className="bot-thread-empty">
+          <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} />
+          <p>{i18n.t('projectAgent.chat.empty')}</p>
+        </div>
+      ) : null}
       {windowed.start > 0 ? <div className="bot-thread-spacer" style={{ height: windowed.start * 72 }} /> : null}
       {windowed.rows.map((row) => (
         row.type === 'separator' ? (
@@ -95,6 +109,10 @@ export function BotMessageList({
             workspaceId={workspaceId}
             message={row.message}
             highlighted={highlightedId === row.message.id}
+            welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
+            avatar={avatar}
+            label={label}
+            avatarMood={avatarMood}
             i18n={i18n}
           />
         ) : (
@@ -124,18 +142,27 @@ function SystemCard({
   workspaceId,
   message,
   highlighted,
+  welcome,
+  avatar,
+  label,
+  avatarMood,
   i18n,
 }: {
   readonly workspaceId: string;
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
+  readonly welcome: boolean;
+  readonly avatar: BotAvatarModel;
+  readonly label: string;
+  readonly avatarMood: BotAvatarMood;
   readonly i18n: I18nRuntime;
 }) {
   const cards = message.cards.length > 0
     ? message.cards
     : [{ cardId: message.id, kind: 'system_card', content: message.content, actions: [] }];
   return (
-    <div className={`bot-system${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
+    <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
+      {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
     </div>
   );

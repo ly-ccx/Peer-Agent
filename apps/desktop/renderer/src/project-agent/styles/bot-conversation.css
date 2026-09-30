@@ -16,11 +16,11 @@
   padding: 18px 22px 8px;
 }
 
-.bot-thread:has(> .bot-system:only-child) {
+.bot-thread:has(> .bot-system:not(.bot-system-welcome):only-child) {
   justify-content: center;
 }
 
-.bot-thread:has(> .bot-system:only-child) > .bot-system {
+.bot-thread:has(> .bot-system:not(.bot-system-welcome):only-child) > .bot-system {
   width: min(420px, 100%);
   margin-inline: auto;
 }
@@ -32,6 +32,88 @@
   color: var(--frost-text-secondary, var(--text-secondary));
   font-size: 13px;
   line-height: 1.5;
+}
+
+.bot-thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+
+.bot-thread-empty .bot-avatar {
+  flex-basis: 104px;
+  width: 104px;
+  height: 104px;
+}
+
+.bot-thread-empty .bot-avatar-image {
+  border-radius: 28px;
+}
+
+.bot-thread-empty p {
+  margin: 0;
+}
+
+.bot-system-welcome {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: min(520px, 100%);
+  margin-top: clamp(56px, 14vh, 160px);
+  text-align: center;
+}
+
+.bot-system-welcome .bot-avatar {
+  flex-basis: 112px;
+  width: 112px;
+  height: 112px;
+}
+
+.bot-system-welcome .bot-avatar-image {
+  border-radius: 30px;
+}
+
+.bot-system-welcome .bot-card {
+  align-items: center;
+  gap: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bot-system-welcome .bot-card p {
+  color: var(--graphite-base);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.bot-system-welcome .bot-card-actions button:first-child {
+  min-height: 40px;
+  padding: 9px 20px;
+  border: 1px solid color-mix(in srgb, var(--graphite-base) 18%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--graphite-base) 12%, var(--chrome-canvas));
+  color: var(--graphite-base);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bot-system-welcome .bot-card-actions button:first-child:hover {
+  background: color-mix(in srgb, var(--graphite-base) 18%, var(--chrome-canvas));
+  color: var(--graphite-base);
+  opacity: 1;
+}
+
+.bot-system-welcome .bot-card-actions button:first-child:focus-visible {
+  outline: 2px solid var(--graphite-base);
+  outline-offset: 3px;
 }
 
 .bot-thinking {

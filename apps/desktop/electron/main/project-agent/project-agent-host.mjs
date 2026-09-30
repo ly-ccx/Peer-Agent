@@ -81,6 +81,7 @@ export function createProjectAgentHost({
   now,
   retryDelays,
   onCurator = null,
+  onStatus = null,
   inbox = null,
   inputQueue = null,
   readSettings = null,
@@ -170,6 +171,9 @@ export function createProjectAgentHost({
       },
       onCurator: typeof onCurator === 'function'
         ? (info) => onCurator({ ...info, workspaceId })
+        : null,
+      onStatus: typeof onStatus === 'function'
+        ? (status) => onStatus(workspaceId, status)
         : null,
     });
     runners.set(workspaceId, runner);
@@ -579,6 +583,9 @@ export function registerDesktopProjectAgent({
       });
     },
     onCurator: (info) => memoryCurator.consider(info),
+    onStatus: (workspaceId) => {
+      if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
+    },
     inputQueue,
     readSettings: getSettings,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
@@ -648,6 +655,7 @@ export function registerDesktopProjectAgent({
       void host.sync([workspaceId]).catch(() => {});
     },
     agentOnline: (workspaceId) => typeof holdsLease === 'function' && holdsLease(workspaceId) === true,
+    readAgentStatus: (workspaceId) => host.runnerFor(workspaceId)?.status(),
     onViewing,
     broadcast,
     conversationStore,

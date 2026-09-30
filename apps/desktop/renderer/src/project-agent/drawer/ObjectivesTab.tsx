@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
+import { PeerIcon } from '../../ui/icons';
 
 interface LegacyAutomation {
   readonly definition?: {
@@ -40,25 +41,43 @@ export function ObjectivesTab({
   }, [workspacePath]);
 
   return (
-    <section className="bot-drawer-tab">
-      <h2>{i18n.t('projectAgent.drawer.legacyAutomations')}</h2>
-      {items.length === 0 ? (
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.legacyAutomationsEmpty')}</p>
-      ) : (
-        <ul>
-          {items.map((item) => {
-            const id = item.definition?.automationId || item.definition?.name || '';
-            return (
-              <li key={id}>
-                <button type="button" onClick={() => onOpenAutomations?.()}>
-                  <span>{item.definition?.name || id}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+    <div className="bot-drawer-tab bot-objectives-tab">
+      <div className="bot-objectives-intro">
+        <span className="bot-objectives-icon" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="16" cy="16" r="11" />
+            <circle cx="16" cy="16" r="6" />
+            <circle cx="16" cy="16" r="1.5" />
+          </svg>
+        </span>
+        <div className="bot-objectives-copy">
+          <h2>{i18n.t('projectAgent.drawer.objectives.body')}</h2>
+          <p>{i18n.t('projectAgent.drawer.objectives.hint')}</p>
+        </div>
+      </div>
+      {items.length > 0 && (
+        <section className="bot-tasks-section">
+          <div className="bot-tasks-heading">
+            <h2>{i18n.t('projectAgent.drawer.legacyAutomations')}</h2>
+            <span>{items.length}</span>
+          </div>
+          <ul className="bot-tasks-list">
+            {items.map((item) => {
+              const id = item.definition?.automationId || item.definition?.name || '';
+              return (
+                <li key={id}>
+                  <button type="button" className="bot-task-row" onClick={() => onOpenAutomations?.()}>
+                    <span className="bot-task-row-copy">
+                      <span className="bot-task-row-title" title={item.definition?.name || id}>{item.definition?.name || id}</span>
+                    </span>
+                    <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
-      <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.objectives.body')}</p>
-    </section>
+    </div>
   );
 }

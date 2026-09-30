@@ -74,6 +74,7 @@ export function createProjectAgentApplicationService({
   rememberGrant = defaultRememberGrant,
   settleLive = defaultSettleLive,
   agentOnline = () => true,
+  readAgentStatus = () => undefined,
   readEvidenceBody = null,
   conversationStore = null,
   goalPlanStore = null,
@@ -115,6 +116,13 @@ export function createProjectAgentApplicationService({
     return enabled() === true;
   }
 
+  function withAgentStatus(item) {
+    if (!item) return item;
+    const status = readAgentStatus(item.workspaceId);
+    if (!['idle', 'thinking', 'waiting_provider', 'error'].includes(status)) return item;
+    return { ...item, state: { ...item.state, agentStatus: status } };
+  }
+
   function list(payload = {}) {
     if (!open()) return disabled();
     const items = typeof payload?.query === 'string' && payload.query.trim()
@@ -123,12 +131,20 @@ export function createProjectAgentApplicationService({
     const filtered = payload?.needsYouOnly === true
       ? items.filter((item) => item.state.needsYou > 0)
       : items;
-    return { ok: true, items: filtered };
+    return { ok: true, items: filtered.map(withAgentStatus) };
   }
 
   function get(payload = {}) {
     if (!open()) return disabled();
-    return directory.get(payload.workspaceId);
+    const result = directory.get(payload.workspaceId);
+    return result?.ok && result.item ? { ...result, item: withAgentStatus(result.item) } : result;
+  }
+
+  function readAvatar(payload = {}) {
+    if (!open()) return disabled();
+    const result = profileStore?.readAvatar?.(payload.workspaceId);
+    if (!result?.ok) return { ok: false, code: result?.code || 'INVALID_IMAGE' };
+    return { ok: true, dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}` };
   }
 
   async function create(payload = {}, sender = null) {
@@ -179,6 +195,10 @@ export function createProjectAgentApplicationService({
       const rotated = lifecycle.regenerateAvatar(workspaceId);
       if (!rotated?.ok) return rotated;
     }
+    if (payload.avatarColor !== undefined) {
+      const recolored = lifecycle.setAvatarColor(workspaceId, payload.avatarColor);
+      if (!recolored?.ok) return recolored;
+    }
     if (typeof payload.proactivity === 'string') {
       if (!BOT_LEVELS.includes(payload.proactivity)) return { ok: false, code: 'INVALID_PROACTIVITY' };
       const latest = profileStore.read(workspaceId) || current;
@@ -190,9 +210,6 @@ export function createProjectAgentApplicationService({
       const sourcePath = await chooseAvatar(sender);
       if (!sourcePath) return { ok: false, code: 'CANCELLED' };
       const installed = lifecycle.uploadAvatar(workspaceId, sourcePath);
-      if (!installed?.ok) return installed;
-    } else if (typeof payload.avatarPath === 'string' && payload.avatarPath) {
-      const installed = lifecycle.uploadAvatar(workspaceId, payload.avatarPath);
       if (!installed?.ok) return installed;
     }
     queueChanged(workspaceId);
@@ -510,6 +527,7 @@ export function createProjectAgentApplicationService({
   return {
     list,
     get,
+    readAvatar,
     create,
     updateProfile,
     deleteBot,

@@ -7,7 +7,9 @@ import { randomUUID } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -16,7 +18,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { generateAvatar } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, generateAvatar } from '@peer-agent/protocol';
 
 import { pathOf } from '../data-store.mjs';
 
@@ -107,6 +109,48 @@ export function createBotProfileStore({
     return generateAvatar(key);
   }
 
+  function generatedSignature(avatar, workspaceId) {
+    if (avatar?.kind !== 'generated') return null;
+    const variant = Number.isInteger(avatar.variant)
+      ? avatar.variant
+      : generateAvatar(workspaceId).variant;
+    return `${avatar.shape}:${avatar.color}:${variant}`;
+  }
+
+  function occupiedAvatars(exceptWorkspaceId) {
+    const occupied = new Set();
+    let entries = [];
+    try {
+      entries = readdirSync(projectsDir(), { withFileTypes: true });
+    } catch {
+      return occupied;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === exceptWorkspaceId || !isBotWorkspaceId(entry.name)) continue;
+      const profile = read(entry.name);
+      if (!profile || profile.status === 'archived') continue;
+      const signature = generatedSignature(profile.avatar, entry.name);
+      if (signature) occupied.add(signature);
+    }
+    return occupied;
+  }
+
+  function chooseGeneratedAvatar(workspaceId, startSalt, { differentFrom = null, differentColor = null } = {}) {
+    const occupied = occupiedAvatars(workspaceId);
+    let numericSalt = Number.parseInt(String(startSalt || '0'), 10);
+    if (!Number.isInteger(numericSalt) || numericSalt < 0) numericSalt = 0;
+    for (let tries = 0; tries < 2048; tries += 1) {
+      const avatarSalt = numericSalt === 0 ? '' : String(numericSalt);
+      const avatar = generatedAvatar(workspaceId, avatarSalt);
+      const signature = generatedSignature(avatar, workspaceId);
+      if (!occupied.has(signature) && signature !== differentFrom && avatar.color !== differentColor) {
+        return { avatar, avatarSalt };
+      }
+      numericSalt += 1;
+    }
+    return null;
+  }
+
   function create({
     workspaceId,
     displayName,
@@ -123,12 +167,14 @@ export function createBotProfileStore({
     const existing = read(workspaceId);
     if (existing) return { ok: true, profile: existing, created: false };
     const at = stamp(now);
+    const selected = chooseGeneratedAvatar(workspaceId, avatarSalt);
+    if (!selected) return fail('AVATAR_EXHAUSTED');
     const profile = {
       schemaVersion: 1,
       workspaceId,
       displayName: name,
-      avatar: generatedAvatar(workspaceId, avatarSalt),
-      avatarSalt: avatarSalt || '',
+      avatar: selected.avatar,
+      avatarSalt: selected.avatarSalt,
       managed: managed === true,
       agentConversationId: agentConversationId.trim(),
       proactivity: 'inherit',
@@ -161,12 +207,43 @@ export function createBotProfileStore({
     const current = read(workspaceId);
     if (!current) return fail('NOT_FOUND');
     const previous = Number.parseInt(String(current.avatarSalt || '0'), 10);
-    const avatarSalt = String(Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1);
+    const selected = chooseGeneratedAvatar(
+      workspaceId,
+      Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1,
+      {
+        differentFrom: generatedSignature(current.avatar, workspaceId),
+        differentColor: current.avatar?.kind === 'generated' ? current.avatar.color : null,
+      },
+    );
+    if (!selected) return fail('AVATAR_EXHAUSTED');
     return save({
       ...current,
-      avatarSalt,
-      avatar: generatedAvatar(workspaceId, avatarSalt),
+      avatarSalt: selected.avatarSalt,
+      avatar: selected.avatar,
     });
+  }
+
+  function setAvatarColor(workspaceId, color) {
+    if (!BOT_AVATAR_COLORS.includes(color)) return fail('INVALID_AVATAR_COLOR');
+    const current = read(workspaceId);
+    if (!current) return fail('NOT_FOUND');
+    const base = current.avatar?.kind === 'generated'
+      ? current.avatar
+      : generatedAvatar(workspaceId, current.avatarSalt || '');
+    const occupied = occupiedAvatars(workspaceId);
+    const initialVariant = Number.isInteger(base.variant) ? base.variant : generateAvatar(workspaceId).variant;
+    const visualShape = Number.isInteger(base.variant)
+      ? base.shape
+      : BOT_AVATAR_SHAPES[(Math.max(0, BOT_AVATAR_SHAPES.indexOf(base.shape)) + initialVariant) % BOT_AVATAR_SHAPES.length];
+    for (const shape of [visualShape, ...BOT_AVATAR_SHAPES.filter((item) => item !== visualShape)]) {
+      for (let offset = 0; offset < 32; offset += 1) {
+        const avatar = { kind: 'generated', shape, color, variant: (initialVariant + offset) % 32 };
+        if (!occupied.has(generatedSignature(avatar, workspaceId))) {
+          return save({ ...current, avatar });
+        }
+      }
+    }
+    return fail('AVATAR_EXHAUSTED');
   }
 
   function installAvatar(workspaceId, sourcePath) {
@@ -193,13 +270,34 @@ export function createBotProfileStore({
     });
   }
 
+  function readAvatar(workspaceId) {
+    const profile = read(workspaceId);
+    if (!profile) return fail('NOT_FOUND');
+    const ref = profile.avatar?.kind === 'image' ? profile.avatar.ref : null;
+    const mime = ref === 'avatar.png' ? 'image/png'
+      : ref === 'avatar.jpg' ? 'image/jpeg'
+        : ref === 'avatar.webp' ? 'image/webp' : null;
+    if (!mime) return fail('INVALID_IMAGE');
+    const target = path.join(directory(workspaceId), ref);
+    try {
+      const info = lstatSync(target);
+      if (!info.isFile() || info.size <= 0 || info.size > AVATAR_BYTES) return fail('INVALID_IMAGE');
+      if (imageExtension(target) !== ref.slice('avatar.'.length)) return fail('INVALID_IMAGE');
+      return { ok: true, mime, bytes: readFileSync(target) };
+    } catch {
+      return fail('INVALID_IMAGE');
+    }
+  }
+
   return {
     file,
     read,
     create,
     save,
     regenerateAvatar,
+    setAvatarColor,
     installAvatar,
+    readAvatar,
     generatedAvatar,
   };
 }

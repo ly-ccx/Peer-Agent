@@ -1,10 +1,22 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { BotProfile } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Dropdown } from '../../app/components/Dropdown';
+import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
 type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
+const COLOR_NAME_KEYS = [
+  'projectAgent.drawer.settings.avatarColor.0',
+  'projectAgent.drawer.settings.avatarColor.1',
+  'projectAgent.drawer.settings.avatarColor.2',
+  'projectAgent.drawer.settings.avatarColor.3',
+  'projectAgent.drawer.settings.avatarColor.4',
+  'projectAgent.drawer.settings.avatarColor.5',
+  'projectAgent.drawer.settings.avatarColor.6',
+  'projectAgent.drawer.settings.avatarColor.7',
+] as const;
 
 function isProactivityLevel(value: string): value is ProactivityLevel {
   return (PROACTIVITY_LEVELS as readonly string[]).includes(value);
@@ -91,6 +103,22 @@ export function BotSettingsTab({
     }
   }
 
+  async function changeAvatarColor(color: string) {
+    if (busy || profile.avatar.kind === 'generated' && botAvatarDisplayColor(profile.avatar.color) === color) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, avatarColor: color });
+      if (!result?.ok || !result.profile) {
+        setError(result?.code || 'FAILED');
+        return;
+      }
+      onProfile(result.profile);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     if (profile.managed === true && !confirmDelete) {
       setConfirmDelete(true);
@@ -115,36 +143,58 @@ export function BotSettingsTab({
 
   return (
     <div className="bot-drawer-tab">
-      <label>
-        <span>{i18n.t('projectAgent.drawer.settings.name')}</span>
-        <input value={name} onChange={(event) => setName(event.target.value)} />
-      </label>
-      <button type="button" disabled={busy || !name.trim()} onClick={() => { void saveName(); }}>
-        {i18n.t('projectAgent.drawer.settings.save')}
-      </button>
-      <section>
+      <div className="bot-settings-field">
+        <label htmlFor="bot-settings-name">{i18n.t('projectAgent.drawer.settings.name')}</label>
+        <div className="bot-settings-name-row">
+          <input id="bot-settings-name" value={name} onChange={(event) => setName(event.target.value)} />
+          <button type="button" disabled={busy || !name.trim() || name.trim() === profile.displayName} onClick={() => { void saveName(); }}>
+            {i18n.t('projectAgent.drawer.settings.save')}
+          </button>
+        </div>
+      </div>
+      <section className="bot-settings-avatar-section">
         <h2>{i18n.t('projectAgent.drawer.settings.avatar')}</h2>
-        <button type="button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
-          {i18n.t('projectAgent.drawer.settings.avatarNew')}
-        </button>
-        <button type="button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
-          {i18n.t('projectAgent.drawer.settings.avatarUpload')}
-        </button>
+        <div className="bot-avatar-settings">
+          <BotAvatar avatar={profile.avatar} label={profile.displayName} workspaceId={workspaceId} />
+          <div className="bot-avatar-settings-actions">
+            <button type="button" disabled={busy} onClick={() => { void changeAvatar('upload'); }}>
+              {i18n.t('projectAgent.drawer.settings.avatarUpload')}
+            </button>
+            <button type="button" disabled={busy} onClick={() => { void changeAvatar('regenerate'); }}>
+              {i18n.t('projectAgent.drawer.settings.avatarNew')}
+            </button>
+          </div>
+        </div>
+        <div className="bot-avatar-colors" role="group" aria-label={i18n.t('projectAgent.drawer.settings.avatarColor')}>
+          <span>{i18n.t('projectAgent.drawer.settings.avatarColor')}</span>
+          <div className="bot-avatar-color-grid">
+            {BOT_AVATAR_COLORS.map((color, index) => (
+              <button
+                key={color}
+                type="button"
+                className="bot-avatar-color"
+                style={{ ['--bot-swatch-color' as string]: color }}
+                aria-label={i18n.t(COLOR_NAME_KEYS[index]!)}
+                aria-pressed={profile.avatar.kind === 'generated' && botAvatarDisplayColor(profile.avatar.color) === color}
+                disabled={busy}
+                onClick={() => { void changeAvatarColor(color); }}
+              ><span aria-hidden="true" /></button>
+            ))}
+          </div>
+          {profile.avatar.kind === 'image' ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.avatarColorImageHint')}</p> : null}
+        </div>
       </section>
-      <label>
+      <div className="bot-settings-field">
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
-        <select
+        <Dropdown
           value={level}
           disabled={busy}
-          onChange={(event) => { void saveProactivity(event.target.value); }}
-        >
-          {PROACTIVITY_LEVELS.map((item) => (
-            <option key={item} value={item}>
-              {i18n.t(`projectAgent.drawer.settings.proactivity.${item}`)}
-            </option>
-          ))}
-        </select>
-      </label>
+          ariaLabel={i18n.t('projectAgent.drawer.settings.proactivity')}
+          className="bot-settings-proactivity"
+          options={PROACTIVITY_LEVELS.map((item) => ({ value: item, label: i18n.t(`projectAgent.drawer.settings.proactivity.${item}`) }))}
+          onChange={(next) => { void saveProactivity(next); }}
+        />
+      </div>
       <section>
         <h2>{i18n.t('projectAgent.drawer.acceptance')}</h2>
         <p>{i18n.t('projectAgent.drawer.acceptance.auto')}</p>

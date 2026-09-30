@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
+import { PeerIcon } from '../ui/icons';
 import { AutomationCenter } from '../automations/AutomationCenter';
 import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
+import { botAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
 import { MeMenu } from './MeMenu';
 import { NewBotSheet } from './NewBotSheet';
@@ -93,6 +95,8 @@ export function BotListShell({
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const [inspect, setInspect] = useState<BotInspect | null>(null);
+  const [replyFlash, setReplyFlash] = useState<string | null>(null);
+  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [meHistoryOpen, setMeHistoryOpen] = useState(false);
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const pageOverride = activePage === 'automations' || activePage === 'tools';
@@ -111,8 +115,19 @@ export function BotListShell({
   useEffect(() => {
     setLocateSessionId(null);
     setInspect(null);
+    setReplyFlash(null);
     drawerLoadedFor.current = null;
   }, [opened?.workspaceId]);
+
+  useEffect(() => () => {
+    if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+  }, []);
+
+  const announceReply = useCallback((workspaceId: string) => {
+    if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+    setReplyFlash(workspaceId);
+    replyTimerRef.current = setTimeout(() => setReplyFlash(null), 850);
+  }, []);
 
   useEffect(() => {
     const workspaceId = opened?.workspaceId;
@@ -290,25 +305,27 @@ export function BotListShell({
             </svg>
           </button>
         </div>
-        <input
-          ref={searchRef}
-          className="bot-search"
-          type="search"
-          value={list.query}
-          placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
-          aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
-          onChange={(event) => list.setQuery(event.target.value)}
-        />
-        {list.catalog.length > 0 ? (
-          <button
-            type="button"
-            className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
-            aria-pressed={list.needsYouOnly}
-            onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
-          >
-            {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
-          </button>
-        ) : null}
+        <div className="bot-search-frame">
+          <input
+            ref={searchRef}
+            className="bot-search"
+            type="search"
+            value={list.query}
+            placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
+            aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
+            onChange={(event) => list.setQuery(event.target.value)}
+          />
+          {needsYouCount > 0 || list.needsYouOnly ? (
+            <button
+              type="button"
+              className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
+              aria-pressed={list.needsYouOnly}
+              onClick={() => list.setNeedsYouOnly(!list.needsYouOnly)}
+            >
+              {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
+            </button>
+          ) : null}
+        </div>
         <BotList
           items={list.visible}
           highlightedId={list.highlightedId}
@@ -385,7 +402,8 @@ export function BotListShell({
         ) : opened ? (
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
-              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} />
+              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
+                mood={replyFlash === opened.workspaceId ? 'reply' : botAvatarMood(opened.state)} />
               <p className="bot-main-title">{opened.profile.displayName}</p>
               <button
                 ref={profileButtonRef}
@@ -406,7 +424,11 @@ export function BotListShell({
             </header>
             <BotConversation
               workspaceId={opened.workspaceId}
+              avatar={opened.profile.avatar}
+              label={opened.profile.displayName}
+              avatarMood={botAvatarMood(opened.state)}
               i18n={i18n}
+              onReplyArrived={announceReply}
               onLocateSession={setLocateSessionId}
               onInspect={(next) => {
                 setInspect(next);
@@ -429,8 +451,31 @@ export function BotListShell({
           />
         ) : (
           <div className="bot-main-empty">
-            <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
-            <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+            <div className="bot-main-empty-content">
+              <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
+              <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+              {list.catalog.length > 0 ? (
+                <div className="bot-main-picks">
+                  <span className="bot-main-picks-label">{i18n.t('projectAgent.list.recentBots')}</span>
+                  {list.catalog.slice(0, 3).map((item) => (
+                    <button
+                      key={item.workspaceId}
+                      type="button"
+                      className="bot-main-pick"
+                      onClick={() => list.openBot(item.workspaceId)}
+                    >
+                      <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId}
+                        mood={botAvatarMood(item.state)} />
+                      <span className="bot-main-pick-copy">
+                        <strong>{item.profile.displayName}</strong>
+                        <small>{i18n.t('projectAgent.list.openBot')}</small>
+                      </span>
+                      <PeerIcon name="chevronRight" size={16} className="bot-main-pick-arrow" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </section>
