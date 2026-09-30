@@ -298,6 +298,9 @@ export interface ModelRoutingProviderOption {
   readonly id: string;
   readonly label: string;
   readonly providerName: string;
+  readonly groupId?: string;
+  readonly model?: string;
+  readonly authMethod?: string;
   readonly supportsVision: boolean;
   readonly supportsTools: boolean;
   readonly supportsStructured: boolean;

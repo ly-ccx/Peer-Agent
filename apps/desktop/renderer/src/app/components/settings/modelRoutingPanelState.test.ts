@@ -7,6 +7,7 @@ import {
   moveListItem,
   optionRejectReason,
   roleTranslationKey,
+  routingMenuGroups,
   validateAutoPool,
   type RoutingModelOption,
 } from './modelRoutingPanelState.ts';
@@ -84,6 +85,18 @@ test('vision tier and visual role grey out models that cannot see images', () =>
   assert.equal(optionRejectReason(vision, { kind: 'role', role: 'explorer' }), 'tools');
   assert.equal(optionRejectReason({ ...text, contextTokens: 1000 }, { kind: 'role', role: 'explorer' }), 'context');
   assert.equal(optionRejectReason(vision, { kind: 'role', role: 'memory_curator' }), 'structured');
+});
+
+test('routing menu groups models by channel and greys out the wrong capability', () => {
+  const flash = { ...text, id: 'ds-flash', label: 'deepseek-flash', providerName: 'DeepSeek', groupId: 'deepseek', model: 'deepseek-flash' };
+  const pro = { ...text, id: 'ds-pro', label: 'deepseek-pro', providerName: 'DeepSeek', groupId: 'deepseek', model: 'deepseek-pro' };
+  const glm = { ...vision, id: 'glm', label: 'GLM-5.3', providerName: '智谱', groupId: 'zhipu', model: 'glm-5.3' };
+  const groups = routingMenuGroups([flash, pro, glm], { kind: 'tier', tier: 'vision' }, true, () => '不能看图');
+  assert.deepEqual(groups.map((group) => group.label), ['DeepSeek', '智谱']);
+  assert.deepEqual(groups[0]?.items.map((item) => item.id), ['ds-flash', 'ds-pro']);
+  assert.equal(groups[0]?.items.every((item) => item.disabled), true);
+  assert.equal(groups[1]?.items[0]?.disabled, false);
+  assert.equal(groups[0]?.disabled, true);
 });
 
 test('one usable model makes the routing tables read only', () => {

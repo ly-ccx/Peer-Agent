@@ -103,10 +103,27 @@
   white-space: nowrap;
 }
 
-.model-routing-panel .pa-dropdown {
+.model-routing-panel .pa-dropdown,
+.model-routing-panel .model-routing-model-menu {
   display: block;
   width: 100%;
   min-width: 0;
+}
+
+.model-routing-panel .model-routing-model-menu .pa-cascading-trigger {
+  display: flex;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 32px;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--chrome-sunken);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  font-weight: 400;
 }
 
 .model-routing-fallbacks {
@@ -117,7 +134,8 @@
   min-width: 0;
 }
 
-.model-routing-fallbacks > .pa-dropdown {
+.model-routing-fallbacks > .pa-dropdown,
+.model-routing-fallbacks > .model-routing-model-menu {
   flex: 0 0 168px;
   width: 168px;
 }
