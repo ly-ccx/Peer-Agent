@@ -188,15 +188,17 @@ export function CascadingMenu({
       const inSub = submenuRef.current?.contains(target) ?? false;
       if (!inRoot && !inMenu && !inSub) setOpen(false);
     };
-    const onResize = () => {
+    const onReflow = () => {
       updatePosition();
       updateSubmenuPosition();
     };
     window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onReflow, true);
+    window.addEventListener('resize', onReflow);
     return () => {
       window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onReflow, true);
+      window.removeEventListener('resize', onReflow);
     };
   }, [open, updatePosition, updateSubmenuPosition]);
 
