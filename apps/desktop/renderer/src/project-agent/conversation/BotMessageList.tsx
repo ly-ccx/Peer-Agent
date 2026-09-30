@@ -109,6 +109,10 @@ export function BotMessageList({
             workspaceId={workspaceId}
             message={row.message}
             highlighted={highlightedId === row.message.id}
+            welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
+            avatar={avatar}
+            label={label}
+            avatarMood={avatarMood}
             i18n={i18n}
           />
         ) : (
@@ -138,18 +142,27 @@ function SystemCard({
   workspaceId,
   message,
   highlighted,
+  welcome,
+  avatar,
+  label,
+  avatarMood,
   i18n,
 }: {
   readonly workspaceId: string;
   readonly message: BotChatMessage;
   readonly highlighted: boolean;
+  readonly welcome: boolean;
+  readonly avatar: BotAvatarModel;
+  readonly label: string;
+  readonly avatarMood: BotAvatarMood;
   readonly i18n: I18nRuntime;
 }) {
   const cards = message.cards.length > 0
     ? message.cards
     : [{ cardId: message.id, kind: 'system_card', content: message.content, actions: [] }];
   return (
-    <div className={`bot-system${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
+    <div className={`bot-system${welcome ? ' bot-system-welcome' : ''}${highlighted ? ' is-anchored' : ''}`} id={`bot-msg-${message.id}`}>
+      {welcome ? <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} /> : null}
       <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
     </div>
   );
