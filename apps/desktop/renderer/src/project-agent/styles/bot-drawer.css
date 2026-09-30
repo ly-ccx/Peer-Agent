@@ -324,30 +324,178 @@
   font-size: 12px;
 }
 
-.bot-memory-filters,
-.bot-memory-switches,
-.bot-memory-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+.bot-memory-tab {
+  gap: 22px;
 }
 
-.bot-memory-filters label,
-.bot-memory-switches label {
+.bot-memory-tab .bot-memory-section {
+  gap: 12px;
+}
+
+.bot-memory-settings-card {
+  overflow: hidden;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
+}
+
+.bot-memory-setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 14px;
+}
+
+.bot-memory-setting-group + .bot-memory-setting-group {
+  border-top: 1px solid var(--chrome-hairline);
+}
+
+.bot-memory-setting-scope {
+  color: var(--graphite-fade, var(--za-text-muted));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bot-memory-setting-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  min-height: 38px;
+  gap: 16px;
+  color: var(--graphite-base, var(--za-text));
   font-size: 13px;
 }
 
-.bot-memory-filters select {
-  border: 1px solid var(--chrome-hairline, var(--separator));
+.bot-memory-setting-row > span {
+  min-width: 0;
+}
+
+.bot-memory-setting-group .bot-drawer-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+}
+
+.bot-drawer-tab .bot-memory-setting-row .peer-switch {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  padding: 1px;
+  border: 1px solid var(--graphite-hairline);
+  border-radius: 999px;
+  background: var(--control-fill);
+}
+
+.bot-drawer-tab .bot-memory-setting-row .peer-switch:hover:not(:disabled) {
+  background: var(--control-fill-hover);
+}
+
+.bot-drawer-tab .bot-memory-setting-row .peer-switch[data-state='checked'],
+.bot-drawer-tab .bot-memory-setting-row .peer-switch[data-state='checked']:hover:not(:disabled) {
+  border-color: var(--state-active-on);
+  background: var(--state-active-on);
+}
+
+.bot-memory-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 22px 18px;
+  border: 1px dashed var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
+}
+
+.bot-memory-empty svg {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 2px;
+  fill: none;
+  stroke: var(--graphite-fade, var(--za-text-muted));
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bot-memory-empty strong {
+  color: var(--graphite-base, var(--za-text));
+  font-size: 14px;
+}
+
+.bot-memory-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bot-memory-filter {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 12px;
+}
+
+.bot-memory-filter:first-child {
+  grid-column: 1 / -1;
+}
+
+.bot-memory-filter-dropdown,
+.bot-memory-filter-dropdown .pa-dropdown-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.bot-memory-filter-dropdown .pa-dropdown-trigger {
+  min-height: 38px;
+  background: var(--chrome-canvas);
+}
+
+.bot-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bot-memory-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 12px;
+  background: var(--chrome-canvas);
+}
+
+.bot-memory-item-meta,
+.bot-memory-item-actions,
+.bot-memory-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.bot-memory-item-meta span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--chrome-hover);
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 11px;
+}
+
+.bot-drawer-tab .bot-memory-item-actions button {
+  width: auto;
+  flex: 0 0 auto;
   border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  padding: 4px 8px;
+  text-align: center;
+}
+
+.bot-memory-export-actions {
+  margin-top: 12px;
 }
 
 .bot-drawer-tab input {

@@ -206,11 +206,26 @@ export type TranslationKey =
   | 'projectAgent.drawer.sceneMissing'
   | 'projectAgent.drawer.objectives.body'
   | 'projectAgent.drawer.memory.empty'
+  | 'projectAgent.drawer.memory.emptyHint'
+  | 'projectAgent.drawer.memory.filterEmpty'
+  | 'projectAgent.drawer.memory.controls'
+  | 'projectAgent.drawer.memory.saved'
+  | 'projectAgent.drawer.memory.scope.project'
+  | 'projectAgent.drawer.memory.scope.global'
   | 'projectAgent.drawer.memory.readonly'
   | 'projectAgent.drawer.memory.filter.kind'
   | 'projectAgent.drawer.memory.filter.trust'
   | 'projectAgent.drawer.memory.filter.status'
   | 'projectAgent.drawer.memory.filter.all'
+  | 'projectAgent.drawer.memory.kind.fact'
+  | 'projectAgent.drawer.memory.kind.preference'
+  | 'projectAgent.drawer.memory.kind.decision'
+  | 'projectAgent.drawer.memory.kind.procedure'
+  | 'projectAgent.drawer.memory.kind.responsibility'
+  | 'projectAgent.drawer.memory.trust.stated'
+  | 'projectAgent.drawer.memory.trust.verified'
+  | 'projectAgent.drawer.memory.status.active'
+  | 'projectAgent.drawer.memory.status.forgotten'
   | 'projectAgent.drawer.memory.pin'
   | 'projectAgent.drawer.memory.unpin'
   | 'projectAgent.drawer.memory.revoke'
@@ -1276,11 +1291,26 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.sceneMissing': '现场还没有会话',
     'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
     'projectAgent.drawer.memory.empty': '还没有记忆',
+    'projectAgent.drawer.memory.emptyHint': '机器人记下的项目事实、偏好和决定会显示在这里。',
+    'projectAgent.drawer.memory.filterEmpty': '没有符合筛选条件的记忆',
+    'projectAgent.drawer.memory.controls': '记忆设置',
+    'projectAgent.drawer.memory.saved': '已保存的记忆',
+    'projectAgent.drawer.memory.scope.project': '当前项目',
+    'projectAgent.drawer.memory.scope.global': '所有项目',
     'projectAgent.drawer.memory.readonly': '可以固定、撤销、恢复和导出这些记忆',
     'projectAgent.drawer.memory.filter.kind': '种类',
     'projectAgent.drawer.memory.filter.trust': '信任',
     'projectAgent.drawer.memory.filter.status': '状态',
     'projectAgent.drawer.memory.filter.all': '全部',
+    'projectAgent.drawer.memory.kind.fact': '事实',
+    'projectAgent.drawer.memory.kind.preference': '偏好',
+    'projectAgent.drawer.memory.kind.decision': '决定',
+    'projectAgent.drawer.memory.kind.procedure': '流程',
+    'projectAgent.drawer.memory.kind.responsibility': '职责',
+    'projectAgent.drawer.memory.trust.stated': '用户说明',
+    'projectAgent.drawer.memory.trust.verified': '已验证',
+    'projectAgent.drawer.memory.status.active': '生效中',
+    'projectAgent.drawer.memory.status.forgotten': '已撤销',
     'projectAgent.drawer.memory.pin': '固定',
     'projectAgent.drawer.memory.unpin': '取消固定',
     'projectAgent.drawer.memory.revoke': '撤销',
@@ -1289,8 +1319,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.save': '保存',
     'projectAgent.drawer.memory.exportJson': '导出 JSON',
     'projectAgent.drawer.memory.exportMarkdown': '导出 Markdown',
-    'projectAgent.drawer.memory.projectSwitch': '本项目使用记忆',
-    'projectAgent.drawer.memory.useMemory': '使用记忆',
+    'projectAgent.drawer.memory.projectSwitch': '启用记忆',
+    'projectAgent.drawer.memory.useMemory': '对话时使用记忆',
     'projectAgent.drawer.memory.learnPreferences': '从我的习惯里学偏好',
     'projectAgent.drawer.memory.learnLater': '学偏好会在后续阶段生效，这个开关现在就会记住。',
     'projectAgent.drawer.settings.name': '名字',
@@ -2144,11 +2174,26 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
     'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
     'projectAgent.drawer.memory.empty': 'No memories yet',
+    'projectAgent.drawer.memory.emptyHint': 'Project facts, preferences, and decisions remembered by the bot will appear here.',
+    'projectAgent.drawer.memory.filterEmpty': 'No memories match these filters',
+    'projectAgent.drawer.memory.controls': 'Memory settings',
+    'projectAgent.drawer.memory.saved': 'Saved memories',
+    'projectAgent.drawer.memory.scope.project': 'This project',
+    'projectAgent.drawer.memory.scope.global': 'All projects',
     'projectAgent.drawer.memory.readonly': 'Pin, revoke, restore, and export these memories',
     'projectAgent.drawer.memory.filter.kind': 'Kind',
     'projectAgent.drawer.memory.filter.trust': 'Trust',
     'projectAgent.drawer.memory.filter.status': 'Status',
     'projectAgent.drawer.memory.filter.all': 'All',
+    'projectAgent.drawer.memory.kind.fact': 'Fact',
+    'projectAgent.drawer.memory.kind.preference': 'Preference',
+    'projectAgent.drawer.memory.kind.decision': 'Decision',
+    'projectAgent.drawer.memory.kind.procedure': 'Procedure',
+    'projectAgent.drawer.memory.kind.responsibility': 'Responsibility',
+    'projectAgent.drawer.memory.trust.stated': 'Stated',
+    'projectAgent.drawer.memory.trust.verified': 'Verified',
+    'projectAgent.drawer.memory.status.active': 'Active',
+    'projectAgent.drawer.memory.status.forgotten': 'Revoked',
     'projectAgent.drawer.memory.pin': 'Pin',
     'projectAgent.drawer.memory.unpin': 'Unpin',
     'projectAgent.drawer.memory.revoke': 'Revoke',
@@ -2157,8 +2202,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.save': 'Save',
     'projectAgent.drawer.memory.exportJson': 'Export JSON',
     'projectAgent.drawer.memory.exportMarkdown': 'Export Markdown',
-    'projectAgent.drawer.memory.projectSwitch': 'Use memory for this project',
-    'projectAgent.drawer.memory.useMemory': 'Use memory',
+    'projectAgent.drawer.memory.projectSwitch': 'Enable memory',
+    'projectAgent.drawer.memory.useMemory': 'Use memory in conversations',
     'projectAgent.drawer.memory.learnPreferences': 'Learn preferences from my habits',
     'projectAgent.drawer.memory.learnLater': 'Preference learning starts in a later step. This switch is saved now.',
     'projectAgent.drawer.settings.name': 'Name',

@@ -1,6 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useEffect, useState } from 'react';
+import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
+import { Switch } from '../../ui/boolean-controls';
 import {
   filterMemoryRecords,
   readMemoryItems,
@@ -11,9 +13,29 @@ import {
   type MemorySwitches,
 } from '../state/drawerState';
 
-const KINDS = ['', 'fact', 'preference', 'decision', 'procedure', 'responsibility'] as const;
-const TRUSTS = ['', 'stated', 'verified'] as const;
-const STATUSES = ['', 'active', 'forgotten'] as const;
+const KINDS = [
+  { value: '', key: 'projectAgent.drawer.memory.filter.all' },
+  { value: 'fact', key: 'projectAgent.drawer.memory.kind.fact' },
+  { value: 'preference', key: 'projectAgent.drawer.memory.kind.preference' },
+  { value: 'decision', key: 'projectAgent.drawer.memory.kind.decision' },
+  { value: 'procedure', key: 'projectAgent.drawer.memory.kind.procedure' },
+  { value: 'responsibility', key: 'projectAgent.drawer.memory.kind.responsibility' },
+] as const;
+const TRUSTS = [
+  { value: '', key: 'projectAgent.drawer.memory.filter.all' },
+  { value: 'stated', key: 'projectAgent.drawer.memory.trust.stated' },
+  { value: 'verified', key: 'projectAgent.drawer.memory.trust.verified' },
+] as const;
+const STATUSES = [
+  { value: '', key: 'projectAgent.drawer.memory.filter.all' },
+  { value: 'active', key: 'projectAgent.drawer.memory.status.active' },
+  { value: 'forgotten', key: 'projectAgent.drawer.memory.status.forgotten' },
+] as const;
+
+function memoryLabel(i18n: I18nRuntime, value: string, options: readonly { value: string; key: Parameters<I18nRuntime['t']>[0] }[]) {
+  const option = options.find((item) => item.value === value);
+  return option ? i18n.t(option.key) : value;
+}
 
 export function MemoryTab({
   workspaceId,
@@ -62,166 +84,181 @@ export function MemoryTab({
 
   const visible = filterMemoryRecords(items, { kind, trust, status });
 
+  function updateSwitch(patch: Partial<MemorySwitches>) {
+    void clientApi.projectMemorySetSwitches({ workspaceId, ...patch }).then(() => reload());
+  }
+
   return (
-    <div className="bot-drawer-tab">
-      <div className="bot-memory-switches">
-        <label>
-          <input
-            type="checkbox"
-            checked={switches.memoryEnabled}
-            onChange={(event) => {
-              void clientApi.projectMemorySetSwitches({
-                workspaceId,
-                memoryEnabled: event.target.checked,
-              }).then(() => reload());
-            }}
-          />
-          {i18n.t('projectAgent.drawer.memory.projectSwitch')}
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={switches.useMemory}
-            onChange={(event) => {
-              void clientApi.projectMemorySetSwitches({
-                workspaceId,
-                useMemory: event.target.checked,
-              }).then(() => reload());
-            }}
-          />
-          {i18n.t('projectAgent.drawer.memory.useMemory')}
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={switches.learnPreferences}
-            onChange={(event) => {
-              void clientApi.projectMemorySetSwitches({
-                workspaceId,
-                learnPreferences: event.target.checked,
-              }).then(() => reload());
-            }}
-          />
-          {i18n.t('projectAgent.drawer.memory.learnPreferences')}
-        </label>
-      </div>
-      <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.learnLater')}</p>
-      <div className="bot-memory-filters">
-        <label>
-          {i18n.t('projectAgent.drawer.memory.filter.kind')}
-          <select value={kind} onChange={(event) => setKind(event.target.value)}>
-            {KINDS.map((value) => (
-              <option key={value || 'all'} value={value}>
-                {value || i18n.t('projectAgent.drawer.memory.filter.all')}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {i18n.t('projectAgent.drawer.memory.filter.trust')}
-          <select value={trust} onChange={(event) => setTrust(event.target.value)}>
-            {TRUSTS.map((value) => (
-              <option key={value || 'all'} value={value}>
-                {value || i18n.t('projectAgent.drawer.memory.filter.all')}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {i18n.t('projectAgent.drawer.memory.filter.status')}
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            {STATUSES.map((value) => (
-              <option key={value || 'all'} value={value}>
-                {value || i18n.t('projectAgent.drawer.memory.filter.all')}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="bot-memory-actions">
-        <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'json' }); }}>
-          {i18n.t('projectAgent.drawer.memory.exportJson')}
-        </button>
-        <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'markdown' }); }}>
-          {i18n.t('projectAgent.drawer.memory.exportMarkdown')}
-        </button>
-      </div>
-      {visible.length === 0 ? <p>{i18n.t('projectAgent.drawer.memory.empty')}</p> : (
-        <ul>
-          {visible.map((item) => (
-            <li key={item.id}>
-              <span>{item.kind}</span>
-              <span>{item.trust}</span>
-              <span>{item.status}</span>
-              {editingId === item.id ? (
-                <input value={draft} onChange={(event) => setDraft(event.target.value)} />
-              ) : (
-                <p>{item.text}</p>
-              )}
-              <div className="bot-memory-actions">
-                {item.status === 'active' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void clientApi.projectMemoryPin({
-                        workspaceId,
-                        id: item.id,
-                        pinned: item.pinned !== true,
-                      }).then(() => reload());
-                    }}
-                  >
-                    {i18n.t(item.pinned ? 'projectAgent.drawer.memory.unpin' : 'projectAgent.drawer.memory.pin')}
-                  </button>
-                ) : null}
-                {item.status === 'forgotten' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void clientApi.projectMemoryRestore({ workspaceId, id: item.id }).then(() => reload());
-                    }}
-                  >
-                    {i18n.t('projectAgent.drawer.memory.restore')}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void clientApi.projectMemoryForget({ workspaceId, id: item.id }).then(() => reload());
-                    }}
-                  >
-                    {i18n.t('projectAgent.drawer.memory.revoke')}
-                  </button>
-                )}
-                {item.status === 'active' && editingId === item.id ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void clientApi.projectMemoryEdit({ workspaceId, id: item.id, text: draft }).then(() => {
-                        setEditingId('');
-                        setDraft('');
-                        return reload();
-                      });
-                    }}
-                  >
-                    {i18n.t('projectAgent.drawer.memory.save')}
-                  </button>
-                ) : null}
-                {item.status === 'active' && editingId !== item.id ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(item.id);
-                      setDraft(item.text);
-                    }}
-                  >
-                    {i18n.t('projectAgent.drawer.memory.edit')}
-                  </button>
-                ) : null}
+    <div className="bot-drawer-tab bot-memory-tab">
+      <section className="bot-memory-section">
+        <h2>{i18n.t('projectAgent.drawer.memory.controls')}</h2>
+        <div className="bot-memory-settings-card">
+          <div className="bot-memory-setting-group">
+            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.project')}</span>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.projectSwitch')}</span>
+              <Switch
+                checked={switches.memoryEnabled}
+                aria-label={i18n.t('projectAgent.drawer.memory.projectSwitch')}
+                onCheckedChange={(checked) => updateSwitch({ memoryEnabled: checked })}
+              />
+            </div>
+          </div>
+          <div className="bot-memory-setting-group">
+            <span className="bot-memory-setting-scope">{i18n.t('projectAgent.drawer.memory.scope.global')}</span>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.useMemory')}</span>
+              <Switch
+                checked={switches.useMemory}
+                aria-label={i18n.t('projectAgent.drawer.memory.useMemory')}
+                onCheckedChange={(checked) => updateSwitch({ useMemory: checked })}
+              />
+            </div>
+            <div className="bot-memory-setting-row">
+              <span>{i18n.t('projectAgent.drawer.memory.learnPreferences')}</span>
+              <Switch
+                checked={switches.learnPreferences}
+                aria-label={i18n.t('projectAgent.drawer.memory.learnPreferences')}
+                onCheckedChange={(checked) => updateSwitch({ learnPreferences: checked })}
+              />
+            </div>
+            <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.learnLater')}</p>
+          </div>
+        </div>
+      </section>
+      <section className="bot-memory-section">
+        <h2>{i18n.t('projectAgent.drawer.memory.saved')}</h2>
+        {items.length === 0 ? (
+          <div className="bot-memory-empty" role="status">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+              <path d="M8 10c4-2 8-2 12 0 4-2 8-2 12 0v20c-4-2-8-2-12 0-4-2-8-2-12 0V10Z" />
+              <path d="M20 10v20M12 15h4M24 15h4" />
+            </svg>
+            <strong>{i18n.t('projectAgent.drawer.memory.empty')}</strong>
+            <p>{i18n.t('projectAgent.drawer.memory.emptyHint')}</p>
+          </div>
+        ) : (
+          <>
+            <div className="bot-memory-filters">
+              <div className="bot-memory-filter">
+                <span>{i18n.t('projectAgent.drawer.memory.filter.kind')}</span>
+                <Dropdown
+                  value={kind}
+                  ariaLabel={i18n.t('projectAgent.drawer.memory.filter.kind')}
+                  className="bot-memory-filter-dropdown"
+                  options={KINDS.map((item) => ({ value: item.value, label: i18n.t(item.key) }))}
+                  onChange={setKind}
+                />
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
+              <div className="bot-memory-filter">
+                <span>{i18n.t('projectAgent.drawer.memory.filter.trust')}</span>
+                <Dropdown
+                  value={trust}
+                  ariaLabel={i18n.t('projectAgent.drawer.memory.filter.trust')}
+                  className="bot-memory-filter-dropdown"
+                  options={TRUSTS.map((item) => ({ value: item.value, label: i18n.t(item.key) }))}
+                  onChange={setTrust}
+                />
+              </div>
+              <div className="bot-memory-filter">
+                <span>{i18n.t('projectAgent.drawer.memory.filter.status')}</span>
+                <Dropdown
+                  value={status}
+                  ariaLabel={i18n.t('projectAgent.drawer.memory.filter.status')}
+                  className="bot-memory-filter-dropdown"
+                  options={STATUSES.map((item) => ({ value: item.value, label: i18n.t(item.key) }))}
+                  onChange={setStatus}
+                />
+              </div>
+            </div>
+            {visible.length === 0 ? <p className="bot-memory-filter-empty">{i18n.t('projectAgent.drawer.memory.filterEmpty')}</p> : null}
+            <ul className="bot-memory-list">
+              {visible.map((item) => (
+                <li key={item.id}>
+                  <div className="bot-memory-item-meta">
+                    <span>{memoryLabel(i18n, item.kind, KINDS)}</span>
+                    <span>{memoryLabel(i18n, item.trust, TRUSTS)}</span>
+                    <span>{memoryLabel(i18n, item.status, STATUSES)}</span>
+                  </div>
+                  {editingId === item.id ? (
+                    <input aria-label={i18n.t('projectAgent.drawer.memory.edit')} value={draft} onChange={(event) => setDraft(event.target.value)} />
+                  ) : (
+                    <p>{item.text}</p>
+                  )}
+                  <div className="bot-memory-item-actions">
+                    {item.status === 'active' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void clientApi.projectMemoryPin({
+                            workspaceId,
+                            id: item.id,
+                            pinned: item.pinned !== true,
+                          }).then(() => reload());
+                        }}
+                      >
+                        {i18n.t(item.pinned ? 'projectAgent.drawer.memory.unpin' : 'projectAgent.drawer.memory.pin')}
+                      </button>
+                    ) : null}
+                    {item.status === 'forgotten' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void clientApi.projectMemoryRestore({ workspaceId, id: item.id }).then(() => reload());
+                        }}
+                      >
+                        {i18n.t('projectAgent.drawer.memory.restore')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void clientApi.projectMemoryForget({ workspaceId, id: item.id }).then(() => reload());
+                        }}
+                      >
+                        {i18n.t('projectAgent.drawer.memory.revoke')}
+                      </button>
+                    )}
+                    {item.status === 'active' && editingId === item.id ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void clientApi.projectMemoryEdit({ workspaceId, id: item.id, text: draft }).then(() => {
+                            setEditingId('');
+                            setDraft('');
+                            return reload();
+                          });
+                        }}
+                      >
+                        {i18n.t('projectAgent.drawer.memory.save')}
+                      </button>
+                    ) : null}
+                    {item.status === 'active' && editingId !== item.id ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(item.id);
+                          setDraft(item.text);
+                        }}
+                      >
+                        {i18n.t('projectAgent.drawer.memory.edit')}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="bot-memory-export-actions">
+              <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'json' }); }}>
+                {i18n.t('projectAgent.drawer.memory.exportJson')}
+              </button>
+              <button type="button" onClick={() => { void clientApi.projectMemoryExport({ workspaceId, format: 'markdown' }); }}>
+                {i18n.t('projectAgent.drawer.memory.exportMarkdown')}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
