@@ -133,6 +133,18 @@
   background: var(--chrome-hover);
 }
 
+.bot-drawer-tab button:disabled,
+.bot-drawer-detail button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.bot-drawer-tab button:focus-visible,
+.bot-drawer-tab input:focus-visible {
+  outline: 2px solid var(--za-accent);
+  outline-offset: 2px;
+}
+
 .bot-drawer-tab button.is-selected {
   border-color: var(--graphite-base, var(--za-text));
   background: var(--chrome-canvas);
@@ -142,7 +154,10 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
 }
 
 .bot-avatar-settings .bot-avatar {
@@ -160,6 +175,83 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.bot-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--graphite-base, var(--za-text));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bot-settings-name-row {
+  display: flex;
+  gap: 8px;
+}
+
+.bot-settings-name-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.bot-settings-name-row button {
+  flex: none;
+}
+
+.bot-settings-proactivity,
+.bot-settings-proactivity .pa-dropdown-trigger {
+  width: 100%;
+}
+
+.bot-settings-proactivity .pa-dropdown-trigger {
+  min-height: 40px;
+  background: var(--chrome-canvas);
+  text-align: left;
+}
+
+.bot-avatar-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 13px;
+}
+
+.bot-avatar-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.bot-drawer-tab .bot-avatar-color {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.bot-drawer-tab .bot-avatar-color span {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bot-swatch-color);
+  box-shadow: inset 0 1px 2px rgb(255 255 255 / 35%), 0 2px 7px rgb(0 0 0 / 16%);
+}
+
+.bot-drawer-tab .bot-avatar-color:hover:not(:disabled) {
+  background: var(--chrome-hover);
+}
+
+.bot-drawer-tab .bot-avatar-color[aria-pressed='true'] {
+  border-color: var(--graphite-base, var(--za-text));
 }
 
 .bot-drawer-tab,

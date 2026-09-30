@@ -18,7 +18,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { generateAvatar } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, generateAvatar } from '@peer-agent/protocol';
 
 import { pathOf } from '../data-store.mjs';
 
@@ -223,6 +223,29 @@ export function createBotProfileStore({
     });
   }
 
+  function setAvatarColor(workspaceId, color) {
+    if (!BOT_AVATAR_COLORS.includes(color)) return fail('INVALID_AVATAR_COLOR');
+    const current = read(workspaceId);
+    if (!current) return fail('NOT_FOUND');
+    const base = current.avatar?.kind === 'generated'
+      ? current.avatar
+      : generatedAvatar(workspaceId, current.avatarSalt || '');
+    const occupied = occupiedAvatars(workspaceId);
+    const initialVariant = Number.isInteger(base.variant) ? base.variant : generateAvatar(workspaceId).variant;
+    const visualShape = Number.isInteger(base.variant)
+      ? base.shape
+      : BOT_AVATAR_SHAPES[(Math.max(0, BOT_AVATAR_SHAPES.indexOf(base.shape)) + initialVariant) % BOT_AVATAR_SHAPES.length];
+    for (const shape of [visualShape, ...BOT_AVATAR_SHAPES.filter((item) => item !== visualShape)]) {
+      for (let offset = 0; offset < 32; offset += 1) {
+        const avatar = { kind: 'generated', shape, color, variant: (initialVariant + offset) % 32 };
+        if (!occupied.has(generatedSignature(avatar, workspaceId))) {
+          return save({ ...current, avatar });
+        }
+      }
+    }
+    return fail('AVATAR_EXHAUSTED');
+  }
+
   function installAvatar(workspaceId, sourcePath) {
     const current = read(workspaceId);
     if (!current) return fail('NOT_FOUND');
@@ -272,6 +295,7 @@ export function createBotProfileStore({
     create,
     save,
     regenerateAvatar,
+    setAvatarColor,
     installAvatar,
     readAvatar,
     generatedAvatar,

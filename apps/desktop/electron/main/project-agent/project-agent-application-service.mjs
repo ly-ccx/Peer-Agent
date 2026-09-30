@@ -195,6 +195,10 @@ export function createProjectAgentApplicationService({
       const rotated = lifecycle.regenerateAvatar(workspaceId);
       if (!rotated?.ok) return rotated;
     }
+    if (payload.avatarColor !== undefined) {
+      const recolored = lifecycle.setAvatarColor(workspaceId, payload.avatarColor);
+      if (!recolored?.ok) return recolored;
+    }
     if (typeof payload.proactivity === 'string') {
       if (!BOT_LEVELS.includes(payload.proactivity)) return { ok: false, code: 'INVALID_PROACTIVITY' };
       const latest = profileStore.read(workspaceId) || current;

@@ -54,6 +54,7 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
         ensureBot: throwing('ensure'),
         startFamiliarize: throwing('familiarize'),
         regenerateAvatar: throwing('avatar'),
+        setAvatarColor: throwing('color'),
         uploadAvatar: throwing('upload'),
         deleteBot: throwing('delete'),
       },
@@ -75,6 +76,26 @@ test('开关关闭时每个通道都拒绝，并且不写文件', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('头像选色通过宿主保存并返回最新档案', async () => {
+  const calls = [];
+  let profile = { workspaceId: 'ws-1', status: 'active', avatar: { kind: 'generated', shape: 'circle', color: '#6474e5', variant: 0 } };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: { read: () => profile },
+    lifecycle: {
+      setAvatarColor(workspaceId, color) {
+        calls.push([workspaceId, color]);
+        profile = { ...profile, avatar: { ...profile.avatar, color } };
+        return { ok: true, profile };
+      },
+    },
+  });
+  const result = await service.updateProfile({ workspaceId: 'ws-1', avatarColor: '#61b68c' });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.avatar.color, '#61b68c');
+  assert.deepEqual(calls, [['ws-1', '#61b68c']]);
 });
 
 test('头像展示只读取已保存图片，由主进程编码为 data URL', () => {

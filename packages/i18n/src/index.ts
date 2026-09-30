@@ -228,6 +228,16 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
   | 'projectAgent.drawer.settings.avatarUpload'
+  | 'projectAgent.drawer.settings.avatarColor'
+  | 'projectAgent.drawer.settings.avatarColorImageHint'
+  | 'projectAgent.drawer.settings.avatarColor.0'
+  | 'projectAgent.drawer.settings.avatarColor.1'
+  | 'projectAgent.drawer.settings.avatarColor.2'
+  | 'projectAgent.drawer.settings.avatarColor.3'
+  | 'projectAgent.drawer.settings.avatarColor.4'
+  | 'projectAgent.drawer.settings.avatarColor.5'
+  | 'projectAgent.drawer.settings.avatarColor.6'
+  | 'projectAgent.drawer.settings.avatarColor.7'
   | 'projectAgent.drawer.settings.delete'
   | 'projectAgent.drawer.settings.deleteManaged'
   | 'projectAgent.drawer.settings.deleteConfirm'
@@ -1288,6 +1298,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.avatar': '头像',
     'projectAgent.drawer.settings.avatarNew': '重新生成',
     'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
+    'projectAgent.drawer.settings.avatarColor': '颜色',
+    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
+    'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
+    'projectAgent.drawer.settings.avatarColor.1': '珊瑚红',
+    'projectAgent.drawer.settings.avatarColor.2': '琥珀橙',
+    'projectAgent.drawer.settings.avatarColor.3': '薄荷绿',
+    'projectAgent.drawer.settings.avatarColor.4': '丁香紫',
+    'projectAgent.drawer.settings.avatarColor.5': '玫瑰粉',
+    'projectAgent.drawer.settings.avatarColor.6': '湖水蓝',
+    'projectAgent.drawer.settings.avatarColor.7': '暖灰色',
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
@@ -2146,6 +2166,16 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.avatar': 'Avatar',
     'projectAgent.drawer.settings.avatarNew': 'Generate another',
     'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
+    'projectAgent.drawer.settings.avatarColor': 'Color',
+    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
+    'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
+    'projectAgent.drawer.settings.avatarColor.1': 'Coral',
+    'projectAgent.drawer.settings.avatarColor.2': 'Amber',
+    'projectAgent.drawer.settings.avatarColor.3': 'Mint',
+    'projectAgent.drawer.settings.avatarColor.4': 'Lilac',
+    'projectAgent.drawer.settings.avatarColor.5': 'Rose',
+    'projectAgent.drawer.settings.avatarColor.6': 'Lagoon',
+    'projectAgent.drawer.settings.avatarColor.7': 'Warm gray',
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',

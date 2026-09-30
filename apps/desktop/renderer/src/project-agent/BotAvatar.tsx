@@ -32,6 +32,10 @@ const LEGACY_COLORS: Readonly<Record<string, string>> = {
   '#4b5563': '#a8a59f',
 };
 
+export function botAvatarDisplayColor(color: string): string {
+  return LEGACY_COLORS[color.toLowerCase()] || color;
+}
+
 const DETAILS = [
   'M12 10c-3-4-2-7 1-8 3 1 4 4 3 8',
   'M34 10c2-5 5-6 7-4 0 4-2 6-5 8',
@@ -110,7 +114,7 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvat
   return (
     <span
       className="bot-avatar bot-avatar-generated"
-      style={{ ['--bot-avatar-accent' as string]: LEGACY_COLORS[generated.color.toLowerCase()] || generated.color }}
+      style={{ ['--bot-avatar-accent' as string]: botAvatarDisplayColor(generated.color) }}
       role="img"
       aria-label={label}
       data-avatar-kind="generated"

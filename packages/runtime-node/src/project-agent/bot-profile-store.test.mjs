@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { generateAvatar } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, generateAvatar } from '@peer-agent/protocol';
 
 import { cleanDisplayName, createBotProfileStore } from './bot-profile-store.mjs';
 
@@ -78,6 +78,65 @@ test('新建和换一个不会与现有生成头像使用相同组合', () => {
     assert.notEqual(signature(rotated.profile.avatar), signature(second.profile.avatar));
     assert.notEqual(signature(rotated.profile.avatar), signature(first.profile.avatar));
     assert.deepEqual(store.read(pair[1]).avatar, second.profile.avatar);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('选色保留造型并持久化，上传图片后选色会恢复生成头像', () => {
+  const root = tempRoot();
+  try {
+    const workspaceId = 'colorful-bot';
+    const store = createBotProfileStore({ rootDir: root });
+    const original = store.create({ workspaceId, displayName: '彩色', agentConversationId: 'conv-color' }).profile.avatar;
+    const color = BOT_AVATAR_COLORS.find((item) => item !== original.color);
+    const colored = store.setAvatarColor(workspaceId, color);
+    assert.equal(colored.ok, true);
+    assert.deepEqual(colored.profile.avatar, { ...original, color });
+    assert.deepEqual(store.read(workspaceId).avatar, colored.profile.avatar);
+    assert.equal(store.setAvatarColor(workspaceId, '#123456').code, 'INVALID_AVATAR_COLOR');
+    assert.deepEqual(store.read(workspaceId).avatar, colored.profile.avatar);
+    const png = path.join(root, 'color-src.png');
+    writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
+    assert.equal(store.installAvatar(workspaceId, png).ok, true);
+    assert.equal(store.setAvatarColor(workspaceId, color).profile.avatar.kind, 'generated');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('选色遇到已有造型组合时换表情，避免两个机器人完全相同', () => {
+  const root = tempRoot();
+  try {
+    const store = createBotProfileStore({ rootDir: root });
+    const first = store.create({ workspaceId: 'first-color-bot', displayName: '甲', agentConversationId: 'conv-a' }).profile;
+    const second = store.create({ workspaceId: 'second-color-bot', displayName: '乙', agentConversationId: 'conv-b' }).profile;
+    const alternate = BOT_AVATAR_COLORS.find((item) => item !== first.avatar.color);
+    store.save({ ...second, avatar: { ...first.avatar, color: alternate } });
+    const result = store.setAvatarColor(second.workspaceId, first.avatar.color);
+    assert.equal(result.ok, true);
+    assert.equal(result.profile.avatar.color, first.avatar.color);
+    assert.equal(result.profile.avatar.shape, first.avatar.shape);
+    assert.notEqual(result.profile.avatar.variant, first.avatar.variant);
+    assert.deepEqual(store.read(first.workspaceId).avatar, first.avatar);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('旧版无表情编号的头像选色后保留屏幕上的轮廓', () => {
+  const root = tempRoot();
+  try {
+    const workspaceId = 'legacy-color-bot';
+    const store = createBotProfileStore({ rootDir: root });
+    const profile = store.create({ workspaceId, displayName: '旧头像', agentConversationId: 'conv-legacy' }).profile;
+    store.save({ ...profile, avatar: { kind: 'generated', shape: 'square', color: '#dc2626' } });
+    const oldVariant = generateAvatar(workspaceId).variant;
+    const expectedShape = ['circle', 'square', 'triangle', 'diamond', 'hex', 'pill', 'star', 'arch'][(1 + oldVariant) % 8];
+    const result = store.setAvatarColor(workspaceId, BOT_AVATAR_COLORS[3]);
+    assert.equal(result.ok, true);
+    assert.equal(result.profile.avatar.shape, expectedShape);
+    assert.equal(result.profile.avatar.variant, oldVariant);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
