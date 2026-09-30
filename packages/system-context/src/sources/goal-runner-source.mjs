@@ -97,7 +97,15 @@ function summarizeCriteria(rawCriteria, rawResults, limit) {
     } else {
       verify = 'manual';
     }
-    out.push({ id, kind, description, verify });
+    const fields = {};
+    const omittedFields = [];
+    for (const [key, maxLength] of [['id', 200], ['command', 2000], ['path', 1000], ['expect', 2000]]) {
+      const value = key === 'id' ? id : asString(raw?.[key]);
+      if (!value) continue;
+      if (value.length > maxLength) omittedFields.push(key);
+      else fields[key] = sanitizeRuntimeText(value);
+    }
+    out.push({ ...fields, id: fields.id ?? null, kind, description, verify, omittedFields });
     if (out.length >= limit) break;
   }
   return out;
@@ -325,8 +333,15 @@ function formatFacts(plan, options = {}) {
   if (plan.successCriteria.length) {
     lines.push('success criteria (Definition of Done):');
     for (const c of plan.successCriteria) {
-      // 形如： - [pending] (command) run npm test —— 让模型看到每条 DoD 的验证状态。
-      lines.push(`- [${c.verify}] (${c.kind}) ${c.description}`);
+      const criterionId = c.id ? ` criterionId=${JSON.stringify(c.id)}` : '';
+      lines.push(`- [${c.verify}] (${c.kind})${criterionId} ${c.description}`);
+      const checks = ['command', 'path', 'expect']
+        .filter(key => typeof c[key] === 'string')
+        .map(key => `${key}=${JSON.stringify(c[key])}`);
+      if (checks.length) lines.push(`  check: ${checks.join('; ')}`);
+      if (c.omittedFields.length) {
+        lines.push(`  oversized fields omitted (${c.omittedFields.join(', ')}); read full values via goal_get_plan.`);
+      }
     }
     const pendingAuto = plan.successCriteria.filter((c) => c.verify === 'pending');
     const failedAuto = plan.successCriteria.filter((c) => c.verify === 'failed');
