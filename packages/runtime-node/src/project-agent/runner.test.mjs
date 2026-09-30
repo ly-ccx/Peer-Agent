@@ -132,7 +132,7 @@ test('用户回合开任务后，事件回流触发唤醒并 post_reply', async 
       assert.equal(runner.status(), 'waiting_provider');
       assert.equal(args.mode, 'project_agent');
       assert.equal(args.turnProfile.role, 'project_agent');
-      assert.deepEqual(args.turnProfile.context, { sources: [], ...(args.plan.events.length ? { events: args.plan.events } : {}) });
+      assert.deepEqual(args.turnProfile.context, { sources: [], ...(args.plan.events.length ? { events: args.plan.events } : {}), ...(args.plan.kind === 'user' ? { inputAnchors: [{ messageId: inputMessageId(inputId), text: '帮我看一下' }] } : {}) });
       assert.equal(args.modelProviderId, 'model-pa');
       seen.push(args.plan);
       return args.plan.kind === 'wake' ? runWake(args) : runUser(args);

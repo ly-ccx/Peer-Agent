@@ -642,3 +642,23 @@ test('spawn passes the latest user history snapshot to the supervisor', async ()
 function resultGrantRecorded(result) {
   return Boolean(result.grant?.grantId && result.result?.evidence?.toolCallId === result.call.toolCallId);
 }
+
+test('spawn preserves structured Goal criteria and rejects incomplete or forged checks before dispatch', async () => {
+  const seen = [];
+  const provider = createDelegationProvider({ supervisor: { spawn(input) { seen.push(input); return { sessionId: 's-criteria', status: 'running' }; } } });
+  const criterion = { id: 'source-check', kind: 'file-contains', description: 'Source declares BotProfile', path: 'project.ts', expect: 'BotProfile' };
+  const result = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: [criterion, 'Human review remains manual'] })), agentContext());
+  assert.equal(outputOf(result).ok, true);
+  assert.deepEqual(seen[0].successCriteria, [criterion, 'Human review remains manual']);
+  for (const criteria of [
+    [{ kind: 'file-contains', description: 'Missing expect', path: 'project.ts' }],
+    [{ kind: 'command', description: 'Missing command' }],
+    [{ ...criterion, passed: true }],
+    [{ ...criterion }, { ...criterion }],
+    ['Manual first', { ...criterion, id: 'c1' }],
+  ]) {
+    const failed = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: criteria })), agentContext());
+    assert.equal(outputOf(failed).error, 'invalid_input');
+  }
+  assert.equal(seen.length, 1);
+});

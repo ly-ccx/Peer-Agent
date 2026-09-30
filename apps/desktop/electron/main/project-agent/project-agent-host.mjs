@@ -326,7 +326,14 @@ export function createProjectAgentHost({
       if (typeof conversationId !== 'string' || !conversationId.trim()) continue;
       const runner = ensureRunner(workspaceId, conversationId.trim());
       const watched = publishWatch(workspaceId);
-      if (watched.length > 0) runs.push(runner.kick());
+      // An input may have arrived before lease acquisition, or while this host was
+      // offline. The durable queue must recover without another user submission.
+      const consumed = queue.consume(workspaceId);
+      if (consumed.consumed?.length && typeof onInputsConsumed === 'function') {
+        await onInputsConsumed(workspaceId, consumed.consumed);
+      }
+      if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
+      else if (watched.length > 0) runs.push(runner.kick());
       delay = Math.min(delay, watch.nextDelay(workspaceId, atIso));
     }
     await Promise.all(runs);

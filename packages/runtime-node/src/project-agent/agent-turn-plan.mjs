@@ -22,6 +22,9 @@ export function planAgentTurn({
   const wake = kind !== 'user';
   const inputs = wake ? [] : (Array.isArray(userInputs) ? userInputs.filter(Boolean) : []);
   const facts = Array.isArray(events) ? events.filter(Boolean) : [];
+  const inputAnchors = inputs.filter(input => typeof input.inputId === 'string').map(input => ({
+    messageId: inputMessageId(input.inputId), text: typeof input.text === 'string' ? input.text.slice(0, 400) : '',
+  }));
   const workspace = typeof workspaceId === 'string' ? workspaceId.trim() : '';
   return {
     kind: wake ? 'wake' : 'user',
@@ -29,8 +32,8 @@ export function planAgentTurn({
     turnProfile: {
       role: 'project_agent',
       ...(workspace ? { workspaceId: workspace } : {}),
-      context: facts.length > 0 || roster != null
-        ? { ...(context || {}), ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}) }
+      context: facts.length > 0 || roster != null || inputAnchors.length > 0
+        ? { ...(context || {}), ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}), ...(inputAnchors.length ? { inputAnchors } : {}) }
         : (context ?? null),
     },
     modelProviderId: modelProviderId ?? null,

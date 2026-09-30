@@ -19,7 +19,18 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         type: 'array',
         minItems: 1,
         maxItems: 8,
-        items: { type: 'string' },
+        description: 'Use structured Goal criteria for machine checks. Plain strings and manual criteria require human confirmation even under auto acceptance.',
+        items: { anyOf: [
+          { type: 'string', maxLength: 500 },
+          { type: 'object', properties: {
+            id: { type: 'string', maxLength: 200 },
+            kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'manual'] },
+            description: { type: 'string', maxLength: 500 },
+            command: { type: 'string', maxLength: 2000 },
+            path: { type: 'string', maxLength: 1000 },
+            expect: { type: 'string', maxLength: 2000 },
+          }, required: ['kind', 'description'], additionalProperties: false },
+        ] },
       },
       kind: { type: 'string', enum: ['code', 'research', 'docs', 'ui', 'ops', 'other'] },
       readOnly: { type: 'boolean' },
@@ -179,7 +190,7 @@ function validateSpawn(input) {
   const anchorMessageIds = stringList(input.anchorMessageIds, { min: 1, max: 8, itemMax: 200 });
   const title = text(input.title, 60);
   const brief = text(input.brief, 4000);
-  const successCriteria = stringList(input.successCriteria, { min: 1, max: 8, itemMax: 500 });
+  const successCriteria = validatedCriteria(input.successCriteria);
   const kinds = new Set(['code', 'research', 'docs', 'ui', 'ops', 'other']);
   if (!anchorMessageIds) return invalid('anchorMessageIds must contain 1 to 8 message ids.');
   if (!title) return invalid('title is required and must be at most 60 characters.');
@@ -234,6 +245,43 @@ function validateSpawn(input) {
     value.supersedes = supersedes;
   }
   return { ok: true, value };
+}
+
+function validatedCriteria(items) {
+  if (!Array.isArray(items) || items.length < 1 || items.length > 8) return null;
+  const criteria = [];
+  const ids = new Set();
+  for (const item of items) {
+    if (typeof item === 'string') {
+      const description = text(item, 500);
+      if (!description) return null;
+      const id = `c${criteria.length + 1}`;
+      if (ids.has(id)) return null;
+      ids.add(id);
+      criteria.push(description);
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect'].includes(key))) return null;
+    if (!['command', 'test', 'file-contains', 'file-exists', 'manual'].includes(item.kind)) return null;
+    const description = text(item.description, 500);
+    if (!description) return null;
+    const criterion = { kind: item.kind, description };
+    for (const [key, limit] of [['id', 200], ['command', 2000], ['path', 1000], ['expect', 2000]]) {
+      if (item[key] === undefined) continue;
+      const value = text(item[key], limit);
+      if (!value) return null;
+      criterion[key] = value;
+    }
+    const id = criterion.id || `c${criteria.length + 1}`;
+    if (ids.has(id)) return null;
+    ids.add(id);
+    if (['command', 'test'].includes(item.kind) && !criterion.command) return null;
+    if (['file-contains', 'file-exists'].includes(item.kind) && !criterion.path) return null;
+    if (item.kind === 'file-contains' && !criterion.expect) return null;
+    criteria.push(criterion);
+  }
+  return criteria;
 }
 
 function validateList(input) {

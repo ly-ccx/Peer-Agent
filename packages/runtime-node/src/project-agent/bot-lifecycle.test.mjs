@@ -56,7 +56,9 @@ test('懒创建档案和代理对话，第二次返回同一个对话', () => {
     assert.equal(listed[0].role, 'project_agent');
     assert.equal(listed[0].id, first.profile.agentConversationId);
     const rotated = life.regenerateAvatar(entry.workspaceId);
-    assert.deepEqual(rotated.profile.avatar, generateAvatar(`${entry.workspaceId}:1`));
+    assert.ok(Number(rotated.profile.avatarSalt) >= 1);
+    assert.deepEqual(rotated.profile.avatar, generateAvatar(`${entry.workspaceId}:${rotated.profile.avatarSalt}`));
+    assert.notEqual(rotated.profile.avatar.color, first.profile.avatar.color);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
