@@ -182,6 +182,8 @@ export type TranslationKey =
   | 'projectAgent.drawer.modelEmpty'
   | 'projectAgent.drawer.model.pending'
   | 'projectAgent.drawer.tasksEmpty'
+  | 'projectAgent.drawer.showAll'
+  | 'projectAgent.drawer.collapse'
   | 'projectAgent.drawer.group.needsYou'
   | 'projectAgent.drawer.group.running'
   | 'projectAgent.drawer.group.queued'
@@ -205,6 +207,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.scene'
   | 'projectAgent.drawer.sceneMissing'
   | 'projectAgent.drawer.objectives.body'
+  | 'projectAgent.drawer.objectives.hint'
   | 'projectAgent.drawer.memory.empty'
   | 'projectAgent.drawer.memory.emptyHint'
   | 'projectAgent.drawer.memory.filterEmpty'
@@ -1267,6 +1270,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.modelEmpty': '跟随全局分工',
     'projectAgent.drawer.model.pending': '项目级模型范围还没有单独的保存接口，这里显示全局对话模型。',
     'projectAgent.drawer.tasksEmpty': '还没有任务',
+    'projectAgent.drawer.showAll': '查看全部',
+    'projectAgent.drawer.collapse': '收起',
     'projectAgent.drawer.group.needsYou': '需要你',
     'projectAgent.drawer.group.running': '进行中',
     'projectAgent.drawer.group.queued': '排队',
@@ -1290,6 +1295,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.scene': '任务现场',
     'projectAgent.drawer.sceneMissing': '现场还没有会话',
     'projectAgent.drawer.objectives.body': '目标将在后续版本开放',
+    'projectAgent.drawer.objectives.hint': '现在可以先通过对话交代具体任务。',
     'projectAgent.drawer.memory.empty': '还没有记忆',
     'projectAgent.drawer.memory.emptyHint': '机器人记下的项目事实、偏好和决定会显示在这里。',
     'projectAgent.drawer.memory.filterEmpty': '没有符合筛选条件的记忆',
@@ -2150,6 +2156,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.modelEmpty': 'Follow the global routing',
     'projectAgent.drawer.model.pending': 'A per-project model scope does not have its own save path yet. This shows the global conversation model.',
     'projectAgent.drawer.tasksEmpty': 'No tasks yet',
+    'projectAgent.drawer.showAll': 'Show all',
+    'projectAgent.drawer.collapse': 'Show less',
     'projectAgent.drawer.group.needsYou': 'Needs you',
     'projectAgent.drawer.group.running': 'In progress',
     'projectAgent.drawer.group.queued': 'Queued',
@@ -2173,6 +2181,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.scene': 'Task scene',
     'projectAgent.drawer.sceneMissing': 'This task has no scene yet',
     'projectAgent.drawer.objectives.body': 'Objectives will open in a later version',
+    'projectAgent.drawer.objectives.hint': 'For now, you can give this bot specific tasks in chat.',
     'projectAgent.drawer.memory.empty': 'No memories yet',
     'projectAgent.drawer.memory.emptyHint': 'Project facts, preferences, and decisions remembered by the bot will appear here.',
     'projectAgent.drawer.memory.filterEmpty': 'No memories match these filters',

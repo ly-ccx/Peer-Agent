@@ -488,6 +488,157 @@
   white-space: nowrap;
 }
 
+.bot-tasks-tab,
+.bot-objectives-tab {
+  gap: 24px;
+  padding-top: 6px;
+}
+
+.bot-tasks-tab .bot-tasks-section,
+.bot-objectives-tab .bot-tasks-section {
+  gap: 10px;
+  min-width: 0;
+}
+
+.bot-tasks-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bot-tasks-heading h2 {
+  font-size: 13px;
+}
+
+.bot-tasks-heading > span {
+  color: var(--graphite-fade, var(--za-text-muted));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bot-tasks-list {
+  overflow: hidden;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
+}
+
+.bot-tasks-list li + li {
+  border-top: 1px solid var(--chrome-hairline);
+}
+
+.bot-drawer-tab .bot-tasks-list .bot-task-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.bot-drawer-tab .bot-tasks-list .bot-task-row:hover,
+.bot-drawer-tab .bot-tasks-list .bot-task-row.is-selected {
+  background: var(--chrome-hover);
+}
+
+.bot-drawer-tab .bot-tasks-list .bot-task-row.is-selected {
+  box-shadow: inset 2px 0 var(--za-accent);
+}
+
+.bot-drawer-tab .bot-task-row-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bot-drawer-tab .bot-task-row-title {
+  display: -webkit-box;
+  flex: none;
+  overflow: hidden;
+  color: var(--graphite-base, var(--za-text));
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bot-drawer-tab .bot-task-row-meta {
+  flex: none;
+  color: var(--graphite-fade, var(--za-text-muted));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bot-drawer-tab .bot-task-row-arrow {
+  flex: none;
+  color: var(--graphite-fade, var(--za-text-muted));
+  font-size: 18px;
+  font-weight: 300;
+}
+
+.bot-drawer-tab .bot-tasks-more {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-color: transparent;
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 12px;
+}
+
+.bot-tasks-more span {
+  font-size: 13px;
+}
+
+.bot-tasks-empty,
+.bot-objectives-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 22px 18px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: var(--chrome-canvas);
+}
+
+.bot-tasks-empty svg,
+.bot-objectives-icon svg {
+  width: 30px;
+  height: 30px;
+  color: var(--graphite-secondary, var(--za-text-muted));
+}
+
+.bot-tasks-empty strong,
+.bot-objectives-intro h2 {
+  color: var(--graphite-base, var(--za-text));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bot-objectives-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 3px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 12px;
+  background: var(--paper-sheet, var(--za-surface-0));
+}
+
+.bot-objectives-intro p {
+  color: var(--graphite-secondary, var(--za-text-muted));
+  font-size: 12px;
+}
+
 .bot-drawer-detail dt {
   color: var(--graphite-secondary, var(--za-text-muted));
   font-size: 12px;
