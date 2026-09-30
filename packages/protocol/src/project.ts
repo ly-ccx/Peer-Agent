@@ -106,7 +106,7 @@ function fnv1a(text: string): number {
   return hash >>> 0;
 }
 
-export function generateAvatar(workspaceId: string): BotAvatar {
+export function generateAvatar(workspaceId: string): Extract<BotAvatar, { kind: 'generated' }> {
   const hash = fnv1a(workspaceId);
   const shape = BOT_AVATAR_SHAPES[hash % BOT_AVATAR_SHAPES.length] ?? BOT_AVATAR_SHAPES[0];
   const color = BOT_AVATAR_COLORS[(hash >>> 16) % BOT_AVATAR_COLORS.length] ?? BOT_AVATAR_COLORS[0];

@@ -1,4 +1,4 @@
-import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import { generateAvatar, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useState, type PointerEvent } from 'react';
 import { clientApi } from '../clientApi';
 import type { BotAvatarMood } from './state/botAvatarState';
@@ -66,23 +66,25 @@ function resetEyes(event: PointerEvent<HTMLSpanElement>) {
 }
 
 export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvatarProps) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [imageData, setImageData] = useState<{ key: string; dataUrl: string } | null>(null);
+  const imageKey = avatar.kind === 'image' ? `${workspaceId}:${avatar.ref}` : '';
+  const dataUrl = imageData?.key === imageKey ? imageData.dataUrl : null;
   useEffect(() => {
     if (avatar.kind !== 'image') {
-      setDataUrl(null);
+      setImageData(null);
       return undefined;
     }
     let cancelled = false;
-    setDataUrl(null);
+    setImageData(null);
     void clientApi.projectAgentReadAvatar({ workspaceId }).then((result) => {
-      if (!cancelled) setDataUrl(result.ok ? result.dataUrl : null);
+      if (!cancelled) setImageData(result.ok ? { key: imageKey, dataUrl: result.dataUrl } : null);
     }).catch(() => {
-      if (!cancelled) setDataUrl(null);
+      if (!cancelled) setImageData(null);
     });
     return () => { cancelled = true; };
-  }, [avatar, workspaceId]);
+  }, [avatar, imageKey, workspaceId]);
 
-  if (avatar.kind === 'image') {
+  if (avatar.kind === 'image' && dataUrl) {
     return (
       <span
         className="bot-avatar bot-avatar-image"
@@ -93,21 +95,22 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvat
         onPointerMove={moveEyes}
         onPointerLeave={resetEyes}
       >
-        {dataUrl ? <img src={dataUrl} alt="" /> : <span aria-hidden="true">{Array.from(label.trim())[0]?.toLocaleUpperCase() || 'P'}</span>}
+        <img src={dataUrl} alt="" />
       </span>
     );
   }
-  const variant = Number.isInteger(avatar.variant) ? Math.abs(avatar.variant!) % 32 : legacyVariant(workspaceId);
-  const shapeIndex = SHAPES.indexOf(avatar.shape);
-  const visualShape = avatar.variant === undefined
+  const generated = avatar.kind === 'generated' ? avatar : generateAvatar(workspaceId);
+  const variant = Number.isInteger(generated.variant) ? Math.abs(generated.variant!) % 32 : legacyVariant(workspaceId);
+  const shapeIndex = SHAPES.indexOf(generated.shape);
+  const visualShape = generated.variant === undefined
     ? SHAPES[(Math.max(0, shapeIndex) + variant) % SHAPES.length]
-    : avatar.shape;
+    : generated.shape;
   const eyeY = 22 + Math.floor(variant / 8) % 3;
   const eyeSpread = 5 + variant % 3;
   return (
     <span
       className="bot-avatar bot-avatar-generated"
-      style={{ ['--bot-avatar-accent' as string]: LEGACY_COLORS[avatar.color.toLowerCase()] || avatar.color }}
+      style={{ ['--bot-avatar-accent' as string]: LEGACY_COLORS[generated.color.toLowerCase()] || generated.color }}
       role="img"
       aria-label={label}
       data-avatar-kind="generated"

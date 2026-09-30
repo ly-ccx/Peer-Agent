@@ -468,7 +468,10 @@
   opacity: 0;
 }
 
-.bot-avatar[data-avatar-mood="working"] svg,
+.bot-avatar[data-avatar-mood="working"] svg {
+  animation: bot-avatar-thinking 4.2s ease-in-out infinite;
+}
+
 .bot-avatar[data-avatar-mood="thinking"] svg {
   animation: bot-avatar-thinking 1.9s ease-in-out infinite;
 }
@@ -484,7 +487,7 @@
 }
 
 .bot-avatar[data-avatar-mood="needs_you"] svg {
-  animation: bot-avatar-attention 2.8s ease-in-out infinite;
+  animation: bot-avatar-attention 900ms ease-in-out 1;
 }
 
 .bot-avatar[data-avatar-mood="reply"] svg {

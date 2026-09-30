@@ -318,9 +318,9 @@
 }
 
 @keyframes bot-avatar-attention {
-  0%, 80%, 100% { transform: translateY(0) rotate(0); }
-  86% { transform: translateY(-2px) rotate(-7deg); }
-  92% { transform: translateY(0) rotate(5deg); }
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-2px) rotate(-7deg); }
+  55% { transform: translateY(0) rotate(5deg); }
 }
 
 @keyframes bot-avatar-reply {
