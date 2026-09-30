@@ -13,7 +13,9 @@ import {
   projectClassicGoals,
   projectHistory,
 } from '@peer-agent/runtime-node';
+import { projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
+import { profilePolicyPatch } from './profile-policy.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';
 
 function defaultRememberGrant(input) {
@@ -81,8 +83,11 @@ export function createProjectAgentApplicationService({
   readSearchCorpus = null,
   corpusStamp = null,
   searchIndex = createConversationSearchIndex(),
+  listModels = () => [],
+  retryTurn = null,
 } = {}) {
   let corpusToken = null;
+  const retrying = new Map();
   const pendingChanged = new Set();
   const pendingConversation = new Set();
   let changedTimer = null;
@@ -137,7 +142,7 @@ export function createProjectAgentApplicationService({
   function get(payload = {}) {
     if (!open()) return disabled();
     const result = directory.get(payload.workspaceId);
-    return result?.ok && result.item ? { ...result, item: withAgentStatus(result.item) } : result;
+    return result?.ok && result.item ? { ...result, item: withAgentStatus(result.item), modelOptions: listModels().filter(model => model.enabled !== false).map(projectModelRoutingMenuOption).filter(Boolean) } : result;
   }
 
   function readAvatar(payload = {}) {
@@ -155,7 +160,7 @@ export function createProjectAgentApplicationService({
       if (!bound?.id) return { ok: false, code: 'CANCELLED' };
       const bot = lifecycle.ensureBot(bound.id, { managed: false });
       if (!bot?.ok) return bot;
-      const familiarize = lifecycle.startFamiliarize?.(bound.id) ?? null;
+      const familiarize = await lifecycle.startFamiliarize?.(bound.id) ?? null;
       queueChanged(bound.id);
       return { ok: true, workspaceId: bound.id, profile: bot.profile, familiarize };
     }
@@ -173,7 +178,7 @@ export function createProjectAgentApplicationService({
       }
       const bot = lifecycle.ensureBot(workspaceId, { managed: true });
       if (!bot?.ok) return bot;
-      const familiarize = lifecycle.startFamiliarize?.(workspaceId) ?? null;
+      const familiarize = await lifecycle.startFamiliarize?.(workspaceId) ?? null;
       queueChanged(workspaceId);
       return { ok: true, workspaceId, path: created.path, profile: bot.profile, familiarize };
     }
@@ -185,6 +190,8 @@ export function createProjectAgentApplicationService({
     const workspaceId = payload?.workspaceId;
     const current = profileStore?.read?.(workspaceId);
     if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
+    const policy = profilePolicyPatch(payload, listModels());
+    if (!policy.ok) return policy;
     if (typeof payload.displayName === 'string') {
       const displayName = cleanDisplayName(payload.displayName);
       if (!displayName) return { ok: false, code: 'INVALID_NAME' };
@@ -211,6 +218,10 @@ export function createProjectAgentApplicationService({
       if (!sourcePath) return { ok: false, code: 'CANCELLED' };
       const installed = lifecycle.uploadAvatar(workspaceId, sourcePath);
       if (!installed?.ok) return installed;
+    }
+    if (Object.keys(policy.patch).length) {
+      const saved = profileStore.save({ ...profileStore.read(workspaceId), ...policy.patch });
+      if (!saved?.ok) return saved;
     }
     queueChanged(workspaceId);
     return { ok: true, profile: profileStore.read(workspaceId) };
@@ -503,14 +514,45 @@ export function createProjectAgentApplicationService({
     }
   }
 
-  function startFamiliarize(payload = {}) {
+  async function startFamiliarize(payload = {}) {
     if (!open()) return disabled();
     if (typeof lifecycle?.startFamiliarize !== 'function') return { ok: false, code: 'FAMILIARIZE_UNAVAILABLE' };
-    const result = lifecycle.startFamiliarize(payload.workspaceId);
+    const result = await lifecycle.startFamiliarize(payload.workspaceId);
     if (result?.ok) {
       queueChanged(payload.workspaceId);
       queueConversation(payload.workspaceId);
     }
+    return result;
+  }
+
+  async function confirmResult(payload = {}) {
+    if (!open()) return disabled();
+    const session = sessions?.get?.({ sessionId: payload.sessionId });
+    if (!payload.workspaceId || session?.workspaceId !== payload.workspaceId) return { ok: false, code: 'NOT_FOUND' };
+    const result = await sessions.confirmResult(payload.sessionId);
+    if (!result?.ok) return { ok: false, code: result?.error || 'NOT_CONFIRMABLE' };
+    queueChanged(payload.workspaceId); queueConversation(payload.workspaceId);
+    return result;
+  }
+
+  async function acceptReadme(payload = {}) {
+    if (!open()) return disabled();
+    if (!directory.get(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
+    const result = await lifecycle.acceptReadme(payload.workspaceId);
+    if (result?.ok) { queueChanged(payload.workspaceId); queueConversation(payload.workspaceId); }
+    return result;
+  }
+
+  async function retry(payload = {}) {
+    if (!open()) return disabled();
+    if (!directory.get(payload.workspaceId)?.ok || !payload.turnId) return { ok: false, code: 'NOT_FOUND' };
+    if (typeof retryTurn !== 'function') return { ok: false, code: 'RETRY_UNAVAILABLE' };
+    const key = `${payload.workspaceId}:${payload.turnId}`;
+    if (retrying.has(key)) return retrying.get(key);
+    const promise = Promise.resolve().then(() => retryTurn(payload)).finally(() => retrying.delete(key));
+    retrying.set(key, promise);
+    const result = await promise;
+    if (result?.ok) { queueChanged(payload.workspaceId); queueConversation(payload.workspaceId); }
     return result;
   }
 
@@ -544,5 +586,8 @@ export function createProjectAgentApplicationService({
     listHistory,
     continueHistory,
     startFamiliarize,
+    confirmResult,
+    acceptReadme,
+    retry,
   };
 }

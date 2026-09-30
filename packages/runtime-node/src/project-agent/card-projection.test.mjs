@@ -40,7 +40,7 @@ test('同一事实只生成一张卡，重复投影得到相同 cardId', () => {
   assert.equal(first.find((card) => card.kind === 'approval').content, '写文件');
 });
 
-test('卡片动作只点名已有通道，确认结果不登记通道', () => {
+test('卡片动作通过统一应用服务通道', () => {
   const cards = Object.fromEntries(projectCards('ws-1', facts()).map((card) => [card.kind, card]));
 
   assert.deepEqual(cards.approval.actions, [
@@ -69,7 +69,7 @@ test('卡片动作只点名已有通道，确认结果不登记通道', () => {
     text: 'A',
   });
   assert.equal(cards.confirm_result.actions[0].id, 'confirm');
-  assert.equal(Object.hasOwn(cards.confirm_result.actions[0], 'channel'), false);
+  assert.equal(cards.confirm_result.actions[0].channel, 'project-agent:confirm-result');
   assert.deepEqual(cards.confirm_result.actions[0].payload, {
     sessionId: 'sess-1',
     cardId: 'card:confirm_result:sess-1',
@@ -77,8 +77,8 @@ test('卡片动作只点名已有通道，确认结果不登记通道', () => {
   });
   assert.equal(cards.agent_unavailable.content, '代理暂时不可用：超时');
   assert.equal(cards.agent_unavailable.actions[0].id, 'retry');
-  assert.equal(Object.hasOwn(cards.agent_unavailable.actions[0], 'channel'), false);
-  assert.equal(Object.hasOwn(cards.readme_offer.actions[0], 'channel'), false);
+  assert.equal(cards.agent_unavailable.actions[0].channel, 'project-agent:retry');
+  assert.equal(cards.readme_offer.actions[0].channel, 'project-agent:accept-readme');
 });
 
 test('宿主已经终态的事实直接投影为已解决，不必另写', () => {

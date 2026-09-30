@@ -71,6 +71,7 @@ function questionsIn(messages) {
   for (const message of messages) {
     const question = message?.question;
     if (!question || typeof question !== 'object' || question.answered === true) continue;
+    if (messages.some(answer => answer.answerTo === `card:question:reply:${message.id}`)) continue;
     found.push(question);
   }
   return found;
@@ -91,6 +92,7 @@ export function createBotDirectory({
   listApprovals = () => [],
   listConfirmations = () => [],
   listClassicGoals = () => [],
+  readCards = () => [],
   now = () => new Date(),
 } = {}) {
   const profiles = createBotProfileStore({ rootDir, now });
@@ -179,14 +181,7 @@ export function createBotDirectory({
     const approvals = listApprovals(profile.workspaceId);
     return {
       item: projectBotListItem({
-        profile: {
-          workspaceId: profile.workspaceId,
-          displayName: profile.displayName,
-          avatar: profile.avatar,
-          managed: profile.managed === true,
-          agentConversationId: profile.agentConversationId,
-          updatedAt: profile.updatedAt,
-        },
+        profile: { ...profile },
         lastMessage: last,
         sessions: mappedSessions,
         approvals: Array.isArray(approvals) ? approvals : [],
@@ -249,7 +244,17 @@ export function createBotDirectory({
       const index = filtered.findIndex((message) => message?.id === before);
       start = index >= 0 ? index + 1 : 0;
     }
-    const page = filtered.slice(start, start + size);
+    const cards = readCards(workspaceId) || [];
+    const byCard = new Map(cards.map((card) => [card.cardId, card]));
+    const page = filtered.slice(start, start + size).map((message) => ({ ...message,
+      ...(message.cards ? { cards: message.cards.map((card) => byCard.get(card.cardId) || card) } : {}),
+    }));
+    if (!before) {
+      const present = new Set(filtered.flatMap((message) => (message.cards || []).map((card) => card.cardId)));
+      for (const card of cards) if (!present.has(card.cardId) && card.resolvedState !== 'resolved') {
+        page.push({ id: card.cardId, role: 'assistant', kind: 'system_card', content: '', cards: [card] });
+      }
+    }
     const nextCursor = start + size < filtered.length ? (page[page.length - 1]?.id ?? null) : null;
     const familiarizeOffer = (before == null || before === '') && !profile.familiarize
       ? FAMILIARIZE_OFFER

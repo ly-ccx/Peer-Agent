@@ -8,8 +8,7 @@ export const USER_TURN_LIMITS = Object.freeze({ maxRounds: 10, maxToolCalls: 20 
 export const WAKE_TURN_LIMITS = Object.freeze({ maxRounds: 6, maxToolCalls: 12 });
 
 /**
- * 组装一轮项目代理回合。唤醒不伪造用户消息：事件和名册只进 reminder。
- * `turnProfile.context` 留给 B2-11，这里只原样放进槽位。
+ * 唤醒不伪造用户消息：事件和名册进入 Context Source 的事实槽位。
  */
 export function planAgentTurn({
   kind,
@@ -30,7 +29,9 @@ export function planAgentTurn({
     turnProfile: {
       role: 'project_agent',
       ...(workspace ? { workspaceId: workspace } : {}),
-      context: context ?? null,
+      context: facts.length > 0 || roster != null
+        ? { ...(context || {}), ...(facts.length ? { events: facts.map((event) => ({ ...event })) } : {}), ...(roster != null ? { roster } : {}) }
+        : (context ?? null),
     },
     modelProviderId: modelProviderId ?? null,
     limits: { ...(wake ? WAKE_TURN_LIMITS : USER_TURN_LIMITS) },
@@ -56,8 +57,8 @@ export function finishAgentTurn({
   const storedRounds = normalizeRounds(rounds);
   const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds })];
   if (failed) {
-    messages.push(unavailableCard(turnId, reason));
-    return { messages, replied: false };
+    messages.push(unavailableCard(turnId, reason, plan?.turnProfile?.workspaceId));
+    return { messages, replied: false, failed: true };
   }
   const replies = postReplies(storedRounds);
   const evidenceRefs = hostEvidenceRefs(storedRounds);
@@ -68,7 +69,7 @@ export function finishAgentTurn({
     });
     return { messages, replied: true };
   }
-  if (plan?.kind === 'user') {
+  if (plan?.kind === 'user' && finalText(storedRounds).trim()) {
     messages.push(attachEvidence(applyMemoryMeta({
       id: `${turnId}-reply`,
       role: 'assistant',
@@ -81,6 +82,10 @@ export function finishAgentTurn({
     }, memoryUsed, learned), evidenceRefs));
     return { messages, replied: true };
   }
+  if (plan?.kind === 'user') {
+    messages.push(unavailableCard(turnId, '未收到有效回复', plan?.turnProfile?.workspaceId));
+    return { messages, replied: false, failed: true };
+  }
   return { messages, replied: false };
 }
 
@@ -91,6 +96,7 @@ export function agentTurnMessage({ turnId, plan, rounds = [] } = {}) {
     kind: 'agent_turn',
     turnId,
     turnKind: plan?.kind === 'wake' ? 'wake' : 'user',
+    userInputs: Array.isArray(plan?.userInputs) ? plan.userInputs : [],
     content: '',
     rounds: normalizeRounds(rounds),
   };
@@ -100,9 +106,8 @@ function wakeReminder(events, roster) {
   const lines = [
     'Wake turn. These inbox events are facts, not a new user message.',
     'Speak only by calling post_reply. If nothing needs to be said, stop without post_reply.',
-    `Events: ${JSON.stringify(events)}`,
   ];
-  if (roster != null) lines.push(`Roster: ${JSON.stringify(roster)}`);
+
   return {
     id: 'project-agent-wake',
     title: 'Project agent wake',
@@ -113,7 +118,7 @@ function wakeReminder(events, roster) {
   };
 }
 
-function unavailableCard(turnId, reason) {
+function unavailableCard(turnId, reason, workspaceId) {
   const why = typeof reason === 'string' && reason.trim() ? reason.trim() : '未知原因';
   return {
     id: `${turnId}-card`,
@@ -122,11 +127,14 @@ function unavailableCard(turnId, reason) {
     card: 'agent_unavailable',
     content: `代理暂时不可用：${why}`,
     actions: ['retry'],
+    cards: [{ cardId: `card:agent_unavailable:${turnId}`, kind: 'agent_unavailable', content: `代理暂时不可用：${why}`, actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId, turnId } }] }],
     turnId,
   };
 }
 
 function replyFromTool(turnId, index, call, learned, turnMemoryIds) {
+  const validated = replyOutput(call.result);
+  if (validated) return applyMemoryMeta({ ...validated, turnId }, turnMemoryIds, learned);
   const input = call.input && typeof call.input === 'object' ? call.input : {};
   const message = {
     id: `${turnId}-reply-${index + 1}`,
@@ -200,7 +208,27 @@ function surfacingOf(result) {
 }
 
 function postReplies(rounds) {
-  return toolCallsOf(rounds).filter((call) => call.name === 'post_reply');
+  return toolCallsOf(rounds).filter((call) => call.name === 'post_reply' && acceptedReplyResult(call.result));
+}
+
+export function acceptedReplyResult(result) {
+  if (typeof result === 'string') {
+    try { return acceptedReplyResult(JSON.parse(result)); } catch { return false; }
+  }
+  if (!result || typeof result !== 'object') return false;
+  if (result.ok === false || result.success === false || result.error || ['failed', 'denied', 'cancelled'].includes(result.status)) return false;
+  const nested = result.output ?? result.outputPreview?.legacyResult ?? result.legacyResult;
+  if (nested != null) return acceptedReplyResult(nested);
+  return result.ok === true || result.success === true || result.status === 'success';
+}
+
+function replyOutput(result) {
+  if (typeof result === 'string') {
+    try { return replyOutput(JSON.parse(result)); } catch { return null; }
+  }
+  if (!result || typeof result !== 'object') return null;
+  if (result.message?.kind === 'agent_reply') return result.message;
+  return replyOutput(result.output ?? result.outputPreview?.legacyResult ?? result.legacyResult);
 }
 
 function toolCallsOf(rounds) {

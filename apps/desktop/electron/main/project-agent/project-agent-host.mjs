@@ -39,6 +39,9 @@ import { installMemoryGate, memoryUseEnabled } from './memory-gate-port.mjs';
 import { liveMemoryIndex } from './memory-index-port.mjs';
 import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
+import { installDelegation } from './delegation-port.mjs';
+import { createDesktopProjectFacts } from './project-facts.mjs';
+import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
 export function messagesFromUserInputs(plan) {
@@ -76,6 +79,9 @@ export function createProjectAgentHost({
   executeTurn,
   resolveModel = null,
   resolveContext = null,
+  resolveRoster = null,
+  onReplied = null,
+  onInputsConsumed = null,
   routing = null,
   getWindows = () => [],
   now,
@@ -161,6 +167,8 @@ export function createProjectAgentHost({
           ? resolveContext({ ...info, workspaceId, conversationId })
           : null
       ),
+      resolveRoster: () => typeof resolveRoster === 'function' ? resolveRoster(workspaceId) : null,
+      onReplied: typeof onReplied === 'function' ? (message) => onReplied(workspaceId, message) : null,
       sink: createBroadcastSink({ getWindows }),
       now,
       retryDelays,
@@ -202,6 +210,9 @@ export function createProjectAgentHost({
       const due = armDigest(runner, workspaceId);
       const watched = publishWatch(workspaceId);
       const consumed = queue.consume(workspaceId);
+      if (consumed.consumed?.length && typeof onInputsConsumed === 'function') {
+        await onInputsConsumed(workspaceId, consumed.consumed);
+      }
       if (consumed.consumed?.length) runs.push(runner.enqueueUserInputs(consumed.consumed));
       else if (!consumed.skipped || due || watched.length > 0) runs.push(runner.kick());
     }
@@ -396,6 +407,8 @@ export function registerDesktopProjectAgent({
   dialog,
   BrowserWindow,
   shell,
+  listModels = () => [],
+  readUiDelivery = null,
   onReady = null,
   onAppendedMessage = null,
   onViewing = null,
@@ -406,30 +419,48 @@ export function registerDesktopProjectAgent({
   });
   const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
   const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const memoryStore = createMemoryStore({ rootDir: dataHome });
+  const inbox = createProjectInbox({ rootDir: runtimeRoot });
+  const verification = createSessionVerification({
+    goalPlanStore,
+    verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
+    appendMessage,
+  });
   const supervisor = createSessionSupervisor({
     conversationStore,
     goalPlanStore,
     goalRunner,
     approvalStore,
+    memoryStore,
+    resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
+      ...input,
+      workerModelProviderId: input.workerModel?.modelProviderId,
+      projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy,
+    }),
+    resolveAcceptancePolicy: (workspaceId) => profileStore.read(workspaceId)?.acceptancePolicy,
+    readSessionFacts: (plan) => ({ hostAuthority: {
+      ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
+      ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
+    } }),
+    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || ''}` }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
-  installSessionVerification(createSessionVerification({
-    goalPlanStore,
-    verifySession: (plan, focus) => goalRunner?.verifyDelegatedSession?.({ plan, focus }),
-    appendMessage,
-  }));
-  installDeliveryFacts({
+  const uninstallDelegation = installDelegation({ supervisor, storeDir: runtimeRoot });
+  const uninstallVerification = installSessionVerification(verification);
+  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot });
+  const uninstallDelivery = installDeliveryFacts({
     read(view) {
       const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;
       return {
+        ...projectFacts.delivery(view?.workspaceId),
         proactivity: settings.proactivity,
         ...(typeof level === 'string' && level !== 'inherit' ? { botLevel: level } : {}),
         quietHours: inQuietHours(new Date(), settings.quietHours),
       };
     },
   });
-  installProjectProactivity({
+  const uninstallProactivity = installProjectProactivity({
     set({ workspaceId, level }) {
       const profile = profileStore.read(workspaceId);
       if (!profile || profile.status === 'archived') return { ok: false, error: 'not_found' };
@@ -438,8 +469,7 @@ export function registerDesktopProjectAgent({
       return { ok: true, level };
     },
   });
-  const memoryStore = createMemoryStore({ rootDir: dataHome });
-  installMemoryGate({
+  const uninstallMemory = installMemoryGate({
     enabled(workspaceId) {
       const settings = typeof getSettings === 'function' ? getSettings() : null;
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
@@ -498,6 +528,7 @@ export function registerDesktopProjectAgent({
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
+    readCards: (workspaceId) => projectFacts.cards(workspaceId),
     listClassicGoals(workspaceId) {
       try {
         const folder = typeof registry?.get === 'function' ? (registry.get(workspaceId)?.path || '') : '';
@@ -520,6 +551,15 @@ export function registerDesktopProjectAgent({
     registry,
     conversationStore,
     memoryStore,
+    spawn: async (request) => {
+      const anchorMessageId = `lifecycle-${request.kind}-${request.workspaceId}`;
+      if (!hasMessage(request.conversationId, anchorMessageId)) appendMessage(request.conversationId, {
+        id: anchorMessageId, role: 'user', kind: 'user_input', content: request.task.brief,
+      });
+      return supervisor.spawn({ ...request.task, anchorMessageIds: [anchorMessageId] }, {
+        workspaceId: request.workspaceId, parentConversationId: request.conversationId, workspacePath: request.workspacePath,
+      });
+    },
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
   });
@@ -575,11 +615,19 @@ export function registerDesktopProjectAgent({
     resolveConversationId,
     hasMessage,
     appendMessage,
+    inbox,
+    resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
+    resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
+    ...createProjectLifecycleEffects({ profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast }),
     executeTurn: (input) => {
-      const messages = messagesFromUserInputs(input?.plan);
+      const history = conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
+      const messages = projectConversationHistory(history.filter((message) => message.kind === 'user_input' || message.kind === 'agent_reply' || !message.kind && ['user', 'assistant'].includes(message.role))).messages;
       return agentTurnExecutor.runTurn({
         ...input,
-        ...(messages ? { messages } : {}),
+        messages,
+        ephemeral: true,
+        ...(input.plan?.reminder ? { runtimeReminders: [input.plan.reminder] } : {}),
+        workspacePath: registry.get(input.workspaceId)?.path,
       });
     },
     onCurator: (info) => memoryCurator.consider(info),
@@ -606,6 +654,27 @@ export function registerDesktopProjectAgent({
     profileStore,
     inputQueue,
     sessions: supervisor,
+    listModels,
+    retryTurn: async ({ workspaceId, turnId }) => {
+      if (holdsLease(workspaceId) !== true) return { ok: false, code: 'HOST_OFFLINE' };
+      const conversationId = resolveConversationId(workspaceId);
+      const messages = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
+      const card = messages.find((message) => message.turnId === turnId && message.card === 'agent_unavailable');
+      if (!card) return { ok: false, code: 'NOT_FOUND' };
+      if (projectFacts.cards(workspaceId).find((item) => item.cardId === `card:agent_unavailable:${turnId}`)?.resolvedState === 'resolved') return { ok: true, replayed: true };
+      const later = messages.slice(messages.indexOf(card) + 1);
+      if (later.some((message) => message.kind === 'agent_turn')) return { ok: false, code: 'STALE_TURN' };
+      const runner = host.runnerFor(workspaceId);
+      if (runner?.parked()) await runner.retry();
+      else {
+        const turn = messages.find((message) => message.id === turnId && message.kind === 'agent_turn');
+        await host.sync([workspaceId]);
+        if (turn?.userInputs?.length) await host.runnerFor(workspaceId).enqueueUserInputs(turn.userInputs);
+        else await host.runnerFor(workspaceId).kick();
+      }
+      projectFacts.resolve(workspaceId, card.cards?.[0]?.cardId || `card:agent_unavailable:${turnId}`);
+      return { ok: true };
+    },
     approvals: approvalStore,
     readEvidenceBody(evidenceRef) {
       if (typeof goalPlanStore?.findEvidenceIndexRecords !== 'function') return null;
@@ -732,6 +801,9 @@ export function registerDesktopProjectAgent({
         return got.profile?.displayName || got.item?.profile?.displayName || '';
       },
       workspaceIdForConversation,
+      host,
+      supervisor,
+      dispose: () => { host.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

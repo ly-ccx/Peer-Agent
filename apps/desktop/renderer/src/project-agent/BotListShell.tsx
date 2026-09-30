@@ -490,7 +490,7 @@ export function BotListShell({
           i18n={i18n}
           isZh={isZh}
           onMemory={setDrawerMemory}
-          onProfile={() => {}}
+          onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}
           onDeleted={() => {

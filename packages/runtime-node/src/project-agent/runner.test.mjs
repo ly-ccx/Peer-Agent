@@ -132,7 +132,7 @@ test('用户回合开任务后，事件回流触发唤醒并 post_reply', async 
       assert.equal(runner.status(), 'waiting_provider');
       assert.equal(args.mode, 'project_agent');
       assert.equal(args.turnProfile.role, 'project_agent');
-      assert.deepEqual(args.turnProfile.context, { sources: [] });
+      assert.deepEqual(args.turnProfile.context, { sources: [], ...(args.plan.events.length ? { events: args.plan.events } : {}) });
       assert.equal(args.modelProviderId, 'model-pa');
       seen.push(args.plan);
       return args.plan.kind === 'wake' ? runWake(args) : runUser(args);
@@ -486,7 +486,9 @@ test('计时器只入邮箱，轮次和工具上限会停住循环', async () =>
     });
     await capped.enqueueUserInputs([input('cap', '测上限')]);
     assert.equal(userRounds, 7);
-    assert.equal(capped.status(), 'idle');
+    assert.equal(capped.status(), 'error');
+    assert.ok(box.messages.some(message => message.card === 'agent_unavailable'));
+    assert.equal(box.messages.some(message => message.kind === 'agent_reply' && !message.content), false);
     const userTurn = box.messages.find((message) => message.turnKind === 'user');
     assert.equal(userTurn.rounds.length, 7);
 
@@ -640,7 +642,7 @@ test('今日小结定时邮件唤醒后写入分隔消息，digest 回复改入�
       toolCalls: [{
         name: 'post_reply',
         input: { text: '先记下', proactive: true },
-        result: { meta: { surfacing: 'digest' } },
+        result: { ok: true, meta: { surfacing: 'digest' } },
       }],
     }), {
       onDigest: (item) => held.push(item),

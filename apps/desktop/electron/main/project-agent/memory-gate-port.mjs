@@ -6,6 +6,8 @@ let current = null;
 
 export function installMemoryGate(port) {
   current = port && typeof port.enabled === 'function' ? port : null;
+  const installed = current;
+  return () => { if (current === installed) current = null; };
 }
 
 export function liveMemoryGate() {

@@ -81,3 +81,25 @@ test('runTurn rejects a missing chat service or sink', () => {
   const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage() {} } });
   assert.throws(() => executor.runTurn({ sink: {} }), /sink/);
 });
+
+test('project cancellation aborts the existing stream and detaches after completion', async () => {
+  const controller = new AbortController();
+  const aborted = [];
+  let release;
+  const executor = createAgentTurnExecutor({ llmChatService: {
+    sendMessage(input) {
+      assert.equal(Object.hasOwn(input, 'signal'), false);
+      return new Promise(resolve => { release = resolve; });
+    },
+    abort(streamId) { aborted.push(streamId); release({ terminalStatus: 'aborted' }); },
+  } });
+  const pending = executor.runTurn({ mode: 'project_agent', streamId: 'cancel-stream', signal: controller.signal, sink: { send() {} } });
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.terminalStatus, 'aborted');
+  assert.deepEqual(aborted, ['cancel-stream']);
+  const alreadyAborted = await executor.runTurn({ mode: 'project_agent', signal: controller.signal, sink: { send() {} } });
+  assert.equal(alreadyAborted.terminalStatus, 'aborted');
+  assert.deepEqual(aborted, ['cancel-stream']);
+});

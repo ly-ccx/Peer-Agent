@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 /**
  * Runs one agent turn through an existing chat service.
  * The sink receives stream events. The service still owns tools, permissions, and persistence.
@@ -8,12 +10,15 @@ export function createAgentTurnExecutor({ llmChatService } = {}) {
     throw new Error('AgentTurnExecutor requires llmChatService.sendMessage');
   }
   return {
+    resolveGoalRole(input) {
+      return llmChatService.resolveGoalRole?.(input) ?? { ok: false, missing: '没有可用的模型' };
+    },
     /**
      * @param {object} input
      * @param {object} [input.turnProfile]
      * @param {{ send: (channel: string, payload: unknown) => void }} input.sink
      */
-    runTurn({ turnProfile = null, sink, ...sendMessageArgs } = {}) {
+    runTurn({ turnProfile = null, sink, signal, ...sendMessageArgs } = {}) {
       if (!sink || typeof sink.send !== 'function') {
         throw new Error('AgentTurnExecutor requires a sink with send()');
       }
@@ -25,16 +30,24 @@ export function createAgentTurnExecutor({ llmChatService } = {}) {
           turnProfile,
         });
       }
+      if (signal?.aborted) return Promise.resolve({ ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' });
       const collected = collectTurn(sink);
+      const streamId = sendMessageArgs.streamId || randomUUID();
+      const abort = () => llmChatService.abort?.(streamId);
+      signal?.addEventListener('abort', abort, { once: true });
       return llmChatService.sendMessage({
         ...sendMessageArgs,
+        streamId,
         webContents: collected.sink,
         turnProfile,
       }).then((outcome) => ({
         ...outcome,
+        ...(collected.error() || ['error', 'aborted', 'interrupted'].includes(outcome?.terminalStatus)
+          ? { ok: false, retryable: false, error: outcome?.error || collected.error() || outcome.terminalStatus }
+          : {}),
         text: typeof outcome?.text === 'string' && outcome.text ? outcome.text : collected.text(),
         toolCalls: Array.isArray(outcome?.toolCalls) ? outcome.toolCalls : collected.toolCalls(),
-      }));
+      })).finally(() => signal?.removeEventListener('abort', abort));
     },
   };
 }
@@ -43,11 +56,14 @@ function collectTurn(sink) {
   const calls = [];
   const byId = new Map();
   let text = '';
+  let error = '';
   const wrapped = {
     send(channel, payload) {
       sink.send(channel, payload);
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
         text += payload.content;
+      } else if (channel === 'chat:stream:error') {
+        error = typeof payload?.error === 'string' ? payload.error : '提供方错误';
       } else if (channel === 'chat:stream:tool-call') {
         const id = typeof payload?.toolCallId === 'string' && payload.toolCallId
           ? payload.toolCallId
@@ -71,6 +87,7 @@ function collectTurn(sink) {
   return {
     sink: wrapped,
     text: () => text,
+    error: () => error,
     toolCalls: () => calls.map((call) => ({ ...call })),
   };
 }

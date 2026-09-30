@@ -33,6 +33,7 @@ export function createBotLifecycle({
   readdir = readdirSync,
 } = {}) {
   const profiles = createBotProfileStore({ rootDir, now });
+  const pending = new Map();
 
   function workspacePath(workspaceId) {
     const entry = registry?.get?.(workspaceId);
@@ -139,7 +140,8 @@ export function createBotLifecycle({
     const loaded = activeProfile(workspaceId);
     if (!loaded.ok) return loaded;
     const profile = loaded.profile;
-    if (profile.familiarize?.plan) {
+    if (pending.has(workspaceId)) return pending.get(workspaceId);
+    if (profile.familiarize?.plan && (profile.familiarize.kind === 'blank' || profile.familiarize.dispatched === true)) {
       return { ok: true, profile, plan: profile.familiarize.plan, reused: true };
     }
     const folder = workspacePath(workspaceId);
@@ -163,27 +165,33 @@ export function createBotLifecycle({
       });
       if (!appended) return fail('CONVERSATION_MISSING');
     }
-    const saved = profiles.save({
-      ...profile,
-      familiarize: {
-        kind: plan.kind,
-        plan,
-        startedAt: now() instanceof Date ? now().toISOString() : String(now()),
-      },
-    });
-    if (!saved.ok) return saved;
-    if (plan.kind === 'research' && typeof spawn === 'function') {
-      spawn({
-        workspaceId,
-        conversationId: profile.agentConversationId,
-        workspacePath: folder,
-        kind: 'research',
-        readOnly: true,
-        delegationOrigin: { readOnly: true, kind: 'research' },
-        task: plan.task,
+    function saveStarted(result) {
+      if (result?.error || result?.ok === false) return fail(result.error || result.code || 'SPAWN_FAILED');
+      const saved = profiles.save({
+        ...profiles.read(workspaceId),
+        familiarize: { kind: plan.kind, plan, dispatched: plan.kind === 'research',
+          ...(result?.sessionId ? { sessionId: result.sessionId } : {}),
+          startedAt: now() instanceof Date ? now().toISOString() : String(now()) },
       });
+      return saved.ok ? { ok: true, profile: saved.profile, plan } : saved;
     }
-    return { ok: true, profile: saved.profile, plan };
+    if (plan.kind !== 'research') return saveStarted(null);
+    if (typeof spawn !== 'function') return fail('SPAWN_UNAVAILABLE');
+    return dispatch(workspaceId, () => spawn({
+      workspaceId, conversationId: profile.agentConversationId, workspacePath: folder,
+      kind: 'research', readOnly: true, delegationOrigin: { readOnly: true, kind: 'research' }, task: plan.task,
+    }), saveStarted);
+  }
+
+  function dispatch(workspaceId, run, save) {
+    try {
+      const result = run();
+      if (!result?.then) return save(result);
+      const promise = Promise.resolve(result).then(save, () => fail('SPAWN_FAILED'))
+        .finally(() => pending.delete(workspaceId));
+      pending.set(workspaceId, promise);
+      return promise;
+    } catch { return fail('SPAWN_FAILED'); }
   }
 
   function recordVerifiedFindings(workspaceId, findings) {
@@ -240,8 +248,10 @@ export function createBotLifecycle({
     if (!conversationStore || typeof conversationStore.appendMessage !== 'function') {
       return fail('CONVERSATION_REQUIRED');
     }
-    const anchorMessageId = `user-${randomUUID()}`;
-    const appended = conversationStore.appendMessage(profile.agentConversationId, {
+    const anchorMessageId = input.anchorMessageId || `user-${randomUUID()}`;
+    const appended = input.anchorMessageId
+      ? conversationStore.getPersistedConversationHistory?.(profile.agentConversationId)
+      : conversationStore.appendMessage(profile.agentConversationId, {
       id: anchorMessageId,
       role: 'user',
       kind: 'user_input',
@@ -275,26 +285,20 @@ export function createBotLifecycle({
     if (!loaded.ok) return loaded;
     const profile = loaded.profile;
     if (profile.readmeOffer?.offered !== true) return fail('OFFER_MISSING');
-    const saved = profiles.save({
-      ...profile,
-      readmeOffer: { offered: true, accepted: true },
-    });
-    if (!saved.ok) return saved;
-    const task = buildReadmeTask({
-      displayName: profile.displayName,
-      responsibility: responsibilityText(workspaceId),
-    });
-    if (typeof spawn === 'function') {
-      spawn({
-        workspaceId,
-        conversationId: profile.agentConversationId,
-        workspacePath: workspacePath(workspaceId),
-        kind: 'docs',
-        readOnly: false,
-        task,
+    if (profile.readmeOffer.accepted === true) return { ok: true, profile, reused: true };
+    if (pending.has(workspaceId)) return pending.get(workspaceId);
+    if (typeof spawn !== 'function') return fail('SPAWN_UNAVAILABLE');
+    const task = buildReadmeTask({ displayName: profile.displayName, responsibility: responsibilityText(workspaceId) });
+    return dispatch(workspaceId, () => spawn({
+      workspaceId, conversationId: profile.agentConversationId, workspacePath: workspacePath(workspaceId),
+      kind: 'docs', readOnly: false, task,
+    }), (result) => {
+      if (result?.error || result?.ok === false) return fail(result.error || result.code || 'SPAWN_FAILED');
+      const saved = profiles.save({ ...profiles.read(workspaceId),
+        readmeOffer: { offered: true, accepted: true, ...(result?.sessionId ? { sessionId: result.sessionId } : {}) },
       });
-    }
-    return { ok: true, profile: saved.profile, task };
+      return saved.ok ? { ok: true, profile: saved.profile, task } : saved;
+    });
   }
 
   function deleteBot(workspaceId, options = {}) {

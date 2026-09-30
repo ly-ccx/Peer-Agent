@@ -42,7 +42,7 @@ function origin(extra = {}) {
   };
 }
 
-test('桌面复核端口从宿主计划和证据索引取事实，并记下 verifying', async () => {
+test('桌面复核端口从宿主计划和证据索引取事实，复核完成后退出 verifying', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'b3-04-verify-'));
   const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
   const appended = [];
@@ -88,8 +88,8 @@ test('桌面复核端口从宿主计划和证据索引取事实，并记下 veri
     })).result.outputPreview.legacyResult.output);
     assert.equal(reviewed.ok, true);
     assert.equal(reviewed.status, 'verifying');
-    assert.equal(store.getPlan(created.planId).delegationOrigin.verifying, true);
-    assert.equal(supervisor.get({ sessionId: 'session-1' }).status, 'verifying');
+    assert.notEqual(store.getPlan(created.planId).delegationOrigin.verifying, true);
+    assert.equal(supervisor.get({ sessionId: 'session-1' }).status, 'waiting_user');
     assert.equal(appended[0].conversationId, 'parent-1');
     assert.equal(appended[0].message.kind, 'system_card');
     assert.equal(appended[0].message.cards[0].content, reviewed.event.outcome);

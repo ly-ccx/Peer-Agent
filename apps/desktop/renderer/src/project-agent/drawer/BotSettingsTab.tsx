@@ -1,8 +1,9 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotProfile, type ModelRoutingMenuOption } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
+import { BotPolicyFields } from './BotPolicyFields';
 import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
@@ -24,12 +25,12 @@ function isProactivityLevel(value: string): value is ProactivityLevel {
 
 /**
  * 名字、头像和删除只走项目代理 IPC。
- * 签收策略和项目模型覆盖还没有单独的写入通道，这里只展示，不另存一份。
+ * 策略与模型覆盖同样由宿主校验并保存。
  */
 export function BotSettingsTab({
   workspaceId,
   profile,
-  modelLabel,
+  modelOptions = [],
   i18n,
   onProfile,
   onDeleted,
@@ -37,6 +38,7 @@ export function BotSettingsTab({
   readonly workspaceId: string;
   readonly profile: BotProfile;
   readonly modelLabel: string;
+  readonly modelOptions?: readonly ModelRoutingMenuOption[];
   readonly i18n: I18nRuntime;
   readonly onProfile: (profile: BotProfile) => void;
   readonly onDeleted: () => void;
@@ -81,6 +83,17 @@ export function BotSettingsTab({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>) {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await clientApi.projectAgentUpdateProfile({ workspaceId, ...patch });
+      if (!result?.ok || !result.profile) { setError(result?.code || 'FAILED'); return; }
+      onProfile(result.profile);
+    } catch { setError('FAILED'); }
+    finally { setBusy(false); }
   }
 
   async function changeAvatar(kind: 'regenerate' | 'upload') {
@@ -195,16 +208,8 @@ export function BotSettingsTab({
           onChange={(next) => { void saveProactivity(next); }}
         />
       </div>
-      <section>
-        <h2>{i18n.t('projectAgent.drawer.acceptance')}</h2>
-        <p>{i18n.t('projectAgent.drawer.acceptance.auto')}</p>
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.acceptance.pending')}</p>
-      </section>
-      <section>
-        <h2>{i18n.t('projectAgent.drawer.model')}</h2>
-        <p>{modelLabel || i18n.t('projectAgent.drawer.modelEmpty')}</p>
-        <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.model.pending')}</p>
-      </section>
+      <BotPolicyFields profile={profile} models={modelOptions} busy={busy} i18n={i18n}
+        onChange={patch => { void savePolicy(patch); }} />
       {error ? <p className="bot-drawer-note">{error}</p> : null}
       <button type="button" disabled={busy} onClick={() => { void remove(); }}>
         {confirmDelete

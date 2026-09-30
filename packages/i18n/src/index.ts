@@ -159,6 +159,25 @@ export type TranslationKey =
   | 'projectAgent.chat.approveContinue'
   | 'projectAgent.chat.reject'
   | 'projectAgent.chat.answer'
+  | 'projectAgent.policy.planApproval'
+  | 'projectAgent.policy.planApproval.never'
+  | 'projectAgent.policy.planApproval.writes'
+  | 'projectAgent.policy.planApproval.always'
+  | 'projectAgent.policy.acceptance.auto'
+  | 'projectAgent.policy.acceptance.confirm'
+  | 'projectAgent.policy.models'
+  | 'projectAgent.policy.modelsHint'
+  | 'projectAgent.policy.inherit'
+  | 'projectAgent.policy.autoPool'
+  | 'projectAgent.policy.moreRoles'
+  | 'projectAgent.policy.fewerRoles'
+  | 'projectAgent.policy.scope'
+  | 'projectAgent.policy.scope.all'
+  | 'projectAgent.policy.scope.restricted'
+  | 'projectAgent.policy.localOnly'
+  | 'projectAgent.chat.confirmResult'
+  | 'projectAgent.chat.acceptReadme'
+  | 'projectAgent.chat.actionFailed'
   | 'projectAgent.drawer.title'
   | 'projectAgent.drawer.close'
   | 'projectAgent.drawer.back'
@@ -1247,6 +1266,25 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approveContinue': '批准并继续',
     'projectAgent.chat.reject': '拒绝',
     'projectAgent.chat.answer': '回答',
+    'projectAgent.policy.planApproval': '开工前批准计划',
+    'projectAgent.policy.planApproval.never': '直接开工',
+    'projectAgent.policy.planApproval.writes': '写入任务先批准',
+    'projectAgent.policy.planApproval.always': '所有任务先批准',
+    'projectAgent.policy.acceptance.auto': '符合条件时自动签收',
+    'projectAgent.policy.acceptance.confirm': '由我确认结果',
+    'projectAgent.policy.models': '项目模型',
+    'projectAgent.policy.modelsHint': '跟随全局配置，或为这个机器人指定模型。修改对新任务生效。',
+    'projectAgent.policy.inherit': '跟随全局',
+    'projectAgent.policy.autoPool': '已配置自动池',
+    'projectAgent.policy.moreRoles': '更多角色',
+    'projectAgent.policy.fewerRoles': '收起角色',
+    'projectAgent.policy.scope': '可用模型范围',
+    'projectAgent.policy.scope.all': '全部已配置模型',
+    'projectAgent.policy.scope.restricted': '仅所选模型',
+    'projectAgent.policy.localOnly': '只使用本地模型',
+    'projectAgent.chat.confirmResult': '确认结果',
+    'projectAgent.chat.acceptReadme': '写 README',
+    'projectAgent.chat.actionFailed': '操作失败，请重试',
     'projectAgent.drawer.title': '档案',
     'projectAgent.drawer.close': '关闭',
     'projectAgent.drawer.back': '返回任务',
@@ -2133,6 +2171,25 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approveContinue': 'Approve and continue',
     'projectAgent.chat.reject': 'Reject',
     'projectAgent.chat.answer': 'Answer',
+    'projectAgent.policy.planApproval': 'Approve plans before starting',
+    'projectAgent.policy.planApproval.never': 'Start directly',
+    'projectAgent.policy.planApproval.writes': 'Approve write tasks',
+    'projectAgent.policy.planApproval.always': 'Approve every task',
+    'projectAgent.policy.acceptance.auto': 'Accept eligible results automatically',
+    'projectAgent.policy.acceptance.confirm': 'I confirm results',
+    'projectAgent.policy.models': 'Project models',
+    'projectAgent.policy.modelsHint': 'Use global routing or choose models for this bot. Changes apply to new tasks.',
+    'projectAgent.policy.inherit': 'Use global routing',
+    'projectAgent.policy.autoPool': 'Configured automatic pool',
+    'projectAgent.policy.moreRoles': 'More roles',
+    'projectAgent.policy.fewerRoles': 'Fewer roles',
+    'projectAgent.policy.scope': 'Allowed models',
+    'projectAgent.policy.scope.all': 'All configured models',
+    'projectAgent.policy.scope.restricted': 'Selected models only',
+    'projectAgent.policy.localOnly': 'Use local models only',
+    'projectAgent.chat.confirmResult': 'Confirm result',
+    'projectAgent.chat.acceptReadme': 'Write README',
+    'projectAgent.chat.actionFailed': 'Action failed. Please try again',
     'projectAgent.drawer.title': 'Profile',
     'projectAgent.drawer.close': 'Close',
     'projectAgent.drawer.back': 'Back to tasks',

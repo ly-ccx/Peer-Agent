@@ -308,7 +308,9 @@ export function Dropdown({
           }}
         >
           <span className="pa-dropdown-check" aria-hidden>
-            {opt.value === value ? '✓' : ''}
+            {opt.value === value ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg> : null}
           </span>
           <span className="pa-dropdown-item-label">{opt.label}</span>
           {opt.hint ? <span className="pa-dropdown-item-hint">{opt.hint}</span> : null}

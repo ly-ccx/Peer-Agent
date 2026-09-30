@@ -2160,10 +2160,9 @@ function registerDesktopIpcHost() {
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
       holdsLease: (workspaceId) => hostLeases.holds(workspaceId),
       getSettings: () => settingsStore.getAll(), mergeSettings: (patch) => settingsStore.merge(patch),
-      dialog, BrowserWindow, shell,
-      onReady: (api) => {
-        projectAgentDirectory = api;
-      },
+      dialog, BrowserWindow, shell, listModels: () => llmConfigStore.listProviders(),
+      readUiDelivery: (plan) => desktopPreviewProvider?.authority.read(plan.planId, plan),
+      onReady: (api) => { projectAgentDirectory = api; },
       onViewing: (workspaceId) => {
         viewingBotWorkspaceId = typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
       },
@@ -3761,6 +3760,7 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
     { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
     { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
+    { name: 'project-agent', dispose: () => projectAgentDirectory?.dispose() },
     { name: 'trusted-window-registry', dispose: () => trustedWindowRegistry.dispose() },
     { name: 'full-disk-access-drag-float', dispose: () => fullDiskAccessDragFloatController.destroy() },
   ],

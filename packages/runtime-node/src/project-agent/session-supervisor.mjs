@@ -65,6 +65,8 @@ export function createSessionSupervisor({
   goalPlanStore,
   goalRunner = null,
   catalog = [],
+  resolveModel = null,
+  memoryStore = null,
   routing = null,
   projectPolicy = null,
   abortStream = null,
@@ -205,6 +207,8 @@ export function createSessionSupervisor({
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
+      acceptance: 'confirm',
+      accepted: Boolean(plan.resultAcceptance?.acceptedAt),
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(origin.verifying === true ? { verifying: true, phase: 'verifying' } : {}),
@@ -253,14 +257,14 @@ export function createSessionSupervisor({
     };
   }
 
-  function freezeModels(input) {
+  function freezeModels(input, workspaceId) {
     const source = {};
     const slots = {};
     let worker = null;
     let autoReason = null;
     for (const [role, slot] of ROLE_SLOTS) {
       const preference = role === 'session_worker' ? input.modelPreference : null;
-      const resolved = resolveRoleModel({
+      const request = {
         role,
         catalog,
         routing: routing || { tiers: {}, roles: {}, verifierPreferDifferentFamily: false },
@@ -270,8 +274,11 @@ export function createSessionSupervisor({
           : null,
         workerModel: worker,
         taskRequiresVision: role === 'session_worker' && input.kind === 'ui',
-      });
+        workspaceId,
+      };
+      const resolved = typeof resolveModel === 'function' ? resolveModel(request) : resolveRoleModel(request);
       if (!resolved?.ok) {
+        if (role === 'visual_verifier' && input.kind !== 'ui') continue;
         return { ok: false, missing: resolved?.missing || '没有可用的模型' };
       }
       if (role === 'session_worker') worker = resolved.selection;
@@ -337,7 +344,7 @@ export function createSessionSupervisor({
       };
     }
 
-    const frozen = freezeModels(input || {});
+    const frozen = freezeModels(input || {}, workspaceId);
     if (!frozen.ok) return { error: 'model_unavailable', missing: frozen.missing };
 
     const history = conversationStore.getPersistedConversationHistory?.(parentConversationId);
@@ -405,7 +412,7 @@ export function createSessionSupervisor({
       });
       if (!stored) throw new Error('delegation message was not stored');
 
-      const snapshot = createSnapshot(workspaceId);
+      const snapshot = createSnapshot(workspaceId, memoryStore ? { store: memoryStore } : {});
       if (!snapshot.ok || typeof snapshot.snapshotId !== 'string') {
         const error = new Error(snapshot.reason || 'memory snapshot failed');
         error.code = 'memory_snapshot_failed';
@@ -859,6 +866,7 @@ export function createSessionSupervisor({
     for (const plan of delegatedPlans()) {
       const workspaceId = plan.delegationOrigin?.workspaceId;
       if (workspaceId) workspaces.add(workspaceId);
+      if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) settleLocked(plan.delegationOrigin.sessionId);
     }
     for (const workspaceId of workspaces) await promote(workspaceId);
   }
@@ -870,6 +878,11 @@ export function createSessionSupervisor({
       return exclusive(() => spawnLocked(input, context || {}));
     },
     list,
+    /** Complete project facts for the host; model-facing list() remains bounded. */
+    sessionsForProject(workspaceId) {
+      const workspace = text(workspaceId);
+      return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).map(project) : [];
+    },
     get,
     cancel(input) {
       return exclusive(() => cancelLocked(input || {}));
@@ -885,6 +898,10 @@ export function createSessionSupervisor({
     },
     settle(sessionId) {
       return exclusive(() => settleLocked(sessionId));
+    },
+    acceptance(sessionId) {
+      const plan = findBySession(text(sessionId));
+      return plan?.status === 'completed' ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
     },
     confirmResult(sessionId) {
       return exclusive(() => confirmLocked(sessionId));

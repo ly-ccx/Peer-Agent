@@ -37,9 +37,10 @@ export function createDelegationProvider({
     if (typeof ledger === 'function') return ledger(context);
     if (ledger) return ledger;
     const scope = text(context?.workspaceId) || text(context?.conversationId);
-    if (storeDir && scope) {
+    const directory = typeof storeDir === 'function' ? storeDir() : storeDir;
+    if (directory && scope) {
       return createDurableGoalIdempotencyLedger({
-        storeDir,
+        storeDir: directory,
         planId: scope,
         runId: 'delegation',
       });
@@ -169,6 +170,13 @@ export function createDelegationProvider({
       }
     }
 
+    if (input.sessionId && typeof supervisor?.get === 'function') {
+      const session = await supervisor.get({ sessionId: input.sessionId });
+      if (session?.workspaceId && view.workspaceId && session.workspaceId !== view.workspaceId) {
+        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'out_of_scope' } });
+      }
+    }
+
     const key = idempotencyKey({
       turnId: view.turnId,
       toolCallOrdinal: view.toolCallOrdinal,
@@ -224,7 +232,7 @@ export function createDelegationProvider({
       );
     }
     if (name === 'list_sessions') {
-      const rows = await callPort(supervisor?.list, input, 'supervisor_unavailable');
+      const rows = await callPort(supervisor?.list, { ...input, workspaceId: view.workspaceId }, 'supervisor_unavailable');
       if (!rows.ok) return rows;
       return { ok: true, output: { ok: true, sessions: Array.isArray(rows.output) ? rows.output : [] } };
     }
