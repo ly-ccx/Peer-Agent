@@ -11,6 +11,19 @@ const view = {
   messages: [{ id: 'u1', kind: 'user_input', role: 'user', content: '做一下' }],
 };
 
+test('a completed result requires independent verification before delivery', () => {
+  let independentVerifier = 'missing';
+  const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'],
+    sessionStates: [{ sessionId: 's1', status: 'result_ready' }],
+    verdicts: [{ sessionId: 's1', outcome: 'passed', independentVerifier }],
+  }) });
+  const args = { text: 'Result', replyTo: ['u1'], sources: ['s1'],
+    statusClaims: [{ sessionId: 's1', status: 'result_ready' }] };
+  assert.equal(port.postReply(args, view).error, 'verification_required');
+  independentVerifier = 'passed';
+  assert.equal(port.postReply(args, view).error, undefined);
+});
+
 test('a reply anchored to an unreported completed task cannot omit its source', () => {
   const port=createDesktopReplyComposer({readDelivery:()=>({sessionIds:['s1'],sessionStates:[{sessionId:'s1',status:'result_ready'}],
     unreportedResults:[{sessionId:'s1',anchorMessageId:'u1'}]})});

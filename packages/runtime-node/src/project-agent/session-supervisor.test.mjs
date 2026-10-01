@@ -576,8 +576,21 @@ async function completedSession(env) {
   return { ...opened, planId };
 }
 
-test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
+test('missing independent verification cannot mint policy acceptance', async () => {
   const env = await harness();
+  try {
+    const opened = await completedSession(env);
+    env.conversationStore.appendMessage(env.parent.id, { id: 'result', role: 'assistant',
+      kind: 'agent_reply', content: 'Result', sources: [opened.sessionId] });
+    const result = await env.supervisor.settle(opened.sessionId);
+    assert.equal(result.accepted, false);
+    assert.ok(result.reasons.includes('verification_below_floor'));
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+  } finally { await env.cleanup(); }
+});
+
+test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
+  const env = await harness({ readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'passed' } }) });
   try {
     const opened = await completedSession(env);
     const early = await env.supervisor.settle(opened.sessionId, { userAgreed: true, acceptedBy: 'user' });

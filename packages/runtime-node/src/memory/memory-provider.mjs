@@ -204,6 +204,11 @@ export function createMemoryProvider(options = {}) {
   }
 
   function remember(input, context) {
+    // This reserved host anchor asks for file research; it is not a user
+    // statement of the discovered facts. Verified findings use lifecycle admission.
+    if (typeof input.anchorMessageId === 'string' && input.anchorMessageId.startsWith('lifecycle-research-')) {
+      return { ok: false, error: 'anchor_not_user_input' };
+    }
     const { store, index } = resources();
     const saved = store.rememberStated({
       ...input,

@@ -35,6 +35,19 @@ function ids(output) {
   return output.items.map((item) => item.id).sort();
 }
 
+test('the host familiarity anchor cannot turn file observations into stated memory', async () => {
+  const root = tempRoot('familiarity-provenance');
+  const provider = createMemoryProvider({ rootDir: root });
+  try {
+    const id = 'lifecycle-research-ws-1';
+    const result = await provider.executeCapability(call('local.memory.remember', {
+      kind: 'fact', text: 'Project name is peer-agent', anchorMessageId: id,
+    }), context({ messages: [{ id, role: 'user', kind: 'user_input', content: 'Read the project and remember verified facts.' }] }));
+    assert.equal(outputOf(result).error, 'anchor_not_user_input');
+    assert.equal(createMemoryStore({ rootDir: root }).list({ workspaceId: 'ws-1' }).length, 0);
+  } finally { provider.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('production nested context admits project agent memory but never worker writes', async () => {
   const root=mkdtempSync(path.join(os.tmpdir(),'nested-memory-'));
   try {

@@ -115,6 +115,16 @@ export function composeReply(input = {}) {
     }
   }
 
+  const missingVerification = (Array.isArray(input.verdicts) ? input.verdicts : [])
+    .filter(verdict => sources.ids.includes(verdict?.sessionId)
+      && actualStates.get(verdict.sessionId)?.status === 'result_ready'
+      && verdict.outcome === 'passed' && verdict.independentVerifier === 'missing');
+  if (missingVerification.length) {
+    return fail('verification_required', 'Run verify_session for the completed sources, then retry with their current status.', {
+      sessionStates: missingVerification.map(verdict => actualStates.get(verdict.sessionId)),
+    });
+  }
+
   const verdicts = indexVerdicts(input.verdicts);
   const marks = marksFor(sources.ids, verdicts);
   const verdictRef = latestVerdictRef(sources.ids, verdicts);

@@ -638,7 +638,8 @@ export function createSessionSupervisor({
       manualCriteriaPending: extra.manualCriteriaPending === true,
       externalSideEffects: extra.externalSideEffects === true,
       outOfScopeWrite: extra.outOfScopeWrite === true,
-      verificationBelowFloor: extra.verificationBelowFloor === true,
+      verificationBelowFloor: extra.verificationBelowFloor === true
+        || !['passed', 'not_required'].includes(hostAuthority.independentVerifier),
       hostAuthority,
       evidenceIndex: indexedRefs(plan),
     };
