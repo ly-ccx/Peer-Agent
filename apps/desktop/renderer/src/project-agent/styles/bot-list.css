@@ -963,3 +963,7 @@
   cursor: default;
   opacity: 0.45;
 }
+
+.bot-avatar[data-avatar-animated="false"] svg,
+.bot-avatar[data-avatar-animated="false"] .bot-avatar-eye,
+.bot-avatar[data-avatar-animated="false"] .bot-avatar-thought { animation: none; }

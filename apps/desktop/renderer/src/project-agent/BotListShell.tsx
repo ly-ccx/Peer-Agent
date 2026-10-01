@@ -423,6 +423,7 @@ export function BotListShell({
               </button>
             </header>
             <BotConversation
+              key={opened.workspaceId}
               workspaceId={opened.workspaceId}
               avatar={opened.profile.avatar}
               label={opened.profile.displayName}

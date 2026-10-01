@@ -33,11 +33,11 @@ export function createFtsIndex({ db, name }) {
   const likeStmt = db.prepare(`SELECT id FROM ${doc} WHERE body LIKE ? ESCAPE '\\'`);
   const matchStmt = db.prepare(`SELECT id FROM ${fts} WHERE ${fts} MATCH ?`);
 
-  function put(id, body, meta, updatedAt) {
+  function put(id, body, meta, updatedAt, replace = true) {
     const key = String(id);
     const text = body == null ? '' : String(body);
     writeDoc.run(key, text, typeof meta === 'string' ? meta : JSON.stringify(meta ?? null), updatedAt);
-    deleteFts.run(key);
+    if (replace) deleteFts.run(key);
     if (text) insertFts.run(key, text);
   }
 
@@ -76,11 +76,14 @@ export function createFtsIndex({ db, name }) {
       return rows.map((row) => ({ ...row, meta: parseMeta(row.meta) }));
     },
     rebuild(items) {
+      const unique = new Map();
+      for (const item of items) unique.set(String(item.id), item);
       db.exec('BEGIN IMMEDIATE');
       try {
         db.exec(`DELETE FROM ${doc}; DELETE FROM ${fts};`);
         const now = Date.now();
-        for (const item of items) put(item.id, item.body, item.meta, now);
+        // The table is empty; deleting by unindexed id per row causes repeated full scans.
+        for (const item of unique.values()) put(item.id, item.body, item.meta, now, false);
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');

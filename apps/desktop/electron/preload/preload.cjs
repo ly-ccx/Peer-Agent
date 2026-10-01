@@ -31,9 +31,18 @@ function readInitialSettings() {
   return {};
 }
 
+function getSettings() {
+  // Quick Chat already owns the sync snapshot channel, never settings:get.
+  const href = globalThis.location?.href;
+  if (href && new URL(href).searchParams.get('window') === 'quick-chat') {
+    return Promise.resolve(readInitialSettings());
+  }
+  return ipcRenderer.invoke('settings:get');
+}
+
 contextBridge.exposeInMainWorld('peerAgent', {
   initialSettings: readInitialSettings(),
-  getSettings: () => ipcRenderer.invoke('settings:get'),
+  getSettings,
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
   // Remote access (ADR 75 M1). Each returns { ok, status } or { ok:false, error }.
   getRemoteAccess: () => ipcRenderer.invoke('remote-access:status'),

@@ -65,9 +65,15 @@ export function visibleBotList(
 export function mergeBotSearch(
   catalog: readonly BotListItem[],
   hits: readonly BotListItem[],
+  corpusHits: readonly { readonly workspaceId: string }[] = [],
 ): BotListItem[] {
   const local = new Map(catalog.map((item) => [item.workspaceId, item]));
-  return sortBotList(hits.map((hit) => local.get(hit.workspaceId) ?? hit));
+  const matches = new Map(hits.map(hit => [hit.workspaceId, local.get(hit.workspaceId) ?? hit]));
+  for (const hit of corpusHits) {
+    const item = local.get(hit.workspaceId);
+    if (item) matches.set(item.workspaceId, item);
+  }
+  return sortBotList([...matches.values()]);
 }
 
 /** 局部刷新：有新投影就替换或插入，空投影表示归档或消失。结果重新排序。 */

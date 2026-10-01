@@ -10,6 +10,8 @@ const ALL_APP_WINDOW_ROLES = Object.freeze([
   'permission-drag-float',
 ]);
 const QUICK_CHAT_CHANNELS = new Set([
+  'project-agent:list',
+  'project-agent:submit-input',
   'chat:send',
   'chat:start-task',
   'conversations:append-message',

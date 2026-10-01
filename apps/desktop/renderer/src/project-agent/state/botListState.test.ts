@@ -62,6 +62,17 @@ test('搜索合并保留本地角标，并收下只靠任务标题命中的机�
   assert.equal(visibleBotList(merged, { needsYouOnly: true }).map((item) => item.workspaceId).join(','), 'notes');
 });
 
+test('full-corpus message, task and memory hits reveal their current bot once', () => {
+  const message = bot('message', '2026-09-27T03:00:00.000Z', { unread: 2 });
+  const memory = bot('memory', '2026-09-27T02:00:00.000Z');
+  const task = bot('task', '2026-09-27T01:00:00.000Z');
+  const result = mergeBotSearch([message, memory, task], [message], [
+    { workspaceId: 'message' }, { workspaceId: 'task' }, { workspaceId: 'memory' }, { workspaceId: 'memory' }, { workspaceId: 'archived' },
+  ]);
+  assert.deepEqual(result.map(row => row.workspaceId), ['message', 'memory', 'task']);
+  assert.equal(result[0], message);
+});
+
 test('局部刷新替换单行并在归档后从列表拿掉，选中还在全量里就保持', () => {
   const notes = bot('notes', '2026-09-27T01:00:00.000Z', { needsYou: 1 });
   const peer = bot('peer', '2026-09-27T02:00:00.000Z');

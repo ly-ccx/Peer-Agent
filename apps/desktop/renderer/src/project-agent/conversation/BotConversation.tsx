@@ -45,8 +45,12 @@ export function BotConversation({
     lastReplyRef.current = lastId;
   }, [conversation.status, conversation.messages, onReplyArrived, workspaceId]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [highlightRequestId, setHighlightRequestId] = useState(0);
   useEffect(() => {
-    if (focusMessageId) setHighlightedId(focusMessageId);
+    if (highlightedId) void conversation.locateMessage(highlightedId);
+  }, [highlightedId, conversation.locateMessage]);
+  useEffect(() => {
+    if (focusMessageId) { setHighlightedId(focusMessageId); setHighlightRequestId(value => value + 1); }
   }, [focusMessageId, focusRequestId]);
   const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
 
@@ -61,9 +65,13 @@ export function BotConversation({
           label={label}
           avatarMood={avatarMood}
           rows={conversation.rows}
+          hasOlder={conversation.hasOlder}
+          olderError={conversation.olderError}
+          onLoadOlder={conversation.loadOlder}
           highlightedId={highlightedId}
+          highlightRequestId={highlightRequestId}
           i18n={i18n}
-          onJump={(messageId) => setHighlightedId(messageId)}
+          onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
           onQuote={(messageId, excerpt) => setQuote({ messageId, text: excerpt })}
           onRetry={(inputId) => {
             void conversation.retry(inputId);

@@ -27,8 +27,6 @@ import {
   createProjectInbox,
   createWatchPublisher,
   delegationFactsForWorkspace,
-  projectClassicGoals,
-  projectHistory,
   normalizeProjectAgentSettings,
   createProjectRegistry,
   createSessionSupervisor,
@@ -40,6 +38,7 @@ import {
 import { createBroadcastSink } from '../agent-host/turn-sinks.mjs';
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
+import { createClassicGoalProjection } from './classic-goal-projection.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { evidenceBodyFromRecord } from './evidence-presenter.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
@@ -102,6 +101,7 @@ export function registerDesktopProjectAgent({
   releaseLease = null,
   hostLeases = null,
   getSettings,
+  readRuntimePolicy = getSettings,
   mergeSettings,
   dialog,
   BrowserWindow,
@@ -115,10 +115,10 @@ export function registerDesktopProjectAgent({
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   let host = null;
   let objectiveWatches=null;
-  const runtimeEnabled = () => enabled() && getSettings()?.projectAgent?.shell !== 'classic';
+  const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
-  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => getSettings()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
   function readEvidenceBody(evidenceRef) {
     try {
       const record = goalPlanStore.findEvidenceIndexRecords?.([evidenceRef])?.[0];
@@ -193,7 +193,7 @@ export function registerDesktopProjectAgent({
   const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
     read(view) {
-      const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
+      const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;
       return {
         ...projectFacts.delivery(view?.workspaceId),
@@ -215,7 +215,7 @@ export function registerDesktopProjectAgent({
   });
   const uninstallMemory = installMemoryGate({
     enabled(workspaceId) {
-      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const settings = typeof readRuntimePolicy === 'function' ? readRuntimePolicy() : null;
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
@@ -223,9 +223,9 @@ export function registerDesktopProjectAgent({
   const memoryCurator = createMemoryCurator({
     store: memoryStore,
     episodes: createEpisodeLog({ rootDir: dataHome }),
-    learnPreferences: () => getSettings()?.memory?.learnPreferences !== false,
+    learnPreferences: () => readRuntimePolicy()?.memory?.learnPreferences !== false,
     memoryEnabled: (workspaceId) => {
-      const settings = typeof getSettings === 'function' ? getSettings() : null;
+      const settings = typeof readRuntimePolicy === 'function' ? readRuntimePolicy() : null;
       const profile = workspaceId ? profileStore.read(workspaceId) : null;
       return memoryUseEnabled({ settings, profile });
     },
@@ -252,31 +252,22 @@ export function registerDesktopProjectAgent({
     resolveFileAnchors: fileAnchors.capture,
     onWrote: memoryChanged,
   });
+  const classicGoals = createClassicGoalProjection({ registry, conversationStore, goalPlanStore });
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
     readMessages: (conversationId) => (
       conversationStore.getPersistedConversationHistory(conversationId)?.messages || []
     ),
+    readMessagesBatch: typeof conversationStore.getPersistedConversationHistories === 'function'
+      ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
     listSessions: (workspaceId) => supervisor.list({ workspaceId }),
     getSession: (sessionId) => supervisor.get({ sessionId }),
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
+    readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
-    listClassicGoals(workspaceId) {
-      try {
-        const folder = typeof registry?.get === 'function' ? (registry.get(workspaceId)?.path || '') : '';
-        if (!folder || typeof conversationStore?.listConversations !== 'function') return [];
-        const conversations = conversationStore.listConversations() || [];
-        const history = projectHistory(Array.isArray(conversations) ? conversations : [], { workspacePath: folder });
-        const plans = typeof goalPlanStore?.listPlans === 'function' ? goalPlanStore.listPlans() : [];
-        return projectClassicGoals(Array.isArray(plans) ? plans : [], {
-          workspacePath: folder,
-          conversationIds: history.map((item) => item.id),
-        });
-      } catch {
-        return [];
-      }
-    },
+    listClassicGoals: classicGoals.one,
+    readClassicGoalsBatch: classicGoals.batch,
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,
@@ -363,6 +354,7 @@ export function registerDesktopProjectAgent({
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
     listWorkspaceIds: () => directory.workspaceIds(),
+    readOwnedWorkspaceIds: ids => runtimeEnabled() ? ids.filter(id => holdsLease(id) === true) : [],
     resolveConversationId,
     hasMessage,
     appendMessage,
@@ -386,13 +378,13 @@ export function registerDesktopProjectAgent({
     },
     onCurator: (info) => memoryCurator.consider(info),
     onMaintenance: info => {
-      if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: getSettings(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
+      if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
     },
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
     inputQueue,
-    readSettings: getSettings,
+    readSettings: readRuntimePolicy,
     getWindows: () => BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()),
     readFacts: (workspaceId) => delegationFactsForWorkspace(
       (goalPlanStore.listPlans?.() || [])
@@ -497,15 +489,19 @@ export function registerDesktopProjectAgent({
     broadcast,
     conversationStore,
     goalPlanStore,
-    readSearchCorpus() {
-      const bots = typeof directory.list === 'function' ? directory.list() : [];
+    readSearchCorpus(catalog) {
+      const bots = Array.isArray(catalog) ? catalog : (typeof directory.list === 'function' ? directory.list() : []);
       const messages = [];
-      for (const workspaceId of directory.workspaceIds()) {
-        const conversationId = directory.conversationId(workspaceId);
+      let histories = null;
+      try { histories = conversationStore.getPersistedConversationHistories?.(bots.map(bot => bot.profile?.agentConversationId).filter(Boolean)); }
+      catch { /* Per-conversation fallback below preserves optional corpus recovery. */ }
+      for (const bot of bots) {
+        const workspaceId = bot.workspaceId;
+        const conversationId = bot.profile?.agentConversationId;
         if (!conversationId) continue;
         let history = [];
         try {
-          history = conversationStore.getPersistedConversationHistory(conversationId)?.messages || [];
+          history = (histories instanceof Map ? histories.get(conversationId) : conversationStore.getPersistedConversationHistory(conversationId))?.messages || [];
         } catch {
           history = [];
         }

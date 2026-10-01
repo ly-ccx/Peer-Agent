@@ -1,6 +1,7 @@
 import { generateAvatar, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useState, type PointerEvent } from 'react';
 import { clientApi } from '../clientApi';
+import { useAvatarMotion } from './state/useAvatarMotion';
 import type { BotAvatarMood } from './state/botAvatarState';
 
 interface BotAvatarProps {
@@ -70,6 +71,7 @@ function resetEyes(event: PointerEvent<HTMLSpanElement>) {
 }
 
 export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvatarProps) {
+  const motion = useAvatarMotion();
   const [imageData, setImageData] = useState<{ key: string; dataUrl: string } | null>(null);
   const imageKey = avatar.kind === 'image' ? `${workspaceId}:${avatar.ref}` : '';
   const dataUrl = imageData?.key === imageKey ? imageData.dataUrl : null;
@@ -96,6 +98,8 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvat
         aria-label={label}
         data-avatar-kind="image"
         data-avatar-mood={mood}
+        ref={motion.ref}
+        data-avatar-animated={motion.active}
         onPointerMove={moveEyes}
         onPointerLeave={resetEyes}
       >
@@ -120,6 +124,8 @@ export function BotAvatar({ avatar, label, workspaceId, mood = 'idle' }: BotAvat
       data-avatar-kind="generated"
       data-avatar-shape={visualShape}
       data-avatar-mood={mood}
+        ref={motion.ref}
+        data-avatar-animated={motion.active}
       onPointerMove={moveEyes}
       onPointerLeave={resetEyes}
     >

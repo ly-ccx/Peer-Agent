@@ -10,17 +10,50 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   min-height: 0;
   overflow: auto;
   padding: 18px 22px 8px;
 }
 
-.bot-thread:has(> .bot-system:not(.bot-system-welcome):only-child) {
+/* Virtual spacers and message rows must retain their scroll geometry. */
+.bot-thread > * {
+  flex-shrink: 0;
+}
+
+.bot-thread-row {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 12px;
+}
+
+.bot-thread-origin {
+  height: 0;
+}
+
+.bot-thread-older {
+  margin-bottom: 12px;
+  align-self: center;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--frost-text-secondary, var(--text-secondary));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bot-thread-older:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bot-thread[data-single-system="true"] {
   justify-content: center;
 }
 
-.bot-thread:has(> .bot-system:not(.bot-system-welcome):only-child) > .bot-system {
+.bot-thread[data-single-system="true"] .bot-system {
   width: min(420px, 100%);
   margin-inline: auto;
 }

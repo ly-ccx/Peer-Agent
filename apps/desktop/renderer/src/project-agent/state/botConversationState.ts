@@ -87,7 +87,7 @@ export interface BotChatMessage {
   readonly cards: readonly BotChatCard[];
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
-  readonly pending?: 'sending' | 'failed';
+  readonly pending?: 'sending' | 'received' | 'failed';
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
@@ -96,7 +96,12 @@ export interface PendingBotInput {
   readonly text: string;
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
-  readonly state: 'sending' | 'failed';
+  readonly state: 'sending' | 'received' | 'failed';
+}
+
+/** A successful durable submit receipt acknowledges only this input, never a reply. */
+export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: string): PendingBotInput[] {
+  return pending.map(item => item.inputId === inputId ? { ...item, state: 'received' } : item);
 }
 
 export type ConversationRow =
@@ -420,6 +425,14 @@ export function windowConversationRows<T>(
   const index = Math.min(rows.length - 1, Math.max(0, anchorIndex));
   const start = Math.max(0, Math.min(Math.max(0, rows.length - span), index - half));
   return { start, rows: rows.slice(start, start + span) };
+}
+
+/** Prepending history must preserve the identity of the current reading window. */
+export function conversationWindowAnchor(previous: readonly ConversationRow[], next: readonly ConversationRow[], index: number): number {
+  const idOf = (row: ConversationRow) => row.type === 'message' ? row.message.id : row.id;
+  const old = previous[index];
+  const found = old ? next.findIndex(row => idOf(row) === idOf(old)) : -1;
+  return found >= 0 ? found : Math.max(0, Math.min(index, next.length - 1));
 }
 
 export function formatConversationStamp(iso: string, now = Date.now()): { sameDay: boolean; clock: string; date: string } | null {

@@ -87,11 +87,14 @@ export function createBotDirectory({
   rootDir = null,
   registry = null,
   readMessages = () => [],
+  readMessagesBatch = null,
   listSessions = () => [],
   getSession = () => null,
   listApprovals = () => [],
+  readApprovalsBatch = null,
   listConfirmations = () => [],
   listClassicGoals = () => [],
+  readClassicGoalsBatch = null,
   readCards = () => [],
   now = () => new Date(),
 } = {}) {
@@ -125,9 +128,10 @@ export function createBotDirectory({
       .map((entry) => entry.name);
   }
 
-  function messagesOf(profile) {
+  function messagesOf(profile, batch = null) {
     if (!profile?.agentConversationId || typeof readMessages !== 'function') return [];
-    const messages = readMessages(profile.agentConversationId, profile.workspaceId);
+    const messages = batch instanceof Map && batch.has(profile.agentConversationId) ? batch.get(profile.agentConversationId)
+      : readMessages(profile.agentConversationId, profile.workspaceId);
     return Array.isArray(messages) ? messages : [];
   }
 
@@ -136,7 +140,7 @@ export function createBotDirectory({
     if (!existsSync(file)) return null;
     try {
       const parsed = JSON.parse(readFileSync(file, 'utf8'));
-      return typeof parsed?.at === 'string' && parsed.at ? parsed.at : null;
+      return typeof parsed?.at === 'string' && parsed.at ? parsed : null;
     } catch {
       return null;
     }
@@ -147,7 +151,10 @@ export function createBotDirectory({
     return Array.isArray(sessions) ? sessions : [];
   }
 
-  function classicGoalsOf(workspaceId) {
+  function classicGoalsOf(workspaceId, batch = null) {
+    if (batch instanceof Map && batch.has(workspaceId)) {
+      return Array.isArray(batch.get(workspaceId)) ? batch.get(workspaceId) : [];
+    }
     if (typeof listClassicGoals !== 'function') return [];
     try {
       const goals = listClassicGoals(workspaceId);
@@ -157,8 +164,8 @@ export function createBotDirectory({
     }
   }
 
-  function projectRow(profile) {
-    const messages = messagesOf(profile);
+  function projectRow(profile, classicBatch = null, messageBatch = null, approvalBatch = null) {
+    const messages = messagesOf(profile, messageBatch);
     const visible = messages.filter(isVisibleBotMessage);
     const last = visible.length ? toListMessage(visible[visible.length - 1]) : null;
     const sessions = sessionsOf(profile.workspaceId);
@@ -166,7 +173,7 @@ export function createBotDirectory({
     const confirmations = listConfirmations(profile.workspaceId);
     const openConfirmations = (Array.isArray(confirmations) ? confirmations : [])
       .filter((item) => item && item.accepted !== true && item.needsConfirm !== false);
-    const classicGoals = classicGoalsOf(profile.workspaceId);
+    const classicGoals = classicGoalsOf(profile.workspaceId, classicBatch);
     const mappedSessions = [
       ...sessions.map((session) => ({
         status: session?.status,
@@ -178,14 +185,15 @@ export function createBotDirectory({
         .filter((goal) => goal?.waitingUser === true)
         .map((goal) => ({ status: 'waiting_user', updatedAt: goal.updatedAt })),
     ];
-    const approvals = listApprovals(profile.workspaceId);
+    const approvals = approvalBatch instanceof Map && approvalBatch.has(profile.workspaceId)
+      ? approvalBatch.get(profile.workspaceId) : listApprovals(profile.workspaceId);
     return {
       item: projectBotListItem({
         profile: { ...profile },
         lastMessage: last,
         sessions: mappedSessions,
         approvals: Array.isArray(approvals) ? approvals : [],
-        readCursor: readCursor(profile.workspaceId),
+        readCursor: readCursor(profile.workspaceId)?.at ?? null,
       }),
       titles: sessions
         .map((session) => (typeof session?.title === 'string' ? session.title : ''))
@@ -204,7 +212,17 @@ export function createBotDirectory({
   }
 
   function rows() {
-    return activeProfiles().map(projectRow);
+    const current = activeProfiles();
+    let batch = null;
+    try { batch = readClassicGoalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
+    catch { /* Legacy per-project reads remain available. */ }
+    let messages = null;
+    try { messages = readMessagesBatch?.(current.map(profile => profile.agentConversationId).filter(Boolean)) ?? null; }
+    catch { /* Existing single reads retain their normal failure behavior. */ }
+    let approvals = null;
+    try { approvals = readApprovalsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
+    catch { /* Existing single reads retain their normal failure behavior. */ }
+    return current.map(profile => projectRow(profile, batch, messages, approvals));
   }
 
   function list() {
@@ -288,29 +306,35 @@ export function createBotDirectory({
     if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
     const visible = messagesOf(profile).filter(isVisibleBotMessage);
     const last = visible.length ? visible[visible.length - 1] : null;
-    const at = last ? (messageAt(last) || stamp()) : stamp();
+    const current = readCursor(workspaceId);
+    const messageId = typeof last?.id === 'string' ? last.id : null;
+    const at = (last && messageAt(last)) || (current?.messageId === messageId ? current.at : stamp());
+    if (current?.at === at && current.messageId === messageId) {
+      return { ok: true, at, messageId, changed: false };
+    }
     const dir = runtimeDir(workspaceId);
     mkdirSync(dir, { recursive: true });
     const file = cursorFile(workspaceId);
     const temporary = path.join(dir, `read-cursor.${randomUUID()}.tmp`);
     writeFileSync(temporary, `${JSON.stringify({
       at,
-      messageId: typeof last?.id === 'string' ? last.id : null,
+      messageId,
     })}\n`, 'utf8');
     renameSync(temporary, file);
-    return { ok: true, at, messageId: typeof last?.id === 'string' ? last.id : null };
+    return { ok: true, at, messageId, changed: true };
   }
 
-  function search(query) {
-    const text = typeof query === 'string' ? query.trim().toLowerCase() : '';
+  function query(value) {
+    const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
     const built = rows();
-    if (!text) return sortBotList(built.map((row) => row.item));
+    const catalog = sortBotList(built.map((row) => row.item));
+    if (!text) return { items: catalog, catalog };
     const matched = built.filter((row) => {
       if (row.item.profile.displayName.toLowerCase().includes(text)) return true;
       if (row.item.preview.toLowerCase().includes(text)) return true;
       return row.titles.some((title) => title.toLowerCase().includes(text));
     });
-    return sortBotList(matched.map((row) => row.item));
+    return { items: sortBotList(matched.map((row) => row.item)), catalog };
   }
 
   return {
@@ -324,7 +348,8 @@ export function createBotDirectory({
       return Array.isArray(approvals) ? approvals : [];
     },
     markRead,
-    search,
+    query,
+    search: (value) => query(value).items,
     conversationId: (workspaceId) => profiles.read(workspaceId)?.agentConversationId || '',
     workspaceIds: () => activeProfiles().map((profile) => profile.workspaceId),
   };
