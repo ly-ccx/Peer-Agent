@@ -35,10 +35,10 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   useEffect(()=>{if(!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
   useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId)host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,view,earlier]);
-  async function perform(run:()=>Promise<any>|any) {
+  async function perform(run:()=>Promise<any>|any,success=copy('done')) {
     if(busy)return;
     setBusy(true);
-    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(copy('done'));refresh();}
+    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(success);refresh();}
     catch {setNotice(copy('error'));}
     finally {setBusy(false);}
   }
@@ -48,11 +48,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   }
   function submit(text:string) {
     const command=parseProjectCommand(text);
-    if(command.kind==='text'){if(command.text)perform(()=>{client.latest();client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};});return;}
+    if(command.kind==='text'){if(command.text)perform(()=>{client.latest();client.submit(command.text);setEarlier(false);setView('conversation');return {ok:true};},copy('received'));return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
     if(command.kind==='view'){setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}
     if(command.kind==='classic'){setNotice(copy('leaving'));void perform(onClassic);return;}
-    if(command.kind==='takeover'){void perform(async()=>{await host.takeover();setNotice(copy('takeover'));});return;}
+    if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
     if(command.kind==='older'){setSnapshot(client.earlier());setEarlier(true);setView('conversation');return;}
     if(command.kind==='latest'){setSnapshot(client.latest());setEarlier(false);setView('conversation');return;}
     if(command.kind==='help'){setView('help');return;}
