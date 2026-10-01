@@ -23,6 +23,11 @@ export function probeFile({workspacePath,relative,signal,maxBytes=1024*1024}={})
 export function expandWatchPaths(workspacePath,patterns,{limit=256}={}) {
   if(!Array.isArray(patterns)||patterns.some(p=>!safeWatchPath(p)))throw Error('file_path_invalid');
   const root=realpathSync(workspacePath),files=[],directories=[root];
+  for(const pattern of patterns.filter(pattern=>!/[?*]/.test(pattern))){
+    const target=path.resolve(root,pattern);if(!existsSync(target))continue;
+    const relative=path.relative(root,realpathSync(target));
+    if(relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative))throw Error('file_outside_workspace');
+  }
   if(patterns.every(pattern=>!/[?*]/.test(pattern)&&(!existsSync(path.resolve(root,pattern))||!statSync(path.resolve(root,pattern)).isDirectory()))){
     const parents=new Set();
     for(const pattern of patterns){const target=path.resolve(root,pattern);let parent=path.dirname(target);while(!existsSync(parent)&&parent!==root)parent=path.dirname(parent);

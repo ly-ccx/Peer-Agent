@@ -31,6 +31,7 @@ test('file hash, bounded patterns and realpath checks refuse traversal, ignored 
   writeFileSync(path.join(root,'a.mjs'),'changed');assert.notEqual(probeFile({workspacePath:root,relative:'a.mjs'}).digest,first.digest);
   assert.equal(probeFile({workspacePath:root,relative:'../secret'}).ok,false);
   assert.equal(probeFile({workspacePath:root,relative:'escape'}).unavailableReason,'file_outside_workspace');
+  symlinkSync(outside,path.join(root,'escape-directory'));assert.throws(()=>expandWatchPaths(root,['escape-directory']),/file_outside_workspace/);
   assert.equal(probeFile({workspacePath:root,relative:'node_modules/secret.mjs'}).ok,false);
   assert.deepEqual(expandWatchPaths(root,['**/*.mjs']).files,['a.mjs','src/b.mjs']);
   assert.deepEqual(expandWatchPaths(root,['src']).files,['src/b.mjs']);
