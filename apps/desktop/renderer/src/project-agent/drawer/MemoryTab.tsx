@@ -30,6 +30,8 @@ const STATUSES = [
   { value: '', key: 'projectAgent.drawer.memory.filter.all' },
   { value: 'active', key: 'projectAgent.drawer.memory.status.active' },
   { value: 'forgotten', key: 'projectAgent.drawer.memory.status.forgotten' },
+  { value: 'expired', key: 'projectAgent.drawer.memory.status.expired' },
+  { value: 'conflicted', key: 'projectAgent.drawer.memory.status.conflicted' },
 ] as const;
 
 function memoryLabel(i18n: I18nRuntime, value: string, options: readonly { value: string; key: Parameters<I18nRuntime['t']>[0] }[]) {
@@ -179,13 +181,18 @@ export function MemoryTab({
                     <span>{memoryLabel(i18n, item.kind, KINDS)}</span>
                     <span>{memoryLabel(i18n, item.trust, TRUSTS)}</span>
                     <span>{memoryLabel(i18n, item.status, STATUSES)}</span>
+                    {item.needsReverify ? <span>{i18n.t('projectAgent.drawer.memory.needsReverify')}</span> : null}
                   </div>
                   {editingId === item.id ? (
                     <input aria-label={i18n.t('projectAgent.drawer.memory.edit')} value={draft} onChange={(event) => setDraft(event.target.value)} />
                   ) : (
                     <p>{item.text}</p>
                   )}
+                  {item.sourceRefs?.length ? <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.memory.sources')}: {item.sourceRefs.join(' · ')}</p> : null}
                   <div className="bot-memory-item-actions">
+                    {item.status === 'conflicted' ? <button type="button" onClick={() => {
+                      void clientApi.projectMemoryRestore({ workspaceId, id: item.id, resolveConflict: true }).then(() => reload());
+                    }}>{i18n.t('projectAgent.drawer.memory.keepThis')}</button> : null}
                     {item.status === 'active' ? (
                       <button
                         type="button"

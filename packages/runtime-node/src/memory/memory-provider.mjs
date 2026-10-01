@@ -15,7 +15,7 @@ import {
 } from '../project-agent/tool-specs.mjs';
 import { createPermissionGrant } from '../tool-result-factory.mjs';
 import { createMemoryIndex } from './memory-index.mjs';
-import { createMemoryStore } from './memory-store.mjs';
+import { createMemoryStore, isEffectiveMemory } from './memory-store.mjs';
 
 const MESSAGES = {
   sensitive: ['这条内容里有密钥或令牌，没有写入。', 'Secret-like content was refused. Nothing was written.'],
@@ -74,20 +74,20 @@ export function createMemoryProvider(options = {}) {
     if (opened) return opened;
     const store = options.store || createMemoryStore(options);
     const index = createMemoryIndex({ file: resolveIndexFile(options) });
-    index.rebuild(store.list({ status: 'active' }));
+    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
     opened = { store, index };
     return opened;
   }
 
   function rebuildIndex() {
     const { store, index } = resources();
-    index.rebuild(store.list({ status: 'active' }));
+    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
   }
 
   function searchable(workspaceId, scope) {
     const { store } = resources();
     if (scope === 'user' || !workspaceId) {
-      return store.list({ status: 'active', scope: 'user' });
+      return store.list({ status: 'active', scope: 'user' }).filter(item => isEffectiveMemory(item));
     }
     const items = store.list({
       status: 'active',
@@ -95,6 +95,7 @@ export function createMemoryProvider(options = {}) {
       workspaceId,
     });
     return items.filter((item) => {
+      if (!isEffectiveMemory(item)) return false;
       if (item.scope === 'user') return scope !== 'project';
       return item.workspaceId === workspaceId;
     });
@@ -216,7 +217,7 @@ export function createMemoryProvider(options = {}) {
       messages: context?.messages,
     });
     if (!saved.ok) return { ok: false, error: saved.reason };
-    index.upsert(saved.item);
+    index.rebuild(store.list({ status: 'active' }).filter(item => isEffectiveMemory(item)));
     return { ok: true, id: saved.item.id, trust: saved.item.trust, status: saved.item.status };
   }
 

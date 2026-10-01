@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { pathOf } from '../data-store.mjs';
 import { memorySecretReason } from './memory-redaction.mjs';
+import { memoryConflictDecision } from './conflict.mjs';
 
 const WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const KINDS = new Set(['fact', 'preference', 'decision', 'procedure', 'responsibility']);
@@ -23,9 +24,44 @@ const TEXT_MAX = 2000;
 const REASON_MAX = 500;
 const REF_MAX = 200;
 const REF_COUNT = 16;
+const STATUSES = new Set(['active', 'forgotten', 'expired', 'conflicted']);
+
+function metadata(input) {
+  const result = {};
+  if (input.expiresAt != null) {
+    if (typeof input.expiresAt !== 'string' || input.expiresAt.length > 40 || !Number.isFinite(Date.parse(input.expiresAt))) return null;
+    result.expiresAt = new Date(input.expiresAt).toISOString();
+  }
+  if (input.topicKey != null || input.topicValue != null) {
+    if (typeof input.topicKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(input.topicKey)
+      || !clip(input.topicValue, 200) || memorySecretReason(input.topicValue)) return null;
+    result.topicKey = input.topicKey.toLowerCase(); result.topicValue = input.topicValue.trim().toLowerCase();
+  }
+  if (input.fileAnchors != null) {
+    if (!Array.isArray(input.fileAnchors) || input.fileAnchors.length > 16) return null;
+    result.fileAnchors = [];
+    for (const anchor of input.fileAnchors) {
+      if (!clip(anchor?.path, 500) || path.isAbsolute(anchor.path) || anchor.path.includes('\\') || anchor.path.split('/').includes('..')
+        || !clip(anchor.contentHash, 128)) return null;
+      result.fileAnchors.push({ path: anchor.path, contentHash: anchor.contentHash, commit: clip(anchor.commit, 200) || null });
+    }
+  }
+  if (input.needsReverify === true) result.needsReverify = true;
+  for (const key of ['conflictId', 'supersededBy', 'maintenanceReason']) if (clip(input[key], 200)) result[key] = input[key];
+  if (Array.isArray(input.conflictsWith)) result.conflictsWith = input.conflictsWith.filter(id => clip(id, 200)).slice(0, 100);
+  return result;
+}
 
 export function isMemoryWorkspaceId(value) {
   return typeof value === 'string' && WORKSPACE_ID.test(value);
+}
+
+export function isEffectiveMemory(item, at = Date.now()) {
+  if (item?.status !== 'active' || item.needsReverify === true) return false;
+  if (item.pinned || item.kind === 'responsibility') return true;
+  if (item.expiresAt && Date.parse(item.expiresAt) <= at) return false;
+  return !(item.kind === 'preference' && item.trust === 'inferred'
+    && at - Date.parse(item.lastUsedAt || item.createdAt) >= 90 * 24 * 60 * 60_000);
 }
 
 function fail(reason) {
@@ -56,6 +92,8 @@ function copyItem(item) {
   return {
     ...item,
     sourceRefs: [...item.sourceRefs],
+    ...(item.fileAnchors ? { fileAnchors: item.fileAnchors.map(anchor => ({ ...anchor })) } : {}),
+    ...(item.conflictsWith ? { conflictsWith: [...item.conflictsWith] } : {}),
   };
 }
 
@@ -109,11 +147,11 @@ export function createMemoryStore({
     const inferredPreference = input.trust === 'inferred'
       && input.kind === 'preference'
       && input.scope === 'user'
-      && (input.status === 'active' || input.status === 'forgotten')
+      && STATUSES.has(input.status)
       && Number.isInteger(input.confirmedCount)
       && input.confirmedCount >= 3;
     if (input.trust !== 'stated' && input.trust !== 'verified' && !inferredPreference) return null;
-    if (input.status !== 'active' && input.status !== 'forgotten') return null;
+    if (!STATUSES.has(input.status)) return null;
     if (input.scope !== 'project' && input.scope !== 'user') return null;
     if (input.scope === 'project' && !isMemoryWorkspaceId(input.workspaceId)) return null;
     if (input.scope === 'user' && input.kind !== 'preference') return null;
@@ -147,6 +185,8 @@ export function createMemoryStore({
     if (anchorMessageId) record.anchorMessageId = anchorMessageId;
     const forgetReason = clip(input.forgetReason, REASON_MAX);
     if (input.status === 'forgotten' && forgetReason) record.forgetReason = forgetReason;
+    const extra = metadata(input); if (!extra) return null;
+    Object.assign(record, extra);
     return record;
   }
 
@@ -174,6 +214,27 @@ export function createMemoryStore({
   function append(file, record) {
     mkdirSync(path.dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  }
+
+  function writeNew(record) {
+    const existing = list({ workspaceId: record.workspaceId, scope: record.scope });
+    const decision = memoryConflictDecision(record, existing);
+    const records = decision.replaceIds.map(id => ({ ...existing.find(item => item.id === id), status: 'forgotten',
+      forgetReason: 'superseded', supersededBy: record.id, updatedAt: record.updatedAt }));
+    if (decision.conflictIds.length) {
+      const linked = existing.filter(item => decision.conflictIds.includes(item.id));
+      const linkedIds = new Set(linked.flatMap(item => [item.id, ...(item.conflictsWith || [])]));
+      const eligible = existing.filter(item => linkedIds.has(item.id) && ['active', 'conflicted'].includes(item.status) && !decision.replaceIds.includes(item.id));
+      const ids = [...new Set([record.id, ...eligible.map(item => item.id)])].sort();
+      const conflictId = `memory:${ids[0]}`;
+      for (const item of eligible) records.push({ ...item, status: 'conflicted', conflictId,
+        conflictsWith: ids.filter(id => id !== item.id), updatedAt: record.updatedAt });
+      record = { ...record, status: 'conflicted', conflictId, conflictsWith: ids.filter(id => id !== record.id) };
+    }
+    records.push(record);
+    const file = fileFor(record); mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, records.map(item => JSON.stringify(item)).join('\n') + '\n', 'utf8');
+    return { ok: true, item: copyItem(record) };
   }
 
   function list({ workspaceId, status, scope } = {}) {
@@ -230,6 +291,8 @@ export function createMemoryStore({
       updatedAt: stamp,
     };
     if (placed.scope === 'project') record.workspaceId = placed.workspaceId;
+    const extra = metadata(input); if (!extra) return fail('invalid_input');
+    Object.assign(record, extra);
     return { ok: true, record };
   }
 
@@ -247,8 +310,7 @@ export function createMemoryStore({
       sourceRefs: [anchorMessageId],
       anchorMessageId,
     };
-    append(fileFor(record), record);
-    return { ok: true, item: copyItem(record) };
+    return writeNew(record);
   }
 
   function writeCurated(input = {}) {
@@ -272,8 +334,7 @@ export function createMemoryStore({
       confirmedCount: input.confirmedCount,
       sourceRefs,
     };
-    append(fileFor(record), record);
-    return { ok: true, item: copyItem(record) };
+    return writeNew(record);
   }
 
   function writeVerified(input = {}) {
@@ -294,8 +355,7 @@ export function createMemoryStore({
       trust: 'verified',
       sourceRefs,
     };
-    append(fileFor(record), record);
-    return { ok: true, item: copyItem(record) };
+    return writeNew(record);
   }
 
   function visible(item, workspaceId) {
@@ -394,6 +454,7 @@ export function createMemoryStore({
     if (!id) return fail('invalid_input');
     const current = visible(get(id), input.workspaceId);
     if (!current) return fail('not_found');
+    if (current.status === 'conflicted') return fail('conflict_choice_required');
     if (current.status === 'active') return { ok: true, item: current, alreadyActive: true };
     const record = {
       ...current,
@@ -401,7 +462,30 @@ export function createMemoryStore({
       updatedAt: now().toISOString(),
     };
     delete record.forgetReason;
-    append(fileFor(record), record);
+    return writeNew(record);
+  }
+
+  function markMaintained(input = {}) {
+    const current = visible(get(input.id), input.workspaceId);
+    if (!current) return fail('not_found');
+    if (input.status !== undefined && input.status !== 'expired') return fail('invalid_input');
+    const record = { ...current, ...(input.status ? { status: input.status } : {}),
+      ...(input.needsReverify === true ? { needsReverify: true } : {}),
+      maintenanceReason: clip(input.maintenanceReason, 200) || 'maintenance', updatedAt: now().toISOString() };
+    append(fileFor(record), record); return { ok: true, item: copyItem(record) };
+  }
+
+  function resolveConflict(input = {}) {
+    const current = visible(get(input.id), input.workspaceId);
+    if (current?.status === 'active') return { ok: true, item: current, alreadyResolved: true };
+    if (!current || current.status !== 'conflicted' || !current.conflictId) return fail('not_conflicted');
+    const others = list({ workspaceId: input.workspaceId, scope: current.scope }).filter(item => item.id !== current.id && item.status === 'conflicted' && item.conflictId === current.conflictId);
+    const updatedAt = now().toISOString();
+    const records = others.map(other => ({ ...other, status: 'forgotten', forgetReason: 'conflict_choice', supersededBy: current.id, updatedAt }));
+    const record = { ...current, status: 'active', updatedAt };
+    delete record.conflictId; delete record.conflictsWith;
+    records.push(record);
+    appendFileSync(fileFor(record), records.map(item => JSON.stringify(item)).join('\n') + '\n', 'utf8');
     return { ok: true, item: copyItem(record) };
   }
 
@@ -411,6 +495,8 @@ export function createMemoryStore({
     writeCurated,
     forget,
     restore,
+    resolveConflict,
+    markMaintained,
     setPinned,
     reviseStated,
     markUsed,

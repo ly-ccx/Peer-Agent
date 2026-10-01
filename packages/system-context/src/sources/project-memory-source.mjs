@@ -13,7 +13,7 @@ function itemsOf(input) {
   return firstArray(input?.projectMemory, bag.projectMemory, bag.memoryItems, bag.items) ?? [];
 }
 
-function admit(item, seen) {
+function admit(item, seen, at) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   const id = clipText(item.id, 200);
   if (!id || seen.has(id) || looksSensitive(item.text) || looksSensitive(id)) return null;
@@ -21,6 +21,11 @@ function admit(item, seen) {
   if (!text || !KINDS.has(item.kind)) return null;
   const status = typeof item.status === 'string' && item.status ? item.status : 'active';
   if (status !== 'active') return null;
+  if (item.pinned !== true && item.kind !== 'responsibility') {
+    if (item.expiresAt && Date.parse(item.expiresAt) <= at) return null;
+    if (item.kind === 'preference' && item.trust === 'inferred'
+      && at - Date.parse(item.lastUsedAt || item.createdAt) >= 90 * 24 * 60 * 60_000) return null;
+  }
   const confirmedCount = Number.isInteger(item.confirmedCount) && item.confirmedCount > 0
     ? item.confirmedCount
     : 0;
@@ -39,6 +44,7 @@ function admit(item, seen) {
     trust: item.trust,
     confirmedCount,
     pinned: item.pinned === true,
+    needsReverify: item.needsReverify === true,
     lastUsedAt: stamp(item.lastUsedAt),
     updatedAt: stamp(item.updatedAt),
   };
@@ -62,6 +68,7 @@ function byRecentUse(left, right) {
 }
 
 function groupOf(item) {
+  if (item.needsReverify) return 'outdated';
   if (item.pinned) return 'pinned';
   if (item.kind === 'responsibility') return 'responsibilities';
   if (item.kind === 'fact' && item.trust === 'verified') return 'facts';
@@ -75,6 +82,7 @@ function orderItems(items) {
     responsibilities: [],
     facts: [],
     preferences: [],
+    outdated: [],
   };
   for (const item of items) {
     const group = groupOf(item);
@@ -84,16 +92,18 @@ function orderItems(items) {
   groups.responsibilities.sort(byId);
   groups.facts.sort(byRecentUse);
   groups.preferences.sort(byId);
+  groups.outdated.sort(byId);
   return [
     ['Pinned', groups.pinned],
     ['Responsibilities', groups.responsibilities],
     ['Verified facts', groups.facts],
     ['User preferences', groups.preferences],
+    ['可能已过时 · 待核实', groups.outdated],
   ];
 }
 
 function formatItem(item) {
-  return `- ${item.id} [${item.kind}/${item.trust}] ${item.text}`;
+  return `- ${item.id} [${item.kind}/${item.needsReverify ? '可能已过时' : item.trust}] ${item.text}`;
 }
 
 function flatItems(items) {
@@ -195,7 +205,7 @@ export function memoryIdsFromAssembledContext(context) {
   return Array.isArray(ids) ? [...ids] : [];
 }
 
-export function createProjectMemoryPromptSource() {
+export function createProjectMemoryPromptSource({ now = () => new Date() } = {}) {
   return {
     id: 'project-memory',
     layer: 'L7_CONTINUITY',
@@ -205,7 +215,7 @@ export function createProjectMemoryPromptSource() {
       if (!hasRole(input, 'project_agent')) return { items: [] };
       const seen = new Set();
       return {
-        items: itemsOf(input).map((item) => admit(item, seen)).filter(Boolean),
+        items: itemsOf(input).map((item) => admit(item, seen, new Date(now()).getTime())).filter(Boolean),
       };
     },
     render(observation) {

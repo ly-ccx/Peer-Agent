@@ -88,6 +88,9 @@ function actionLabel(action: BotChatCardAction, i18n: I18nRuntime): string {
 
 async function runCardAction(workspaceId: string, action: BotChatCardAction): Promise<{ ok: boolean; code?: string }> {
   const payload = action.payload || {};
+  if (action.channel === 'project-memory:restore' && typeof payload.id === 'string' && payload.resolveConflict === true) {
+    return clientApi.projectMemoryRestore({ workspaceId, id: payload.id, resolveConflict: true });
+  }
   if (action.channel === 'project-agent:decide-approval') {
     const approvalId = typeof payload.approvalId === 'string' ? payload.approvalId : '';
     const decision = payload.decision;

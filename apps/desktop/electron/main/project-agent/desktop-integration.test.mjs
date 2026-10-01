@@ -19,7 +19,7 @@ const provider = { id: 'configured', provider: 'openai', model: 'test-model', en
   apiKeyConfigured: true, supportsVision: false, supportsTools: true, supportsStructured: true, isDefault: true };
 after(() => { if (previousHome === undefined) delete process.env.PEER_AGENT_HOME; else process.env.PEER_AGENT_HOME = previousHome; rmSync(root, { recursive: true, force: true }); });
 
-function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {} } = {}) {
+function harness({ blank = false, send = null, folder = null, dataHome = null, configured = true, verify = null, settings = {}, holdsLease = () => true } = {}) {
   const home = dataHome || mkdtempSync(path.join(root, 'home-'));
   const project = folder || path.join(home, 'workspace');
   mkdirSync(project, { recursive: true });
@@ -36,7 +36,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
       ...(verify ? {verifyDelegatedSession:verify} : {}) },
     agentTurnExecutor: executor, workspace: { removeWorkspace() {} }, broadcast: (...args) => events.push(args),
-    holdsLease: () => true, getSettings: () => ({ ...settings, workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
+    holdsLease, getSettings: () => ({ ...settings, workspaces: [{ path: project, name: 'test' }] }), mergeSettings() {},
     listModels: () => configured ? [provider] : [], dialog: {}, BrowserWindow: { getAllWindows: () => [] }, shell: {}, onReady(value) { api = value; },
   });
   const handlers = new Map();
@@ -392,4 +392,18 @@ test('classic shell leaves queued bot input unconsumed and starts no bot or dele
     assert.equal(env.calls.length, 0); assert.equal(env.starts.length, 0); assert.equal(env.api.host.isReady(initial.bot.workspaceId), false);
     assert.equal((await env.invoke('start-familiarize')).code, 'PROJECT_AGENT_DISABLED');
   } finally { env.dispose(); }
+});
+
+test('desktop daily memory maintenance obeys classic, lease and memory switches and uses no model', async () => {
+  for (const scenario of [{settings:{projectAgent:{digestTime:'00:00'}},expected:'expired'}, {settings:{projectAgent:{shell:'classic',digestTime:'00:00'}},expected:'active'}, {settings:{projectAgent:{digestTime:'00:00'},memory:{enabled:false}},expected:'active'}, {settings:{projectAgent:{digestTime:'00:00'}},holdsLease:()=>false,expected:'active'}]) {
+    const initial=harness();initial.dispose();
+    const env=harness({...scenario,dataHome:initial.home,folder:initial.project});
+    try {
+      const store=createMemoryStore({rootDir:env.home});
+      const item=store.writeVerified({workspaceId:env.bot.workspaceId,kind:'fact',text:'temporary',sourceRefs:['ev'],expiresAt:'2020-01-01T00:00:00Z'}).item;
+      await env.api.host.sync([env.bot.workspaceId]);
+      assert.equal(store.get(item.id).status,scenario.expected);
+      assert.equal(env.calls.length,0);
+    } finally {env.dispose();}
+  }
 });

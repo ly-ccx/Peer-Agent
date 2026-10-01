@@ -11,6 +11,8 @@ import {
   createMemoryStore,
   createEpisodeLog,
   createMemoryCurator,
+  createMemoryMaintenance,
+  createMemoryFileAnchors,
   createDigestQueue,
   createProjectAgentRunner,
   inQuietHours,
@@ -90,6 +92,7 @@ export function createProjectAgentHost({
   now,
   retryDelays,
   onCurator = null,
+  onMaintenance = null,
   onStatus = null,
   inbox = null,
   inputQueue = null,
@@ -267,6 +270,7 @@ export function createProjectAgentHost({
     if (typeof readSettings !== 'function') return false;
     const settings = normalizeProjectAgentSettings(readSettings()?.projectAgent);
     const at = typeof now === 'function' ? now() : new Date();
+    if (typeof onMaintenance === 'function') onMaintenance({ workspaceId, at, digestTime: settings.digestTime });
     const due = digests.consider(workspaceId, at, settings.digestTime);
     if (!due?.timer) return false;
     const queued = runner.enqueueTimer(due.timer);
@@ -471,6 +475,12 @@ export function registerDesktopProjectAgent({
   const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
   const profileStore = createBotProfileStore({ rootDir: dataHome });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
+  const memoryChanged = workspaceId => {
+    liveMemoryIndex().rebuild();
+    if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
+  };
+  const fileAnchors = createMemoryFileAnchors({ resolveWorkspacePath: workspaceId => registry.get(workspaceId)?.path });
+  const memoryMaintenance = createMemoryMaintenance({ rootDir: runtimeRoot, store: memoryStore, readAnchor: fileAnchors.read, onChanged: memoryChanged });
   const inbox = createProjectInbox({ rootDir: runtimeRoot });
   const verification = createSessionVerification({
     goalPlanStore,
@@ -501,7 +511,7 @@ export function registerDesktopProjectAgent({
   });
   const uninstallDelegation = installDelegation({ supervisor, storeDir: runtimeRoot });
   const uninstallVerification = installSessionVerification(verification);
-  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot });
+  const projectFacts = createDesktopProjectFacts({ supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore });
   const uninstallDelivery = installDeliveryFacts({
     read(view) {
       const settings = normalizeProjectAgentSettings(getSettings()?.projectAgent);
@@ -559,7 +569,8 @@ export function registerDesktopProjectAgent({
       ),
       runTurn: (input) => agentTurnExecutor.runTurn(input),
     }),
-    onWrote: () => liveMemoryIndex().rebuild(),
+    resolveFileAnchors: fileAnchors.capture,
+    onWrote: memoryChanged,
   });
   const directory = createBotDirectory({
     rootDir: dataHome,
@@ -691,6 +702,9 @@ export function registerDesktopProjectAgent({
       });
     },
     onCurator: (info) => memoryCurator.consider(info),
+    onMaintenance: info => {
+      if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: getSettings(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
+    },
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
@@ -861,6 +875,7 @@ export function registerDesktopProjectAgent({
   }
   const memory = createProjectMemoryService({
     store: memoryStore,
+    onChanged: memoryChanged,
     profileStore,
     getSettings: typeof getSettings === 'function' ? getSettings : () => ({}),
     mergeSettings: typeof mergeSettings === 'function' ? mergeSettings : () => {},

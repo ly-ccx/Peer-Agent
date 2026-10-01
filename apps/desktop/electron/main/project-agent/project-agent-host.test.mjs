@@ -350,3 +350,13 @@ test('one project recovery failure never runs its model or blocks another owned 
     assert.deepEqual(phases.filter(item => item.startsWith('good:')), ['lease', 'inputs', 'inbox', 'queue', 'tasks', 'watch', 'digest'].map(phase => `good:${phase}`));
   } finally { host.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('digest maintenance runs under recovery lease even with no inbox, and never runs for an unowned or stopped project', async () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'memory-clock-'));const maintenance=[];let modelCalls=0;let owned=true;
+  const host=createProjectAgentHost({rootDir:root,holdsLease:()=>owned,listWorkspaceIds:()=>['ws'],resolveConversationId:()=> 'conv',executeTurn:async()=>{modelCalls++;return {text:'unexpected'};},readSettings:()=>({projectAgent:{digestTime:'00:00'}}),now:()=>new Date(),onMaintenance:info=>maintenance.push(info),schedule:()=>null});
+  try {
+    await host.sync();assert.ok(maintenance.length>=1);assert.equal(modelCalls,0);
+    const count=maintenance.length;owned=false;await host.sync();assert.equal(maintenance.length,count);
+    owned=true;host.stop('ws');await host.sync();assert.equal(maintenance.length,count);
+  } finally {host.dispose();rmSync(root,{recursive:true,force:true});}
+});

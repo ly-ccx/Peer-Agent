@@ -10,7 +10,18 @@ export type MemoryTrust = 'verified' | 'stated' | 'inferred';
 
 export type MemoryStatus = 'active' | 'forgotten' | 'expired' | 'conflicted';
 
-export interface MemoryItem {
+export interface MemoryValidityFields {
+  readonly expiresAt?: string;
+  readonly topicKey?: string;
+  readonly topicValue?: string;
+  readonly conflictId?: string;
+  readonly conflictsWith?: readonly string[];
+  readonly supersededBy?: string;
+  readonly needsReverify?: boolean;
+  readonly fileAnchors?: readonly { readonly path: string; readonly contentHash: string; readonly commit: string | null }[];
+}
+
+export interface MemoryItem extends MemoryValidityFields {
   readonly id: string;
   readonly scope: 'project' | 'user';
   readonly workspaceId?: string;
@@ -45,7 +56,7 @@ export interface MemorySnapshot {
 }
 
 /** 记忆页跨进程载荷。渲染层不读存储。 */
-export interface ProjectMemoryRecord {
+export interface ProjectMemoryRecord extends MemoryValidityFields {
   readonly id: string;
   readonly scope: 'project' | 'user';
   readonly workspaceId?: string;
@@ -99,6 +110,7 @@ export interface ProjectMemoryForgetRequest {
 export interface ProjectMemoryRestoreRequest {
   readonly workspaceId: string;
   readonly id: string;
+  readonly resolveConflict?: boolean;
 }
 
 export interface ProjectMemoryEditRequest {
@@ -160,6 +172,7 @@ export function assessMemoryCandidate(
     return { ok: false, reason: 'inactive' };
   }
   if (item.status === 'conflicted') return { ok: false, reason: 'conflicted' };
+  if (item.needsReverify === true) return { ok: false, reason: 'needs_reverify' };
   if (SECRET.test(item.text)) return { ok: false, reason: 'sensitive' };
   if (LOOSENING.test(item.text)) return { ok: false, reason: 'loosens_policy' };
   if (item.untrusted === true && (item.kind === 'preference' || STANDING_ORDER.test(item.text))) {

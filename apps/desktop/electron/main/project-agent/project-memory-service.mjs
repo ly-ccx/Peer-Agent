@@ -30,6 +30,7 @@ export function createProjectMemoryService({
   getSettings = () => ({}),
   mergeSettings = () => {},
   showSaveDialog = async () => ({ canceled: true }),
+  onChanged = null,
 } = {}) {
   if (!store) throw new TypeError('store is required');
 
@@ -57,8 +58,11 @@ export function createProjectMemoryService({
     };
   }
 
-  function changed(result) {
-    if (result?.ok) liveMemoryIndex().rebuild();
+  function changed(result, workspaceId) {
+    if (result?.ok) {
+      liveMemoryIndex().rebuild();
+      if (typeof onChanged === 'function') onChanged(workspaceId);
+    }
     return result;
   }
 
@@ -90,7 +94,7 @@ export function createProjectMemoryService({
       pinned: payload.pinned,
       workspaceId,
     });
-    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved));
+    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved), workspaceId);
   }
 
   function forget(payload = {}) {
@@ -100,14 +104,16 @@ export function createProjectMemoryService({
       ? payload.reason.trim()
       : '用户撤销';
     const saved = store.forget({ id: payload.id, reason, workspaceId });
-    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved));
+    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved), workspaceId);
   }
 
   function restore(payload = {}) {
     const workspaceId = workspaceIdOf(payload);
     if (!workspaceId) return fail('INVALID_WORKSPACE');
-    const saved = store.restore({ id: payload.id, workspaceId });
-    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved));
+    const saved = payload.resolveConflict === true
+      ? store.resolveConflict({ id: payload.id, workspaceId })
+      : store.restore({ id: payload.id, workspaceId });
+    return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved), workspaceId);
   }
 
   function edit(payload = {}) {
@@ -120,7 +126,7 @@ export function createProjectMemoryService({
     });
     return changed(saved.ok
       ? { ok: true, item: saved.item, revokedId: saved.revokedId }
-      : fromStore(saved));
+      : fromStore(saved), workspaceId);
   }
 
   async function exportMemory(payload = {}) {

@@ -20,6 +20,17 @@ function item(overrides) {
   };
 }
 
+test('changed verified anchors are labeled possibly outdated and leave the clean verified group', () => {
+  const source = createProjectMemoryPromptSource();
+  const section = source.render(source.observe({ role: 'project_agent', projectMemory: [
+    item({ id: 'stale', text: 'old command', trust: 'verified', needsReverify: true }),
+    item({ id: 'fresh', text: 'current fact', trust: 'verified' }),
+  ] }))[0];
+  assert.match(section.content, /可能已过时/);
+  assert.ok(section.content.indexOf('fresh') < section.content.indexOf('stale'));
+  assert.equal(section.layer, 'L7_CONTINUITY');
+});
+
 test('记忆简报只在项目代理角色进入 L7，并回传实际渲染的 id', () => {
   const source = createProjectMemoryPromptSource();
   assert.equal(source.id, 'project-memory');
@@ -113,4 +124,11 @@ test('满 3 次的推断偏好进入简报，不足 3 次的不进入', () => {
   assert.match(section.content, /User preferences:/);
   assert.match(section.content, /回复要短/);
   assert.doesNotMatch(section.content, /mem-early|还在观察|猜的事实/);
+});
+
+test('brief refuses elapsed deadlines and unused inferred preferences before maintenance but preserves pins and duties', () => {
+  const source=createProjectMemoryPromptSource({now:()=>new Date('2026-10-01T00:00:00Z')});
+  const expired=item({id:'expired',text:'old',trust:'verified',expiresAt:'2026-09-01T00:00:00Z'});
+  const observation=source.observe({role:'project_agent',projectMemory:[expired,{...expired,id:'pinned',pinned:true},{...expired,id:'duty',kind:'responsibility'},item({id:'unused',text:'brief',kind:'preference',scope:'user',trust:'inferred',confirmedCount:3,createdAt:'2026-06-01T00:00:00Z'})]});
+  assert.deepEqual(observation.items.map(i=>i.id),['pinned','duty']);
 });

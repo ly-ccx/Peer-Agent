@@ -29,6 +29,7 @@ export function projectCards(workspaceId, facts = {}, resolutions = []) {
     ...confirmCards(facts),
     ...readmeCards(workspaceId, facts),
     ...unavailableCards(facts),
+    ...memoryConflictCards(facts),
     ...handoffCards(facts),
   ];
   const byId = new Map();
@@ -301,6 +302,22 @@ function unavailableCards(facts) {
     }));
   }
   return cards;
+}
+
+function memoryConflictCards(facts) {
+  const groups = new Map();
+  for (const item of asList(facts.memories)) {
+    if (item.status !== 'conflicted' || !boundedId(item.conflictId, ID_MAX)) continue;
+    const group = groups.get(item.conflictId) || []; group.push(item); groups.set(item.conflictId, group);
+  }
+  return [...groups].flatMap(([conflictId, items]) => items.length < 2 ? [] : [draft({
+    cardId: cardIdOf('memory_conflict', conflictId), kind: 'memory_conflict',
+    content: clip(`记忆有冲突，请选择保留哪条：${items.slice(0, 2).map(item => `${item.text.slice(0, 70)}（来源：${(item.sourceRefs || []).join('、').slice(0, 20)}）`).join('；')}`, '记忆冲突，需要选择'),
+    factResolved: false, factState: '', refs: refs({ conflictId }),
+    actions: items.slice(0, 4).map(item => ipcAction('choose_memory', 'project-memory:restore', {
+      id: item.id, resolveConflict: true, text: clip(`保留：${item.text}`, '保留这条'),
+    })),
+  })]);
 }
 
 function readmeFact(value) {
