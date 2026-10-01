@@ -441,7 +441,7 @@ export function createProjectAgentApplicationService({
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {
-        const token = typeof corpusStamp === 'function' ? String(corpusStamp() ?? '') : null;
+        const token = typeof corpusStamp === 'function' ? String(corpusStamp(snapshot?.catalog) ?? '') : null;
         if (token === null || token !== corpusToken) {
           searchIndex.sync(collectConversationSearchDocuments(readSearchCorpus(snapshot?.catalog) || {}));
           if (token !== null) corpusToken = token;

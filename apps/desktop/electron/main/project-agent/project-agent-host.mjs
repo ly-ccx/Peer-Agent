@@ -532,11 +532,13 @@ export function registerDesktopProjectAgent({
       }
       return { bots, messages, tasks, memories };
     },
-    corpusStamp() {
+    corpusStamp(catalog) {
       const parts = [];
-      const ids = typeof directory.workspaceIds === 'function' ? directory.workspaceIds() : [];
-      for (const workspaceId of ids) {
-        const conversationId = directory.conversationId(workspaceId);
+      const sources = Array.isArray(catalog)
+        ? catalog.map(item => ({ workspaceId: item.workspaceId, conversationId: item.profile?.agentConversationId }))
+        : (typeof directory.workspaceIds === 'function' ? directory.workspaceIds() : [])
+          .map(workspaceId => ({ workspaceId, conversationId: directory.conversationId(workspaceId) }));
+      for (const { workspaceId, conversationId } of sources) {
         if (conversationId) parts.push(fileStamp(path.join(dataHome, 'conversations', `${conversationId}.jsonl`)));
         parts.push(fileStamp(path.join(dataHome, 'projects', workspaceId, 'profile.json')));
         if (typeof memoryStore.projectFile === 'function') parts.push(fileStamp(memoryStore.projectFile(workspaceId)));
