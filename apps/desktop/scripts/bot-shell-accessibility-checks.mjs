@@ -68,7 +68,19 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
   assert.equal(moving, 0);
   await trigger.click(); await page.getByRole('tab', { name: '记忆', exact: true }).click();
   assert.equal(await page.locator('.bot-drawer-pane').evaluate(node => getComputedStyle(node).animationName), 'none');
+  const memoryRows = page.locator('.bot-memory-list > li');
+  await until(() => memoryRows.count(), count => count === 50);
+  const firstMemory = await memoryRows.first().locator('p').first().textContent();
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  assert.equal(await memoryRows.count(), 50);
+  assert.notEqual(await memoryRows.first().locator('p').first().textContent(), firstMemory);
+  await page.getByRole('button', { name: '上一页', exact: true }).click();
+  assert.equal(await memoryRows.first().locator('p').first().textContent(), firstMemory);
+  checks.push('10000 memory records render 50 at a time; next and previous retain distinct identities');
   report.reducedDrawerState = await page.locator('.bot-drawer-dock').evaluate(node => ({ attrs: [...node.attributes].map(a => [a.name,a.value]), active: document.activeElement?.className, focused: document.hasFocus(), buttons: [...node.querySelectorAll('button')].slice(0,8).map(item => ({text:item.textContent,disabled:item.disabled,inert:!!item.closest('[inert]'),hidden:!!item.closest('[aria-hidden=\"true\"]')})) }));
+  report.reducedDrawerState.roleButtonCount = await page.getByRole('button').count();
+  report.reducedDrawerState.closeSnapshot = await page.locator('.bot-drawer-head button').ariaSnapshot();
+  report.reducedDrawerState.closeMatches = await page.getByRole('button', { name: '关闭', exact: true }).count();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   checks.push('reduced motion stops avatar/enter displacement animations while drawer remains usable');
 
@@ -83,14 +95,21 @@ export async function checkBotShellAccessibility({ page, app, until, report }) {
       return blend(color, color[3] === 255 ? [0,0,0] : background(node.parentElement));
     };
     const lum = rgb => rgb.map(x => x/255).map(x => x<=0.04045 ? x/12.92 : ((x+0.055)/1.055)**2.4).reduce((n,x,i)=>n+x*[0.2126,0.7152,0.0722][i],0);
-    return ['.bot-row-name','.bot-row-preview','.bot-row-time'].map(selector => {
-      const node = document.querySelector(selector), bg = background(node), fg = blend(rgba(getComputedStyle(node).color), bg);
-      const values = [lum(fg),lum(bg)].sort((a,b)=>b-a);
-      return { selector, ratio: (values[0]+0.05)/(values[1]+0.05) };
-    });
+    const root = document.documentElement, original = { theme: root.dataset.theme, palette: root.dataset.palette };
+    const samples = [];
+    for (const palette of ['frost','catppuccin']) for (const theme of ['light','dark']) {
+      root.dataset.theme = theme; root.dataset.palette = palette;
+      for (const selector of ['.bot-row-name','.bot-row-preview','.bot-row-time']) {
+        const node = document.querySelector(selector), bg = background(node), fg = blend(rgba(getComputedStyle(node).color), bg);
+        const values = [lum(fg),lum(bg)].sort((a,b)=>b-a);
+        samples.push({ palette, theme, selector, ratio: (values[0]+0.05)/(values[1]+0.05) });
+      }
+    }
+    for (const key of ['theme','palette']) if (original[key] === undefined) delete root.dataset[key]; else root.dataset[key] = original[key];
+    return samples;
   });
   assert.ok(report.contrast.every(sample => sample.ratio >= 4.5), 'small readable list text contrast must reach 4.5:1');
-  checks.push('actual list name/preview/time contrast reaches 4.5:1');
+  checks.push('actual list name/preview/time contrast reaches 4.5:1 in both light/dark and Frost/Catppuccin');
 
   await page.locator('.bot-me-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const quiet = page.getByRole('switch', { name: '安静时段', exact: true }); await quiet.waitFor();

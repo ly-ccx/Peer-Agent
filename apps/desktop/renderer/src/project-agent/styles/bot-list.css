@@ -351,7 +351,7 @@
 
 .bot-row-preview,
 .bot-row-time {
-  color: var(--graphite-fade);
+  color: var(--graphite-soft);
   font-size: 12px;
 }
 
@@ -368,7 +368,12 @@
 
 .bot-row-time {
   font-size: 11px;
-  color: var(--graphite-mute);
+  color: var(--graphite-soft);
+}
+
+[data-palette="catppuccin"][data-theme="light"] .bot-row-preview,
+[data-palette="catppuccin"][data-theme="light"] .bot-row-time {
+  color: var(--graphite-base);
 }
 
 .bot-badge {

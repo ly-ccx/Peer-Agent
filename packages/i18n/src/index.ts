@@ -337,6 +337,9 @@ export type TranslationKey =
   | 'projectAgent.drawer.memory.filterEmpty'
   | 'projectAgent.drawer.memory.controls'
   | 'projectAgent.drawer.memory.saved'
+  | 'projectAgent.drawer.memory.page'
+  | 'projectAgent.drawer.memory.previous'
+  | 'projectAgent.drawer.memory.next'
   | 'projectAgent.drawer.memory.scope.project'
   | 'projectAgent.drawer.memory.scope.global'
   | 'projectAgent.drawer.memory.readonly'
@@ -1563,6 +1566,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.filterEmpty': '没有符合筛选条件的记忆',
     'projectAgent.drawer.memory.controls': '记忆设置',
     'projectAgent.drawer.memory.saved': '已保存的记忆',
+    'projectAgent.drawer.memory.page': '{start}–{end} / {total}',
+    'projectAgent.drawer.memory.previous': '上一页',
+    'projectAgent.drawer.memory.next': '下一页',
     'projectAgent.drawer.memory.scope.project': '当前项目',
     'projectAgent.drawer.memory.scope.global': '所有项目',
     'projectAgent.drawer.memory.readonly': '可以固定、撤销、恢复和导出这些记忆',
@@ -2587,6 +2593,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.memory.filterEmpty': 'No memories match these filters',
     'projectAgent.drawer.memory.controls': 'Memory settings',
     'projectAgent.drawer.memory.saved': 'Saved memories',
+    'projectAgent.drawer.memory.page': '{start}–{end} / {total}',
+    'projectAgent.drawer.memory.previous': 'Previous page',
+    'projectAgent.drawer.memory.next': 'Next page',
     'projectAgent.drawer.memory.scope.project': 'This project',
     'projectAgent.drawer.memory.scope.global': 'All projects',
     'projectAgent.drawer.memory.readonly': 'Pin, revoke, restore, and export these memories',

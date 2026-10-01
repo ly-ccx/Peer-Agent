@@ -917,3 +917,27 @@
 .bot-objective-edit input, .bot-objective-edit textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-color, #2b3039); background: transparent; color: inherit; border-radius: 6px; padding: 8px; font: inherit; }
 .bot-objective-edit textarea { resize: vertical; min-height: 70px; }
 .bot-objective-error { font-size: 12px; color: var(--color-danger, #e78585); }
+
+.bot-memory-pages {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--graphite-soft);
+  font-size: 12px;
+}
+
+.bot-memory-pages button {
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--chrome-canvas);
+  color: var(--graphite-base);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bot-memory-pages button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
