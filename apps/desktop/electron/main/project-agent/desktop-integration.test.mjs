@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -65,6 +65,21 @@ test('desktop diagnostic assembly reads actual input and turn stores without run
     assert.deepEqual(after.report.errors,[]);assert.deepEqual(after.report.bots[0].errors,[]);
     assert.equal(after.report.bots[0].turns.at(-1).outcome,'done');assert.ok(after.report.bots[0].turns.at(-1).durationMs>=0);
     const text=JSON.stringify(after.report);assert.equal(text.includes(env.home),false);assert.equal(text.includes('hello'),false);
+  } finally { env.dispose(); }
+});
+
+test('diagnostic read leaves a corrupt actual project registry untouched', async () => {
+  const env = harness();
+  try {
+    const projects = path.join(env.home, 'projects'), file = path.join(projects, 'registry.json');
+    writeFileSync(file, '{broken');
+    const before = readdirSync(projects).sort(), count = env.calls.length;
+    const result = await env.diagnostics('read');
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.report.errors, ['PROJECTS_UNAVAILABLE']);
+    assert.equal(readFileSync(file, 'utf8'), '{broken');
+    assert.deepEqual(readdirSync(projects).sort(), before);
+    assert.equal(env.calls.length, count);
   } finally { env.dispose(); }
 });
 
